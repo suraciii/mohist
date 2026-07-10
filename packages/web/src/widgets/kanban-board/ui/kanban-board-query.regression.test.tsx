@@ -1,25 +1,28 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { IssueStatus, IssueHealth } from '../../../entities/issue'
 import { makeIssue, makeIssues, mockAgentStatus, renderBoard } from './_kanbanBoardQueryTestUtils'
 
 import { KanbanBoard } from './KanbanBoard'
 
+let previousUrl = ''
+let previousHistoryState: unknown
+
+beforeEach(() => {
+  previousUrl = window.location.href
+  previousHistoryState = window.history.state
+  window.history.replaceState(null, '', '/')
+})
+
+afterEach(() => {
+  cleanup()
+  window.history.replaceState(previousHistoryState, '', previousUrl)
+  vi.clearAllMocks()
+})
+
 describe('KanbanBoard Homepage Regression Coverage', () => {
-  beforeEach(() => {
-    Object.defineProperty(window, 'location', {
-      value: { search: '', pathname: '/' },
-      writable: true,
-    })
-  })
-
-  afterEach(() => {
-    cleanup()
-    vi.clearAllMocks()
-  })
-
   describe('Desktop layout regression - horizontal multi-column contract at md+', () => {
     it('renders desktop board container with horizontal multi-column layout at md+', () => {
       const issues = [
@@ -79,18 +82,6 @@ describe('KanbanBoard Homepage Regression Coverage', () => {
   })
 
   describe('Mobile cancelled tab count is independent of showCancelled', () => {
-    beforeEach(() => {
-      Object.defineProperty(window, 'location', {
-        value: { search: '', pathname: '/' },
-        writable: true,
-      })
-    })
-
-    afterEach(() => {
-      cleanup()
-      vi.clearAllMocks()
-    })
-
     it('renders 8 in the Cancelled tab badge regardless of the toggle state', async () => {
       const issues = Array.from({ length: 8 }, (_, i) =>
         makeIssue({
@@ -259,20 +250,14 @@ describe('KanbanBoard Homepage Regression Coverage', () => {
 
   describe('Label filtering beyond first eight labels', () => {
     it('restores the visible search input from URL state after popstate navigation', async () => {
-      Object.defineProperty(window, 'location', {
-        value: { search: 'search=current', pathname: '/' },
-        writable: true,
-      })
+      window.history.replaceState(null, '', '/?search=current')
 
       renderBoard(<KanbanBoard issues={[makeIssue({ title: 'Current issue' })]} agentStatus={mockAgentStatus} />)
 
       const searchInputs = screen.getAllByPlaceholderText('Search titles...') as HTMLInputElement[]
       expect(searchInputs.map((input) => input.value)).toEqual(['current', 'current'])
 
-      Object.defineProperty(window, 'location', {
-        value: { search: 'search=restored', pathname: '/' },
-        writable: true,
-      })
+      window.history.replaceState(null, '', '/?search=restored')
 
       act(() => {
         window.dispatchEvent(new PopStateEvent('popstate'))
@@ -405,18 +390,6 @@ describe('KanbanBoard Homepage Regression Coverage', () => {
   })
 
   describe('Done column collapse - desktop limit-5 + expand', () => {
-    beforeEach(() => {
-      Object.defineProperty(window, 'location', {
-        value: { search: '', pathname: '/' },
-        writable: true,
-      })
-    })
-
-    afterEach(() => {
-      cleanup()
-      vi.clearAllMocks()
-    })
-
     it('limits the desktop Done column to the first five issues and exposes an N more toggle', () => {
       // Default sort is priority; with equal priority the tie-breaker is
       // updatedAt desc. We give each issue a distinct updatedAt so the

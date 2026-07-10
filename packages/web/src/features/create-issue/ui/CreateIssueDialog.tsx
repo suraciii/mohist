@@ -169,17 +169,13 @@ export function CreateIssueDialog({ open, onClose }: Props) {
     ? enabledWorkflowIds.has(recommendation.workflow)
     : false
   const recommendationUnavailable = recommendation && !recommendationIsEnabled
-
-  useEffect(() => {
-    if (!recommendation || workflowTouched || !recommendationIsEnabled) return
-    setWorkflowProfileId(recommendation.workflow)
-  }, [recommendation, recommendationIsEnabled, workflowTouched])
-
-  useEffect(() => {
-    if (frontmatterRisk && !riskTouched) {
-      setRisk(frontmatterRisk)
-    }
-  }, [frontmatterRisk, riskTouched])
+  const recommendedWorkflowProfileId = recommendation && recommendationIsEnabled && !workflowTouched
+    ? recommendation.workflow
+    : null
+  const submittedWorkflowProfileId = workflowTouched
+    ? workflowProfileId
+    : recommendedWorkflowProfileId
+  const effectiveRisk = riskTouched ? risk : frontmatterRisk
 
   useEffect(() => {
     if (selectedTemplate) {
@@ -188,7 +184,9 @@ export function CreateIssueDialog({ open, onClose }: Props) {
   }, [selectedTemplate])
 
   const { effectiveTemplateId: defaultProfileId } = useEffectiveDefaultWorkflowProfile()
-  const workflowSelectValue = workflowProfileId ?? defaultProfileId ?? ''
+  const workflowSelectValue = workflowTouched
+    ? workflowProfileId ?? ''
+    : recommendedWorkflowProfileId ?? defaultProfileId ?? ''
 
   const mutation = useMutation({
     mutationFn: () => {
@@ -202,8 +200,8 @@ export function CreateIssueDialog({ open, onClose }: Props) {
         ...(projectId ? { projectId } : {}),
         priority,
         ...(repositoryName ? { repositoryName } : {}),
-        ...(workflowProfileId ? { workflowProfileId } : {}),
-        ...(risk ? { risk } : {}),
+        ...(submittedWorkflowProfileId ? { workflowProfileId: submittedWorkflowProfileId } : {}),
+        ...(effectiveRisk ? { risk: effectiveRisk } : {}),
         ...(prerequisiteNumbers.length > 0 ? { prerequisiteNumbers } : {}),
       })
     },
@@ -335,18 +333,18 @@ export function CreateIssueDialog({ open, onClose }: Props) {
                     type="button"
                     variant="ghost"
                     size="xs"
-                    aria-pressed={risk === r}
+                    aria-pressed={effectiveRisk === r}
                     onClick={() => {
                       setRisk(r)
                       setRiskTouched(true)
                     }}
                     className={`rounded-full capitalize ${
-                      risk === r ? 'ring-1 ring-offset-1' : 'hover:opacity-80'
+                      effectiveRisk === r ? 'ring-1 ring-offset-1' : 'hover:opacity-80'
                     }`}
                     style={{
                       backgroundColor: style.bg,
                       color: style.text,
-                      ...(risk === r ? { ringColor: style.text } : {}),
+                      ...(effectiveRisk === r ? { ringColor: style.text } : {}),
                     }}
                   >
                     {r}

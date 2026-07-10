@@ -1,5 +1,7 @@
 // @vitest-environment jsdom
 import {
+  afterAll,
+  beforeAll,
   beforeEach,
   describe,
   expect,
@@ -50,20 +52,38 @@ const DEFAULT_DETAIL = {
 }
 
 const overflowByTestId = new Map<string, boolean>()
+const clientHeightDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientHeight')
+const scrollHeightDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollHeight')
 
-Object.defineProperty(HTMLElement.prototype, 'clientHeight', {
-  configurable: true,
-  get() {
-    return 32
-  },
+beforeAll(() => {
+  Object.defineProperty(HTMLElement.prototype, 'clientHeight', {
+    configurable: true,
+    get() {
+      return 32
+    },
+  })
+
+  Object.defineProperty(HTMLElement.prototype, 'scrollHeight', {
+    configurable: true,
+    get() {
+      if (!(this instanceof HTMLElement)) return 32
+      return overflowByTestId.get(this.dataset.testid ?? '') ? 64 : 32
+    },
+  })
 })
 
-Object.defineProperty(HTMLElement.prototype, 'scrollHeight', {
-  configurable: true,
-  get() {
-    if (!(this instanceof HTMLElement)) return 32
-    return overflowByTestId.get(this.dataset.testid ?? '') ? 64 : 32
-  },
+afterAll(() => {
+  if (clientHeightDescriptor) {
+    Object.defineProperty(HTMLElement.prototype, 'clientHeight', clientHeightDescriptor)
+  } else {
+    Reflect.deleteProperty(HTMLElement.prototype, 'clientHeight')
+  }
+
+  if (scrollHeightDescriptor) {
+    Object.defineProperty(HTMLElement.prototype, 'scrollHeight', scrollHeightDescriptor)
+  } else {
+    Reflect.deleteProperty(HTMLElement.prototype, 'scrollHeight')
+  }
 })
 
 const DETAILS = {
