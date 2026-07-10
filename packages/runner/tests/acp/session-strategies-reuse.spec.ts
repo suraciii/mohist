@@ -8,7 +8,6 @@ import {
   createSharedFixture,
   createSharedSessionFixture,
   resetAcpTestHooks,
-  runAcpActionUntilSettled,
   useAcpFakeTimers,
 } from "./support.js"
 
@@ -50,12 +49,26 @@ function providerDefaultModelWarningContext(context: Parameters<typeof acpAgentA
   }
 }
 
+async function advanceThoughtLiveness(agent: { waitForPrompt(): Promise<void> }) {
+  await agent.waitForPrompt()
+  await vi.advanceTimersByTimeAsync(20)
+  await vi.advanceTimersByTimeAsync(20)
+  await vi.advanceTimersByTimeAsync(20)
+  await vi.advanceTimersByTimeAsync(20)
+  await vi.advanceTimersByTimeAsync(20)
+}
+
 describe("mohist/acp-agent existing shared session reuse", () => {
   it("SharedAcpThoughtAndToolUpdatesArrive_LivenessMonitored_DoNotProbeWhileAgentIsActive", async () => {
     useAcpFakeTimers()
     const fixture = createSharedFixture("liveness-non-message")
 
-    const result = await runAcpActionUntilSettled(runDefaultModelAction(fixture.context({ prompt: "long task", session: "build", livenessQuietThresholdMs: 100, probeTimeoutMs: 500, timeout: 2_000 })))
+    const action = runDefaultModelAction(fixture.context({ prompt: "long task", session: "build", livenessQuietThresholdMs: 100, probeTimeoutMs: 500, timeout: 2_000 }))
+    await fixture.agent.waitForPrompt()
+    await vi.advanceTimersByTimeAsync(20)
+    await vi.advanceTimersByTimeAsync(20)
+    await vi.advanceTimersByTimeAsync(20)
+    const result = await action
 
     expect(result.status).toBe("success")
     expect(fixture.agent.calls.filter((entry) => entry.event === "prompt")).toHaveLength(1)
@@ -92,13 +105,15 @@ describe("mohist/acp-agent existing shared session reuse", () => {
     useAcpFakeTimers()
     const shared = createSharedSessionFixture("thought-liveness", { sessionRecord: { acpSessionId: "shared-session-1" } })
 
-    const result = await runAcpActionUntilSettled(runDefaultModelAction(contextWithOverrides({
+    const action = runDefaultModelAction(contextWithOverrides({
       prompt: "long shared task",
       session: "shared-session",
       livenessQuietThresholdMs: 50,
       probeTimeoutMs: 80,
       timeout: 1_000,
-    }, undefined, shared.context())))
+    }, undefined, shared.context()))
+    await advanceThoughtLiveness(shared.agent)
+    const result = await action
 
     expect(result.status).toBe("success")
     expect(shared.agent.calls.filter((entry) => entry.event === "prompt").length).toBe(1)
@@ -115,14 +130,16 @@ describe("mohist/acp-agent existing shared session reuse", () => {
     useAcpFakeTimers()
     const shared = createSharedSessionFixture("thought-liveness", { sessionRecord: { acpSessionId: "shared-session-1", model: "openai/gpt-5.5" } })
 
-    const result = await runAcpActionUntilSettled(acpAgentAction(contextWithOverrides({
+    const action = acpAgentAction(contextWithOverrides({
       prompt: "reuse shared session",
       session: "shared-session",
       agent: { model: "openai/gpt-5.5" },
       livenessQuietThresholdMs: 5_000,
       probeTimeoutMs: 5_000,
       timeout: 5_000,
-    }, undefined, shared.context())))
+    }, undefined, shared.context()))
+    await advanceThoughtLiveness(shared.agent)
+    const result = await action
 
     expect(result.status).toBe("success")
     const setModelIndex = shared.agent.calls.findIndex((entry) => entry.event === "unstable_setSessionModel" && entry.modelId === "openai/gpt-5.5")
@@ -141,14 +158,16 @@ describe("mohist/acp-agent existing shared session reuse", () => {
       sessionRecord: { acpSessionId: "shared-session-1", model: "kimi-for-coding/k2p6" },
     })
 
-    const result = await runAcpActionUntilSettled(acpAgentAction(contextWithOverrides({
+    const action = acpAgentAction(contextWithOverrides({
       prompt: "switch shared session model",
       session: "shared-session",
       agent: { model: "openai/gpt-5.5" },
       livenessQuietThresholdMs: 5_000,
       probeTimeoutMs: 5_000,
       timeout: 5_000,
-    }, undefined, shared.context())))
+    }, undefined, shared.context()))
+    await advanceThoughtLiveness(shared.agent)
+    const result = await action
 
     expect(result.status).toBe("success")
     expect(shared.agent.calls.some((entry) => entry.event === "resumeSession")).toBe(false)
@@ -172,14 +191,16 @@ describe("mohist/acp-agent existing shared session reuse", () => {
       sessionRecord: { acpSessionId: "shared-session-1", model: "anthropic/claude-sonnet-4-5/max" },
     })
 
-    const result = await runAcpActionUntilSettled(acpAgentAction(contextWithOverrides({
+    const action = acpAgentAction(contextWithOverrides({
       prompt: "switch shared session variant",
       session: "shared-session",
       agent: { model: "anthropic/claude-sonnet-4-5", variant: "high" },
       livenessQuietThresholdMs: 5_000,
       probeTimeoutMs: 5_000,
       timeout: 5_000,
-    }, undefined, shared.context())))
+    }, undefined, shared.context()))
+    await advanceThoughtLiveness(shared.agent)
+    const result = await action
 
     expect(result.status).toBe("success")
     expect(shared.agent.calls.some((entry) => entry.event === "resumeSession")).toBe(false)

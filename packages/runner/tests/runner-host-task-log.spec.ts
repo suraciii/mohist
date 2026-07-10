@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { RunnerHost } from "../src/runtime/host.js"
+import { RunnerHost, startTaskLogFlushTrigger } from "../src/runtime/host.js"
 import type { SessionTarget } from "../src/runtime/acp-connection.js"
+import { deferred, type Deferred } from "./support/deferred.js"
 
 const mocks = vi.hoisted(() => ({
   connect: vi.fn(),
@@ -127,16 +128,6 @@ function buildHost() {
   })
 }
 
-function deferred() {
-  let resolve!: () => void
-  let reject!: (reason?: unknown) => void
-  const promise = new Promise<void>((res, rej) => {
-    resolve = res
-    reject = rej
-  })
-  return { promise, resolve, reject }
-}
-
 function workWith(overrides: Partial<{ workflowRunId: string; workId: string; uses: string; ownerKind: string; agentJobId: string }> = {}) {
   return {
     workflowRunId: "wf-336",
@@ -150,50 +141,7 @@ function workWith(overrides: Partial<{ workflowRunId: string; workId: string; us
   }
 }
 
-// Drain microtasks until quiescence. Under fake timers the host's
-// async chains (poll → executeAndReport → append → noteAppend → flush →
-// upload) advance on microtask turns; a single `await Promise.resolve()`
-// is not enough because some continuations schedule on later turns.
-// Mirrors the helper in runner-host-cleanup-config.spec.ts so the two
-// specs stay symmetric in how they drive the same `RunnerHost.run` loop.
-async function flushMicrotasks() {
-  await Promise.resolve()
-  await Promise.resolve()
-}
-
-// Advance fake time in fixed steps, draining microtasks between ticks
-// so fire-and-forget promises (heartbeat, runCleanupOnce, the host's
-// per-work microtask chain) settle before the next timer fires. Using
-// small steps (rather than one big jump) keeps ordering deterministic
-// when several intervals share the clock.
-async function flushCycles(ms: number, cycles: number) {
-  for (let i = 0; i < cycles; i += 1) {
-    await vi.advanceTimersByTimeAsync(ms)
-    await flushMicrotasks()
-  }
-}
-
-// Drain microtasks and advance fake timers until a predicate is satisfied.
-// Used instead of vi.waitFor under fake timers because waitFor's internal
-// polling timer is not advanced by advanceTimersByTimeAsync, which makes
-// timer-dependent assertions order-dependent across specs.
-async function drainUntil(predicate: () => boolean, label: string, maxTicks = 100) {
-  for (let i = 0; i < maxTicks; i += 1) {
-    if (predicate()) return
-    await flushMicrotasks()
-    if (predicate()) return
-    await vi.advanceTimersByTimeAsync(1)
-  }
-  throw new Error(`drainUntil timed out waiting for: ${label}`)
-}
-
 describe("RunnerHost task-log best-effort flush (T-003)", () => {
-  // Drive the host loop with fake timers so the assertions never depend
-  // on wall-clock scheduling (project rule: tests must not rely on real
-  // time). `vi.waitFor` is retained as a polling helper, but under fake
-  // timers its `timeout` is a sentinel, not a real deadline — every
-  // state transition is advanced deterministically by
-  // `vi.advanceTimersByTimeAsync` + microtask flushes.
   beforeEach(() => {
     vi.useFakeTimers()
   })
@@ -203,17 +151,27 @@ describe("RunnerHost task-log best-effort flush (T-003)", () => {
 
   it("UploadsIncrementalLogBeforeWorkCompletes", async () => {
     vi.clearAllMocks()
+    const actionStarted = deferred<void>()
+    const uploadStarted = deferred<void>()
+    const reportStarted = deferred<void>()
     connect.mockResolvedValue(undefined)
     heartbeat.mockResolvedValue(undefined)
     disconnect.mockResolvedValue(undefined)
-    uploadTaskLog.mockResolvedValue({ accepted: 1, truncated: false })
-    report.mockResolvedValue({})
+    uploadTaskLog.mockImplementation(async () => {
+      uploadStarted.resolve()
+      return { accepted: 1, truncated: false }
+    })
+    report.mockImplementation(async () => {
+      reportStarted.resolve()
+      return {}
+    })
     startSignalR.mockResolvedValue(undefined)
     stopSignalR.mockResolvedValue(undefined)
     poll.mockResolvedValueOnce([workWith({ workId: "work-live", agentJobId: "aj-live" })]).mockImplementation(async () => [])
     const release = deferred()
     blockingAction.mockImplementationOnce(async ({ log }: { log?: { write: (source: string, text: string) => void } }) => {
       log?.write("action:test", "line before completion")
+      actionStarted.resolve()
       await release.promise
       return { status: "success", message: "ok" }
     })
@@ -231,27 +189,41 @@ describe("RunnerHost task-log best-effort flush (T-003)", () => {
     })
     const run = host.run(controller.signal)
 
-    // Start the host loop (connect + first poll under fake timers).
-    await vi.waitFor(() => expect(connect).toHaveBeenCalled(), { timeout: 5_000 })
-    // Drive the poll cycle so the work item is dequeued and the
-    // action's append → noteAppend → flush microtask chain runs.
-    await flushCycles(1, 3)
-    await vi.waitFor(() => expect(uploadTaskLog).toHaveBeenCalled(), { timeout: 5_000 })
+    await actionStarted.promise
+    await uploadStarted.promise
     expect(report).not.toHaveBeenCalled()
 
     release.resolve()
-    await vi.waitFor(() => expect(report).toHaveBeenCalled(), { timeout: 5_000 })
+    await reportStarted.promise
     controller.abort()
-    await vi.waitFor(() => expect(run).resolves.toBeUndefined(), { timeout: 5_000 })
+    await expect(run).resolves.toBeUndefined()
   })
 
   it("RoutesConcurrentIncrementalUploadsToEachWorkItemCollector", async () => {
     vi.clearAllMocks()
+    const actionsStarted = new Map<string, Deferred<void>>([
+      ["work-A", deferred<void>()],
+      ["work-B", deferred<void>()],
+    ])
+    const uploadsStarted = new Map<string, Deferred<void>>([
+      ["work-A", deferred<void>()],
+      ["work-B", deferred<void>()],
+    ])
+    const reportsStarted = new Map<string, Deferred<void>>([
+      ["work-A", deferred<void>()],
+      ["work-B", deferred<void>()],
+    ])
     connect.mockResolvedValue(undefined)
     heartbeat.mockResolvedValue(undefined)
     disconnect.mockResolvedValue(undefined)
-    uploadTaskLog.mockResolvedValue({ accepted: 1, truncated: false })
-    report.mockResolvedValue({})
+    uploadTaskLog.mockImplementation(async (_ownerId: string, workId: string) => {
+      uploadsStarted.get(workId)?.resolve()
+      return { accepted: 1, truncated: false }
+    })
+    report.mockImplementation(async (work: { workId: string }) => {
+      reportsStarted.get(work.workId)?.resolve()
+      return {}
+    })
     startSignalR.mockResolvedValue(undefined)
     stopSignalR.mockResolvedValue(undefined)
     // Dispatch both works in a single poll so they start concurrently.
@@ -263,12 +235,13 @@ describe("RunnerHost task-log best-effort flush (T-003)", () => {
         workWith({ workId: "work-B", agentJobId: "aj-B" }),
       ])
       .mockImplementation(async () => [])
-    const releases = new Map<string, ReturnType<typeof deferred>>()
+    const releases = new Map<string, Deferred<void>>()
     const gate = deferred()
     blockingAction.mockImplementation(async ({ workId, log }: { workId: string; log?: { write: (source: string, text: string) => void } }) => {
       const release = deferred()
       releases.set(workId, release)
       log?.write("action:test", `line for ${workId}`)
+      actionsStarted.get(workId)?.resolve()
       // Block on a shared gate so the test can observe both incremental
       // flushes before either work completes.
       await gate.promise
@@ -289,11 +262,8 @@ describe("RunnerHost task-log best-effort flush (T-003)", () => {
     })
     const run = host.run(controller.signal)
 
-    await vi.waitFor(() => expect(connect).toHaveBeenCalled(), { timeout: 5_000 })
-    await drainUntil(
-      () => new Set(uploadTaskLog.mock.calls.map((call) => call[1])).size === 2,
-      "incremental uploads for both work items",
-    )
+    await Promise.all([...actionsStarted.values()].map(({ promise }) => promise))
+    await Promise.all([...uploadsStarted.values()].map(({ promise }) => promise))
     expect(new Set(uploadTaskLog.mock.calls.map((call) => call[1]))).toEqual(new Set(["work-A", "work-B"]))
 
     for (const call of uploadTaskLog.mock.calls) {
@@ -307,18 +277,27 @@ describe("RunnerHost task-log best-effort flush (T-003)", () => {
     gate.resolve()
     releases.get("work-A")!.resolve()
     releases.get("work-B")!.resolve()
-    await vi.waitFor(() => expect(report).toHaveBeenCalledTimes(2), { timeout: 5_000 })
+    await Promise.all([...reportsStarted.values()].map(({ promise }) => promise))
     controller.abort()
-    await vi.waitFor(() => expect(run).resolves.toBeUndefined(), { timeout: 5_000 })
+    await expect(run).resolves.toBeUndefined()
   })
 
   it("FallbackExecutorPathStreamsIncrementalLogsBeforeReport", async () => {
     vi.clearAllMocks()
+    const actionStarted = deferred<void>()
+    const uploadStarted = deferred<void>()
+    const reportStarted = deferred<void>()
     connect.mockResolvedValue(undefined)
     heartbeat.mockResolvedValue(undefined)
     disconnect.mockResolvedValue(undefined)
-    uploadTaskLog.mockResolvedValue({ accepted: 1, truncated: false })
-    report.mockResolvedValue({})
+    uploadTaskLog.mockImplementation(async () => {
+      uploadStarted.resolve()
+      return { accepted: 1, truncated: false }
+    })
+    report.mockImplementation(async () => {
+      reportStarted.resolve()
+      return {}
+    })
     startSignalR.mockResolvedValue(undefined)
     stopSignalR.mockResolvedValue(undefined)
     poll.mockResolvedValueOnce([workWith({ workId: "work-fallback", agentJobId: "aj-fallback" })]).mockImplementation(async () => [])
@@ -341,6 +320,7 @@ describe("RunnerHost task-log best-effort flush (T-003)", () => {
       })
     blockingAction.mockImplementationOnce(async ({ log }: { log?: { write: (source: string, text: string) => void } }) => {
       log?.write("action:test", "fallback live line")
+      actionStarted.resolve()
       await release.promise
       return { status: "success", message: "ok" }
     })
@@ -359,28 +339,35 @@ describe("RunnerHost task-log best-effort flush (T-003)", () => {
     })
     const run = host.run(controller.signal)
 
-    await vi.waitFor(() => expect(connect).toHaveBeenCalled(), { timeout: 5_000 })
-    await flushCycles(1, 3)
-    await vi.waitFor(() => expect(uploadTaskLog).toHaveBeenCalled(), { timeout: 5_000 })
+    await actionStarted.promise
+    await uploadStarted.promise
     expect(report).not.toHaveBeenCalled()
 
     release.resolve()
-    await vi.waitFor(() => expect(report).toHaveBeenCalled(), { timeout: 5_000 })
+    await reportStarted.promise
     controller.abort()
-    await vi.waitFor(() => expect(run).resolves.toBeUndefined(), { timeout: 5_000 })
+    await expect(run).resolves.toBeUndefined()
     errorSpy.mockRestore()
   })
 
   it("FlushesCapturedLogViaUploadTaskLogBeforeReport", async () => {
     vi.clearAllMocks()
+    const uploadStarted = deferred<void>()
+    const reportStarted = deferred<void>()
     getConnectionId.mockReturnValue("conn-1")
     probeLiveness.mockResolvedValue(true)
     forceReconnect.mockResolvedValue(undefined)
     connect.mockResolvedValue(undefined)
     heartbeat.mockResolvedValue(undefined)
     disconnect.mockResolvedValue(undefined)
-    uploadTaskLog.mockResolvedValue({ accepted: 2, truncated: false })
-    report.mockResolvedValue({})
+    uploadTaskLog.mockImplementation(async () => {
+      uploadStarted.resolve()
+      return { accepted: 2, truncated: false }
+    })
+    report.mockImplementation(async () => {
+      reportStarted.resolve()
+      return {}
+    })
     startSignalR.mockResolvedValue(undefined)
     stopSignalR.mockResolvedValue(undefined)
     poll.mockResolvedValueOnce([workWith()]).mockImplementation(async () => [])
@@ -388,14 +375,10 @@ describe("RunnerHost task-log best-effort flush (T-003)", () => {
     const controller = new AbortController()
     const host = buildHost()
     const run = host.run(controller.signal)
-    await vi.waitFor(() => expect(connect).toHaveBeenCalled(), { timeout: 5_000 })
-    // The default action writes two rebase lines and resolves; the
-    // terminal flush + report then run as a microtask chain after the
-    // poll dequeues the work item.
-    await flushCycles(1, 3)
-    await vi.waitFor(() => expect(uploadTaskLog).toHaveBeenCalled(), { timeout: 5_000 })
+    await uploadStarted.promise
+    await reportStarted.promise
     controller.abort()
-    await vi.waitFor(() => expect(run).resolves.toBeUndefined(), { timeout: 5_000 })
+    await expect(run).resolves.toBeUndefined()
 
     const uploadCall = uploadTaskLog.mock.calls[0] as [string, string, { entries: Array<{ source: string; text: string }>; truncated: boolean }]
     expect(uploadCall[0]).toBe("aj-336")
@@ -413,6 +396,7 @@ describe("RunnerHost task-log best-effort flush (T-003)", () => {
 
   it("FailedUploadIsLoggedAndSwallowed_ReportStillSucceeds", async () => {
     vi.clearAllMocks()
+    const reportStarted = deferred<void>()
     getConnectionId.mockReturnValue("conn-1")
     probeLiveness.mockResolvedValue(true)
     forceReconnect.mockResolvedValue(undefined)
@@ -425,7 +409,10 @@ describe("RunnerHost task-log best-effort flush (T-003)", () => {
     // the default mock. Both failures / successes are best-effort and
     // never block the report (design D1 / D6).
     uploadTaskLog.mockRejectedValueOnce(new Error("server returned 500"))
-    report.mockResolvedValue({})
+    report.mockImplementation(async () => {
+      reportStarted.resolve()
+      return {}
+    })
     startSignalR.mockResolvedValue(undefined)
     stopSignalR.mockResolvedValue(undefined)
     poll.mockResolvedValueOnce([workWith({ workflowRunId: "wf-fail", workId: "work-fail", agentJobId: "aj-fail" })]).mockImplementation(async () => [])
@@ -441,11 +428,9 @@ describe("RunnerHost task-log best-effort flush (T-003)", () => {
       dispatchLivenessProbeIntervalMs: 60_000,
     })
     const run = host.run(controller.signal)
-    await vi.waitFor(() => expect(connect).toHaveBeenCalled(), { timeout: 5_000 })
-    await flushCycles(1, 3)
-    await vi.waitFor(() => expect(report).toHaveBeenCalled(), { timeout: 5_000 })
+    await reportStarted.promise
     controller.abort()
-    await vi.waitFor(() => expect(run).resolves.toBeUndefined(), { timeout: 5_000 })
+    await expect(run).resolves.toBeUndefined()
 
     expect(uploadTaskLog).toHaveBeenCalled()
     expect(report).toHaveBeenCalledTimes(1)
@@ -458,14 +443,23 @@ describe("RunnerHost task-log best-effort flush (T-003)", () => {
 
   it("PendingUploadIsTimedOut_ReportStillSucceeds", async () => {
     vi.clearAllMocks()
+    const uploadStarted = deferred<void>()
+    const pendingUpload = deferred<void>()
+    const reportStarted = deferred<void>()
     getConnectionId.mockReturnValue("conn-1")
     probeLiveness.mockResolvedValue(true)
     forceReconnect.mockResolvedValue(undefined)
     connect.mockResolvedValue(undefined)
     heartbeat.mockResolvedValue(undefined)
     disconnect.mockResolvedValue(undefined)
-    uploadTaskLog.mockImplementationOnce(() => new Promise(() => undefined))
-    report.mockResolvedValue({})
+    uploadTaskLog.mockImplementationOnce(() => {
+      uploadStarted.resolve()
+      return pendingUpload.promise
+    })
+    report.mockImplementation(async () => {
+      reportStarted.resolve()
+      return {}
+    })
     startSignalR.mockResolvedValue(undefined)
     stopSignalR.mockResolvedValue(undefined)
     poll.mockResolvedValueOnce([workWith({ workflowRunId: "wf-pending", workId: "work-pending", agentJobId: "aj-pending" })]).mockImplementation(async () => [])
@@ -474,18 +468,11 @@ describe("RunnerHost task-log best-effort flush (T-003)", () => {
     const controller = new AbortController()
     const host = buildHost()
     const run = host.run(controller.signal)
-    await vi.waitFor(() => expect(connect).toHaveBeenCalled(), { timeout: 5_000 })
-    // Dequeue the work item; the terminal flush then races a forever-
-    // pending upload against the 250ms terminal-timeout guard. Under
-    // fake timers that guard NEVER fires on its own — advance past it
-    // explicitly so the upload rejects, the error is logged, and the
-    // report is reached.
-    await flushCycles(1, 3)
+    await uploadStarted.promise
     await vi.advanceTimersByTimeAsync(250)
-    await flushMicrotasks()
-    await vi.waitFor(() => expect(report).toHaveBeenCalled(), { timeout: 5_000 })
+    await reportStarted.promise
     controller.abort()
-    await vi.waitFor(() => expect(run).resolves.toBeUndefined(), { timeout: 5_000 })
+    await expect(run).resolves.toBeUndefined()
 
     expect(uploadTaskLog).toHaveBeenCalled()
     expect(report).toHaveBeenCalledTimes(1)
@@ -496,6 +483,7 @@ describe("RunnerHost task-log best-effort flush (T-003)", () => {
 
   it("ReportCarriesTheVerdict_WhenLogUploadSucceeds", async () => {
     vi.clearAllMocks()
+    const reportStarted = deferred<void>()
     getConnectionId.mockReturnValue("conn-1")
     probeLiveness.mockResolvedValue(true)
     forceReconnect.mockResolvedValue(undefined)
@@ -503,7 +491,10 @@ describe("RunnerHost task-log best-effort flush (T-003)", () => {
     heartbeat.mockResolvedValue(undefined)
     disconnect.mockResolvedValue(undefined)
     uploadTaskLog.mockResolvedValue({ accepted: 1, truncated: false })
-    report.mockResolvedValue({})
+    report.mockImplementation(async () => {
+      reportStarted.resolve()
+      return {}
+    })
     startSignalR.mockResolvedValue(undefined)
     stopSignalR.mockResolvedValue(undefined)
     blockingAction.mockImplementationOnce(async ({ log }: { signal: AbortSignal; log?: { write: (source: string, text: string) => void } }) => {
@@ -522,11 +513,9 @@ describe("RunnerHost task-log best-effort flush (T-003)", () => {
       dispatchLivenessProbeIntervalMs: 60_000,
     })
     const run = host.run(controller.signal)
-    await vi.waitFor(() => expect(connect).toHaveBeenCalled(), { timeout: 5_000 })
-    await flushCycles(1, 3)
-    await vi.waitFor(() => expect(report).toHaveBeenCalled(), { timeout: 5_000 })
+    await reportStarted.promise
     controller.abort()
-    await vi.waitFor(() => expect(run).resolves.toBeUndefined(), { timeout: 5_000 })
+    await expect(run).resolves.toBeUndefined()
 
     const reportCall = report.mock.calls[0] as [unknown, { status: string; message: string }]
     expect(reportCall[1].status).toBe("failed")
@@ -560,7 +549,7 @@ describe("TaskLogCollector incremental flush integration (T-003 Phase 2)", () =>
       if (batch === null) return
       flushCalls.push(batch.entries.map((e) => ({ seq: e.seq })))
     }
-    const trigger = startTaskLogFlushTriggerForTest(flushIncremental, 60, 1_000)
+    const trigger = startTaskLogFlushTrigger(flushIncremental, 60, 1_000)
 
     collector.append("a", "1")
     await vi.advanceTimersByTimeAsync(120)
@@ -582,7 +571,6 @@ describe("TaskLogCollector incremental flush integration (T-003 Phase 2)", () =>
         seenSeqs.add(entry.seq)
       }
     }
-    vi.useRealTimers()
   })
 
   it("WatermarkExcludesAlreadySent_IncrementalBatchCarriesOnlyNewLines", async () => {
@@ -594,7 +582,7 @@ describe("TaskLogCollector incremental flush integration (T-003 Phase 2)", () =>
       if (batch === null) return
       drainedSeqs.push(batch.entries.map((e) => e.seq))
     }
-    const trigger = startTaskLogFlushTriggerForTest(flushIncremental, 60, 1_000)
+    const trigger = startTaskLogFlushTrigger(flushIncremental, 60, 1_000)
 
     collector.append("a", "1")
     collector.append("a", "2")
@@ -612,7 +600,6 @@ describe("TaskLogCollector incremental flush integration (T-003 Phase 2)", () =>
     // Confirm no seq repeats.
     const flat = drainedSeqs.flat()
     expect(flat).toEqual([...new Set(flat)].sort((a, b) => a - b))
-    vi.useRealTimers()
   })
 
   it("EmptyDrainProducesNoUpload_QuietPeriodSkipsNetworkRoundTrip", async () => {
@@ -624,7 +611,7 @@ describe("TaskLogCollector incremental flush integration (T-003 Phase 2)", () =>
       if (batch === null) return
       flushCalls(batch)
     }
-    const trigger = startTaskLogFlushTriggerForTest(flushIncremental, 60, 1_000)
+    const trigger = startTaskLogFlushTrigger(flushIncremental, 60, 1_000)
 
     await vi.advanceTimersByTimeAsync(300)
     await trigger.stop()
@@ -636,7 +623,6 @@ describe("TaskLogCollector incremental flush integration (T-003 Phase 2)", () =>
     expect(flushCalls).not.toHaveBeenCalled()
     // pendingSinceWatermark must still be 0 (no appends).
     expect(collector.pendingSinceWatermark()).toBe(0)
-    vi.useRealTimers()
   })
 
   it("LineCountThresholdFiresEagerly_BeforeNextIntervalTick", async () => {
@@ -649,7 +635,7 @@ describe("TaskLogCollector incremental flush integration (T-003 Phase 2)", () =>
       drainedSeqs.push(batch.entries.map((e) => e.seq))
     }
     // Long interval, low threshold — the threshold path drives the fire.
-    const trigger = startTaskLogFlushTriggerForTest(flushIncremental, 10_000, 3)
+    const trigger = startTaskLogFlushTrigger(flushIncremental, 10_000, 3)
     const listener = () => trigger.noteAppend()
     collector.setAppendListener(listener)
 
@@ -664,7 +650,6 @@ describe("TaskLogCollector incremental flush integration (T-003 Phase 2)", () =>
 
     collector.setAppendListener(null)
     await trigger.stop()
-    vi.useRealTimers()
   })
 
   it("FailedIncrementalUploadIsReconciledByTerminalBatch_AuthoritativeStoreRecovers", async () => {
@@ -694,7 +679,6 @@ describe("TaskLogCollector incremental flush integration (T-003 Phase 2)", () =>
     await uploadTerminal()
     const terminalBatch = uploadBatches[0]!
     expect(terminalBatch.map((e) => e.seq)).toEqual([1, 2])
-    vi.useRealTimers()
   })
 
   it("FlushTriggerIsStoppedBeforeTerminalFlush_NoLateIncrementalFiresAfterCompletion", async () => {
@@ -706,7 +690,7 @@ describe("TaskLogCollector incremental flush integration (T-003 Phase 2)", () =>
       if (batch === null) return
       drainedSeqs.push(batch.entries.map((e) => e.seq))
     }
-    const trigger = startTaskLogFlushTriggerForTest(flushIncremental, 60, 1_000)
+    const trigger = startTaskLogFlushTrigger(flushIncremental, 60, 1_000)
     collector.append("a", "1")
     await vi.advanceTimersByTimeAsync(80)
     // Stop BEFORE the next tick — no further fires.
@@ -714,23 +698,26 @@ describe("TaskLogCollector incremental flush integration (T-003 Phase 2)", () =>
     const beforeCount = drainedSeqs.length
     await vi.advanceTimersByTimeAsync(500)
     expect(drainedSeqs.length).toBe(beforeCount)
-    vi.useRealTimers()
   })
 
   it("IncrementalFlushesAreSerialized_WhenTriggerFiresDuringInFlightUpload", async () => {
-    const resolvers: Array<() => void> = []
+    vi.useFakeTimers()
+    const secondFlushStarted = deferred<void>()
+    const releases: Deferred<void>[] = []
     let active = 0
     let maxActive = 0
-    const flushIncremental = vi.fn(() => new Promise<void>((resolve) => {
+    const flushIncremental = vi.fn(() => {
       active += 1
       maxActive = Math.max(maxActive, active)
-      resolvers.push(() => {
+      if (flushIncremental.mock.calls.length === 2) secondFlushStarted.resolve()
+      const release = deferred<void>()
+      releases.push(release)
+      return release.promise.finally(() => {
         active -= 1
-        resolve()
       })
-    }))
+    })
 
-    const trigger = startTaskLogFlushTriggerForTest(flushIncremental, 10_000, 1)
+    const trigger = startTaskLogFlushTrigger(flushIncremental, 10_000, 1)
 
     trigger.noteAppend()
     trigger.noteAppend()
@@ -739,11 +726,11 @@ describe("TaskLogCollector incremental flush integration (T-003 Phase 2)", () =>
     expect(flushIncremental).toHaveBeenCalledTimes(1)
     expect(maxActive).toBe(1)
 
-    resolvers.shift()?.()
-    await vi.waitFor(() => expect(flushIncremental).toHaveBeenCalledTimes(2))
+    releases.shift()?.resolve()
+    await secondFlushStarted.promise
     expect(maxActive).toBe(1)
 
-    resolvers.shift()?.()
+    releases.shift()?.resolve()
     await trigger.stop()
     expect(active).toBe(0)
   })
@@ -757,7 +744,7 @@ describe("TaskLogCollector incremental flush integration (T-003 Phase 2)", () =>
       if (batch === null) return
       drainCount += 1
     }
-    const trigger = startTaskLogFlushTriggerForTest(flushIncremental, 100, 1_000)
+    const trigger = startTaskLogFlushTrigger(flushIncremental, 100, 1_000)
     // No appends — every tick still calls the flush callback, which
     // is a no-op (drain returns null). After 250 ms three ticks fire.
     await vi.advanceTimersByTimeAsync(250)
@@ -767,13 +754,5 @@ describe("TaskLogCollector incremental flush integration (T-003 Phase 2)", () =>
     await vi.advanceTimersByTimeAsync(110)
     expect(drainCount).toBe(1)
     await trigger.stop()
-    vi.useRealTimers()
   })
 })
-
-// Re-export the host's private trigger so these unit tests can drive
-// the same code path the host uses (rather than reimplementing the
-// setInterval dance). The host deliberately keeps this symbol private
-// to its module — the test reaches it through a thin re-export kept
-// in the host module itself for testability.
-import { startTaskLogFlushTrigger as startTaskLogFlushTriggerForTest } from "../src/runtime/host.js"

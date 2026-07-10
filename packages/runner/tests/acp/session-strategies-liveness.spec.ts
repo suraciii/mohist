@@ -6,7 +6,6 @@ import {
   createFixture,
   createSharedSessionFixture,
   resetAcpTestHooks,
-  runAcpActionUntilSettled,
   useAcpProviderDiagnostic,
   useAcpFakeTimers,
 } from "./support.js"
@@ -22,13 +21,18 @@ describe("mohist/acp-agent strategy liveness routing", () => {
     useAcpFakeTimers()
     const fixture = createFixture("tool-liveness")
 
-    const result = await runWithDefaultModelWarning("tool-session", () => runAcpActionUntilSettled(acpAgentAction(fixture.context({
+    const result = await runWithDefaultModelWarning("tool-session", () => acpAgentAction(fixture.context({
       prompt: "long tool task",
       session: "tool-session",
       livenessQuietThresholdMs: 30,
       probeTimeoutMs: 80,
       timeout: 1_000,
-    }))))
+    })), async (action) => {
+      await fixture.agent.waitForPrompt()
+      await vi.advanceTimersByTimeAsync(30)
+      await vi.advanceTimersByTimeAsync(20)
+      return action
+    })
 
     expect(result.status).toBe("success")
 
@@ -59,13 +63,18 @@ describe("mohist/acp-agent strategy liveness routing", () => {
     useAcpFakeTimers()
     const fixture = createFixture("probe-timeout")
 
-    const result = await runWithDefaultModelWarning("timeout-session", () => runAcpActionUntilSettled(acpAgentAction(fixture.context({
+    const result = await runWithDefaultModelWarning("timeout-session", () => acpAgentAction(fixture.context({
       prompt: "quiet task",
       session: "timeout-session",
       livenessQuietThresholdMs: 30,
       probeTimeoutMs: 60,
       timeout: 1_000,
-    }))))
+    })), async (action) => {
+      await fixture.agent.waitForPrompt()
+      await vi.advanceTimersByTimeAsync(30)
+      await vi.advanceTimersByTimeAsync(60)
+      return action
+    })
 
     expect(result.status).toBe("failure")
     expect(result.message ?? "").toContain("Session liveness probe timed out")
@@ -102,13 +111,18 @@ describe("mohist/acp-agent strategy liveness routing", () => {
     useAcpProviderDiagnostic(rateLimitDiagnostic())
     const fixture = createFixture("probe-timeout")
 
-    const result = await runWithDefaultModelWarning("timeout-session", () => runAcpActionUntilSettled(acpAgentAction(fixture.context({
+    const result = await runWithDefaultModelWarning("timeout-session", () => acpAgentAction(fixture.context({
       prompt: "quiet task",
       session: "timeout-session",
       livenessQuietThresholdMs: 30,
       probeTimeoutMs: 60,
       timeout: 1_000,
-    }))))
+    })), async (action) => {
+      await fixture.agent.waitForPrompt()
+      await vi.advanceTimersByTimeAsync(30)
+      await vi.advanceTimersByTimeAsync(60)
+      return action
+    })
 
     expect(result.status).toBe("failure")
     expect(result.message ?? "").toContain("Session liveness probe timed out")
@@ -133,13 +147,17 @@ describe("mohist/acp-agent strategy liveness routing", () => {
     const fixture = createFixture("basic")
     const shared = createSharedSessionFixture("probe-send-failed")
 
-    const result = await runWithDefaultModelWarning("probe-send-failed-session", () => runAcpActionUntilSettled(acpAgentAction(fixture.context({
+    const result = await runWithDefaultModelWarning("probe-send-failed-session", () => acpAgentAction(fixture.context({
       prompt: "probe send fails",
       session: "probe-send-failed-session",
       livenessQuietThresholdMs: 30,
       probeTimeoutMs: 60,
       timeout: 1_000,
-    }, undefined, shared.context()))))
+    }, undefined, shared.context())), async (action) => {
+      await shared.agent.waitForPrompt()
+      await vi.advanceTimersByTimeAsync(30)
+      return action
+    })
 
     expect(result.status).toBe("failure")
     expect(result.message ?? "").toContain("Failed to send liveness probe: probe transport failed")
@@ -164,15 +182,19 @@ describe("mohist/acp-agent strategy liveness routing", () => {
     useAcpFakeTimers()
     const fixture = createFixture("abort-during-probe")
     const controller = new AbortController()
-    setTimeout(() => controller.abort(), 60)
 
-    const result = await runWithDefaultModelWarning("cancel-session", () => runAcpActionUntilSettled(acpAgentAction(fixture.context({
+    const action = runWithDefaultModelWarning("cancel-session", () => acpAgentAction(fixture.context({
       prompt: "cancel during probe",
       session: "cancel-session",
       livenessQuietThresholdMs: 20,
       probeTimeoutMs: 200,
       timeout: 1_000,
-    }, controller.signal))))
+    }, controller.signal)))
+    await fixture.agent.waitForPrompt()
+    await vi.advanceTimersByTimeAsync(20)
+    await fixture.serverConnection.waitForLivenessProbe()
+    controller.abort()
+    const result = await action
 
     expect(result.status).toBe("failure")
     expect(result.message ?? "").toMatch(/stopped by user/i)
@@ -181,10 +203,15 @@ describe("mohist/acp-agent strategy liveness routing", () => {
   })
 })
 
-async function runWithDefaultModelWarning<T>(sessionName: string, operation: () => Promise<T>): Promise<T> {
+async function runWithDefaultModelWarning<T>(
+  sessionName: string,
+  operation: () => Promise<T>,
+  drive?: (action: Promise<T>) => Promise<T>,
+): Promise<T> {
   const warningSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined)
   try {
-    const result = await operation()
+    const action = operation()
+    const result = drive === undefined ? await action : await drive(action)
     expect(warningSpy).toHaveBeenCalledTimes(1)
     expect(warningSpy).toHaveBeenNthCalledWith(
       1,

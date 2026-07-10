@@ -1,14 +1,22 @@
 import { mkdir, mkdtemp, rename, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { archiveChangeAction, setArchiveRenameForTest, setOpenSpecGitRunnerForTest } from "../src/actions/openspec.js"
 import type { ActionContext, JsonObject } from "../src/core/types.js"
 import type { ServerConnection } from "../src/server/connection.js"
 
+const ARCHIVE_TEST_TIME = new Date("2026-07-11T12:00:00.000Z")
+
 describe("mohist/archive-change", () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] })
+    vi.setSystemTime(ARCHIVE_TEST_TIME)
+  })
+
   afterEach(() => {
     setArchiveRenameForTest(null)
+    vi.useRealTimers()
   })
 
   it("ArchiveChangeAfterMove_StagesAndCommitsArchivedChange", async () => {

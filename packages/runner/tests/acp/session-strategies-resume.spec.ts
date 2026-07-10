@@ -6,7 +6,6 @@ import {
   contextWithOverrides,
   createSharedSessionFixture,
   resetAcpTestHooks,
-  runAcpActionUntilSettled,
   useAcpFakeTimers,
 } from "./support.js"
 
@@ -56,7 +55,14 @@ describe("mohist/acp-agent resumed shared sessions", () => {
       probeTimeoutMs: 80,
       timeout: 1_000,
     }, undefined, shared.context())
-    const result = await runAcpActionUntilSettled(runWithProviderDefaultModelWarning(context, () => acpAgentAction(context)))
+    const action = runWithProviderDefaultModelWarning(context, () => acpAgentAction(context))
+    await shared.agent.waitForPrompt()
+    await vi.advanceTimersByTimeAsync(20)
+    await vi.advanceTimersByTimeAsync(20)
+    await vi.advanceTimersByTimeAsync(20)
+    await vi.advanceTimersByTimeAsync(20)
+    await vi.advanceTimersByTimeAsync(20)
+    const result = await action
 
     expect(result.status).toBe("success")
     expect(shared.serverConnection.calls.some((entry) => entry.event === "getWorkflowAgentSession" || entry.event === "openWorkflowAgentSession")).toBe(true)

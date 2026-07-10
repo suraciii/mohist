@@ -13,7 +13,8 @@
     "start": "node dist/cli.js",
     "test": "vitest run",
     "test:run": "vitest run",
-    "test:ci": "npm run typecheck:tests && npm run test:run",
+    "test:ci": "npm run typecheck:tests && npm run check:test-boundaries && npm run test:run",
+    "check:test-boundaries": "node ../../scripts/check-node-test-boundaries.mjs --scope runner",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "typecheck:tests": "tsc -p tsconfig.tests.json --noEmit"
   },

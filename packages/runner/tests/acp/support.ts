@@ -4,6 +4,7 @@ import { tmpdir } from "node:os"
 import { AgentSideConnection, ClientSideConnection, PROTOCOL_VERSION } from "@agentclientprotocol/sdk"
 import type { Agent, RequestPermissionRequest, RequestPermissionResponse, SessionNotification, Stream } from "@agentclientprotocol/sdk"
 import { vi } from "vitest"
+import { deferred } from "../support/deferred.js"
 import { setAcpProcessFactoryForTest, type AcpProcessHandle } from "../../src/actions/acp-agent.js"
 import { setAcpCancelTimeoutMsForTest } from "../../src/actions/acp/liveness.js"
 import type { ActionContext } from "../../src/core/types.js"
@@ -116,6 +117,7 @@ export function baseContext(withInput: Record<string, unknown>, signal = new Abo
 export class FakeAcpAgent {
   readonly calls: any[] = []
   private connection!: AgentSideConnection
+  private readonly promptStarted = deferred<void>()
   private promptCount = 0
   private initialPromptResolve: ((value: { stopReason: "end_turn" }) => void) | null = null
   cancelHangs = false
@@ -124,6 +126,11 @@ export class FakeAcpAgent {
 
   bind(connection: AgentSideConnection) {
     this.connection = connection
+  }
+
+  waitForPrompt(): Promise<void> {
+    if (this.calls.some((call) => call.event === "prompt")) return Promise.resolve()
+    return this.promptStarted.promise
   }
 
   handler(): Agent {
@@ -162,6 +169,7 @@ export class FakeAcpAgent {
         self.promptCount += 1
         const text = promptText(params.prompt)
         self.calls.push({ event: "prompt", promptCount: self.promptCount, text })
+        self.promptStarted.resolve()
         if (self.scenario === "permission") {
           const response = await self.connection.requestPermission({ sessionId: params.sessionId, toolCall: { toolCallId: "tool-permission", title: "Run command", kind: "execute", status: "pending" }, options: [{ optionId: "reject", name: "Reject", kind: "reject_once" }, { optionId: "allow", name: "Allow", kind: "allow_once" }] })
           self.calls.push({ event: "permissionResponse", ...response })
@@ -385,8 +393,16 @@ export function createSharedSessionFixture(
 export class FakeServerConnection {
   readonly calls: Array<{ event: string; type?: string; payload?: unknown; body?: unknown; sessionName?: string }> = []
   nextEnsureWorkflowAgentSession: { acpSessionId?: string; workDir?: string; model?: string | null } = { acpSessionId: "shared-session-1", workDir: "D:/fake/work" }
+  private readonly livenessProbeStarted = deferred<void>()
 
   constructor(private readonly timeline?: Array<{ event: string }>) {}
+
+  waitForLivenessProbe(): Promise<void> {
+    if (this.calls.some((call) => call.event === "workflowAgentSessionEvents" && call.type === "session.liveness" && (call.payload as { status?: string }).status === "probing")) {
+      return Promise.resolve()
+    }
+    return this.livenessProbeStarted.promise
+  }
 
   async ensureWorkflowAgentSession(_projectId: string, _workflowRunId: string, sessionName: string) {
     this.calls.push({ event: "ensureWorkflowAgentSession", sessionName })
@@ -410,13 +426,17 @@ export class FakeServerConnection {
 
   async workflowAgentSessionRuntimeEvents(_projectId: string, _workflowRunId: string, sessionName: string, payload: { events?: Array<{ type: string; payload: unknown }>; runtimeEvents?: Array<{ type: string; payload: unknown }> }) {
     const events = payload?.events ?? payload?.runtimeEvents ?? []
-    for (const event of events) this.calls.push({ event: "workflowAgentSessionEvents", sessionName, type: event.type, payload: event.payload })
+    for (const event of events) {
+      this.calls.push({ event: "workflowAgentSessionEvents", sessionName, type: event.type, payload: event.payload })
+      if (event.type === "session.liveness" && (event.payload as { status?: string }).status === "probing") this.livenessProbeStarted.resolve()
+    }
   }
 }
 
 export class FakeSharedAcpAgent {
   readonly calls: any[] = []
   private connection!: AgentSideConnection
+  private readonly promptStarted = deferred<void>()
   cancelHangs = false
 
   constructor(
@@ -426,6 +446,11 @@ export class FakeSharedAcpAgent {
 
   bind(connection: AgentSideConnection) {
     this.connection = connection
+  }
+
+  waitForPrompt(): Promise<void> {
+    if (this.calls.some((call) => call.event === "prompt")) return Promise.resolve()
+    return this.promptStarted.promise
   }
 
   handler(): Agent {
@@ -455,6 +480,7 @@ export class FakeSharedAcpAgent {
       },
       async prompt(params) {
         self.calls.push({ event: "prompt", sessionId: params.sessionId, text: promptText(params.prompt) })
+        self.promptStarted.resolve()
         if (self.scenario === "thought-liveness") {
           for (let index = 0; index < 5; index += 1) {
             await delay(20)
@@ -513,39 +539,20 @@ export function useAcpProviderDiagnostic(diagnostic: OpencodeProviderErrorDiagno
   })
 }
 
-export async function runAcpActionUntilSettled<T>(action: Promise<T>, maxRounds = 1_000): Promise<T> {
-  let done = false
-  let value: T | undefined
-  let error: unknown
-  void action.then(
-    (resolved) => {
-      done = true
-      value = resolved
-    },
-    (rejected) => {
-      done = true
-      error = rejected
-    },
-  )
-
-  for (let round = 0; round < maxRounds; round += 1) {
-    await new Promise<void>((resolve) => setImmediate(resolve))
-    if (done) {
-      if (error) throw error
-      return value as T
-    }
-    if (vi.getTimerCount() > 0) await vi.advanceTimersToNextTimerAsync()
-  }
-
-  throw new Error(`ACP action did not settle after ${maxRounds} fake-timer rounds`)
-}
-
-export function createTrackedFakeProcess(agent: FakeAcpAgent, options: { hangCancelWrites?: boolean } = {}): AcpProcessHandle & { cleanupCount: () => number } {
-  const base = createFakeProcess(agent, options)
+export function createTrackedFakeProcess(
+  agent: FakeAcpAgent,
+  options: { hangCancelWrites?: boolean } = {},
+): AcpProcessHandle & { cleanupCount: () => number; waitForCancelWrite: () => Promise<void> } {
+  const cancelWriteStarted = deferred<void>()
+  const base = createFakeProcess(agent, {
+    ...options,
+    onCancelWrite: cancelWriteStarted.resolve,
+  })
   let cleanupCalls = 0
   return {
     ...base,
     cleanupCount: () => cleanupCalls,
+    waitForCancelWrite: () => cancelWriteStarted.promise,
     async cleanup() {
       cleanupCalls += 1
       await base.cleanup()
@@ -553,10 +560,13 @@ export function createTrackedFakeProcess(agent: FakeAcpAgent, options: { hangCan
   }
 }
 
-export function createFakeProcess(agent: FakeAcpAgent, options: { hangCancelWrites?: boolean } = {}): AcpProcessHandle {
+export function createFakeProcess(
+  agent: FakeAcpAgent,
+  options: { hangCancelWrites?: boolean; onCancelWrite?: () => void } = {},
+): AcpProcessHandle {
   const [baseClientStream, agentStream] = linkedStreams()
   const clientStream: Stream = options.hangCancelWrites
-    ? { writable: createCancelHangingWritable(baseClientStream.writable), readable: baseClientStream.readable }
+    ? { writable: createCancelHangingWritable(baseClientStream.writable, options.onCancelWrite), readable: baseClientStream.readable }
     : baseClientStream
   const connection = new AgentSideConnection(() => agent.handler(), agentStream)
   agent.bind(connection)
@@ -573,12 +583,13 @@ export function createFakeProcess(agent: FakeAcpAgent, options: { hangCancelWrit
   }
 }
 
-export function createCancelHangingWritable(inner: WritableStream<any>): WritableStream<any> {
+export function createCancelHangingWritable(inner: WritableStream<any>, onCancelWrite?: () => void): WritableStream<any> {
   let pendingWriteReject: ((reason: unknown) => void) | undefined
   const stream = new WritableStream<any>({
     async write(chunk) {
       const text = describeMessage(chunk)
       if (text.includes("\"session/cancel\"")) {
+        onCancelWrite?.()
         await new Promise<void>((_, reject) => { pendingWriteReject = reject })
         return
       }
