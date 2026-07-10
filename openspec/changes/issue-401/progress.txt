@@ -119,3 +119,53 @@
 - The `reference-rail-drift` card is collapsed by default — `CollapsibleRailCard` has `defaultCollapsed: true` for the drift card. To assert "full drift detail retained" (base SHA, defer reason), the test must click the toggle to expand the card body, then verify the existing fields. Verifying just the collapsed summary (`reference-rail-drift-summary` shows `needs-attention`) plus the toggle-then-expanded body proves both: the rail card is still present AND its full content is still rendered.
 - `deriveRuntimeDecision` returns `failed` summary when `recovery?.latestAttemptState === 'failed'`. So the drift+blocked test had to use `latestAttemptState: null` (or omit it) to land in the `blocked` summary — otherwise the surface produces `terminalActions(ctx, 'start')` (retry, resume, rerun, **start**, inspect) instead of `terminalActions(ctx, 'stop')` (retry, resume, rerun, **stop**, inspect). The acceptance criterion asks for "blocked recovery actions (retry/resume/rerun/stop)" so the test must pin the summary to `blocked`.
 
+
+## T-004 (Control workspace composition, content demotion, and cross-cutting spec verification)
+
+### Composition verification
+- No production-code changes to `IssueDetailPage.tsx` were needed: the page composition already has every slot (`evidence`, `executionSignal`, `driftRecovery`) wired, the `runtime-decision-surface-frame` lives inside `status-header-tier`, and description/comments live in `reading-flow` below the surface. The pre-existing tier-weight anchors (`status-header-tier`, `reading-flow[data-tier-weight="reading-flow"]`, `reference-rail[data-tier-weight="reference-rail"]`), single-sticky `status-headline`, and `lg:col-span-2` / `lg:col-span-1` split all remain in place. The 3-slot integration is verified to compose into one coherent control workspace without leaking operational content above reading-flow.
+- The `runtime-decision-surface-frame` slot wraps `RuntimeDecisionSurface` (with new `evidence`/`executionSignal`/`driftRecovery` props) and is gated by `!isNarrowViewport` for desktop control-workspace; narrow viewports continue to use `MobileActionBar` for the primary action, preserving prior scope per design D1.
+- The 3 new anchors (`runtime-evidence`, `runtime-execution-signal`, `runtime-drift-recovery`) follow the existing `runtime-*` naming convention and live **inside** the surface, so they do not introduce duplicates in any tier.
+
+### New cross-cutting spec test file
+- Added `IssueDetailPage.control-workspace.test.tsx` (22 tests across 12 describes) as the integration verification point. It exercises the full control workspace contract across every conditional path, the invariants, the lifecycle-action preservation, and the no-new-actions invariant.
+- Coverage map:
+  - **running** — identity, stage, progress, primary action (Stop), no fabrication of evidence/signal/drift slots, full LatestArtifactsPanel still in reading-flow with `latest-artifacts-list` data-testid preserved.
+  - **approval-required** — awaiting stage in surface, Approve and Send-back as adjacent buttons inside the same decision context, primary carries default-variant emphasis. Send-back form opens `runtime-send-back-form` inside the surface (no navigation away).
+  - **blocked** — recovery actions (retry/resume/rerun/stop) inside surface, `runtime-next-action`/`runtime-rationale` present, primary action is one of the valid recovery kinds.
+  - **interrupted health** — surfaced as `summary: blocked` in the headline, `runtime-rationale` cites "interrupted", no standalone `workflow-interrupted-card` introduced.
+  - **drift (needs-attention)** — `runtime-drift-recovery` inside surface AND `reference-rail-drift` retained with full collapse behavior; **defer** drift — no in-surface block (non-blocking decision does not promote).
+  - **failed** — `summary: failed` AND `runtime-evidence` slot present, multiple recovery actions inside surface, all anchored in status-header-tier.
+  - **queued/backlog** — identity + queued summary, NO fabricated stage/progress figure, NO primary `runtime-action-...` block (only the disabled `runtime-action-start` is offered for a draft backlog), draft pill in identity row, runner-gating signal surfaces (`runtime-execution-signal-runner` with `data-gating-kind="capacity-full"`) and matches the wait reason.
+  - **done (non-archived)** — terminal Done summary, no start/stop/approve/retry/resume/rerun offered.
+  - **archived done** — `archived-banner` and `archived-pill` in status-header-tier, terminal state, no active controls, `back-to-archived` instead of `back-to-board`, description/comments still readable in reading-flow.
+  - **secondary-content demotion** — description, comments, `reference-rail-configuration`, `reference-rail-prerequisites`, and `reference-rail-details` (model) all anchored outside `status-header-tier`; description and comments appear AFTER the surface in document order.
+  - **lifecycle preservation** — across 6 conditional scenarios the only `runtime-action-*` testids produced are the existing set (`approve`, `send-back`, `retry`, `resume`, `rerun`, `stop`, `start`, `inspect`); no `runtime-action-rebase`/`close`/`archive`/`mark-ready` ever leaks into the surface. `rebase` flows through `runtime-drift-recovery-action`, NOT through the `runtime-actions` row. Close/archive/mark-ready remain in the reference-rail `reference-rail-actions` card untouched.
+  - **stop confirmation** — clicking Stop shows `runtime-stop-confirmation-copy` inside the surface (no drawer/navigation) and the stop button remains mounted.
+
+### Cross-cutting invariants asserted
+- `assertControlWorkspaceBasics()` helper is the single integration entry point that the test suite uses to verify, on every conditional path:
+  - Exactly 3 `data-tier-weight` containers (`status-header > reading-flow > reference-rail`).
+  - Single `data-sticky="true"` element (`status-headline`).
+  - `grid` uses `lg:grid-cols-3`, `reading-flow` uses `lg:col-span-2`, `reference-rail` uses `lg:col-span-1`.
+  - All `status-header-tier` blocks (headline, identity, runtime-decision-surface) live inside the header tier, not in reading-flow or rail.
+  - Reading-flow blocks (workflow-view, description, comments, diff-files, commits) live inside reading-flow, not header/rail.
+  - Reference-rail blocks (details, workflow-profile, configuration, actions, prerequisites) live inside rail, not header/reading-flow.
+- `everyActionAnchorInHeaderTier()` ensures every `runtime-action-*` button is in `status-header-tier` (not reading-flow or rail).
+- `expectNoNewActionKinds()` walks all `[data-testid^="runtime-action-"]` and asserts each is in the known set; specifically asserts `runtime-action-rebase` does not exist (rebase flows through `runtime-drift-recovery-action` per design D4).
+- `noExtraOperationalNodesLeakAboveReadingFlow()` ensures description and comments never appear inside the header tier.
+
+### Test results
+- All 4627 web tests + 1031 runner tests pass.
+- TypeScript clean (no `tsc --noEmit` errors in packages/web or packages/runner).
+- 22 new IssueDetailPage.control-workspace.test.tsx tests pass; 278 prior issue-detail tests remain green (no updates needed — the new slots sit inside the surface and do not affect document-order or cross-tier invariants the per-feature tests already assert).
+
+### Decisions made
+- Treated `inspect` (the disabled "View transcript" placeholder) as part of the existing action set in the runtime-action universe; did NOT exclude it from "no new actions" verification. `inspect` is part of the existing `RuntimeActionKind` set in `derive-runtime-decision.ts:30` and is unchanged.
+- Created one focused test file for the control workspace contract rather than scattering more tests across the existing `cross-tier.test.tsx`. Existing `cross-tier.test.tsx` covers tier-weight invariants; the new file layers on the slot-specific, lifecycle-preservation, and no-new-actions invariants without duplication.
+- The test file uses local helpers (`assertControlWorkspaceBasics`, `everyActionAnchorInHeaderTier`, `expectNoNewActionKinds`, `noExtraOperationalNodesLeakAboveReadingFlow`) shared across every describe. This keeps each scenario test compact and prevents drift between describe blocks on what "correct composition" means.
+
+### Gotchas
+- `mockArtifacts` items must use `artifactId`, `workflowRunId`, `taskRunId`, `path`, `kind`, `recordedAt` (the `WorkflowArtifact` shape). Passing items with the wrong shape caused a "Each child in a list should have a unique key" warning because `ArtifactOpener` uses `key={artifact.artifactId}`. Discovered this when the first run of the approval-required test failed on the artifacts list. Fixed by using the same shape that `IssueDetailPage.decision-adjacent-evidence.test.tsx` uses (`makePlanArtifact`/`makeReviewArtifact`).
+- `runtime-action-inspect` is ALWAYS rendered (disabled, "View transcript") — driven by `presentation.inspect` in `runtime-presentations.ts:74` which is built regardless of allowed actions. So "no inspection" assertions must accept its disabled presence; "no inspection offered" is implicitly a no-op across all paths. The "no-new-actions" assertion correctly excludes `inspect` from the unknown set but does NOT exclude it from the rendered set.
+- `ArtifactOpener` returns null in compact mode when there are no artifacts (line 84), so an empty mock (or missing workflowRunId) means `runtime-evidence` is absent — the in-surface artifact slot is correctly absent for the running summary test where artifacts exist but the summary is `running` (the gate is on `summary` not on artifact presence).
