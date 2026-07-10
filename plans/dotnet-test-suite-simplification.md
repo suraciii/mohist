@@ -1,5 +1,13 @@
 # Make .NET test cave simple and remove tricky scheduler
 
+> **Classification superseded**: this plan's Unit/Component/Integration project
+> model was an intermediate execution result. The final model has exactly three
+> test kinds: SpecTests for product specifications, UnitTests for technical
+> implementation, and ArchTests for architecture and design constraints. A
+> ratchet is only one optional ArchTests enforcement strategy. See
+> `plans/dotnet-test-tracks.md`. The scheduler, schema, support-library, guard,
+> and performance work recorded here remains valid.
+
 > **Executor rule**: grug read whole plan before touch code. grug do one chunk,
 > run gate, make green, then next chunk. no grand rewrite. no clever replacement
 > for old clever thing. if STOP condition happen, grug stop and report. grug not
@@ -629,10 +637,17 @@ needed because no byte gate exist.
 
 ## Deferred cleanup
 
-existing Integration fixture DB callers still use `Services` or
-`ConnectionString` in older specs. move those in a separate pass: migrate pure
-DB setup to `UseDbAsync`, then replace the small number of real host-composition
-probes with named access. do not turn this into a generic fixture service API.
+post-completion design review found the project classification itself was still
+mechanism-driven. Component and Integration describe how a test runs, not what
+kind of truth it protects. project split, scheduler removal, schema cleanup,
+TestSupport, ArchTests infrastructure, native thread cap, .NET validation, and
+performance work are complete and remain useful; the Unit/Component/Integration
+taxonomy is superseded.
+
+track final classification only in `plans/dotnet-test-tracks.md`. this plan
+stays as the historical execution record. the follow-up audits every test by
+its authority and value: product spec, technical implementation, or architecture
+constraint. tests with no current independent risk are removed instead of moved.
 
 ## Future grug remember
 
