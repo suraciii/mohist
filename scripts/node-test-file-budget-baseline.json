@@ -109,7 +109,6 @@
   "packages/web/src/widgets/session-transcript/model/useTurnKeyboardNav.test.tsx": 573,
   "packages/web/src/widgets/session-transcript/ui/CopyFullTextButton.test.tsx": 302,
   "packages/web/src/widgets/session-transcript/ui/SessionTranscriptLayout.integration.test.tsx": 591,
-  "packages/web/src/widgets/session-transcript/ui/SessionTranscriptView.test.tsx": 1526,
   "packages/web/tests/IssueDetailPage.spec.tsx": 1180,
   "packages/web/tests/SessionLiveUpdates.spec.tsx": 913,
   "packages/web/tests/SessionPageHeader.spec.tsx": 1007,
