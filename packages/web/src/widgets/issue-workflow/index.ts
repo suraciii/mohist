@@ -1,4 +1,10 @@
 export { ArtifactContentViewer } from './ui/ArtifactContentViewer'
+export { ArtifactOpener } from './ui/ArtifactOpener'
+export type {
+  ArtifactOpenerArtifactsHook,
+  ArtifactOpenerMode,
+  ArtifactOpenerProps,
+} from './ui/ArtifactOpener'
 export { BranchBar } from './ui/BranchBar'
 export { FeedbackHistory } from './ui/FeedbackHistory'
 export { FullReportModal, ResultBadge } from './ui/ReviewReportModal'
@@ -10,6 +16,7 @@ export { WorkflowSessionsPanel } from './ui/WorkflowSessionsPanel'
 export { RuntimeDecisionSurface } from './ui/RuntimeDecisionSurface'
 export type { RuntimeDecisionSurfaceProps } from './ui/RuntimeDecisionSurface'
 export type { RuntimeDecisionSurfaceMutations } from './ui/RuntimeDecisionSurface'
+export type { DecisionEvidence, ExecutionSignal, ActiveSessionCue, RunnerGatingReason, DriftRecoveryAction } from './ui/RuntimeDecisionSurface'
 export { getStopConsequenceCopy, invokeAction } from './runtime-action-handlers'
 export type { InvokeActionParams, InvokeActionCallbacks, StopConsequenceCopy } from './runtime-action-handlers'
 export { WorkflowRunStatusPill } from './ui/WorkflowRunStatusPill'
@@ -19,6 +26,7 @@ export { WorkflowView } from './ui/WorkflowView'
 export { IssueWorkflowProfileEditor } from './ui/IssueWorkflowProfileEditor'
 export { WorkflowProfileControl } from './ui/WorkflowProfileControl'
 export {
+  buildWaitReason,
   deriveRuntimeDecision,
 } from './model/derive-runtime-decision'
 export type {
@@ -49,3 +57,10 @@ export type {
   SiblingSessionNavigation,
   UseSiblingSessionsOptions,
 } from './model/useSiblingSessions'
+export { useRebaseRecovery } from './model/useRebaseRecovery'
+export type {
+  RebaseRecoveryResult,
+  RebaseRecoveryWorkspaceStatus,
+  RebaseRecoveryWorkspaceView,
+  RebaseRecovery,
+} from './model/useRebaseRecovery'

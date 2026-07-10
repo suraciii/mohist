@@ -189,7 +189,7 @@ describe('IssueDetailPage narrow-viewport MobileActionBar matrix', () => {
     await waitFor(() => expect(screen.getByTestId('status-headline')).toBeTruthy())
 
     const bar = screen.getByTestId('mobile-action-bar')
-    expect(bar.dataset.summary).toBe('blocked')
+    expect(bar.dataset.summary).toBe('failed')
     expect(bar.dataset.actionKind).toBe('retry')
     expect(within(bar).getByTestId('mobile-action-retry')).toBeInTheDocument()
   })
@@ -258,7 +258,7 @@ describe('IssueDetailPage narrow-viewport MobileActionBar matrix', () => {
     expect(start).toHaveAttribute('title', 'Waiting for #9 Prepare spec')
   })
 
-  it('runner-unavailable backlog still surfaces enabled Start', async () => {
+  it('runner-unavailable backlog still surfaces the runner gating message in Start', async () => {
     mockAgentStatus({
       activeAgents: [],
       capacity: { max: 1 },
@@ -279,8 +279,8 @@ describe('IssueDetailPage narrow-viewport MobileActionBar matrix', () => {
     await waitFor(() => expect(screen.getByTestId('mobile-action-bar')).toBeTruthy())
 
     const start = screen.getByTestId('mobile-action-start')
-    expect(start).toBeEnabled()
-    expect(start).not.toHaveAttribute('title')
+    expect(start).toBeDisabled()
+    expect(start.getAttribute('title')).toMatch(/runner is not available|no runner is connected/i)
   })
 
   it('failed state preserves the Start new workflow primary label', async () => {

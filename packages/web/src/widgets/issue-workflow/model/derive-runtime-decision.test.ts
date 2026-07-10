@@ -213,7 +213,7 @@ describe('deriveRuntimeDecision', () => {
     expect(decision.waitReason).toContain('#98')
   })
 
-  it('keeps backlog Start enabled when the runner is unavailable', () => {
+  it('returns queued when the runner is unavailable', () => {
     const decision = deriveRuntimeDecision({
       issue: baseIssue({
         status: IssueStatus.Backlog,
@@ -230,8 +230,9 @@ describe('deriveRuntimeDecision', () => {
 
     expect(decision.summary).toBe('queued')
     expect(decision.primary?.kind).toBe('start')
-    expect(decision.primary?.enabled).toBe(true)
-    expect(decision.waitReason).toBeNull()
+    expect(decision.primary?.enabled).toBe(false)
+    expect(decision.primary?.reason).toBe('Runner offline')
+    expect(decision.waitReason).toBe('Runner offline')
   })
 
   it('returns queued with Start as the primary action for a ready backlog issue', () => {
@@ -500,12 +501,12 @@ describe('deriveRuntimeDecision', () => {
         },
       })
 
-      expect(decision.summary).toBe('blocked')
+      expect(decision.summary).toBe('failed')
       expect(decision.actions.find((a) => a.kind === 'resume')?.enabled).toBe(true)
       expect(decision.primary?.kind).toBe('resume')
       expect(decision.actions.find((a) => a.kind === 'retry')?.enabled).toBe(false)
       expect(decision.actions.find((a) => a.kind === 'rerun')?.enabled).toBe(false)
-      expect(decision.actions.find((a) => a.kind === 'stop')?.enabled).toBe(false)
+      expect(decision.actions.find((a) => a.kind === 'start')?.enabled).toBe(false)
     })
 
     it('enables an action when it comes only from workflowTimeline.availableActions', () => {
@@ -587,14 +588,14 @@ describe('deriveRuntimeDecision', () => {
       })
 
       const actionKinds = decision.actions.map((a) => a.kind)
-      for (const kind of ['retry', 'resume', 'rerun', 'stop'] as const) {
+      for (const kind of ['retry', 'resume', 'rerun', 'start'] as const) {
         const found = decision.actions.find((a) => a.kind === kind)
         expect(found, `expected an action entry for ${kind}`).toBeDefined()
         expect(found?.enabled, `expected ${kind} to be disabled when no projection allows it`).toBe(false)
       }
       expect(actionKinds).not.toContain('approve')
       expect(actionKinds).not.toContain('send-back')
-      expect(actionKinds).not.toContain('start')
+      expect(actionKinds).not.toContain('stop')
     })
 
     it('exposes Start new workflow (not Stop) when a failed workflow offers start', () => {

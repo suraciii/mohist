@@ -243,6 +243,11 @@ const PRESENTATIONS: Record<RuntimeSummary, SummaryPresentation> = {
       const issue = ctx.issue
       if (issue?.blockedReason) return issue.blockedReason
       if (issue?.convergence?.blockedReason) return issue.convergence.blockedReason
+      const recovery = issue?.recovery
+      if (recovery?.latestAttemptState === 'interrupted'
+        || issue?.workflowStatus?.toLowerCase() === 'interrupted') {
+        return 'The workflow was interrupted. Resume or rerun to continue.'
+      }
       return 'The workflow is blocked and needs an action to continue.'
     },
     nextAction: (ctx) => {

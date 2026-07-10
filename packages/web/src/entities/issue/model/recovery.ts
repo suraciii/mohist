@@ -1,4 +1,4 @@
-export type WorkItemAttemptState = 'running' | 'completed' | 'failed'
+export type WorkItemAttemptState = 'running' | 'completed' | 'failed' | 'interrupted'
 export type WorkflowRecoverySummary = 'running' | 'awaiting-approval' | 'waiting-for-recovery' | 'completed'
 
 export interface RecoveryProjection {
