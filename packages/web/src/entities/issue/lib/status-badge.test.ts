@@ -19,14 +19,14 @@ describe('statusBadge', () => {
     expect(statusBadge('unknown' as IssueHealth)).toBe('text-gray-700 bg-gray-50')
   })
 
-  it('Active uses green-700 NOT green-600 (Issue #30 regression)', () => {
+  it('Active uses green-700 NOT green-600', () => {
     const result = statusBadge(IssueHealth.Active)
     expect(result).toContain('text-green-700')
     expect(result).toContain('bg-green-50')
     expect(result).not.toContain('green-600')
   })
 
-  it('Blocked uses red-700 NOT red-600 (Issue #30 regression)', () => {
+  it('Blocked uses red-700 NOT red-600', () => {
     const result = statusBadge(IssueHealth.Blocked)
     expect(result).toContain('text-red-700')
     expect(result).not.toContain('red-600')

@@ -156,7 +156,7 @@ function makeSessionsForLookup() {
   }]
 }
 
-describe('T-003: SessionPage followup composer integration', () => {
+describe('SessionPage followup composer integration', () => {
   it('renders an interactive composer below the transcript when the session is active', async () => {
     sessionsData = makeSessionsForLookup()
     metadata = makeMetadata({

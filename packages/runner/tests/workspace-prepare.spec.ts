@@ -1,9 +1,4 @@
 import { afterEach, describe, expect, it } from "vitest"
-import { execFile } from "node:child_process"
-import { mkdtemp, rm, writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
-import { join } from "node:path"
-import { promisify } from "node:util"
 import { createDefaultRegistry } from "../src/actions/registry.js"
 import {
   setWorkspacePrepareExistsCheckerForTest,
@@ -16,7 +11,6 @@ type GitCall = { workDir: string; args: string[] }
 
 const WORKSPACE_PATH = "/workspace"
 const EXPECTED_BRANCH = "mohist/run-wr-prepare-1"
-const exec = promisify(execFile)
 
 afterEach(() => {
   setWorkspacePrepareGitRunnerForTest(null)

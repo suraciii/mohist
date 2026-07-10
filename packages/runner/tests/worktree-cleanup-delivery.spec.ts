@@ -1,11 +1,7 @@
-import { execFile } from "node:child_process"
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
-import { dirname, join } from "node:path"
-import { promisify } from "node:util"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { WorkExecutor } from "../src/runtime/executor.js"
 import { setCleanupAgentActionForTest } from "../src/runtime/worktree-enforcement.js"
+import { setExecutorGitRunnerForTest } from "../src/runtime/git-probe.js"
 import { ActionRegistry } from "../src/actions/registry.js"
 import { rebaseAction, setRebaseExistsCheckerForTest, setRebaseGitRunnerForTest } from "../src/actions/rebase.js"
 import { pushAction, setPushGitRunnerForTest } from "../src/actions/push.js"
@@ -13,63 +9,82 @@ import { verifyOnlyWorkspaceManager } from "./support/workspace-mock.js"
 import type { ActionContext, ActionResult, JsonObject, RenderedWorkItem } from "../src/core/types.js"
 import type { ServerConnection } from "../src/server/connection.js"
 
-const exec = promisify(execFile)
-
-interface WorktreeFixture {
+interface FakeWorktree {
   workDir: string
   branch: string
-  upstream: string
+  staged: string[]
+  unstaged: string[]
+  untracked: string[]
+  cleanupCommits: { files: string[]; sha: string }[]
 }
 
-let worktree: WorktreeFixture
+let worktree: FakeWorktree
 let connection: Pick<ServerConnection, "uploadArtifact" | "report">
 
-beforeEach(async () => {
-  worktree = await initWorktreeFixture()
+beforeEach(() => {
+  worktree = createFakeWorktree()
+  installExecutorGit(worktree)
   connection = {
     async report() {
       return {}
     },
     async uploadArtifact() {
-      throw new Error("uploadArtifact should not be called in regression tests")
+      throw new Error("uploadArtifact should not be called in cleanup delivery tests")
     },
   } as unknown as Pick<ServerConnection, "uploadArtifact" | "report">
 })
 
-afterEach(async () => {
+afterEach(() => {
   setCleanupAgentActionForTest(null)
+  setExecutorGitRunnerForTest(null)
   setRebaseGitRunnerForTest(null)
   setRebaseExistsCheckerForTest(null)
   setPushGitRunnerForTest(null)
-  await rm(worktree.workDir, { recursive: true, force: true })
-  await rm(worktree.upstream, { recursive: true, force: true })
 })
 
-async function initWorktreeFixture(): Promise<WorktreeFixture> {
-  const root = await mkdtemp(join(tmpdir(), "mohist-issue112-regression-"))
-  const upstream = join(root, "upstream.git")
-  const workDir = join(root, "worktree")
-  await mkdir(upstream, { recursive: true })
-  await exec("git", ["init", "--bare", "--initial-branch=master", upstream])
-
-  await mkdir(workDir, { recursive: true })
-  await exec("git", ["init", "-q", "--initial-branch=master"], { cwd: workDir })
-  await exec("git", ["config", "user.email", "test@example.com"], { cwd: workDir })
-  await exec("git", ["config", "user.name", "Mohist Test"], { cwd: workDir })
-  await exec("git", ["config", "commit.gpgsign", "false"], { cwd: workDir })
-  await exec("git", ["remote", "add", "origin", upstream], { cwd: workDir })
-  await writeFile(join(workDir, "README.md"), "init\n", "utf8")
-  await exec("git", ["add", "README.md"], { cwd: workDir })
-  await exec("git", ["commit", "-m", "init", "-q"], { cwd: workDir })
-  await exec("git", ["push", "-u", "origin", "master", "-q"], { cwd: workDir })
-  await exec("git", ["checkout", "-q", "-b", "mo/issue-112"], { cwd: workDir })
-  return { workDir, branch: "mo/issue-112", upstream }
+function createFakeWorktree(): FakeWorktree {
+  return {
+    workDir: process.cwd(),
+    branch: "mo/worktree-cleanup",
+    staged: [],
+    unstaged: [],
+    untracked: [],
+    cleanupCommits: [],
+  }
 }
 
-async function dirtyFile(relativePath: string, content: string): Promise<void> {
-  const full = join(worktree.workDir, relativePath)
-  await mkdir(dirname(full), { recursive: true })
-  await writeFile(full, content, "utf8")
+function installExecutorGit(state: FakeWorktree) {
+  setExecutorGitRunnerForTest(async (workDir, args) => {
+    expect(workDir).toBe(state.workDir)
+    switch (args.join(" ")) {
+      case "rev-parse --abbrev-ref HEAD":
+        return gitOk(`${state.branch}\n`)
+      case "rev-parse --is-inside-work-tree":
+        return gitOk("true\n")
+      case "diff --cached --name-only":
+        return gitOk(fileList(state.staged))
+      case "diff --name-only":
+        return gitOk(fileList(state.unstaged))
+      case "ls-files --others --exclude-standard":
+        return gitOk(fileList(state.untracked))
+      case "rev-parse --git-path index.lock":
+        return gitOk("/fake/worktree/.git/index.lock\n")
+      default:
+        throw new Error(`unexpected executor git call: ${args.join(" ")}`)
+    }
+  })
+}
+
+function fileList(files: string[]) {
+  return files.length === 0 ? "" : `${files.join("\n")}\n`
+}
+
+function commitCleanup(state: FakeWorktree, files: string[], sha: string) {
+  expect(state.untracked).toEqual(files)
+  state.staged = []
+  state.unstaged = []
+  state.untracked = []
+  state.cleanupCommits.push({ files, sha })
 }
 
 function buildRegistry(handlers: Record<string, (ctx: ActionContext) => Promise<ActionResult>>): ActionRegistry {
@@ -93,7 +108,7 @@ function buildExecutor(registry: ActionRegistry): WorkExecutor {
 
 function buildWork(overrides: Partial<RenderedWorkItem> = {}): RenderedWorkItem {
   return {
-    workflowRunId: "wf-112",
+    workflowRunId: "wf-worktree-cleanup",
     workId: "build:agent.1",
     workType: "task",
     title: "Agent-backed task",
@@ -102,7 +117,7 @@ function buildWork(overrides: Partial<RenderedWorkItem> = {}): RenderedWorkItem 
     variables: {
       workspace: { path: worktree.workDir, branch: worktree.branch, changeDir: null },
       project: { path: worktree.workDir },
-      issue: { title: "Issue #102 regression", number: 112 },
+      issue: { title: "Worktree cleanup delivery", number: 42 },
     },
     ...overrides,
   }
@@ -110,7 +125,7 @@ function buildWork(overrides: Partial<RenderedWorkItem> = {}): RenderedWorkItem 
 
 function rebaseContext(overrides: JsonObject = {}, variables: JsonObject = {}): ActionContext {
   return {
-    workflowRunId: "wf-112",
+    workflowRunId: "wf-worktree-cleanup",
     workId: "integrate:rebase.1",
     workType: "task",
     stage: "integrate",
@@ -120,13 +135,13 @@ function rebaseContext(overrides: JsonObject = {}, variables: JsonObject = {}): 
       baseBranch: "master",
       remote: "origin",
       squash: true,
-      message: "Complete issue #112",
+      message: "Complete worktree cleanup",
       ...overrides,
     },
     variables: {
       project: { path: worktree.workDir },
       workspace: { path: worktree.workDir, branch: worktree.branch, changeDir: null },
-      issue: { title: "Issue #102 regression", number: 112 },
+      issue: { title: "Worktree cleanup delivery", number: 42 },
       ...variables,
     },
     workDir: worktree.workDir,
@@ -137,7 +152,7 @@ function rebaseContext(overrides: JsonObject = {}, variables: JsonObject = {}): 
 
 function pushContext(overrides: JsonObject = {}, variables: JsonObject = {}): ActionContext {
   return {
-    workflowRunId: "wf-112",
+    workflowRunId: "wf-worktree-cleanup",
     workId: "integrate:push.1",
     workType: "task",
     stage: "integrate",
@@ -148,7 +163,7 @@ function pushContext(overrides: JsonObject = {}, variables: JsonObject = {}): Ac
       project: { path: "/not/the/workspace" },
       repository: { baseBranch: "master" },
       workspace: { path: worktree.workDir, branch: worktree.branch, changeDir: null },
-      issue: { title: "Issue #102 regression", number: 112 },
+      issue: { title: "Worktree cleanup delivery", number: 42 },
       ...variables,
     },
     workDir: worktree.workDir,
@@ -187,11 +202,11 @@ function installRebaseMockGit(calls: string[]) {
         return gitOk("squashed-sha\n")
       }
       case "rebase origin/master":
-        return gitOk("Successfully rebased and updated refs/heads/mo/issue-112.")
+        return gitOk("Successfully rebased and updated refs/heads/mo/worktree-cleanup.")
       case "reset --soft base-sha":
         return gitOk("")
-      case "commit -m Complete issue #112":
-        return gitOk("[mo/issue-112 squashed-sha] Complete issue #112")
+      case "commit -m Complete worktree cleanup":
+        return gitOk("[mo/worktree-cleanup squashed-sha] Complete worktree cleanup")
       default:
         return gitFail(`unexpected git call: ${cmd}`, 1)
     }
@@ -199,10 +214,8 @@ function installRebaseMockGit(calls: string[]) {
   setRebaseExistsCheckerForTest(() => false)
 }
 
-describe("Issue #112 regression — agent leftovers are cleaned before rebase+push delivery", () => {
-  it("AgentTaskLeavesChanges_CleanupAgentCommits_RebaseAndPushUseCleanWorkspace", async () => {
-    await dirtyFile("src/agent-output.ts", "export const v = 112\n")
-
+describe("worktree cleanup before delivery", () => {
+  it("commits agent leftovers before rebase and push", async () => {
     const cleanupPrompts: string[] = []
     setCleanupAgentActionForTest(async (ctx) => {
       const prompt = String(ctx.with?.prompt ?? "")
@@ -211,13 +224,15 @@ describe("Issue #112 regression — agent leftovers are cleaned before rebase+pu
       expect(prompt).toMatch(/do NOT start any new task work/i)
       expect(prompt).toMatch(/do NOT push to any remote/i)
       expect(prompt).toContain("src/agent-output.ts")
-      await exec("git", ["add", "src/agent-output.ts"], { cwd: ctx.workDir })
-      await exec("git", ["commit", "-m", "cleanup: commit agent output", "-q"], { cwd: ctx.workDir })
+      commitCleanup(worktree, ["src/agent-output.ts"], "cleanup-sha")
       return { status: "success", message: "committed leftover", output: JSON.stringify({ commitSha: "cleanup-sha" }) }
     })
 
     const registry = buildRegistry({
-      "mohist/acp-agent": async () => ({ status: "success", message: "agent finished" }),
+      "mohist/acp-agent": async () => {
+        worktree.untracked = ["src/agent-output.ts"]
+        return { status: "success", message: "agent finished" }
+      },
       "mohist/rebase": rebaseAction,
       "mohist/push": pushAction,
     })
@@ -227,9 +242,8 @@ describe("Issue #112 regression — agent leftovers are cleaned before rebase+pu
     expect(agentResult.status).toBe("completed")
     expect(agentResult.cleanupAttempts).toBe(1)
     expect(cleanupPrompts).toHaveLength(1)
-
-    const statusAfterCleanup = await exec("git", ["status", "--porcelain"], { cwd: worktree.workDir })
-    expect(statusAfterCleanup.stdout).toBe("")
+    expect(worktree.cleanupCommits).toEqual([{ files: ["src/agent-output.ts"], sha: "cleanup-sha" }])
+    expect(worktree.untracked).toEqual([])
 
     const rebaseCalls: string[] = []
     installRebaseMockGit(rebaseCalls)
@@ -247,7 +261,7 @@ describe("Issue #112 regression — agent leftovers are cleaned before rebase+pu
       "rebase origin/master",
       "rev-parse HEAD",
       "reset --soft base-sha",
-      "commit -m Complete issue #112",
+      "commit -m Complete worktree cleanup",
       "rev-parse HEAD",
     ])
     expect(rebaseOutput).toMatchObject({
@@ -265,10 +279,10 @@ describe("Issue #112 regression — agent leftovers are cleaned before rebase+pu
       const command = args.join(" ")
       pushCalls.push({ workDir, command })
       switch (command) {
-        case "rev-parse mo/issue-112":
+        case "rev-parse mo/worktree-cleanup":
           return gitOk("squashed-sha\n")
-        case "push origin mo/issue-112:master":
-          return gitOk("To origin\n   base-sha..squashed-sha  mo/issue-112 -> master")
+        case "push origin mo/worktree-cleanup:master":
+          return gitOk("To origin\n   base-sha..squashed-sha  mo/worktree-cleanup -> master")
         default:
           return gitFail(`unexpected git call: ${command}`, 1)
       }
@@ -280,7 +294,7 @@ describe("Issue #112 regression — agent leftovers are cleaned before rebase+pu
     expect(pushOutput).toMatchObject({
       kind: "push",
       status: "completed",
-      source: "mo/issue-112",
+      source: "mo/worktree-cleanup",
       target: "master",
       landedCommit: "squashed-sha",
       pushed: true,
@@ -288,14 +302,12 @@ describe("Issue #112 regression — agent leftovers are cleaned before rebase+pu
       workDir: worktree.workDir,
     })
     expect(pushCalls).toEqual([
-      { workDir: worktree.workDir, command: "rev-parse mo/issue-112" },
-      { workDir: worktree.workDir, command: "push origin mo/issue-112:master" },
+      { workDir: worktree.workDir, command: "rev-parse mo/worktree-cleanup" },
+      { workDir: worktree.workDir, command: "push origin mo/worktree-cleanup:master" },
     ])
   })
 
-  it("AgentTaskLeavesChanges_CleanupExhausts_TaskFailsBeforeDelivery", async () => {
-    await dirtyFile("src/never-clean.ts", "export const v = 1\n")
-
+  it("fails delivery after cleanup attempts leave the workspace dirty", async () => {
     let attempt = 0
     setCleanupAgentActionForTest(async (ctx) => {
       attempt += 1
@@ -305,7 +317,10 @@ describe("Issue #112 regression — agent leftovers are cleaned before rebase+pu
     })
 
     const registry = buildRegistry({
-      "mohist/acp-agent": async () => ({ status: "success", message: "first run" }),
+      "mohist/acp-agent": async () => {
+        worktree.untracked = ["src/never-clean.ts"]
+        return { status: "success", message: "first run" }
+      },
       "mohist/rebase": rebaseAction,
       "mohist/push": pushAction,
     })
@@ -316,7 +331,7 @@ describe("Issue #112 regression — agent leftovers are cleaned before rebase+pu
         variables: {
           workspace: { path: worktree.workDir, branch: worktree.branch, changeDir: null },
           project: { path: worktree.workDir },
-          issue: { title: "Issue #102 regression", number: 112 },
+          issue: { title: "Worktree cleanup delivery", number: 42 },
           runner: { cleanup: { maxAttempts: 3 } },
         },
       }),

@@ -76,7 +76,7 @@ function createTaskLogTestState(initialPage: TaskLogPage | undefined): TaskLogTe
   }
 }
 
-describe('TaskLogPanel — agent-task milestone rows (Phase 3b T-001)', () => {
+describe('TaskLogPanel agent-task milestone rows', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     fakeConnections.length = 0

@@ -602,7 +602,7 @@ describe('IssueDetailPage activity dialog', () => {
   })
 })
 
-describe('IssueDetailPage density and whitespace rhythm (issue-180 T-004)', () => {
+describe('IssueDetailPage density and whitespace rhythm', () => {
   beforeEach(() => {
     setScopedValue(window, 'innerWidth', 1280)
     window.dispatchEvent(new Event('resize'))
@@ -816,7 +816,7 @@ describe('IssueDetailPage density and whitespace rhythm (issue-180 T-004)', () =
   })
 })
 
-describe('IssueDetailPage Ask Agent entry (T-005)', () => {
+describe('IssueDetailPage Ask Agent entry', () => {
   it('renders an Ask Agent button in the Actions card section', async () => {
     mockIssue(makeIssue())
 

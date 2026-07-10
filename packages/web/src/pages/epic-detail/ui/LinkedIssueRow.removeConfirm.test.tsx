@@ -77,7 +77,7 @@ function makeEpic(overrides: Record<string, unknown> = {}) {
   }
 }
 
-describe('EpicDetailPage LinkedIssueRow Remove confirmation flow (T-002)', () => {
+describe('EpicDetailPage LinkedIssueRow Remove confirmation flow', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     _epicData = makeEpic()

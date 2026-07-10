@@ -3,6 +3,7 @@ import { Readable, Writable } from "node:stream"
 import { ClientSideConnection, ndJsonStream, PROTOCOL_VERSION } from "@agentclientprotocol/sdk"
 import type { RequestPermissionRequest, RequestPermissionResponse, SessionNotification, Stream } from "@agentclientprotocol/sdk"
 import { killProcess, sanitizedEnvironment } from "../system/process.js"
+import { assertExternalProcessAllowed, registerExternalProcess } from "../system/process-policy.js"
 import { acpArgs, acpCommand } from "./acp-command.js"
 
 export type SessionTarget =
@@ -64,11 +65,13 @@ type PermissionHandler = (params: RequestPermissionRequest) => Promise<RequestPe
 export async function createSharedAcpConnection(workDir: string): Promise<SharedAcpConnection> {
   const command = acpCommand()
   const args = acpArgs()
+  assertExternalProcessAllowed("runtime/acp-connection.createSharedAcpConnection")
   const proc = spawn(command, args, {
     cwd: workDir,
     stdio: ["pipe", "pipe", "inherit"],
     env: sanitizedEnvironment(),
   })
+  registerExternalProcess(proc)
 
   const stream = ndJsonStream(
     Writable.toWeb(proc.stdin!) as WritableStream<Uint8Array>,

@@ -470,7 +470,7 @@ function getInputByLabel(label: string): HTMLInputElement {
   return input as HTMLInputElement
 }
 
-describe('SettingsSubNav dirty-guard (T-004)', () => {
+describe('SettingsSubNav dirty-guard', () => {
   beforeEach(() => {
     _configData = { ...DEFAULT_CONFIG }
     _repositories = []

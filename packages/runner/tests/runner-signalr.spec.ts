@@ -772,7 +772,7 @@ describe("RunnerSignalRClient ReceiveFollowup handler", () => {
 // event + prompt() through the *generic* server connection methods,
 // look the resolver up under the `generic:` AcpSessionManager key,
 // and silently drop unknown sessions.
-describe("RunnerSignalRClient ReceiveFollowup handler (generic session target, T-004)", () => {
+describe("RunnerSignalRClient routes follow-ups to generic sessions", () => {
   function genericPayload(text: string): ReceiveFollowupPayload {
     return {
       target: { kind: "generic", projectId: "proj-1", sessionId: "gen-session-1" },
@@ -1020,7 +1020,7 @@ describe("RunnerSignalRClient ReceiveFollowup handler (generic session target, T
   })
 })
 
-describe("resolveSessionTarget (T-004)", () => {
+describe("resolveSessionTarget", () => {
   it("PrefersTargetField_WhenPresent", () => {
     const payload: ReceiveFollowupPayload = {
       workflowRunId: "wr-ignored",
@@ -1091,7 +1091,7 @@ function emitCancel(builder: CapturedBuilder, payload: CancelAgentSessionPayload
   return Promise.resolve(handler(payload))
 }
 
-describe("RunnerSignalRClient CancelAgentSession handler (T-005)", () => {
+describe("RunnerSignalRClient CancelAgentSession handler", () => {
   function genericCancelPayload(sessionId: string): CancelAgentSessionPayload {
     return {
       target: { kind: "generic", projectId: "proj-1", sessionId },
@@ -1271,7 +1271,7 @@ function buildGitOnlyClient() {
   return lastBuilder()
 }
 
-describe("RunnerSignalRClient GetDiff handler (T-006)", () => {
+describe("RunnerSignalRClient GetDiff handler", () => {
   it("UnresolvableWorkspace_ReturnsNullAndDoesNotInvokeGit", async () => {
     const calls: string[] = []
     setRunnerSignalRExistsCheckerForTest(() => true)
@@ -1668,7 +1668,7 @@ describe("RunnerSignalRClient GetDiff handler (T-006)", () => {
   })
 })
 
-describe("RunnerSignalRClient GetCommits handler (T-006)", () => {
+describe("RunnerSignalRClient GetCommits handler", () => {
   it("UnresolvableWorkspace_ReturnsNullAndDoesNotInvokeGit", async () => {
     const calls: string[] = []
     setRunnerSignalRExistsCheckerForTest(() => true)
@@ -1886,7 +1886,7 @@ describe("RunnerSignalRClient GetCommits handler (T-006)", () => {
   })
 })
 
-describe("RunnerSignalRClient GetCommitDiff handler (T-006)", () => {
+describe("RunnerSignalRClient GetCommitDiff handler", () => {
   it("UnresolvableWorkspace_ReturnsNullAndDoesNotInvokeGit", async () => {
     const calls: string[] = []
     setRunnerSignalRExistsCheckerForTest(() => true)
@@ -2001,7 +2001,7 @@ describe("RunnerSignalRClient GetCommitDiff handler (T-006)", () => {
   })
 })
 
-describe("RunnerSignalRClient GetFileContent handler (T-006)", () => {
+describe("RunnerSignalRClient GetFileContent handler", () => {
   it("UnresolvableWorkspace_ReturnsBaseAndHeadNullAndDoesNotInvokeGit", async () => {
     const calls: string[] = []
     setRunnerSignalRExistsCheckerForTest(() => true)

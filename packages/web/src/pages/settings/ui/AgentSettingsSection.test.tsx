@@ -242,7 +242,7 @@ describe('AgentSettingsSection (Runtime tab)', () => {
     expect(screen.queryByText(/Settings saved successfully/i)).not.toBeInTheDocument()
   })
 
-  it('surfaces a save failure inline as a role=alert + aria-live=polite error card (T-003)', async () => {
+  it('surfaces a save failure inline as a role=alert + aria-live=polite error card', async () => {
     vi.useRealTimers()
     _putError = { message: 'agentTimeout must be a number' }
 
@@ -329,7 +329,7 @@ describe('AgentSettingsSection (Runtime tab)', () => {
     expect(capturedValues.pollInterval).toBe(5000)
   })
 
-  it('opens the shared AlertDialog on Reset and does not call updateAgentRuntime before confirm (T-001)', async () => {
+  it('opens the shared AlertDialog on Reset and does not call updateAgentRuntime before confirm', async () => {
     vi.useRealTimers()
 
     renderSection()
@@ -360,7 +360,7 @@ describe('AgentSettingsSection (Runtime tab)', () => {
     await waitFor(() => expect(putCaptures.length).toBeGreaterThan(0))
   })
 
-  it('does not render the hand-written fixed-inset-0 confirm overlay markup (T-001)', async () => {
+  it('does not render the hand-written fixed-inset-0 confirm overlay markup', async () => {
     vi.useRealTimers()
 
     renderSection()
@@ -380,7 +380,7 @@ describe('AgentSettingsSection (Runtime tab)', () => {
   })
 })
 
-describe('AgentSettingsSection mutation feedback (T-003)', () => {
+describe('AgentSettingsSection mutation feedback', () => {
   beforeEach(() => {
     _configData = {
       agentTimeout: 1800,
@@ -456,7 +456,7 @@ describe('AgentSettingsSection mutation feedback (T-003)', () => {
     expect(toast.error).not.toHaveBeenCalled()
   })
 
-  it('surfaces reset failure through the hook toast AND inline saveError card (T-003)', async () => {
+  it('surfaces reset failure through the hook toast AND inline saveError card', async () => {
     _putError = { message: 'Reset boom' }
 
     await renderLoaded()
@@ -477,7 +477,7 @@ describe('AgentSettingsSection mutation feedback (T-003)', () => {
     expect(errorBanner).toHaveTextContent(/Reset boom/i)
   })
 
-  it('does not add a sonner toast call from handleSave / confirmReset beyond what useSetAgentRuntime already does (T-003)', async () => {
+  it('does not add a sonner toast call from handleSave / confirmReset beyond what useSetAgentRuntime already does', async () => {
     const callsBefore = vi.mocked(toast.error).mock.calls.length
     const callsBeforeSuccess = vi.mocked(toast.success).mock.calls.length
 

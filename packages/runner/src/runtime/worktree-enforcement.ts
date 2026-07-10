@@ -57,6 +57,8 @@ export type ContextParts = {
 
 let cleanupAgentAction: CleanupAgentAction = acpAgentAction
 let lockHolderProbe: LockHolderProbe = defaultLockHolderProbe
+const defaultNow = () => Date.now()
+let now = defaultNow
 
 export { cleanupAgentAction }
 
@@ -66,6 +68,10 @@ export function setCleanupAgentActionForTest(handler: CleanupAgentAction | null)
 
 export function setExecutorLockHolderProbeForTest(probe: LockHolderProbe | null) {
   lockHolderProbe = probe ?? defaultLockHolderProbe
+}
+
+export function setWorktreeClockForTest(clock: (() => number) | null) {
+  now = clock ?? defaultNow
 }
 
 export function resolveStaleIndexLockMs(variables: JsonObject): number {
@@ -98,7 +104,7 @@ export async function recoverStaleIndexLock(workDir: string, variables: JsonObje
     return { status: "blocked", reason: `git index lock stat failed: ${errorMessage(error)}`, lockPath }
   }
 
-  const ageMs = Math.max(0, Date.now() - info.mtimeMs)
+  const ageMs = Math.max(0, now() - info.mtimeMs)
   const staleMs = resolveStaleIndexLockMs(variables)
   if (ageMs < staleMs) {
     return {

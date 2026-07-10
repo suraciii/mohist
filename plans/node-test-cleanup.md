@@ -10,6 +10,7 @@
 grug want green test mean real green.
 
 - Runner fake match production contract.
+- Test names describe behavior, never the historical work-item that prompted them.
 - Runner test TypeScript checked.
 - unexpected console error fail test.
 - Web shared globals always restored.
@@ -68,7 +69,7 @@ Update table after every gate. Another agent should resume without archaeology.
 | Fake time | DONE | Boundary checker self-test, Runner/Web scans, typechecks, 73/1036 Runner, 297/4531 Web, and fixed-seed shuffle passed |
 | Browser truth | DONE | checker self-test, 297-file Web scan, typecheck, 297/4528 Web suite, build, and two retry-free CI-mode 39/39 Chromium E2E runs passed |
 | Temp ownership | DONE | Runner test temp helper, six planned owners, target 7/99 isolated-TMPDIR proof, 74/1038 Runner suite, and test typecheck passed; final full-suite TMPDIR proof remains after its named dependencies |
-| Platform split | TODO | |
+| Platform split | DONE | Runner typecheck/test typecheck, boundary checker, 73/1005 default suite with Git absent from PATH, and repeated 8/36 isolated integration suite passed; CI stays one Node job |
 | Web boundaries | TODO | |
 | File size | TODO | |
 | Final proof | TODO | |
@@ -98,6 +99,7 @@ Allowed files:
 - `packages/runner/scripts/write-build-info.mjs`
 - `packages/runner/src/runtime/build-manifest.ts`
 - `packages/runner/src/runtime/host.ts`, only for narrow timer signal
+- `packages/runner/src/runtime/worktree-enforcement.ts`, only for injected lock clock
 - `packages/runner/src/system/process-policy.ts`
 - `packages/runner/src/system/process.ts`, only for process-policy calls
 - `packages/runner/src/runtime/acp-connection.ts`, only for process-policy calls
@@ -277,7 +279,7 @@ Work item model errors, 76 diagnostics:
 - `packages/runner/tests/executor-task-log.spec.ts`
 - `packages/runner/tests/executor-workspace-boundary.spec.ts`
 - `packages/runner/tests/executor-write-vars.spec.ts`
-- `packages/runner/tests/issue-112-regression.spec.ts`
+- `packages/runner/tests/worktree-cleanup-delivery.spec.ts`
 - `packages/runner/tests/workspace-prepare-workflow.spec.ts`
 
 Fix factory at source. Executor fixture returns exact `RenderedWorkItem`.
@@ -586,11 +588,10 @@ Add Runner temp support and central cleanup. Migrate exact files:
 Use `mkdtemp` or `mkdtempSync`. No Date plus random path name. File already
 touched by earlier gate may adopt helper, but no repo-wide cleanup hunt.
 
-This gate proves only those six owners. The full-suite empty `TMPDIR` proof
-remains final work: `issue-112-regression.spec.ts` leaves its fixture root and
-belongs to Platform split; `artifact-capture.spec.ts` owns an escaping fixture
-file and needs a separately scoped cleanup change. Do not fold either into this
-gate.
+This gate proves only those six owners. `worktree-cleanup-delivery.spec.ts` is
+now a fake Git-state test and owns no temp root. The full-suite empty `TMPDIR`
+proof still depends on separately cleaning `artifact-capture.spec.ts`, whose
+fixture writes outside its owned root. Do not fold that change into this gate.
 
 Verify the migrated owners:
 
@@ -632,24 +633,44 @@ Exact candidate files:
 - `packages/runner/tests/executor-task-log.spec.ts`
 - `packages/runner/tests/executor-workspace-boundary.spec.ts`
 - `packages/runner/tests/git-sink.spec.ts`
-- `packages/runner/tests/issue-112-regression.spec.ts`
+- `packages/runner/tests/worktree-cleanup-delivery.spec.ts`
 - `packages/runner/tests/process.spec.ts`
-- `packages/runner/tests/system-process-timeout.spec.ts`
+- `packages/runner/tests/integration/system-process-timeout.spec.ts`
 - `packages/runner/tests/workspace-prepare.spec.ts`
-- `packages/runner/tests/workspace-registry-integration.spec.ts`
+- `packages/runner/tests/integration/workspace-registry-lifecycle.spec.ts`
 - `packages/runner/tests/workspace.spec.ts`
 
 Ledger records each as `HERMETIC`, `INTEGRATION`, or `SPLIT`, with final path.
 Build-info should already be `HERMETIC` from Runner truth gate.
 
+Final disposition:
+
+| Candidate | Disposition | Final coverage |
+|---|---|---|
+| `acp-tool-noise.spec.ts` | HERMETIC | fake ACP and Git/process seam |
+| `build-info.test.ts` | HERMETIC | injected Git reader |
+| `executor-branch-stability.spec.ts` | SPLIT | model behavior plus branch smoke |
+| `executor-cleanup.spec.ts` | HERMETIC | fake worktree state and fixed lock clock |
+| `executor-task-log.spec.ts` | SPLIT | default task-log behavior plus process smoke |
+| `executor-workspace-boundary.spec.ts` | SPLIT | default boundary behavior plus repo smoke |
+| `git-sink.spec.ts` | HERMETIC | fake Git runner |
+| `worktree-cleanup-delivery.spec.ts` | HERMETIC | fake Git-state fixture |
+| `process.spec.ts` | SPLIT | default environment helper plus process behavior |
+| `integration/system-process-timeout.spec.ts` | INTEGRATION | timeout, abort, and POSIX group kill |
+| `workspace-prepare.spec.ts` | HERMETIC | injected Git runner |
+| `integration/workspace-registry-lifecycle.spec.ts` | INTEGRATION | workspace materialization and registry lifecycle |
+| `workspace.spec.ts` | SPLIT | clone, branch, and rebase smoke |
+
 Integration layout:
 
 - real tests only in `packages/runner/tests/integration/**/*.spec.ts`.
-- default config excludes directory.
+- default config explicitly excludes directory; checker exclusion alone does not
+  change Vitest discovery.
 - `vitest.integration.config.ts` includes only directory.
 - both tracks load common setup for console, timers, env, temp, child cleanup.
 - default loads deny policy setup.
 - integration loads allow-and-register policy setup.
+- CI runs both tracks in the existing Node job after the shared build.
 
 Keep real coverage only for:
 
@@ -658,8 +679,9 @@ Keep real coverage only for:
 - timeout and abort termination.
 - POSIX process group kill where supported.
 
-Use `it.skipIf` for unsupported platform. Never early return. Checker bans
-`.skip`, `.only`, and `.todo`; integration `skipIf` is allowed.
+Use `it.skipIf(process.platform === "win32")` for POSIX-only process
+group cases. Never early return. Checker bans `.skip`, `.only`, and `.todo`;
+integration `skipIf` is allowed.
 
 ### Runtime guard
 
@@ -688,9 +710,10 @@ Default setup imports only `process-policy.ts`, never modules commonly replaced
 by hoisted `vi.mock`. It installs deny policy at setup load, before each test,
 and after each test. Deny throws `external process forbidden in default test`.
 
-Integration setup imports same policy registry and installs allow-and-register
-policy. Direct integration `child_process` use calls
-`registerTestChild(child)` itself.
+Integration setup installs allow-and-register policy at module load and before
+each test, cleans registered children after each test, and resets after all
+tests. Direct integration `child_process` use calls `registerTestChild(child)`
+itself.
 
 Existing local factory setters stay. Resetting local factory to `null` may
 restore real factory, but real factory still consults current track policy.
@@ -700,7 +723,8 @@ uses existing local setter; fake does not spawn.
 No setup imports `acp-connection`, `opencode-models`, or ACP process module.
 Hoisted RunnerHost mocks remain hoisted.
 
-Add `packages/runner/tests/support/external-process-guard.test.ts`:
+Add `packages/runner/tests/external-process-guard.test.ts` and
+`packages/runner/tests/integration/external-process-guard.spec.ts`:
 
 - direct guard call throws before spawn.
 - one test uses existing local process fake and sees fake sentinel.
@@ -710,23 +734,27 @@ Add `packages/runner/tests/support/external-process-guard.test.ts`:
 - focused RunnerHost tests prove existing hoisted module replacements still win.
 
 No-op guard must fail this focused test even when default suite has no platform
-candidate left.
+candidate left. `tests/support/child-process.ts` owns direct integration child
+registration and teardown; it is not an integration test file itself.
 
 No generic service container. One policy module and four call sites. grug keep
 club small.
 
 Extend checker for default Runner:
 
-- no direct `node:child_process` import.
+- no `child_process` import or CommonJS require.
 - no `process.execPath` launch.
 - no real Git command call.
-- no import of executable package script.
+- no import of an executable Runner module.
 - no `vi.mock` of `system/process-policy`.
 - no active `.skip`, `.only`, `.todo`.
+- no historical `issue-<number>`, `Issue #<number>`, or `T-<number>` in a
+  test API title literal across Runner and Web.
 
 Real Git test uses dedicated HOME, XDG config, explicit user identity, explicit
 branch name, disabled hooks, `GIT_CONFIG_NOSYSTEM=1`, and dedicated global config.
-Never user repo. Never user credential helper.
+Clear inherited Git repository-selection and credential-helper variables before
+spawning. Never user repo. Never user credential helper.
 
 Verify default and integration:
 
@@ -759,6 +787,7 @@ XDG_CONFIG_HOME="$integration_home/xdg" \
 GIT_CONFIG_NOSYSTEM=1 \
 GIT_CONFIG_GLOBAL="$integration_home/gitconfig" \
 TMPDIR="$integration_tmp" \
+NODE_DISABLE_COMPILE_CACHE=1 \
 CI=1 \
 npm run test:integration -w packages/runner
 

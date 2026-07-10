@@ -170,7 +170,7 @@ function makeEpicWithLinkedIssues(linkedIssues: unknown[]) {
   }
 }
 
-describe('EpicDetailPage Graph unrenderable banner + Error Boundary (T-004)', () => {
+describe('EpicDetailPage Graph unrenderable banner + Error Boundary', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     widgetBehavior.mode = 'default'

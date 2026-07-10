@@ -245,7 +245,7 @@ describe('EventTimelinePanel', () => {
     })
   })
 
-  describe('neutral visual treatment (issue-180 T-002)', () => {
+  describe('neutral visual treatment', () => {
     const SATURATED_BG_CLASSES = [
       'bg-blue-50',
       'bg-amber-50',

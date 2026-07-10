@@ -206,7 +206,7 @@ async function waitForActiveStartup(events: HostEvents): Promise<string[]> {
   return workflowRunIds
 }
 
-describe("RunnerHost convergence wiring (T-003)", () => {
+describe("RunnerHost converges active workflow runs", () => {
   let root: string
 
   beforeEach(async () => {

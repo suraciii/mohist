@@ -41,7 +41,7 @@ afterEach(() => {
   vi.clearAllMocks()
 })
 
-describe('PreferencesSection (T-003)', () => {
+describe('PreferencesSection', () => {
   beforeEach(() => {
     __resetShortcutHandlersForTesting()
   })
@@ -208,7 +208,7 @@ describe('PreferencesSection (T-003)', () => {
   })
 })
 
-describe('PREFERENCES_DESCRIPTORS (T-003 registry entry)', () => {
+describe('PREFERENCES_DESCRIPTORS', () => {
   it('contains exactly one entry: the theme selector with focusTargetId preferences-theme', () => {
     expect(PREFERENCES_DESCRIPTORS).toEqual([
       {

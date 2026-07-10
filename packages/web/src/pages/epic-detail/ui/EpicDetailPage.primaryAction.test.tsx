@@ -71,7 +71,7 @@ function makeEpic(overrides: Record<string, unknown> = {}) {
   }
 }
 
-describe('EpicDetailPage single prominent primary action (T-001)', () => {
+describe('EpicDetailPage single prominent primary action', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     _issuesData = issues

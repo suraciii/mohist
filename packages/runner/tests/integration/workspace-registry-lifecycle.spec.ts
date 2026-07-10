@@ -1,21 +1,16 @@
 import { existsSync } from "node:fs"
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import {
   RunnerSignalRClient,
   setRunnerSignalRExistsCheckerForTest,
-} from "../src/server/runner-signalr.js"
-import { WorkspaceManager } from "../src/runtime/workspace.js"
-import { WorkspaceRegistry, defaultWorkspaceRegistryFilePath } from "../src/runtime/workspace-registry.js"
-import { exists, runCommand } from "../src/system/process.js"
-
-// End-to-end coverage of T-002: the runner-local workspace registry is
-// persisted at <runnerRoot>/.mohist/runner-state/workspaces.json, written
-// through on every WorkspaceManager.materialize() / verify() success, and
-// dropped when the manual RemoveWorkspace SignalR handler removes the
-// matching directory. The on-disk marker stays exactly identity-only.
+} from "../../src/server/runner-signalr.js"
+import { WorkspaceManager } from "../../src/runtime/workspace.js"
+import { WorkspaceRegistry, defaultWorkspaceRegistryFilePath } from "../../src/runtime/workspace-registry.js"
+import { exists, runCommand } from "../../src/system/process.js"
+import { clearedInheritedGitEnvironment } from "../support/git-environment.js"
+import { createTestTempDir } from "../support/temp-dir.js"
 
 interface CapturedBuilder {
   handlers: Map<string, (...args: unknown[]) => unknown>
@@ -23,13 +18,31 @@ interface CapturedBuilder {
 }
 
 const builders: CapturedBuilder[] = []
+let root: string
+let environment: GitEnvironment
 
-beforeEach(() => {
+interface GitEnvironment extends NodeJS.ProcessEnv {
+  HOME: string
+  XDG_CONFIG_HOME: string
+  GIT_CONFIG_GLOBAL: string
+  GIT_CONFIG_COUNT: "0"
+  GIT_CONFIG_NOSYSTEM: "1"
+  GIT_TERMINAL_PROMPT: "0"
+  GIT_AUTHOR_NAME: string
+  GIT_AUTHOR_EMAIL: string
+  GIT_COMMITTER_NAME: string
+  GIT_COMMITTER_EMAIL: string
+}
+
+beforeEach(async () => {
   builders.length = 0
   setRunnerSignalRExistsCheckerForTest(existsSync)
+  root = await createTestTempDir("mohist-workspace-registry-integration-")
+  environment = await createGitEnvironment(root)
+  isolateGitEnvironment(environment)
 })
 
-afterEach(async () => {
+afterEach(() => {
   setRunnerSignalRExistsCheckerForTest(null)
 })
 
@@ -78,22 +91,15 @@ vi.mock("@microsoft/signalr", () => {
   }
 })
 
-async function makeRepo(root: string) {
+async function makeRepo(root: string, environment: GitEnvironment) {
   const repo = join(root, "repo")
-  await runCommand("git", ["init", repo], ".", new AbortController().signal, {
-    GIT_AUTHOR_NAME: "Mohist Test",
-    GIT_AUTHOR_EMAIL: "mohist-test@example.com",
-    GIT_COMMITTER_NAME: "Mohist Test",
-    GIT_COMMITTER_EMAIL: "mohist-test@example.com",
-  })
+  await git(root, ["init", "--initial-branch=main", repo], environment)
+  await git(repo, ["config", "user.name", environment.GIT_AUTHOR_NAME], environment)
+  await git(repo, ["config", "user.email", environment.GIT_AUTHOR_EMAIL], environment)
+  await git(repo, ["config", "core.hooksPath", join(root, "hooks")], environment)
   await writeFile(join(repo, "README.md"), "base\n")
-  await runCommand("git", ["-C", repo, "add", "."], ".", new AbortController().signal)
-  await runCommand("git", ["-C", repo, "commit", "-m", "base"], ".", new AbortController().signal, {
-    GIT_AUTHOR_NAME: "Mohist Test",
-    GIT_AUTHOR_EMAIL: "mohist-test@example.com",
-    GIT_COMMITTER_NAME: "Mohist Test",
-    GIT_COMMITTER_EMAIL: "mohist-test@example.com",
-  })
+  await git(repo, ["add", "."], environment)
+  await git(repo, ["commit", "-m", "base"], environment)
   return repo
 }
 
@@ -107,25 +113,15 @@ function work(workflowRunId: string, issueId: string, issueNumber: number, gitUr
       mohist: { runId: workflowRunId },
       issue: { id: issueId, number: issueNumber },
       project: { id: "project-1", name: "Mohist Local" },
-      repository: { name: "master", gitUrl, baseBranch: "master" },
-      openspecChangeDir: "openspec/changes/issue-9",
+      repository: { name: "main", gitUrl, baseBranch: "main" },
+      openspecChangeDir: "openspec/changes/sample-change",
     },
   }
 }
 
-describe("WorkspaceManager + WorkspaceRegistry (T-002)", () => {
-  let root: string
-
-  beforeEach(async () => {
-    root = await mkdtemp(join(tmpdir(), "mohist-manager-registry-"))
-  })
-
-  afterEach(async () => {
-    await rm(root, { recursive: true, force: true })
-  })
-
-  it("Materialize_RegistersActiveEntryKeyedByWorkflowRunId", async () => {
-    const repo = await makeRepo(root)
+describe("workspace registry lifecycle", () => {
+  it("materialization registers an active entry by workflow run", async () => {
+    const repo = await makeRepo(root, environment)
     const runnerRoot = join(root, "runner")
     const registry = new WorkspaceRegistry(runnerRoot)
     await registry.load()
@@ -149,8 +145,8 @@ describe("WorkspaceManager + WorkspaceRegistry (T-002)", () => {
     expect(persisted.entries["wr-001"]).toMatchObject({ phase: "active", workflowRunId: "wr-001" })
   })
 
-  it("Marker_WrittenOnMaterialize_ContainsExactlyIdentityFields", async () => {
-    const repo = await makeRepo(root)
+  it("materialization writes only workspace identity to the marker", async () => {
+    const repo = await makeRepo(root, environment)
     const runnerRoot = join(root, "runner")
     const registry = new WorkspaceRegistry(runnerRoot)
     await registry.load()
@@ -163,8 +159,8 @@ describe("WorkspaceManager + WorkspaceRegistry (T-002)", () => {
     expect(marker).toEqual({ issueId: "issue-99", issueNumber: 99, workflowRunId: "wr-marker" })
   })
 
-  it("Verify_RefreshesMaterializedAtForExistingEntry", async () => {
-    const repo = await makeRepo(root)
+  it("verification refreshes an existing entry", async () => {
+    const repo = await makeRepo(root, environment)
     const runnerRoot = join(root, "runner")
     const first = new Date("2026-06-01T00:00:00.000Z")
     const second = new Date("2026-06-25T12:00:00.000Z")
@@ -184,14 +180,8 @@ describe("WorkspaceManager + WorkspaceRegistry (T-002)", () => {
     expect(registry.get("wr-refresh")?.phase).toBe("active")
   })
 
-  it("Verify_OnRunIdWithNoRegistryEntry_DoesNotCreateEntry", async () => {
-    // Verify is the dispatch-time read path. If a verify() ever runs
-    // against a run id that has no registry entry (e.g. an existing
-    // marker from a pre-registry runner build), verify() must NOT
-    // fabricate a registry entry — only materialize() is the
-    // registration point. T-002 explicitly says verify "refreshes
-    // materializedAt"; a missing entry stays missing.
-    const repo = await makeRepo(root)
+  it("verification does not create a missing registry entry", async () => {
+    const repo = await makeRepo(root, environment)
     const runnerRoot = join(root, "runner")
     const registry = new WorkspaceRegistry(runnerRoot)
     await registry.load()
@@ -209,8 +199,8 @@ describe("WorkspaceManager + WorkspaceRegistry (T-002)", () => {
     expect(registry.get("wr-existing-only")).toBeNull()
   })
 
-  it("Registry_LoadedFreshOnEachHostStart_PreservesActivePhase", async () => {
-    const repo = await makeRepo(root)
+  it("a fresh registry loads an active entry", async () => {
+    const repo = await makeRepo(root, environment)
     const runnerRoot = join(root, "runner")
 
     // First host: materialize + register, then "die".
@@ -233,8 +223,8 @@ describe("WorkspaceManager + WorkspaceRegistry (T-002)", () => {
     expect(entry?.terminalAt).toBeNull()
   })
 
-  it("ManualRemoveWorkspace_RemovesMatchingRegistryEntry", async () => {
-    const repo = await makeRepo(root)
+  it("manual removal drops the matching registry entry", async () => {
+    const repo = await makeRepo(root, environment)
     const runnerRoot = join(root, "runner")
     const registry = new WorkspaceRegistry(runnerRoot)
     await registry.load()
@@ -260,13 +250,8 @@ describe("WorkspaceManager + WorkspaceRegistry (T-002)", () => {
     expect(persisted.entries["wr-remove"]).toBeUndefined()
   })
 
-  it("ManualRemoveWorkspace_AlreadyMissingDirectory_StillDropsRegistryEntry", async () => {
-    // T-002 notes: "safeRemove must tolerate an already-missing
-    // directory (treat as removed, delete the entry)". The existing
-    // SignalR handler returns "workspace_missing" for missing paths
-    // but must also clear the registry entry so the registry reflects
-    // the real disk state.
-    const repo = await makeRepo(root)
+  it("manual removal clears the entry when the workspace is already missing", async () => {
+    const repo = await makeRepo(root, environment)
     const runnerRoot = join(root, "runner")
     const registry = new WorkspaceRegistry(runnerRoot)
     await registry.load()
@@ -284,8 +269,8 @@ describe("WorkspaceManager + WorkspaceRegistry (T-002)", () => {
     expect(registry.get("wr-gone")).toBeNull()
   })
 
-  it("ManualRemoveWorkspace_PathOutsideRunnerRoot_DoesNotTouchRegistry", async () => {
-    const repo = await makeRepo(root)
+  it("manual removal refuses a path outside the runner root", async () => {
+    const repo = await makeRepo(root, environment)
     const runnerRoot = join(root, "runner")
     const registry = new WorkspaceRegistry(runnerRoot)
     await registry.load()
@@ -312,7 +297,7 @@ describe("WorkspaceManager + WorkspaceRegistry (T-002)", () => {
     expect(exists(info.path)).toBe(true)
   })
 
-  it("ManualRemoveWorkspace_OutsideRootRegistryEntry_IsRefusedAndPreserved", async () => {
+  it("manual removal preserves a registry entry outside the runner root", async () => {
     const runnerRoot = join(root, "runner")
     const registry = new WorkspaceRegistry(runnerRoot)
     await registry.load()
@@ -335,3 +320,35 @@ describe("WorkspaceManager + WorkspaceRegistry (T-002)", () => {
     expect(exists(outsidePath)).toBe(true)
   })
 })
+
+async function createGitEnvironment(root: string): Promise<GitEnvironment> {
+  const home = join(root, "home")
+  const xdg = join(root, "xdg")
+  const globalConfig = join(root, "gitconfig")
+  const hooks = join(root, "hooks")
+  await Promise.all([mkdir(home, { recursive: true }), mkdir(xdg, { recursive: true }), mkdir(hooks, { recursive: true })])
+  await writeFile(globalConfig, "")
+  return {
+    ...clearedInheritedGitEnvironment,
+    HOME: home,
+    XDG_CONFIG_HOME: xdg,
+    GIT_CONFIG_GLOBAL: globalConfig,
+    GIT_CONFIG_COUNT: "0",
+    GIT_CONFIG_NOSYSTEM: "1",
+    GIT_TERMINAL_PROMPT: "0",
+    GIT_AUTHOR_NAME: "Mohist Integration Test",
+    GIT_AUTHOR_EMAIL: "mohist-integration@example.test",
+    GIT_COMMITTER_NAME: "Mohist Integration Test",
+    GIT_COMMITTER_EMAIL: "mohist-integration@example.test",
+  }
+}
+
+async function git(cwd: string, args: string[], environment: GitEnvironment) {
+  const result = await runCommand("git", args, cwd, new AbortController().signal, environment)
+  if (result.exitCode !== 0) throw new Error(result.stderr || result.stdout || `git ${args.join(" ")} failed`)
+  return result
+}
+
+function isolateGitEnvironment(environment: GitEnvironment) {
+  for (const [key, value] of Object.entries(environment)) vi.stubEnv(key, value)
+}

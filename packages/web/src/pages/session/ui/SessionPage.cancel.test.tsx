@@ -194,7 +194,7 @@ function baseRunningMetadata(overrides: Partial<AgentSessionMetadata> = {}): Age
   }
 }
 
-describe('SessionPage cancel control absence (issue-349 T-002 regression)', () => {
+describe('SessionPage cancel control absence', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     setupRunningIssueMocks()

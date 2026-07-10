@@ -255,7 +255,7 @@ describe('TemplatesSection', () => {
   })
 
   describe('Reset action', () => {
-    it('sends DELETE to remove the override only after the shared AlertDialog is confirmed (T-002)', async () => {
+    it('sends DELETE to remove the override only after the shared AlertDialog is confirmed', async () => {
       let deletedKey: string | null = null
       server.use(
         http.delete(
@@ -299,7 +299,7 @@ describe('TemplatesSection', () => {
       await waitFor(() => expect(deletedKey).toBe('proposal'))
     })
 
-    it('does not invoke DELETE when the AlertDialog is cancelled (T-002)', async () => {
+    it('does not invoke DELETE when the AlertDialog is cancelled', async () => {
       let deleteCalled = false
       server.use(
         http.delete(
@@ -331,7 +331,7 @@ describe('TemplatesSection', () => {
       expect(deleteCalled).toBe(false)
     })
 
-    it('renders a single shared AlertDialog instance for the section, not per row (T-002)', async () => {
+    it('renders a single shared AlertDialog instance for the section, not per row', async () => {
       render(<TemplatesSection />)
 
       await waitFor(() =>
@@ -350,7 +350,7 @@ describe('TemplatesSection', () => {
     })
   })
 
-  describe('Delete action (T-002)', () => {
+  describe('Delete action', () => {
     it('sends DELETE for a project-unique template only after the AlertDialog is confirmed', async () => {
       let deletedKey: string | null = null
       server.use(
@@ -518,7 +518,7 @@ describe('TemplatesSection', () => {
     })
   })
 
-  describe('Empty list CTA (T-006)', () => {
+  describe('Empty list CTA', () => {
     it('renders an inline New Template action when there are no project templates', async () => {
       server.use(
         http.get(`/api/projects/${PROJECT_ID}/templates`, () =>
@@ -555,7 +555,7 @@ describe('TemplatesSection', () => {
     })
   })
 
-  describe('No-project state (T-006)', () => {
+  describe('No-project state', () => {
     it('renders the no-project CTA (Select project + Create Project) when no project is selected', async () => {
       const { baseRender: renderRaw } = await import('../../../../tests/test-utils')
       const { ProjectProvider } = await import('../../../entities/project/model/ProjectContext')

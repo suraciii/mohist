@@ -79,6 +79,9 @@ jobs:
       - name: Test runner
         run: npm run test:ci -w packages/runner
 
+      - name: Test runner integration
+        run: npm run test:integration -w packages/runner
+
       - name: Test web
         run: npm run test:ci -w packages/web
 

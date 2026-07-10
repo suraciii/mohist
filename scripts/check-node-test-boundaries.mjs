@@ -8,11 +8,22 @@ const sharedStateMutationRule = 'no-direct-shared-state-mutation'
 const timerPromiseRule = 'no-real-time-sleep'
 const runnerHostWaitForRule = 'no-runner-host-wait-for'
 const elapsedTimeAssertionRule = 'no-elapsed-time-assertion'
+const runnerChildProcessImportRule = 'no-default-runner-child-process-import'
+const runnerExternalCommandRule = 'no-default-runner-platform-command'
+const runnerExecutableScriptImportRule = 'no-default-runner-executable-script-import'
+const runnerProcessPolicyMockRule = 'no-default-runner-process-policy-mock'
+const runnerTestModifierRule = 'no-runner-test-modifier'
+const historicalTestTitleRule = 'no-historical-ticket-test-title'
 const jsdomGeometryRule = 'no-jsdom-page-geometry-assertion'
 const protectedGlobalNames = new Set(['window', 'document', 'navigator'])
 const protectedPrototypeNames = new Set(['Element', 'HTMLElement'])
 const pageGeometryProperties = ['scrollWidth', 'clientWidth', 'offsetWidth']
 const boundingRectProperties = new Set(['bottom', 'height', 'left', 'right', 'top', 'width', 'x', 'y'])
+const childProcessModuleSpecifiers = new Set(['child_process', 'node:child_process'])
+const runnerTestModifierNames = new Set(['skip', 'only', 'todo', 'skipIf'])
+const testApiFunctionNames = new Set(['it', 'test', 'describe', 'suite', 'context'])
+const runnerDefaultTrack = 'default'
+const runnerIntegrationTrack = 'integration'
 
 function unwrapExpression(expression) {
   let current = expression
@@ -132,6 +143,206 @@ function createSharedStateMutationViolation(filePath, sourceFile, node, root) {
 
 function createRunnerViolation(filePath, sourceFile, node, rule, description, fix) {
   return createViolation(filePath, sourceFile, node, { rule, description, fix })
+}
+
+function stringLiteralText(expression) {
+  const current = unwrapExpression(expression)
+  return ts.isStringLiteral(current) || ts.isNoSubstitutionTemplateLiteral(current)
+    ? current.text
+    : undefined
+}
+
+function importSpecifierText(node) {
+  if (ts.isImportDeclaration(node)) return stringLiteralText(node.moduleSpecifier)
+  if (ts.isImportEqualsDeclaration(node) && ts.isExternalModuleReference(node.moduleReference)) {
+    return node.moduleReference.expression === undefined
+      ? undefined
+      : stringLiteralText(node.moduleReference.expression)
+  }
+  if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) {
+    return node.arguments[0] === undefined ? undefined : stringLiteralText(node.arguments[0])
+  }
+  return undefined
+}
+
+function isChildProcessImport(node) {
+  const specifier = importSpecifierText(node)
+  if (specifier !== undefined && childProcessModuleSpecifiers.has(specifier)) return true
+  if (!ts.isCallExpression(node)) return false
+  const argument = node.arguments[0]
+  if (argument === undefined) return false
+  const required = stringLiteralText(argument)
+  if (required === undefined || !childProcessModuleSpecifiers.has(required)) return false
+  const callee = unwrapExpression(node.expression)
+  if (isIdentifierNamed(callee, 'require')) return true
+  return ts.isCallExpression(callee)
+    && (isIdentifierNamed(unwrapExpression(callee.expression), 'createRequire')
+      || getMember(callee.expression)?.name === 'createRequire')
+}
+
+function resolveLocalModuleImport(filePath, moduleSpecifier) {
+  if (!moduleSpecifier.startsWith('.')) return undefined
+
+  const candidate = resolve(dirname(filePath), moduleSpecifier)
+  const base = candidate.replace(/\.(?:[cm]?[jt]sx?)$/, '')
+  const extensions = ['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs']
+  const candidates = [
+    candidate,
+    ...extensions.map((extension) => `${base}${extension}`),
+    ...extensions.map((extension) => resolve(candidate, `index${extension}`)),
+  ]
+  return candidates.find(existsSync)
+}
+
+function importResolvesTo(filePath, moduleSpecifier, targetFile) {
+  const importedFile = resolveLocalModuleImport(filePath, moduleSpecifier)
+  return importedFile !== undefined && resolve(importedFile) === resolve(targetFile)
+}
+
+function runnerSystemProcessFile(runnerRoot) {
+  return resolve(runnerRoot, 'src/system/process.ts')
+}
+
+function runnerProcessPolicyFile(runnerRoot) {
+  return resolve(runnerRoot, 'src/system/process-policy.ts')
+}
+
+function runnerExecutableModuleFiles(runnerRoot) {
+  return [
+    resolve(runnerRoot, 'scripts/write-build-info.mjs'),
+    resolve(runnerRoot, 'src/cli.ts'),
+  ]
+}
+
+function systemProcessRunCommandImports(sourceFile, filePath, runnerRoot) {
+  const named = new Set()
+  const namespaces = new Set()
+  const systemProcessFile = runnerSystemProcessFile(runnerRoot)
+
+  function visit(node) {
+    if (ts.isImportDeclaration(node)) {
+      const specifier = importSpecifierText(node)
+      if (specifier !== undefined && importResolvesTo(filePath, specifier, systemProcessFile)) {
+        const bindings = node.importClause?.namedBindings
+        if (bindings !== undefined && ts.isNamedImports(bindings)) {
+          for (const element of bindings.elements) {
+            const importedName = element.propertyName?.text ?? element.name.text
+            if (importedName === 'runCommand') named.add(element.name.text)
+          }
+        }
+        if (bindings !== undefined && ts.isNamespaceImport(bindings)) namespaces.add(bindings.name.text)
+      }
+    }
+    ts.forEachChild(node, visit)
+  }
+
+  visit(sourceFile)
+  return { named, namespaces }
+}
+
+function isSystemProcessRunCommandCall(call, imports) {
+  const callee = unwrapExpression(call.expression)
+  if (ts.isIdentifier(callee)) return imports.named.has(callee.text)
+
+  const member = getMember(callee)
+  return member !== null
+    && member.name === 'runCommand'
+    && ts.isIdentifier(member.object)
+    && imports.namespaces.has(member.object.text)
+}
+
+function isProcessExecPath(expression) {
+  const member = getMember(expression)
+  if (member === null || member.name !== 'execPath') return false
+  if (isIdentifierNamed(member.object, 'process')) return true
+  const globalProcess = getMember(member.object)
+  return globalProcess !== null
+    && globalProcess.name === 'process'
+    && isIdentifierNamed(globalProcess.object, 'globalThis')
+}
+
+function isPlatformCommand(expression) {
+  return stringLiteralText(expression) === 'git' || isProcessExecPath(expression)
+}
+
+function isDefaultRunnerPlatformCommandCall(call, systemProcessImports) {
+  if (!isSystemProcessRunCommandCall(call, systemProcessImports)) return false
+  return call.arguments[0] !== undefined && isPlatformCommand(call.arguments[0])
+}
+
+function isRunnerExecutableScriptImport(node, filePath, runnerRoot) {
+  const specifier = importSpecifierText(node)
+  return specifier !== undefined
+    && runnerExecutableModuleFiles(runnerRoot).some((targetFile) => importResolvesTo(filePath, specifier, targetFile))
+}
+
+function mockModuleSpecifier(call) {
+  const argument = call.arguments[0]
+  if (argument === undefined) return undefined
+  const literal = stringLiteralText(argument)
+  if (literal !== undefined) return literal
+  return ts.isCallExpression(unwrapExpression(argument))
+    ? importSpecifierText(unwrapExpression(argument))
+    : undefined
+}
+
+function isProcessPolicyMock(call, filePath, runnerRoot) {
+  if (!isViMethodCall(call, new Set(['mock', 'doMock']))) return false
+  const specifier = mockModuleSpecifier(call)
+  return specifier !== undefined && importResolvesTo(filePath, specifier, runnerProcessPolicyFile(runnerRoot))
+}
+
+function testApiBase(expression) {
+  let current = unwrapExpression(expression)
+  while (true) {
+    if (ts.isCallExpression(current)) {
+      current = unwrapExpression(current.expression)
+      continue
+    }
+    if (ts.isIdentifier(current)) return testApiFunctionNames.has(current.text) ? current.text : undefined
+    const member = getMember(current)
+    if (member === null) return undefined
+    current = member.object
+  }
+}
+
+function historicalTicketTitle(call) {
+  const base = testApiBase(call.expression)
+  if (base === undefined) return undefined
+  const title = call.arguments[0] === undefined ? undefined : stringLiteralText(call.arguments[0])
+  if (title === undefined) return undefined
+  return /\bissue-\d+\b/i.test(title)
+    || /\bissue\s*#\d+\b/i.test(title)
+    || /\bT-\d+\b/i.test(title)
+    ? { base, title }
+    : undefined
+}
+
+function createHistoricalTicketTitleViolation(filePath, sourceFile, call, title) {
+  return createViolation(filePath, sourceFile, call, {
+    rule: historicalTestTitleRule,
+    description: `uses historical ticket provenance in a ${title.base} title`,
+    fix: 'Name the behavior under test; keep historical ticket identifiers out of test titles.',
+  })
+}
+
+function testModifier(call) {
+  let current = unwrapExpression(call.expression)
+  while (true) {
+    const member = getMember(current)
+    if (member === null || member.name === null) return undefined
+    if (runnerTestModifierNames.has(member.name)) {
+      const base = testApiBase(member.object)
+      if (base !== undefined) return { base, modifier: member.name }
+    }
+    current = member.object
+  }
+}
+
+function isAllowedRunnerTestModifier(modifier, track) {
+  return track === runnerIntegrationTrack
+    && modifier.modifier === 'skipIf'
+    && (modifier.base === 'it' || modifier.base === 'test')
 }
 
 function createJsdomGeometryViolation(filePath, sourceFile, node) {
@@ -342,6 +553,9 @@ export function scanSourceFile(filePath, sourceText = readFileSync(filePath, 'ut
     }
 
     if (ts.isCallExpression(node)) {
+      const title = historicalTicketTitle(node)
+      if (title !== undefined) violations.push(createHistoricalTicketTitleViolation(filePath, sourceFile, node, title))
+
       const root = findMutationCallTarget(node)
       if (root !== null) violations.push(createSharedStateMutationViolation(filePath, sourceFile, node.arguments[0], root))
 
@@ -403,11 +617,20 @@ function isActiveRunnerVitestFile(relativePath) {
   return /\.(?:spec|test)\.tsx?$/.test(relativePath)
 }
 
+function isActiveRunnerIntegrationVitestFile(relativePath) {
+  return relativePath.startsWith('tests/integration/') && /\.spec\.tsx?$/.test(relativePath)
+}
+
 export function collectRunnerVitestFiles(runnerRoot = resolve(repositoryRoot, 'packages/runner')) {
   return [
     ...walkFiles(resolve(runnerRoot, 'src')),
     ...walkFiles(resolve(runnerRoot, 'tests')),
   ].filter((filePath) => isActiveRunnerVitestFile(relative(runnerRoot, filePath).replaceAll('\\', '/')))
+}
+
+export function collectRunnerIntegrationVitestFiles(runnerRoot = resolve(repositoryRoot, 'packages/runner')) {
+  return walkFiles(resolve(runnerRoot, 'tests/integration'))
+    .filter((filePath) => isActiveRunnerIntegrationVitestFile(relative(runnerRoot, filePath).replaceAll('\\', '/')))
 }
 
 function isGlobalTimerCall(call) {
@@ -867,15 +1090,42 @@ function expectationReceivedExpression(call) {
     : undefined
 }
 
-export function scanRunnerSourceFile(filePath, sourceText = readFileSync(filePath, 'utf8')) {
+export function scanRunnerSourceFile(
+  filePath,
+  sourceText = readFileSync(filePath, 'utf8'),
+  { runnerRoot = resolve(repositoryRoot, 'packages/runner'), track = runnerDefaultTrack } = {},
+) {
   const sourceFile = ts.createSourceFile(filePath, sourceText, ts.ScriptTarget.Latest, true, scriptKindFor(filePath))
   const violations = []
   const timerBindings = localTimerPromiseBindings(sourceFile)
   const timeBindings = timeNowBindings(sourceFile)
   const elapsedBindings = elapsedTimeBindings(sourceFile, timeBindings)
+  const systemProcessImports = systemProcessRunCommandImports(sourceFile, filePath, runnerRoot)
 
   function visit(node) {
-    if (ts.isAwaitExpression(node) && awaitedTimerPromise(node, timerBindings) && !hasExplicitFakeTimerAdvanceBefore(node, sourceFile)) {
+    if (track === runnerDefaultTrack && isChildProcessImport(node)) {
+      violations.push(createRunnerViolation(
+        filePath,
+        sourceFile,
+        node,
+        runnerChildProcessImportRule,
+        'imports node:child_process in a default Runner test',
+        'Move real process coverage to tests/integration and use an injected process fake in the default track.',
+      ))
+    }
+
+    if (track === runnerDefaultTrack && isRunnerExecutableScriptImport(node, filePath, runnerRoot)) {
+      violations.push(createRunnerViolation(
+        filePath,
+        sourceFile,
+        node,
+        runnerExecutableScriptImportRule,
+        'imports an executable Runner module in a default test',
+        'Test behavior through a hermetic seam, or move executable coverage to tests/integration.',
+      ))
+    }
+
+    if (track === runnerDefaultTrack && ts.isAwaitExpression(node) && awaitedTimerPromise(node, timerBindings) && !hasExplicitFakeTimerAdvanceBefore(node, sourceFile)) {
       violations.push(createRunnerViolation(
         filePath,
         sourceFile,
@@ -887,7 +1137,46 @@ export function scanRunnerSourceFile(filePath, sourceText = readFileSync(filePat
     }
 
     if (ts.isCallExpression(node)) {
-      if (isRunnerHostSpec(filePath) && isViMethodCall(node, new Set(['waitFor']))) {
+      const title = historicalTicketTitle(node)
+      if (title !== undefined) violations.push(createHistoricalTicketTitleViolation(filePath, sourceFile, node, title))
+
+      const modifier = testModifier(node)
+      if (modifier !== undefined && !isAllowedRunnerTestModifier(modifier, track)) {
+        violations.push(createRunnerViolation(
+          filePath,
+          sourceFile,
+          node,
+          runnerTestModifierRule,
+          `uses ${modifier.base}.${modifier.modifier} in a Runner ${track} test`,
+          track === runnerIntegrationTrack
+            ? 'Integration tests may use only it.skipIf/test.skipIf for platform-specific coverage.'
+            : 'Do not disable default Runner tests; make the test hermetic instead.',
+        ))
+      }
+
+      if (track === runnerDefaultTrack && isDefaultRunnerPlatformCommandCall(node, systemProcessImports)) {
+        violations.push(createRunnerViolation(
+          filePath,
+          sourceFile,
+          node,
+          runnerExternalCommandRule,
+          'runs git or process.execPath through system/process in a default Runner test',
+          'Move real command coverage to tests/integration and keep default tests behind a fake process seam.',
+        ))
+      }
+
+      if (track === runnerDefaultTrack && isProcessPolicyMock(node, filePath, runnerRoot)) {
+        violations.push(createRunnerViolation(
+          filePath,
+          sourceFile,
+          node,
+          runnerProcessPolicyMockRule,
+          'mocks system/process-policy in a default Runner test',
+          'Use the installed default deny policy and inject a local process fake instead.',
+        ))
+      }
+
+      if (track === runnerDefaultTrack && isRunnerHostSpec(filePath) && isViMethodCall(node, new Set(['waitFor']))) {
         violations.push(createRunnerViolation(
           filePath,
           sourceFile,
@@ -899,7 +1188,7 @@ export function scanRunnerSourceFile(filePath, sourceText = readFileSync(filePat
       }
 
       const received = expectationReceivedExpression(node)
-      if (received !== undefined && (isElapsedExpression(received, timeBindings) || containsElapsedTimeBinding(received, elapsedBindings))) {
+      if (track === runnerDefaultTrack && received !== undefined && (isElapsedExpression(received, timeBindings) || containsElapsedTimeBinding(received, elapsedBindings))) {
         violations.push(createRunnerViolation(
           filePath,
           sourceFile,
@@ -918,11 +1207,35 @@ export function scanRunnerSourceFile(filePath, sourceText = readFileSync(filePat
   return violations
 }
 
-export function checkRunnerTestBoundaries(runnerRoot = resolve(repositoryRoot, 'packages/runner')) {
-  const files = collectRunnerVitestFiles(runnerRoot)
+function checkRunnerTrackBoundaries(files, runnerRoot, track) {
   return {
     files,
-    violations: files.flatMap((filePath) => scanRunnerSourceFile(filePath)),
+    violations: files.flatMap((filePath) => scanRunnerSourceFile(
+      filePath,
+      readFileSync(filePath, 'utf8'),
+      { runnerRoot, track },
+    )),
+  }
+}
+
+export function checkRunnerIntegrationTestBoundaries(runnerRoot = resolve(repositoryRoot, 'packages/runner')) {
+  return checkRunnerTrackBoundaries(
+    collectRunnerIntegrationVitestFiles(runnerRoot),
+    runnerRoot,
+    runnerIntegrationTrack,
+  )
+}
+
+export function checkRunnerTestBoundaries(runnerRoot = resolve(repositoryRoot, 'packages/runner')) {
+  const defaultResult = checkRunnerTrackBoundaries(
+    collectRunnerVitestFiles(runnerRoot),
+    runnerRoot,
+    runnerDefaultTrack,
+  )
+  const integrationResult = checkRunnerIntegrationTestBoundaries(runnerRoot)
+  return {
+    files: [...defaultResult.files, ...integrationResult.files],
+    violations: [...defaultResult.violations, ...integrationResult.violations],
   }
 }
 
@@ -937,6 +1250,7 @@ function runSelfTest() {
   const expectedFiles = [
     'src/allowed-local.test.tsx',
     'src/direct-assignment.test.tsx',
+    'src/historical-ticket-title.test.tsx',
     'src/jsdom-geometry.test.tsx',
     'src/prototype-calls.test.tsx',
     'tests/active.spec.tsx',
@@ -975,6 +1289,7 @@ function runSelfTest() {
   )
   const expectedWebRules = {
     'src/direct-assignment.test.tsx': [sharedStateMutationRule, sharedStateMutationRule, sharedStateMutationRule, sharedStateMutationRule],
+    'src/historical-ticket-title.test.tsx': [historicalTestTitleRule, historicalTestTitleRule, historicalTestTitleRule, historicalTestTitleRule, historicalTestTitleRule, historicalTestTitleRule],
     'src/jsdom-geometry.test.tsx': [jsdomGeometryRule, jsdomGeometryRule, jsdomGeometryRule, jsdomGeometryRule, jsdomGeometryRule, jsdomGeometryRule, jsdomGeometryRule, jsdomGeometryRule, jsdomGeometryRule, jsdomGeometryRule],
     'src/prototype-calls.test.tsx': [sharedStateMutationRule, sharedStateMutationRule, sharedStateMutationRule, sharedStateMutationRule],
     'tests/active.spec.tsx': [sharedStateMutationRule],
@@ -1005,16 +1320,37 @@ function runSelfTest() {
     'tests/awaited-promise-timer.spec.ts',
     'tests/awaited-resolve-alias-timer.spec.ts',
     'tests/awaited-sibling-real-timer.spec.ts',
+    'tests/default-child-process-import.spec.ts',
+    'tests/default-executable-script-import.spec.ts',
+    'tests/default-platform-command.spec.ts',
+    'tests/default-process-policy-mock.spec.ts',
+    'tests/default-test-modifier.spec.ts',
     'tests/elapsed-local-assertion.spec.ts',
     'tests/elapsed-snapshot-assertion.spec.ts',
     'tests/elapsed-time-assertion.spec.ts',
+    'tests/historical-ticket-title.spec.ts',
     'tests/ordinary-wait-for.spec.ts',
     'tests/runner-host-wait-for.spec.ts',
+    'tests/integration/allowed-platform-process.spec.ts',
+    'tests/integration/allowed-skip-if.spec.ts',
+    'tests/integration/disallowed-test-modifier.spec.ts',
   ]
 
   assertSelfTest(
     JSON.stringify(runnerRelativeFiles) === JSON.stringify(expectedRunnerFiles),
     `expected active Runner files ${expectedRunnerFiles.join(', ')}, got ${runnerRelativeFiles.join(', ')}`,
+  )
+
+  const integrationRunnerFiles = collectRunnerIntegrationVitestFiles(fixtureRunnerRoot)
+    .map((filePath) => relative(fixtureRunnerRoot, filePath).replaceAll('\\', '/'))
+  const expectedIntegrationRunnerFiles = [
+    'tests/integration/allowed-platform-process.spec.ts',
+    'tests/integration/allowed-skip-if.spec.ts',
+    'tests/integration/disallowed-test-modifier.spec.ts',
+  ]
+  assertSelfTest(
+    JSON.stringify(integrationRunnerFiles) === JSON.stringify(expectedIntegrationRunnerFiles),
+    `expected integration Runner files ${expectedIntegrationRunnerFiles.join(', ')}, got ${integrationRunnerFiles.join(', ')}`,
   )
 
   const runnerRules = Object.groupBy(
@@ -1031,16 +1367,23 @@ function runSelfTest() {
     'tests/awaited-promise-timer.spec.ts': [timerPromiseRule],
     'tests/awaited-resolve-alias-timer.spec.ts': [timerPromiseRule],
     'tests/awaited-sibling-real-timer.spec.ts': [timerPromiseRule],
+    'tests/default-child-process-import.spec.ts': [runnerChildProcessImportRule, runnerChildProcessImportRule, runnerChildProcessImportRule, runnerChildProcessImportRule],
+    'tests/default-executable-script-import.spec.ts': [runnerExecutableScriptImportRule, runnerExecutableScriptImportRule, runnerExecutableScriptImportRule, runnerExecutableScriptImportRule],
+    'tests/default-platform-command.spec.ts': [runnerExternalCommandRule, runnerExternalCommandRule, runnerExternalCommandRule, runnerExternalCommandRule],
+    'tests/default-process-policy-mock.spec.ts': [runnerProcessPolicyMockRule, runnerProcessPolicyMockRule],
+    'tests/default-test-modifier.spec.ts': [runnerTestModifierRule, runnerTestModifierRule, runnerTestModifierRule, runnerTestModifierRule],
     'tests/elapsed-local-assertion.spec.ts': [elapsedTimeAssertionRule],
     'tests/elapsed-snapshot-assertion.spec.ts': [elapsedTimeAssertionRule],
     'tests/elapsed-time-assertion.spec.ts': [elapsedTimeAssertionRule, elapsedTimeAssertionRule],
+    'tests/historical-ticket-title.spec.ts': [historicalTestTitleRule, historicalTestTitleRule, historicalTestTitleRule, historicalTestTitleRule, historicalTestTitleRule, historicalTestTitleRule],
     'tests/runner-host-wait-for.spec.ts': [runnerHostWaitForRule],
+    'tests/integration/disallowed-test-modifier.spec.ts': [runnerTestModifierRule, runnerTestModifierRule, runnerTestModifierRule, runnerTestModifierRule],
   }
 
   assertSelfTest(
     JSON.stringify(Object.fromEntries(Object.entries(runnerRules).map(([file, items]) => [file, items.map((item) => item.rule)])))
       === JSON.stringify(expectedRunnerRules),
-    'did not report the expected Runner time-boundary rules',
+    'did not report the expected Runner boundary rules',
   )
 
   assertSelfTest(

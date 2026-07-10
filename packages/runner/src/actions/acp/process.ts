@@ -4,6 +4,7 @@ import { ndJsonStream } from "@agentclientprotocol/sdk"
 import type { Stream } from "@agentclientprotocol/sdk"
 import type { ActionContext } from "../../core/types.js"
 import { killProcess, sanitizedEnvironment } from "../../system/process.js"
+import { assertExternalProcessAllowed, registerExternalProcess } from "../../system/process-policy.js"
 import { acpArgs, acpCommand } from "../../runtime/acp-command.js"
 
 export interface AcpProcessHandle {
@@ -31,11 +32,13 @@ export function getAcpProcessFactory() {
 export function createSpawnedAcpProcess(context: ActionContext): AcpProcessHandle {
   const command = acpCommand()
   const args = acpArgs()
+  assertExternalProcessAllowed("actions/acp/process.createSpawnedAcpProcess")
   const proc = spawn(command, args, {
     cwd: context.workDir,
     stdio: ["pipe", "pipe", "inherit"],
     env: sanitizedEnvironment(),
   })
+  registerExternalProcess(proc)
   return new SpawnedAcpProcess(proc)
 }
 

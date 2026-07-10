@@ -133,7 +133,7 @@ function renderWithoutProject() {
 }
 
 describe('ProjectDefaultWorkflowControl', () => {
-  it('renders a no-project CTA when the WorkflowProfilesSection is mounted without a project (T-006)', () => {
+  it('renders a no-project CTA when the WorkflowProfilesSection is mounted without a project', () => {
     renderWithoutProject()
 
     expect(screen.getByTestId('no-project-select-button')).toBeInTheDocument()

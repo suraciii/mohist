@@ -1,7 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { RunnerHost, startTaskLogFlushTrigger } from "../src/runtime/host.js"
 import type { SessionTarget } from "../src/runtime/acp-connection.js"
+import { setExecutorGitRunnerForTest, type GitRunner } from "../src/runtime/git-probe.js"
 import { deferred, type Deferred } from "./support/deferred.js"
+
+const nonGitRunner: GitRunner = async () => ({
+  success: false,
+  exitCode: 128,
+  stdout: "",
+  stderr: "not a git repository",
+  combinedOutput: "not a git repository",
+})
 
 const mocks = vi.hoisted(() => ({
   connect: vi.fn(),
@@ -141,12 +150,14 @@ function workWith(overrides: Partial<{ workflowRunId: string; workId: string; us
   }
 }
 
-describe("RunnerHost task-log best-effort flush (T-003)", () => {
+describe("RunnerHost flushes task logs before reporting work", () => {
   beforeEach(() => {
     vi.useFakeTimers()
+    setExecutorGitRunnerForTest(nonGitRunner)
   })
   afterEach(() => {
     vi.useRealTimers()
+    setExecutorGitRunnerForTest(null)
   })
 
   it("UploadsIncrementalLogBeforeWorkCompletes", async () => {
@@ -523,7 +534,7 @@ describe("RunnerHost task-log best-effort flush (T-003)", () => {
   })
 })
 
-describe("TaskLogCollector incremental flush integration (T-003 Phase 2)", () => {
+describe("TaskLogCollector incremental flush through RunnerHost", () => {
   // These tests exercise the `drain` + watermark + flush trigger
   // contract end-to-end through the host's `executeAndReport`. They
   // use a stub collector + flush helper instead of running a real

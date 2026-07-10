@@ -212,7 +212,7 @@ function setupDefaultMocks() {
   }
 }
 
-describe('SessionPage sticky recovery bar (issue-245 T-004)', () => {
+describe('SessionPage sticky recovery bar', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     setupDefaultMocks()

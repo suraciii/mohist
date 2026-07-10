@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { killProcess, runCommand } from "../src/system/process.js"
-import { createDefaultRegistry } from "../src/actions/registry.js"
+import { killProcess, runCommand } from "../../src/system/process.js"
+import { createDefaultRegistry } from "../../src/actions/registry.js"
 import type { ChildProcess } from "node:child_process"
-import type { ActionContext } from "../src/core/types.js"
+import type { ActionContext } from "../../src/core/types.js"
+import { registerTestChild } from "../support/child-process.js"
 
-// `runCommand` per-command timeout (issue-291, design D1–D5):
+// `runCommand` per-command timeout behavior:
 //   - optional `timeoutMs` rides in `CommandLineOptions`;
 //   - omitted / non-positive ⇒ byte-identical result (no timer armed);
 //   - on expiry the child + its process group are signaled (detached
@@ -19,8 +20,6 @@ import type { ActionContext } from "../src/core/types.js"
 // fake clock, while `setImmediate` / real I/O / child pipes remain
 // on real time so captured output reaches the parent. Never real
 // git/gh, never network, never wall-clock assertions.
-
-const LINUX_DARWIN = process.platform !== "win32"
 
 async function waitForProcessExit(pid: number) {
   for (let attempt = 0; attempt < 1_000; attempt += 1) {
@@ -118,8 +117,7 @@ describe("runCommand per-command timeout", () => {
     }
   })
 
-  it("TimeoutExpires_KillsHungChildAndResolvesStructured", async () => {
-    if (!LINUX_DARWIN) return // group kill semantics are POSIX-only
+  it.skipIf(process.platform === "win32")("TimeoutExpires_KillsHungChildAndResolvesStructured", async () => {
 
     const HANG_TIMEOUT_MS = 50
 
@@ -158,8 +156,7 @@ describe("runCommand per-command timeout", () => {
     }
   })
 
-  it("TimeoutExpires_ReapsHelperSubprocessWithParent", async () => {
-    if (!LINUX_DARWIN) return
+  it.skipIf(process.platform === "win32")("TimeoutExpires_ReapsHelperSubprocessWithParent", async () => {
 
     // The direct child spawns a helper subprocess and writes both PIDs
     // to stdout, then waits. After the per-command timeout, both PIDs
@@ -220,8 +217,7 @@ describe("runCommand per-command timeout", () => {
     await waitForProcessExit(helperPid!)
   })
 
-  it("ParentAbort_StillRejectsAndPerCommandTimerDoesNotMaskIt", async () => {
-    if (!LINUX_DARWIN) return
+  it.skipIf(process.platform === "win32")("ParentAbort_StillRejectsAndPerCommandTimerDoesNotMaskIt", async () => {
 
     // Parent aborts before the per-command timer would fire. The
     // work-level abort path must dominate: the timer is cleared and
@@ -250,8 +246,7 @@ describe("runCommand per-command timeout", () => {
     }
   })
 
-  it("CoreScriptTimeout_RemainsParentAbortAndRejects", async () => {
-    if (!LINUX_DARWIN) return
+  it.skipIf(process.platform === "win32")("CoreScriptTimeout_RemainsParentAbortAndRejects", async () => {
 
     const registry = createDefaultRegistry()
     const action = registry.resolve("core/script")
@@ -267,7 +262,10 @@ describe("runCommand per-command timeout", () => {
         stage: "check",
         title: "script timeout",
         uses: "core/script",
-        with: { run: "printf 'script-ready\\n'; while true; do sleep 1; done", timeout: 50 },
+        with: {
+          run: `printf 'script-ready\\n'; exec "${process.execPath}" -e "process.once('SIGTERM', () => process.exit(0)); setInterval(() => {}, 1_000)"`,
+          timeout: 50,
+        },
         variables: {},
         workDir: process.cwd(),
         signal: new AbortController().signal,
@@ -285,8 +283,7 @@ describe("runCommand per-command timeout", () => {
     }
   })
 
-  it("KillProcess_GroupKillsDetachedChild", async () => {
-    if (!LINUX_DARWIN) return
+  it.skipIf(process.platform === "win32")("KillProcess_GroupKillsDetachedChild", async () => {
 
     // Spawn a detached child that itself spawns a helper, then call
     // `killProcess` directly to verify the group-kill semantics. No
@@ -302,6 +299,8 @@ describe("runCommand per-command timeout", () => {
       ].join("")
 
       const child = spawn(process.execPath, ["-e", parentScript], { cwd: process.cwd(), detached: true, stdio: ["ignore", "pipe", "ignore"] })
+      registerTestChild(child)
+      const childClosed = waitForChildClose(child)
       const pids = deferred<{ parentPid: number; helperPid: number }>()
       let resolvedPids = false
       let parentPid: number | undefined
@@ -329,6 +328,7 @@ describe("runCommand per-command timeout", () => {
 
       killProcess(child)
 
+      await childClosed
       await waitForProcessExit(parentPid!)
       await waitForProcessExit(helperPid!)
     } finally {
@@ -336,11 +336,12 @@ describe("runCommand per-command timeout", () => {
     }
   })
 
-  it("KillProcess_FallsBackToDirectKillForNonDetachedChild", async () => {
-    if (!LINUX_DARWIN) return
+  it.skipIf(process.platform === "win32")("KillProcess_FallsBackToDirectKillForNonDetachedChild", async () => {
 
     const { spawn } = await import("node:child_process")
     const child = spawn(process.execPath, ["-e", "process.stdout.write('pid=' + process.pid + '\\n'); setInterval(() => {}, 1000)"], { cwd: process.cwd(), detached: false, stdio: ["ignore", "pipe", "ignore"] })
+    registerTestChild(child)
+    const childClosed = waitForChildClose(child)
     const ready = deferred<number>()
     let resolvedPid = false
     let childPid: number | undefined
@@ -360,7 +361,7 @@ describe("runCommand per-command timeout", () => {
       expect(() => process.kill(childPid!, 0)).not.toThrow()
 
       killProcess(child)
-      await waitForChildClose(child)
+      await childClosed
 
       expect(() => process.kill(childPid!, 0)).toThrow()
     } finally {

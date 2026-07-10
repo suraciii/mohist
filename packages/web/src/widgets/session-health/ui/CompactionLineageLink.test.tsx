@@ -22,7 +22,7 @@ function renderLink(props: Partial<CompactionLineageLinkProps> = {}) {
   )
 }
 
-describe('CompactionLineageLink (issue-245 T-006)', () => {
+describe('CompactionLineageLink', () => {
   it('renders nothing when the lineage chain is null', () => {
     const { container } = renderLink({ runtimeSessionLineage: null })
     expect(container.firstChild).toBeNull()

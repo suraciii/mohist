@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process"
+import { assertExternalProcessAllowed } from "../system/process-policy.js"
 
 export interface DiscoveredOpencodeModels {
   models: string[]
@@ -135,6 +136,7 @@ export function clearOpencodeModelsCacheForTesting(): void {
 // — observed truncating 49KB output to 32KB and silently dropping providers.
 // spawnSync drains all pipes before returning, so it captures the full output.
 function execFileText(command: string, args: string[], signal: AbortSignal): Promise<string> {
+  assertExternalProcessAllowed("runtime/opencode-models.execFileText")
   const result = spawnSync(command, args, { signal, timeout: 10_000, encoding: "utf8", maxBuffer: 16 * 1024 * 1024 })
   if (result.error) throw result.error
   if (result.status !== 0) throw new Error(`${command} ${args.join(" ")} exited with ${result.status}`)

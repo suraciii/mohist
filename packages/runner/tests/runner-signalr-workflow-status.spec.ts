@@ -74,7 +74,7 @@ vi.mock("@microsoft/signalr", () => {
   }
 })
 
-describe("RunnerSignalRClient.ReceiveWorkflowRunStatus (T-003 push)", () => {
+describe("RunnerSignalRClient receives workflow run status updates", () => {
   let root: string
 
   beforeEach(async () => {

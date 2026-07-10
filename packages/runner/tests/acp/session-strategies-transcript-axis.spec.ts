@@ -250,7 +250,7 @@ function runtimeEventsByType(serverConnection: FakeServerConnectionForTranscript
     .filter((entry) => entry.event === "agentSessionRuntimeEvents" && entry.type === type)
 }
 
-describe("generic (sessionId) transcript axis — issue-345 regression", () => {
+describe("generic sessionId transcript axis", () => {
   it("ExecutorUsesPolledDispatchAgentSessionId_AsGenericRuntimeEventsTarget", async () => {
     setExecutorGitRunnerForTest(async (_workDir, args) => {
       const joined = args.join(" ")

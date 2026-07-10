@@ -311,7 +311,7 @@ describe('AgentDetailPage', () => {
     })
   })
 
-  describe('Subscriptions section wiring (T-004)', () => {
+  describe('Subscriptions section wiring', () => {
     it('mounts the SubscriptionsSection for an active agent with its own data-agent-id', async () => {
       mockAgent(makeAgent({ id: 'agent-42', status: 'active' }))
       renderPage()

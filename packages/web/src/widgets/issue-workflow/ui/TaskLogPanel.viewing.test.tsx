@@ -63,7 +63,7 @@ function createTaskLogTestState(initialPage: TaskLogPage | undefined): TaskLogTe
   }
 }
 
-describe('TaskLogPanel — viewing enhancement (Phase 3a T-001)', () => {
+describe('TaskLogPanel log viewing', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     fakeConnections.length = 0
@@ -566,7 +566,7 @@ describe('TaskLogPanel — viewing enhancement (Phase 3a T-001)', () => {
     })
   })
 
-  it('live-append during a running task still appends in seq order when no filter is active (non-regression)', async () => {
+  it('appends live lines in sequence when no filter is active', async () => {
     const testState = createTaskLogTestState(makePage([
       makeLine({ seq: 1, source: 'workspace-prep', text: 'line-1' }),
     ]))

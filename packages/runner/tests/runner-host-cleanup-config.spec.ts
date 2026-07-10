@@ -267,7 +267,7 @@ async function advanceCleanupTick(events: CleanupEvents): Promise<CleanupCall> {
   return await cleanup
 }
 
-describe("RunnerHost idle-system cleanup (issue-359 T-002)", () => {
+describe("RunnerHost idle-system cleanup", () => {
   let root: string
 
   beforeEach(async () => {

@@ -217,7 +217,7 @@ describe('EpicDetailPage LinkedIssueRow inline Start', () => {
   })
 })
 
-describe('EpicDetailPage LinkedIssueRow vertical task line layout (T-001)', () => {
+describe('EpicDetailPage LinkedIssueRow vertical task line layout', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     _epicData = makeEpic()

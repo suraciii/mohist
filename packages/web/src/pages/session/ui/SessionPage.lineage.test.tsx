@@ -214,7 +214,7 @@ function baseMetadata(overrides: Partial<AgentSessionMetadata> = {}): AgentSessi
   }
 }
 
-describe('SessionPage lineage link wiring (issue-245 T-006)', () => {
+describe('SessionPage lineage link wiring', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     setupDefaultMocks()

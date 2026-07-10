@@ -70,7 +70,7 @@ describe('settings visual consistency contract', () => {
   })
 })
 
-describe('settings section heading is sourced from sections SOT (T-005)', () => {
+describe('settings section heading is sourced from sections SOT', () => {
   const settingsSourceFiles = collectSourceFiles(settingsDir)
 
   function fileFor(key: SettingsSectionKey): string {
@@ -123,7 +123,7 @@ describe('settings section heading is sourced from sections SOT (T-005)', () => 
   }
 })
 
-describe('settings typography baseline (T-008)', () => {
+describe('settings typography baseline', () => {
   const settingsSourceFiles = collectSourceFiles(settingsDir)
   const settingsSectionPath = settingsSourceFiles.find((file) => file.endsWith('/pages/settings/ui/SettingsSection.tsx'))
 

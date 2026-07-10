@@ -58,7 +58,7 @@ function createTaskLogTestState(initialPage: TaskLogPage | undefined): TaskLogTe
   }
 }
 
-describe('TaskLogPanel — live append (Phase 2 T-004)', () => {
+describe('TaskLogPanel live append', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     fakeConnections.length = 0
@@ -73,7 +73,7 @@ describe('TaskLogPanel — live append (Phase 2 T-004)', () => {
     queryClients.clear()
   })
 
-  it('renders Phase 1 line-by-line output (non-regression)', async () => {
+  it('renders cached log lines in sequence', async () => {
     const testState = createTaskLogTestState(makePage([
       makeLine({ seq: 1, text: 'Cloning repo' }),
       makeLine({ seq: 2, text: 'CONFLICT' }),
@@ -350,7 +350,7 @@ describe('TaskLogPanel — live append (Phase 2 T-004)', () => {
     expect(recordedInvokes.some((inv) => inv.method === 'SubscribeTaskLogAsync')).toBe(false)
   })
 
-  it('preserves the truncation indicator from cached data (Phase 1 rendering non-regression)', async () => {
+  it('preserves the truncation indicator from cached data', async () => {
     const testState = createTaskLogTestState(makePage([
       makeLine({ seq: 4999, text: 'CONFLICT' }),
       makeLine({ seq: 5000, text: 'Patch failed' }),
@@ -364,7 +364,7 @@ describe('TaskLogPanel — live append (Phase 2 T-004)', () => {
     expect(await screen.findByTestId('task-log-truncation-indicator')).toBeInTheDocument()
   })
 
-  it('preserves the empty-state message when no lines are cached (Phase 1 rendering non-regression)', async () => {
+  it('preserves the empty-state message when no lines are cached', async () => {
     const testState = createTaskLogTestState(makePage([]))
 
     renderWithTaskLogProviders(
@@ -375,7 +375,7 @@ describe('TaskLogPanel — live append (Phase 2 T-004)', () => {
     expect(await screen.findByTestId('task-log-empty')).toBeInTheDocument()
   })
 
-  it('shows the full authoritative log when there were no live subscribers during execution (Phase 1 non-regression)', async () => {
+  it('shows the full authoritative log when no live subscriber ran', async () => {
     const testState = createTaskLogTestState(makePage([
       makeLine({ seq: 1, timestamp: '2026-07-03T08:00:00.000Z', text: 'authoritative-line-1' }),
       makeLine({ seq: 2, timestamp: '2026-07-03T08:00:00.050Z', text: 'authoritative-line-2' }),

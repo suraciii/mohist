@@ -87,7 +87,7 @@ afterEach(() => {
   mockSystemInfo(baseSystemInfo)
 })
 
-describe('SystemSettingsSection (T-005)', () => {
+describe('SystemSettingsSection', () => {
   it('renders the Log Path sourced from systemInfo.paths.logs, not a hardcoded string', async () => {
     renderSection()
 

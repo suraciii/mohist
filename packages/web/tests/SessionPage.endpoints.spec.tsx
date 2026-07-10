@@ -221,7 +221,7 @@ function makeSessionsForLookup() {
   }]
 }
 
-describe('T-009: SessionPage split endpoints', () => {
+describe('SessionPage split endpoints', () => {
   describe('metadata and transcript endpoint usage', () => {
     it('loads metadata and transcript through project-scoped session key endpoints', async () => {
       _params = { number: '51', sessionName: 'T-003.1' }

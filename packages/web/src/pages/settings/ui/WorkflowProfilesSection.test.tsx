@@ -332,7 +332,7 @@ describe('WorkflowProfilesSection', () => {
   })
 })
 
-describe('WORKFLOW_DESCRIPTORS (T-003 registry entry)', () => {
+describe('WORKFLOW_DESCRIPTORS', () => {
   it('contains at least one workflow-related entry', () => {
     expect(WORKFLOW_DESCRIPTORS.length).toBeGreaterThan(0)
     for (const entry of WORKFLOW_DESCRIPTORS) {

@@ -611,7 +611,7 @@ describe('Live-then-refetch transcript equivalence', () => {
   })
 })
 
-describe('T-006: Transcript affordances', () => {
+describe('Transcript affordances', () => {
   describe('assistant reply copy action', () => {
     it('shows copy button on assistant text part', async () => {
       const turns = [makeTurn({
@@ -849,7 +849,7 @@ describe('T-006: Transcript affordances', () => {
   })
 })
 
-describe('T-007: Follow-mode scrolling and streaming text pacing', () => {
+describe('Follow-mode scrolling and streaming text pacing', () => {
   describe('follow-mode pause/resume', () => {
     it('auto-scrolls when reader is near bottom during live session', async () => {
       const scrollToMock = vi.fn()

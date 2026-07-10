@@ -4,6 +4,7 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises"
 import { existsSync } from "node:fs"
 import { dirname } from "node:path"
 import { StringDecoder } from "node:string_decoder"
+import { assertExternalProcessAllowed, registerExternalProcess } from "./process-policy.js"
 import { createTimeoutSignal } from "./timeout-signal.js"
 
 export interface CommandResult {
@@ -87,6 +88,7 @@ export async function runCommand(
   env?: NodeJS.ProcessEnv,
   options?: CommandLineOptions,
 ) {
+  assertExternalProcessAllowed("system/process.runCommand")
   const timeoutMs = options?.timeoutMs
   const onLine = options?.onLine
   const onClose = options?.onClose
@@ -101,6 +103,7 @@ export async function runCommand(
     // alongside the direct child. We do NOT unref(): the parent still
     // awaits close, otherwise we'd race the spawn-error path.
     const child = spawn(command, args, { cwd, env: { ...process.env, ...env }, signal: effectiveSignal, shell: false, detached: true })
+    registerExternalProcess(child)
     const stdout: Buffer[] = []
     const stderr: Buffer[] = []
     const stdoutState: LineBufferState = { carry: "", decoder: new StringDecoder("utf8") }

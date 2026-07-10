@@ -11,7 +11,7 @@ afterEach(() => {
   __resetShortcutHandlersForTesting()
 })
 
-describe('SHORTCUTS (T-003 single source of truth)', () => {
+describe('SHORTCUTS', () => {
   it('exposes the two real shortcuts the application currently ships with', () => {
     expect(SHORTCUTS.map((s) => s.id)).toEqual(['sidebar-toggle', 'settings-search'])
   })
@@ -35,7 +35,7 @@ describe('SHORTCUTS (T-003 single source of truth)', () => {
   })
 })
 
-describe('registerShortcutHandler (T-003 handler registry)', () => {
+describe('registerShortcutHandler', () => {
   it('returns a function that unregisters the handler when invoked', () => {
     const handler = () => {}
     const unregister = registerShortcutHandler('sidebar-toggle', handler)

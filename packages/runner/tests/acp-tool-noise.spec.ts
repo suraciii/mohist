@@ -1,39 +1,59 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { acpAgentAction, setAcpProcessFactoryForTest, type AcpProcessHandle } from "../src/actions/acp-agent.js"
+import { acpAgentAction, setAcpProcessFactoryForTest } from "../src/actions/acp-agent.js"
 import type { ActionContext } from "../src/core/types.js"
-import { runCommand } from "../src/system/process.js"
+import * as processModule from "../src/system/process.js"
 import { fakeAcpProcess } from "./support/fake-acp.js"
 import { createTestTempDir } from "./support/temp-dir.js"
 
-afterEach(() => setAcpProcessFactoryForTest(null))
+let restoreProcessRunner: (() => void) | null = null
+
+afterEach(() => {
+  setAcpProcessFactoryForTest(null)
+  restoreProcessRunner?.()
+  restoreProcessRunner = null
+})
 
 describe("mohist/acp-agent tool noise cleanup", () => {
   it("AgentMutatesOpencodeLockfile_ActionRestoresToolNoiseBeforeVerification", async () => {
     const warningSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined)
     try {
       const root = await createTestTempDir("mohist-acp-noise-")
-      await git(root, "init")
-      await git(root, "config", "user.email", "test@example.com")
-      await git(root, "config", "user.name", "Test User")
       await writeFile(join(root, "README.md"), "base\n")
       await mkdir(join(root, ".opencode"), { recursive: true })
-      await writeFile(join(root, ".opencode", "package-lock.json"), "locked\n")
-      await git(root, "add", ".")
-      await git(root, "commit", "-m", "base")
+      const lockfile = join(root, ".opencode", "package-lock.json")
+      await writeFile(lockfile, "locked\n")
+      const artifact = join(root, "artifact.txt")
+      const calls: Array<{ command: string; args: string[]; workDir: string }> = []
+      const missingToolFiles: string[] = []
+      const runner = vi.spyOn(processModule, "runCommand").mockImplementation(async (command, args, workDir) => {
+        calls.push({ command, args: [...args], workDir })
+        if (args.join(" ") === "checkout -- .opencode/package-lock.json") {
+          await writeFile(lockfile, "locked\n")
+          return { exitCode: 0, stdout: "", stderr: "" }
+        }
+        missingToolFiles.push(args.at(-1) ?? "")
+        return { exitCode: 1, stdout: "", stderr: "path is not tracked" }
+      })
+      restoreProcessRunner = () => runner.mockRestore()
 
       setAcpProcessFactoryForTest(() => fakeAcpProcess(async () => {
-        await writeFile(join(root, ".opencode", "package-lock.json"), "mutated\n")
-        await writeFile(join(root, "artifact.txt"), "done\n")
+        await writeFile(lockfile, "mutated\n")
+        await writeFile(artifact, "done\n")
       }))
 
       const result = await acpAgentAction(context(root))
 
       expect(result.status).toBe("success")
-      expect(await readFile(join(root, ".opencode", "package-lock.json"), "utf8")).toBe("locked\n")
-      const status = await git(root, "status", "--short")
-      expect(status.stdout.trim()).toBe("?? artifact.txt")
+      expect(await readFile(lockfile, "utf8")).toBe("locked\n")
+      expect(await readFile(artifact, "utf8")).toBe("done\n")
+      expect(calls).toEqual([
+        { command: "git", args: ["checkout", "--", ".opencode/package-lock.json"], workDir: root },
+        { command: "git", args: ["checkout", "--", ".opencode/bun.lock"], workDir: root },
+        { command: "git", args: ["checkout", "--", ".opencode/node_modules/.package-lock.json"], workDir: root },
+      ])
+      expect(missingToolFiles).toEqual([".opencode/bun.lock", ".opencode/node_modules/.package-lock.json"])
       expect(warningSpy).toHaveBeenCalledTimes(1)
       expect(warningSpy).toHaveBeenNthCalledWith(
         1,
@@ -67,10 +87,4 @@ function context(workDir: string): ActionContext {
     signal: new AbortController().signal,
     writeVars: async () => {},
   }
-}
-
-async function git(cwd: string, ...args: string[]) {
-  const result = await runCommand("git", args, cwd, new AbortController().signal)
-  if (result.exitCode !== 0) throw new Error(result.stderr || result.stdout)
-  return result
 }

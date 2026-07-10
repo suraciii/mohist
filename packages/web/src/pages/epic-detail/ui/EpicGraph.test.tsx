@@ -227,7 +227,7 @@ describe('EpicDetailPage linked issues view toggle', () => {
   })
 })
 
-describe('EpicDetailPage Graph mobile degradation (T-003)', () => {
+describe('EpicDetailPage Graph mobile degradation', () => {
   beforeEach(() => {
     vi.clearAllMocks()
   })

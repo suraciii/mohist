@@ -10,7 +10,7 @@ import { issues, linkedIssue, renderPage, getActionGroup } from './_epicDetailPa
 import { mountEpicDetail, mockEpic } from './_epicDetailMsw'
 import { setScopedProperty } from '../../../../tests/support/scoped-property'
 
-describe('EpicDetailPage summary-first information architecture (T-002)', () => {
+describe('EpicDetailPage summary-first information architecture', () => {
   const LONG_DESCRIPTION = [
     '## Background',
     '',

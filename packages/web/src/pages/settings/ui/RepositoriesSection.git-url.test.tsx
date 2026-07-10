@@ -236,7 +236,7 @@ describe('RepositoriesSection (git-url only)', () => {
     expect(screen.getByTestId('repository-remove-backend')).toBeInTheDocument()
   })
 
-  describe('Remove confirmation flow (T-002)', () => {
+  describe('Remove confirmation flow', () => {
     it('opens the shared AlertDialog when Remove is clicked and does not send DELETE before confirm', async () => {
       renderSection()
 
@@ -280,7 +280,7 @@ describe('RepositoriesSection (git-url only)', () => {
       )
     })
 
-    it('renders a single AlertDialog instance for the section, not per row (T-002)', async () => {
+    it('renders a single AlertDialog instance for the section, not per row', async () => {
       const initialRepos: Repository[] = [
         {
           name: 'a',
