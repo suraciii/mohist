@@ -7,6 +7,7 @@ using Mohist.Server.Agent.Grains;
 using Mohist.Server.Events.Grains;
 using Mohist.Server.Infrastructure.Data;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Infrastructure.Data.Runner;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Events;
@@ -114,6 +115,75 @@ public sealed class CapturingEventStore : IEventStore
 }
 
 /// <summary>
+/// In-memory <see cref="IDeadLetterStore"/> for the dispatcher fixture.
+/// Records every dead-letter write and supports the query/get paths so
+/// spec tests can assert the grain → service → dead-letter wiring.
+/// </summary>
+public sealed class CapturingDeadLetterStore : IDeadLetterStore
+{
+    private readonly object _gate = new();
+    private readonly List<DeadLetterRow> _rows = [];
+    private long _nextId;
+
+    public Task WriteAsync(DeadLetterRow row, CancellationToken ct = default)
+    {
+        lock (_gate)
+        {
+            var assignedId = row.DeadLetterId == 0 ? ++_nextId : row.DeadLetterId;
+            _rows.Add(new DeadLetterRow
+            {
+                DeadLetterId = assignedId,
+                Origin = row.Origin,
+                Id = row.Id,
+                Source = row.Source,
+                EventId = row.EventId,
+                Type = row.Type,
+                Time = row.Time,
+                SpecVersion = row.SpecVersion,
+                Subject = row.Subject,
+                DataContentType = row.DataContentType,
+                Data = row.Data,
+                ExtensionsJson = row.ExtensionsJson,
+                FailingHandler = row.FailingHandler,
+                ErrorMessage = row.ErrorMessage,
+                ErrorStack = row.ErrorStack,
+                AttemptCount = row.AttemptCount,
+                DeadLetteredAt = row.DeadLetteredAt,
+            });
+        }
+        return Task.CompletedTask;
+    }
+
+    public Task<IReadOnlyList<DeadLetterRow>> QueryAsync(string? failingHandler, int limit, CancellationToken ct = default)
+    {
+        lock (_gate)
+        {
+            IEnumerable<DeadLetterRow> q = _rows;
+            if (!string.IsNullOrEmpty(failingHandler))
+                q = q.Where(r => r.FailingHandler == failingHandler);
+            return Task.FromResult<IReadOnlyList<DeadLetterRow>>(q
+                .OrderBy(r => r.DeadLetteredAt)
+                .ThenBy(r => r.DeadLetterId)
+                .Take(limit)
+                .ToList());
+        }
+    }
+
+    public Task<DeadLetterRow?> GetAsync(long deadLetterId, CancellationToken ct = default)
+    {
+        lock (_gate)
+        {
+            return Task.FromResult(_rows.FirstOrDefault(r => r.DeadLetterId == deadLetterId));
+        }
+    }
+
+    public IReadOnlyList<DeadLetterRow> Written
+    {
+        get { lock (_gate) { return _rows.ToList(); } }
+    }
+}
+
+/// <summary>
 /// Self-contained silo fixture for the dispatcher integration tests.
 /// Wires the production <see cref="EventDispatcherService"/> with
 /// <see cref="CapturingEventStore"/> as the dispatcher's <see cref="IEventStore"/>
@@ -128,6 +198,7 @@ public sealed class DispatcherFixture : IAsyncLifetime
     public FakeTimeProvider TimeProvider { get; } = new(new DateTimeOffset(2026, 7, 1, 0, 0, 0, TimeSpan.Zero));
     public CapturingEventStore EventStore { get; } = new();
     public CapturingEventPublisher EventPublisher { get; } = new();
+    public CapturingDeadLetterStore DeadLetterStore { get; } = new();
     public FakeRunnerWorkspaceClient RunnerWorkspace { get; private set; } = null!;
     public IReminderTable ReminderTable => Cluster.GetSiloServiceProvider(null).GetRequiredService<IReminderTable>();
 
@@ -172,7 +243,7 @@ public sealed class DispatcherFixture : IAsyncLifetime
     public Task DisposeAsync()
     {
         Cluster?.Dispose();
-        _keeper?.DisposeAsync();
+        _keeper?.Dispose();
         return Task.CompletedTask;
     }
 
@@ -203,7 +274,7 @@ public sealed class DispatcherFixture : IAsyncLifetime
         siloBuilder.Services.RemoveAll<IEventStore>();
         siloBuilder.Services.AddSingleton<IEventStore>(EventStore);
         siloBuilder.Services.RemoveAll<IDeadLetterStore>();
-        siloBuilder.Services.AddSingleton<IDeadLetterStore>(new NoopDeadLetterStore());
+        siloBuilder.Services.AddSingleton<IDeadLetterStore>(DeadLetterStore);
 
         siloBuilder.Services.AddCloudEventBus();
         // Add the fixture as a singleton so the test handlers can resolve
@@ -212,7 +283,7 @@ public sealed class DispatcherFixture : IAsyncLifetime
         siloBuilder.Services.AddCloudEventHandlersFromAssembly(typeof(DispatcherFixture).Assembly);
 
         siloBuilder.Services.AddSingleton<EventDispatcherService>();
-        siloBuilder.Services.AddSingleton<TimeProvider>(System.TimeProvider.System);
+        siloBuilder.Services.AddSingleton<TimeProvider>(TimeProvider);
 
         siloBuilder.Services.AddSingleton<ITranscriptEventPublisher, TestNoopTranscriptEventPublisher>();
         siloBuilder.Services.AddScoped<IWorkflowArtifactBindService, WorkflowArtifactBindService>();
@@ -369,4 +440,18 @@ public sealed class DispatcherSpecificHandler : ICloudEventHandler
 public sealed class TestNoopTranscriptEventPublisher : ITranscriptEventPublisher
 {
     public Task PublishAsync(TranscriptEnvelope envelope, CancellationToken ct = default) => Task.CompletedTask;
+}
+
+/// <summary>
+/// Poison-message handler used by the dead-letter spec test to exercise
+/// the grain → service → dead-letter wiring. Subscribes to a test-only
+/// type and always throws, forcing retry exhaustion and dead-lettering.
+/// </summary>
+[Subscription(Type = "test.poison")]
+public sealed class DispatcherPoisonHandler : ICloudEventHandler
+{
+    public bool Filter(CloudEvent evt) => true;
+
+    public Task HandleAsync(CloudEvent evt, CancellationToken ct) =>
+        throw new InvalidOperationException("poison test handler");
 }

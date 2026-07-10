@@ -147,12 +147,12 @@ public sealed class EventDispatcherService
                 continue;
             anyMatched = true;
 
-            var (settled, error, attemptCount) = await InvokeWithRetryAsync(sub, envelope, ct).ConfigureAwait(false);
+            var (settled, error, attemptCount, errorStack) = await InvokeWithRetryAsync(sub, envelope, ct).ConfigureAwait(false);
             if (settled == HandlerOutcome.Delivered)
                 continue;
 
             anyFailed = true;
-            await DeadLetterAsync(evt, sub, error, attemptCount, ct).ConfigureAwait(false);
+            await DeadLetterAsync(evt, sub, error, attemptCount, errorStack, ct).ConfigureAwait(false);
         }
 
         if (!anyMatched)
@@ -189,7 +189,7 @@ public sealed class EventDispatcherService
         }
     }
 
-    private async Task<(HandlerOutcome Outcome, string? Error, int Attempts)> InvokeWithRetryAsync(
+    private async Task<(HandlerOutcome Outcome, string? Error, int Attempts, string? ErrorStack)> InvokeWithRetryAsync(
         Subscription sub, CloudEvent envelope, CancellationToken ct)
     {
         var attempts = 0;
@@ -207,7 +207,7 @@ public sealed class EventDispatcherService
                         "Dispatcher: handler {Handler} recovered for {Type} {EventId} on attempt {Attempt}",
                         sub.Handler.GetType().FullName, envelope.Type, envelope.Id, attempts);
                 }
-                return (HandlerOutcome.Delivered, null, attempts);
+                return (HandlerOutcome.Delivered, null, attempts, null);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
@@ -223,7 +223,7 @@ public sealed class EventDispatcherService
             }
         }
 
-        return (HandlerOutcome.Exhausted, Summarize(lastError), attempts);
+        return (HandlerOutcome.Exhausted, Summarize(lastError), attempts, lastError?.ToString());
     }
 
     private async Task DeadLetterAsync(
@@ -231,9 +231,9 @@ public sealed class EventDispatcherService
         Subscription sub,
         string? error,
         int attempts,
+        string? errorStack,
         CancellationToken ct)
     {
-        var envelope = ReconstructEnvelope(evt);
         var row = new DeadLetterRow
         {
             Origin = evt.Origin.ToString(),
@@ -249,21 +249,12 @@ public sealed class EventDispatcherService
             ExtensionsJson = evt.ExtensionsJson,
             FailingHandler = sub.Handler.GetType().FullName ?? sub.Handler.GetType().Name,
             ErrorMessage = error ?? "unknown",
-            ErrorStack = null,
+            ErrorStack = errorStack,
             AttemptCount = attempts,
             DeadLetteredAt = _time.GetUtcNow(),
         };
 
-        try
-        {
-            await _deadLetters.WriteAsync(row, ct).ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            _log.LogError(ex,
-                "Dispatcher: failed to write dead-letter for {Type} {EventId} from handler {Handler}",
-                envelope.Type, envelope.Id, row.FailingHandler);
-        }
+        await _deadLetters.WriteAsync(row, ct).ConfigureAwait(false);
     }
 
     private static string? Summarize(Exception? ex)

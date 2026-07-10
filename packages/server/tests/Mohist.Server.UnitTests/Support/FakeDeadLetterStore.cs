@@ -16,8 +16,12 @@ public sealed class FakeDeadLetterStore : IDeadLetterStore
     private readonly List<DeadLetterRow> _rows = [];
     private long _nextId;
 
+    public Func<DeadLetterRow, bool>? ThrowOnWrite { get; set; }
+
     public Task WriteAsync(DeadLetterRow row, CancellationToken ct = default)
     {
+        if (ThrowOnWrite?.Invoke(row) == true)
+            throw new InvalidOperationException("simulated dead-letter write failure");
         lock (_gate)
         {
             var assignedId = row.DeadLetterId == 0 ? ++_nextId : row.DeadLetterId;

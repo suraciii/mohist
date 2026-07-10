@@ -161,6 +161,9 @@ public class EventDispatcherSpecs
         Assert.Equal(IssueCompleted, dl.Type);
         Assert.Equal(3, dl.AttemptCount);
         Assert.Contains("permanent", dl.ErrorMessage);
+        Assert.NotNull(dl.ErrorStack);
+        Assert.Contains("InvalidOperationException", dl.ErrorStack);
+        Assert.Contains("permanent", dl.ErrorStack);
 
         var marked = Assert.Single(events.Marked);
         Assert.Equal("/mohist/issues/issue_1", marked.Source);
@@ -212,11 +215,16 @@ public class EventDispatcherSpecs
         var time = new FakeTimeProvider(StartTime);
         var events = new FakeEventStore();
         var dlq = new FakeDeadLetterStore();
-        var calls = 0;
-        var sub = new Subscription(
-            IssueCompleted,
-            new Recorder(_ => calls++),
-            DispatchDynamic);
+        var seenEventIds = new List<string>();
+        var processed = new HashSet<string>();
+        var uniqueDeliveries = 0;
+        var rec = new IdempotentRecorder(evt =>
+        {
+            seenEventIds.Add(evt.Id);
+            if (processed.Add(evt.Id))
+                uniqueDeliveries++;
+        });
+        var sub = new Subscription(IssueCompleted, rec, DispatchDynamic);
         var dispatcher = BuildDispatcher(events, dlq, [sub], time);
 
         events.Enqueue(FakeEventStore.Build(IssueCompleted, "/mohist/issues/issue_1", id: 1, eventId: "evt_crash"));
@@ -224,17 +232,16 @@ public class EventDispatcherSpecs
 
         await dispatcher.DispatchAsync(CancellationToken.None);
 
-        // Handler ran, mark threw, so the row stays undelivered.
-        Assert.Equal(1, calls);
+        Assert.Equal(new[] { "evt_crash" }, seenEventIds);
+        Assert.Equal(1, uniqueDeliveries);
         Assert.Empty(events.Marked);
         Assert.Single(events.PendingUndelivered);
 
-        // Repair the store, drive another tick — handler must run again
-        // and the row must now be marked.
         events.ThrowOnMark = null;
         await dispatcher.DispatchAsync(CancellationToken.None);
 
-        Assert.Equal(2, calls);
+        Assert.Equal(new[] { "evt_crash", "evt_crash" }, seenEventIds);
+        Assert.Equal(1, uniqueDeliveries);
         Assert.Single(events.Marked);
         Assert.Empty(events.PendingUndelivered);
     }
@@ -300,6 +307,37 @@ public class EventDispatcherSpecs
 
         Assert.Equal(1, matchedCalls);
         Assert.Equal(0, otherCalls);
+    }
+
+    [Fact]
+    public async Task DispatchAsync_DeadLetterWriteFailure_KeepsRowUndelivered()
+    {
+        var time = new FakeTimeProvider(StartTime);
+        var events = new FakeEventStore();
+        var dlq = new FakeDeadLetterStore();
+        dlq.ThrowOnWrite = _ => true;
+        var attempts = 0;
+        var sub = new Subscription(
+            IssueCompleted,
+            new FlakyRecorder(() =>
+            {
+                attempts++;
+                throw new InvalidOperationException("permanent");
+            }),
+            DispatchDynamic);
+        var dispatcher = BuildDispatcher(events, dlq, [sub], time, handlerMaxAttempts: 2);
+
+        events.Enqueue(FakeEventStore.Build(IssueCompleted, "/mohist/issues/issue_1", id: 1, eventId: "evt_dl_crash"));
+
+        var ex = await Record.ExceptionAsync(() =>
+            dispatcher.DispatchAsync(CancellationToken.None));
+        Assert.NotNull(ex);
+        Assert.Contains("dead-letter", ex.Message);
+
+        Assert.Equal(2, attempts);
+        Assert.Empty(dlq.Written);
+        Assert.Empty(events.Marked);
+        Assert.Single(events.PendingUndelivered);
     }
 
     [Fact]
@@ -483,6 +521,21 @@ public class EventDispatcherSpecs
         public Task HandleAsync(CloudEvent<IssueCompleted> evt, CancellationToken ct)
         {
             _sink.Add(evt);
+            return Task.CompletedTask;
+        }
+    }
+
+    private sealed class IdempotentRecorder : ICloudEventHandler
+    {
+        private readonly Action<CloudEvent> _onEvent;
+
+        public IdempotentRecorder(Action<CloudEvent> onEvent) => _onEvent = onEvent;
+
+        public bool Filter(CloudEvent evt) => true;
+
+        public Task HandleAsync(CloudEvent evt, CancellationToken ct)
+        {
+            _onEvent(evt);
             return Task.CompletedTask;
         }
     }

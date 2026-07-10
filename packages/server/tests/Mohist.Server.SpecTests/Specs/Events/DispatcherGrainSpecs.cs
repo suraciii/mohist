@@ -131,6 +131,32 @@ public class DispatcherGrainSpecs
         Assert.True(row.Period > TimeSpan.Zero,
             $"Reminder period must be positive (got {row.Period})");
     }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task PoisonEvent_ExhaustsRetries_DeadLettersAndMarksDispatched()
+    {
+        var envelope = new CloudEvent(
+            id: "evt_poison_spec",
+            source: new Uri("/mohist/issues/issue_poison", UriKind.Relative),
+            type: "test.poison",
+            time: DateTimeOffset.UtcNow,
+            data: null);
+
+        await _fixture.EventPublisher.PublishAsync(envelope);
+        await _fixture.Dispatcher.PulseAsync();
+
+        var deadLetters = _fixture.DeadLetterStore.Written;
+        var dl = deadLetters.SingleOrDefault(r => r.EventId == "evt_poison_spec");
+        Assert.NotNull(dl);
+        Assert.Equal("test.poison", dl.Type);
+        Assert.Contains("DispatcherPoisonHandler", dl.FailingHandler);
+        Assert.Contains("poison test handler", dl.ErrorMessage);
+        Assert.NotNull(dl.ErrorStack);
+        Assert.Contains("InvalidOperationException", dl.ErrorStack);
+        Assert.Equal(0, _fixture.EventStore.PendingCount);
+    }
 }
 
 /// <summary>
