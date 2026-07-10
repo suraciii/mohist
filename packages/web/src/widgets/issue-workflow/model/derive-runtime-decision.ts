@@ -92,9 +92,9 @@ export function buildWaitReason(input: RuntimeDecisionInput): string | null {
     return `Waiting for #${blocker.issue.number} ${blocker.issue.title}`.trim()
   }
 
-  if (input.agentStatus?.runnerAvailable === false && input.issue?.status !== 'backlog') {
+  if (input.agentStatus?.runnerAvailable === false) {
     return input.agentStatus.runnerMessage
-      ?? 'No Runner is available. The workflow will continue automatically when one connects.'
+      ?? 'No runner is connected. Start a runner before this issue can run.'
   }
 
   const capacity = input.agentStatus?.capacity
@@ -131,15 +131,22 @@ function determineSummary(input: RuntimeDecisionInput): RuntimeSummary {
     return APPROVAL_FAILURE_OVERRIDE_SUMMARY
   }
 
-  if (health === IssueHealth.Blocked) {
-    return 'blocked'
-  }
-
   if (
     recovery?.latestAttemptState === 'failed'
     || (failedScriptHealthCheck && recovery?.latestAttemptState !== 'running')
   ) {
     return 'failed'
+  }
+
+  if (health === IssueHealth.Blocked) {
+    return 'blocked'
+  }
+
+  if (
+    recovery?.latestAttemptState === 'interrupted'
+    || status === 'interrupted'
+  ) {
+    return 'blocked'
   }
 
   const approval = issue.approvalState

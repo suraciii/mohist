@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
-import { IssueStatus, IssueHealth } from '../../../entities/issue'
+import { IssueStatus, IssueHealth, WorkflowStage } from '../../../entities/issue'
 import { makeIssue, makeIssues, mockAgentStatus } from './_kanbanBoardQueryTestUtils'
 
 import { KanbanBoard } from './KanbanBoard'
@@ -282,6 +282,7 @@ describe('Mobile board navigation non-overlap', () => {
           number: 611,
           status: IssueStatus.InProgress,
           health: IssueHealth.Active,
+          workflowStage: WorkflowStage.Build,
           title: 'Interrupted work',
         }),
       ]
@@ -297,7 +298,7 @@ describe('Mobile board navigation non-overlap', () => {
           number: 711,
           status: IssueStatus.Backlog,
           health: IssueHealth.Active,
-          workflowStage: 'plan' as never,
+          workflowStage: WorkflowStage.Plan,
           title: 'Rerunnable work',
         }),
       ]
@@ -313,12 +314,14 @@ describe('Mobile board navigation non-overlap', () => {
           number: 811,
           status: IssueStatus.InProgress,
           health: IssueHealth.Active,
+          workflowStage: WorkflowStage.Build,
           title: 'Interrupted one',
         }),
         makeIssue({
           number: 812,
           status: IssueStatus.InProgress,
           health: IssueHealth.Active,
+          workflowStage: WorkflowStage.Build,
           title: 'Interrupted two',
         }),
       ]
@@ -347,6 +350,7 @@ describe('Mobile board navigation non-overlap', () => {
           number: 911,
           status: IssueStatus.InProgress,
           health: IssueHealth.Active,
+          workflowStage: WorkflowStage.Build,
           title: 'Interrupted work',
         }),
       ]
@@ -365,6 +369,7 @@ describe('Mobile board navigation non-overlap', () => {
           number: 1011,
           status: IssueStatus.InProgress,
           health: IssueHealth.Active,
+          workflowStage: WorkflowStage.Build,
           title: 'Clickable rerun',
         }),
       ]

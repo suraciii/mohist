@@ -1,6 +1,5 @@
 import type { AgentStatus } from '../../../entities/agent'
 import type { RuntimeSummary } from '../../../widgets/issue-workflow'
-import { buildWaitReason } from '../../../widgets/issue-workflow'
 import type { ExecutionSignal } from '../../../widgets/issue-workflow/ui/RuntimeDecisionSurface'
 
 export interface BuildExecutionSignalInput {
@@ -9,6 +8,8 @@ export interface BuildExecutionSignalInput {
   blocker: unknown
   summary: RuntimeSummary
 }
+
+const DEFAULT_RUNNER_UNAVAILABLE_REASON = 'No runner is connected. Start a runner before this issue can run.'
 
 export function buildExecutionSignal(input: BuildExecutionSignalInput): ExecutionSignal | null {
   const { activeSession, agentStatus, blocker, summary } = input
@@ -35,19 +36,19 @@ function pickRunnerGating({
 
   if (isDraftBlocker(blocker) || isWaitingForBlocker(blocker)) return null
 
-  const reason = buildWaitReason({
-    issue: { blocker } as never,
-    agentStatus: agentStatus as never,
-  })
-  if (!reason) return null
-
   if (agentStatus?.runnerAvailable === false) {
-    return { reason, kind: 'runner-unavailable' }
+    return {
+      reason: agentStatus.runnerMessage ?? DEFAULT_RUNNER_UNAVAILABLE_REASON,
+      kind: 'runner-unavailable',
+    }
   }
 
   const capacity = agentStatus?.capacity
   if (capacity && capacity.max > 0 && capacity.active >= capacity.max) {
-    return { reason, kind: 'capacity-full' }
+    return {
+      reason: `Runner capacity is full (${capacity.active}/${capacity.max}).`,
+      kind: 'capacity-full',
+    }
   }
 
   return null
