@@ -1,10 +1,10 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
+import { readFile, writeFile } from "node:fs/promises"
 import { join } from "node:path"
-import { tmpdir } from "node:os"
 import { describe, expect, it, vi } from "vitest"
 import { NETWORK_COMMAND_TIMEOUT_MS } from "../src/actions/git.js"
 import { WorkspaceManager, slugify } from "../src/runtime/workspace.js"
 import { exists, runCommand } from "../src/system/process.js"
+import { createTestTempDir } from "./support/temp-dir.js"
 
 // The workspace is a clone of the repo checked out on a per-run branch.
 // `prepare()` is the two-step contract: (1) have a clone at the workspace
@@ -14,7 +14,7 @@ import { exists, runCommand } from "../src/system/process.js"
 
 describe("WorkspaceManager.prepare", () => {
   it("FreshRun_ClonesAndCreatesRunBranchFromBase", async () => {
-    const root = await mkdtemp(join(tmpdir(), "mohist-workspace-"))
+    const root = await createTestTempDir("mohist-workspace-")
     const repo = await createRepo(root, "repo")
     const runnerRoot = join(root, "runner")
     const manager = new WorkspaceManager(runnerRoot)
@@ -33,7 +33,7 @@ describe("WorkspaceManager.prepare", () => {
   })
 
   it("SameRunReentry_ReusesWorkspaceWithoutRecloning", async () => {
-    const root = await mkdtemp(join(tmpdir(), "mohist-workspace-"))
+    const root = await createTestTempDir("mohist-workspace-")
     const repo = await createRepo(root, "repo")
     const runnerRoot = join(root, "runner")
     const manager = new WorkspaceManager(runnerRoot)
@@ -62,7 +62,7 @@ describe("WorkspaceManager.prepare", () => {
   })
 
   it("RestartWithNewRun_ReclonesFreshWorkspaceDroppingStaleFiles", async () => {
-    const root = await mkdtemp(join(tmpdir(), "mohist-workspace-"))
+    const root = await createTestTempDir("mohist-workspace-")
     const repo = await createRepo(root, "repo")
     const runnerRoot = join(root, "runner")
     const manager = new WorkspaceManager(runnerRoot)
@@ -79,7 +79,7 @@ describe("WorkspaceManager.prepare", () => {
   })
 
   it("MissingBaseBranch_FailsWithoutCreatingWorkspace", async () => {
-    const root = await mkdtemp(join(tmpdir(), "mohist-workspace-"))
+    const root = await createTestTempDir("mohist-workspace-")
     const repo = await createRepo(root, "repo")
     const runnerRoot = join(root, "runner")
     const manager = new WorkspaceManager(runnerRoot)
@@ -93,7 +93,7 @@ describe("WorkspaceManager.prepare", () => {
   })
 
   it("CloneFailure_IsFatal", async () => {
-    const root = await mkdtemp(join(tmpdir(), "mohist-workspace-"))
+    const root = await createTestTempDir("mohist-workspace-")
     const runnerRoot = join(root, "runner")
     const manager = new WorkspaceManager(runnerRoot)
     const signal = new AbortController().signal
@@ -104,7 +104,7 @@ describe("WorkspaceManager.prepare", () => {
   })
 
   it("BaseBranchLsRemoteTimeout_FailsBeforeCloneWithStructuredStep", async () => {
-    const root = await mkdtemp(join(tmpdir(), "mohist-workspace-"))
+    const root = await createTestTempDir("mohist-workspace-")
     const runnerRoot = join(root, "runner")
     const manager = new WorkspaceManager(runnerRoot)
     const signal = new AbortController().signal
@@ -142,7 +142,7 @@ describe("WorkspaceManager.prepare", () => {
   })
 
   it("CloneTimeout_FailsWithStructuredStep", async () => {
-    const root = await mkdtemp(join(tmpdir(), "mohist-workspace-"))
+    const root = await createTestTempDir("mohist-workspace-")
     const runnerRoot = join(root, "runner")
     const manager = new WorkspaceManager(runnerRoot)
     const signal = new AbortController().signal
@@ -178,7 +178,7 @@ describe("WorkspaceManager.prepare", () => {
   })
 
   it("Preparation_DoesNotUseGitWorktreeCommands", async () => {
-    const root = await mkdtemp(join(tmpdir(), "mohist-workspace-"))
+    const root = await createTestTempDir("mohist-workspace-")
     const repo = await createRepo(root, "repo")
     const runnerRoot = join(root, "runner")
     const manager = new WorkspaceManager(runnerRoot)
@@ -196,7 +196,7 @@ describe("WorkspaceManager.prepare", () => {
   })
 
   it("ServerSuppliedPath_IsHonored", async () => {
-    const root = await mkdtemp(join(tmpdir(), "mohist-workspace-"))
+    const root = await createTestTempDir("mohist-workspace-")
     const repo = await createRepo(root, "repo")
     const runnerRoot = join(root, "runner")
     const manager = new WorkspaceManager(runnerRoot)
@@ -221,7 +221,7 @@ describe("WorkspaceManager.prepare", () => {
 // run's committed work survives.
 describe("WorkspaceManager.prepare crash recovery", () => {
   it("MidRebaseCrash_ReentryRecoversAndPreservesRunBranch", async () => {
-    const root = await mkdtemp(join(tmpdir(), "mohist-recovery-"))
+    const root = await createTestTempDir("mohist-recovery-")
     const repo = await createRepo(root, "repo")
     const runnerRoot = join(root, "runner")
     const manager = new WorkspaceManager(runnerRoot)
@@ -264,7 +264,7 @@ describe("WorkspaceManager.prepare crash recovery", () => {
   })
 
   it("CleanReentry_IsNoOp", async () => {
-    const root = await mkdtemp(join(tmpdir(), "mohist-recovery-clean-"))
+    const root = await createTestTempDir("mohist-recovery-clean-")
     const repo = await createRepo(root, "repo")
     const runnerRoot = join(root, "runner")
     const manager = new WorkspaceManager(runnerRoot)

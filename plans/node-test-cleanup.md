@@ -67,7 +67,7 @@ Update table after every gate. Another agent should resume without archaeology.
 | Shared state | DONE | Boundary checker self-test, 297-file scan, Web typecheck, 297/4531 suite, and fixed shuffle seed 20260710 passed |
 | Fake time | DONE | Boundary checker self-test, Runner/Web scans, typechecks, 73/1036 Runner, 297/4531 Web, and fixed-seed shuffle passed |
 | Browser truth | DONE | checker self-test, 297-file Web scan, typecheck, 297/4528 Web suite, build, and two retry-free CI-mode 39/39 Chromium E2E runs passed |
-| Temp ownership | TODO | |
+| Temp ownership | DONE | Runner test temp helper, six planned owners, target 7/99 isolated-TMPDIR proof, 74/1038 Runner suite, and test typecheck passed; final full-suite TMPDIR proof remains after its named dependencies |
 | Platform split | TODO | |
 | Web boundaries | TODO | |
 | File size | TODO | |
@@ -586,13 +586,33 @@ Add Runner temp support and central cleanup. Migrate exact files:
 Use `mkdtemp` or `mkdtempSync`. No Date plus random path name. File already
 touched by earlier gate may adopt helper, but no repo-wide cleanup hunt.
 
-Verify:
+This gate proves only those six owners. The full-suite empty `TMPDIR` proof
+remains final work: `issue-112-regression.spec.ts` leaves its fixture root and
+belongs to Platform split; `artifact-capture.spec.ts` owns an escaping fixture
+file and needs a separately scoped cleanup change. Do not fold either into this
+gate.
+
+Verify the migrated owners:
 
 ```bash
 set -euo pipefail
 tmp_root="$(mktemp -d)"
 trap 'rm -rf "$tmp_root"' EXIT
-TMPDIR="$tmp_root" npm run test:ci -w packages/runner
+
+NODE_DISABLE_COMPILE_CACHE=1 TMPDIR="$tmp_root" \
+  npm run typecheck:tests -w packages/runner
+NODE_DISABLE_COMPILE_CACHE=1 TMPDIR="$tmp_root" \
+  npm run check:test-boundaries -w packages/runner
+NODE_DISABLE_COMPILE_CACHE=1 TMPDIR="$tmp_root" \
+  npm exec -w packages/runner -- vitest run \
+    tests/support/temp-dir.test.ts \
+    tests/expectations.spec.ts \
+    tests/workspace.spec.ts \
+    tests/openspec-archive-change.spec.ts \
+    tests/openspec-tasks.spec.ts \
+    tests/openspec-artifacts.spec.ts \
+    tests/acp-tool-noise.spec.ts
+
 test -z "$(find "$tmp_root" -mindepth 1 -print -quit)"
 rmdir "$tmp_root"
 trap - EXIT

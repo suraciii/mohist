@@ -1,6 +1,5 @@
-import { mkdtemp, writeFile } from "node:fs/promises"
+import { writeFile } from "node:fs/promises"
 import { join } from "node:path"
-import { tmpdir } from "node:os"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { openspecTasksAction, setOpenSpecGitRunnerForTest } from "../src/actions/openspec.js"
 import type { ActionContext } from "../src/core/types.js"
@@ -8,10 +7,11 @@ import type { ServerConnection } from "../src/server/connection.js"
 import { resolvePrompt, setPromptLoaderRegistryForTest, defaultPromptLoaderRegistry } from "../src/core/prompt.js"
 import "../src/core/prompt-registry.js"
 import { OPENSPEC_TASK_PROMPT_LOADER_NAME } from "../src/actions/openspec-task-prompt.js"
+import { createTestTempDir } from "./support/temp-dir.js"
 
 describe("mohist/openspec-tasks", () => {
   it("OpenSpecTaskWithoutExplicitPrompt_LoadsExecutableAcpTaskWithPromptLoaderSpec", async () => {
-    const workDir = await mkdtemp(join(tmpdir(), "mohist-openspec-"))
+    const workDir = await createTestTempDir("mohist-openspec-")
     const tasksPath = join(workDir, "tasks.json")
     await writeFile(tasksPath, JSON.stringify({
       tasks: [
@@ -44,7 +44,7 @@ describe("mohist/openspec-tasks", () => {
   })
 
   it("OpenSpecTaskWithoutExplicitPrompt_PromptLoaderSpecResolvesThroughRegisteredLoader", async () => {
-    const workDir = await mkdtemp(join(tmpdir(), "mohist-openspec-"))
+    const workDir = await createTestTempDir("mohist-openspec-")
     const tasksPath = join(workDir, "tasks.json")
     await writeFile(tasksPath, JSON.stringify({
       tasks: [
@@ -79,7 +79,7 @@ describe("mohist/openspec-tasks", () => {
   })
 
   it("OpenSpecTaskWithAgentTemplate_LoadsTaskWithTemplatePreservedForLateExpansion", async () => {
-    const workDir = await mkdtemp(join(tmpdir(), "mohist-openspec-"))
+    const workDir = await createTestTempDir("mohist-openspec-")
     const tasksPath = join(workDir, "tasks.json")
     await writeFile(tasksPath, JSON.stringify({
       tasks: [
@@ -108,7 +108,7 @@ describe("mohist/openspec-tasks", () => {
   })
 
   it("OpenSpecTaskWithoutAgentTemplate_LoadsTaskWithoutAgent", async () => {
-    const workDir = await mkdtemp(join(tmpdir(), "mohist-openspec-"))
+    const workDir = await createTestTempDir("mohist-openspec-")
     const tasksPath = join(workDir, "tasks.json")
     await writeFile(tasksPath, JSON.stringify({
       tasks: [
@@ -138,7 +138,7 @@ describe("mohist/openspec-tasks", () => {
     // incorrectly template-rendered by the runner. The fix keeps them out of
     // `with` entirely; task JSON content remains opaque and is read lazily by
     // the registered prompt loader at prompt-resolution time.
-    const workDir = await mkdtemp(join(tmpdir(), "mohist-openspec-"))
+    const workDir = await createTestTempDir("mohist-openspec-")
     const tasksPath = join(workDir, "tasks.json")
     await writeFile(tasksPath, JSON.stringify({
       tasks: [
@@ -194,7 +194,7 @@ describe("mohist/openspec-tasks", () => {
   })
 
   it("OpenSpecTaskWithStringPromptOverride_PreservesCallerPrompt", async () => {
-    const workDir = await mkdtemp(join(tmpdir(), "mohist-openspec-"))
+    const workDir = await createTestTempDir("mohist-openspec-")
     const tasksPath = join(workDir, "tasks.json")
     await writeFile(tasksPath, JSON.stringify({
       tasks: [
@@ -217,7 +217,7 @@ describe("mohist/openspec-tasks", () => {
   })
 
   it("OpenSpecTaskWithObjectPromptOverride_PreservesCallerPrompt", async () => {
-    const workDir = await mkdtemp(join(tmpdir(), "mohist-openspec-"))
+    const workDir = await createTestTempDir("mohist-openspec-")
     const tasksPath = join(workDir, "tasks.json")
     await writeFile(tasksPath, JSON.stringify({
       tasks: [
@@ -245,7 +245,7 @@ describe("mohist/openspec-tasks", () => {
   })
 
   it("OpenSpecTaskWithLoaderPromptOverride_PreservesCallerLoaderSpec", async () => {
-    const workDir = await mkdtemp(join(tmpdir(), "mohist-openspec-"))
+    const workDir = await createTestTempDir("mohist-openspec-")
     const tasksPath = join(workDir, "tasks.json")
     await writeFile(tasksPath, JSON.stringify({
       tasks: [
@@ -275,7 +275,7 @@ describe("mohist/openspec-tasks", () => {
   })
 
   it("OpenSpecTaskWithDefaultWithPromptOverride_PreservesCallerPrompt", async () => {
-    const workDir = await mkdtemp(join(tmpdir(), "mohist-openspec-"))
+    const workDir = await createTestTempDir("mohist-openspec-")
     const tasksPath = join(workDir, "tasks.json")
     await writeFile(tasksPath, JSON.stringify({
       tasks: [
@@ -299,7 +299,7 @@ describe("mohist/openspec-tasks", () => {
   })
 
   it("OpenSpecTaskWithBuildPromptVariable_EmbedsBaseInLoaderSpec", async () => {
-    const workDir = await mkdtemp(join(tmpdir(), "mohist-openspec-"))
+    const workDir = await createTestTempDir("mohist-openspec-")
     const tasksPath = join(workDir, "tasks.json")
     await writeFile(tasksPath, JSON.stringify({
       tasks: [
@@ -324,7 +324,7 @@ describe("mohist/openspec-tasks", () => {
   })
 
   it("OpenSpecTaskWithoutBuildPromptVariable_OmitsBaseInLoaderSpec", async () => {
-    const workDir = await mkdtemp(join(tmpdir(), "mohist-openspec-"))
+    const workDir = await createTestTempDir("mohist-openspec-")
     const tasksPath = join(workDir, "tasks.json")
     await writeFile(tasksPath, JSON.stringify({
       tasks: [
@@ -351,7 +351,7 @@ describe("mohist/openspec-tasks", () => {
   })
 
   it("OpenSpecTaskWithCustomItemsPath_PropagatesItemsInLoaderSpec", async () => {
-    const workDir = await mkdtemp(join(tmpdir(), "mohist-openspec-"))
+    const workDir = await createTestTempDir("mohist-openspec-")
     const tasksPath = join(workDir, "tasks.json")
     await writeFile(tasksPath, JSON.stringify({
       tasks: [
@@ -376,7 +376,7 @@ describe("mohist/openspec-tasks", () => {
   })
 
   it("OpenSpecTaskWithMultipleTasks_InjectsPerTaskSelectors", async () => {
-    const workDir = await mkdtemp(join(tmpdir(), "mohist-openspec-"))
+    const workDir = await createTestTempDir("mohist-openspec-")
     const tasksPath = join(workDir, "tasks.json")
     await writeFile(tasksPath, JSON.stringify({
       tasks: [
@@ -408,7 +408,7 @@ describe("mohist/openspec-tasks", () => {
   })
 
   it("OpenSpecTaskWithDefaultLoaderPromptSpec_PreservesCallersPromptAndInjectsPerTaskTaskId", async () => {
-    const workDir = await mkdtemp(join(tmpdir(), "mohist-openspec-"))
+    const workDir = await createTestTempDir("mohist-openspec-")
     const tasksPath = join(workDir, "tasks.json")
     await writeFile(tasksPath, JSON.stringify({
       tasks: [
@@ -453,7 +453,7 @@ describe("mohist/openspec-tasks", () => {
   })
 
   it("OpenSpecTaskWithDefaultLoaderPromptSpec_AndTaskOverridesWithPrompt_PreservesTaskOverride", async () => {
-    const workDir = await mkdtemp(join(tmpdir(), "mohist-openspec-"))
+    const workDir = await createTestTempDir("mohist-openspec-")
     const tasksPath = join(workDir, "tasks.json")
     await writeFile(tasksPath, JSON.stringify({
       tasks: [

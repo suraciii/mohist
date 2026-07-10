@@ -1,11 +1,11 @@
-import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises"
+import { mkdir, readFile, writeFile } from "node:fs/promises"
 import { join } from "node:path"
-import { tmpdir } from "node:os"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { acpAgentAction, setAcpProcessFactoryForTest, type AcpProcessHandle } from "../src/actions/acp-agent.js"
 import type { ActionContext } from "../src/core/types.js"
 import { runCommand } from "../src/system/process.js"
 import { fakeAcpProcess } from "./support/fake-acp.js"
+import { createTestTempDir } from "./support/temp-dir.js"
 
 afterEach(() => setAcpProcessFactoryForTest(null))
 
@@ -13,7 +13,7 @@ describe("mohist/acp-agent tool noise cleanup", () => {
   it("AgentMutatesOpencodeLockfile_ActionRestoresToolNoiseBeforeVerification", async () => {
     const warningSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined)
     try {
-      const root = await mkdtemp(join(tmpdir(), "mohist-acp-noise-"))
+      const root = await createTestTempDir("mohist-acp-noise-")
       await git(root, "init")
       await git(root, "config", "user.email", "test@example.com")
       await git(root, "config", "user.name", "Test User")

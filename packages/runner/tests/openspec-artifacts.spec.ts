@@ -1,10 +1,10 @@
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises"
+import { mkdir, writeFile } from "node:fs/promises"
 import { join } from "node:path"
-import { tmpdir } from "node:os"
 import { describe, expect, it, vi } from "vitest"
 import { openspecArtifactsAction } from "../src/actions/openspec.js"
 import type { ActionContext } from "../src/core/types.js"
 import { createDefaultRegistry } from "../src/actions/registry.js"
+import { createTestTempDir } from "./support/temp-dir.js"
 
 describe("mohist/openspec-artifacts", () => {
   it("registers openspec-artifacts in the default registry", () => {
@@ -13,7 +13,7 @@ describe("mohist/openspec-artifacts", () => {
   })
 
   it("returns success and lists zero missing artifacts when all four plan artifacts exist", async () => {
-    const workDir = await mkdtemp(join(tmpdir(), "mohist-openspec-artifacts-"))
+    const workDir = await createTestTempDir("mohist-openspec-artifacts-")
     const changeDir = join(workDir, "openspec", "changes", "issue-270")
     await mkdir(join(changeDir, "specs", "pr-first-workflow"), { recursive: true })
     await writeFile(join(changeDir, "proposal.md"), "proposal\n")
@@ -33,7 +33,7 @@ describe("mohist/openspec-artifacts", () => {
   })
 
   it("returns failure listing only proposal.md when proposal.md is missing", async () => {
-    const workDir = await mkdtemp(join(tmpdir(), "mohist-openspec-artifacts-"))
+    const workDir = await createTestTempDir("mohist-openspec-artifacts-")
     const changeDir = join(workDir, "openspec", "changes", "issue-270")
     await mkdir(join(changeDir, "specs", "pr-first-workflow"), { recursive: true })
     await writeFile(join(changeDir, "specs", "pr-first-workflow", "spec.md"), "spec\n")
@@ -51,7 +51,7 @@ describe("mohist/openspec-artifacts", () => {
   })
 
   it("returns failure listing only the specs directory when specs/ is missing", async () => {
-    const workDir = await mkdtemp(join(tmpdir(), "mohist-openspec-artifacts-"))
+    const workDir = await createTestTempDir("mohist-openspec-artifacts-")
     const changeDir = join(workDir, "openspec", "changes", "issue-270")
     await mkdir(changeDir, { recursive: true })
     await writeFile(join(changeDir, "proposal.md"), "proposal\n")
@@ -71,7 +71,7 @@ describe("mohist/openspec-artifacts", () => {
   })
 
   it("returns failure listing only design.md when design.md is missing", async () => {
-    const workDir = await mkdtemp(join(tmpdir(), "mohist-openspec-artifacts-"))
+    const workDir = await createTestTempDir("mohist-openspec-artifacts-")
     const changeDir = join(workDir, "openspec", "changes", "issue-270")
     await mkdir(join(changeDir, "specs", "pr-first-workflow"), { recursive: true })
     await writeFile(join(changeDir, "proposal.md"), "proposal\n")
@@ -88,7 +88,7 @@ describe("mohist/openspec-artifacts", () => {
   })
 
   it("returns failure listing only tasks.json when tasks.json is missing", async () => {
-    const workDir = await mkdtemp(join(tmpdir(), "mohist-openspec-artifacts-"))
+    const workDir = await createTestTempDir("mohist-openspec-artifacts-")
     const changeDir = join(workDir, "openspec", "changes", "issue-270")
     await mkdir(join(changeDir, "specs", "pr-first-workflow"), { recursive: true })
     await writeFile(join(changeDir, "proposal.md"), "proposal\n")
@@ -105,7 +105,7 @@ describe("mohist/openspec-artifacts", () => {
   })
 
   it("returns failure when a required directory is present as a file", async () => {
-    const workDir = await mkdtemp(join(tmpdir(), "mohist-openspec-artifacts-"))
+    const workDir = await createTestTempDir("mohist-openspec-artifacts-")
     const changeDir = join(workDir, "openspec", "changes", "issue-270")
     await mkdir(changeDir, { recursive: true })
     await writeFile(join(changeDir, "proposal.md"), "proposal\n")
@@ -123,7 +123,7 @@ describe("mohist/openspec-artifacts", () => {
   })
 
   it("returns failure when a required file is present as a directory", async () => {
-    const workDir = await mkdtemp(join(tmpdir(), "mohist-openspec-artifacts-"))
+    const workDir = await createTestTempDir("mohist-openspec-artifacts-")
     const changeDir = join(workDir, "openspec", "changes", "issue-270")
     await mkdir(join(changeDir, "specs"), { recursive: true })
     await mkdir(join(changeDir, "proposal.md"), { recursive: true })
@@ -140,7 +140,7 @@ describe("mohist/openspec-artifacts", () => {
   })
 
   it("returns failure listing every missing artifact when changeDir is empty", async () => {
-    const workDir = await mkdtemp(join(tmpdir(), "mohist-openspec-artifacts-"))
+    const workDir = await createTestTempDir("mohist-openspec-artifacts-")
     const changeDir = join(workDir, "openspec", "changes", "issue-270")
     await mkdir(changeDir, { recursive: true })
 
@@ -162,7 +162,7 @@ describe("mohist/openspec-artifacts", () => {
   })
 
   it("fails with a clear message when only changeDir is supplied (the action's sole input)", async () => {
-    const workDir = await mkdtemp(join(tmpdir(), "mohist-openspec-artifacts-"))
+    const workDir = await createTestTempDir("mohist-openspec-artifacts-")
     const result = await openspecArtifactsAction({
       workflowRunId: "workflow-1",
       workId: "plan-artifacts",
@@ -184,7 +184,7 @@ describe("mohist/openspec-artifacts", () => {
   })
 
   it("ignores other inputs beyond changeDir (only changeDir is consulted)", async () => {
-    const workDir = await mkdtemp(join(tmpdir(), "mohist-openspec-artifacts-"))
+    const workDir = await createTestTempDir("mohist-openspec-artifacts-")
     const changeDir = join(workDir, "openspec", "changes", "issue-270")
     await mkdir(join(changeDir, "specs"), { recursive: true })
     await writeFile(join(changeDir, "proposal.md"), "proposal\n")

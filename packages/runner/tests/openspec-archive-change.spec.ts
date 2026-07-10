@@ -1,10 +1,10 @@
-import { mkdir, mkdtemp, rename, writeFile } from "node:fs/promises"
+import { mkdir, rename, writeFile } from "node:fs/promises"
 import { join } from "node:path"
-import { tmpdir } from "node:os"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { archiveChangeAction, setArchiveRenameForTest, setOpenSpecGitRunnerForTest } from "../src/actions/openspec.js"
 import type { ActionContext, JsonObject } from "../src/core/types.js"
 import type { ServerConnection } from "../src/server/connection.js"
+import { createTestTempDir } from "./support/temp-dir.js"
 
 const ARCHIVE_TEST_TIME = new Date("2026-07-11T12:00:00.000Z")
 
@@ -20,7 +20,7 @@ describe("mohist/archive-change", () => {
   })
 
   it("ArchiveChangeAfterMove_StagesAndCommitsArchivedChange", async () => {
-    const workDir = await mkdtemp(join(tmpdir(), "mohist-archive-change-"))
+    const workDir = await createTestTempDir("mohist-archive-change-")
     const changeDir = join(workDir, "openspec", "changes", "issue-127")
     await mkdir(join(changeDir, "specs", "workflow-definition"), { recursive: true })
     await writeFile(join(changeDir, "proposal.md"), "proposal\n")
@@ -78,7 +78,7 @@ describe("mohist/archive-change", () => {
     // Simulates a previous run that completed the rename but crashed before
     // any git call. The retry must observe the existing archive on disk,
     // skip the rename, and complete the staging + commit.
-    const workDir = await mkdtemp(join(tmpdir(), "mohist-archive-change-"))
+    const workDir = await createTestTempDir("mohist-archive-change-")
     const changeDir = join(workDir, "openspec", "changes", "issue-127")
     const datePrefix = new Date().toISOString().slice(0, 10)
     const sourceRel = "openspec/changes/issue-127"
@@ -125,7 +125,7 @@ describe("mohist/archive-change", () => {
     // Simulates a previous run that completed both the rename and the
     // commit. The retry must observe the empty stage for both source and
     // archive paths and return success without making another commit.
-    const workDir = await mkdtemp(join(tmpdir(), "mohist-archive-change-"))
+    const workDir = await createTestTempDir("mohist-archive-change-")
     const changeDir = join(workDir, "openspec", "changes", "issue-127")
     const datePrefix = new Date().toISOString().slice(0, 10)
     const sourceRel = "openspec/changes/issue-127"
@@ -165,7 +165,7 @@ describe("mohist/archive-change", () => {
     // Simulates a previous run that crashed between `git add`/`git rm` and
     // `git commit`. The retry must re-run the (idempotent) stage and diff,
     // observe non-empty stage, and successfully commit.
-    const workDir = await mkdtemp(join(tmpdir(), "mohist-archive-change-"))
+    const workDir = await createTestTempDir("mohist-archive-change-")
     const changeDir = join(workDir, "openspec", "changes", "issue-127")
     const datePrefix = new Date().toISOString().slice(0, 10)
     const sourceRel = "openspec/changes/issue-127"
@@ -201,7 +201,7 @@ describe("mohist/archive-change", () => {
   })
 
   it("ArchiveChangeWhenPersistedDestinationAndSourceBothExist_FailsWithPartialArchive", async () => {
-    const workDir = await mkdtemp(join(tmpdir(), "mohist-archive-change-"))
+    const workDir = await createTestTempDir("mohist-archive-change-")
     const changeDir = join(workDir, "openspec", "changes", "issue-127")
     const datePrefix = new Date().toISOString().slice(0, 10)
     const sourceRel = "openspec/changes/issue-127"
@@ -233,7 +233,7 @@ describe("mohist/archive-change", () => {
   })
 
   it("ArchiveChangeWhenSourceMissingAndArchiveMissing_FailsWithMissingSource", async () => {
-    const workDir = await mkdtemp(join(tmpdir(), "mohist-archive-change-"))
+    const workDir = await createTestTempDir("mohist-archive-change-")
     const changeDir = join(workDir, "openspec", "changes", "issue-127")
 
     const calls: string[][] = []
@@ -257,7 +257,7 @@ describe("mohist/archive-change", () => {
     // When the source and destination are on different filesystems, the
     // initial `rename` fails with EXDEV. The action must fall back to a
     // recursive copy + delete and continue with the rest of the flow.
-    const workDir = await mkdtemp(join(tmpdir(), "mohist-archive-change-"))
+    const workDir = await createTestTempDir("mohist-archive-change-")
     const changeDir = join(workDir, "openspec", "changes", "issue-127")
     await mkdir(join(changeDir, "specs"), { recursive: true })
     await writeFile(join(changeDir, "proposal.md"), "proposal\n")
@@ -305,7 +305,7 @@ describe("mohist/archive-change", () => {
     // The action must scope its stage/diff/commit to source + archive
     // paths so an unrelated staged change under `openspec/` does not get
     // swept into the archive commit.
-    const workDir = await mkdtemp(join(tmpdir(), "mohist-archive-change-"))
+    const workDir = await createTestTempDir("mohist-archive-change-")
     const changeDir = join(workDir, "openspec", "changes", "issue-127")
     await mkdir(changeDir, { recursive: true })
     await writeFile(join(changeDir, "proposal.md"), "proposal\n")
@@ -339,7 +339,7 @@ describe("mohist/archive-change", () => {
   })
 
   it("ArchiveChangeWhenCommitFails_FailsWithStageCommitAndPreservesChangedFiles", async () => {
-    const workDir = await mkdtemp(join(tmpdir(), "mohist-archive-change-"))
+    const workDir = await createTestTempDir("mohist-archive-change-")
     const changeDir = join(workDir, "openspec", "changes", "issue-127")
     await mkdir(changeDir, { recursive: true })
     await writeFile(join(changeDir, "proposal.md"), "proposal\n")
@@ -373,7 +373,7 @@ describe("mohist/archive-change", () => {
   })
 
   it("ArchiveChangePersistsArchiveNameBeforeMove", async () => {
-    const workDir = await mkdtemp(join(tmpdir(), "mohist-archive-change-"))
+    const workDir = await createTestTempDir("mohist-archive-change-")
     const changeDir = join(workDir, "openspec", "changes", "issue-127")
     await mkdir(join(changeDir, "specs"), { recursive: true })
     await writeFile(join(changeDir, "proposal.md"), "proposal\n")
@@ -419,7 +419,7 @@ describe("mohist/archive-change", () => {
   })
 
   it("ArchiveChangeRetryAfterVersionedMove_ReusesExactPersistedDestination", async () => {
-    const workDir = await mkdtemp(join(tmpdir(), "mohist-archive-change-"))
+    const workDir = await createTestTempDir("mohist-archive-change-")
     const changeDir = join(workDir, "openspec", "changes", "issue-127")
     await mkdir(join(changeDir, "specs"), { recursive: true })
     await writeFile(join(changeDir, "proposal.md"), "proposal v2\n")
@@ -490,7 +490,7 @@ describe("mohist/archive-change", () => {
   })
 
   it("ArchiveChangeCrossDayRetry_ReusesPersistedNameAndFindsArchivedDirectory", async () => {
-    const workDir = await mkdtemp(join(tmpdir(), "mohist-archive-change-"))
+    const workDir = await createTestTempDir("mohist-archive-change-")
     const changeDir = join(workDir, "openspec", "changes", "issue-127")
     const oldPrefix = "2026-06-25-issue-127"
     const archivedDir = join(workDir, "openspec", "changes", "archive", oldPrefix)
@@ -533,7 +533,7 @@ describe("mohist/archive-change", () => {
     ["_actions.archiveChange.destination", "../../escaped"],
     ["_actions.archiveChange.destination", "nested/name"],
   ] as const)("ArchiveChangeRejectsUnsafePersistedName_%s_%s", async (keySource, unsafePrefix) => {
-    const workDir = await mkdtemp(join(tmpdir(), "mohist-archive-change-"))
+    const workDir = await createTestTempDir("mohist-archive-change-")
     const changeDir = join(workDir, "openspec", "changes", "issue-127")
     await mkdir(join(changeDir, "specs"), { recursive: true })
     await writeFile(join(changeDir, "proposal.md"), "proposal\n")
@@ -561,7 +561,7 @@ describe("mohist/archive-change", () => {
   })
 
   it("ArchiveChangeRetryWithPersistedNameAndNoMove_ReusesNameAndMovesToPersistedDestination", async () => {
-    const workDir = await mkdtemp(join(tmpdir(), "mohist-archive-change-"))
+    const workDir = await createTestTempDir("mohist-archive-change-")
     const changeDir = join(workDir, "openspec", "changes", "issue-127")
     await mkdir(join(changeDir, "specs"), { recursive: true })
     await writeFile(join(changeDir, "proposal.md"), "proposal\n")
@@ -602,7 +602,7 @@ describe("mohist/archive-change", () => {
   })
 
   it("ArchiveChangeWhenPersistFails_FailsWithRetrySafeBeforeMove", async () => {
-    const workDir = await mkdtemp(join(tmpdir(), "mohist-archive-change-"))
+    const workDir = await createTestTempDir("mohist-archive-change-")
     const changeDir = join(workDir, "openspec", "changes", "issue-127")
     await mkdir(join(changeDir, "specs"), { recursive: true })
     await writeFile(join(changeDir, "proposal.md"), "proposal\n")
@@ -628,7 +628,7 @@ describe("mohist/archive-change", () => {
     // archive directory exists on disk under today's prefix. The action
     // must backfill `openspecArchiveName = basename(archiveDir)` before
     // continuing and must NOT fail with `missing-source`.
-    const workDir = await mkdtemp(join(tmpdir(), "mohist-archive-change-"))
+    const workDir = await createTestTempDir("mohist-archive-change-")
     const changeDir = join(workDir, "openspec", "changes", "issue-127")
     const datePrefix = new Date().toISOString().slice(0, 10)
     const archivedName = `${datePrefix}-issue-127`
@@ -672,7 +672,7 @@ describe("mohist/archive-change", () => {
     // a later retry crosses a UTC date boundary. The action must read
     // the backfilled name (which points to the old-date archive) and
     // NOT recompute today's date prefix.
-    const workDir = await mkdtemp(join(tmpdir(), "mohist-archive-change-"))
+    const workDir = await createTestTempDir("mohist-archive-change-")
     const changeDir = join(workDir, "openspec", "changes", "issue-127")
     const oldPrefix = "2026-06-25-issue-127"
     const archivedDir = join(workDir, "openspec", "changes", "archive", oldPrefix)
@@ -714,7 +714,7 @@ describe("mohist/archive-change", () => {
     // The action must return `persist-name` retry-safe and must NOT touch
     // the existing archive (the basename is the same, but the failed persist
     // means a retry will re-attempt the persist).
-    const workDir = await mkdtemp(join(tmpdir(), "mohist-archive-change-"))
+    const workDir = await createTestTempDir("mohist-archive-change-")
     const changeDir = join(workDir, "openspec", "changes", "issue-127")
     const datePrefix = new Date().toISOString().slice(0, 10)
     const archivedDir = join(workDir, "openspec", "changes", "archive", `${datePrefix}-issue-127`)
@@ -746,7 +746,7 @@ describe("mohist/archive-change", () => {
     // `_actions.archiveChange.destination` key set. The new code must read
     // the legacy basename and migrate it to `openspecArchiveName` at the
     // before-move write site, so a subsequent retry uses the new key.
-    const workDir = await mkdtemp(join(tmpdir(), "mohist-archive-change-"))
+    const workDir = await createTestTempDir("mohist-archive-change-")
     const changeDir = join(workDir, "openspec", "changes", "issue-127")
     await mkdir(join(changeDir, "specs"), { recursive: true })
     await writeFile(join(changeDir, "proposal.md"), "proposal\n")
@@ -787,7 +787,7 @@ describe("mohist/archive-change", () => {
   })
 
   it("ArchiveChangeLegacyOnlyRetryWithArchivePresent_MigratesBeforeGitStaging", async () => {
-    const workDir = await mkdtemp(join(tmpdir(), "mohist-archive-change-"))
+    const workDir = await createTestTempDir("mohist-archive-change-")
     const changeDir = join(workDir, "openspec", "changes", "issue-127")
     const oldPrefix = "2026-06-25-issue-127"
     const archivedDir = join(workDir, "openspec", "changes", "archive", oldPrefix)
@@ -841,7 +841,7 @@ describe("mohist/archive-change", () => {
     // resolution (D2 priority order) and ignore the legacy value. The
     // action must NOT write any variable in this scenario because the
     // archive at the persisted (new-key) destination already exists.
-    const workDir = await mkdtemp(join(tmpdir(), "mohist-archive-change-"))
+    const workDir = await createTestTempDir("mohist-archive-change-")
     const changeDir = join(workDir, "openspec", "changes", "issue-127")
     const newPrefix = "2026-06-26-issue-127"
     const legacyPrefix = "2026-06-25-issue-127"

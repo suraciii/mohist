@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest"
 import { promiseValue, verifyExpectations, type TaskArtifactExpectation } from "../src/actions/expectations.js"
 import type { ActionContext } from "../src/core/types.js"
-import { mkdirSync, writeFileSync, rmSync } from "node:fs"
+import { writeFileSync } from "node:fs"
 import { join } from "node:path"
-import { tmpdir } from "node:os"
+import { createTestTempDirSync } from "./support/temp-dir.js"
 
 describe("verifyExpectations", () => {
   const makeContext = (withInput: Record<string, unknown>, workDir: string): ActionContext => ({
@@ -488,7 +488,5 @@ describe("promiseValue", () => {
 })
 
 function mkTestDir(): string {
-  const dir = join(tmpdir(), `mohist-test-${Date.now()}-${Math.random().toString(36).slice(2)}`)
-  mkdirSync(dir, { recursive: true })
-  return dir
+  return createTestTempDirSync("mohist-test-")
 }
