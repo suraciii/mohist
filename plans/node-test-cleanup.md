@@ -71,7 +71,7 @@ Update table after every gate. Another agent should resume without archaeology.
 | Temp ownership | DONE | Runner test temp helper, six planned owners, target 7/99 isolated-TMPDIR proof, 74/1038 Runner suite, and test typecheck passed; final full-suite TMPDIR proof remains after its named dependencies |
 | Platform split | DONE | Runner typecheck/test typecheck, boundary checker, 73/1005 default suite with Git absent from PATH, and repeated 8/36 isolated integration suite passed; CI stays one Node job |
 | Web boundaries | DONE | checker self-test; Web 297 and Runner 81 scans; Web typecheck; 297/4509 normal and fixed-shuffle suite; MSW HTTP boundary, suffix-only environment, and source-read cleanup complete |
-| File size | TODO | |
+| File size | IN PROGRESS | 192e52d64 ACP, 06da4cdff CleanupLoop, and eb2a1ed7e RunnerHost splits; budget and identity-comparison infrastructure |
 | Final proof | TODO | |
 
 Status is `TODO`, `IN PROGRESS`, `DONE`, `SKIPPED: reason`, or
@@ -912,12 +912,25 @@ Extend checker with simple budget:
 - renamed offender cannot escape limit.
 - trusted-base compare rejects new baseline key and higher old number.
 
+Earlier gates can make an old file bigger before this gate starts. bootstrap
+only inherits identities already over limit in trusted source. It maps same
+budget-kind rename into committed `HEAD`, then records committed `HEAD` lines.
+Never read dirty worktree. Source-compliant file gets no allowance. `.spec` to
+`.test` is not same budget kind. split it.
+
 Only mandatory splits in this plan:
 
 - `packages/runner/tests/runner-signalr.spec.ts`
 - `packages/web/src/widgets/session-transcript/ui/SessionTranscriptView.test.tsx`
 - `packages/web/src/pages/issue-changed-files/ui/IssueChangedFilesPage.test.tsx`
 - `packages/web/tests/ToolRegistryAndRefetch.spec.tsx`
+
+These three became over limit in earlier gates. They are not old debt. Split
+them before baseline can go green:
+
+- `packages/runner/tests/acp/session-strategies.spec.ts`
+- `packages/runner/tests/cleanup-loop.spec.ts`
+- `packages/runner/tests/runner-host.spec.ts`
 
 Split by current top-level behavior. Shared stateless data builder uses narrow
 `*-test-utils.ts`. Lifetime owner uses `Fixture` under test support. No new
@@ -944,11 +957,15 @@ Command scans test files from trusted source ref, not mutable working tree. It
 must fail if baseline file already exists. Later work edits baseline only to
 lower limits or remove compliant paths.
 
-Normal checker with `--budget-base-ref` does this:
+`--budget-base-ref` adds Git history check:
 
-- if trusted tree has baseline file, compare current JSON to trusted JSON.
-- if trusted tree has no baseline yet, compute expected bootstrap values from
-  trusted tree files.
+- normal boundary and absolute-size check still read worktree.
+- no-growth compare reads baseline and sizes from committed `HEAD`. Run it
+  after split commit.
+- if trusted tree has baseline file, compare committed `HEAD` JSON to trusted
+  JSON.
+- if trusted tree has no baseline yet, find source files already over limit,
+  map same-kind rename into committed `HEAD`, and use committed `HEAD` value.
 - reject new offender, higher number, missing old path that still violates
   absolute budget, or current file longer than allowed value.
 
@@ -988,12 +1005,20 @@ Verify every batch:
 
 ```bash
 node scripts/compare-vitest-results.mjs --self-test
-npm run check:test-boundaries -w packages/web -- --budget-base-ref "$(git merge-base HEAD origin/master)"
-npm run check:test-boundaries -w packages/runner -- --budget-base-ref "$(git merge-base HEAD origin/master)"
+npm run check:test-boundaries -w packages/web
+npm run check:test-boundaries -w packages/runner
 npm run typecheck -w packages/web
 npm run typecheck:tests -w packages/runner
 npm run test:ci -w packages/web
 npm run test:ci -w packages/runner
+```
+
+After split batch commit:
+
+```bash
+base_ref="$(git merge-base HEAD origin/master)"
+npm run check:test-boundaries -w packages/web -- --budget-base-ref "$base_ref"
+npm run check:test-boundaries -w packages/runner -- --budget-base-ref "$base_ref"
 ```
 
 Other old over-budget files stay in no-growth baseline. They are future work.
