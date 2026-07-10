@@ -65,7 +65,7 @@ Update table after every gate. Another agent should resume without archaeology.
 | Baseline | DONE | Web 296/4527; Runner 72/1031; fixed shuffle passed; hidden `uploadTaskLog` TypeError reproduced |
 | Runner truth | DONE | Runner production/test typecheck, target retry regression, 73/1036 suite, fixed shuffle seed 20260710, and build passed |
 | Shared state | DONE | Boundary checker self-test, 297-file scan, Web typecheck, 297/4531 suite, and fixed shuffle seed 20260710 passed |
-| Fake time | TODO | |
+| Fake time | DONE | Boundary checker self-test, Runner/Web scans, typechecks, 73/1036 Runner, 297/4531 Web, and fixed-seed shuffle passed |
 | Browser truth | TODO | |
 | Temp ownership | TODO | |
 | Platform split | TODO | |

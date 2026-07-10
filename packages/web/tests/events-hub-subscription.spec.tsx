@@ -1,8 +1,8 @@
-import { act, renderHook, waitFor } from '@testing-library/react'
+import { act, renderHook } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { useEventsConnection } from '../src/shared/api/events-hub'
 import { EVENT_TYPES, REVERSE_DNS_EVENT_TYPES, TRANSCRIPT_EVENT_TYPES } from '../src/shared/lib/canonical-event-types'
-import { fakeConnections, rejectNextInvoke, type FakeConnection } from '../tests/support/signalr-fake'
+import { deferNextFakeConnectionStart, fakeConnections, rejectNextInvoke, waitForFakeConnection, type FakeConnection } from '../tests/support/signalr-fake'
 
 
 function lastConnection(): FakeConnection {
@@ -33,24 +33,27 @@ async function renderConnectedHook(
   onEvent = vi.fn(),
   onTranscriptEvent?: (envelope: unknown) => void,
 ) {
+  deferNextFakeConnectionStart()
   const rendered = renderHook(() => useEventsConnection('project-1', onEvent, onTranscriptEvent))
-  await waitFor(() => {
-    expect(rendered.result.current.status).toBe('connected')
-    expect(rendered.result.current.connection).not.toBeNull()
+  const connection = await waitForFakeConnection()
+  await act(async () => {
+    connection.completeStart()
+    await connection.waitForStart()
+    await connection.waitForInvoke('SetSubscriptionsAsync')
   })
-  return rendered
+  expect(rendered.result.current.status).toBe('connected')
+  expect(rendered.result.current.connection).toBe(connection)
+  return { ...rendered, connection }
 }
 
 describe('useEventsConnection subscription behavior', () => {
   it('invokes SetSubscriptionsAsync with the canonical EVENT_TYPES list after start resolves', async () => {
-    await renderConnectedHook()
+    const { connection } = await renderConnectedHook()
 
-    await waitFor(() => {
-      expect(vi.mocked(lastConnection().invoke)).toHaveBeenCalledWith(
-        'SetSubscriptionsAsync',
-        expect.arrayContaining([...EVENT_TYPES]),
-      )
-    })
+    expect(vi.mocked(connection.invoke)).toHaveBeenCalledWith(
+      'SetSubscriptionsAsync',
+      expect.arrayContaining([...EVENT_TYPES]),
+    )
 
     const subscribeCall = getSubscribeCalls().find(
       ({ method }) => method === 'SetSubscriptionsAsync',
@@ -64,7 +67,7 @@ describe('useEventsConnection subscription behavior', () => {
   })
 
   it('re-invokes SetSubscriptionsAsync with the canonical list when onreconnected fires', async () => {
-    const { result } = await renderConnectedHook()
+    const { result, connection } = await renderConnectedHook()
 
     const initialSubscribeCount = getSubscribeCalls().filter(
       ({ method }) => method === 'SetSubscriptionsAsync',
@@ -74,16 +77,14 @@ describe('useEventsConnection subscription behavior', () => {
     const onReconnected = getOnReconnectedCallback()
     await act(async () => {
       onReconnected()
-      await Promise.resolve()
+      await connection.waitForInvoke('SetSubscriptionsAsync', initialSubscribeCount + 1)
     })
 
-    await waitFor(() => {
-      const totalSubscribeCalls = getSubscribeCalls().filter(
-        ({ method }) => method === 'SetSubscriptionsAsync',
-      ).length
-      expect(totalSubscribeCalls).toBeGreaterThan(initialSubscribeCount)
-      expect(result.current.reconnectVersion).toBe(initialReconnectVersion + 1)
-    })
+    const totalSubscribeCalls = getSubscribeCalls().filter(
+      ({ method }) => method === 'SetSubscriptionsAsync',
+    ).length
+    expect(totalSubscribeCalls).toBe(initialSubscribeCount + 1)
+    expect(result.current.reconnectVersion).toBe(initialReconnectVersion + 1)
 
     const allSubscribeCalls = getSubscribeCalls().filter(
       ({ method }) => method === 'SetSubscriptionsAsync',
@@ -113,42 +114,38 @@ describe('useEventsConnection subscription behavior', () => {
 
   it('catches invoke failures and does not tear down the connection', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const failure = new Error('transient hub error')
+    let unmount: (() => void) | null = null
+    try {
+      rejectNextInvoke(failure)
+      const rendered = await renderConnectedHook()
+      unmount = rendered.unmount
 
-    rejectNextInvoke(new Error('transient hub error'))
-    const { result, unmount } = await renderConnectedHook()
+      expect(warnSpy).toHaveBeenCalledOnce()
+      expect(warnSpy).toHaveBeenCalledWith(
+        '[EventsHub] SetSubscriptionsAsync invoke failed (will not break connection):',
+        failure,
+      )
 
-    await waitFor(() => {
-      expect(warnSpy).toHaveBeenCalled()
-    })
+      const onReconnected = getOnReconnectedCallback()
+      const initialReconnectVersion = rendered.result.current.reconnectVersion
+      await act(async () => {
+        onReconnected()
+        await rendered.connection.waitForInvoke('SetSubscriptionsAsync', 2)
+      })
 
-    const warnMessage = warnSpy.mock.calls.map((call) => String(call[0])).join('\n')
-    expect(warnMessage).toContain('SetSubscriptionsAsync')
-
-    const onReconnected = getOnReconnectedCallback()
-    const initialReconnectVersion = result.current.reconnectVersion
-    await act(async () => {
-      onReconnected()
-      await Promise.resolve()
-    })
-
-    await waitFor(() => {
-      const reconnectInvokeCalls = getSubscribeCalls().filter(
-        ({ method }) => method === 'SetSubscriptionsAsync',
-      ).length
-      expect(reconnectInvokeCalls).toBeGreaterThan(1)
-      expect(result.current.reconnectVersion).toBe(initialReconnectVersion + 1)
-    })
-
-    unmount()
-
-    warnSpy.mockRestore()
+      expect(getSubscribeCalls().filter(({ method }) => method === 'SetSubscriptionsAsync')).toHaveLength(2)
+      expect(rendered.result.current.reconnectVersion).toBe(initialReconnectVersion + 1)
+    } finally {
+      unmount?.()
+      warnSpy.mockRestore()
+    }
   })
 
   it('does not invoke SetSubscriptionsAsync when projectId is null', async () => {
-    renderHook(() => useEventsConnection(null, vi.fn()))
-
-    await new Promise((resolve) => setTimeout(resolve, 0))
+    const rendered = renderHook(() => useEventsConnection(null, vi.fn()))
 
     expect(fakeConnections.length).toBe(0)
+    expect(rendered.result.current.status).toBe('disconnected')
   })
 })
