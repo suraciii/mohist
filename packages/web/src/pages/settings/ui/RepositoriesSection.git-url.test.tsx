@@ -1,4 +1,3 @@
-// @vitest-environment jsdom
 import { beforeEach, describe, expect, it } from 'vitest'
 import { fireEvent, render, screen, waitFor, within } from '../../../../tests/test-utils'
 import { useMutation } from '@tanstack/react-query'

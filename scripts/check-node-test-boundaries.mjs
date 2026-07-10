@@ -15,11 +15,67 @@ const runnerProcessPolicyMockRule = 'no-default-runner-process-policy-mock'
 const runnerTestModifierRule = 'no-runner-test-modifier'
 const historicalTestTitleRule = 'no-historical-ticket-test-title'
 const jsdomGeometryRule = 'no-jsdom-page-geometry-assertion'
+const webFetchGlobalStubRule = 'no-web-fetch-global-stub'
+const webFetchGlobalMutationRule = 'no-web-fetch-global-mutation'
+const webViMockRule = 'no-web-vi-mock'
+const vitestEnvironmentDirectiveRule = 'no-vitest-environment-directive'
+const webDomInPlainTestRule = 'no-dom-in-plain-web-test'
+const webNodeFsSourceReadRule = 'no-web-node-fs-source-read'
 const protectedGlobalNames = new Set(['window', 'document', 'navigator'])
 const protectedPrototypeNames = new Set(['Element', 'HTMLElement'])
 const pageGeometryProperties = ['scrollWidth', 'clientWidth', 'offsetWidth']
 const boundingRectProperties = new Set(['bottom', 'height', 'left', 'right', 'top', 'width', 'x', 'y'])
 const childProcessModuleSpecifiers = new Set(['child_process', 'node:child_process'])
+const nodeFsModuleSpecifiers = new Set(['fs', 'fs/promises', 'node:fs', 'node:fs/promises'])
+const nodeFsReadMemberNames = new Set([
+  'access',
+  'accessSync',
+  'createReadStream',
+  'existsSync',
+  'lstat',
+  'lstatSync',
+  'opendir',
+  'opendirSync',
+  'readFile',
+  'readFileSync',
+  'readdir',
+  'readdirSync',
+  'realpath',
+  'realpathSync',
+  'stat',
+  'statSync',
+])
+const webDomGlobalNames = new Set([
+  'Comment',
+  'CustomEvent',
+  'DOMParser',
+  'DOMRect',
+  'DragEvent',
+  'Element',
+  'Event',
+  'FocusEvent',
+  'HTMLElement',
+  'InputEvent',
+  'IntersectionObserver',
+  'KeyboardEvent',
+  'MouseEvent',
+  'MutationObserver',
+  'Node',
+  'PointerEvent',
+  'ResizeObserver',
+  'SubmitEvent',
+  'Text',
+  'WheelEvent',
+  'cancelAnimationFrame',
+  'document',
+  'getComputedStyle',
+  'localStorage',
+  'matchMedia',
+  'navigator',
+  'requestAnimationFrame',
+  'sessionStorage',
+  'window',
+])
 const runnerTestModifierNames = new Set(['skip', 'only', 'todo', 'skipIf'])
 const testApiFunctionNames = new Set(['it', 'test', 'describe', 'suite', 'context'])
 const runnerDefaultTrack = 'default'
@@ -120,7 +176,11 @@ function scriptKindFor(filePath) {
 }
 
 function createViolation(filePath, sourceFile, node, { rule, root, description, fix }) {
-  const position = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile))
+  return createViolationAtPosition(filePath, sourceFile, node.getStart(sourceFile), { rule, root, description, fix })
+}
+
+function createViolationAtPosition(filePath, sourceFile, start, { rule, root, description, fix }) {
+  const position = sourceFile.getLineAndCharacterOfPosition(start)
   return {
     filePath,
     line: position.line + 1,
@@ -146,6 +206,7 @@ function createRunnerViolation(filePath, sourceFile, node, rule, description, fi
 }
 
 function stringLiteralText(expression) {
+  if (expression === undefined) return undefined
   const current = unwrapExpression(expression)
   return ts.isStringLiteral(current) || ts.isNoSubstitutionTemplateLiteral(current)
     ? current.text
@@ -345,6 +406,302 @@ function isAllowedRunnerTestModifier(modifier, track) {
     && (modifier.base === 'it' || modifier.base === 'test')
 }
 
+function isGlobalWindow(expression) {
+  const current = unwrapExpression(expression)
+  if (isIdentifierNamed(current, 'window')) return true
+  const member = getMember(current)
+  return member !== null
+    && member.name === 'window'
+    && (isIdentifierNamed(member.object, 'globalThis') || isIdentifierNamed(member.object, 'global'))
+}
+
+function bindingIdentifiers(name) {
+  if (ts.isIdentifier(name)) return [name]
+  if (!ts.isObjectBindingPattern(name) && !ts.isArrayBindingPattern(name)) return []
+  return name.elements.flatMap((element) => ts.isOmittedExpression(element) ? [] : bindingIdentifiers(element.name))
+}
+
+function webValueBindings(sourceFile) {
+  const bindings = []
+
+  function addBinding(name, declaration) {
+    for (const identifier of bindingIdentifiers(name)) {
+      bindings.push({ name: identifier.text, scope: lexicalScope(declaration) })
+    }
+  }
+
+  function visit(node) {
+    if (ts.isImportDeclaration(node)) {
+      const clause = node.importClause
+      if (clause?.name !== undefined) addBinding(clause.name, node)
+      const namedBindings = clause?.namedBindings
+      if (namedBindings !== undefined && ts.isNamespaceImport(namedBindings)) addBinding(namedBindings.name, node)
+      if (namedBindings !== undefined && ts.isNamedImports(namedBindings)) {
+        for (const element of namedBindings.elements) addBinding(element.name, node)
+      }
+    }
+    if (ts.isVariableDeclaration(node) || ts.isParameter(node)) addBinding(node.name, node)
+    if ((ts.isFunctionDeclaration(node) || ts.isClassDeclaration(node) || ts.isEnumDeclaration(node)) && node.name !== undefined) {
+      addBinding(node.name, node)
+    }
+    if (ts.isCatchClause(node) && node.variableDeclaration !== undefined) addBinding(node.variableDeclaration.name, node)
+    ts.forEachChild(node, visit)
+  }
+
+  visit(sourceFile)
+  return bindings
+}
+
+function isLocallyBound(identifier, bindings) {
+  return bindings.some((binding) => binding.name === identifier.text && isAncestor(binding.scope, identifier))
+}
+
+function isGlobalFetchTarget(expression) {
+  return isIdentifierNamed(expression, 'globalThis')
+    || isIdentifierNamed(expression, 'global')
+    || isGlobalWindow(expression)
+}
+
+function isGlobalFetch(expression, bindings) {
+  const current = unwrapExpression(expression)
+  if (ts.isIdentifier(current) && current.text === 'fetch') return !isLocallyBound(current, bindings)
+  const member = getMember(current)
+  return member !== null
+    && member.name === 'fetch'
+    && isGlobalFetchTarget(member.object)
+}
+
+function isGlobalFetchDefinition(call) {
+  const member = getMember(call.expression)
+  if (member === null || member.name !== 'defineProperty') return false
+  if (!isGlobalBuiltin(member.object, 'Object') && !isGlobalBuiltin(member.object, 'Reflect')) return false
+  return call.arguments[0] !== undefined
+    && call.arguments[1] !== undefined
+    && isGlobalFetchTarget(call.arguments[0])
+    && stringLiteralText(call.arguments[1]) === 'fetch'
+}
+
+function isWebFetchGlobalStub(call) {
+  return isViMethodCall(call, new Set(['stubGlobal']))
+    && stringLiteralText(call.arguments[0]) === 'fetch'
+}
+
+function isWebFetchGlobalSpy(call) {
+  return isViMethodCall(call, new Set(['spyOn']))
+    && call.arguments[0] !== undefined
+    && isGlobalFetchTarget(call.arguments[0])
+    && stringLiteralText(call.arguments[1]) === 'fetch'
+}
+
+function isWebViMock(call) {
+  return isViMethodCall(call, new Set(['mock', 'doMock']))
+}
+
+function isViObject(expression) {
+  const current = unwrapExpression(expression)
+  if (isIdentifierNamed(current, 'vi')) return true
+  const member = getMember(current)
+  return member !== null
+    && member.name === 'vi'
+    && (isIdentifierNamed(member.object, 'globalThis') || isIdentifierNamed(member.object, 'global'))
+}
+
+function isWebViMockAliasDeclaration(node) {
+  if (!ts.isVariableDeclaration(node) || node.initializer === undefined) return false
+  const initializer = unwrapExpression(node.initializer)
+  const member = getMember(initializer)
+  if (member !== null && member.name !== null && new Set(['mock', 'doMock']).has(member.name) && isViObject(member.object)) {
+    return true
+  }
+  if (!ts.isObjectBindingPattern(node.name) || !isViObject(initializer)) return false
+  return node.name.elements.some((element) => {
+    const propertyName = propertyNameText(element.propertyName) ?? propertyNameText(element.name)
+    return propertyName === 'mock' || propertyName === 'doMock'
+  })
+}
+
+function isOrdinaryWebNodeTest(filePath) {
+  const normalized = filePath.replaceAll('\\', '/')
+  return normalized.endsWith('.test.ts') && !normalized.endsWith('.dom.test.ts')
+}
+
+function isIdentifierValueReference(identifier) {
+  const parent = identifier.parent
+  if (isIdentifierInTypePosition(identifier)) return false
+  if (ts.isPropertyAccessExpression(parent) && parent.name === identifier) return false
+  if (ts.isQualifiedName(parent) && parent.right === identifier) return false
+  if (ts.isPropertyAssignment(parent) && parent.name === identifier) return false
+  if (ts.isShorthandPropertyAssignment(parent) && parent.name === identifier) return true
+  if (ts.isBindingElement(parent) && (parent.name === identifier || parent.propertyName === identifier)) return false
+  if (ts.isVariableDeclaration(parent) && parent.name === identifier) return false
+  if (ts.isParameter(parent) && parent.name === identifier) return false
+  if (ts.isFunctionDeclaration(parent) && parent.name === identifier) return false
+  if (ts.isClassDeclaration(parent) && parent.name === identifier) return false
+  if (ts.isInterfaceDeclaration(parent) && parent.name === identifier) return false
+  if (ts.isTypeAliasDeclaration(parent) && parent.name === identifier) return false
+  if (ts.isEnumDeclaration(parent) && parent.name === identifier) return false
+  if (ts.isEnumMember(parent) && parent.name === identifier) return false
+  if (ts.isImportClause(parent) && parent.name === identifier) return false
+  if (ts.isImportSpecifier(parent) || ts.isNamespaceImport(parent) || ts.isExportSpecifier(parent)) return false
+  if (ts.isPropertyDeclaration(parent) && parent.name === identifier) return false
+  if (ts.isPropertySignature(parent) && parent.name === identifier) return false
+  if (ts.isMethodDeclaration(parent) && parent.name === identifier) return false
+  if (ts.isMethodSignature(parent) && parent.name === identifier) return false
+  if (ts.isGetAccessorDeclaration(parent) && parent.name === identifier) return false
+  if (ts.isSetAccessorDeclaration(parent) && parent.name === identifier) return false
+  return true
+}
+
+function isIdentifierInTypePosition(identifier) {
+  let current = identifier.parent
+  while (current !== undefined) {
+    if (ts.isTypeNode(current)) return true
+    if (ts.isSourceFile(current) || ts.isStatement(current) || ts.isExpression(current)) return false
+    current = current.parent
+  }
+  return false
+}
+
+function isOrdinaryWebDomGlobal(expression) {
+  const current = unwrapExpression(expression)
+  if (ts.isIdentifier(current)) {
+    return isIdentifierValueReference(current) && webDomGlobalNames.has(current.text)
+  }
+
+  const member = getMember(current)
+  return member !== null
+    && member.name !== null
+    && webDomGlobalNames.has(member.name)
+    && (isIdentifierNamed(member.object, 'globalThis') || isIdentifierNamed(member.object, 'global'))
+}
+
+function isTestingLibraryReactImport(node) {
+  const specifier = importSpecifierText(node)
+  if (specifier === '@testing-library/react' || specifier?.startsWith('@testing-library/react/') === true) return true
+  if (!ts.isCallExpression(node)) return false
+  const callee = unwrapExpression(node.expression)
+  const isModuleLoad = callee.kind === ts.SyntaxKind.ImportKeyword
+    || isIdentifierNamed(callee, 'require')
+    || (ts.isCallExpression(callee)
+      && (isIdentifierNamed(unwrapExpression(callee.expression), 'createRequire')
+        || getMember(callee.expression)?.name === 'createRequire'))
+  const moduleSpecifier = stringLiteralText(node.arguments[0])
+  return isModuleLoad
+    && (moduleSpecifier === '@testing-library/react' || moduleSpecifier?.startsWith('@testing-library/react/') === true)
+}
+
+function isNodeFsSpecifier(specifier) {
+  return specifier !== undefined && nodeFsModuleSpecifiers.has(specifier)
+}
+
+function isNodeFsModuleLoadCall(call) {
+  const specifier = call.expression.kind === ts.SyntaxKind.ImportKeyword
+    ? importSpecifierText(call)
+    : call.arguments[0] === undefined ? undefined : stringLiteralText(call.arguments[0])
+  if (!isNodeFsSpecifier(specifier)) return false
+  const callee = unwrapExpression(call.expression)
+  if (callee.kind === ts.SyntaxKind.ImportKeyword || isIdentifierNamed(callee, 'require')) return true
+  return ts.isCallExpression(callee)
+    && (isIdentifierNamed(unwrapExpression(callee.expression), 'createRequire')
+      || getMember(callee.expression)?.name === 'createRequire')
+}
+
+function isNodeFsModuleLoadExpression(expression) {
+  const current = unwrapExpression(expression)
+  const loaded = ts.isAwaitExpression(current) ? unwrapExpression(current.expression) : current
+  return ts.isCallExpression(loaded) && isNodeFsModuleLoadCall(loaded)
+}
+
+function addNodeFsBinding(name, propertyName, bindings) {
+  if (ts.isIdentifier(name)) {
+    if (propertyName === undefined || propertyName === 'promises') bindings.namespaces.add(name.text)
+    if (propertyName !== undefined && nodeFsReadMemberNames.has(propertyName)) bindings.named.add(name.text)
+    return
+  }
+
+  if (!ts.isObjectBindingPattern(name)) return
+  for (const element of name.elements) {
+    const memberName = propertyNameText(element.propertyName) ?? propertyNameText(element.name)
+    addNodeFsBinding(element.name, memberName, bindings)
+  }
+}
+
+function nodeFsReadBindings(sourceFile) {
+  const named = new Set()
+  const namespaces = new Set()
+  const bindings = { named, namespaces }
+
+  function addNamespaceBinding(name) {
+    namespaces.add(name)
+  }
+
+  function visit(node) {
+    if (ts.isImportDeclaration(node) && isNodeFsSpecifier(importSpecifierText(node))) {
+      const clause = node.importClause
+      if (clause?.name !== undefined) addNamespaceBinding(clause.name.text)
+      const bindings = clause?.namedBindings
+      if (bindings !== undefined && ts.isNamespaceImport(bindings)) addNamespaceBinding(bindings.name.text)
+      if (bindings !== undefined && ts.isNamedImports(bindings)) {
+        for (const element of bindings.elements) {
+          const importedName = element.propertyName?.text ?? element.name.text
+          if (importedName === 'default' || importedName === 'promises') addNamespaceBinding(element.name.text)
+          if (nodeFsReadMemberNames.has(importedName)) named.add(element.name.text)
+        }
+      }
+    }
+
+    if (ts.isImportEqualsDeclaration(node) && isNodeFsSpecifier(importSpecifierText(node))) {
+      addNamespaceBinding(node.name.text)
+    }
+
+    if (ts.isVariableDeclaration(node) && node.initializer !== undefined) {
+      const initializer = unwrapExpression(node.initializer)
+      const loaded = ts.isAwaitExpression(initializer) ? unwrapExpression(initializer.expression) : initializer
+      if (ts.isCallExpression(loaded) && isNodeFsModuleLoadCall(loaded)) addNodeFsBinding(node.name, undefined, bindings)
+    }
+
+    ts.forEachChild(node, visit)
+  }
+
+  visit(sourceFile)
+  return { named, namespaces }
+}
+
+function isNodeFsReadCall(call, bindings) {
+  const callee = unwrapExpression(call.expression)
+  if (ts.isIdentifier(callee)) return bindings.named.has(callee.text)
+
+  const member = getMember(callee)
+  if (member === null || member.name === null || !nodeFsReadMemberNames.has(member.name)) return false
+  if (isIdentifierNamed(member.object, 'fs') && bindings.namespaces.has('fs')) return true
+  if (ts.isIdentifier(member.object) && bindings.namespaces.has(member.object.text)) return true
+  if (isNodeFsModuleLoadExpression(member.object)) return true
+
+  const promises = getMember(member.object)
+  return promises !== null
+    && promises.name === 'promises'
+    && (
+      (ts.isIdentifier(promises.object) && bindings.namespaces.has(promises.object.text))
+      || isNodeFsModuleLoadExpression(promises.object)
+    )
+}
+
+function vitestEnvironmentDirectivePositions(sourceText) {
+  const scanner = ts.createScanner(ts.ScriptTarget.Latest, false, ts.LanguageVariant.Standard, sourceText)
+  const positions = []
+  let token = scanner.scan()
+  while (token !== ts.SyntaxKind.EndOfFileToken) {
+    if (
+      (token === ts.SyntaxKind.SingleLineCommentTrivia || token === ts.SyntaxKind.MultiLineCommentTrivia)
+      && /@vitest-environment\b/i.test(scanner.getTokenText())
+    ) {
+      positions.push(scanner.getTokenPos())
+    }
+    token = scanner.scan()
+  }
+  return positions
+}
+
 function createJsdomGeometryViolation(filePath, sourceFile, node) {
   return createViolation(filePath, sourceFile, node, {
     rule: jsdomGeometryRule,
@@ -407,6 +764,7 @@ function isBoundingRectCall(expression) {
 }
 
 function propertyNameText(name) {
+  if (name === undefined) return undefined
   return ts.isIdentifier(name) || ts.isStringLiteral(name) || ts.isNoSubstitutionTemplateLiteral(name)
     ? name.text
     : undefined
@@ -541,18 +899,94 @@ export function scanSourceFile(filePath, sourceText = readFileSync(filePath, 'ut
   const sourceFile = ts.createSourceFile(filePath, sourceText, ts.ScriptTarget.Latest, true, scriptKindFor(filePath))
   const violations = []
   const bindings = geometryBindings(sourceFile)
+  const valueBindings = webValueBindings(sourceFile)
+  const ordinaryNodeTest = isOrdinaryWebNodeTest(filePath)
+  const fsReadBindings = nodeFsReadBindings(sourceFile)
+
+  for (const position of vitestEnvironmentDirectivePositions(sourceText)) {
+    violations.push(createViolationAtPosition(filePath, sourceFile, position, {
+      rule: vitestEnvironmentDirectiveRule,
+      description: 'uses a per-file Vitest environment directive',
+      fix: 'Use the .test.ts, .dom.test.ts, or .test.tsx suffix to select the test environment.',
+    }))
+  }
 
   function visit(node) {
+    if (isWebViMockAliasDeclaration(node)) {
+      violations.push(createViolation(filePath, sourceFile, node, {
+        rule: webViMockRule,
+        description: 'creates an alias for vi.mock or vi.doMock',
+        fix: 'Use an explicit test seam, provider, or MSW handler instead of module mocking.',
+      }))
+    }
+
+    if (ordinaryNodeTest && ts.isExpression(node) && isOrdinaryWebDomGlobal(node)) {
+      violations.push(createViolation(filePath, sourceFile, node, {
+        rule: webDomInPlainTestRule,
+        description: 'uses a DOM global from an ordinary .test.ts file',
+        fix: 'Rename the file to .dom.test.ts or .test.tsx, then use the matching test environment.',
+      }))
+    }
+
+    if (ordinaryNodeTest && isTestingLibraryReactImport(node)) {
+      violations.push(createViolation(filePath, sourceFile, node, {
+        rule: webDomInPlainTestRule,
+        description: 'imports @testing-library/react from an ordinary .test.ts file',
+        fix: 'Rename the file to .dom.test.ts or .test.tsx, then use the matching test environment.',
+      }))
+    }
+
+    if (ts.isCallExpression(node) && isNodeFsReadCall(node, fsReadBindings)) {
+      violations.push(createViolation(filePath, sourceFile, node, {
+        rule: webNodeFsSourceReadRule,
+        description: 'reads source through node:fs in a Web Vitest file',
+        fix: 'Test the rendered or imported behavior instead of reading source files from a test.',
+      }))
+    }
+
     if (ts.isBinaryExpression(node) && isComparisonOperator(node.operatorToken.kind) && isJsdomGeometryComparison(node.left, node.right, bindings)) {
       violations.push(createJsdomGeometryViolation(filePath, sourceFile, node))
     }
 
     if (ts.isBinaryExpression(node) && ts.isAssignmentOperator(node.operatorToken.kind)) {
+      if (isGlobalFetch(node.left, valueBindings)) {
+        violations.push(createViolation(filePath, sourceFile, node.left, {
+          rule: webFetchGlobalMutationRule,
+          description: 'assigns the global fetch implementation',
+          fix: 'Use the shared MSW server to model HTTP behavior instead of replacing global fetch.',
+        }))
+      }
       const root = findProtectedRoot(node.left)
-      if (root !== null) violations.push(createSharedStateMutationViolation(filePath, sourceFile, node.left, root))
+      if (root !== null && !isGlobalFetch(node.left, valueBindings)) {
+        violations.push(createSharedStateMutationViolation(filePath, sourceFile, node.left, root))
+      }
     }
 
     if (ts.isCallExpression(node)) {
+      if (isWebFetchGlobalStub(node)) {
+        violations.push(createViolation(filePath, sourceFile, node, {
+          rule: webFetchGlobalStubRule,
+          description: 'stubs the global fetch implementation',
+          fix: 'Use the shared MSW server to model HTTP behavior instead of stubbing global fetch.',
+        }))
+      }
+
+      if (isWebFetchGlobalSpy(node) || isGlobalFetchDefinition(node)) {
+        violations.push(createViolation(filePath, sourceFile, node, {
+          rule: webFetchGlobalMutationRule,
+          description: 'mutates or spies on the global fetch implementation',
+          fix: 'Use the shared MSW server to model HTTP behavior instead of replacing global fetch.',
+        }))
+      }
+
+      if (isWebViMock(node)) {
+        violations.push(createViolation(filePath, sourceFile, node, {
+          rule: webViMockRule,
+          description: 'uses vi.mock in a Web Vitest file',
+          fix: 'Use an explicit test seam, provider, or MSW handler instead of module mocking.',
+        }))
+      }
+
       const title = historicalTicketTitle(node)
       if (title !== undefined) violations.push(createHistoricalTicketTitleViolation(filePath, sourceFile, node, title))
 
@@ -877,7 +1311,7 @@ function isViMethodCall(call, methodNames) {
   return member !== null
     && member.name !== null
     && methodNames.has(member.name)
-    && isIdentifierNamed(member.object, 'vi')
+    && isViObject(member.object)
 }
 
 function enclosingFunction(node) {
@@ -1250,9 +1684,17 @@ function runSelfTest() {
   const expectedFiles = [
     'src/allowed-local.test.tsx',
     'src/direct-assignment.test.tsx',
+    'src/environment-directive.test.tsx',
     'src/historical-ticket-title.test.tsx',
     'src/jsdom-geometry.test.tsx',
+    'src/node-fs-source-read.test.tsx',
+    'src/ordinary-dom-global.test.ts',
+    'src/ordinary-testing-library.test.ts',
+    'src/ordinary-type-only-dom.test.ts',
     'src/prototype-calls.test.tsx',
+    'src/web-fetch-global.test.tsx',
+    'src/web-vi-mock-alias.test.tsx',
+    'src/web-vi-mock.test.tsx',
     'tests/active.spec.tsx',
   ]
 
@@ -1289,9 +1731,16 @@ function runSelfTest() {
   )
   const expectedWebRules = {
     'src/direct-assignment.test.tsx': [sharedStateMutationRule, sharedStateMutationRule, sharedStateMutationRule, sharedStateMutationRule],
+    'src/environment-directive.test.tsx': [vitestEnvironmentDirectiveRule, vitestEnvironmentDirectiveRule],
     'src/historical-ticket-title.test.tsx': [historicalTestTitleRule, historicalTestTitleRule, historicalTestTitleRule, historicalTestTitleRule, historicalTestTitleRule, historicalTestTitleRule],
     'src/jsdom-geometry.test.tsx': [jsdomGeometryRule, jsdomGeometryRule, jsdomGeometryRule, jsdomGeometryRule, jsdomGeometryRule, jsdomGeometryRule, jsdomGeometryRule, jsdomGeometryRule, jsdomGeometryRule, jsdomGeometryRule],
+    'src/node-fs-source-read.test.tsx': [webNodeFsSourceReadRule, webNodeFsSourceReadRule, webNodeFsSourceReadRule, webNodeFsSourceReadRule, webNodeFsSourceReadRule, webNodeFsSourceReadRule, webNodeFsSourceReadRule, webNodeFsSourceReadRule, webNodeFsSourceReadRule],
+    'src/ordinary-dom-global.test.ts': [webDomInPlainTestRule, webDomInPlainTestRule, webDomInPlainTestRule, webDomInPlainTestRule],
+    'src/ordinary-testing-library.test.ts': [webDomInPlainTestRule, webDomInPlainTestRule],
     'src/prototype-calls.test.tsx': [sharedStateMutationRule, sharedStateMutationRule, sharedStateMutationRule, sharedStateMutationRule],
+    'src/web-fetch-global.test.tsx': [webFetchGlobalStubRule, webFetchGlobalMutationRule, webFetchGlobalMutationRule, webFetchGlobalMutationRule, webFetchGlobalMutationRule, webFetchGlobalMutationRule, webFetchGlobalMutationRule, webFetchGlobalMutationRule, webFetchGlobalMutationRule, webFetchGlobalMutationRule],
+    'src/web-vi-mock-alias.test.tsx': [webViMockRule, webViMockRule, webViMockRule, webViMockRule],
+    'src/web-vi-mock.test.tsx': [webViMockRule, webViMockRule, webViMockRule, webViMockRule],
     'tests/active.spec.tsx': [sharedStateMutationRule],
   }
 

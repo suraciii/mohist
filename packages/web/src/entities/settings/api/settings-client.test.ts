@@ -1,4 +1,6 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
+import { http, HttpResponse } from 'msw'
+import { server, useMswServer } from '../../../../tests/support/msw'
 import {
   agentRuntimeToConfigKey,
   configToAgentRuntime,
@@ -8,31 +10,59 @@ import {
   updateAgentRuntime,
 } from './client'
 
-afterEach(() => {
-  vi.unstubAllGlobals()
-  vi.restoreAllMocks()
-})
+useMswServer()
+
+interface CapturedRequest {
+  path: string
+  method: string
+  contentType: string | null
+  body?: unknown
+}
+
+const baselineConfig = {
+  maxConcurrentAgents: 3,
+  agentTimeout: 600,
+  taskTimeout: 600,
+  stageTimeout: 3600,
+  pollInterval: 5000,
+  maxGracePeriods: 3,
+}
+
+async function captureRequest(request: Request, requests: CapturedRequest[]) {
+  const url = new URL(request.url)
+  const captured: CapturedRequest = {
+    path: `${url.pathname}${url.search}`,
+    method: request.method,
+    contentType: request.headers.get('content-type'),
+  }
+  if (request.method !== 'GET') captured.body = await request.json()
+  requests.push(captured)
+}
+
+function configResponse(overrides: Record<string, unknown> = {}) {
+  return HttpResponse.json({ success: true, data: { ...baselineConfig, ...overrides } })
+}
+
+function errorResponse(error: string, status: number, code: string) {
+  return HttpResponse.json({ success: false, error, code }, { status })
+}
 
 describe('settings client agent runtime adapter', () => {
   it('reads runtime config from /api/config instead of the missing /api/agent-runtime endpoint', async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      const url = typeof input === 'string' ? input : input.toString()
-      if (url.endsWith('/api/config')) {
-        return Response.json({
-          success: true,
-          data: {
-            maxConcurrentAgents: 4,
-            agentTimeout: 900,
-            taskTimeout: 300,
-            stageTimeout: 1800,
-            pollInterval: 10000,
-            maxGracePeriods: 5,
-          },
+    const requests: CapturedRequest[] = []
+    server.use(
+      http.get('*/api/config', async ({ request }) => {
+        await captureRequest(request, requests)
+        return configResponse({
+          maxConcurrentAgents: 4,
+          agentTimeout: 900,
+          taskTimeout: 300,
+          stageTimeout: 1800,
+          pollInterval: 10000,
+          maxGracePeriods: 5,
         })
-      }
-      return Response.json({ success: false, error: 'not found' }, { status: 404 })
-    })
-    vi.stubGlobal('fetch', fetchMock)
+      }),
+    )
 
     const result = await getAgentRuntime()
 
@@ -44,20 +74,17 @@ describe('settings client agent runtime adapter', () => {
       pollInterval: 10000,
       maxGracePeriods: 5,
     })
-    expect(fetchMock).toHaveBeenCalledTimes(1)
-    const calledUrl = fetchMock.mock.calls[0]?.[0]
-    const calledUrlString = typeof calledUrl === 'string' ? calledUrl : (calledUrl as URL).toString()
-    expect(calledUrlString).toBe('/api/config')
-    expect(calledUrlString).not.toContain('/api/agent-runtime')
+    expect(requests).toEqual([{
+      path: '/api/config',
+      method: 'GET',
+      contentType: 'application/json',
+    }])
   })
 
   it('propagates a load failure from /api/config without falling back to defaults', async () => {
-    const fetchMock = vi.fn(async () => Response.json({
-      success: false,
-      error: 'server unavailable',
-      code: 'server_error',
-    }, { status: 500 }))
-    vi.stubGlobal('fetch', fetchMock)
+    server.use(
+      http.get('*/api/config', () => errorResponse('server unavailable', 500, 'server_error')),
+    )
 
     await expect(getAgentRuntime()).rejects.toMatchObject({
       name: 'ApiError',
@@ -103,41 +130,13 @@ describe('settings client agent runtime adapter', () => {
   })
 
   it('persists supported runtime fields through PUT /api/config/{key} and reuses the latest response', async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = typeof input === 'string' ? input : input.toString()
-      const method = init?.method ?? 'GET'
-
-      if (method === 'GET' && url.endsWith('/api/config')) {
-        return Response.json({
-          success: true,
-          data: {
-            maxConcurrentAgents: 3,
-            agentTimeout: 600,
-            taskTimeout: 600,
-            stageTimeout: 3600,
-            pollInterval: 5000,
-            maxGracePeriods: 3,
-          },
-        })
-      }
-
-      if (method === 'PUT' && url.endsWith('/api/config/agentTimeout')) {
-        return Response.json({
-          success: true,
-          data: {
-            maxConcurrentAgents: 3,
-            agentTimeout: 1200,
-            taskTimeout: 600,
-            stageTimeout: 3600,
-            pollInterval: 5000,
-            maxGracePeriods: 3,
-          },
-        })
-      }
-
-      return Response.json({ success: false, error: 'unexpected' }, { status: 500 })
-    })
-    vi.stubGlobal('fetch', fetchMock)
+    const requests: CapturedRequest[] = []
+    server.use(
+      http.put('*/api/config/:key', async ({ request }) => {
+        await captureRequest(request, requests)
+        return configResponse({ agentTimeout: 1200 })
+      }),
+    )
 
     const result = await updateAgentRuntime({ timeout: 1200000 })
 
@@ -149,80 +148,49 @@ describe('settings client agent runtime adapter', () => {
       pollInterval: 5000,
       maxGracePeriods: 3,
     })
-
-    const putCall = fetchMock.mock.calls.find(([, init]) => init?.method === 'PUT')
-    expect(putCall).toBeDefined()
-    const putUrl = putCall?.[0]
-    const putUrlString = typeof putUrl === 'string' ? putUrl : (putUrl as URL).toString()
-    expect(putUrlString).toBe('/api/config/agentTimeout')
-    expect(putUrlString).not.toContain('/api/agent-runtime')
-    const body = JSON.parse(putCall?.[1]?.body as string)
-    expect(body).toEqual({ value: 1200 })
+    expect(requests).toEqual([{
+      path: '/api/config/agentTimeout',
+      method: 'PUT',
+      contentType: 'application/json',
+      body: { value: 1200 },
+    }])
   })
 
   it('sends only changed supported fields and skips unaffected ones', async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = typeof input === 'string' ? input : input.toString()
-      const method = init?.method ?? 'GET'
-
-      if (method === 'GET' && url.endsWith('/api/config')) {
-        return Response.json({
-          success: true,
-          data: {
-            maxConcurrentAgents: 3,
-            agentTimeout: 600,
-            taskTimeout: 600,
-            stageTimeout: 3600,
-            pollInterval: 5000,
-            maxGracePeriods: 3,
-          },
-        })
-      }
-
-      if (method === 'PUT' && (url.endsWith('/api/config/maxConcurrentAgents') || url.endsWith('/api/config/maxGracePeriods'))) {
-        const body = JSON.parse(init?.body as string) as { value: number }
-        return Response.json({
-          success: true,
-          data: {
-            maxConcurrentAgents: body.value,
-            agentTimeout: 600,
-            taskTimeout: 600,
-            stageTimeout: 3600,
-            pollInterval: 5000,
-            maxGracePeriods: url.endsWith('/api/config/maxGracePeriods') ? body.value : 3,
-          },
-        })
-      }
-
-      return Response.json({ success: false, error: 'unexpected' }, { status: 500 })
-    })
-    vi.stubGlobal('fetch', fetchMock)
+    const requests: CapturedRequest[] = []
+    server.use(
+      http.put('*/api/config/:key', async ({ request }) => {
+        await captureRequest(request, requests)
+        const path = new URL(request.url).pathname
+        return configResponse(path.endsWith('/maxConcurrentAgents')
+          ? { maxConcurrentAgents: 7 }
+          : { maxGracePeriods: 2 })
+      }),
+    )
 
     await updateAgentRuntime({ maxConcurrent: 7, maxGracePeriods: 2 })
 
-    const putCalls = fetchMock.mock.calls.filter(([, init]) => init?.method === 'PUT')
-    const putUrls = putCalls.map(([u]) => (typeof u === 'string' ? u : (u as URL).toString()))
-    expect(putUrls).toContain('/api/config/maxConcurrentAgents')
-    expect(putUrls).toContain('/api/config/maxGracePeriods')
-    expect(putUrls).not.toContain('/api/config/agentTimeout')
-    expect(putUrls).not.toContain('/api/config/taskTimeout')
-    expect(putUrls).not.toContain('/api/config/stageTimeout')
-    expect(putUrls).not.toContain('/api/config/pollInterval')
+    expect(requests).toEqual(expect.arrayContaining([
+      {
+        path: '/api/config/maxConcurrentAgents',
+        method: 'PUT',
+        contentType: 'application/json',
+        body: { value: 7 },
+      },
+      {
+        path: '/api/config/maxGracePeriods',
+        method: 'PUT',
+        contentType: 'application/json',
+        body: { value: 2 },
+      },
+    ]))
+    expect(requests).toHaveLength(2)
   })
 
   it('surfaces server validation failures from the config API', async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = typeof input === 'string' ? input : input.toString()
-      if (init?.method === 'PUT' && url.endsWith('/api/config/agentTimeout')) {
-        return Response.json({
-          success: false,
-          error: 'agentTimeout must be a number',
-          code: 'bad_request',
-        }, { status: 400 })
-      }
-      return Response.json({ success: false, error: 'unexpected' }, { status: 500 })
-    })
-    vi.stubGlobal('fetch', fetchMock)
+    server.use(
+      http.put('*/api/config/agentTimeout', () => errorResponse('agentTimeout must be a number', 400, 'bad_request')),
+    )
 
     await expect(updateAgentRuntime({ timeout: 1200000 })).rejects.toMatchObject({
       name: 'ApiError',
@@ -232,48 +200,23 @@ describe('settings client agent runtime adapter', () => {
   })
 
   it('refetches confirmed state after a successful save by re-reading the latest response', async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = typeof input === 'string' ? input : input.toString()
-      const method = init?.method ?? 'GET'
-
-      if (method === 'GET' && url.endsWith('/api/config')) {
-        return Response.json({
-          success: true,
-          data: {
-            maxConcurrentAgents: 3,
-            agentTimeout: 600,
-            taskTimeout: 600,
-            stageTimeout: 3600,
-            pollInterval: 5000,
-            maxGracePeriods: 3,
-          },
-        })
-      }
-
-      if (method === 'PUT' && url.endsWith('/api/config/pollInterval')) {
-        return Response.json({
-          success: true,
-          data: {
-            maxConcurrentAgents: 3,
-            agentTimeout: 600,
-            taskTimeout: 600,
-            stageTimeout: 3600,
-            pollInterval: 15000,
-            maxGracePeriods: 3,
-          },
-        })
-      }
-
-      return Response.json({ success: false, error: 'unexpected' }, { status: 500 })
-    })
-    vi.stubGlobal('fetch', fetchMock)
+    const requests: CapturedRequest[] = []
+    server.use(
+      http.put('*/api/config/pollInterval', async ({ request }) => {
+        await captureRequest(request, requests)
+        return configResponse({ pollInterval: 15000 })
+      }),
+    )
 
     const result = await updateAgentRuntime({ pollInterval: 15000 })
 
     expect(result.pollInterval).toBe(15000)
-    const putCall = fetchMock.mock.calls.find(([, init]) => init?.method === 'PUT')
-    const body = JSON.parse(putCall?.[1]?.body as string)
-    expect(body).toEqual({ value: 15000 })
+    expect(requests).toEqual([{
+      path: '/api/config/pollInterval',
+      method: 'PUT',
+      contentType: 'application/json',
+      body: { value: 15000 },
+    }])
     expect(result.pollInterval).not.toBe(5000)
   })
 
@@ -289,50 +232,48 @@ describe('settings client agent runtime adapter', () => {
 
 describe('settings client log level', () => {
   it('loads log level from /api/config instead of the missing /api/log-level endpoint', async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      const url = typeof input === 'string' ? input : input.toString()
-      if (url.endsWith('/api/config')) {
-        return Response.json({ success: true, data: { logLevel: 'WARN' } })
-      }
-      return Response.json({ success: false, error: 'not found' }, { status: 404 })
-    })
-    vi.stubGlobal('fetch', fetchMock)
+    const requests: CapturedRequest[] = []
+    server.use(
+      http.get('*/api/config', async ({ request }) => {
+        await captureRequest(request, requests)
+        return configResponse({ logLevel: 'WARN' })
+      }),
+    )
 
     const result = await getLogLevel()
 
     expect(result).toEqual({ level: 'WARN' })
-    expect(fetchMock).toHaveBeenCalledTimes(1)
-    const calledUrl = fetchMock.mock.calls[0]?.[0]
-    const calledUrlString = typeof calledUrl === 'string' ? calledUrl : (calledUrl as URL).toString()
-    expect(calledUrlString).toBe('/api/config')
-    expect(calledUrlString).not.toContain('/api/log-level')
+    expect(requests).toEqual([{
+      path: '/api/config',
+      method: 'GET',
+      contentType: 'application/json',
+    }])
   })
 
   it('persists log level changes through PUT /api/config/logLevel', async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = typeof input === 'string' ? input : input.toString()
-      if (init?.method === 'PUT' && url.endsWith('/api/config/logLevel')) {
-        return Response.json({ success: true, data: { logLevel: 'ERROR' } })
-      }
-      return Response.json({ success: false, error: 'unexpected' }, { status: 500 })
-    })
-    vi.stubGlobal('fetch', fetchMock)
+    const requests: CapturedRequest[] = []
+    server.use(
+      http.put('*/api/config/logLevel', async ({ request }) => {
+        await captureRequest(request, requests)
+        return configResponse({ logLevel: 'ERROR' })
+      }),
+    )
 
     const result = await setLogLevel('ERROR')
 
     expect(result).toEqual({ level: 'ERROR' })
-    const calledUrl = fetchMock.mock.calls[0]?.[0]
-    const calledUrlString = typeof calledUrl === 'string' ? calledUrl : (calledUrl as URL).toString()
-    expect(calledUrlString).toBe('/api/config/logLevel')
+    expect(requests).toEqual([{
+      path: '/api/config/logLevel',
+      method: 'PUT',
+      contentType: 'application/json',
+      body: { value: 'ERROR' },
+    }])
   })
 
   it('surfaces server-side validation failures from the config API', async () => {
-    const fetchMock = vi.fn(async () => Response.json({
-      success: false,
-      error: 'logLevel must be one of DEBUG, INFO, WARN, ERROR',
-      code: 'bad_request',
-    }, { status: 400 }))
-    vi.stubGlobal('fetch', fetchMock)
+    server.use(
+      http.put('*/api/config/logLevel', () => errorResponse('logLevel must be one of DEBUG, INFO, WARN, ERROR', 400, 'bad_request')),
+    )
 
     await expect(setLogLevel('TRACE')).rejects.toMatchObject({
       name: 'ApiError',

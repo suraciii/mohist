@@ -1,4 +1,3 @@
-// @vitest-environment jsdom
 import '@testing-library/jest-dom'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
@@ -235,6 +234,18 @@ describe('App shell bottom spacing for mobile bottom nav', () => {
 
     const classNames = shellContainer!.className.split(/\s+/)
     expect(classNames).not.toContain('pb-14')
+  })
+
+  it('keeps application content shrinkable inside the sidebar inset', () => {
+    renderApp()
+
+    const shellContainer = getShellContentContainer()
+    expect(shellContainer).not.toBeNull()
+
+    const classNames = shellContainer!.className.split(/\s+/)
+    expect(classNames).toContain('flex-1')
+    expect(classNames).toContain('min-h-0')
+    expect(classNames).toContain('min-w-0')
   })
 
   it('routes /:projectName/inbox to the project inbox page', async () => {

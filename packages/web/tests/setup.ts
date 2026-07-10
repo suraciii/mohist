@@ -69,6 +69,23 @@ const _matchMediaMock = ((query: string) => ({
     dispatchEvent: vi.fn(),
   })) as typeof window.matchMedia
 
+function restoreAnimationFrameFallback() {
+  if (typeof window === 'undefined') return
+
+  const requestFrame = (callback: FrameRequestCallback) =>
+    setTimeout(() => callback(performance.now()), 16) as unknown as number
+  const cancelFrame = (handle: number) => clearTimeout(handle)
+
+  window.requestAnimationFrame = requestFrame
+  window.cancelAnimationFrame = cancelFrame
+  globalThis.requestAnimationFrame = requestFrame
+  globalThis.cancelAnimationFrame = cancelFrame
+}
+
+beforeEach(() => {
+  restoreAnimationFrameFallback()
+})
+
 afterEach(() => {
   cleanup()
   restoreScopedProperties()
@@ -78,6 +95,7 @@ afterEach(() => {
   resetSignalrFake()
   vi.useRealTimers()
   vi.unstubAllGlobals()
+  restoreAnimationFrameFallback()
   if (typeof window !== 'undefined') {
     window.localStorage.clear()
     window.sessionStorage.clear()
@@ -131,7 +149,4 @@ if (typeof window !== 'undefined' && typeof window.Element !== 'undefined' && !w
   window.Element.prototype.scrollIntoView = function scrollIntoView() {}
 }
 
-if (typeof window !== 'undefined' && !window.requestAnimationFrame) {
-  window.requestAnimationFrame = (cb: FrameRequestCallback) => setTimeout(() => cb(performance.now()), 16) as unknown as number
-  window.cancelAnimationFrame = (handle: number) => clearTimeout(handle)
-}
+restoreAnimationFrameFallback()

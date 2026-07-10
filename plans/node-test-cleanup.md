@@ -70,7 +70,7 @@ Update table after every gate. Another agent should resume without archaeology.
 | Browser truth | DONE | checker self-test, 297-file Web scan, typecheck, 297/4528 Web suite, build, and two retry-free CI-mode 39/39 Chromium E2E runs passed |
 | Temp ownership | DONE | Runner test temp helper, six planned owners, target 7/99 isolated-TMPDIR proof, 74/1038 Runner suite, and test typecheck passed; final full-suite TMPDIR proof remains after its named dependencies |
 | Platform split | DONE | Runner typecheck/test typecheck, boundary checker, 73/1005 default suite with Git absent from PATH, and repeated 8/36 isolated integration suite passed; CI stays one Node job |
-| Web boundaries | TODO | |
+| Web boundaries | DONE | checker self-test; Web 297 and Runner 81 scans; Web typecheck; 297/4509 normal and fixed-shuffle suite; MSW HTTP boundary, suffix-only environment, and source-read cleanup complete |
 | File size | TODO | |
 | Final proof | TODO | |
 

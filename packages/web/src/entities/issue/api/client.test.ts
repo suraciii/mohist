@@ -1,31 +1,50 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
+import { http, HttpResponse } from 'msw'
+import { server, useMswServer } from '../../../../tests/support/msw'
 import { createIssue, getIssueEvents, getLabels, updateIssue } from './client'
 
-afterEach(() => {
-  vi.unstubAllGlobals()
-  vi.restoreAllMocks()
-})
+useMswServer()
 
-function mockJsonResponse(payload: unknown, status: number = 200): Response {
-  return new Response(JSON.stringify({ success: true, data: payload }), {
-    status,
-    headers: { 'Content-Type': 'application/json' },
-  })
+function successResponse(payload: unknown) {
+  return HttpResponse.json({ success: true, data: payload })
+}
+
+function requestPath(request: Request) {
+  const url = new URL(request.url)
+  return `${url.pathname}${url.search}`
+}
+
+function issueResponse(labels: Record<string, string>) {
+  return {
+    id: 'issue-1',
+    number: 1,
+    title: 'T',
+    status: 'backlog',
+    health: 'active',
+    projectId: 'proj-1',
+    labels,
+    createdAt: '2026-06-19T00:00:00.000Z',
+    updatedAt: '2026-06-19T00:00:00.000Z',
+  }
 }
 
 describe('getIssueEvents', () => {
   it('requests GET /api/projects/{ref}/issues/{number}/events', async () => {
-    const fetchMock = vi.fn<typeof fetch>()
-    fetchMock.mockResolvedValue(mockJsonResponse([]))
-    vi.stubGlobal('fetch', fetchMock)
+    const requests: Request[] = []
+    server.use(
+      http.get('*/api/projects/:projectId/issues/:number/events', ({ request }) => {
+        requests.push(request)
+        return successResponse([])
+      }),
+    )
 
     const events = await getIssueEvents(42, 'proj-1')
 
     expect(events).toEqual([])
-    expect(fetchMock).toHaveBeenCalledTimes(1)
-    const [calledPath, calledInit] = fetchMock.mock.calls[0]
-    expect(calledPath).toBe('/api/projects/proj-1/issues/42/events')
-    expect(calledInit?.method).toBeUndefined()
+    expect(requests).toHaveLength(1)
+    expect(requestPath(requests[0])).toBe('/api/projects/proj-1/issues/42/events')
+    expect(requests[0].method).toBe('GET')
+    expect(requests[0].headers.get('content-type')).toBe('application/json')
   })
 
   it('returns the stored cloud events payload', async () => {
@@ -43,7 +62,9 @@ describe('getIssueEvents', () => {
         extensions: {},
       },
     ]
-    vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockResolvedValue(mockJsonResponse(stored)))
+    server.use(
+      http.get('*/api/projects/:projectId/issues/:number/events', () => successResponse(stored)),
+    )
 
     const events = await getIssueEvents(42, 'proj-1')
 
@@ -51,7 +72,9 @@ describe('getIssueEvents', () => {
   })
 
   it('returns an empty array when the server sends an empty list', async () => {
-    vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockResolvedValue(mockJsonResponse([])))
+    server.use(
+      http.get('*/api/projects/:projectId/issues/:number/events', () => successResponse([])),
+    )
 
     const events = await getIssueEvents(42, 'proj-1')
 
@@ -61,20 +84,27 @@ describe('getIssueEvents', () => {
 
 describe('getLabels', () => {
   it('requests GET /api/projects/{ref}/labels and returns distinct keys', async () => {
-    const fetchMock = vi.fn<typeof fetch>()
-    fetchMock.mockResolvedValue(mockJsonResponse(['stream', 'module']))
-    vi.stubGlobal('fetch', fetchMock)
+    const requests: Request[] = []
+    server.use(
+      http.get('*/api/projects/:projectId/labels', ({ request }) => {
+        requests.push(request)
+        return successResponse(['stream', 'module'])
+      }),
+    )
 
     const keys = await getLabels('proj-1')
 
     expect(keys).toEqual(['stream', 'module'])
-    expect(fetchMock).toHaveBeenCalledTimes(1)
-    const [calledPath] = fetchMock.mock.calls[0]
-    expect(calledPath).toBe('/api/projects/proj-1/labels')
+    expect(requests).toHaveLength(1)
+    expect(requestPath(requests[0])).toBe('/api/projects/proj-1/labels')
+    expect(requests[0].method).toBe('GET')
+    expect(requests[0].headers.get('content-type')).toBe('application/json')
   })
 
   it('returns an empty array when the project has no labels', async () => {
-    vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockResolvedValue(mockJsonResponse([])))
+    server.use(
+      http.get('*/api/projects/:projectId/labels', () => successResponse([])),
+    )
 
     const keys = await getLabels('proj-empty')
 
@@ -84,21 +114,13 @@ describe('getLabels', () => {
 
 describe('createIssue / updateIssue with key-value labels', () => {
   it('createIssue POSTs title and key-value labels object', async () => {
-    const fetchMock = vi.fn<typeof fetch>()
-    fetchMock.mockResolvedValue(
-      mockJsonResponse({
-        id: 'issue-1',
-        number: 1,
-        title: 'T',
-        status: 'backlog',
-        health: 'active',
-        projectId: 'proj-1',
-        labels: { stream: 'frontend' },
-        createdAt: '2026-06-19T00:00:00.000Z',
-        updatedAt: '2026-06-19T00:00:00.000Z',
+    const requests: Request[] = []
+    server.use(
+      http.post('*/api/projects/:projectId/issues', ({ request }) => {
+        requests.push(request)
+        return successResponse(issueResponse({ stream: 'frontend' }))
       }),
     )
-    vi.stubGlobal('fetch', fetchMock)
 
     await createIssue({
       title: 'T',
@@ -106,40 +128,32 @@ describe('createIssue / updateIssue with key-value labels', () => {
       projectId: 'proj-1',
     })
 
-    expect(fetchMock).toHaveBeenCalledTimes(1)
-    const [calledPath, calledInit] = fetchMock.mock.calls[0]
-    expect(calledPath).toBe('/api/projects/proj-1/issues')
-    expect(calledInit?.method).toBe('POST')
-    expect(JSON.parse(calledInit?.body as string)).toEqual({
+    expect(requests).toHaveLength(1)
+    expect(requestPath(requests[0])).toBe('/api/projects/proj-1/issues')
+    expect(requests[0].method).toBe('POST')
+    expect(requests[0].headers.get('content-type')).toBe('application/json')
+    await expect(requests[0].json()).resolves.toEqual({
       title: 'T',
       labels: { stream: 'frontend', module: 'auth' },
     })
   })
 
   it('updateIssue PATCHes the full labels map (replacement)', async () => {
-    const fetchMock = vi.fn<typeof fetch>()
-    fetchMock.mockResolvedValue(
-      mockJsonResponse({
-        id: 'issue-1',
-        number: 1,
-        title: 'T',
-        status: 'backlog',
-        health: 'active',
-        projectId: 'proj-1',
-        labels: { module: 'auth' },
-        createdAt: '2026-06-19T00:00:00.000Z',
-        updatedAt: '2026-06-19T00:00:00.000Z',
+    const requests: Request[] = []
+    server.use(
+      http.patch('*/api/projects/:projectId/issues/:number', ({ request }) => {
+        requests.push(request)
+        return successResponse(issueResponse({ module: 'auth' }))
       }),
     )
-    vi.stubGlobal('fetch', fetchMock)
 
     await updateIssue(1, { labels: { module: 'auth' } }, 'proj-1')
 
-    expect(fetchMock).toHaveBeenCalledTimes(1)
-    const [calledPath, calledInit] = fetchMock.mock.calls[0]
-    expect(calledPath).toBe('/api/projects/proj-1/issues/1')
-    expect(calledInit?.method).toBe('PATCH')
-    expect(JSON.parse(calledInit?.body as string)).toEqual({
+    expect(requests).toHaveLength(1)
+    expect(requestPath(requests[0])).toBe('/api/projects/proj-1/issues/1')
+    expect(requests[0].method).toBe('PATCH')
+    expect(requests[0].headers.get('content-type')).toBe('application/json')
+    await expect(requests[0].json()).resolves.toEqual({
       labels: { module: 'auth' },
     })
   })

@@ -5,3 +5,9 @@ Reflect.defineProperty(element, 'clientHeight', { configurable: true, value: 12 
 Reflect.deleteProperty(element, 'unused')
 vi.spyOn(window, 'matchMedia')
 vi.stubGlobal('exampleBoundary', true)
+
+function replaceLocalFetch(fetch: () => Promise<Response>) {
+  fetch = () => Promise.resolve(new Response())
+}
+
+void replaceLocalFetch

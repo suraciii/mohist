@@ -1,4 +1,3 @@
-// @vitest-environment jsdom
 import { describe, expect, it } from 'vitest'
 import { parseDiff, isLargeDiff, getDiffStats, DEFAULT_LARGE_DIFF_THRESHOLD } from './diffModel'
 

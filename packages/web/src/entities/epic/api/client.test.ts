@@ -1,75 +1,73 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
+import { http, HttpResponse } from 'msw'
+import { server, useMswServer } from '../../../../tests/support/msw'
 import { getEpicEvents, getEpics } from './client'
 
-afterEach(() => {
-  vi.unstubAllGlobals()
-  vi.restoreAllMocks()
-})
+useMswServer()
 
-function mockJsonResponse(payload: unknown): Response {
-  return new Response(JSON.stringify({ success: true, data: payload }), {
-    status: 200,
-    headers: { 'Content-Type': 'application/json' },
-  })
+function successResponse(payload: unknown) {
+  return HttpResponse.json({ success: true, data: payload })
+}
+
+function requestPath(request: Request) {
+  const url = new URL(request.url)
+  return `${url.pathname}${url.search}`
+}
+
+function recordEpicListRequest(payload: unknown = []) {
+  const requests: Request[] = []
+  server.use(
+    http.get('*/api/projects/:projectId/epics', ({ request }) => {
+      requests.push(request)
+      return successResponse(payload)
+    }),
+  )
+  return requests
 }
 
 describe('getEpics query-string forwarding', () => {
   it('requests GET /api/projects/{ref}/epics with no query string when params are omitted', async () => {
-    const fetchMock = vi.fn<typeof fetch>()
-    fetchMock.mockResolvedValue(mockJsonResponse([]))
-    vi.stubGlobal('fetch', fetchMock)
+    const requests = recordEpicListRequest()
 
     const list = await getEpics({ projectId: 'proj-1' })
 
     expect(list).toEqual([])
-    expect(fetchMock).toHaveBeenCalledTimes(1)
-    const [calledPath, calledInit] = fetchMock.mock.calls[0]
-    expect(calledPath).toBe('/api/projects/proj-1/epics')
-    expect(calledInit?.method).toBeUndefined()
+    expect(requests).toHaveLength(1)
+    expect(requestPath(requests[0])).toBe('/api/projects/proj-1/epics')
+    expect(requests[0].method).toBe('GET')
+    expect(requests[0].headers.get('content-type')).toBe('application/json')
   })
 
   it('appends ?search={term} when search is provided', async () => {
-    const fetchMock = vi.fn<typeof fetch>()
-    fetchMock.mockResolvedValue(mockJsonResponse([]))
-    vi.stubGlobal('fetch', fetchMock)
+    const requests = recordEpicListRequest()
 
     await getEpics({ projectId: 'proj-1', search: 'auth' })
 
-    const [calledPath] = fetchMock.mock.calls[0]
-    expect(calledPath).toBe('/api/projects/proj-1/epics?search=auth')
+    expect(requestPath(requests[0])).toBe('/api/projects/proj-1/epics?search=auth')
   })
 
   it('appends ?sort=...&dir=... when sort fields are provided', async () => {
-    const fetchMock = vi.fn<typeof fetch>()
-    fetchMock.mockResolvedValue(mockJsonResponse([]))
-    vi.stubGlobal('fetch', fetchMock)
+    const requests = recordEpicListRequest()
 
     await getEpics({ projectId: 'proj-1', sort: 'priority', dir: 'asc' })
 
-    const [calledPath] = fetchMock.mock.calls[0]
-    expect(calledPath).toBe('/api/projects/proj-1/epics?sort=priority&dir=asc')
+    expect(requestPath(requests[0])).toBe('/api/projects/proj-1/epics?sort=priority&dir=asc')
   })
 
   it('combines search + sort + dir into a single querystring', async () => {
-    const fetchMock = vi.fn<typeof fetch>()
-    fetchMock.mockResolvedValue(mockJsonResponse([]))
-    vi.stubGlobal('fetch', fetchMock)
+    const requests = recordEpicListRequest()
 
     await getEpics({ projectId: 'proj-1', search: 'auth', sort: 'updated', dir: 'desc' })
 
-    const [calledPath] = fetchMock.mock.calls[0]
-    expect(calledPath).toBe('/api/projects/proj-1/epics?search=auth&sort=updated&dir=desc')
+    expect(requestPath(requests[0])).toBe('/api/projects/proj-1/epics?search=auth&sort=updated&dir=desc')
   })
 
   it('skips empty search and default sort/dir keys so the URL stays minimal', async () => {
-    const fetchMock = vi.fn<typeof fetch>()
-    fetchMock.mockResolvedValue(mockJsonResponse([]))
-    vi.stubGlobal('fetch', fetchMock)
+    const requests = recordEpicListRequest()
 
     await getEpics({ projectId: 'proj-1', search: '' })
 
-    const [calledPath] = fetchMock.mock.calls[0]
-    expect(calledPath).toBe('/api/projects/proj-1/epics')
+    expect(requestPath(requests[0])).toBe('/api/projects/proj-1/epics')
   })
 
   it('returns the parsed epics array on a 200 success envelope', async () => {
@@ -94,9 +92,7 @@ describe('getEpics query-string forwarding', () => {
         },
       },
     ]
-    const fetchMock = vi.fn<typeof fetch>()
-    fetchMock.mockResolvedValue(mockJsonResponse(payload))
-    vi.stubGlobal('fetch', fetchMock)
+    recordEpicListRequest(payload)
 
     const result = await getEpics({ projectId: 'proj-1', search: 'auth' })
 
@@ -107,27 +103,34 @@ describe('getEpics query-string forwarding', () => {
 
 describe('getEpicEvents', () => {
   it('requests GET /api/projects/{ref}/epics/{id}/events with the encoded id', async () => {
-    const fetchMock = vi.fn<typeof fetch>()
-    fetchMock.mockResolvedValue(mockJsonResponse([]))
-    vi.stubGlobal('fetch', fetchMock)
+    const requests: Request[] = []
+    server.use(
+      http.get('*/api/projects/:projectId/epics/:epicId/events', ({ request }) => {
+        requests.push(request)
+        return successResponse([])
+      }),
+    )
 
     await getEpicEvents('epic-1', 'proj-1')
 
-    expect(fetchMock).toHaveBeenCalledTimes(1)
-    const [calledPath, calledInit] = fetchMock.mock.calls[0]
-    expect(calledPath).toBe('/api/projects/proj-1/epics/epic-1/events')
-    expect(calledInit?.method).toBeUndefined()
+    expect(requests).toHaveLength(1)
+    expect(requestPath(requests[0])).toBe('/api/projects/proj-1/epics/epic-1/events')
+    expect(requests[0].method).toBe('GET')
+    expect(requests[0].headers.get('content-type')).toBe('application/json')
   })
 
   it('encodes epic ids that contain characters needing URL escaping', async () => {
-    const fetchMock = vi.fn<typeof fetch>()
-    fetchMock.mockResolvedValue(mockJsonResponse([]))
-    vi.stubGlobal('fetch', fetchMock)
+    const paths: string[] = []
+    server.use(
+      http.get('*/api/projects/:projectId/epics/:epicId/events', ({ request }) => {
+        paths.push(requestPath(request))
+        return successResponse([])
+      }),
+    )
 
     await getEpicEvents('epic with/slash', 'proj-1')
 
-    const [calledPath] = fetchMock.mock.calls[0]
-    expect(calledPath).toBe('/api/projects/proj-1/epics/epic%20with%2Fslash/events')
+    expect(paths).toEqual(['/api/projects/proj-1/epics/epic%20with%2Fslash/events'])
   })
 
   it('returns the parsed events array on a 200 success envelope', async () => {
@@ -145,9 +148,9 @@ describe('getEpicEvents', () => {
         extensions: { projectid: 'proj-1', epicid: 'epic-1', epicno: '1' },
       },
     ]
-    const fetchMock = vi.fn<typeof fetch>()
-    fetchMock.mockResolvedValue(mockJsonResponse(payload))
-    vi.stubGlobal('fetch', fetchMock)
+    server.use(
+      http.get('*/api/projects/:projectId/epics/:epicId/events', () => successResponse(payload)),
+    )
 
     const result = await getEpicEvents('epic-1', 'proj-1')
 

@@ -1,4 +1,3 @@
-// @vitest-environment jsdom
 import '@testing-library/jest-dom'
 import { describe, expect, it } from 'vitest'
 import { STATUS_PILL_PAIRS } from './IssueCard'

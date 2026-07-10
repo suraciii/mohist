@@ -1,4 +1,3 @@
-// @vitest-environment jsdom
 import '@testing-library/jest-dom'
 import { fireEvent, render, screen, waitFor } from '../../../../tests/test-utils'
 import { http, HttpResponse } from 'msw'
