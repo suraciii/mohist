@@ -59,25 +59,30 @@ describe('KanbanBoard Homepage Regression Coverage', () => {
       ]
       renderBoard(<KanbanBoard issues={issues} agentStatus={mockAgentStatus} />)
 
-      const cancelledColumn = screen.getByTestId('stage-column-cancelled')
+      // Default render path: showCancelled=false → the Cancelled group
+      // renders as a compact stub (not a full StageColumn with hidden body).
+      const collapsedStub = screen.getByTestId('cancelled-collapsed-stub')
+      expect(collapsedStub).toBeInTheDocument()
+      expect(collapsedStub.textContent).toContain('1')
+      expect(screen.queryByTestId('stage-column-cancelled')).not.toBeInTheDocument()
+
+      // Clicking the stub's expand affordance restores the full-width
+      // StageColumn with the cancelled-toggle reading 'Hide cancelled'.
+      fireEvent.click(within(collapsedStub).getByTestId('cancelled-collapsed-stub-expand'))
+
+      const cancelledColumn = await screen.findByTestId('stage-column-cancelled')
       const toggle = within(cancelledColumn).getByTestId('cancelled-toggle')
+      expect(toggle).toHaveTextContent('Hide cancelled')
+      expect(within(cancelledColumn).getByText('Cancelled work')).toBeInTheDocument()
 
-      expect(toggle).toHaveTextContent('Show cancelled (1)')
-      expect(within(cancelledColumn).queryByText('Cancelled work')).not.toBeInTheDocument()
-
-      fireEvent.click(toggle)
-
-      await waitFor(() => {
-        expect(within(cancelledColumn).getByText('Cancelled work')).toBeInTheDocument()
-      })
-      expect(within(cancelledColumn).getByTestId('cancelled-toggle')).toHaveTextContent('Hide cancelled')
-
+      // Clicking 'Hide cancelled' collapses back to the compact stub and
+      // removes the full stage-column-cancelled element.
       fireEvent.click(within(cancelledColumn).getByTestId('cancelled-toggle'))
 
       await waitFor(() => {
-        expect(within(cancelledColumn).queryByText('Cancelled work')).not.toBeInTheDocument()
+        expect(screen.getByTestId('cancelled-collapsed-stub')).toBeInTheDocument()
       })
-      expect(within(cancelledColumn).getByTestId('cancelled-toggle')).toHaveTextContent('Show cancelled (1)')
+      expect(screen.queryByTestId('stage-column-cancelled')).not.toBeInTheDocument()
     })
   })
 

@@ -652,7 +652,46 @@ export function KanbanBoard({
       <div data-testid="kanban-board-row" className="hidden md:flex flex-row gap-4 overflow-x-auto p-4 flex-1 min-w-0">
         {displayedColumns.map((col) => {
           const isCancelled = col.key === IssueStatus.Cancelled
-          const cancelledColumnHidden = isCancelled && !showCancelled && col.issues.length > 0
+          const cancelledHasIssues = isCancelled && col.issues.length > 0
+          const renderCollapsedStub = isCancelled && !showCancelled && cancelledHasIssues
+          if (renderCollapsedStub) {
+            const colors = getStageColors(col.key)
+            return (
+              <div
+                key={col.key}
+                data-testid="cancelled-collapsed-stub"
+                data-stage={col.key}
+                className={`flex flex-col w-[120px] shrink-0 rounded-xl border bg-card/40 ${colors.activeBorder}`}
+              >
+                <div
+                  className="flex items-center gap-2 px-3 pt-2.5 pb-2 border-b"
+                  style={{ borderBottomColor: `${colors.accent}30` }}
+                >
+                  <span
+                    className="inline-block h-2 w-2 rounded-full shrink-0"
+                    style={{ backgroundColor: colors.accent }}
+                  />
+                  <h2 className={`text-xs font-semibold uppercase tracking-wide ${colors.labelClass}`}>
+                    {col.label}
+                  </h2>
+                  <span className="ml-auto text-xs text-muted-foreground tabular-nums">
+                    {col.issues.length}
+                  </span>
+                </div>
+                <div className="flex-1 flex items-center justify-center p-2">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    data-testid="cancelled-collapsed-stub-expand"
+                    onClick={() => setShowCancelled(true)}
+                    className="h-auto px-2 py-0.5 text-[11px] font-medium text-muted-foreground hover:text-foreground hover:bg-muted/80 transition-colors"
+                  >
+                    Show cancelled
+                  </Button>
+                </div>
+              </div>
+            )
+          }
           return (
             <StageColumn
               key={col.key}
@@ -674,12 +713,6 @@ export function KanbanBoard({
                     {showCancelled ? 'Hide cancelled' : `Show cancelled (${col.issues.length})`}
                   </Button>
                 ) : undefined
-              }
-              bodyHidden={cancelledColumnHidden}
-              emptyState={
-                isCancelled
-                  ? `Cancelled issues hidden — ${col.issues.length} not shown`
-                  : undefined
               }
             />
           )

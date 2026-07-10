@@ -45,6 +45,12 @@ useMswServer(
       },
     }),
   ),
+  http.get('*/api/projects/:projectId/workflow-profile/variables', () =>
+    HttpResponse.json({ success: true, data: { vars: {}, stages: {} } }),
+  ),
+  http.get('*/api/projects/:projectId/opencode/models', () =>
+    HttpResponse.json({ success: true, data: { models: [], modelVariants: {} } }),
+  ),
   http.get('*/api/workflow-templates/system', () =>
     HttpResponse.json({ success: true, data: [] }),
   ),
