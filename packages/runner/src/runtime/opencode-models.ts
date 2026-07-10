@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process"
+import { spawnSync } from "node:child_process"
 
 export interface DiscoveredOpencodeModels {
   models: string[]
@@ -130,12 +130,13 @@ export function clearOpencodeModelsCacheForTesting(): void {
   cached = null
 }
 
+// opencode streams its models output asynchronously, and the async execFile
+// callback can fire (process 'close') while stdout pipe data is still buffered
+// — observed truncating 49KB output to 32KB and silently dropping providers.
+// spawnSync drains all pipes before returning, so it captures the full output.
 function execFileText(command: string, args: string[], signal: AbortSignal): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const child = execFile(command, args, { signal, timeout: 10_000 }, (error, stdout) => {
-      if (error) reject(error)
-      else resolve(stdout)
-    })
-    child.unref?.()
-  })
+  const result = spawnSync(command, args, { signal, timeout: 10_000, encoding: "utf8", maxBuffer: 16 * 1024 * 1024 })
+  if (result.error) throw result.error
+  if (result.status !== 0) throw new Error(`${command} ${args.join(" ")} exited with ${result.status}`)
+  return Promise.resolve(result.stdout)
 }
