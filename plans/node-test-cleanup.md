@@ -66,7 +66,7 @@ Update table after every gate. Another agent should resume without archaeology.
 | Runner truth | DONE | Runner production/test typecheck, target retry regression, 73/1036 suite, fixed shuffle seed 20260710, and build passed |
 | Shared state | DONE | Boundary checker self-test, 297-file scan, Web typecheck, 297/4531 suite, and fixed shuffle seed 20260710 passed |
 | Fake time | DONE | Boundary checker self-test, Runner/Web scans, typechecks, 73/1036 Runner, 297/4531 Web, and fixed-seed shuffle passed |
-| Browser truth | IN PROGRESS | jsdom geometry guard and browser coverage migration in progress |
+| Browser truth | DONE | checker self-test, 297-file Web scan, typecheck, 297/4528 Web suite, build, and two retry-free CI-mode 39/39 Chromium E2E runs passed |
 | Temp ownership | TODO | |
 | Platform split | TODO | |
 | Web boundaries | TODO | |

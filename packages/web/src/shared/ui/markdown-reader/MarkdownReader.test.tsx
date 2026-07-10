@@ -1,7 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { useRef, type ReactNode } from 'react'
 import { MarkdownReader, type MarkdownAttachment } from './MarkdownReader'
 import * as SharedUiBarrel from '@/shared/ui'
 import { setScopedProperty, setScopedValue } from '../../../../tests/support/scoped-property'
@@ -26,20 +25,6 @@ class StubResizeObserver {
   disconnect(): void {
     this.observed = []
   }
-}
-
-function OverflowProbe({ children }: { children: ReactNode }) {
-  const containerRef = useRef<HTMLDivElement | null>(null)
-
-  return (
-    <div
-      ref={containerRef}
-      data-testid="overflow-probe"
-      className="w-[400px] overflow-x-hidden border"
-    >
-      {children}
-    </div>
-  )
 }
 
 function setupResizeObserver() {
@@ -249,64 +234,21 @@ describe('MarkdownReader heading remap', () => {
   })
 })
 
-describe('MarkdownReader code-block overflow', () => {
-  beforeEach(() => {
-    setupResizeObserver()
-  })
-
+describe('MarkdownReader code-block scrolling affordance', () => {
   afterEach(() => {
     cleanup()
   })
 
-  it('does not produce page-level horizontal overflow for a long code line', () => {
+  it('marks a long code line and its pre wrapper as horizontally scrollable', () => {
     const longLine = 'a'.repeat(2000)
     const content = '```\n' + longLine + '\n```'
 
-    const measured = { code: { scrollWidth: 0, clientWidth: 0 }, pre: { scrollWidth: 0, clientWidth: 0 }, probe: { scrollWidth: 0, clientWidth: 0 } }
-
-    setScopedProperty(HTMLElement.prototype, 'scrollWidth', {
-      configurable: true,
-      get(this: HTMLElement) {
-        const testId = this.getAttribute?.('data-testid')
-        if (testId === 'markdown-code-block') return measured.code.scrollWidth
-        if (testId === 'markdown-pre') return measured.pre.scrollWidth
-        if (testId === 'overflow-probe') return measured.probe.scrollWidth
-        return 0
-      },
-    })
-    setScopedProperty(HTMLElement.prototype, 'clientWidth', {
-      configurable: true,
-      get(this: HTMLElement) {
-        const testId = this.getAttribute?.('data-testid')
-        if (testId === 'markdown-code-block') return measured.code.clientWidth
-        if (testId === 'markdown-pre') return measured.pre.clientWidth
-        if (testId === 'overflow-probe') return measured.probe.clientWidth
-        return 0
-      },
-    })
-
-    render(
-      <OverflowProbe>
-        <MarkdownReader content={content} baseHeadingLevel={2} />
-      </OverflowProbe>,
-    )
-
-    measured.code.scrollWidth = 5000
-    measured.code.clientWidth = 300
-    measured.pre.scrollWidth = 5000
-    measured.pre.clientWidth = 300
-    measured.probe.scrollWidth = 400
-    measured.probe.clientWidth = 400
-
-    const probe = screen.getByTestId('overflow-probe')
-    expect(probe.scrollWidth).toBe(probe.clientWidth)
+    render(<MarkdownReader content={content} baseHeadingLevel={2} />)
 
     const codeEl = screen.getByTestId('markdown-code-block')
-    expect(codeEl.scrollWidth).toBeGreaterThan(codeEl.clientWidth)
     expect(codeEl.className).toContain('overflow-x-auto')
 
     const preEl = screen.getByTestId('markdown-pre')
-    expect(preEl.scrollWidth).toBeGreaterThan(preEl.clientWidth)
     expect(preEl.className).toContain('overflow-x-auto')
   })
 })
@@ -347,17 +289,13 @@ describe('MarkdownReader table containment', () => {
     cleanup()
   })
 
-  it('wraps a wide table in a horizontally scrollable container and does not expand the page', () => {
+  it('wraps a wide table in a horizontally scrollable container', () => {
     const header = '| ' + Array.from({ length: 12 }, (_, i) => `col-${i + 1}`).join(' | ') + ' |'
     const separator = '| ' + Array.from({ length: 12 }, () => '---').join(' | ') + ' |'
     const row = '| ' + Array.from({ length: 12 }, (_, i) => `value-${i + 1}`).join(' | ') + ' |'
     const content = [header, separator, row, row, row].join('\n')
 
-    render(
-      <OverflowProbe>
-        <MarkdownReader content={content} baseHeadingLevel={2} />
-      </OverflowProbe>,
-    )
+    render(<MarkdownReader content={content} baseHeadingLevel={2} />)
 
     const wrapper = screen.getByTestId('markdown-table-wrapper')
     expect(wrapper.className).toContain('overflow-x-auto')

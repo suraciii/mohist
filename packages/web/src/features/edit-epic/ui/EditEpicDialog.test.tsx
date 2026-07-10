@@ -8,7 +8,6 @@ import { ProjectProvider } from '../../../entities/project'
 import { EditEpicDialog } from './EditEpicDialog'
 import type { EpicDetail, EpicPriority, EpicStatus } from '../../../entities/epic'
 import { EPIC_DESCRIPTION_TEMPLATE } from '@/shared/lib/epic-description-template'
-import { setScopedProperty } from '../../../../tests/support/scoped-property'
 
 const updateHandler = vi.fn(async ({ id, data }: {
   id: string
@@ -69,17 +68,6 @@ function renderDialog(props: { open?: boolean; onClose?: () => void; epic?: Epic
       </ProjectProvider>
     </QueryClientProvider>,
   )
-}
-
-function stubWidth(width: number) {
-  setScopedProperty(document.documentElement, 'scrollWidth', {
-    configurable: true,
-    get: () => width,
-  })
-  setScopedProperty(document.documentElement, 'clientWidth', {
-    configurable: true,
-    get: () => width,
-  })
 }
 
 afterEach(() => {
@@ -285,18 +273,8 @@ describe('EditEpicDialog opt-in Insert template', () => {
   })
 })
 
-describe('EditEpicDialog mobile-safe layout', () => {
-  it('renders without horizontal overflow at 320, 390, and 430 px', () => {
-    for (const width of [320, 390, 430]) {
-      cleanup()
-      stubWidth(width)
-      renderDialog()
-
-      expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(document.documentElement.clientWidth)
-    }
-  })
-
-  it('keeps the submit action reachable through a sticky footer (footer is outside the scroll region)', () => {
+describe('EditEpicDialog footer structure', () => {
+  it('places the submit action in a footer outside the scroll region', () => {
     renderDialog()
 
     const footer = screen.getByTestId('edit-epic-footer')
@@ -310,7 +288,7 @@ describe('EditEpicDialog mobile-safe layout', () => {
     expect(scrollRegion.contains(footer)).toBe(false)
   })
 
-  it('keeps the cancel action in the same sticky footer', () => {
+  it('places the cancel action in the same footer', () => {
     renderDialog()
 
     const footer = screen.getByTestId('edit-epic-footer')

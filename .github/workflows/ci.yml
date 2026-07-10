@@ -81,3 +81,17 @@ jobs:
 
       - name: Test web
         run: npm run test:ci -w packages/web
+
+      - name: Install Chromium
+        run: npm exec -w packages/web -- playwright install --with-deps chromium
+
+      - name: Test web E2E
+        run: npm run test:e2e -w packages/web
+
+      - name: Upload Playwright traces
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: playwright-traces
+          path: packages/web/test-results
+          if-no-files-found: ignore

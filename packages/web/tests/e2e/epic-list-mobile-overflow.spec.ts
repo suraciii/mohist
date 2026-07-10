@@ -131,30 +131,27 @@ async function expectNoHorizontalOverflow(page: Page) {
   expect(metrics.scrollWidth).toBeLessThanOrEqual(metrics.clientWidth)
 }
 
-async function expectStateTextVisibleWithinViewport(page: Page) {
-  const viewport = page.viewportSize()
-  expect(viewport).not.toBeNull()
-  const stateTexts = [
-    page.getByTestId('epic-card-in-progress').filter({ hasText: '#12345' }),
-    page.getByTestId('epic-card-next').filter({ hasText: '#67890' }),
-  ]
+async function expectBoxInsideViewport(page: Page, locator: ReturnType<Page['getByTestId']>, label: string) {
+  await expect(locator, label).toBeVisible()
+  await locator.scrollIntoViewIfNeeded()
 
-  for (const stateText of stateTexts) {
-    await expect(stateText).toBeVisible()
-    const box = await stateText.boundingBox()
-    expect(box).not.toBeNull()
-    expect(box!.x).toBeGreaterThanOrEqual(0)
-    expect(box!.x + box!.width).toBeLessThanOrEqual(viewport!.width)
-  }
+  const [box, viewport] = await Promise.all([
+    locator.boundingBox(),
+    page.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight })),
+  ])
 
-  for (const label of ['Running', 'Idle']) {
-    const badge = page.locator('[data-slot="badge"]', { hasText: label }).first()
-    await expect(badge).toBeVisible()
-    const box = await badge.boundingBox()
-    expect(box).not.toBeNull()
-    expect(box!.x).toBeGreaterThanOrEqual(0)
-    expect(box!.x + box!.width).toBeLessThanOrEqual(viewport!.width)
-  }
+  expect(box, `${label} has a rendered box`).not.toBeNull()
+  expect(box!.x, `${label} starts inside the viewport`).toBeGreaterThanOrEqual(0)
+  expect(box!.y, `${label} starts inside the viewport`).toBeGreaterThanOrEqual(0)
+  expect(box!.x + box!.width, `${label} ends inside the viewport`).toBeLessThanOrEqual(viewport.width)
+  expect(box!.y + box!.height, `${label} ends inside the viewport`).toBeLessThanOrEqual(viewport.height)
+}
+
+async function expectResponsiveControlsInsideViewport(page: Page) {
+  await expectBoxInsideViewport(page, page.getByTestId('epic-list-toolbar'), 'Epic list toolbar')
+  await expectBoxInsideViewport(page, page.getByTestId('epic-card-in-progress'), 'Running issue label')
+  await expectBoxInsideViewport(page, page.getByTestId('epic-card-next').filter({ hasText: '#67890' }), 'Next issue label')
+  await expectBoxInsideViewport(page, page.getByTestId('epic-card-start'), 'Start next issue action')
 }
 
 test.describe('Epic list mobile overflow', () => {
@@ -171,7 +168,7 @@ test.describe('Epic list mobile overflow', () => {
       await expect(page.getByTestId('epic-section-idle')).toContainText('No linked issues')
 
       await expectNoHorizontalOverflow(page)
-      await expectStateTextVisibleWithinViewport(page)
+      await expectResponsiveControlsInsideViewport(page)
     })
   }
 })

@@ -91,8 +91,15 @@ async function mockEpicApi(page: Page) {
     if (method === 'GET' && path === `/projects/${project.id}/issues`) {
       return route.fulfill({ json: apiResponse([makeIssue(3, { title: 'Available issue' })]) })
     }
-    if (method === 'GET' && path.startsWith(`/projects/${project.id}/epics/`)) {
-      const id = decodeURIComponent(path.split('/').at(-1) ?? '')
+    const epicPath = `/projects/${project.id}/epics/`
+    if (method === 'GET' && path.startsWith(epicPath) && path.endsWith('/events')) {
+      return route.fulfill({ json: apiResponse([]) })
+    }
+    if (method === 'GET' && path.startsWith(epicPath)) {
+      const id = decodeURIComponent(path.slice(epicPath.length))
+      if (id.includes('/')) {
+        return route.fulfill({ status: 404, json: { success: false, error: `Unhandled test route: ${method} ${path}` } })
+      }
       if (id === 'epic-linked-rows') {
         return route.fulfill({
           json: apiResponse(makeEpic('idle', {
@@ -131,18 +138,37 @@ async function expectNoHorizontalOverflow(page: Page) {
   expect(metrics.scrollWidth).toBeLessThanOrEqual(metrics.clientWidth)
 }
 
+async function expectBoxInsideViewport(page: Page, locator: ReturnType<Page['getByTestId']>, label: string) {
+  await expect(locator, label).toBeVisible()
+  await locator.scrollIntoViewIfNeeded()
+
+  const [box, viewport] = await Promise.all([
+    locator.boundingBox(),
+    page.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight })),
+  ])
+
+  expect(box, `${label} has a rendered box`).not.toBeNull()
+  expect(box!.x, `${label} starts inside the viewport`).toBeGreaterThanOrEqual(0)
+  expect(box!.y, `${label} starts inside the viewport`).toBeGreaterThanOrEqual(0)
+  expect(box!.x + box!.width, `${label} ends inside the viewport`).toBeLessThanOrEqual(viewport.width)
+  expect(box!.y + box!.height, `${label} ends inside the viewport`).toBeLessThanOrEqual(viewport.height)
+}
+
 async function expectLinkedIssueRowsFitViewport(page: Page) {
-  const viewportWidth = await page.evaluate(() => document.documentElement.clientWidth)
   const rows = page.getByTestId('linked-issue-row')
   const count = await rows.count()
   expect(count).toBeGreaterThan(0)
 
   for (let index = 0; index < count; index += 1) {
-    const box = await rows.nth(index).boundingBox()
-    expect(box).not.toBeNull()
-    expect(box!.x).toBeGreaterThanOrEqual(0)
-    expect(box!.x + box!.width).toBeLessThanOrEqual(viewportWidth)
+    await expectBoxInsideViewport(page, rows.nth(index), `Linked issue row ${index + 1}`)
   }
+}
+
+const lifecycleActionTestId: Record<EpicStatus, string> = {
+  idle: 'start-epic-trigger',
+  running: 'pause-epic-trigger',
+  done: 'reopen-epic-trigger',
+  closed: 'reopen-epic-trigger',
 }
 
 async function expectSummaryVisibleBeforeOverview(page: Page, viewportHeight: number) {
@@ -179,6 +205,12 @@ test.describe('Epic detail mobile overflow', () => {
         await expect(page.getByTestId('epic-description')).toContainText(LONG_DESCRIPTION)
 
         await expectNoHorizontalOverflow(page)
+        await expectBoxInsideViewport(page, page.getByTestId('edit-epic-button'), 'Edit epic action')
+        await expectBoxInsideViewport(
+          page,
+          page.getByTestId(lifecycleActionTestId[status]),
+          `${status} lifecycle action`,
+        )
 
         await page.getByTestId('linked-issues-view-graph').click()
         await expect(page.getByTestId('epic-dep-graph-canvas')).toBeVisible()

@@ -8,8 +8,11 @@ const sharedStateMutationRule = 'no-direct-shared-state-mutation'
 const timerPromiseRule = 'no-real-time-sleep'
 const runnerHostWaitForRule = 'no-runner-host-wait-for'
 const elapsedTimeAssertionRule = 'no-elapsed-time-assertion'
+const jsdomGeometryRule = 'no-jsdom-page-geometry-assertion'
 const protectedGlobalNames = new Set(['window', 'document', 'navigator'])
 const protectedPrototypeNames = new Set(['Element', 'HTMLElement'])
+const pageGeometryProperties = ['scrollWidth', 'clientWidth', 'offsetWidth']
+const boundingRectProperties = new Set(['bottom', 'height', 'left', 'right', 'top', 'width', 'x', 'y'])
 
 function unwrapExpression(expression) {
   let current = expression
@@ -131,11 +134,208 @@ function createRunnerViolation(filePath, sourceFile, node, rule, description, fi
   return createViolation(filePath, sourceFile, node, { rule, description, fix })
 }
 
+function createJsdomGeometryViolation(filePath, sourceFile, node) {
+  return createViolation(filePath, sourceFile, node, {
+    rule: jsdomGeometryRule,
+    description: 'asserts page-fit geometry that jsdom does not measure',
+    fix: 'Keep semantic structure assertions here and move viewport geometry coverage to Playwright.',
+  })
+}
+
+function isComparisonOperator(kind) {
+  return new Set([
+    ts.SyntaxKind.EqualsEqualsToken,
+    ts.SyntaxKind.EqualsEqualsEqualsToken,
+    ts.SyntaxKind.ExclamationEqualsToken,
+    ts.SyntaxKind.ExclamationEqualsEqualsToken,
+    ts.SyntaxKind.LessThanToken,
+    ts.SyntaxKind.LessThanEqualsToken,
+    ts.SyntaxKind.GreaterThanToken,
+    ts.SyntaxKind.GreaterThanEqualsToken,
+  ]).has(kind)
+}
+
+function containsPageGeometryProperty(expression, propertyName, bindings = []) {
+  return forEachDescendant(expression, (node) => {
+    if (!ts.isExpression(node)) return false
+    if (getMember(node)?.name === propertyName) return true
+    return ts.isIdentifier(node) && resolveLexicalBinding(bindings, node.text, node)?.[propertyName] === true
+  })
+}
+
+function isDocumentElement(expression) {
+  const member = getMember(expression)
+  if (member === null || member.name !== 'documentElement') return false
+  if (isIdentifierNamed(member.object, 'document')) return true
+  const globalDocument = getMember(member.object)
+  return globalDocument !== null && globalDocument.name === 'document' && isIdentifierNamed(globalDocument.object, 'globalThis')
+}
+
+function isVisualViewport(expression) {
+  if (isIdentifierNamed(expression, 'visualViewport')) return true
+  const member = getMember(expression)
+  return member !== null && member.name === 'visualViewport'
+    && (isIdentifierNamed(member.object, 'window') || isIdentifierNamed(member.object, 'globalThis'))
+}
+
+function isWindow(expression) {
+  return isIdentifierNamed(expression, 'window') || isIdentifierNamed(expression, 'globalThis')
+}
+
+function isViewportSize(expression) {
+  const member = getMember(expression)
+  if (member === null) return false
+  if ((member.name === 'innerWidth' || member.name === 'innerHeight') && isWindow(member.object)) return true
+  if ((member.name === 'clientWidth' || member.name === 'clientHeight') && isDocumentElement(member.object)) return true
+  return (member.name === 'width' || member.name === 'height') && isVisualViewport(member.object)
+}
+
+function isBoundingRectCall(expression) {
+  if (!ts.isCallExpression(expression)) return false
+  return getMember(expression.expression)?.name === 'getBoundingClientRect'
+}
+
+function propertyNameText(name) {
+  return ts.isIdentifier(name) || ts.isStringLiteral(name) || ts.isNoSubstitutionTemplateLiteral(name)
+    ? name.text
+    : undefined
+}
+
+function isDestructuredViewportSize(binding) {
+  const { propertyName, initializer } = binding
+  if (propertyName === undefined) return false
+  if ((propertyName === 'innerWidth' || propertyName === 'innerHeight') && isWindow(initializer)) return true
+  if ((propertyName === 'clientWidth' || propertyName === 'clientHeight') && isDocumentElement(initializer)) return true
+  return (propertyName === 'width' || propertyName === 'height') && isVisualViewport(initializer)
+}
+
+function isDestructuredBoundingRectProperty(binding, bindings) {
+  return binding.propertyName !== undefined
+    && boundingRectProperties.has(binding.propertyName)
+    && containsBoundingRect(binding.initializer, bindings)
+}
+
+function geometryBindings(sourceFile) {
+  const bindings = []
+
+  function addBinding(name, declaration, initializer, propertyName) {
+    bindings.push({
+      name,
+      declaration,
+      initializer,
+      propertyName,
+      scope: lexicalScope(declaration),
+      hoisted: false,
+      viewport: false,
+      boundingRect: false,
+      scrollWidth: false,
+      clientWidth: false,
+      offsetWidth: false,
+    })
+  }
+
+  function visit(node) {
+    if (ts.isVariableDeclaration(node) && node.initializer !== undefined) {
+      if (ts.isIdentifier(node.name)) {
+        addBinding(node.name.text, node, node.initializer, undefined)
+      }
+      if (ts.isObjectBindingPattern(node.name)) {
+        for (const element of node.name.elements) {
+          if (!ts.isIdentifier(element.name)) continue
+          addBinding(element.name.text, element, node.initializer, propertyNameText(element.propertyName ?? element.name))
+        }
+      }
+    }
+    ts.forEachChild(node, visit)
+  }
+
+  visit(sourceFile)
+
+  let changed = true
+  while (changed) {
+    changed = false
+    for (const binding of bindings) {
+      if (!binding.viewport && (containsViewportSize(binding.initializer, bindings) || isDestructuredViewportSize(binding))) {
+        binding.viewport = true
+        changed = true
+      }
+      if (!binding.boundingRect && (binding.propertyName === undefined
+        ? containsBoundingRect(binding.initializer, bindings)
+        : isDestructuredBoundingRectProperty(binding, bindings))) {
+        binding.boundingRect = true
+        changed = true
+      }
+      for (const propertyName of pageGeometryProperties) {
+        if (!binding[propertyName] && (binding.propertyName === propertyName
+          || containsPageGeometryProperty(binding.initializer, propertyName, bindings))) {
+          binding[propertyName] = true
+          changed = true
+        }
+      }
+    }
+  }
+
+  return bindings
+}
+
+function containsViewportSize(expression, bindings = []) {
+  return forEachDescendant(expression, (node) => {
+    if (!ts.isExpression(node)) return false
+    if (isViewportSize(node)) return true
+    return ts.isIdentifier(node) && resolveLexicalBinding(bindings, node.text, node)?.viewport === true
+  })
+}
+
+function containsBoundingRect(expression, bindings = []) {
+  return forEachDescendant(expression, (node) => {
+    if (!ts.isExpression(node)) return false
+    if (isBoundingRectCall(node)) return true
+    return ts.isIdentifier(node) && resolveLexicalBinding(bindings, node.text, node)?.boundingRect === true
+  })
+}
+
+function isJsdomGeometryComparison(left, right, bindings) {
+  const leftScrollWidth = containsPageGeometryProperty(left, 'scrollWidth', bindings)
+  const rightScrollWidth = containsPageGeometryProperty(right, 'scrollWidth', bindings)
+  const leftClientWidth = containsPageGeometryProperty(left, 'clientWidth', bindings)
+  const rightClientWidth = containsPageGeometryProperty(right, 'clientWidth', bindings)
+  if ((leftScrollWidth && rightClientWidth) || (rightScrollWidth && leftClientWidth)) return true
+
+  const leftOffsetWidth = containsPageGeometryProperty(left, 'offsetWidth', bindings)
+  const rightOffsetWidth = containsPageGeometryProperty(right, 'offsetWidth', bindings)
+  if ((leftOffsetWidth && containsViewportSize(right, bindings)) || (rightOffsetWidth && containsViewportSize(left, bindings))) return true
+
+  return (containsBoundingRect(left, bindings) && containsViewportSize(right, bindings))
+    || (containsBoundingRect(right, bindings) && containsViewportSize(left, bindings))
+}
+
+function expectationComparisonOperands(call) {
+  const matcher = getMember(call.expression)
+  const comparisonMatchers = new Set([
+    'toBe',
+    'toEqual',
+    'toStrictEqual',
+    'toBeCloseTo',
+    'toBeLessThan',
+    'toBeLessThanOrEqual',
+    'toBeGreaterThan',
+    'toBeGreaterThanOrEqual',
+  ])
+  if (matcher === null || matcher.name === null || !comparisonMatchers.has(matcher.name) || call.arguments.length === 0) return undefined
+  const received = expectationReceivedExpression(call)
+  return received === undefined ? undefined : { left: received, right: call.arguments[0] }
+}
+
 export function scanSourceFile(filePath, sourceText = readFileSync(filePath, 'utf8')) {
   const sourceFile = ts.createSourceFile(filePath, sourceText, ts.ScriptTarget.Latest, true, scriptKindFor(filePath))
   const violations = []
+  const bindings = geometryBindings(sourceFile)
 
   function visit(node) {
+    if (ts.isBinaryExpression(node) && isComparisonOperator(node.operatorToken.kind) && isJsdomGeometryComparison(node.left, node.right, bindings)) {
+      violations.push(createJsdomGeometryViolation(filePath, sourceFile, node))
+    }
+
     if (ts.isBinaryExpression(node) && ts.isAssignmentOperator(node.operatorToken.kind)) {
       const root = findProtectedRoot(node.left)
       if (root !== null) violations.push(createSharedStateMutationViolation(filePath, sourceFile, node.left, root))
@@ -144,6 +344,11 @@ export function scanSourceFile(filePath, sourceText = readFileSync(filePath, 'ut
     if (ts.isCallExpression(node)) {
       const root = findMutationCallTarget(node)
       if (root !== null) violations.push(createSharedStateMutationViolation(filePath, sourceFile, node.arguments[0], root))
+
+      const comparison = expectationComparisonOperands(node)
+      if (comparison !== undefined && isJsdomGeometryComparison(comparison.left, comparison.right, bindings)) {
+        violations.push(createJsdomGeometryViolation(filePath, sourceFile, node))
+      }
     }
 
     ts.forEachChild(node, visit)
@@ -173,7 +378,7 @@ function isActiveWebVitestFile(relativePath) {
   if (isExcludedWebFile(relativePath)) return false
   if (relativePath.startsWith('src/')) return /\.test\.tsx?$/.test(relativePath)
   if (!relativePath.startsWith('tests/')) return false
-  if (relativePath.startsWith('tests/a11y/') || relativePath.startsWith('tests/e2e/')) return false
+  if (relativePath.startsWith('tests/e2e/')) return false
   return /\.spec\.tsx$/.test(relativePath)
 }
 
@@ -732,6 +937,7 @@ function runSelfTest() {
   const expectedFiles = [
     'src/allowed-local.test.tsx',
     'src/direct-assignment.test.tsx',
+    'src/jsdom-geometry.test.tsx',
     'src/prototype-calls.test.tsx',
     'tests/active.spec.tsx',
   ]
@@ -741,8 +947,9 @@ function runSelfTest() {
     `expected active files ${expectedFiles.join(', ')}, got ${relativeFiles.join(', ')}`,
   )
 
+  const sharedStateViolations = violations.filter((violation) => violation.rule === sharedStateMutationRule)
   const actualRoots = Object.groupBy(
-    violations,
+    sharedStateViolations,
     (violation) => relative(fixtureWebRoot, violation.filePath).replaceAll('\\', '/'),
   )
   const expectedRoots = {
@@ -758,8 +965,25 @@ function runSelfTest() {
   )
 
   assertSelfTest(
-    violations.every((violation) => violation.rule === sharedStateMutationRule && violation.line > 0 && violation.column > 0),
-    'diagnostics are missing rule or source location',
+    violations.every((violation) => violation.line > 0 && violation.column > 0),
+    'diagnostics are missing source location',
+  )
+
+  const webRules = Object.groupBy(
+    violations,
+    (violation) => relative(fixtureWebRoot, violation.filePath).replaceAll('\\', '/'),
+  )
+  const expectedWebRules = {
+    'src/direct-assignment.test.tsx': [sharedStateMutationRule, sharedStateMutationRule, sharedStateMutationRule, sharedStateMutationRule],
+    'src/jsdom-geometry.test.tsx': [jsdomGeometryRule, jsdomGeometryRule, jsdomGeometryRule, jsdomGeometryRule, jsdomGeometryRule, jsdomGeometryRule, jsdomGeometryRule, jsdomGeometryRule, jsdomGeometryRule, jsdomGeometryRule],
+    'src/prototype-calls.test.tsx': [sharedStateMutationRule, sharedStateMutationRule, sharedStateMutationRule, sharedStateMutationRule],
+    'tests/active.spec.tsx': [sharedStateMutationRule],
+  }
+
+  assertSelfTest(
+    JSON.stringify(Object.fromEntries(Object.entries(webRules).map(([file, items]) => [file, items.map((item) => item.rule)])))
+      === JSON.stringify(expectedWebRules),
+    'did not report the expected Web boundary rules',
   )
 
   const fixtureRunnerRoot = resolve(repositoryRoot, 'scripts/fixtures/node-test-boundaries/runner')

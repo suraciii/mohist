@@ -11,7 +11,6 @@ import { EpicCreateDialog } from './EpicCreateDialog'
 import { EPIC_DESCRIPTION_TEMPLATE, hasEpicDescriptionStructure } from '@/shared/lib/epic-description-template'
 import { useMswServer } from '../../../../tests/support/msw'
 import type { Epic, EpicStatus } from '../../../entities/epic'
-import { setScopedProperty } from '../../../../tests/support/scoped-property'
 
 let _createResponse: Epic | null = null
 
@@ -79,17 +78,6 @@ function renderDialog(props: { open?: boolean; onClose?: () => void } = {}) {
     </QueryClientProvider>,
   )
   return { queryClient, onClose, ...view }
-}
-
-function stubWidth(width: number) {
-  setScopedProperty(document.documentElement, 'scrollWidth', {
-    configurable: true,
-    get: () => width,
-  })
-  setScopedProperty(document.documentElement, 'clientWidth', {
-    configurable: true,
-    get: () => width,
-  })
 }
 
 describe('EpicCreateDialog guided template prefill', () => {
@@ -323,24 +311,15 @@ describe('EpicCreateDialog error handling', () => {
     fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Will fail' } })
     fireEvent.click(screen.getByTestId('epic-create-submit'))
 
-    await waitFor(() => expect(screen.queryByTestId('epic-create-success')).toBeNull())
+    expect(await screen.findByTestId('epic-create-error')).toHaveTextContent('Server unavailable')
+    expect(screen.queryByTestId('epic-create-success')).not.toBeInTheDocument()
     expect(screen.queryByTestId('epic-create-cancel')).toBeInTheDocument()
     expect(screen.queryByTestId('epic-create-submit')).toBeInTheDocument()
   })
 })
 
-describe('EpicCreateDialog mobile-safe layout', () => {
-  it('renders without horizontal overflow at 320, 390, and 430 px', () => {
-    for (const width of [320, 390, 430]) {
-      cleanup()
-      stubWidth(width)
-      renderDialog()
-
-      expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(document.documentElement.clientWidth)
-    }
-  })
-
-  it('keeps the submit action reachable through a sticky footer (footer is outside the scroll region)', () => {
+describe('EpicCreateDialog footer structure', () => {
+  it('places the submit action in a footer outside the scroll region', () => {
     renderDialog()
 
     const footer = screen.getByTestId('epic-create-footer')
@@ -354,7 +333,7 @@ describe('EpicCreateDialog mobile-safe layout', () => {
     expect(scrollRegion.contains(footer)).toBe(false)
   })
 
-  it('keeps both success actions reachable through the same footer after a successful create', async () => {
+  it('places both success actions in the same footer after a successful create', async () => {
     _createResponse = makeEpic({ id: 'epic-reach', number: 4, title: 'Reachability' })
 
     renderDialog()
