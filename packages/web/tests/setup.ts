@@ -1,26 +1,19 @@
 import '@testing-library/jest-dom'
 import { cleanup } from '@testing-library/react'
-import { afterEach, vi } from 'vitest'
+import { afterEach, beforeEach, vi } from 'vitest'
 import { resetSonnerFake } from './support/sonner-fake'
 import { resetSignalrFake } from './support/signalr-fake'
-import { absolutizeRelativeFetchUrls, server } from './support/msw'
+import { ensureMswServerListening, server } from './support/msw'
 
-let _msWlistening = false
-if (!_msWlistening) {
-  _msWlistening = true
-  try {
-    server.listen({ onUnhandledRequest: 'warn' })
-  } catch (e) {
-    // MSW may already be listening (e.g. isolate:false re-evaluation)
-    // swallow 'already enabled' errors
-  }
-  absolutizeRelativeFetchUrls()
-}
+ensureMswServerListening()
+
+beforeEach(() => {
+  ensureMswServerListening()
+})
 
 let _reducedMotionOverride: boolean | undefined
 
-function _defaultMatchMediaFn() {
-  return vi.fn().mockImplementation((query: string) => ({
+const _matchMediaMock = ((query: string) => ({
     matches: _reducedMotionOverride === true
       ? query === '(prefers-reduced-motion: reduce)'
       : false,
@@ -31,13 +24,11 @@ function _defaultMatchMediaFn() {
     addEventListener: vi.fn(),
     removeEventListener: vi.fn(),
     dispatchEvent: vi.fn(),
-  }))
-}
-
-const _matchMediaMock = _defaultMatchMediaFn()
+  })) as typeof window.matchMedia
 
 afterEach(() => {
   cleanup()
+  server.resetHandlers()
   _reducedMotionOverride = undefined
   resetSonnerFake()
   resetSignalrFake()
@@ -70,6 +61,9 @@ if (typeof window !== 'undefined') {
  */
 export function setPrefersReducedMotion(reduce: boolean) {
   _reducedMotionOverride = reduce
+  if (typeof window !== 'undefined') {
+    window.matchMedia = _matchMediaMock
+  }
 }
 
 if (typeof window !== 'undefined' && !window.ResizeObserver) {

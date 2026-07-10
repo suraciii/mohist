@@ -3,16 +3,29 @@ import '@testing-library/jest-dom'
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { http, HttpResponse } from 'msw'
 import type { LogEntry, LogTailResult } from '../model/api'
-import { useMswServer } from '../../../../tests/support/msw'
-import { LogsPage } from './LogsPage'
+import { LogsPage as DefaultLogsPage, type LogsDataHook } from './LogsPage'
 
 let _logData: LogTailResult = { lines: [], source: null, cursor: null, nextCursor: null, reset: false, truncated: false, unavailable: false, expectedLocation: null, reason: null }
 
-useMswServer(
-  http.get('*/logs/tail', () => HttpResponse.json({ success: true, data: _logData })),
-)
+const logsHook: LogsDataHook = () => ({
+  entries: _logData.unavailable ? [] : _logData.lines,
+  loading: false,
+  error: null,
+  refresh: () => undefined,
+  cursor: _logData.unavailable ? null : _logData.cursor,
+  nextCursor: _logData.unavailable ? null : _logData.nextCursor,
+  source: _logData.unavailable ? null : _logData.source,
+  unavailable: _logData.unavailable,
+  expectedLocation: _logData.expectedLocation,
+  reason: _logData.reason,
+  truncated: _logData.unavailable ? false : _logData.truncated,
+  reset: _logData.reset || _logData.unavailable,
+})
+
+function LogsPage() {
+  return <DefaultLogsPage logsHook={logsHook} />
+}
 
 function makeEntry(overrides: Partial<LogEntry> = {}): LogEntry {
   return {

@@ -1,11 +1,7 @@
-// @vitest-environment jsdom
-import { afterEach, describe, expect, it } from 'vitest'
-import { renderHook, waitFor } from '@testing-library/react'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { http, HttpResponse } from 'msw'
-import { server, useMswServer } from '../../../../tests/support/msw'
-import type { ReactNode } from 'react'
-import { useProjectTemplateOverride } from '..'
+import { projectTemplateOverrideQueryOptions } from '..'
+import { useMswServer } from '../../../../tests/support/msw'
 
 const PROJECT_ID = 'test-project'
 const KEY = 'proposal'
@@ -21,128 +17,67 @@ const OVERRIDE_ROW = {
   updatedAt: '2024-01-01T00:00:00.000Z',
 }
 
-const defaultHandlers = [
-  http.get(`/api/projects/${PROJECT_ID}/templates/${KEY}/override`, () =>
-    HttpResponse.json({ success: true, data: OVERRIDE_ROW }),
-  ),
-]
+let overrideResponse: {
+  success: boolean
+  data?: typeof OVERRIDE_ROW
+  error?: string
+  code?: string
+} = { success: true, data: OVERRIDE_ROW }
+let overrideStatus = 200
+const requestedUrls: string[] = []
 
-const queryClients: QueryClient[] = []
-
-function createQueryClient() {
-  const qc = new QueryClient({
-    defaultOptions: {
-      queries: { retry: false, gcTime: 0 },
-      mutations: { retry: false },
-    },
-  })
-  queryClients.push(qc)
-  return qc
-}
-
-function renderUseProjectTemplateOverride(
-  projectId: string | undefined,
-  key: string | undefined,
-) {
-  const queryClient = createQueryClient()
-  return renderHook(() => useProjectTemplateOverride(projectId, key), {
-    wrapper: ({ children }: { children: ReactNode }) => (
-      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
-    ),
-  })
-}
-
-useMswServer(...defaultHandlers)
-
-afterEach(() => {
-  for (const qc of queryClients) qc.clear()
-  queryClients.length = 0
+const overrideHandler = vi.fn(({ request }: { request: Request }) => {
+  requestedUrls.push(request.url)
+  return HttpResponse.json(overrideResponse, { status: overrideStatus })
 })
 
-describe('useProjectTemplateOverride hook', () => {
-  it('issues GET /api/projects/{id}/templates/{key}/override and returns the override row', async () => {
-    const requests: { method: string; url: string }[] = []
-    server.use(
-      http.get(`/api/projects/${PROJECT_ID}/templates/${KEY}/override`, ({ request }) => {
-        requests.push({ method: request.method, url: request.url })
-        return HttpResponse.json({ success: true, data: OVERRIDE_ROW })
-      }),
-    )
+useMswServer(
+  http.get('*/api/projects/:projectId/templates/:key/override', overrideHandler),
+)
 
-    const { result } = renderUseProjectTemplateOverride(PROJECT_ID, KEY)
+beforeEach(() => {
+  overrideResponse = { success: true, data: OVERRIDE_ROW }
+  overrideStatus = 200
+  requestedUrls.length = 0
+  overrideHandler.mockClear()
+})
 
-    await waitFor(() => {
-      expect(result.current.data).toEqual(OVERRIDE_ROW)
-    })
+describe('projectTemplateOverrideQueryOptions', () => {
+  it('fetches the project-scoped override and returns the row', async () => {
+    const result = await projectTemplateOverrideQueryOptions(PROJECT_ID, KEY).queryFn()
 
-    expect(requests).toHaveLength(1)
-    expect(requests[0].method).toBe('GET')
-    expect(requests[0].url).toContain(
+    expect(result).toEqual(OVERRIDE_ROW)
+    expect(overrideHandler).toHaveBeenCalledTimes(1)
+    expect(new URL(requestedUrls[0]!).pathname).toBe(
       `/api/projects/${PROJECT_ID}/templates/${KEY}/override`,
     )
   })
 
-  it('does not retry on 404 and surfaces the error', async () => {
-    const calls: string[] = []
-    server.resetHandlers(
-      http.get(`/api/projects/${PROJECT_ID}/templates/${KEY}/override`, ({ request }) => {
-        calls.push(request.url)
-        return HttpResponse.json(
-          { success: false, error: 'No override', code: 'not_found' },
-          { status: 404 },
-        )
-      }),
-    )
+  it('does not retry a 404 and surfaces the API error', async () => {
+    overrideResponse = { success: false, error: 'No override', code: 'not_found' }
+    overrideStatus = 404
+    const options = projectTemplateOverrideQueryOptions(PROJECT_ID, KEY)
 
-    const { result } = renderUseProjectTemplateOverride(PROJECT_ID, KEY)
-
-    await waitFor(() => {
-      expect(result.current.isError).toBe(true)
-    })
-
-    expect(result.current.error).toMatchObject({ status: 404 })
-    expect(calls).toHaveLength(1)
+    await expect(options.queryFn()).rejects.toMatchObject({ status: 404 })
+    expect(options.retry(0, { status: 404 })).toBe(false)
+    expect(options.retry(0, { status: 500 })).toBe(true)
+    expect(options.retry(1, { status: 500 })).toBe(false)
   })
 
-  it('does not fetch when either projectId or key is missing', () => {
-    let fetchCalled = false
-    server.use(
-      http.get(`/api/projects/${PROJECT_ID}/templates/${KEY}/override`, () => {
-        fetchCalled = true
-        return HttpResponse.json({ success: true, data: OVERRIDE_ROW })
-      }),
-    )
-
-    const { result: resultNoKey } = renderUseProjectTemplateOverride(PROJECT_ID, undefined)
-    const { result: resultNoProject } = renderUseProjectTemplateOverride(undefined, KEY)
-
-    expect(resultNoKey.current.isLoading).toBe(false)
-    expect(resultNoKey.current.data).toBeUndefined()
-    expect(resultNoProject.current.isLoading).toBe(false)
-    expect(resultNoProject.current.data).toBeUndefined()
-    expect(fetchCalled).toBe(false)
+  it('is disabled when either projectId or key is missing', () => {
+    expect(projectTemplateOverrideQueryOptions(PROJECT_ID, undefined).enabled).toBe(false)
+    expect(projectTemplateOverrideQueryOptions(undefined, KEY).enabled).toBe(false)
+    expect(projectTemplateOverrideQueryOptions(PROJECT_ID, KEY).enabled).toBe(true)
   })
 
-  it('scopes the fetch to the provided projectId and key', async () => {
-    const seenUrls: string[] = []
+  it('scopes the fetch to the provided key', async () => {
     const customKey = 'custom-key'
-    server.resetHandlers(
-      http.get(`/api/projects/${PROJECT_ID}/templates/${customKey}/override`, ({ request }) => {
-        seenUrls.push(request.url)
-        return HttpResponse.json({
-          success: true,
-          data: { ...OVERRIDE_ROW, key: customKey },
-        })
-      }),
+    overrideResponse = { success: true, data: { ...OVERRIDE_ROW, key: customKey } }
+
+    await projectTemplateOverrideQueryOptions(PROJECT_ID, customKey).queryFn()
+
+    expect(new URL(requestedUrls[0]!).pathname).toBe(
+      `/api/projects/${PROJECT_ID}/templates/${customKey}/override`,
     )
-
-    const { result } = renderUseProjectTemplateOverride(PROJECT_ID, customKey)
-
-    await waitFor(() => {
-      expect(result.current.isSuccess).toBe(true)
-    })
-
-    expect(seenUrls).toHaveLength(1)
-    expect(seenUrls[0]).toContain(`/api/projects/${PROJECT_ID}/templates/${customKey}/override`)
   })
 })

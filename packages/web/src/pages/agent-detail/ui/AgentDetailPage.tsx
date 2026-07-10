@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type ComponentProps, type ComponentType } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import {
   BotIcon,
@@ -19,14 +19,50 @@ import {
   useUnarchiveAgent,
   readAgentModelAndVariant,
 } from '../../../entities/agent'
-import type { AgentSessionListItemDto } from '../../../entities/agent'
+import type { AgentInfo, AgentSessionListItemDto } from '../../../entities/agent'
 import { useProjectPath } from '../../../entities/project'
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
 import { Button } from '@/shared/ui/components/button'
 import { Badge } from '@/shared/ui/components/badge'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/shared/ui/components/dialog'
-import { AgentProfileEditor } from '../../../widgets/agent-profile-editor/ui/AgentProfileEditor'
-import { SubscriptionsSection } from '../../../widgets/agent-subscriptions/ui/SubscriptionsSection'
+import { AgentProfileEditor as DefaultAgentProfileEditor } from '../../../widgets/agent-profile-editor/ui/AgentProfileEditor'
+import { SubscriptionsSection as DefaultSubscriptionsSection } from '../../../widgets/agent-subscriptions/ui/SubscriptionsSection'
+
+export interface AgentDetailPageComponents {
+  AgentProfileEditor: ComponentType<ComponentProps<typeof DefaultAgentProfileEditor>>
+  SubscriptionsSection: ComponentType<ComponentProps<typeof DefaultSubscriptionsSection>>
+}
+
+export interface AgentDetailPageData {
+  agent: AgentInfo | undefined
+  isLoading: boolean
+  isError: boolean
+  sessions: AgentSessionListItemDto[]
+  sessionsLoading: boolean
+  archiveAgent: Pick<ReturnType<typeof useArchiveAgent>, 'mutate' | 'isPending'>
+  unarchiveAgent: Pick<ReturnType<typeof useUnarchiveAgent>, 'mutate' | 'isPending'>
+}
+
+export type AgentDetailPageDataHook = (agentId: string) => AgentDetailPageData
+
+const useDefaultData: AgentDetailPageDataHook = (agentId) => {
+  const { data: agent, isLoading, isError } = useAgent(agentId)
+  const { data: sessions = [], isLoading: sessionsLoading } = useAgentSessions({ agentRef: agentId })
+  return {
+    agent,
+    isLoading,
+    isError,
+    sessions,
+    sessionsLoading,
+    archiveAgent: useArchiveAgent(),
+    unarchiveAgent: useUnarchiveAgent(),
+  }
+}
+
+const defaultComponents: AgentDetailPageComponents = {
+  AgentProfileEditor: DefaultAgentProfileEditor,
+  SubscriptionsSection: DefaultSubscriptionsSection,
+}
 
 function formatTime(iso: string | null | undefined): string {
   if (!iso) return ''
@@ -93,14 +129,26 @@ function SessionSection({
   )
 }
 
-export function AgentDetailPage() {
+export function AgentDetailPage({
+  components,
+  dataHook = useDefaultData,
+}: {
+  components?: Partial<AgentDetailPageComponents>
+  dataHook?: AgentDetailPageDataHook
+} = {}) {
+  const { AgentProfileEditor, SubscriptionsSection } = { ...defaultComponents, ...components }
   const { agentId } = useParams<{ agentId: string }>()
   const navigate = useNavigate()
   const toProjectPath = useProjectPath()
-  const { data: agent, isLoading, isError } = useAgent(agentId ?? '')
-  const { data: allSessions = [], isLoading: sessionsLoading } = useAgentSessions({ agentRef: agentId ?? '' })
-  const archiveAgent = useArchiveAgent()
-  const unarchiveAgent = useUnarchiveAgent()
+  const {
+    agent,
+    isLoading,
+    isError,
+    sessions: allSessions,
+    sessionsLoading,
+    archiveAgent,
+    unarchiveAgent,
+  } = dataHook(agentId ?? '')
   const [editorOpen, setEditorOpen] = useState(false)
   const [archiveConfirmOpen, setArchiveConfirmOpen] = useState(false)
 

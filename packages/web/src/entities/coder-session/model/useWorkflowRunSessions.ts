@@ -11,12 +11,17 @@ interface LiveSessionState {
   sessions: WorkflowRunSession[]
 }
 
-export function useWorkflowRunSessions(workflowRunId: string | null | undefined) {
+export type WorkflowRunSessionsFetcher = typeof getWorkflowRunSessions
+
+export function useWorkflowRunSessions(
+  workflowRunId: string | null | undefined,
+  fetcher: WorkflowRunSessionsFetcher = getWorkflowRunSessions,
+) {
   const queryClient = useQueryClient()
   const queryKey = useMemo(() => ['workflow-runs', workflowRunId, 'sessions'] as const, [workflowRunId])
   const { data: sessions = EMPTY_SESSIONS, isLoading } = useQuery({
     queryKey,
-    queryFn: () => getWorkflowRunSessions(workflowRunId!),
+    queryFn: () => fetcher(workflowRunId!),
     enabled: !!workflowRunId,
     staleTime: 30 * 1000,
   })

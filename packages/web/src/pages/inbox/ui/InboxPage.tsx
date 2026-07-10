@@ -60,6 +60,46 @@ interface InboxItemRowProps {
   archivePending: boolean
 }
 
+interface InboxItemMutation {
+  mutate: (itemId: string) => void
+  isPending: boolean
+}
+
+interface InboxBulkMutation {
+  mutate: () => void
+  isPending: boolean
+}
+
+export interface InboxPageData {
+  items: InboxItem[] | undefined
+  error: unknown
+  isError: boolean
+  isLoading: boolean
+  refetch: () => unknown
+  markRead: InboxItemMutation
+  markAllRead: InboxBulkMutation
+  archive: InboxItemMutation
+}
+
+export type InboxPageDataHook = () => InboxPageData
+
+const useDefaultInboxPageData: InboxPageDataHook = () => {
+  const inbox = useInbox()
+  const markRead = useMarkInboxItemRead()
+  const markAllRead = useMarkAllInboxRead()
+  const archive = useArchiveInboxItem()
+  return {
+    items: inbox.data,
+    error: inbox.error,
+    isError: inbox.isError,
+    isLoading: inbox.isLoading,
+    refetch: inbox.refetch,
+    markRead,
+    markAllRead,
+    archive,
+  }
+}
+
 function InboxItemRow({
   item,
   onMarkRead,
@@ -159,13 +199,14 @@ function InboxItemRow({
   )
 }
 
-export function InboxPage() {
+export function InboxPage({
+  dataHook = useDefaultInboxPageData,
+}: {
+  dataHook?: InboxPageDataHook
+} = {}) {
   useDocumentTitle('Inbox — Mohist')
 
-  const { data: items, error, isError, isLoading, refetch } = useInbox()
-  const markRead = useMarkInboxItemRead()
-  const markAllRead = useMarkAllInboxRead()
-  const archive = useArchiveInboxItem()
+  const { items, error, isError, isLoading, refetch, markRead, markAllRead, archive } = dataHook()
 
   const list = items ?? []
   const unreadCount = list.filter((item) => !item.isRead).length

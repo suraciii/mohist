@@ -4,15 +4,11 @@ import { describe, expect, it } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
-import { http, HttpResponse } from 'msw'
-import { server, useMswServer } from '../../../../tests/support/msw'
 import { TEST_PROJECT } from '../../../../tests/test-utils'
 import { ProjectProvider } from '../../../entities/project'
 import type { QualityMetricsResponse, QualityMetricsWindowDto, StageReworkRateDto } from '../../../entities/issue'
 
-import { QualityPanel, formatWindowTitle } from './QualityPanel'
-
-useMswServer()
+import { QualityPanel, formatWindowTitle, type QualityMetricsDataHook } from './QualityPanel'
 
 function makeStage(
   stage: string,
@@ -52,18 +48,16 @@ function makeQualityResponse(
   }
 }
 
-const QUALITY_PATH = '*/api/projects/:projectId/issues/metrics/quality'
+let qualityMetricsResult: ReturnType<QualityMetricsDataHook>
+
+const qualityMetricsHook: QualityMetricsDataHook = () => qualityMetricsResult
 
 function mockQualityResponse(data: QualityMetricsResponse) {
-  server.use(
-    http.get(QUALITY_PATH, () => HttpResponse.json({ success: true, data })),
-  )
+  qualityMetricsResult = { data }
 }
 
 function mockQualityPending() {
-  server.use(
-    http.get(QUALITY_PATH, () => new Promise(() => {})),
-  )
+  qualityMetricsResult = { data: undefined }
 }
 
 function renderPanel(range: '7d' | '30d' | '90d' = '30d') {
@@ -72,7 +66,7 @@ function renderPanel(range: '7d' | '30d' | '90d' = '30d') {
     <QueryClientProvider client={queryClient}>
       <ProjectProvider initialProjectId={TEST_PROJECT.id} initialProjects={[TEST_PROJECT]}>
         <MemoryRouter initialEntries={['/']}>
-          <QualityPanel range={range} />
+          <QualityPanel range={range} qualityMetricsHook={qualityMetricsHook} />
         </MemoryRouter>
       </ProjectProvider>
     </QueryClientProvider>,

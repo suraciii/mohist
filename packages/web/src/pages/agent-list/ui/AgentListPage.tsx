@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type ComponentProps, type ComponentType } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { PlusIcon, BotIcon, ArchiveIcon, CircleIcon } from 'lucide-react'
 import { useAgents, readAgentModelAndVariant } from '../../../entities/agent'
@@ -7,7 +7,15 @@ import { useProjectPath } from '../../../entities/project'
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
 import { Button } from '@/shared/ui/components/button'
 import { Badge } from '@/shared/ui/components/badge'
-import { AgentProfileEditor } from '../../../widgets/agent-profile-editor/ui/AgentProfileEditor'
+import { AgentProfileEditor as DefaultAgentProfileEditor } from '../../../widgets/agent-profile-editor/ui/AgentProfileEditor'
+
+export interface AgentListPageComponents {
+  AgentProfileEditor: ComponentType<ComponentProps<typeof DefaultAgentProfileEditor>>
+}
+
+const defaultComponents: AgentListPageComponents = {
+  AgentProfileEditor: DefaultAgentProfileEditor,
+}
 
 function getAgentType(agent: AgentInfo): string {
   const config = agent.agentConfig
@@ -107,7 +115,12 @@ function AgentEmptyState({ onCreateClick }: { onCreateClick: () => void }) {
   )
 }
 
-export function AgentListPage() {
+export function AgentListPage({
+  components,
+}: {
+  components?: Partial<AgentListPageComponents>
+} = {}) {
+  const { AgentProfileEditor } = { ...defaultComponents, ...components }
   useDocumentTitle('Agents — Mohist')
   const { data: agents, isLoading } = useAgents()
   const [editorOpen, setEditorOpen] = useState(false)

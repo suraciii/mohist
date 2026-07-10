@@ -1,10 +1,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { TEST_PROJECT, screen, waitFor, within } from './test-utils'
+import type { ReactElement } from 'react'
+import { http, HttpResponse } from 'msw'
 import { SessionPage } from '../src/pages/session/ui/SessionPage'
 import type { SessionTurn, CoderSessionDetail, SessionMetadata, AgentSessionMetadata } from '../src/entities/coder-session'
-import { renderWithQueryClient, makeTurn, convertLegacyToAgentMetadata, queryClients, originalScrollTo } from './session-page-test-utils'
+import { useMswServer } from './support/msw'
+import { renderWithQueryClient as renderPageWithQueryClient, makeTurn, convertLegacyToAgentMetadata, queryClients, originalScrollTo } from './session-page-test-utils'
 
-const sessionPageMocks = vi.hoisted(() => ({
+const sessionPageMocks = {
   sessions: [] as any[],
   sessionsLoading: false,
   issue: null as any,
@@ -20,49 +23,67 @@ const sessionPageMocks = vi.hoisted(() => ({
     status: string
     createdAt: string
   }>,
-}))
+}
 
-vi.mock('react-router-dom', async () => {
-  const actual = await vi.importActual<typeof import('react-router-dom')>('react-router-dom')
-  return {
-    ...actual,
-    useParams: () => sessionPageMocks.params,
-  }
-})
+type SessionApiCall = {
+  kind: 'metadata' | 'transcript'
+  issueNumber: string
+  sessionName: string
+  projectId: string
+}
 
-vi.mock('../src/entities/coder-session/model/useCoderSessions', () => ({
-  useCoderSessions: () => ({ sessions: sessionPageMocks.sessions, isLoading: sessionPageMocks.sessionsLoading }),
-}))
+let sessionApiCalls: SessionApiCall[] = []
 
-vi.mock('../src/entities/coder-session/model/useWorkflowRunSessions', () => ({
-  useWorkflowRunSessions: () => ({
-    isLoading: false,
-    sessions: sessionPageMocks.workflowRunSessions,
+useMswServer(
+  http.get('*/api/projects/:projectId/issues/:issueNumber/coder-sessions', () => {
+    if (sessionPageMocks.sessionsLoading) return new Promise<never>(() => {})
+    return HttpResponse.json({ success: true, data: sessionPageMocks.sessions })
   }),
-}))
-
-vi.mock('../src/entities/issue/api/queries', () => ({
-  useIssue: () => ({ data: sessionPageMocks.issue }),
-}))
-
-vi.mock('../src/entities/coder-session/api/client', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../src/entities/coder-session/api/client')>()),
-  getAgentSessionMetadata: vi.fn(() => {
-    if (sessionPageMocks.detailPending) return new Promise(() => {})
-    if (sessionPageMocks.detailError) return Promise.reject(sessionPageMocks.detailError)
-    return Promise.resolve(sessionPageMocks.metadata)
-  }),
-  getAgentSessionTranscript: vi.fn(() => {
-    if (sessionPageMocks.detailPending) return new Promise(() => {})
-    if (sessionPageMocks.detailError) return Promise.reject(sessionPageMocks.detailError)
+  http.get('*/api/projects/:projectId/issues/:issueNumber/sessions/:sessionName/transcript', ({ params }) => {
+    sessionApiCalls.push({
+      kind: 'transcript',
+      issueNumber: String(params.issueNumber),
+      sessionName: String(params.sessionName),
+      projectId: String(params.projectId),
+    })
+    if (sessionPageMocks.detailPending) return new Promise<never>(() => {})
+    if (sessionPageMocks.detailError) {
+      return HttpResponse.json({ success: false, error: sessionPageMocks.detailError.message }, { status: 500 })
+    }
     const turns = sessionPageMocks.turns ?? []
-    return Promise.resolve({
-      turns,
-      partCount: turns.reduce((total, turn) => total + turn.assistant.length, 0),
-      lastActivityAt: turns.at(-1)?.completedAt ?? turns.at(-1)?.startedAt ?? null,
+    return HttpResponse.json({
+      success: true,
+      data: {
+        turns,
+        partCount: turns.reduce((total, turn) => total + turn.assistant.length, 0),
+        lastActivityAt: turns.at(-1)?.completedAt ?? turns.at(-1)?.startedAt ?? null,
+      },
     })
   }),
-}))
+  http.get('*/api/projects/:projectId/issues/:issueNumber/sessions/:sessionName', ({ params }) => {
+    sessionApiCalls.push({
+      kind: 'metadata',
+      issueNumber: String(params.issueNumber),
+      sessionName: String(params.sessionName),
+      projectId: String(params.projectId),
+    })
+    if (sessionPageMocks.detailPending) return new Promise<never>(() => {})
+    if (sessionPageMocks.detailError) {
+      return HttpResponse.json({ success: false, error: sessionPageMocks.detailError.message }, { status: 500 })
+    }
+    return HttpResponse.json({ success: true, data: sessionPageMocks.metadata })
+  }),
+  http.get('*/api/projects/:projectId/issues/:issueNumber', () =>
+    HttpResponse.json({ success: true, data: sessionPageMocks.issue })),
+  http.get('*/api/workflow-runs/:workflowRunId/sessions', () =>
+    HttpResponse.json({ success: true, data: sessionPageMocks.workflowRunSessions })),
+)
+
+function renderWithQueryClient(_ui: ReactElement) {
+  const { number, sessionName } = sessionPageMocks.params
+  const route = `/issues/${encodeURIComponent(number)}/workflow/sessions/${encodeURIComponent(sessionName)}`
+  return renderPageWithQueryClient(<SessionPage />, route)
+}
 
 Object.defineProperty(navigator, 'clipboard', {
   value: { writeText: vi.fn().mockResolvedValue(undefined) },
@@ -71,6 +92,7 @@ Object.defineProperty(navigator, 'clipboard', {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  sessionApiCalls = []
   sessionPageMocks.sessions = []
   sessionPageMocks.sessionsLoading = false
   sessionPageMocks.issue = null
@@ -258,19 +280,6 @@ describe('SessionPage header and states', () => {
     })
 
     it('requests metadata before raw events when opening a session route', async () => {
-      const api = await import('../src/entities/coder-session/api/client')
-      const callOrder: string[] = []
-      const metadataMock = api.getAgentSessionMetadata as unknown as ReturnType<typeof vi.fn>
-      const transcriptMock = api.getAgentSessionTranscript as unknown as ReturnType<typeof vi.fn>
-      metadataMock.mockImplementationOnce(async (..._args) => {
-        callOrder.push('metadata')
-        return sessionPageMocks.metadata
-      })
-      transcriptMock.mockImplementationOnce(async (..._args) => {
-        callOrder.push('transcript')
-        return { turns: sessionPageMocks.turns ?? [], partCount: 0, lastActivityAt: null }
-      })
-
       sessionPageMocks.params = { number: '51', sessionName: 'T-003.1' } as any
       const detail = makeMockDetail({
         id: 'proj/wr/T-003.1',
@@ -285,18 +294,17 @@ describe('SessionPage header and states', () => {
       renderWithQueryClient(<SessionPage />)
 
       await waitFor(() => {
-        expect(callOrder[0]).toBe('metadata')
+        expect(sessionApiCalls.map((call) => call.kind)).toEqual(['metadata', 'transcript'])
       })
-      await waitFor(() => {
-        expect(callOrder).toContain('transcript')
-      })
+      const callOrder = sessionApiCalls.map((call) => call.kind)
       expect(callOrder.indexOf('metadata')).toBeLessThan(callOrder.indexOf('transcript'))
-      expect(metadataMock).toHaveBeenCalledWith(51, 'T-003.1', TEST_PROJECT.id)
-      expect(transcriptMock).toHaveBeenCalledWith(51, 'T-003.1', TEST_PROJECT.id)
+      expect(sessionApiCalls).toEqual([
+        { kind: 'metadata', issueNumber: '51', sessionName: 'T-003.1', projectId: TEST_PROJECT.id },
+        { kind: 'transcript', issueNumber: '51', sessionName: 'T-003.1', projectId: TEST_PROJECT.id },
+      ])
     })
 
     it('does not request raw events when metadata has not yet loaded', async () => {
-      const api = await import('../src/entities/coder-session/api/client')
       sessionPageMocks.params = { number: '77', sessionName: 'late' } as any
       const detail = makeMockDetail({
         id: 'proj/wr/late',
@@ -308,20 +316,18 @@ describe('SessionPage header and states', () => {
         detailPending: true,
       })
 
-      const transcriptMock = api.getAgentSessionTranscript as unknown as ReturnType<typeof vi.fn>
-      transcriptMock.mockClear()
-
       renderWithQueryClient(<SessionPage />)
 
       await waitFor(() => {
         expect(screen.getByText(/loading/i)).toBeInTheDocument()
       })
 
-      expect(transcriptMock).not.toHaveBeenCalled()
+      expect(sessionApiCalls).toEqual([
+        { kind: 'metadata', issueNumber: '77', sessionName: 'late', projectId: TEST_PROJECT.id },
+      ])
     })
 
     it('loads workflow session metadata by route session name', async () => {
-      const api = await import('../src/entities/coder-session/api/client')
       sessionPageMocks.params = { number: '123', sessionName: 'plan' } as any
       const detail = makeMockDetail({
         id: 'proj_1/wr_1/plan',
@@ -336,10 +342,10 @@ describe('SessionPage header and states', () => {
       renderWithQueryClient(<SessionPage />)
 
       await waitFor(() => {
-        expect(api.getAgentSessionMetadata).toHaveBeenCalledWith(123, 'plan', TEST_PROJECT.id)
-      })
-      await waitFor(() => {
-        expect(api.getAgentSessionTranscript).toHaveBeenCalledWith(123, 'plan', TEST_PROJECT.id)
+        expect(sessionApiCalls).toEqual([
+          { kind: 'metadata', issueNumber: '123', sessionName: 'plan', projectId: TEST_PROJECT.id },
+          { kind: 'transcript', issueNumber: '123', sessionName: 'plan', projectId: TEST_PROJECT.id },
+        ])
       })
     })
 
@@ -755,8 +761,8 @@ describe('SessionPage header and states', () => {
 
       await screen.findByText('Issue #55')
 
-      const prev = screen.getByTestId('session-sibling-prev')
-      const next = screen.getByTestId('session-sibling-next')
+      const prev = await screen.findByTestId('session-sibling-prev')
+      const next = await screen.findByTestId('session-sibling-next')
 
       expect(prev.getAttribute('href')).toBe('/Test%20Project/issues/55/workflow/sessions/plan')
       expect(next.getAttribute('href')).toBe('/Test%20Project/issues/55/workflow/sessions/check')
@@ -798,7 +804,7 @@ describe('SessionPage header and states', () => {
       expect(disabledPrev.getAttribute('aria-disabled')).toBe('true')
       expect(disabledPrev.textContent).toContain('prev')
 
-      const next = screen.getByTestId('session-sibling-next')
+      const next = await screen.findByTestId('session-sibling-next')
       expect(next.getAttribute('href')).toBe('/Test%20Project/issues/55/workflow/sessions/build')
     })
 
@@ -831,7 +837,7 @@ describe('SessionPage header and states', () => {
 
       await screen.findByText('Issue #55')
 
-      const prev = screen.getByTestId('session-sibling-prev')
+      const prev = await screen.findByTestId('session-sibling-prev')
       expect(prev.getAttribute('href')).toBe('/Test%20Project/issues/55/workflow/sessions/build')
 
       expect(screen.queryByTestId('session-sibling-next')).not.toBeInTheDocument()
@@ -869,7 +875,7 @@ describe('SessionPage header and states', () => {
 
       await screen.findByText('Issue #55')
 
-      const sidebar = screen.getByTestId('session-sibling-sidebar')
+      const sidebar = await screen.findByTestId('session-sibling-sidebar')
       const entries = within(sidebar).getAllByTestId('session-sibling-sidebar-entry')
 
       expect(entries).toHaveLength(3)
@@ -913,7 +919,7 @@ describe('SessionPage header and states', () => {
 
       await screen.findByText('Issue #55')
 
-      const sidebar = screen.getByTestId('session-sibling-sidebar')
+      const sidebar = await screen.findByTestId('session-sibling-sidebar')
       const entries = within(sidebar).getAllByTestId('session-sibling-sidebar-entry')
 
       const current = entries.find((node) => node.getAttribute('data-current') === 'true')
@@ -996,7 +1002,7 @@ describe('SessionPage header and states', () => {
 
       await screen.findByText('Issue #55')
 
-      const sidebar = screen.getByTestId('session-sibling-sidebar')
+      const sidebar = await screen.findByTestId('session-sibling-sidebar')
       const entries = within(sidebar).getAllByTestId('session-sibling-sidebar-entry')
       const names = entries.map((node) => node.querySelector('span.font-mono')?.textContent)
       expect(names).toEqual(['plan', 'build', 'check'])

@@ -1,4 +1,5 @@
 export { useCreateProject, useDeleteProject, useProjects, useRepositories, useAddRepository, useRemoveRepository, useSetDefaultRepository } from './api/queries'
+export type { ProjectCreator } from './api/queries'
 export { getRepositories, addRepository, removeRepository, setDefaultRepository } from './api/client'
 export { ProjectProvider, useProject, useProjectPath, projectPath } from './model/ProjectContext'
 export type { Project, Repository, AddRepositoryInput } from './model/types'

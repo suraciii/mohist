@@ -4,15 +4,11 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
-import { http, HttpResponse } from 'msw'
-import { server, useMswServer } from '../../../../tests/support/msw'
 import { ProjectProvider } from '../../../entities/project'
 import { TEST_PROJECT } from '../../../../tests/test-utils'
 import type { CompletionBucketPoint, CompletionTrendResponse } from '../../../entities/issue'
 
-import { CompletionTrend } from './CompletionTrend'
-
-useMswServer()
+import { CompletionTrend, type CompletionTrendHook } from './CompletionTrend'
 
 function makeBuckets(completedByWeek: number[]): CompletionBucketPoint[] {
   return completedByWeek.map((completed, index) => {
@@ -34,24 +30,20 @@ function makeTrendResponse(buckets: CompletionBucketPoint[]): CompletionTrendRes
   }
 }
 
-const TREND_PATH = '*/api/projects/:projectId/issues/metrics/completion'
+let completionTrendResult: ReturnType<CompletionTrendHook>
+
+const completionTrendHook: CompletionTrendHook = () => completionTrendResult
 
 function mockTrendResponse(data: CompletionTrendResponse) {
-  server.use(
-    http.get(TREND_PATH, () => HttpResponse.json({ success: true, data })),
-  )
+  completionTrendResult = { data, isLoading: false, isError: false }
 }
 
 function mockTrendPending() {
-  server.use(
-    http.get(TREND_PATH, () => new Promise(() => {})),
-  )
+  completionTrendResult = { data: undefined, isLoading: true, isError: false }
 }
 
 function mockTrendError() {
-  server.use(
-    http.get(TREND_PATH, () => HttpResponse.json({ success: false, error: { message: 'boom' } }, { status: 500 })),
-  )
+  completionTrendResult = { data: undefined, isLoading: false, isError: true }
 }
 
 function renderTrend() {
@@ -60,7 +52,7 @@ function renderTrend() {
     <QueryClientProvider client={queryClient}>
       <ProjectProvider initialProjectId={TEST_PROJECT.id} initialProjects={[TEST_PROJECT]}>
         <MemoryRouter initialEntries={['/']}>
-          <CompletionTrend range="30d" />
+          <CompletionTrend range="30d" completionTrendHook={completionTrendHook} />
         </MemoryRouter>
       </ProjectProvider>
     </QueryClientProvider>,

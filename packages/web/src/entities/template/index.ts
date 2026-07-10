@@ -1,4 +1,5 @@
 export {
+  projectTemplateOverrideQueryOptions,
   useDeleteProjectTemplateOverride,
   useExtractVariables,
   usePreviewProjectTemplate,
@@ -7,6 +8,7 @@ export {
   useSystemTemplates,
   useUpsertProjectTemplateOverride,
 } from './api/queries'
+export type { ProjectTemplatePreviewer, ProjectTemplatesFetcher } from './api/queries'
 export {
   deleteProjectTemplateOverride,
   extractVariables,

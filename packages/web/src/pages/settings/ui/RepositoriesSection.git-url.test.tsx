@@ -1,15 +1,15 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it } from 'vitest'
 import { fireEvent, render, screen, waitFor, within } from '../../../../tests/test-utils'
-import { http, HttpResponse } from 'msw'
-import { server, useMswServer } from '../../../../tests/support/msw'
-import { RepositoriesSection } from './RepositoriesSection'
+import { useMutation } from '@tanstack/react-query'
+import type { Project, Repository } from '../../../entities/project'
+import { RepositoriesSection, type RepositoriesSectionDataHook } from './RepositoriesSection'
 
 const addRepositoryRequests: { method: string; url: string; body: unknown }[] = []
 const setDefaultRequests: { method: string; url: string; body: unknown }[] = []
 const removeRepositoryRequests: { method: string; url: string }[] = []
 
-let repositoriesResponse: Array<Record<string, unknown>> = [
+let repositoriesResponse: Repository[] = [
   {
     name: 'frontend',
     gitUrl: 'https://github.com/example/frontend.git',
@@ -24,50 +24,63 @@ let repositoriesResponse: Array<Record<string, unknown>> = [
   },
 ]
 
-const handlers = [
-  http.get('/api/projects/:projectId/repositories', () => {
-    return HttpResponse.json({ success: true, data: repositoriesResponse })
-  }),
-  http.post('/api/projects/:projectId/repositories', async ({ request, params }) => {
-    const body = await request.json()
-    addRepositoryRequests.push({ method: request.method, url: request.url, body })
-    const data = body as { name: string; gitUrl: string; baseBranch?: string }
-    if (!data.gitUrl || !data.gitUrl.trim()) {
-      return HttpResponse.json(
-        { success: false, error: 'gitUrl is required' },
-        { status: 400 },
-      )
-    }
-    if (data.name === 'conflict') {
-      return HttpResponse.json(
-        { success: false, error: 'Repository name already exists' },
-        { status: 409 },
-      )
-    }
-    const next = {
-      name: data.name,
-      gitUrl: data.gitUrl,
-      baseBranch: data.baseBranch ?? 'main',
-      isDefault: false,
-    }
-    repositoriesResponse = [...repositoriesResponse, next]
-    return HttpResponse.json(
-      { success: true, data: { id: params.projectId, repositories: repositoriesResponse } },
-      { status: 201 },
-    )
-  }),
-  http.patch('/api/projects/:projectId/repositories/:repoName', async ({ request }) => {
-    const body = await request.json()
-    setDefaultRequests.push({ method: request.method, url: request.url, body })
-    return HttpResponse.json({ success: true, data: { repositories: repositoriesResponse } })
-  }),
-  http.delete('/api/projects/:projectId/repositories/:repoName', ({ request }) => {
-    removeRepositoryRequests.push({ method: request.method, url: request.url })
-    return HttpResponse.json({ success: true, data: { repositories: repositoriesResponse } })
-  }),
-]
+function projectResponse(projectId: string): Project {
+  return {
+    id: projectId,
+    name: 'Test project',
+    createdAt: '2024-01-01T00:00:00Z',
+    updatedAt: '2024-01-01T00:00:00Z',
+    repositories: repositoriesResponse,
+  }
+}
 
-useMswServer(...handlers)
+const repositoriesDataHook: RepositoriesSectionDataHook = () => {
+  const addRepo = useMutation({
+    mutationFn: async ({ projectId, data }: {
+      projectId: string
+      data: { name: string; gitUrl: string; baseBranch?: string; isDefault?: boolean }
+    }) => {
+      addRepositoryRequests.push({
+        method: 'POST',
+        url: `/api/projects/${projectId}/repositories`,
+        body: data,
+      })
+      repositoriesResponse = [...repositoriesResponse, {
+        name: data.name,
+        gitUrl: data.gitUrl,
+        baseBranch: data.baseBranch ?? 'main',
+        isDefault: false,
+      }]
+      return projectResponse(projectId)
+    },
+  })
+  const removeRepo = useMutation({
+    mutationFn: async ({ projectId, repoName }: { projectId: string; repoName: string }) => {
+      removeRepositoryRequests.push({
+        method: 'DELETE',
+        url: `/api/projects/${projectId}/repositories/${repoName}`,
+      })
+      repositoriesResponse = repositoriesResponse.filter((repo) => repo.name !== repoName)
+      return projectResponse(projectId)
+    },
+  })
+  const setDefault = useMutation({
+    mutationFn: async ({ projectId, repoName }: { projectId: string; repoName: string }) => {
+      setDefaultRequests.push({
+        method: 'PATCH',
+        url: `/api/projects/${projectId}/repositories/${repoName}`,
+        body: { setDefault: true },
+      })
+      return projectResponse(projectId)
+    },
+  })
+
+  return { repositories: repositoriesResponse, isLoading: false, addRepo, removeRepo, setDefault }
+}
+
+function renderSection() {
+  return render(<RepositoriesSection projectId="proj-1" dataHook={repositoriesDataHook} />)
+}
 
 beforeEach(() => {
   addRepositoryRequests.length = 0
@@ -91,7 +104,7 @@ beforeEach(() => {
 
 describe('RepositoriesSection (git-url only)', () => {
   it('renders repository name, Git URL, base branch, and default status from server data', async () => {
-    render(<RepositoriesSection projectId="proj-1" />)
+    renderSection()
 
     const frontendRow = await screen.findByTestId('repository-frontend')
     expect(within(frontendRow).getByTestId('repository-name-frontend')).toHaveTextContent('frontend')
@@ -113,7 +126,7 @@ describe('RepositoriesSection (git-url only)', () => {
   })
 
   it('does not show a Local Path input or Remote URL input in the add form', async () => {
-    render(<RepositoriesSection projectId="proj-1" />)
+    renderSection()
 
     await screen.findByTestId('repository-add-form')
     const form = screen.getByTestId('repository-add-form')
@@ -129,7 +142,7 @@ describe('RepositoriesSection (git-url only)', () => {
   })
 
   it('submits a POST with gitUrl and never sends path or remote', async () => {
-    render(<RepositoriesSection projectId="proj-1" />)
+    renderSection()
 
     const form = await screen.findByTestId('repository-add-form')
     fireEvent.change(within(form).getByTestId('repository-add-name'), {
@@ -160,7 +173,7 @@ describe('RepositoriesSection (git-url only)', () => {
   })
 
   it('disables the submit button when Git URL is empty and shows no path-required error', async () => {
-    render(<RepositoriesSection projectId="proj-1" />)
+    renderSection()
 
     const form = await screen.findByTestId('repository-add-form')
     fireEvent.change(within(form).getByTestId('repository-add-name'), {
@@ -174,7 +187,7 @@ describe('RepositoriesSection (git-url only)', () => {
   })
 
   it('enables submit when name and Git URL are filled and no path is required', async () => {
-    render(<RepositoriesSection projectId="proj-1" />)
+    renderSection()
 
     const form = await screen.findByTestId('repository-add-form')
     fireEvent.change(within(form).getByTestId('repository-add-name'), {
@@ -189,7 +202,7 @@ describe('RepositoriesSection (git-url only)', () => {
   })
 
   it('omits removed path/remote fields even when the add form is submitted with extra fields', async () => {
-    render(<RepositoriesSection projectId="proj-1" />)
+    renderSection()
 
     const form = await screen.findByTestId('repository-add-form')
     fireEvent.change(within(form).getByTestId('repository-add-name'), {
@@ -213,7 +226,7 @@ describe('RepositoriesSection (git-url only)', () => {
   })
 
   it('renders set-default and remove controls only for non-default repositories', async () => {
-    render(<RepositoriesSection projectId="proj-1" />)
+    renderSection()
 
     await screen.findByTestId('repository-frontend')
     expect(screen.queryByTestId('repository-set-default-frontend')).not.toBeInTheDocument()
@@ -225,7 +238,7 @@ describe('RepositoriesSection (git-url only)', () => {
 
   describe('Remove confirmation flow (T-002)', () => {
     it('opens the shared AlertDialog when Remove is clicked and does not send DELETE before confirm', async () => {
-      render(<RepositoriesSection projectId="proj-1" />)
+      renderSection()
 
       await screen.findByTestId('repository-backend')
 
@@ -247,7 +260,7 @@ describe('RepositoriesSection (git-url only)', () => {
     })
 
     it('does not invoke the remove mutation until the user confirms', async () => {
-      render(<RepositoriesSection projectId="proj-1" />)
+      renderSection()
 
       await screen.findByTestId('repository-backend')
 
@@ -268,7 +281,7 @@ describe('RepositoriesSection (git-url only)', () => {
     })
 
     it('renders a single AlertDialog instance for the section, not per row (T-002)', async () => {
-      const initialRepos: Array<Record<string, unknown>> = [
+      const initialRepos: Repository[] = [
         {
           name: 'a',
           gitUrl: 'https://example.com/a.git',
@@ -282,13 +295,9 @@ describe('RepositoriesSection (git-url only)', () => {
           isDefault: false,
         },
       ]
-      server.use(
-        http.get('/api/projects/:projectId/repositories', () =>
-          HttpResponse.json({ success: true, data: initialRepos }),
-        ),
-      )
+      repositoriesResponse = initialRepos
 
-      render(<RepositoriesSection projectId="proj-1" />)
+      renderSection()
 
       await screen.findByTestId('repository-a')
       await screen.findByTestId('repository-b')
@@ -312,7 +321,7 @@ describe('RepositoriesSection (git-url only)', () => {
     })
 
     it('does not call DELETE on the initial trigger click across multiple rows', async () => {
-      const initialRepos: Array<Record<string, unknown>> = [
+      const initialRepos: Repository[] = [
         {
           name: 'a',
           gitUrl: 'https://example.com/a.git',
@@ -326,13 +335,9 @@ describe('RepositoriesSection (git-url only)', () => {
           isDefault: false,
         },
       ]
-      server.use(
-        http.get('/api/projects/:projectId/repositories', () =>
-          HttpResponse.json({ success: true, data: initialRepos }),
-        ),
-      )
+      repositoriesResponse = initialRepos
 
-      render(<RepositoriesSection projectId="proj-1" />)
+      renderSection()
 
       await screen.findByTestId('repository-a')
       await screen.findByTestId('repository-b')

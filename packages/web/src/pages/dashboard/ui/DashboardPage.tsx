@@ -30,7 +30,13 @@ const defaultAgentStatus: AgentStatus = {
   capacity: { active: 0, max: 0 },
 }
 
-export function DashboardPage() {
+export type ActivityCardsHook = typeof useActivityCards
+
+export function DashboardPage({
+  activityCardsHook = useActivityCards,
+}: {
+  activityCardsHook?: ActivityCardsHook
+} = {}) {
   const { data: projects, isLoading: projectsLoading } = useProjects()
   const { currentProject, projectId } = useProject()
   const { data: agentStatus, isLoading: agentStatusLoading, isError: agentStatusError } = useAgentStatus()
@@ -39,7 +45,7 @@ export function DashboardPage() {
     activeCards,
     isLoading: activityLoading,
     isError: activityError,
-  } = useActivityCards()
+  } = activityCardsHook()
   const { completed, failed, archived } = useRecentDigest()
   const [showCreateProject, setShowCreateProject] = useState(false)
 
@@ -127,7 +133,11 @@ export function DashboardPage() {
         {showReadyState && <ReadyState />}
         {hasActiveWork && (
           <DashboardZone id="pulse" name="Active production">
-            <PulseZone issuesOverride={fetchedIssues ?? []} agentStatusOverride={agentStatus ?? defaultAgentStatus} />
+            <PulseZone
+              issuesOverride={fetchedIssues ?? []}
+              agentStatusOverride={agentStatus ?? defaultAgentStatus}
+              activityCardsHook={activityCardsHook}
+            />
           </DashboardZone>
         )}
         {hasCapacityData && agentStatus && <DashboardCapacityZone agentStatusOverride={agentStatus} />}

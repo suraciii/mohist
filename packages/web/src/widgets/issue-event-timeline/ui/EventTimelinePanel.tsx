@@ -2,14 +2,26 @@ import { useMemo, useState } from 'react'
 import { ActivityIcon, ArrowDownIcon, ArrowUpIcon } from 'lucide-react'
 import { CategoryFilter } from './CategoryFilter'
 import { EventTimelineRow } from './EventTimelineRow'
-import { useEventTimeline } from '../useEventTimeline'
+import {
+  useEventTimeline,
+  type EventTimelineHistoryHook,
+} from '../useEventTimeline'
 import type { TimelineCategory, TimelineEntry } from '../model/types'
 
-interface EventTimelinePanelProps {
+export interface EventTimelinePanelProps {
   issueNumber: number
   issueId: string | null | undefined
   workflowStatus?: string | null
   enabled?: boolean
+  className?: string
+  showHeader?: boolean
+  historyHook?: EventTimelineHistoryHook
+}
+
+interface EventTimelinePanelViewProps {
+  entries: TimelineEntry[]
+  isLoading: boolean
+  workflowStatus?: string | null
   className?: string
   showHeader?: boolean
 }
@@ -32,8 +44,28 @@ export function EventTimelinePanel({
   enabled = true,
   className,
   showHeader = true,
+  historyHook,
 }: EventTimelinePanelProps) {
-  const { entries, isLoading } = useEventTimeline(issueNumber, issueId, enabled)
+  const { entries, isLoading } = useEventTimeline(issueNumber, issueId, enabled, historyHook)
+
+  return (
+    <EventTimelinePanelView
+      entries={entries}
+      isLoading={isLoading}
+      workflowStatus={workflowStatus}
+      className={className}
+      showHeader={showHeader}
+    />
+  )
+}
+
+export function EventTimelinePanelView({
+  entries,
+  isLoading,
+  workflowStatus,
+  className,
+  showHeader = true,
+}: EventTimelinePanelViewProps) {
   const [order, setOrder] = useState<'newest' | 'chronological'>('newest')
   const [selectedCategories, setSelectedCategories] = useState<Set<TimelineCategory>>(
     new Set(['workflow', 'approval', 'integration', 'success', 'failure', 'metadata']),

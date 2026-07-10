@@ -219,8 +219,8 @@ export function getWorkflowProfiles(projectId?: string | null) {
     })))
 }
 
-export function getWorkflowProfile(id: string) {
-  return request<WorkflowProfileDetail>(`/workflow-templates/system/${id}`)
+export function getWorkflowProfile(id: string, requester: typeof request = request) {
+  return requester<WorkflowProfileDetail>(`/workflow-templates/system/${id}`)
 }
 
 export interface ProjectDefaultWorkflowProfile {

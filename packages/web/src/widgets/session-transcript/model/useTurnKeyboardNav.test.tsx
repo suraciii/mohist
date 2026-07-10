@@ -30,6 +30,8 @@ interface SetupResult {
   unmount: () => void
 }
 
+const harnessCleanups = new Set<() => void>()
+
 function dispatchPageKeyDown(key: string, init: KeyboardEventInit = {}) {
   fireEvent.keyDown(window, { key, ...init })
 }
@@ -65,14 +67,20 @@ function setupHarness(options: SetupOptions): SetupResult {
   }
 
   const view = render(<Harness />)
+  let mounted = true
+  const unmount = () => {
+    if (!mounted) return
+    mounted = false
+    view.unmount()
+    container.remove()
+    harnessCleanups.delete(unmount)
+  }
+  harnessCleanups.add(unmount)
 
   return {
     container,
     turnRefs,
-    unmount: () => {
-      view.unmount()
-      container.remove()
-    },
+    unmount,
   }
 }
 
@@ -80,10 +88,14 @@ describe('useTurnKeyboardNav', () => {
   let scrollIntoViewSpy: ReturnType<typeof vi.spyOn>
 
   beforeEach(() => {
+    if (document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur()
+    }
     scrollIntoViewSpy = vi.spyOn(Element.prototype, 'scrollIntoView').mockImplementation(() => {})
   })
 
   afterEach(() => {
+    for (const dispose of [...harnessCleanups]) dispose()
     scrollIntoViewSpy.mockRestore()
     vi.restoreAllMocks()
     if (document.activeElement instanceof HTMLElement) {

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type FormEvent } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { BotIcon } from 'lucide-react'
 import { useProject, useProjectPath } from '../../../entities/project'
@@ -45,11 +45,32 @@ import {
 } from '@/shared/ui/components/dialog'
 import { MarkdownReader } from '@/shared/ui'
 import {
-  DependencyGraphErrorBoundary,
-  DependencyGraphWidget,
+  DependencyGraphErrorBoundary as DefaultDependencyGraphErrorBoundary,
+  DependencyGraphWidget as DefaultDependencyGraphWidget,
+  type DependencyGraphErrorBoundaryProps,
+  type DependencyGraphWidgetProps,
   type Renderability,
 } from '../../../widgets/epic-dependency-graph'
 import { EpicActivityTimelineSection } from './sections/EpicActivityTimelineSection'
+
+export interface EpicDetailPageComponents {
+  DependencyGraphErrorBoundary: ComponentType<DependencyGraphErrorBoundaryProps>
+  DependencyGraphWidget: ComponentType<DependencyGraphWidgetProps>
+}
+
+export type RemoveEpicIssueHook = () => Pick<
+  ReturnType<typeof useRemoveEpicIssue>,
+  'mutate' | 'isPending' | 'isError' | 'error'
+>
+
+export interface EpicDetailPageDependencies {
+  removeEpicIssueHook: RemoveEpicIssueHook
+}
+
+const defaultComponents: EpicDetailPageComponents = {
+  DependencyGraphErrorBoundary: DefaultDependencyGraphErrorBoundary,
+  DependencyGraphWidget: DefaultDependencyGraphWidget,
+}
 
 function PriorityBadge({ priority }: { priority: string }) {
   const colors: Record<string, string> = {
@@ -504,7 +525,17 @@ function EpicIssueSelector({ candidates, value, onChange, hasSelectableCandidate
   )
 }
 
-export function EpicDetailPage() {
+export function EpicDetailPage({
+  components,
+  dependencies,
+}: {
+  components?: Partial<EpicDetailPageComponents>
+  dependencies?: Partial<EpicDetailPageDependencies>
+} = {}) {
+  const {
+    DependencyGraphErrorBoundary,
+    DependencyGraphWidget,
+  } = { ...defaultComponents, ...components }
   const { id = '' } = useParams()
   const navigate = useNavigate()
   const toProjectPath = useProjectPath()
@@ -512,7 +543,8 @@ export function EpicDetailPage() {
   const { data: epic, isLoading } = useEpic(id)
   const { data: issues } = useIssues(projectId ? { projectId } : undefined)
   const addEpicIssue = useAddEpicIssue()
-  const removeEpicIssue = useRemoveEpicIssue()
+  const removeEpicIssueHook = dependencies?.removeEpicIssueHook ?? useRemoveEpicIssue
+  const removeEpicIssue = removeEpicIssueHook()
   const startIssue = useStartIssue()
   const [pendingStartIssueNumber, setPendingStartIssueNumber] = useState<number | null>(null)
   const markEpicDone = useMarkEpicDone()

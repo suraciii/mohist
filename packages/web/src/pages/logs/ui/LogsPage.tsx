@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react'
-import { useLogs } from '../model/useLogs'
+import { useLogs, type UseLogsReturn } from '../model/useLogs'
 import type { LogEntry } from '../model/api'
 import { LEVEL_COLORS, LEVEL_CHIP_COLORS, ALL_LEVELS, type LogLevel } from '../../../shared/lib/log-levels'
 import { formatLogTime } from '../../../shared/lib/format-time'
@@ -24,8 +24,14 @@ function LogRow({ entry }: { entry: LogEntry }) {
   )
 }
 
-export function LogsPage() {
-  const { entries, loading, error, truncated, source, unavailable, expectedLocation, reason } = useLogs()
+export type LogsDataHook = () => UseLogsReturn
+
+export function LogsPage({
+  logsHook = useLogs,
+}: {
+  logsHook?: LogsDataHook
+} = {}) {
+  const { entries, loading, error, truncated, source, unavailable, expectedLocation, reason } = logsHook()
   const [enabledLevels, setEnabledLevels] = useState<Set<LogLevel>>(new Set(ALL_LEVELS))
   const [searchQuery, setSearchQuery] = useState('')
   const [autoFollow, setAutoFollow] = useState(true)

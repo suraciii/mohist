@@ -59,8 +59,18 @@ function hasThroughputData(data: CompletionTrendResponse | undefined): data is C
   return data.buckets.some(b => b.completed > 0 || b.failed > 0)
 }
 
-export function ThroughputChart({ range }: { range: InsightsRange }) {
-  const { data, isLoading, isError } = useCompletionThroughput(range)
+export type CompletionThroughputHook = (
+  range?: InsightsRange,
+) => Pick<ReturnType<typeof useCompletionThroughput>, 'data' | 'isLoading' | 'isError'>
+
+export function ThroughputChart({
+  range,
+  completionThroughputHook = useCompletionThroughput,
+}: {
+  range: InsightsRange
+  completionThroughputHook?: CompletionThroughputHook
+}) {
+  const { data, isLoading, isError } = completionThroughputHook(range)
 
   const status = isLoading ? 'loading'
     : isError ? 'error'

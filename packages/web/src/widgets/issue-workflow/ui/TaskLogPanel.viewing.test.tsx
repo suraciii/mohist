@@ -2,11 +2,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { http, HttpResponse } from 'msw'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query'
 import { ProjectProvider } from '../../../entities/project'
+import { issueWorkflowTaskLogQueryOptions } from '../../../entities/issue'
 import type { TaskLogPage } from '../../../entities/issue/model/task-log'
-import { TaskLogPanel } from './TaskLogPanel'
+import {
+  TaskLogPanel as DefaultTaskLogPanel,
+  type TaskLogDataHook,
+  type TaskLogPanelProps,
+} from './TaskLogPanel'
 import {
   fakeConnections,
   flushAndGetLastConnection,
@@ -22,11 +26,30 @@ import {
   renderWithHarness,
   type TestHarness,
 } from './_taskLogPanelTestUtils'
-import { server, useMswServer } from '../../../../tests/support/msw'
-
-useMswServer()
 
 const _taskLogPageRef: { current: TaskLogPage | undefined } = { current: undefined }
+let _taskLogState: 'ready' | 'loading' | 'error' = 'ready'
+
+const taskLogHook: TaskLogDataHook = ({ issueNumber, taskId, projectId, workflowRunId }) =>
+  useQuery({
+    ...issueWorkflowTaskLogQueryOptions(
+      projectId,
+      issueNumber,
+      taskId,
+      { limit: 5000 },
+      true,
+      workflowRunId,
+    ),
+    queryFn: async () => {
+      if (_taskLogState === 'loading') return new Promise<TaskLogPage>(() => {})
+      if (_taskLogState === 'error') throw new Error('boom')
+      return _taskLogPageRef.current ?? makePage([])
+    },
+  })
+
+function TaskLogPanel(props: Omit<TaskLogPanelProps, 'taskLogHook'>) {
+  return <DefaultTaskLogPanel {...props} taskLogHook={taskLogHook} />
+}
 
 function buildMswHarness(initialPage: TaskLogPage | undefined): TestHarness {
   const queryClient = newQueryClient()
@@ -46,13 +69,8 @@ describe('TaskLogPanel — viewing enhancement (Phase 3a T-001)', () => {
     fakeConnections.length = 0
     recordedInvokes.length = 0
     _taskLogPageRef.current = undefined
+    _taskLogState = 'ready'
     mockConnectionBuilder()
-    server.use(
-      http.get('*/api/projects/:projectId/issues/:issueNumber/workflow/tasks/:taskId/logs', () => {
-        const data = _taskLogPageRef.current ?? { lines: [], nextCursor: null, truncated: false }
-        return HttpResponse.json({ success: true, data })
-      }),
-    )
   })
 
   afterEach(() => {
@@ -239,7 +257,7 @@ describe('TaskLogPanel — viewing enhancement (Phase 3a T-001)', () => {
     })
 
     const capture = installDownloadSpy()
-    const fetchSpy = vi.spyOn(window, 'fetch')
+    const fetchSpy = vi.spyOn(harness.queryClient, 'fetchQuery')
 
     const download = await screen.findByTestId('task-log-download-button')
     await user.click(download)
@@ -414,11 +432,7 @@ describe('TaskLogPanel — viewing enhancement (Phase 3a T-001)', () => {
   })
 
   it('preserves the loading and error boundary messages', async () => {
-    server.use(
-      http.get('*/api/projects/:projectId/issues/:issueNumber/workflow/tasks/:taskId/logs', () => {
-        return new Promise(() => {})
-      }),
-    )
+    _taskLogState = 'loading'
     const queryClientLoading = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const { unmount } = render(
       <QueryClientProvider client={queryClientLoading}>
@@ -431,11 +445,7 @@ describe('TaskLogPanel — viewing enhancement (Phase 3a T-001)', () => {
     expect(screen.getByText('Loading execution log…')).toBeInTheDocument()
     unmount()
 
-    server.use(
-      http.get('*/api/projects/:projectId/issues/:issueNumber/workflow/tasks/:taskId/logs', () => {
-        return HttpResponse.json({ success: false, error: 'boom' }, { status: 500 })
-      }),
-    )
+    _taskLogState = 'error'
     const queryClientError = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     render(
       <QueryClientProvider client={queryClientError}>

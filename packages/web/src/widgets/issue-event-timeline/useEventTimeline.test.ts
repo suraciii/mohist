@@ -1,29 +1,27 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { renderHook, act } from '@testing-library/react'
-import { useEventTimeline } from './useEventTimeline'
-import type { TimelineLiveEvent } from '../../entities/issue/model/timeline-events'
+import { beforeEach, describe, expect, it } from 'vitest'
+import { act, renderHook, waitFor } from '@testing-library/react'
+import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query'
+import { createElement, type ReactNode } from 'react'
+import { ProjectProvider } from '../../entities/project'
+import { dispatchTimelineEvent, type TimelineLiveEvent } from '../../entities/issue/model/timeline-events'
 import type { StoredCloudEventDto } from '../../entities/issue/model/types'
+import {
+  useEventTimeline,
+  type EventTimelineHistoryHook,
+} from './useEventTimeline'
 
-const handlers = new Set<(event: TimelineLiveEvent) => void>()
+let historyResponse: StoredCloudEventDto[] | 'never' = []
+let requestedIssueNumbers: string[] = []
 
-vi.mock('../../entities/issue', () => ({
-  useIssueEvents: vi.fn(),
-}))
-
-vi.mock('../../entities/issue/model/timeline-events', () => ({
-  dispatchTimelineEvent: vi.fn(),
-  onTimelineEvent: vi.fn((handler: (event: TimelineLiveEvent) => void) => {
-    handlers.add(handler)
-    return () => handlers.delete(handler)
-  }),
-}))
-
-import { useIssueEvents } from '../../entities/issue'
-import { onTimelineEvent } from '../../entities/issue/model/timeline-events'
-
-function dispatch(event: TimelineLiveEvent) {
-  handlers.forEach((handler) => handler(event))
-}
+const historyHook: EventTimelineHistoryHook = (issueNumber, enabled) => useQuery({
+  queryKey: ['event-timeline-test-history', issueNumber],
+  queryFn: async () => {
+    requestedIssueNumbers.push(String(issueNumber))
+    if (historyResponse === 'never') return new Promise<StoredCloudEventDto[]>(() => {})
+    return historyResponse
+  },
+  enabled,
+})
 
 function makeHistoryEvent(overrides: Partial<StoredCloudEventDto> = {}): StoredCloudEventDto {
   return {
@@ -53,30 +51,63 @@ function makeLiveEvent(overrides: Partial<TimelineLiveEvent> = {}): TimelineLive
   }
 }
 
+function makeWrapper() {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false, gcTime: 0 } },
+  })
+  const project = {
+    id: 'proj-1',
+    name: 'Project 1',
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+    repositories: [],
+  }
+
+  return ({ children }: { children: ReactNode }) => createElement(
+    QueryClientProvider,
+    { client: queryClient },
+    createElement(
+      ProjectProvider,
+      { initialProjectId: project.id, initialProjects: [project], children },
+    ),
+  )
+}
+
+function renderTimelineHook(enabled: boolean = true) {
+  return renderHook(
+    ({ number, issueId, isEnabled }) => useEventTimeline(number, issueId, isEnabled, historyHook),
+    {
+      initialProps: { number: 42, issueId: 'issue-42', isEnabled: enabled },
+      wrapper: makeWrapper(),
+    },
+  )
+}
+
 beforeEach(() => {
-  handlers.clear()
-  vi.mocked(useIssueEvents).mockReturnValue({ data: undefined, isLoading: false } as ReturnType<typeof useIssueEvents>)
+  historyResponse = []
+  requestedIssueNumbers = []
 })
 
 describe('useEventTimeline', () => {
-  it('returns history entries on mount', () => {
-    vi.mocked(useIssueEvents).mockReturnValue({
-      data: [makeHistoryEvent({ eventId: 'h1', type: 'com.mohist.issue.created', time: '2026-06-18T09:00:00.000Z' })],
-      isLoading: false,
-    } as ReturnType<typeof useIssueEvents>)
+  it('returns history entries on mount', async () => {
+    historyResponse = [
+      makeHistoryEvent({ eventId: 'h1', type: 'com.mohist.issue.created', time: '2026-06-18T09:00:00.000Z' }),
+    ]
 
-    const { result } = renderHook(() => useEventTimeline(42, 'issue-42'))
+    const { result } = renderTimelineHook()
 
-    expect(result.current.entries).toHaveLength(1)
+    await waitFor(() => {
+      expect(result.current.entries).toHaveLength(1)
+    })
     expect(result.current.entries[0].id).toBe('h1')
     expect(result.current.entries[0].isLive).toBe(false)
   })
 
   it('appends live events for the current issue', () => {
-    const { result } = renderHook(() => useEventTimeline(42, 'issue-42'))
+    const { result } = renderTimelineHook()
 
     act(() => {
-      dispatch(makeLiveEvent({ issueNumber: 42, eventId: 'l1' }))
+      dispatchTimelineEvent(makeLiveEvent({ issueNumber: 42, eventId: 'l1' }))
     })
 
     expect(result.current.entries).toHaveLength(1)
@@ -85,61 +116,69 @@ describe('useEventTimeline', () => {
   })
 
   it('ignores live events for a different issue', () => {
-    const { result } = renderHook(() => useEventTimeline(42, 'issue-42'))
+    const { result } = renderTimelineHook()
 
     act(() => {
-      dispatch(makeLiveEvent({ issueNumber: 99, issueId: 'issue-99', eventId: 'l-other', payload: { issueNumber: 99 } }))
+      dispatchTimelineEvent(makeLiveEvent({
+        issueNumber: 99,
+        issueId: 'issue-99',
+        eventId: 'l-other',
+        payload: { issueNumber: 99 },
+      }))
     })
 
     expect(result.current.entries).toHaveLength(0)
   })
 
   it('matches live events by issueId when issueNumber differs', () => {
-    const { result } = renderHook(() => useEventTimeline(42, 'issue-42'))
+    const { result } = renderTimelineHook()
 
     act(() => {
-      dispatch(makeLiveEvent({ issueNumber: null, issueId: 'issue-42', eventId: 'l-by-id' }))
+      dispatchTimelineEvent(makeLiveEvent({ issueNumber: null, issueId: 'issue-42', eventId: 'l-by-id' }))
     })
 
     expect(result.current.entries).toHaveLength(1)
     expect(result.current.entries[0].id).toBe('l-by-id')
   })
 
-  it('deduplicates live events against history by eventId', () => {
-    vi.mocked(useIssueEvents).mockReturnValue({
-      data: [makeHistoryEvent({ eventId: 'shared-1', type: 'com.mohist.workflow.run.started' })],
-      isLoading: false,
-    } as ReturnType<typeof useIssueEvents>)
+  it('deduplicates live events against history by eventId', async () => {
+    historyResponse = [makeHistoryEvent({ eventId: 'shared-1', type: 'com.mohist.workflow.run.started' })]
+    const { result } = renderTimelineHook()
 
-    const { result } = renderHook(() => useEventTimeline(42, 'issue-42'))
+    await waitFor(() => {
+      expect(result.current.entries).toHaveLength(1)
+    })
 
     act(() => {
-      dispatch(makeLiveEvent({ eventId: 'shared-1', issueNumber: 42 }))
+      dispatchTimelineEvent(makeLiveEvent({ eventId: 'shared-1', issueNumber: 42 }))
     })
 
     expect(result.current.entries).toHaveLength(1)
   })
 
-  it('orders entries chronologically by time', () => {
-    vi.mocked(useIssueEvents).mockReturnValue({
-      data: [
-        makeHistoryEvent({ eventId: 'h1', time: '2026-06-18T12:00:00.000Z' }),
-        makeHistoryEvent({ eventId: 'h2', time: '2026-06-18T10:00:00.000Z' }),
-      ],
-      isLoading: false,
-    } as ReturnType<typeof useIssueEvents>)
+  it('orders entries chronologically by time', async () => {
+    historyResponse = [
+      makeHistoryEvent({ eventId: 'h1', time: '2026-06-18T12:00:00.000Z' }),
+      makeHistoryEvent({ eventId: 'h2', time: '2026-06-18T10:00:00.000Z' }),
+    ]
 
-    const { result } = renderHook(() => useEventTimeline(42, 'issue-42'))
+    const { result } = renderTimelineHook()
 
-    expect(result.current.entries.map((e) => e.id)).toEqual(['h2', 'h1'])
+    await waitFor(() => {
+      expect(result.current.entries.map((event) => event.id)).toEqual(['h2', 'h1'])
+    })
   })
 
   it('caps live events at 500 entries', () => {
-    const { result } = renderHook(() => useEventTimeline(42, 'issue-42'))
+    const { result } = renderTimelineHook()
 
     act(() => {
       for (let i = 0; i < 550; i++) {
-        dispatch(makeLiveEvent({ eventId: `l-${i}`, issueNumber: 42, time: `2026-06-18T10:00:00.00${i}Z` }))
+        dispatchTimelineEvent(makeLiveEvent({
+          eventId: `l-${i}`,
+          issueNumber: 42,
+          time: new Date(Date.UTC(2026, 5, 18, 10, 0, 0, i)).toISOString(),
+        }))
       }
     })
 
@@ -147,77 +186,62 @@ describe('useEventTimeline', () => {
   })
 
   it('resets live events when issueNumber changes', () => {
-    const { result, rerender } = renderHook(
-      ({ number }: { number: number }) => useEventTimeline(number, 'issue-42'),
-      { initialProps: { number: 42 } },
-    )
+    const { result, rerender } = renderTimelineHook()
 
     act(() => {
-      dispatch(makeLiveEvent({ issueNumber: 42, eventId: 'l1' }))
+      dispatchTimelineEvent(makeLiveEvent({ issueNumber: 42, eventId: 'l1' }))
     })
 
     expect(result.current.entries).toHaveLength(1)
 
-    rerender({ number: 43 })
+    rerender({ number: 43, issueId: 'issue-42', isEnabled: true })
 
     expect(result.current.entries).toHaveLength(0)
   })
 
   it('passes loading state through', () => {
-    vi.mocked(useIssueEvents).mockReturnValue({
-      data: undefined,
-      isLoading: true,
-    } as ReturnType<typeof useIssueEvents>)
+    historyResponse = 'never'
 
-    const { result } = renderHook(() => useEventTimeline(42, 'issue-42'))
+    const { result } = renderTimelineHook()
 
     expect(result.current.isLoading).toBe(true)
   })
 
-  it('forwards the enabled flag to useIssueEvents for lazy loading', () => {
-    vi.mocked(useIssueEvents).mockClear()
+  it('loads history only when enabled', async () => {
+    const { rerender } = renderTimelineHook(false)
 
-    renderHook(() => useEventTimeline(42, 'issue-42', false))
+    expect(requestedIssueNumbers).toEqual([])
 
-    expect(useIssueEvents).toHaveBeenLastCalledWith(42, false)
+    rerender({ number: 42, issueId: 'issue-42', isEnabled: true })
 
-    renderHook(() => useEventTimeline(42, 'issue-42', true))
-
-    expect(useIssueEvents).toHaveBeenLastCalledWith(42, true)
+    await waitFor(() => {
+      expect(requestedIssueNumbers).toEqual(['42'])
+    })
   })
 
   it('does not subscribe to live events when enabled is false', () => {
-    handlers.clear()
-
-    renderHook(() => useEventTimeline(42, 'issue-42', false))
+    const { result } = renderTimelineHook(false)
 
     act(() => {
-      dispatch(makeLiveEvent({ issueNumber: 42, eventId: 'lazy-l1' }))
+      dispatchTimelineEvent(makeLiveEvent({ issueNumber: 42, eventId: 'lazy-l1' }))
     })
 
-    expect(handlers.size).toBe(0)
+    expect(result.current.entries).toEqual([])
   })
 
   it('subscribes to live events only after enabled flips to true', () => {
-    handlers.clear()
-
-    const { rerender } = renderHook(
-      ({ enabled }: { enabled: boolean }) => useEventTimeline(42, 'issue-42', enabled),
-      { initialProps: { enabled: false } },
-    )
-
-    expect(handlers.size).toBe(0)
-
-    rerender({ enabled: true })
-
-    expect(handlers.size).toBe(1)
+    const { result, rerender } = renderTimelineHook(false)
 
     act(() => {
-      dispatch(makeLiveEvent({ issueNumber: 42, eventId: 'lazy-after-open' }))
+      dispatchTimelineEvent(makeLiveEvent({ issueNumber: 42, eventId: 'before-open' }))
     })
+    expect(result.current.entries).toEqual([])
 
-    expect(handlers.size).toBe(1)
+    rerender({ number: 42, issueId: 'issue-42', isEnabled: true })
+
+    act(() => {
+      dispatchTimelineEvent(makeLiveEvent({ issueNumber: 42, eventId: 'after-open' }))
+    })
+    expect(result.current.entries.map((entry) => entry.id)).toEqual(['after-open'])
   })
 })
-
-void onTimelineEvent

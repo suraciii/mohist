@@ -31,6 +31,7 @@ interface Props {
   issues: Issue[]
   agentStatus: AgentStatus
   archivedCount?: number
+  runnerSummaryHook?: typeof useRunnerSummary
 }
 
 const ALL_PRIORITIES = ['p0', 'p1', 'p2', 'p3', 'p4']
@@ -466,10 +467,12 @@ function attentionFamily(item: Extract<AttentionItem, { issueNumber: number }>):
 }
 function RunnerUnavailableBanner({
   agentStatus,
+  runnerSummaryHook,
 }: {
   agentStatus: AgentStatus
+  runnerSummaryHook: typeof useRunnerSummary
 }) {
-  const { hasConnectedCapacity } = useRunnerSummary()
+  const { hasConnectedCapacity } = runnerSummaryHook()
   const toProjectPath = useProjectPath()
   if (hasConnectedCapacity) return null
 
@@ -488,7 +491,12 @@ function getSearchParams(): string {
   return typeof window !== 'undefined' ? window.location.search : ''
 }
 
-export function KanbanBoard({ issues, agentStatus, archivedCount = 0 }: Props) {
+export function KanbanBoard({
+  issues,
+  agentStatus,
+  archivedCount = 0,
+  runnerSummaryHook = useRunnerSummary,
+}: Props) {
   const allLabels = useMemo(() => deriveLabelPairsFromIssues(issues), [issues])
 
   const queryState = useMemo(() => parseBoardQuery(getSearchParams()), [])
@@ -563,7 +571,7 @@ export function KanbanBoard({ issues, agentStatus, archivedCount = 0 }: Props) {
 
   return (
     <div data-testid="kanban-board-root" className="flex flex-col min-w-0 h-[calc(100vh-3rem)]">
-      <RunnerUnavailableBanner agentStatus={agentStatus} />
+      <RunnerUnavailableBanner agentStatus={agentStatus} runnerSummaryHook={runnerSummaryHook} />
       <NeedsAttentionSummary items={attentionItems} />
       <FilterBar
         state={localState}

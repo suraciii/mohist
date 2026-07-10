@@ -1,8 +1,8 @@
-import { useCallback, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useLayoutEffect, useRef, useState, type ComponentType } from 'react'
 import { ArrowLeftIcon } from 'lucide-react'
 import { useProject } from '../../../entities/project'
 import { useDisableWorkflowProfile, useEnableWorkflowProfile, useProjectDefaultWorkflowProfile, useWorkflowProfile, useAllWorkflowProfiles } from '../../../entities/settings'
-import type { WorkflowProfileInfo } from '../../../entities/settings'
+import type { ProjectDefaultWorkflowProfile, WorkflowProfileDetail, WorkflowProfileInfo } from '../../../entities/settings'
 import { includesWorkflowProfileId } from '../../../entities/settings/model/workflowProfileIds'
 import { CardSection } from '../../../shared/ui/components/card-section'
 import { Switch } from '../../../shared/ui/components/switch'
@@ -65,8 +65,49 @@ function StageSummary({ stage }: { stage: { stage: string; requiresApproval: boo
   )
 }
 
-function ProfileDetail({ profileId, onBack }: { profileId: string; onBack: () => void }) {
-  const { data: profile, isLoading, isError } = useWorkflowProfile(profileId)
+export type WorkflowProfileHook = (
+  profileId: string | null,
+) => { data: WorkflowProfileDetail | undefined; isLoading: boolean; isError: boolean }
+
+interface WorkflowProfileMutation {
+  mutate: (profileId: string) => void
+  isPending: boolean
+}
+
+export interface WorkflowProfilesSectionData {
+  allProfiles: WorkflowProfileInfo[] | undefined
+  profilesLoading: boolean
+  profilesError: boolean
+  projectProfile: ProjectDefaultWorkflowProfile | undefined
+  projectProfileLoading: boolean
+  projectProfileError: boolean
+  disableMutation: WorkflowProfileMutation
+  enableMutation: WorkflowProfileMutation
+}
+
+export type WorkflowProfilesSectionDataHook = () => WorkflowProfilesSectionData
+
+export interface WorkflowProfilesSectionComponents {
+  ProjectDefaultWorkflowControl: ComponentType
+}
+
+const useDefaultData: WorkflowProfilesSectionDataHook = () => {
+  const { data: allProfiles, isLoading: profilesLoading, isError: profilesError } = useAllWorkflowProfiles()
+  const { data: projectProfile, isLoading: projectProfileLoading, isError: projectProfileError } = useProjectDefaultWorkflowProfile()
+  return {
+    allProfiles,
+    profilesLoading,
+    profilesError,
+    projectProfile,
+    projectProfileLoading,
+    projectProfileError,
+    disableMutation: useDisableWorkflowProfile(),
+    enableMutation: useEnableWorkflowProfile(),
+  }
+}
+
+function ProfileDetail({ profileId, onBack, profileHook }: { profileId: string; onBack: () => void; profileHook: WorkflowProfileHook }) {
+  const { data: profile, isLoading, isError } = profileHook(profileId)
   const { label: sectionLabel } = getSectionMeta('workflows')
 
   if (isLoading) {
@@ -137,6 +178,7 @@ function ProfileCard({
   isLastEnabled,
   toggleDisabled,
   onToggleDisabled,
+  profileHook,
 }: {
   profile: WorkflowProfileInfo
   onClick: () => void
@@ -144,12 +186,13 @@ function ProfileCard({
   isLastEnabled: boolean
   toggleDisabled: boolean
   onToggleDisabled: (profileId: string, currentlyDisabled: boolean) => void
+  profileHook: WorkflowProfileHook
 }) {
   const descriptionRef = useRef<HTMLParagraphElement>(null)
   const [isExpanded, setIsExpanded] = useState(false)
   const [hasOverflow, setHasOverflow] = useState(false)
   const [blockedMessage, setBlockedMessage] = useState<string | null>(null)
-  const { data: detail, isLoading: detailLoading } = useWorkflowProfile(profile.id)
+  const { data: detail, isLoading: detailLoading } = profileHook(profile.id)
 
   useLayoutEffect(() => {
     const description = descriptionRef.current
@@ -252,12 +295,27 @@ function ProfileCard({
   )
 }
 
-export function WorkflowProfilesSection() {
+export function WorkflowProfilesSection({
+  dataHook = useDefaultData,
+  profileHook = useWorkflowProfile,
+  components,
+}: {
+  dataHook?: WorkflowProfilesSectionDataHook
+  profileHook?: WorkflowProfileHook
+  components?: Partial<WorkflowProfilesSectionComponents>
+} = {}) {
   const { currentProject } = useProject()
-  const { data: allProfiles, isLoading: profilesLoading, isError: profilesError } = useAllWorkflowProfiles()
-  const { data: projectProfile, isLoading: projectProfileLoading, isError: projectProfileError } = useProjectDefaultWorkflowProfile()
-  const disableMutation = useDisableWorkflowProfile()
-  const enableMutation = useEnableWorkflowProfile()
+  const {
+    allProfiles,
+    profilesLoading,
+    profilesError,
+    projectProfile,
+    projectProfileLoading,
+    projectProfileError,
+    disableMutation,
+    enableMutation,
+  } = dataHook()
+  const DefaultWorkflowControl = components?.ProjectDefaultWorkflowControl ?? ProjectDefaultWorkflowControl
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const { label: sectionLabel, description: sectionDescription } = getSectionMeta('workflows')
 
@@ -277,7 +335,7 @@ export function WorkflowProfilesSection() {
   }
 
   if (selectedId) {
-    return <ProfileDetail profileId={selectedId} onBack={() => setSelectedId(null)} />
+    return <ProfileDetail profileId={selectedId} onBack={() => setSelectedId(null)} profileHook={profileHook} />
   }
 
   if (profilesLoading || projectProfileLoading) {
@@ -302,7 +360,7 @@ export function WorkflowProfilesSection() {
       >
         <div className="space-y-4">
           <div id="project-default-workflow" tabIndex={-1}>
-            <ProjectDefaultWorkflowControl />
+            <DefaultWorkflowControl />
           </div>
           {allProfiles.map((p) => (
             <ProfileCard
@@ -313,6 +371,7 @@ export function WorkflowProfilesSection() {
               isLastEnabled={enabledCount <= 1 && !includesWorkflowProfileId(disabledIds, p.id)}
               toggleDisabled={disableMutation.isPending || enableMutation.isPending}
               onToggleDisabled={handleToggleDisabled}
+              profileHook={profileHook}
             />
           ))}
         </div>

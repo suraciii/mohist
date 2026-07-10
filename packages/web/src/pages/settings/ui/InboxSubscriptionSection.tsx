@@ -33,9 +33,30 @@ const DEFAULT_SUBSCRIPTION: InboxSubscription = {
   [NOTIFICATION_KINDS.IssueCompleted]: true,
 }
 
-export function InboxSubscriptionSection() {
+export interface InboxSubscriptionSectionData {
+  subscription: InboxSubscription | undefined
+  isLoading: boolean
+  updateSubscription: (subscription: InboxSubscription) => void
+}
+
+export type InboxSubscriptionSectionDataHook = () => InboxSubscriptionSectionData
+
+const useDefaultData: InboxSubscriptionSectionDataHook = () => {
   const { data: subscription, isLoading } = useInboxSubscription()
   const update = useUpdateInboxSubscription()
+  return {
+    subscription,
+    isLoading,
+    updateSubscription: (nextSubscription) => update.mutate(nextSubscription),
+  }
+}
+
+export function InboxSubscriptionSection({
+  dataHook = useDefaultData,
+}: {
+  dataHook?: InboxSubscriptionSectionDataHook
+} = {}) {
+  const { subscription, isLoading, updateSubscription } = dataHook()
   const [draft, setDraft] = useState<InboxSubscription>(DEFAULT_SUBSCRIPTION)
   const draftRef = useRef<InboxSubscription>(DEFAULT_SUBSCRIPTION)
   const { label: sectionLabel } = getSectionMeta('inbox')
@@ -54,7 +75,7 @@ export function InboxSubscriptionSection() {
     }
     draftRef.current = next
     setDraft(next)
-    update.mutate(next)
+    updateSubscription(next)
   }
 
   return (

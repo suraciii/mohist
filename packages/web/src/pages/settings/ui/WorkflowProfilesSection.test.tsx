@@ -6,9 +6,13 @@ import {
   it,
 } from 'vitest'
 import { fireEvent, render, screen, waitFor, within } from '../../../../tests/test-utils'
-import { WorkflowProfilesSection, WORKFLOW_DESCRIPTORS } from './WorkflowProfilesSection'
-import { http, HttpResponse } from 'msw'
-import { server, useMswServer } from '../../../../tests/support/msw'
+import {
+  WorkflowProfilesSection as DefaultWorkflowProfilesSection,
+  WORKFLOW_DESCRIPTORS,
+  type WorkflowProfileHook,
+  type WorkflowProfilesSectionComponents,
+  type WorkflowProfilesSectionDataHook,
+} from './WorkflowProfilesSection'
 
 const SYSTEM_TEMPLATES = [
   {
@@ -62,22 +66,11 @@ Object.defineProperty(HTMLElement.prototype, 'scrollHeight', {
   },
 })
 
-const handlers = [
-  http.get('/api/workflow-templates/system', () =>
-    HttpResponse.json({ success: true, data: SYSTEM_TEMPLATES }),
-  ),
-  http.get('/api/projects/test-project/workflow-profile', () =>
-    HttpResponse.json({ success: true, data: { projectId: 'test-project', defaultTemplateId: null } }),
-  ),
-  http.get('/api/workflow-templates/system/mohist/local', () =>
-    HttpResponse.json({ success: true, data: DEFAULT_DETAIL }),
-  ),
-  http.get('/api/workflow-templates/system/mohist/quick-fix', () =>
-    HttpResponse.json({
-      success: true,
-      data: {
+const DETAILS = {
+  'mohist/local': { ...DEFAULT_DETAIL, displayName: DEFAULT_DETAIL.name },
+  'mohist/quick-fix': {
         id: 'mohist/quick-fix',
-        name: 'Mohist Quick Fix',
+        displayName: 'Mohist Quick Fix',
         description: SYSTEM_TEMPLATES[1].description,
         isDefault: false,
         yaml: 'description: quick-fix\nstages:\n  - stage: check\n    checks:\n      - merge-ready\n  - stage: integrate\n    requiresApproval: true\n',
@@ -85,42 +78,67 @@ const handlers = [
           { stage: 'check', requiresApproval: false, tasks: [], checks: ['merge-ready'] },
           { stage: 'integrate', requiresApproval: true, tasks: [], checks: [] },
         ],
-      },
-    }),
-  ),
-  http.get('/api/workflow-templates/system/mohist/experiment', () =>
-    HttpResponse.json({
-      success: true,
-      data: {
+  },
+  'mohist/experiment': {
         id: 'mohist/experiment',
-        name: 'Mohist Experiment',
+        displayName: 'Mohist Experiment',
         description: SYSTEM_TEMPLATES[2].description,
         isDefault: false,
         yaml: 'description: experiment\nstages: []\n',
         stages: [],
-      },
-    }),
-  ),
-]
+  },
+}
 
-useMswServer(...handlers)
+const disableRequests: string[] = []
+
+const dataHook: WorkflowProfilesSectionDataHook = () => ({
+  allProfiles: SYSTEM_TEMPLATES.map((profile) => ({
+    id: profile.id,
+    displayName: profile.name,
+    description: profile.description,
+    isDefault: profile.isDefault,
+  })),
+  profilesLoading: false,
+  profilesError: false,
+  projectProfile: {
+    projectId: 'test-project',
+    defaultTemplateId: null,
+    disabledWorkflowProfileIds: [],
+  },
+  projectProfileLoading: false,
+  projectProfileError: false,
+  disableMutation: { mutate: (profileId) => disableRequests.push(profileId), isPending: false },
+  enableMutation: { mutate: () => undefined, isPending: false },
+})
+
+const profileHook: WorkflowProfileHook = (profileId) => ({
+  data: profileId ? DETAILS[profileId as keyof typeof DETAILS] : undefined,
+  isLoading: false,
+  isError: false,
+})
+
+const components: WorkflowProfilesSectionComponents = {
+  ProjectDefaultWorkflowControl: () => <div data-testid="project-default-workflow-control" />,
+}
+
+function WorkflowProfilesSection() {
+  return (
+    <DefaultWorkflowProfilesSection
+      dataHook={dataHook}
+      profileHook={profileHook}
+      components={components}
+    />
+  )
+}
 
 beforeEach(() => {
   overflowByTestId.clear()
+  disableRequests.length = 0
 })
 
 describe('WorkflowProfilesSection', () => {
   describe('Profile list (cards)', () => {
     it('disables an enabled non-last profile through the switch', async () => {
-      const disableRequests: string[] = []
-      server.use(
-        http.post('/api/projects/test-project/workflow-profile/disable', async ({ request }) => {
-          const body = await request.json() as { profileId?: string }
-          disableRequests.push(body.profileId ?? '')
-          return HttpResponse.json({ success: true, data: null })
-        }),
-      )
-
       render(<WorkflowProfilesSection />)
 
       const quickFixCard = await waitFor(() =>

@@ -1,22 +1,68 @@
 // @vitest-environment jsdom
-import { describe, expect, it, vi, beforeEach } from 'vitest'
+import { describe, expect, it, beforeEach } from 'vitest'
 import { screen, waitFor, fireEvent } from '@testing-library/react'
 import { render } from '../../../../tests/test-utils'
-import { LatestArtifactsPanel } from './LatestArtifactsPanel'
-import { WorkflowView } from './WorkflowView'
-import { IssueStatus, IssueHealth, WorkflowStage, type Issue, type WorkflowTimeline, type WorkflowArtifact } from '../../../entities/issue'
-import { useIssueWorkflowArtifacts, useIssueWorkflowArtifactContent, useWorkflowTimeline } from '../../../entities/issue'
+import type { ComponentProps } from 'react'
+import { LatestArtifactsPanel as DefaultLatestArtifactsPanel, type LatestArtifactsHook } from './LatestArtifactsPanel'
+import { WorkflowView as DefaultWorkflowView, type WorkflowTimelineHook } from './WorkflowView'
+import type { ArtifactContentHook } from './ArtifactContentViewer'
+import {
+  IssueStatus,
+  IssueHealth,
+  WorkflowStage,
+  type Issue,
+  type WorkflowTimeline,
+  type WorkflowArtifact,
+} from '../../../entities/issue'
+import type { WorkflowArtifactContentResult } from '../../../entities/issue/api/client'
 
-vi.mock('../../../entities/issue', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../../../entities/issue')>()),
-  useIssueWorkflowArtifacts: vi.fn(),
-  useIssueWorkflowArtifactContent: vi.fn(),
-  useWorkflowTimeline: vi.fn(),
-}))
+let artifactsData: WorkflowArtifact[] = []
+let artifactContent: WorkflowArtifactContentResult | null = null
+let artifactFileContent: WorkflowArtifactContentResult | null = null
+let timelineData: WorkflowTimeline | null = null
 
-const mockedUseIssueWorkflowArtifacts = vi.mocked(useIssueWorkflowArtifacts)
-const mockedUseIssueWorkflowArtifactContent = vi.mocked(useIssueWorkflowArtifactContent)
-const mockedUseWorkflowTimeline = vi.mocked(useWorkflowTimeline)
+const artifactsHook: LatestArtifactsHook = () => ({
+  data: artifactsData,
+  isLoading: false,
+  error: null,
+})
+
+const contentHook: ArtifactContentHook = (_issueNumber, _artifactId, options, enabled = true) => ({
+  data: enabled ? (options?.file ? artifactFileContent : artifactContent) ?? undefined : undefined,
+  isLoading: false,
+  error: null,
+})
+
+const timelineHook: WorkflowTimelineHook = () => ({ data: timelineData })
+
+function LatestArtifactsPanel(
+  props: Omit<ComponentProps<typeof DefaultLatestArtifactsPanel>, 'artifactsHook' | 'contentHook'>,
+) {
+  return (
+    <DefaultLatestArtifactsPanel
+      {...props}
+      artifactsHook={artifactsHook}
+      contentHook={contentHook}
+    />
+  )
+}
+
+function WorkflowView(props: Omit<ComponentProps<typeof DefaultWorkflowView>, 'timelineHook'>) {
+  return (
+    <DefaultWorkflowView
+      {...props}
+      timelineHook={timelineHook}
+      dependencies={{ ...props.dependencies, artifactContentHook: contentHook }}
+    />
+  )
+}
+
+beforeEach(() => {
+  artifactsData = []
+  artifactContent = null
+  artifactFileContent = null
+  timelineData = null
+})
 
 function makeIssue(overrides: Partial<Issue> = {}): Issue {
   return {
@@ -157,20 +203,11 @@ async function expandTaskByTitle(taskTitle: string) {
 }
 
 describe('LatestArtifactsPanel', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    mockedUseIssueWorkflowArtifactContent.mockReturnValue({ data: undefined, isLoading: false, error: null } as ReturnType<typeof useIssueWorkflowArtifactContent>)
-  })
-
   it('renders latest artifacts grouped by path', async () => {
-    mockedUseIssueWorkflowArtifacts.mockReturnValue({
-      data: [
+    artifactsData = [
         makeFileArtifact({ artifactId: 'art-proposal', path: 'proposal.md', taskRunId: 'plan.1' }),
         makeFileArtifact({ artifactId: 'art-review-2', path: 'review.md', taskRunId: 'ai-review.2' }),
-      ],
-      isLoading: false,
-      error: null,
-    } as ReturnType<typeof useIssueWorkflowArtifacts>)
+    ]
 
     render(<LatestArtifactsPanel issueNumber={1} workflowRunId="workflow-run-1" />)
 
@@ -181,11 +218,7 @@ describe('LatestArtifactsPanel', () => {
   })
 
   it('renders directory artifact as one collection', async () => {
-    mockedUseIssueWorkflowArtifacts.mockReturnValue({
-      data: [makeDirectoryArtifact({ artifactId: 'art-specs', path: 'specs/' })],
-      isLoading: false,
-      error: null,
-    } as ReturnType<typeof useIssueWorkflowArtifacts>)
+    artifactsData = [makeDirectoryArtifact({ artifactId: 'art-specs', path: 'specs/' })]
 
     render(<LatestArtifactsPanel issueNumber={1} workflowRunId="workflow-run-1" />)
 
@@ -196,17 +229,8 @@ describe('LatestArtifactsPanel', () => {
   })
 
   it('opens recorded artifact content when latest artifact is clicked', async () => {
-    mockedUseIssueWorkflowArtifacts.mockReturnValue({
-      data: [makeFileArtifact({ artifactId: 'art-review-2', path: 'review.md', taskRunId: 'ai-review.2' })],
-      isLoading: false,
-      error: null,
-    } as ReturnType<typeof useIssueWorkflowArtifacts>)
-
-    mockedUseIssueWorkflowArtifactContent.mockReturnValue({
-      data: { kind: 'text', content: '# Title\n\nPASS', contentType: 'text/markdown' },
-      isLoading: false,
-      error: null,
-    } as ReturnType<typeof useIssueWorkflowArtifactContent>)
+    artifactsData = [makeFileArtifact({ artifactId: 'art-review-2', path: 'review.md', taskRunId: 'ai-review.2' })]
+    artifactContent = { kind: 'text', content: '# Title\n\nPASS', contentType: 'text/markdown' }
 
     render(<LatestArtifactsPanel issueNumber={1} workflowRunId="workflow-run-1" />)
 
@@ -228,17 +252,8 @@ describe('LatestArtifactsPanel', () => {
   })
 
   it('renders non-Markdown text artifact inside a <pre> block', async () => {
-    mockedUseIssueWorkflowArtifacts.mockReturnValue({
-      data: [makeFileArtifact({ artifactId: 'art-log', path: 'output.log', taskRunId: 'plan.1', contentType: 'text/plain' })],
-      isLoading: false,
-      error: null,
-    } as ReturnType<typeof useIssueWorkflowArtifacts>)
-
-    mockedUseIssueWorkflowArtifactContent.mockReturnValue({
-      data: { kind: 'text', content: 'plain line 1\nplain line 2', contentType: 'text/plain' },
-      isLoading: false,
-      error: null,
-    } as ReturnType<typeof useIssueWorkflowArtifactContent>)
+    artifactsData = [makeFileArtifact({ artifactId: 'art-log', path: 'output.log', taskRunId: 'plan.1', contentType: 'text/plain' })]
+    artifactContent = { kind: 'text', content: 'plain line 1\nplain line 2', contentType: 'text/plain' }
 
     render(<LatestArtifactsPanel issueNumber={1} workflowRunId="workflow-run-1" />)
 
@@ -259,21 +274,13 @@ describe('LatestArtifactsPanel', () => {
   })
 
   it('renders directory entries and opens contained Markdown file content through MarkdownReader', async () => {
-    mockedUseIssueWorkflowArtifacts.mockReturnValue({
-      data: [makeDirectoryArtifact({ artifactId: 'art-specs', path: 'specs/' })],
-      isLoading: false,
-      error: null,
-    } as ReturnType<typeof useIssueWorkflowArtifacts>)
-
-    mockedUseIssueWorkflowArtifactContent.mockReturnValue({
-      data: {
-        kind: 'directory',
-        entries: [{ relativePath: 'workflow.md', size: 100, contentType: 'text/markdown' }],
-        totalSize: 100,
-      },
-      isLoading: false,
-      error: null,
-    } as ReturnType<typeof useIssueWorkflowArtifactContent>)
+    artifactsData = [makeDirectoryArtifact({ artifactId: 'art-specs', path: 'specs/' })]
+    artifactContent = {
+      kind: 'directory',
+      entries: [{ relativePath: 'workflow.md', size: 100, contentType: 'text/markdown' }],
+      totalSize: 100,
+    }
+    artifactFileContent = { kind: 'text', content: '# Spec\n\nSpec body', contentType: 'text/markdown' }
 
     render(<LatestArtifactsPanel issueNumber={1} workflowRunId="workflow-run-1" />)
 
@@ -287,12 +294,6 @@ describe('LatestArtifactsPanel', () => {
       expect(screen.getByText('workflow.md')).toBeInTheDocument()
     })
 
-    mockedUseIssueWorkflowArtifactContent.mockReturnValue({
-      data: { kind: 'text', content: '# Spec\n\nSpec body', contentType: 'text/markdown' },
-      isLoading: false,
-      error: null,
-    } as ReturnType<typeof useIssueWorkflowArtifactContent>)
-
     fireEvent.click(screen.getByText('workflow.md'))
 
     await waitFor(() => {
@@ -305,13 +306,8 @@ describe('LatestArtifactsPanel', () => {
 })
 
 describe('Task artifact history rendering', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    mockedUseIssueWorkflowArtifactContent.mockReturnValue({ data: undefined, isLoading: false, error: null } as ReturnType<typeof useIssueWorkflowArtifactContent>)
-  })
-
   it('renders artifacts on each task run row', async () => {
-    mockedUseWorkflowTimeline.mockReturnValue({ data: makeTimelineWithTaskArtifacts() } as ReturnType<typeof useWorkflowTimeline>)
+    timelineData = makeTimelineWithTaskArtifacts()
 
     render(<WorkflowView issue={makeIssue()} />)
 
@@ -327,7 +323,7 @@ describe('Task artifact history rendering', () => {
   })
 
   it('preserves historical review artifact on ai-review.1 row after ai-review.2 runs', async () => {
-    mockedUseWorkflowTimeline.mockReturnValue({ data: makeTimelineWithTaskArtifacts() } as ReturnType<typeof useWorkflowTimeline>)
+    timelineData = makeTimelineWithTaskArtifacts()
 
     render(<WorkflowView issue={makeIssue()} />)
 
@@ -345,22 +341,9 @@ describe('Task artifact history rendering', () => {
 })
 
 describe('ArtifactContentViewer rendering edge cases', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-  })
-
   it('renders .markdown artifacts as markdown (not as <pre> text)', async () => {
-    mockedUseIssueWorkflowArtifacts.mockReturnValue({
-      data: [makeFileArtifact({ artifactId: 'art-doc', path: 'notes.markdown', size: 200 })],
-      isLoading: false,
-      error: null,
-    } as ReturnType<typeof useIssueWorkflowArtifacts>)
-
-    mockedUseIssueWorkflowArtifactContent.mockReturnValue({
-      data: { kind: 'text', content: '# Heading\n\n- item 1\n- item 2', contentType: 'text/markdown' },
-      isLoading: false,
-      error: null,
-    } as ReturnType<typeof useIssueWorkflowArtifactContent>)
+    artifactsData = [makeFileArtifact({ artifactId: 'art-doc', path: 'notes.markdown', size: 200 })]
+    artifactContent = { kind: 'text', content: '# Heading\n\n- item 1\n- item 2', contentType: 'text/markdown' }
 
     render(<LatestArtifactsPanel issueNumber={1} workflowRunId="workflow-run-1" />)
 
@@ -380,17 +363,8 @@ describe('ArtifactContentViewer rendering edge cases', () => {
   })
 
   it('falls back to "Recorded artifact content" when size is null', async () => {
-    mockedUseIssueWorkflowArtifacts.mockReturnValue({
-      data: [makeFileArtifact({ artifactId: 'art-unknown-size', path: 'unknown-size.md', size: null })],
-      isLoading: false,
-      error: null,
-    } as ReturnType<typeof useIssueWorkflowArtifacts>)
-
-    mockedUseIssueWorkflowArtifactContent.mockReturnValue({
-      data: { kind: 'text', content: 'Some content', contentType: 'text/markdown' },
-      isLoading: false,
-      error: null,
-    } as ReturnType<typeof useIssueWorkflowArtifactContent>)
+    artifactsData = [makeFileArtifact({ artifactId: 'art-unknown-size', path: 'unknown-size.md', size: null })]
+    artifactContent = { kind: 'text', content: 'Some content', contentType: 'text/markdown' }
 
     render(<LatestArtifactsPanel issueNumber={1} workflowRunId="workflow-run-1" />)
 
@@ -413,17 +387,8 @@ describe('ArtifactContentViewer rendering edge cases', () => {
     })
 
     try {
-      mockedUseIssueWorkflowArtifacts.mockReturnValue({
-        data: [makeFileArtifact({ artifactId: 'art-copy', path: 'copy.md', size: 50 })],
-        isLoading: false,
-        error: null,
-      } as ReturnType<typeof useIssueWorkflowArtifacts>)
-
-      mockedUseIssueWorkflowArtifactContent.mockReturnValue({
-        data: { kind: 'text', content: 'Copy me', contentType: 'text/markdown' },
-        isLoading: false,
-        error: null,
-      } as ReturnType<typeof useIssueWorkflowArtifactContent>)
+      artifactsData = [makeFileArtifact({ artifactId: 'art-copy', path: 'copy.md', size: 50 })]
+      artifactContent = { kind: 'text', content: 'Copy me', contentType: 'text/markdown' }
 
       render(<LatestArtifactsPanel issueNumber={1} workflowRunId="workflow-run-1" />)
 

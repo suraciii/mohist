@@ -2,8 +2,8 @@
 /**
  * Shared helpers for the IssueDetailPage reference-rail colocated test files.
  *
- * `vi.mock()` / `vi.hoisted()` are hoisted per-file, so each `*.test.tsx`
- * declares its own `vi.mock(...)` blocks AND the mock-control variables those
+ * Module mocks and hoisted values are scoped per-file, so each `*.test.tsx`
+ * declares its own mock blocks and the mock-control variables those
  * factories close over (`mockUseIssue`, `mockUseAgentStatus`, ...). Those cannot
  * be imported. This module only exports the non-mock helpers shared across the
  * reference-rail render tests:
@@ -20,6 +20,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { ProjectProvider } from '../../../entities/project'
 import type { Project } from '../../../entities/project'
 import { IssueDetailPage } from './IssueDetailPage'
+import { getCurrentIssueFixture } from './_issueDetailMsw'
 
 export const projects: Project[] = [
   {
@@ -32,7 +33,14 @@ export const projects: Project[] = [
 ]
 
 export function renderPage() {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  })
+  const issue = getCurrentIssueFixture()
+  if (issue) {
+    queryClient.setQueryDefaults(['issues', 14, 'proj-1'], { staleTime: Infinity })
+    queryClient.setQueryData(['issues', 14, 'proj-1'], issue)
+  }
   return render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={['/issues/14']}>

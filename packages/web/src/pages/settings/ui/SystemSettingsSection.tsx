@@ -11,6 +11,7 @@ import {
   useSystemUpdate,
   useSystemUpdateStatus,
 } from '../../../entities/settings'
+import type { SystemInfo, SystemUpdateStatusEnvelope } from '../../../entities/settings'
 import { Button } from '@/shared/ui/components/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/ui/components/select'
 import { CardSection } from '@/shared/ui/components/card-section'
@@ -90,13 +91,71 @@ export const SYSTEM_DESCRIPTORS: SettingsSearchEntry[] = [
   },
 ]
 
-export function SystemSettingsSection() {
+export interface SystemSettingsData {
+  logLevelData: { level: string } | undefined
+  logLevelLoading: boolean
+  logLevelError: boolean
+  logLevelErrorValue: Error | null
+  setLogLevel: (level: LogLevel) => Promise<unknown>
+  systemInfo: SystemInfo | undefined
+  infoLoading: boolean
+  infoError: boolean
+  infoErrorValue: Error | null
+  refetchInfo: () => Promise<unknown>
+  startSystemUpdate: () => Promise<unknown>
+  systemUpdatePending: boolean
+  updateStatusEnvelope: SystemUpdateStatusEnvelope | undefined
+  refetchUpdateStatus: () => Promise<unknown>
+}
+
+export type SystemSettingsDataHook = () => SystemSettingsData
+
+const useDefaultData: SystemSettingsDataHook = () => {
   const { data: logLevelData, isLoading: logLevelLoading, isError: logLevelError, error: logLevelErrorValue } = useLogLevel()
   const setLogLevelMutation = useSetLogLevel()
   const { data: systemInfo, isLoading: infoLoading, isError: infoError, error: infoErrorValue, refetch: refetchInfo } = useSystemInfo()
   const systemUpdate = useSystemUpdate()
-  const [trackingUpdate, setTrackingUpdate] = useState(false)
   const { data: updateStatusEnvelope, refetch: refetchUpdateStatus } = useSystemUpdateStatus(true)
+  return {
+    logLevelData,
+    logLevelLoading,
+    logLevelError,
+    logLevelErrorValue,
+    setLogLevel: (level) => setLogLevelMutation.mutateAsync(level),
+    systemInfo,
+    infoLoading,
+    infoError,
+    infoErrorValue,
+    refetchInfo,
+    startSystemUpdate: () => systemUpdate.mutateAsync(),
+    systemUpdatePending: systemUpdate.isPending,
+    updateStatusEnvelope,
+    refetchUpdateStatus,
+  }
+}
+
+export function SystemSettingsSection({
+  dataHook = useDefaultData,
+}: {
+  dataHook?: SystemSettingsDataHook
+} = {}) {
+  const {
+    logLevelData,
+    logLevelLoading,
+    logLevelError,
+    logLevelErrorValue,
+    setLogLevel,
+    systemInfo,
+    infoLoading,
+    infoError,
+    infoErrorValue,
+    refetchInfo,
+    startSystemUpdate,
+    systemUpdatePending,
+    updateStatusEnvelope,
+    refetchUpdateStatus,
+  } = dataHook()
+  const [trackingUpdate, setTrackingUpdate] = useState(false)
   const [reconnectState, setReconnectState] = useState<string | null>(null)
   const updateStatus = updateStatusEnvelope?.job ?? null
   const { label: sectionLabel, description: sectionDescription } = getSectionMeta('system')
@@ -122,7 +181,7 @@ export function SystemSettingsSection() {
     setSaving(true)
 
     try {
-      await setLogLevelMutation.mutateAsync(newLevel)
+      await setLogLevel(newLevel)
     } catch (err) {
       setCurrentLevel(previousLevel)
       setLogError(err instanceof Error ? err.message : 'Failed to update log level')
@@ -207,7 +266,7 @@ export function SystemSettingsSection() {
     if (!systemInfo) return
     if (systemInfo.source.dirty) return
     setReconnectState(null)
-    await systemUpdate.mutateAsync()
+    await startSystemUpdate()
     setTrackingUpdate(true)
   }
 
@@ -394,7 +453,7 @@ export function SystemSettingsSection() {
                   ) : (
                     <Button
                       onClick={handleUpdate}
-                      disabled={systemUpdate.isPending || systemInfo.source.dirty}
+                      disabled={systemUpdatePending || systemInfo.source.dirty}
                       className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white"
                     >
                       <RefreshCwIcon className="h-4 w-4" />

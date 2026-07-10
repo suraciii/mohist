@@ -5,6 +5,18 @@ import { ActiveSessionCard, WaitingCard, RecentCard, UsageSnapshotLabel, useActi
 import { RunnerSummaryBadge } from '../../../widgets/runner-status'
 import { useProjectPath } from '../../../entities/project'
 
+export interface ActivityPageDependencies {
+  activityCardsHook: typeof useActivityCards
+  activityUsageSnapshotHook: typeof useActivityUsageSnapshot
+  RunnerSummaryBadge: typeof RunnerSummaryBadge
+}
+
+const defaultDependencies: ActivityPageDependencies = {
+  activityCardsHook: useActivityCards,
+  activityUsageSnapshotHook: useActivityUsageSnapshot,
+  RunnerSummaryBadge,
+}
+
 function EmptySection({ message }: { message: string }) {
   return (
     <div className="rounded-lg border border-dashed border-gray-200 bg-gray-50 px-4 py-8 text-center">
@@ -22,9 +34,18 @@ function SectionHeader({ title, count }: { title: string; count: number }) {
   )
 }
 
-export function ActivityPage() {
-  const { activeCards, recentCards, waitingCards, statusCounts, slotUsage } = useActivityCards()
-  const usageSnapshot = useActivityUsageSnapshot()
+export function ActivityPage({
+  dependencies = defaultDependencies,
+}: {
+  dependencies?: ActivityPageDependencies
+} = {}) {
+  const {
+    activityCardsHook: useCards,
+    activityUsageSnapshotHook: useUsageSnapshot,
+    RunnerSummaryBadge: RunnerBadge,
+  } = dependencies
+  const { activeCards, recentCards, waitingCards, statusCounts, slotUsage } = useCards()
+  const usageSnapshot = useUsageSnapshot()
   const toProjectPath = useProjectPath()
   const [now, setNow] = useState(() => Date.now())
 
@@ -43,7 +64,7 @@ export function ActivityPage() {
         activeSlots={slotUsage.active}
         maxSlots={slotUsage.max}
       >
-        <RunnerSummaryBadge />
+        <RunnerBadge />
       </StatusBar>
 
       <div className="flex-1 overflow-y-auto">

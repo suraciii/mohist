@@ -2,15 +2,17 @@
 import '@testing-library/jest-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { QueryClient, QueryClientProvider, useMutation } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
-import { http, HttpResponse } from 'msw'
 import { toast } from 'sonner'
-import { server } from '../../../../tests/support/msw'
 import { ProjectProvider } from '../../../entities/project'
 import type { Project } from '../../../entities/project'
 import type { RunnerStatusRow } from '../../../entities/runner'
-import { RunnerDetailPage } from './RunnerDetailPage'
+import { ApiError } from '../../../shared/api/client'
+import {
+  RunnerDetailPage,
+  type RunnerDetailPageDependencies,
+} from './RunnerDetailPage'
 
 const TEST_PROJECT: Project = {
   id: 'proj-1',
@@ -41,7 +43,29 @@ function makeRunner(overrides: Partial<RunnerStatusRow> = {}): RunnerStatusRow {
 }
 
 let _runnerData: RunnerStatusRow | null = null
-let slotsHandler: ReturnType<typeof vi.fn>
+let _runnerLoading = false
+let _runnerError: Error | null = null
+const slotsHandler = vi.fn(async ({
+  runnerId,
+  slots,
+}: {
+  runnerId: string
+  slots: number
+}) => ({ runnerId, slots }))
+
+const runnerHook: NonNullable<RunnerDetailPageDependencies['runnerHook']> = () => ({
+  data: _runnerData ?? undefined,
+  isLoading: _runnerLoading,
+  error: _runnerError,
+}) as never
+
+const slotsMutationHook: NonNullable<RunnerDetailPageDependencies['slotsMutationHook']> = () =>
+  useMutation({ mutationFn: (variables) => slotsHandler(variables) })
+
+const dependencies: RunnerDetailPageDependencies = {
+  runnerHook,
+  slotsMutationHook,
+}
 
 function renderPage() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, retryDelay: 0 } } })
@@ -50,7 +74,7 @@ function renderPage() {
       <ProjectProvider initialProjects={[TEST_PROJECT]} initialProjectId={TEST_PROJECT.id}>
         <MemoryRouter initialEntries={['/mohist-local/runners/runner-7']}>
           <Routes>
-            <Route path="/:projectName/runners/:runnerId" element={<RunnerDetailPage />} />
+            <Route path="/:projectName/runners/:runnerId" element={<RunnerDetailPage dependencies={dependencies} />} />
             <Route path="/:projectName/activity" element={<div>Activity</div>} />
             <Route path="/:projectName/issues/:number" element={<div>Issue</div>} />
           </Routes>
@@ -63,39 +87,20 @@ function renderPage() {
 describe('RunnerDetailPage', () => {
   beforeEach(() => {
     _runnerData = null
+    _runnerLoading = false
+    _runnerError = null
     vi.clearAllMocks()
-    slotsHandler = vi.fn(async ({ request }) => {
-      const body = await request.clone().json() as Record<string, unknown>
-      return HttpResponse.json({ success: true, data: { runnerId: 'runner-7', slots: body.slots } })
-    })
-    server.use(
-      http.get('*/api/projects/:projectId/runners/:runnerId', () => {
-        if (!_runnerData) {
-          return HttpResponse.json(
-            { success: false, error: 'not found' },
-            { status: 404 },
-          )
-        }
-        return HttpResponse.json({ success: true, data: { runner: _runnerData } })
-      }),
-      http.patch('*/api/runner/:runnerId', slotsHandler as any),
-    )
+    slotsHandler.mockReset()
+    slotsHandler.mockImplementation(async ({ runnerId, slots }) => ({ runnerId, slots }))
   })
 
   afterEach(() => {
     cleanup()
-    server.resetHandlers()
-  })
-
-  afterAll(() => {
-    _runnerData = null
   })
 
   describe('loading state', () => {
     it('shows a loading state while the runner is being fetched', () => {
-      server.use(
-        http.get('*/api/projects/:projectId/runners/:runnerId', () => new Promise(() => {})),
-      )
+      _runnerLoading = true
       renderPage()
       expect(screen.getByTestId('runner-detail-loading')).toBeInTheDocument()
     })
@@ -103,14 +108,7 @@ describe('RunnerDetailPage', () => {
 
   describe('not-found state', () => {
     it('surfaces a clear not-found state when the runner id 404s', async () => {
-      server.use(
-        http.get('*/api/projects/:projectId/runners/:runnerId', () =>
-          HttpResponse.json(
-            { success: false, error: "Runner 'runner-7' not found" },
-            { status: 404 },
-          ),
-        ),
-      )
+      _runnerError = new ApiError("Runner 'runner-7' not found", 404)
       renderPage()
       await waitFor(() => {
         expect(screen.getByTestId('runner-not-found')).toBeInTheDocument()
@@ -120,11 +118,7 @@ describe('RunnerDetailPage', () => {
     })
 
     it('shows a generic error card for non-404 failures', async () => {
-      server.use(
-        http.get('*/api/projects/:projectId/runners/:runnerId', () =>
-          HttpResponse.json({ success: false, error: 'boom' }, { status: 500 }),
-        ),
-      )
+      _runnerError = new ApiError('boom', 500)
       renderPage()
       await waitFor(() => {
         expect(screen.getByTestId('runner-detail-error')).toBeInTheDocument()
@@ -317,11 +311,7 @@ describe('RunnerDetailPage', () => {
       await waitFor(() => {
         expect(slotsHandler).toHaveBeenCalled()
       })
-
-      const call = slotsHandler.mock.calls[0][0] as { request: Request }
-      const body = await call.request.clone().json()
-      expect(body).toEqual({ slots: 3 })
-      expect(new URL(call.request.url).pathname).toContain('/runner/runner-7')
+      expect(slotsHandler).toHaveBeenCalledWith({ runnerId: 'runner-7', slots: 3 })
     })
 
     it('calls mutate on decrease button click', async () => {
@@ -337,11 +327,7 @@ describe('RunnerDetailPage', () => {
       await waitFor(() => {
         expect(slotsHandler).toHaveBeenCalled()
       })
-
-      const call = slotsHandler.mock.calls[0][0] as { request: Request }
-      const body = await call.request.clone().json()
-      expect(body).toEqual({ slots: 1 })
-      expect(new URL(call.request.url).pathname).toContain('/runner/runner-7')
+      expect(slotsHandler).toHaveBeenCalledWith({ runnerId: 'runner-7', slots: 1 })
     })
 
     it('disables decrease button at value 1', async () => {
@@ -378,9 +364,7 @@ describe('RunnerDetailPage', () => {
         expect(screen.getByTestId('slots-editor-increase')).toBeInTheDocument()
       })
 
-      slotsHandler.mockImplementationOnce(() =>
-        HttpResponse.json({ success: false, error: 'boom' }, { status: 500 }),
-      )
+      slotsHandler.mockRejectedValueOnce(new Error('boom'))
 
       fireEvent.click(screen.getByTestId('slots-editor-increase'))
 
@@ -404,14 +388,7 @@ describe('RunnerDetailPage', () => {
     })
 
     it('404 not-found state offers a back-to-activity action', async () => {
-      server.use(
-        http.get('*/api/projects/:projectId/runners/:runnerId', () =>
-          HttpResponse.json(
-            { success: false, error: "Runner 'runner-7' not found" },
-            { status: 404 },
-          ),
-        ),
-      )
+      _runnerError = new ApiError("Runner 'runner-7' not found", 404)
       renderPage()
 
       await waitFor(() => {

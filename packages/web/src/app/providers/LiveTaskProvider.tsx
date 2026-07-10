@@ -21,16 +21,29 @@ import { getCurrentIssueNumber, useViewedIssueRef } from './use-viewed-issue'
 
 export const __testing__ = { unwrapEnvelope, unwrapTranscriptEnvelope, routeTranscriptEventName, buildTimelineLiveEvent, parseInboxItemPersistedHint, getCurrentIssueNumber }
 
-function useLiveEvents(projectId: string | null): LiveTaskState {
+export type EventsConnectionHook = typeof useEventsConnection
+export type RunnerDropNoticeHook = typeof useRunnerDropNotice
+export type ViewedIssueHook = typeof useViewedIssueRef
+export type PathnameReader = () => string
+
+const readPathname: PathnameReader = () => window.location.pathname
+
+function useLiveEvents(
+  projectId: string | null,
+  eventsConnectionHook: EventsConnectionHook,
+  runnerDropNoticeHook: RunnerDropNoticeHook,
+  viewedIssueHook: ViewedIssueHook,
+  pathnameReader: PathnameReader,
+): LiveTaskState {
   const queryClient = useQueryClient()
   const [activeTaskId] = useState<string | null>(null)
   const [activeTaskElapsedMs] = useState<number | null>(null)
   const [rebaseConflict, setRebaseConflict] = useState<RebaseConflictState | null>(null)
-  const viewedIssueRef = useViewedIssueRef()
+  const viewedIssueRef = viewedIssueHook()
   // Subscribe to SignalR connection transitions so transport notices are
   // routed to the toast host / Activity surface instead of any inline issue
   // content. The hook itself owns publishing.
-  useRunnerDropNotice()
+  runnerDropNoticeHook()
 
   const handleEvent = useCallback(
     (eventName: string, rawData: unknown, options?: { dispatchAgentDetail?: boolean }) => {
@@ -46,6 +59,7 @@ function useLiveEvents(projectId: string | null): LiveTaskState {
           setRebaseConflict,
           viewedIssue: viewedIssueRef.current,
           projectId,
+          pathname: pathnameReader(),
         })
 
         const timelineEvent = buildTimelineLiveEvent(eventName, rawData, parsed)
@@ -54,7 +68,7 @@ function useLiveEvents(projectId: string | null): LiveTaskState {
         // ignore malformed events
       }
     },
-    [queryClient, projectId],
+    [queryClient, projectId, viewedIssueRef, pathnameReader],
   )
 
   const handleTranscriptEvent = useCallback(
@@ -73,14 +87,34 @@ function useLiveEvents(projectId: string | null): LiveTaskState {
     [handleEvent],
   )
 
-  useEventsConnection(projectId, handleEvent, handleTranscriptEvent)
+  eventsConnectionHook(projectId, handleEvent, handleTranscriptEvent)
 
   return { activeTaskId, activeTaskElapsedMs, rebaseConflict }
 }
 
-export function LiveTaskProvider({ children }: { children: React.ReactNode }) {
+interface LiveTaskProviderProps {
+  children: React.ReactNode
+  eventsConnectionHook?: EventsConnectionHook
+  runnerDropNoticeHook?: RunnerDropNoticeHook
+  viewedIssueHook?: ViewedIssueHook
+  pathnameReader?: PathnameReader
+}
+
+export function LiveTaskProvider({
+  children,
+  eventsConnectionHook = useEventsConnection,
+  runnerDropNoticeHook = useRunnerDropNotice,
+  viewedIssueHook = useViewedIssueRef,
+  pathnameReader = readPathname,
+}: LiveTaskProviderProps) {
   const { projectId } = useProject()
-  const state = useLiveEvents(projectId)
+  const state = useLiveEvents(
+    projectId,
+    eventsConnectionHook,
+    runnerDropNoticeHook,
+    viewedIssueHook,
+    pathnameReader,
+  )
   return (
     <LiveTaskContext.Provider value={state}>
       {children}

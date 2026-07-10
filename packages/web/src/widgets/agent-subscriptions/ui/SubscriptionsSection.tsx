@@ -26,7 +26,26 @@ import { formatAgentSubscriptionFilter } from '../../../entities/agent'
 
 interface Props {
   agent: Pick<AgentInfo, 'id' | 'status'>
+  operationsHook?: SubscriptionOperationsHook
 }
+
+export interface SubscriptionOperations {
+  subscriptionsQuery: Pick<ReturnType<typeof useAgentSubscriptions>, 'data' | 'isLoading'>
+  createMutation: Pick<ReturnType<typeof useCreateAgentSubscription>, 'mutate' | 'isPending'>
+  archiveMutation: Pick<ReturnType<typeof useArchiveAgentSubscription>, 'mutate' | 'isPending'>
+  restoreMutation: Pick<ReturnType<typeof useRestoreAgentSubscription>, 'mutate' | 'isPending'>
+  deleteMutation: Pick<ReturnType<typeof useDeleteAgentSubscription>, 'mutate' | 'isPending'>
+}
+
+export type SubscriptionOperationsHook = (agentRef: string) => SubscriptionOperations
+
+const useDefaultOperations: SubscriptionOperationsHook = (agentRef) => ({
+  subscriptionsQuery: useAgentSubscriptions(agentRef),
+  createMutation: useCreateAgentSubscription(agentRef),
+  archiveMutation: useArchiveAgentSubscription(agentRef),
+  restoreMutation: useRestoreAgentSubscription(agentRef),
+  deleteMutation: useDeleteAgentSubscription(agentRef),
+})
 
 interface FormErrors {
   name?: string
@@ -43,13 +62,16 @@ function previewResponsePrompt(text: string, max: number = 96): string {
   return `${trimmed.slice(0, max - 1)}…`
 }
 
-export function SubscriptionsSection({ agent }: Props) {
+export function SubscriptionsSection({ agent, operationsHook = useDefaultOperations }: Props) {
   const isArchived = agent.status === 'archived'
-  const { data: subscriptions = [], isLoading } = useAgentSubscriptions(agent.id)
-  const createMutation = useCreateAgentSubscription(agent.id)
-  const archiveMutation = useArchiveAgentSubscription(agent.id)
-  const restoreMutation = useRestoreAgentSubscription(agent.id)
-  const deleteMutation = useDeleteAgentSubscription(agent.id)
+  const {
+    subscriptionsQuery,
+    createMutation,
+    archiveMutation,
+    restoreMutation,
+    deleteMutation,
+  } = operationsHook(agent.id)
+  const { data: subscriptions = [], isLoading } = subscriptionsQuery
 
   const [createOpen, setCreateOpen] = useState(false)
   const [name, setName] = useState('')

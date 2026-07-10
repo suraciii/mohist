@@ -73,8 +73,18 @@ function hasUsageData(data: AgentUsageTimeseriesDto | undefined): data is AgentU
   return hasBucketUsage || hasMeasuredCumulativeCost
 }
 
-export function CostTrendChart({ range }: { range: InsightsRange }) {
-  const { data, isLoading, isError } = useAgentUsage(range)
+export type AgentUsageHook = (
+  range?: InsightsRange,
+) => Pick<ReturnType<typeof useAgentUsage>, 'data' | 'isLoading' | 'isError'>
+
+export function CostTrendChart({
+  range,
+  agentUsageHook = useAgentUsage,
+}: {
+  range: InsightsRange
+  agentUsageHook?: AgentUsageHook
+}) {
+  const { data, isLoading, isError } = agentUsageHook(range)
 
   const status = isLoading ? 'loading'
     : isError ? 'error'

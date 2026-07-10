@@ -5,8 +5,8 @@ export function getProjects() {
   return request<Project[]>('/projects')
 }
 
-export function createProject(data: { name: string }) {
-  return request<Project>('/projects', {
+export function createProject(data: { name: string }, requester: typeof request = request) {
+  return requester<Project>('/projects', {
     method: 'POST',
     body: JSON.stringify(data),
   })

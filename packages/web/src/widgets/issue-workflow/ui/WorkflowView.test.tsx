@@ -1,28 +1,28 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
-import { QueryClient } from '@tanstack/react-query'
+import { QueryClient, useMutation } from '@tanstack/react-query'
 import { screen, waitFor, fireEvent, within } from '@testing-library/react'
-import { render } from '../../../../tests/test-utils'
-import { WorkflowView } from './WorkflowView'
-import { IssueStatus, IssueHealth, WorkflowStage, type Issue, type WorkflowTimeline } from '../../../entities/issue'
-import { useWorkflowTimeline, useRequestChangesIssue, useIssueWorkflowArtifactContent } from '../../../entities/issue'
-import * as clientModule from '../../../entities/issue/api/client'
+import { http, HttpResponse } from 'msw'
+import type { ComponentProps, ReactElement } from 'react'
+import { createQueryClient, render as renderWithProviders } from '../../../../tests/test-utils'
+import { useMswServer } from '../../../../tests/support/msw'
+import { WorkflowView as DefaultWorkflowView } from './WorkflowView'
+import type { ArtifactContentHook } from './ArtifactContentViewer'
+import type { StepListDependencies } from './InlineApproval'
+import { IssueStatus, IssueHealth, WorkflowStage, type ApprovalFeedback, type Issue, type WorkflowTimeline, type useWorkflowTimeline } from '../../../entities/issue'
+import type { WorkflowArtifactContentResult } from '../../../entities/issue/api/client'
 
-vi.mock('../../../entities/issue', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../../../entities/issue')>()),
-  useWorkflowTimeline: vi.fn(),
-  useIssueWorkflowArtifactContent: vi.fn(),
-  useRequestChangesIssue: vi.fn(),
-}))
+let approveRequests: string[] = []
+let feedbackRequests: Array<{ issueNumber: string; stage: string; body: string }> = []
+let artifactRequests: string[] = []
+let timelineRequests: string[] = []
+let timelineData: WorkflowTimeline | null | undefined
 
-vi.mock('../../../entities/issue/api/client', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../../../entities/issue/api/client')>()),
-  approveIssue: vi.fn(),
-}))
-
-const mockedUseWorkflowTimeline = vi.mocked(useWorkflowTimeline)
-const mockedUseIssueWorkflowArtifactContent = vi.mocked(useIssueWorkflowArtifactContent)
-const mockedUseRequestChangesIssue = vi.mocked(useRequestChangesIssue)
-const mockedApproveIssue = vi.mocked(clientModule.approveIssue)
+useMswServer(
+  http.get('*/api/projects/:projectId/issues/:issueNumber/workflow/status', ({ params }) => {
+    timelineRequests.push(String(params.issueNumber))
+    return HttpResponse.json({ success: true, data: { workflow: timelineData ?? null } })
+  }),
+)
 
 function makeIssue(overrides: Partial<Issue> = {}): Issue {
   return {
@@ -43,6 +43,52 @@ function makeIssue(overrides: Partial<Issue> = {}): Issue {
     blocker: null,
     ...overrides,
   }
+}
+
+const approveIssueFn: StepListDependencies['approveIssue'] = async (issueNumber) => {
+  approveRequests.push(String(issueNumber))
+  return { issue: makeIssue({ number: issueNumber }), context: null, message: 'approved' }
+}
+
+const requestChangesHook: StepListDependencies['requestChangesHook'] = () =>
+  useMutation<ApprovalFeedback, Error, { issueNumber: number; data: { stage: string; body: string } }>({
+    mutationFn: async ({ issueNumber, data }) => {
+      feedbackRequests.push({
+        issueNumber: String(issueNumber),
+        stage: data.stage,
+        body: data.body,
+      })
+      return {
+        id: 'feedback-1',
+        issueNumber,
+        workflowRunId: 'workflow-run-1',
+        stage: data.stage,
+        status: 'open',
+        body: data.body,
+        createdAt: '2026-01-01T00:00:00.000Z',
+        resolution: null,
+      }
+    },
+  })
+
+const artifactContentHook: ArtifactContentHook = (_issueNumber, artifactId, _options, enabled = true) => {
+  if (enabled && artifactId && !artifactRequests.includes(artifactId)) {
+    artifactRequests.push(artifactId)
+  }
+  const data: WorkflowArtifactContentResult | undefined = enabled
+    ? { kind: 'text', content: '# artifact', contentType: 'text/plain' }
+    : undefined
+  return { data, isLoading: false, error: null }
+}
+
+const workflowDependencies: StepListDependencies = {
+  approveIssue: approveIssueFn,
+  requestChangesHook,
+  artifactContentHook,
+}
+
+function WorkflowView(props: Omit<ComponentProps<typeof DefaultWorkflowView>, 'dependencies'>) {
+  return <DefaultWorkflowView {...props} dependencies={workflowDependencies} />
 }
 
 function makeTimeline(): WorkflowTimeline {
@@ -203,45 +249,36 @@ function makeAwaitingApprovalTimeline(): WorkflowTimeline {
   }
 }
 
-function mockRequestChangesMutation() {
-  const mutate = vi.fn()
-  mockedUseRequestChangesIssue.mockReturnValue({
-    mutate,
-    isPending: false,
-    isError: false,
-    error: null,
-    data: undefined,
-    variables: undefined,
-    reset: vi.fn(),
-    context: undefined,
-    mutateAsync: vi.fn(),
-    isIdle: true,
-    isSuccess: false,
-    failureCount: 0,
-    failureReason: null,
-    status: 'idle',
-    submittedAt: 0,
-  } as unknown as ReturnType<typeof useRequestChangesIssue>)
-  return mutate
+function setWorkflowTimeline(value: { data: WorkflowTimeline | null | undefined }) {
+  timelineData = value.data
+}
+
+function render(ui: ReactElement) {
+  const queryClient = createQueryClient()
+  const queryKey = ['issues', 1, 'test-project', 'workflow-timeline']
+  queryClient.setQueryDefaults(queryKey, { staleTime: Number.POSITIVE_INFINITY })
+  if (timelineData !== undefined) {
+    queryClient.setQueryData(queryKey, timelineData)
+  }
+  return renderWithProviders(ui, { queryClient })
 }
 
 describe('WorkflowView', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    approveRequests = []
+    feedbackRequests = []
+    artifactRequests = []
+    timelineRequests = []
+    timelineData = makeTimeline()
     window.innerWidth = 1280
-    mockedApproveIssue.mockResolvedValue({
-      issue: {} as Issue,
-      context: null,
-      message: 'approved',
-    })
   })
 
   it('renders workflow timeline tasks and checks', () => {
-    mockedUseWorkflowTimeline.mockReturnValue({ data: makeTimeline() } as ReturnType<typeof useWorkflowTimeline>)
+    setWorkflowTimeline({ data: makeTimeline() } as ReturnType<typeof useWorkflowTimeline>)
 
     render(<WorkflowView issue={makeIssue()} />)
 
-    expect(mockedUseWorkflowTimeline).toHaveBeenCalledWith(1, true)
     expect(screen.getByText('Implement WorkflowView')).toBeInTheDocument()
     expect(screen.getByText('Typecheck')).toBeInTheDocument()
     expect(screen.getByText('runtime:coder-agent')).toBeInTheDocument()
@@ -251,7 +288,7 @@ describe('WorkflowView', () => {
 
   it('renders a scrollable stage stepper on mobile without clipping stage labels', async () => {
     window.innerWidth = 390
-    mockedUseWorkflowTimeline.mockReturnValue({ data: makeTimeline() } as ReturnType<typeof useWorkflowTimeline>)
+    setWorkflowTimeline({ data: makeTimeline() } as ReturnType<typeof useWorkflowTimeline>)
 
     render(<WorkflowView issue={makeIssue()} />)
 
@@ -273,16 +310,16 @@ describe('WorkflowView', () => {
   })
 
   it('does not request workflow timeline for backlog issues', () => {
-    mockedUseWorkflowTimeline.mockReturnValue({ data: undefined } as ReturnType<typeof useWorkflowTimeline>)
+    setWorkflowTimeline({ data: undefined } as ReturnType<typeof useWorkflowTimeline>)
 
     render(<WorkflowView issue={makeIssue({ status: IssueStatus.Backlog, workflowStage: null })} />)
 
-    expect(mockedUseWorkflowTimeline).toHaveBeenCalledWith(1, false)
+    expect(timelineRequests).toEqual([])
   })
 
   describe('InlineApproval - awaiting approval', () => {
     it('does not render or initialize approval controls when mounted read-only', () => {
-      mockedUseWorkflowTimeline.mockReturnValue(({
+      setWorkflowTimeline(({
         data: makeAwaitingApprovalTimeline(),
       } as unknown) as ReturnType<typeof useWorkflowTimeline>)
 
@@ -299,12 +336,11 @@ describe('WorkflowView', () => {
       expect(screen.queryByText('Approval Required')).not.toBeInTheDocument()
       expect(screen.queryByTestId('approve-button')).not.toBeInTheDocument()
       expect(screen.queryByTestId('request-changes-button')).not.toBeInTheDocument()
-      expect(mockedUseRequestChangesIssue).not.toHaveBeenCalled()
+      expect(feedbackRequests).toEqual([])
     })
 
     it('renders Approve and Request changes actions; no Reject or Send back labels', () => {
-      mockRequestChangesMutation()
-      mockedUseWorkflowTimeline.mockReturnValue(({
+      setWorkflowTimeline(({
         data: makeAwaitingApprovalTimeline(),
       } as unknown) as ReturnType<typeof useWorkflowTimeline>)
 
@@ -327,8 +363,7 @@ describe('WorkflowView', () => {
     })
 
     it('Request changes action is hidden when stage is not awaiting approval', () => {
-      mockRequestChangesMutation()
-      mockedUseWorkflowTimeline.mockReturnValue({ data: makeTimeline() } as ReturnType<typeof useWorkflowTimeline>)
+      setWorkflowTimeline({ data: makeTimeline() } as ReturnType<typeof useWorkflowTimeline>)
 
       render(<WorkflowView issue={makeIssue({
         workflowStage: WorkflowStage.Build,
@@ -341,8 +376,7 @@ describe('WorkflowView', () => {
     })
 
     it('Request changes action is hidden when stage is running', () => {
-      mockRequestChangesMutation()
-      mockedUseWorkflowTimeline.mockReturnValue({ data: makeTimeline() } as ReturnType<typeof useWorkflowTimeline>)
+      setWorkflowTimeline({ data: makeTimeline() } as ReturnType<typeof useWorkflowTimeline>)
 
       render(<WorkflowView issue={makeIssue({
         workflowStage: WorkflowStage.Build,
@@ -354,8 +388,7 @@ describe('WorkflowView', () => {
     })
 
     it('clicking Request changes opens a text input for feedback body', () => {
-      mockRequestChangesMutation()
-      mockedUseWorkflowTimeline.mockReturnValue(({
+      setWorkflowTimeline(({
         data: makeAwaitingApprovalTimeline(),
       } as unknown) as ReturnType<typeof useWorkflowTimeline>)
 
@@ -378,8 +411,7 @@ describe('WorkflowView', () => {
     })
 
     it('Submit button is disabled without feedback body', () => {
-      mockRequestChangesMutation()
-      mockedUseWorkflowTimeline.mockReturnValue(({
+      setWorkflowTimeline(({
         data: makeAwaitingApprovalTimeline(),
       } as unknown) as ReturnType<typeof useWorkflowTimeline>)
 
@@ -399,9 +431,8 @@ describe('WorkflowView', () => {
       expect(submit).toBeDisabled()
     })
 
-    it('submitting feedback calls requestChangesIssue with stage and body via POST /feedback', () => {
-      const mutate = mockRequestChangesMutation()
-      mockedUseWorkflowTimeline.mockReturnValue(({
+    it('submitting feedback sends the stage and body through the request-changes mutation', async () => {
+      setWorkflowTimeline(({
         data: makeAwaitingApprovalTimeline(),
       } as unknown) as ReturnType<typeof useWorkflowTimeline>)
 
@@ -420,22 +451,17 @@ describe('WorkflowView', () => {
       fireEvent.change(textarea, { target: { value: 'Please address the security findings' } })
       fireEvent.click(screen.getByTestId('submit-request-changes'))
 
-      expect(mutate).toHaveBeenCalledTimes(1)
-      expect(mutate).toHaveBeenCalledWith(
-        {
-          issueNumber: 1,
-          data: {
-            stage: 'plan',
-            body: 'Please address the security findings',
-          },
-        },
-        expect.objectContaining({ onSuccess: expect.any(Function) }),
-      )
+      await waitFor(() => {
+        expect(feedbackRequests).toEqual([{
+          issueNumber: '1',
+          stage: 'plan',
+          body: 'Please address the security findings',
+        }])
+      })
     })
 
     it('renders feedback history when feedback records exist', () => {
-      mockRequestChangesMutation()
-      mockedUseWorkflowTimeline.mockReturnValue(({
+      setWorkflowTimeline(({
         data: makeAwaitingApprovalTimeline(),
       } as unknown) as ReturnType<typeof useWorkflowTimeline>)
 
@@ -475,8 +501,7 @@ describe('WorkflowView', () => {
     })
 
     it('renders multiple feedback cycles distinctly', () => {
-      mockRequestChangesMutation()
-      mockedUseWorkflowTimeline.mockReturnValue(({
+      setWorkflowTimeline(({
         data: makeAwaitingApprovalTimeline(),
       } as unknown) as ReturnType<typeof useWorkflowTimeline>)
 
@@ -534,8 +559,7 @@ describe('WorkflowView', () => {
     })
 
     it('shows open feedback awaiting-application state', () => {
-      mockRequestChangesMutation()
-      mockedUseWorkflowTimeline.mockReturnValue(({
+      setWorkflowTimeline(({
         data: makeAwaitingApprovalTimeline(),
       } as unknown) as ReturnType<typeof useWorkflowTimeline>)
 
@@ -568,13 +592,12 @@ describe('WorkflowView', () => {
     })
 
     it('Feedback history is visible during the running feedback-loop without the approval card', () => {
-      mockRequestChangesMutation();
       // While the apply-feedback task is running, the stage is `Running`
       // and the server's `RequestChanges` clears the stage approval
       // state, so `issue.approvalState` is null. The InlineApproval
       // card is hidden. The feedback-history timeline should still
       // surface the open cycle.
-      mockedUseWorkflowTimeline.mockReturnValue(({
+      setWorkflowTimeline(({
         data: {
           ...makeAwaitingApprovalTimeline(),
           status: 'Running',
@@ -620,8 +643,7 @@ describe('WorkflowView', () => {
 
     it('Approve action calls approveIssue', async () => {
       const invalidateSpy = vi.spyOn(QueryClient.prototype, 'invalidateQueries')
-      mockRequestChangesMutation()
-      mockedUseWorkflowTimeline.mockReturnValue(({
+      setWorkflowTimeline(({
         data: makeAwaitingApprovalTimeline(),
       } as unknown) as ReturnType<typeof useWorkflowTimeline>)
 
@@ -638,7 +660,7 @@ describe('WorkflowView', () => {
       fireEvent.click(screen.getByTestId('approve-button'))
 
       await waitFor(() => {
-        expect(mockedApproveIssue).toHaveBeenCalledWith(1, 'test-project')
+        expect(approveRequests).toEqual(['1'])
       })
       await waitFor(() => {
         expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['issues', 'metrics', 'approval-wait'] })
@@ -647,8 +669,7 @@ describe('WorkflowView', () => {
     })
 
     it('Cancel button closes the feedback input and discards the text', () => {
-      mockRequestChangesMutation()
-      mockedUseWorkflowTimeline.mockReturnValue(({
+      setWorkflowTimeline(({
         data: makeAwaitingApprovalTimeline(),
       } as unknown) as ReturnType<typeof useWorkflowTimeline>)
 
@@ -673,16 +694,8 @@ describe('WorkflowView', () => {
   })
 
   describe('artifact chips on task rows', () => {
-    beforeEach(() => {
-      mockedUseIssueWorkflowArtifactContent.mockReturnValue({
-        data: undefined,
-        isLoading: false,
-        error: null,
-      } as ReturnType<typeof useIssueWorkflowArtifactContent>)
-    })
-
     it('renders clickable artifact chips for completed tasks with artifact summaries', () => {
-      mockedUseWorkflowTimeline.mockReturnValue({ data: makeTimelineWithArtifacts() } as ReturnType<typeof useWorkflowTimeline>)
+      setWorkflowTimeline({ data: makeTimelineWithArtifacts() } as ReturnType<typeof useWorkflowTimeline>)
 
       render(<WorkflowView issue={makeIssue({ workflowStage: WorkflowStage.Plan })} />)
 
@@ -693,7 +706,7 @@ describe('WorkflowView', () => {
     })
 
     it('renders directory artifact chips with folder styling', () => {
-      mockedUseWorkflowTimeline.mockReturnValue({ data: makeTimelineWithArtifacts() } as ReturnType<typeof useWorkflowTimeline>)
+      setWorkflowTimeline({ data: makeTimelineWithArtifacts() } as ReturnType<typeof useWorkflowTimeline>)
 
       render(<WorkflowView issue={makeIssue({ workflowStage: WorkflowStage.Plan })} />)
 
@@ -703,7 +716,7 @@ describe('WorkflowView', () => {
     })
 
     it('does not render artifact chips for running tasks', () => {
-      mockedUseWorkflowTimeline.mockReturnValue({ data: makeTimelineWithArtifacts() } as ReturnType<typeof useWorkflowTimeline>)
+      setWorkflowTimeline({ data: makeTimelineWithArtifacts() } as ReturnType<typeof useWorkflowTimeline>)
 
       render(<WorkflowView issue={makeIssue({ workflowStage: WorkflowStage.Plan })} />)
 
@@ -713,7 +726,7 @@ describe('WorkflowView', () => {
     })
 
     it('does not render artifact chips for completed tasks without artifacts', () => {
-      mockedUseWorkflowTimeline.mockReturnValue({ data: makeTimelineWithArtifacts() } as ReturnType<typeof useWorkflowTimeline>)
+      setWorkflowTimeline({ data: makeTimelineWithArtifacts() } as ReturnType<typeof useWorkflowTimeline>)
 
       render(<WorkflowView issue={makeIssue({ workflowStage: WorkflowStage.Plan })} />)
 
@@ -722,27 +735,24 @@ describe('WorkflowView', () => {
       expect(within(taskRow!).queryByRole('button', { name: /proposal\.md|design\.md|specs\// })).not.toBeInTheDocument()
     })
 
-    it('opens ArtifactContentViewer when an artifact chip is clicked', () => {
-      mockedUseWorkflowTimeline.mockReturnValue({ data: makeTimelineWithArtifacts() } as ReturnType<typeof useWorkflowTimeline>)
+    it('opens ArtifactContentViewer when an artifact chip is clicked', async () => {
+      setWorkflowTimeline({ data: makeTimelineWithArtifacts() } as ReturnType<typeof useWorkflowTimeline>)
 
       render(<WorkflowView issue={makeIssue({ workflowStage: WorkflowStage.Plan })} />)
 
       const chip = screen.getByRole('button', { name: 'proposal.md' })
       fireEvent.click(chip)
 
-      expect(mockedUseIssueWorkflowArtifactContent).toHaveBeenCalledWith(
-        1,
-        'artifact-1',
-        { file: undefined },
-        true,
-      )
+      await waitFor(() => {
+        expect(artifactRequests).toEqual(['artifact-1'])
+      })
       const dialog = screen.getByRole('dialog')
       expect(dialog).toBeInTheDocument()
       expect(within(dialog).getByText('proposal.md')).toBeInTheDocument()
     })
 
     it('does not toggle the task row when a chip is clicked on an expand-capable task', () => {
-      mockedUseWorkflowTimeline.mockReturnValue({ data: makeTimelineWithArtifacts() } as ReturnType<typeof useWorkflowTimeline>)
+      setWorkflowTimeline({ data: makeTimelineWithArtifacts() } as ReturnType<typeof useWorkflowTimeline>)
 
       render(<WorkflowView issue={makeIssue({ workflowStage: WorkflowStage.Plan })} />)
 
@@ -761,7 +771,7 @@ describe('WorkflowView', () => {
     })
 
     it('activates the artifact chip with Enter and Space keyboard events', () => {
-      mockedUseWorkflowTimeline.mockReturnValue({ data: makeTimelineWithArtifacts() } as ReturnType<typeof useWorkflowTimeline>)
+      setWorkflowTimeline({ data: makeTimelineWithArtifacts() } as ReturnType<typeof useWorkflowTimeline>)
 
       render(<WorkflowView issue={makeIssue({ workflowStage: WorkflowStage.Plan })} />)
 

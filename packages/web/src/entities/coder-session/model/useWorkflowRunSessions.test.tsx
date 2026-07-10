@@ -4,24 +4,18 @@ import { renderHook, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import type { WorkflowRunSession } from './types'
 import { useWorkflowRunSessions } from './useWorkflowRunSessions'
-import { useMswServer } from '../../../../tests/support/msw'
-import { http, HttpResponse } from 'msw'
 import { dispatchAgentEvent } from '../../agent/model/events'
 
 let _sessionsData: WorkflowRunSession[] = []
 let _sessionsResponses: Array<WorkflowRunSession[] | 'never'> = []
 
-const WorkflowSessionsPath = '/api/workflow-runs/:workflowRunId/sessions'
-
-const coderSessionsHandler = vi.fn(() => {
+const workflowRunSessionsFetcher = vi.fn((_workflowRunId: string) => {
   const response = _sessionsResponses.length > 0
     ? _sessionsResponses.shift()!
     : _sessionsData
-  if (response === 'never') return new Promise<never>(() => {})
-  return HttpResponse.json({ success: true, data: response })
+  if (response === 'never') return new Promise<WorkflowRunSession[]>(() => {})
+  return Promise.resolve(response)
 })
-
-useMswServer(http.get(WorkflowSessionsPath, coderSessionsHandler))
 
 function session(overrides: Partial<WorkflowRunSession>): WorkflowRunSession {
   return {
@@ -77,7 +71,7 @@ describe('useWorkflowRunSessions', () => {
     )
 
     const { result, rerender } = renderHook(
-      ({ workflowRunId }: { workflowRunId: string }) => useWorkflowRunSessions(workflowRunId),
+      ({ workflowRunId }: { workflowRunId: string }) => useWorkflowRunSessions(workflowRunId, workflowRunSessionsFetcher),
       { initialProps: { workflowRunId: 'wr-1' }, wrapper },
     )
 
@@ -101,7 +95,7 @@ describe('useWorkflowRunSessions', () => {
       )
 
       const { result } = renderHook(
-        () => useWorkflowRunSessions('wr-1'),
+        () => useWorkflowRunSessions('wr-1', workflowRunSessionsFetcher),
         { wrapper },
       )
 
@@ -132,7 +126,7 @@ describe('useWorkflowRunSessions', () => {
       )
 
       const { result } = renderHook(
-        () => useWorkflowRunSessions('wr-1'),
+        () => useWorkflowRunSessions('wr-1', workflowRunSessionsFetcher),
         { wrapper },
       )
 
@@ -140,7 +134,7 @@ describe('useWorkflowRunSessions', () => {
         expect(result.current.sessions.length).toBe(1)
       })
 
-      const fetchCountBefore = coderSessionsHandler.mock.calls.length
+      const fetchCountBefore = workflowRunSessionsFetcher.mock.calls.length
 
       ;(dispatchAgentEvent as any)('usage.updated', {
         coderSessionId: 'sess-1',
@@ -152,7 +146,7 @@ describe('useWorkflowRunSessions', () => {
         expect(result.current.sessions[0].usage?.contextUsagePercent).toBe(72)
       })
 
-      expect(coderSessionsHandler.mock.calls.length).toBe(fetchCountBefore)
+      expect(workflowRunSessionsFetcher.mock.calls.length).toBe(fetchCountBefore)
     })
 
     it('context_health_update updates matched session fields', async () => {
@@ -164,7 +158,7 @@ describe('useWorkflowRunSessions', () => {
       )
 
       const { result } = renderHook(
-        () => useWorkflowRunSessions('wr-1'),
+        () => useWorkflowRunSessions('wr-1', workflowRunSessionsFetcher),
         { wrapper },
       )
 
@@ -199,7 +193,7 @@ describe('useWorkflowRunSessions', () => {
       )
 
       const { result } = renderHook(
-        () => useWorkflowRunSessions('wr-1'),
+        () => useWorkflowRunSessions('wr-1', workflowRunSessionsFetcher),
         { wrapper },
       )
 
@@ -237,7 +231,7 @@ describe('useWorkflowRunSessions', () => {
       )
 
       const { result } = renderHook(
-        () => useWorkflowRunSessions('wr-1'),
+        () => useWorkflowRunSessions('wr-1', workflowRunSessionsFetcher),
         { wrapper },
       )
 

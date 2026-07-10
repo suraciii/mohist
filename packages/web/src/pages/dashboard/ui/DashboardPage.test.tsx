@@ -58,21 +58,6 @@ useMswServer(
   ),
 )
 
-vi.mock('../../../widgets/coder-session/model/activity-cards', () => ({
-  useActivityCards: () => _activityCardsMock,
-}))
-
-vi.mock('../../../widgets/create-project-dialog/ui/CreateProjectDialog', () => ({
-  CreateProjectDialog: ({ open, onClose }: { open: boolean; onClose: () => void }) =>
-    open ? (
-      <div data-testid="create-project-dialog">
-        <button data-testid="create-project-dialog-close" onClick={onClose}>
-          Close
-        </button>
-      </div>
-    ) : null,
-}))
-
 import { DashboardPage } from './DashboardPage'
 
 const NO_AGENT_ACTIVITY: any = {
@@ -155,11 +140,27 @@ function makeAgentStatus(overrides: Partial<AgentStatus> = {}): AgentStatus {
 
 function renderPage() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  queryClient.setQueryDefaults(['projects'], { staleTime: Infinity })
+  queryClient.setQueryData(['projects'], _projects)
+  if (!_agentStatusLoading && !_agentStatusError && _agentStatus !== undefined) {
+    queryClient.setQueryDefaults(['agent-status', 'p1'], { staleTime: Infinity })
+    queryClient.setQueryData(['agent-status', 'p1'], _agentStatus)
+  }
+  if (!_issuesLoading) {
+    const issueParams = { projectId: 'p1' }
+    queryClient.setQueryDefaults(['issues', issueParams], { staleTime: Infinity })
+    queryClient.setQueryData(['issues', issueParams], _issuesData)
+    queryClient.setQueryDefaults(['archived-issues', issueParams], { staleTime: Infinity })
+    queryClient.setQueryData(
+      ['archived-issues', issueParams],
+      _issuesData.filter((issue) => (issue as { archivedAt?: string | null }).archivedAt != null),
+    )
+  }
   return render(
     <QueryClientProvider client={queryClient}>
       <ProjectProvider initialProjectId="p1" initialProjects={_projects as any}>
         <MemoryRouter initialEntries={['/']}>
-          <DashboardPage />
+          <DashboardPage activityCardsHook={() => _activityCardsMock} />
         </MemoryRouter>
       </ProjectProvider>
     </QueryClientProvider>,

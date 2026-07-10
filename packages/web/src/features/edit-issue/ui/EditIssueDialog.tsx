@@ -21,9 +21,15 @@ interface Props {
   open: boolean
   onClose: () => void
   issue: Issue
+  issueUpdater?: typeof updateIssue
 }
 
-export function EditIssueDialog({ open, onClose, issue }: Props) {
+export function EditIssueDialog({
+  open,
+  onClose,
+  issue,
+  issueUpdater = updateIssue,
+}: Props) {
   const [title, setTitle] = useState(issue.title)
   const [body, setBody] = useState(issue.body ?? '')
   const [labels, setLabels] = useState<LabelMap>(issue.labels ?? {})
@@ -43,7 +49,7 @@ export function EditIssueDialog({ open, onClose, issue }: Props) {
 
   const mutation = useMutation({
     mutationFn: () =>
-      updateIssue(issue.number, {
+      issueUpdater(issue.number, {
         title,
         body: body || undefined,
         attachmentIds: extractAttachmentIds(body),

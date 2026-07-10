@@ -90,8 +90,18 @@ function QualityWindow({ title, window }: QualityWindowProps) {
   )
 }
 
-export function QualityPanel({ range }: { range: InsightsRange }) {
-  const { data } = useQualityMetrics(range)
+export type QualityMetricsDataHook = (
+  range?: InsightsRange,
+) => Pick<ReturnType<typeof useQualityMetrics>, 'data'>
+
+export function QualityPanel({
+  range,
+  qualityMetricsHook = useQualityMetrics,
+}: {
+  range: InsightsRange
+  qualityMetricsHook?: QualityMetricsDataHook
+}) {
+  const { data } = qualityMetricsHook(range)
   const window = data?.window
   const hasSamples = (window?.sampleCount ?? 0) > 0
 

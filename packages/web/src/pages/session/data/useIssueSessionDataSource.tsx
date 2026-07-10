@@ -11,6 +11,26 @@ import { useSessionTranscript, projectTurn } from '../../../widgets/session-tran
 import type { SessionDataSourceResult, StatusKind } from './SessionDataSource'
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
 
+export interface IssueSessionDataSourceDependencies {
+  useSessionTranscript?: typeof useSessionTranscript
+  projectTurn?: typeof projectTurn
+  useIssue?: typeof useIssue
+  useCoderSessions?: typeof useCoderSessions
+  useSiblingSessions?: typeof useSiblingSessions
+  getAgentSessionMetadata?: typeof getAgentSessionMetadata
+  getAgentSessionTranscript?: typeof getAgentSessionTranscript
+}
+
+const defaultDependencies: Required<IssueSessionDataSourceDependencies> = {
+  useSessionTranscript,
+  projectTurn,
+  useIssue,
+  useCoderSessions,
+  useSiblingSessions,
+  getAgentSessionMetadata,
+  getAgentSessionTranscript,
+}
+
 function buildSessionMetadata(
   meta: AgentSessionMetadata,
   lastEventAt: string | null,
@@ -90,7 +110,18 @@ function getSessionStatusKind(
   return 'live'
 }
 
-export function useIssueSessionDataSource(): SessionDataSourceResult {
+export function useIssueSessionDataSource(
+  dependencies: IssueSessionDataSourceDependencies = {},
+): SessionDataSourceResult {
+  const {
+    useSessionTranscript: useTranscript,
+    projectTurn: projectTranscriptTurn,
+    useIssue: useIssueHook,
+    useCoderSessions: useCoderSessionsHook,
+    useSiblingSessions: useSiblingSessionsHook,
+    getAgentSessionMetadata: fetchAgentSessionMetadata,
+    getAgentSessionTranscript: fetchAgentSessionTranscript,
+  } = { ...defaultDependencies, ...dependencies }
   const { number: numberStr, sessionId, sessionName } = useParams<{ number: string; sessionId?: string; sessionName?: string }>()
   const { projectId } = useProject()
   const toProjectPath = useProjectPath()
@@ -100,13 +131,13 @@ export function useIssueSessionDataSource(): SessionDataSourceResult {
   const decodedSessionName = sessionName ? decodeURIComponent(sessionName) : undefined
   useDocumentTitle(`Session — Issue #${issueNumber} — Mohist`)
 
-  const { data: issue } = useIssue(issueNumber)
-  const { sessions, isLoading: sessionsLoading } = useCoderSessions(issueNumber)
+  const { data: issue } = useIssueHook(issueNumber)
+  const { sessions, isLoading: sessionsLoading } = useCoderSessionsHook(issueNumber)
   const session = sessions.find((s) => decodedSessionName
     ? (s.sessionName ?? s.executionId ?? s.id) === decodedSessionName
     : s.id === decodedSessionId)
 
-  const siblingNavHook = useSiblingSessions(issue?.workflowRunId ?? null, {
+  const siblingNavHook = useSiblingSessionsHook(issue?.workflowRunId ?? null, {
     currentKey: decodedSessionName ?? decodedSessionId ?? null,
   })
 
@@ -136,7 +167,7 @@ export function useIssueSessionDataSource(): SessionDataSourceResult {
     queryKey: metadataQueryKey,
     queryFn: async () => {
       if (!lookupKey) return null
-      return getAgentSessionMetadata(issueNumber, lookupKey, projectId)
+      return fetchAgentSessionMetadata(issueNumber, lookupKey, projectId)
     },
     enabled: hasRoute,
   })
@@ -145,7 +176,7 @@ export function useIssueSessionDataSource(): SessionDataSourceResult {
     queryKey: transcriptQueryKey,
     queryFn: async () => {
       if (!lookupKey) return null
-      return getAgentSessionTranscript(issueNumber, lookupKey, projectId)
+      return fetchAgentSessionTranscript(issueNumber, lookupKey, projectId)
     },
     enabled: hasRoute && !!metadata,
   })
@@ -195,7 +226,7 @@ export function useIssueSessionDataSource(): SessionDataSourceResult {
     isFinalizing,
     isThinking,
     isStreaming,
-  } = useSessionTranscript({
+  } = useTranscript({
     issueNumber,
     sessionId: detail?.id ?? decodedSessionId ?? decodedSessionName ?? '',
     acpSessionId,
@@ -206,7 +237,7 @@ export function useIssueSessionDataSource(): SessionDataSourceResult {
 
   const displayStatusKind: StatusKind = isFinalizing && isRunning ? 'finalizing' : statusKind
 
-  const displayTurns = useMemo(() => turns.map((turn) => projectTurn(turn)), [turns])
+  const displayTurns = useMemo(() => turns.map((turn) => projectTranscriptTurn(turn)), [turns, projectTranscriptTurn])
 
   const recoverySessionName = detail?.metadata?.sessionName ?? session?.sessionName ?? session?.executionId ?? lookupKey ?? ''
 

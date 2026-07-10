@@ -5,31 +5,25 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { toast } from 'sonner'
 import { ProjectProvider } from '../../entities/project'
 import { REVERSE_DNS_EVENT_TYPES } from '../../shared/lib/canonical-event-types'
-import { LiveTaskProvider } from './LiveTaskProvider'
+import { LiveTaskProvider, type EventsConnectionHook } from './LiveTaskProvider'
 import { TEST_PROJECT } from './_liveTaskProviderTestUtils'
 
-const mocks = vi.hoisted(() => ({
-  useEventsConnection: vi.fn(),
-  useAgentStatus: vi.fn(),
-}))
-
-vi.mock('../../shared/api/events-hub', () => ({
-  useEventsConnection: (...args: unknown[]) => mocks.useEventsConnection(...args),
-}))
-
-vi.mock('../../entities/agent', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../../entities/agent')>()),
-  useAgentStatus: () => mocks.useAgentStatus(),
-}))
+let eventsConnectionCalls: Parameters<EventsConnectionHook>[] = []
+const eventsConnectionHook: EventsConnectionHook = (...args) => {
+  eventsConnectionCalls.push(args)
+  return { status: 'disconnected', connection: null, reconnectVersion: 0 }
+}
+const runnerDropNoticeHook = () => {}
+const viewedIssueRef = { current: null as number | null }
+const viewedIssueHook = () => viewedIssueRef
+let pathname = '/'
+const pathnameReader = () => pathname
 
 beforeEach(() => {
   vi.clearAllMocks()
-  mocks.useAgentStatus.mockReturnValue({
-    data: {
-      running: false,
-      runnerAvailable: true,
-    },
-  })
+  eventsConnectionCalls = []
+  viewedIssueRef.current = null
+  pathname = '/'
 })
 
 describe('LiveTaskProvider inbox hint (invalidation only)', () => {
@@ -45,13 +39,19 @@ describe('LiveTaskProvider inbox hint (invalidation only)', () => {
             initialProjects: [TEST_PROJECT],
             children: createElement(
               LiveTaskProvider,
-              { children: createElement('div', null, 'child') },
+              {
+                children: createElement('div', null, 'child'),
+                eventsConnectionHook,
+                runnerDropNoticeHook,
+                viewedIssueHook,
+                pathnameReader,
+              },
             ),
           },
         ),
       ),
     )
-    return mocks.useEventsConnection.mock.calls[0][1] as (eventName: string, data: unknown) => void
+    return eventsConnectionCalls[0][1]
   }
 
   it('invalidates ["inbox", projectId] when an inbox hint arrives for the current project', () => {
@@ -191,13 +191,19 @@ describe('LiveTaskProvider high-attention inbox notice', () => {
             initialProjects: [TEST_PROJECT],
             children: createElement(
               LiveTaskProvider,
-              { children: createElement('div', null, 'child') },
+              {
+                children: createElement('div', null, 'child'),
+                eventsConnectionHook,
+                runnerDropNoticeHook,
+                viewedIssueHook,
+                pathnameReader,
+              },
             ),
           },
         ),
       ),
     )
-    return mocks.useEventsConnection.mock.calls[0][1] as (eventName: string, data: unknown) => void
+    return eventsConnectionCalls[0][1]
   }
 
   it('shows an error notice for workflow_failed hints', () => {
@@ -293,10 +299,11 @@ describe('LiveTaskProvider high-attention inbox notice', () => {
   })
 
   it('does NOT show a notice when on the inbox page (suppression)', () => {
-    const savedPathname = window.location.pathname
-    window.history.pushState({}, '', '/test-project/inbox')
+    pathname = '/test-project/inbox'
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const handleEvent = mountWith(queryClient)
+    vi.mocked(toast.error).mockClear()
+    vi.mocked(toast.info).mockClear()
 
     act(() => {
       handleEvent(REVERSE_DNS_EVENT_TYPES.InboxItemPersisted, {
@@ -310,14 +317,15 @@ describe('LiveTaskProvider high-attention inbox notice', () => {
 
     expect(toast.error).not.toHaveBeenCalled()
     expect(toast.info).not.toHaveBeenCalled()
-    window.history.pushState({}, '', savedPathname)
   })
 
   it('does NOT show a notice when viewing the same issue (suppression)', () => {
-    const savedPathname = window.location.pathname
-    window.history.pushState({}, '', '/test-project/issues/42')
+    pathname = '/test-project/issues/42'
+    viewedIssueRef.current = 42
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const handleEvent = mountWith(queryClient)
+    vi.mocked(toast.error).mockClear()
+    vi.mocked(toast.info).mockClear()
 
     act(() => {
       handleEvent(REVERSE_DNS_EVENT_TYPES.InboxItemPersisted, {
@@ -331,12 +339,11 @@ describe('LiveTaskProvider high-attention inbox notice', () => {
 
     expect(toast.error).not.toHaveBeenCalled()
     expect(toast.info).not.toHaveBeenCalled()
-    window.history.pushState({}, '', savedPathname)
   })
 
   it('shows a notice when viewing an unrelated issue (different number)', () => {
-    const savedPathname = window.location.pathname
-    window.history.pushState({}, '', '/test-project/issues/99')
+    pathname = '/test-project/issues/99'
+    viewedIssueRef.current = 99
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const handleEvent = mountWith(queryClient)
 
@@ -352,7 +359,6 @@ describe('LiveTaskProvider high-attention inbox notice', () => {
 
     expect(toast.error).toHaveBeenCalledTimes(1)
     expect(toast.error).toHaveBeenCalledWith('Issue #42 encountered an error')
-    window.history.pushState({}, '', savedPathname)
   })
 
   it('the notice is in-app only (uses sonner toast, not Notification API or external push)', () => {

@@ -3,10 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
-import { http, HttpResponse } from 'msw'
 import { ProjectProvider } from '../../../entities/project'
-import { SessionPage } from './SessionPage'
-import { useMswServer } from '../../../../tests/support/msw'
+import { SessionPage, type SessionPageDependencies } from './SessionPage'
 
 let _issueData: unknown = null
 let _coderSessionsData: unknown[] = []
@@ -19,27 +17,7 @@ let _transcriptData: { turns: unknown[]; partCount: number; lastActivityAt: stri
   partCount: 2,
   lastActivityAt: '2026-06-15T10:29:55.000Z',
 }
-let _workflowRunSessionsData: unknown[] = []
-
-useMswServer(
-  http.get('/api/projects/:projectId/issues/:number', () =>
-    HttpResponse.json({ success: true, data: _issueData }),
-  ),
-  http.get('/api/projects/:projectId/issues/:number/coder-sessions', () =>
-    HttpResponse.json({ success: true, data: _coderSessionsData }),
-  ),
-  http.get('/api/projects/:projectId/issues/:number/sessions/:name', () =>
-    HttpResponse.json({ success: true, data: _metadataData }),
-  ),
-  http.get('/api/projects/:projectId/issues/:number/sessions/:name/transcript', () =>
-    HttpResponse.json({ success: true, data: _transcriptData }),
-  ),
-  http.get('/api/workflow-runs/:workflowRunId/sessions', () =>
-    HttpResponse.json({ success: true, data: _workflowRunSessionsData }),
-  ),
-)
-
-const mocks = vi.hoisted(() => ({
+const mocks = {
   transcriptReturn: {
     turns: [] as any[],
     transcriptVersion: 0,
@@ -50,24 +28,29 @@ const mocks = vi.hoisted(() => ({
     isThinking: false,
     isStreaming: false,
   },
-}))
+}
 
-vi.mock('../../../widgets/session-transcript', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../widgets/session-transcript')>()
-  return {
-    ...actual,
-    useSessionTranscript: () => mocks.transcriptReturn,
-    projectTurn: (turn: any) => turn,
+const sessionPageDependencies: SessionPageDependencies = {
+  dataSource: {
+    useSessionTranscript: () => mocks.transcriptReturn as never,
+    projectTurn: (turn) => turn as never,
+    useIssue: () => ({ data: _issueData }) as never,
+    useCoderSessions: () => ({ sessions: _coderSessionsData, isLoading: false }) as never,
+    useSiblingSessions: () => ({
+      sessions: [],
+      currentIndex: -1,
+      previous: null,
+      next: null,
+      hasPrevious: false,
+      hasNext: false,
+    }),
+    getAgentSessionMetadata: async () => _metadataData as never,
+    getAgentSessionTranscript: async () => _transcriptData as never,
+  },
+  shellComponents: {
     SessionTranscriptLayout: ({ turns }: { turns: any[] }) => (
       <div data-testid="session-transcript-layout">{turns.length} turns</div>
     ),
-  }
-})
-
-vi.mock('../../../widgets/coder-session', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../widgets/coder-session')>()
-  return {
-    ...actual,
     SessionRecoveryActions: ({
       issueNumber,
       sessionName,
@@ -87,16 +70,9 @@ vi.mock('../../../widgets/coder-session', async (importOriginal) => {
         <button data-testid="session-recovery-reset" type="button">Reset</button>
       </div>
     ),
-    SessionFollowupComposer: ({ disabled }: { disabled: boolean }) => (
+    SessionFollowupComposer: ({ disabled }: { disabled?: boolean }) => (
       <div data-testid="session-followup-composer" data-disabled={disabled ? 'true' : 'false'} />
     ),
-  }
-})
-
-vi.mock('../../../widgets/session-health', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../widgets/session-health')>()
-  return {
-    ...actual,
     ContextHealthBar: ({
       contextWindowUsed,
       contextWindowSize,
@@ -115,8 +91,8 @@ vi.mock('../../../widgets/session-health', async (importOriginal) => {
         context health bar
       </div>
     ),
-  }
-})
+  },
+}
 
 
 function createQueryClient() {
@@ -138,7 +114,7 @@ async function renderPage() {
           <Routes>
             <Route
               path="/issues/:number/workflow/sessions/:sessionName"
-              element={<SessionPage />}
+              element={<SessionPage dependencies={sessionPageDependencies} />}
             />
           </Routes>
         </MemoryRouter>
@@ -189,7 +165,6 @@ function setupDefaultMocks() {
       exitCode: 0,
     },
   ]
-  _workflowRunSessionsData = []
   _metadataData = {
     id: 'agent-session-1',
     sessionName: 'session-1',

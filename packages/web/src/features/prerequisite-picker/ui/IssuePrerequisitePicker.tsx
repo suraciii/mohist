@@ -24,6 +24,7 @@ export interface IssuePrerequisitePickerProps {
   disabled?: boolean
   errorMessage?: string | null
   selectedIssueSummaries?: IssuePrerequisiteSummary[]
+  issuesHook?: typeof useIssues
 }
 
 type PrerequisiteChipIssue = Pick<IssuePrerequisiteSummary, 'number' | 'title' | 'completed' | 'status' | 'health'>
@@ -102,8 +103,9 @@ export function IssuePrerequisitePicker({
   disabled = false,
   errorMessage,
   selectedIssueSummaries = [],
+  issuesHook = useIssues,
 }: IssuePrerequisitePickerProps) {
-  const issuesQuery = useIssues({ projectId, all: true })
+  const issuesQuery = issuesHook({ projectId, all: true })
   const allIssues: Issue[] = issuesQuery.data ?? []
 
   const excludeSet = useMemo(() => new Set(excludeNumbers), [excludeNumbers])

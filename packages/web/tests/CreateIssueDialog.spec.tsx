@@ -4,16 +4,6 @@ import { http, HttpResponse } from 'msw'
 import { CreateIssueDialog } from '../src/features/create-issue'
 import { server, useMswServer } from './support/msw'
 
-vi.mock('../src/entities/issue', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../src/entities/issue')>()
-  return {
-    ...actual,
-    createIssue: vi.fn(),
-  }
-})
-
-const { createIssue } = await import('../src/entities/issue')
-
 const PROFILES = [
   { id: 'mohist/local', name: 'Default', description: 'Default profile', isDefault: true },
   { id: 'feature-flow', name: 'Feature Flow', description: 'Feature work', isDefault: false },
@@ -26,6 +16,9 @@ const REPOS_PATH = '*/api/projects/:projectId/repositories'
 const ISSUE_TEMPLATES_PATH = '*/api/issue-templates*'
 const ISSUES_PATH = '*/api/projects/:projectId/issues*'
 
+let createRequests: Array<Record<string, unknown>> = []
+let createdIssue: Record<string, unknown>
+
 const defaultHandlers = [
   http.get(PROFILES_PATH, () => HttpResponse.json({ success: true, data: PROFILES })),
   http.get(PROJECT_PROFILE_PATH, () =>
@@ -37,6 +30,11 @@ const defaultHandlers = [
   http.get(MODELS_PATH, () => HttpResponse.json({ success: true, data: { models: [], modelVariants: {} } })),
   http.get(REPOS_PATH, () => HttpResponse.json({ success: true, data: [] })),
   http.get(ISSUE_TEMPLATES_PATH, () => HttpResponse.json({ success: true, data: [] })),
+  http.post(ISSUES_PATH, async ({ request }) => {
+    const body = await request.json() as Record<string, unknown>
+    createRequests.push(body)
+    return HttpResponse.json({ success: true, data: createdIssue })
+  }),
   http.get(ISSUES_PATH, () => HttpResponse.json({ success: true, data: [] })),
 ] as const
 
@@ -57,8 +55,9 @@ function mockProjectDefault(templateId: string) {
   )
 }
 
-function mockHooks() {
-  ;(createIssue as ReturnType<typeof vi.fn>).mockResolvedValue({
+function resetCreateIssueResponse() {
+  createRequests = []
+  createdIssue = {
     id: 'issue_1',
     number: 1,
     title: 'T',
@@ -68,7 +67,7 @@ function mockHooks() {
     labels: {},
     createdAt: '2026-06-16T00:00:00Z',
     updatedAt: '2026-06-16T00:00:00Z',
-  })
+  }
 }
 
 function renderDialog(open = true) {
@@ -90,7 +89,7 @@ const FRONTMATTER_BODY = [
 
 beforeEach(() => {
   vi.clearAllMocks()
-  mockHooks()
+  resetCreateIssueResponse()
 })
 
 afterEach(() => {
@@ -148,9 +147,9 @@ describe('CreateIssueDialog frontmatter detection', () => {
 
     fireEvent.click(screen.getByText('Create'))
     await waitFor(() => {
-      expect(createIssue).toHaveBeenCalledTimes(1)
+      expect(createRequests).toHaveLength(1)
     })
-    const payload = (createIssue as ReturnType<typeof vi.fn>).mock.calls[0][0]
+    const payload = createRequests[0]
     expect(payload.workflowProfileId).toBeUndefined()
   })
 })
@@ -172,9 +171,9 @@ describe('CreateIssueDialog recommendation override and acceptance', () => {
     fireEvent.click(screen.getByText('Create'))
 
     await waitFor(() => {
-      expect(createIssue).toHaveBeenCalledTimes(1)
+      expect(createRequests).toHaveLength(1)
     })
-    const payload = (createIssue as ReturnType<typeof vi.fn>).mock.calls[0][0]
+    const payload = createRequests[0]
     expect(payload.workflowProfileId).toBe('feature-flow')
     expect(payload.risk).toBe('high')
   })
@@ -195,9 +194,9 @@ describe('CreateIssueDialog recommendation override and acceptance', () => {
     fireEvent.click(screen.getByText('Create'))
 
     await waitFor(() => {
-      expect(createIssue).toHaveBeenCalledTimes(1)
+      expect(createRequests).toHaveLength(1)
     })
-    const payload = (createIssue as ReturnType<typeof vi.fn>).mock.calls[0][0]
+    const payload = createRequests[0]
     expect(payload.workflowProfileId).toBe('mohist/local')
   })
 
@@ -209,9 +208,9 @@ describe('CreateIssueDialog recommendation override and acceptance', () => {
     fireEvent.click(screen.getByText('Create'))
 
     await waitFor(() => {
-      expect(createIssue).toHaveBeenCalledTimes(1)
+      expect(createRequests).toHaveLength(1)
     })
-    const payload = (createIssue as ReturnType<typeof vi.fn>).mock.calls[0][0]
+    const payload = createRequests[0]
     expect(payload.workflowProfileId).toBeUndefined()
   })
 
@@ -233,9 +232,9 @@ describe('CreateIssueDialog recommendation override and acceptance', () => {
     fireEvent.click(screen.getByText('Create'))
 
     await waitFor(() => {
-      expect(createIssue).toHaveBeenCalledTimes(1)
+      expect(createRequests).toHaveLength(1)
     })
-    const payload = (createIssue as ReturnType<typeof vi.fn>).mock.calls[0][0]
+    const payload = createRequests[0]
     expect(payload.workflowProfileId).toBeUndefined()
   })
 
@@ -258,9 +257,9 @@ describe('CreateIssueDialog recommendation override and acceptance', () => {
     fireEvent.click(screen.getByText('Create'))
 
     await waitFor(() => {
-      expect(createIssue).toHaveBeenCalledTimes(1)
+      expect(createRequests).toHaveLength(1)
     })
-    const payload = (createIssue as ReturnType<typeof vi.fn>).mock.calls[0][0]
+    const payload = createRequests[0]
     expect(payload.workflowProfileId).toBe('mohist/github-pr')
   })
 })
@@ -268,7 +267,7 @@ describe('CreateIssueDialog recommendation override and acceptance', () => {
 describe('CreateIssueDialog -> issue detail workflow profile display round-trip', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    mockHooks()
+    resetCreateIssueResponse()
   })
 
   afterEach(() => {
@@ -276,7 +275,7 @@ describe('CreateIssueDialog -> issue detail workflow profile display round-trip'
   })
 
   it('reflects the chosen profile on the resulting issue detail read model', async () => {
-    const createdIssue = {
+    createdIssue = {
       id: 'issue_1',
       number: 1,
       title: 'PR work',
@@ -288,7 +287,6 @@ describe('CreateIssueDialog -> issue detail workflow profile display round-trip'
       updatedAt: '2026-06-16T00:00:00.000Z',
       workflowProfileId: 'mohist/github-pr',
     }
-    ;(createIssue as ReturnType<typeof vi.fn>).mockResolvedValue(createdIssue)
     mockProfiles([
       { id: 'mohist/local', name: 'Default', description: '', isDefault: true },
       { id: 'mohist/github-pr', name: 'PR', description: '', isDefault: false },
@@ -305,12 +303,11 @@ describe('CreateIssueDialog -> issue detail workflow profile display round-trip'
     fireEvent.click(screen.getByText('Create'))
 
     await waitFor(() => {
-      expect(createIssue).toHaveBeenCalledTimes(1)
+      expect(createRequests).toHaveLength(1)
     })
-    const payload = (createIssue as ReturnType<typeof vi.fn>).mock.calls[0][0]
+    const payload = createRequests[0]
     expect(payload.workflowProfileId).toBe('mohist/github-pr')
 
-    const returned = await (createIssue as ReturnType<typeof vi.fn>).mock.results[0].value
-    expect(returned.workflowProfileId).toBe('mohist/github-pr')
+    expect(createdIssue.workflowProfileId).toBe('mohist/github-pr')
   })
 })

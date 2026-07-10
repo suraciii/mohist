@@ -2,31 +2,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { cleanup, screen } from '@testing-library/react'
-import { http, HttpResponse } from 'msw'
 
-import { EpicStatus } from '../../../entities/epic'
+import { EpicStatus, type EpicDetail } from '../../../entities/epic'
 import { IssueStatus, WorkflowStage } from '../../../entities/issue'
 
 import { issues, linkedIssue, renderPage } from './_epicDetailPageTestHarness'
-import { useMswServer } from '../../../../tests/support/msw'
 
-let _epicData: unknown = null
-let _issuesData: unknown[] = []
-
-useMswServer(
-  http.get('*/api/projects/:projectId/epics/:epicId', () =>
-    HttpResponse.json({ success: true, data: _epicData }),
-  ),
-  http.get('*/api/projects/:projectId/issues', () =>
-    HttpResponse.json({ success: true, data: _issuesData }),
-  ),
-  http.get('*/api/projects/:projectId/epics/:epicId/events', () =>
-    HttpResponse.json({ success: true, data: [] }),
-  ),
-)
+let _epicData: EpicDetail
 
 describe('EpicDetailPage next issue reason display', () => {
-  function makeEpic(overrides: Record<string, unknown> = {}) {
+  function makeEpic(overrides: Record<string, unknown> = {}): EpicDetail {
     return {
       id: 'epic-12345678',
       number: null,
@@ -49,12 +34,12 @@ describe('EpicDetailPage next issue reason display', () => {
         linkedIssue({ id: 'issue-1', number: 1, title: 'Pending issue', status: IssueStatus.InProgress, stage: WorkflowStage.Build, priority: 'p1' }),
       ],
       ...overrides,
-    }
+    } as EpicDetail
   }
 
   beforeEach(() => {
     vi.clearAllMocks()
-    _issuesData = issues
+    _epicData = makeEpic()
   })
 
   afterEach(() => {
@@ -64,7 +49,7 @@ describe('EpicDetailPage next issue reason display', () => {
   it('shows the advancement-state copy (waiting-for-in-progress with nav link) when nextIssue is null', async () => {
     _epicData = makeEpic()
 
-    renderPage()
+    renderPage({ epic: _epicData, issues })
 
     expect(await screen.findByTestId('advancement-copy')).toHaveTextContent('Waiting for #1 to finish')
     const link = screen.getByTestId('advancement-link')
@@ -86,7 +71,7 @@ describe('EpicDetailPage next issue reason display', () => {
       linkedIssues: [linkedIssue({ id: 'issue-3', number: 3, title: 'Candidate issue' })],
     })
 
-    renderPage()
+    renderPage({ epic: _epicData, issues })
 
     expect(await screen.findByRole('link', { name: '#3 Candidate issue' })).toHaveAttribute('href', expect.stringContaining('/issues/3'))
     expect(screen.queryByTestId('epic-detail-next-start')).toBeNull()
@@ -94,7 +79,7 @@ describe('EpicDetailPage next issue reason display', () => {
 
   it('does not show a Next Issue Start action for reason ready or empty states', async () => {
     _epicData = makeEpic()
-    renderPage()
+    renderPage({ epic: _epicData, issues })
     await screen.findByTestId('advancement-copy')
     expect(screen.queryByTestId('epic-detail-next-start')).toBeNull()
     cleanup()
@@ -110,7 +95,7 @@ describe('EpicDetailPage next issue reason display', () => {
         readyToMarkDone: true,
       },
     })
-    renderPage()
+    renderPage({ epic: _epicData, issues })
     await screen.findByTestId('mark-epic-done')
     expect(screen.queryByTestId('epic-detail-next-start')).toBeNull()
     cleanup()
@@ -126,7 +111,7 @@ describe('EpicDetailPage next issue reason display', () => {
         readyToMarkDone: false,
       },
     })
-    renderPage()
+    renderPage({ epic: _epicData, issues })
     await screen.findByTestId('advancement-copy')
     expect(screen.queryByTestId('epic-detail-next-start')).toBeNull()
   })

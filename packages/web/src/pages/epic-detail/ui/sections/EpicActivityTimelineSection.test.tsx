@@ -3,28 +3,30 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
-import { http, HttpResponse } from 'msw'
 import { ProjectProvider } from '../../../../entities/project'
-import { server, useMswServer } from '../../../../../tests/support/msw'
 import { TEST_PROJECT } from '../../../../../tests/test-utils'
 import { EpicActivityTimelineSection } from './EpicActivityTimelineSection'
 import type { StoredCloudEventDto } from '../../../../entities/epic'
 
-useMswServer()
+let events: StoredCloudEventDto[] = []
+let eventsLoading = false
+let eventsError = false
 
-const EVENTS_PATH = '*/api/projects/:projectId/epics/:epicId/events'
-
-function mockEventsResponse(events: StoredCloudEventDto[]) {
-  server.use(http.get(EVENTS_PATH, () => HttpResponse.json({ success: true, data: events })))
+function mockEventsResponse(nextEvents: StoredCloudEventDto[]) {
+  events = nextEvents
+  eventsLoading = false
+  eventsError = false
 }
 
 function mockEventsPending() {
-  server.use(http.get(EVENTS_PATH, () => new Promise(() => {})))
+  eventsLoading = true
 }
 
 function mockEventsError() {
-  server.use(http.get(EVENTS_PATH, () => HttpResponse.json({ success: false, error: 'fail' }, { status: 500 })))
+  eventsError = true
 }
+
+const eventsHook = () => ({ data: events, isLoading: eventsLoading, isError: eventsError }) as never
 
 function makeEvent(overrides: Partial<StoredCloudEventDto> & { type: string; data?: unknown }): StoredCloudEventDto {
   return {
@@ -47,7 +49,7 @@ function renderSection(epicId: string) {
     <QueryClientProvider client={queryClient}>
       <ProjectProvider initialProjectId={TEST_PROJECT.id} initialProjects={[TEST_PROJECT]}>
         <MemoryRouter>
-          <EpicActivityTimelineSection epicId={epicId} />
+          <EpicActivityTimelineSection epicId={epicId} eventsHook={eventsHook} />
         </MemoryRouter>
       </ProjectProvider>
     </QueryClientProvider>,

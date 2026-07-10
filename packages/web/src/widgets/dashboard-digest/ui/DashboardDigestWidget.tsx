@@ -25,8 +25,12 @@ function DigestSection({ testId, label, issues, timestampFor }: DigestSectionPro
   )
 }
 
-export function DashboardDigestWidget() {
-  const { completed, failed, archived, isLoading } = useRecentDigest()
+export function DashboardDigestWidget({
+  digestHook = useRecentDigest,
+}: {
+  digestHook?: typeof useRecentDigest
+} = {}) {
+  const { completed, failed, archived, isLoading } = digestHook()
 
   if (isLoading) {
     return (

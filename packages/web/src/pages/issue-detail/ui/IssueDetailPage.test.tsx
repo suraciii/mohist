@@ -1,11 +1,11 @@
 // @vitest-environment jsdom
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { ProjectProvider } from '../../../entities/project'
 import type { Project } from '../../../entities/project'
-import { IssueDetailPage } from './IssueDetailPage'
+import { IssueDetailPage, type IssueDetailPageComponents } from './IssueDetailPage'
 import { RuntimeToastHost, useRuntimeToast } from '../../../shared/ui/toast'
 import { mockIssue, mockIssueCommits, mockIssueDiff, mockWorkflowTimeline, mockWorkspaceStatus, mountIssueDetail } from './_issueDetailMsw'
 
@@ -14,8 +14,8 @@ function LocationProbe() {
   return <div data-testid="current-path">{location.pathname}{location.search}</div>
 }
 
-vi.mock('../../../widgets/issue-event-timeline/ui/EventTimelinePanel', () => ({
-  EventTimelinePanel: vi.fn((props: { issueNumber: number; issueId?: string | null; workflowStatus?: string | null; enabled?: boolean }) => (
+const components: IssueDetailPageComponents = {
+  EventTimelinePanel: (props) => (
     <div
       data-testid="event-timeline-panel-mock"
       data-issue-number={props.issueNumber}
@@ -23,8 +23,8 @@ vi.mock('../../../widgets/issue-event-timeline/ui/EventTimelinePanel', () => ({
       data-workflow-status={props.workflowStatus ?? ''}
       data-enabled={props.enabled === undefined ? '' : String(props.enabled)}
     />
-  )),
-}))
+  ),
+}
 
 const projects: Project[] = [
   {
@@ -63,7 +63,7 @@ function renderPage() {
         <ProjectProvider initialProjects={projects} initialProjectId="proj-1">
           <LocationProbe />
           <Routes>
-            <Route path="/issues/:number" element={<IssueDetailPage />} />
+            <Route path="/issues/:number" element={<IssueDetailPage components={components} />} />
           </Routes>
         </ProjectProvider>
       </MemoryRouter>
@@ -388,7 +388,7 @@ function renderPageWithToastHost() {
           <LocationProbe />
           <RuntimeToastHost>
             <Routes>
-              <Route path="/issues/:number" element={<IssueDetailPage />} />
+              <Route path="/issues/:number" element={<IssueDetailPage components={components} />} />
             </Routes>
             <TransportNoticeTrigger />
           </RuntimeToastHost>

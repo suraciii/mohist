@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import { fireEvent, screen } from '@testing-library/react'
 import {
   resolveDeliveryFailureFromMessage,
@@ -19,7 +19,6 @@ import {
   WorkflowStage,
   type Issue,
   type WorkflowTimeline,
-  useWorkflowTimeline,
 } from '../src/entities/issue'
 import { render } from './test-utils'
 
@@ -363,15 +362,11 @@ describe('delivery-failure guidance mapping', () => {
   })
 })
 
-vi.mock('../src/entities/issue', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../src/entities/issue')>()
-  return {
-    ...actual,
-    useWorkflowTimeline: vi.fn(),
-  }
-})
+let timelineData: WorkflowTimeline | null = null
 
-const mockedUseWorkflowTimeline = vi.mocked(useWorkflowTimeline)
+beforeEach(() => {
+  timelineData = null
+})
 
 type FailureKind = Exclude<DeliveryFailureKind, 'branch-invariant-violation'>
 const DELIVERY_TASK_KIND: Record<FailureKind, 'prepare' | 'publish' | 'publish-via-pr'> = {
@@ -509,13 +504,22 @@ function makeBlockedIssue(blockedReason: string | undefined): Issue {
   }
 }
 
+function renderWorkflowView(issue: Issue) {
+  return render(
+    <WorkflowView
+      issue={issue}
+      timelineHook={() => ({ data: timelineData })}
+    />,
+  )
+}
+
 describe('WorkflowView delivery failure rendering', () => {
   it('shows the conflict kind, label, and next action when prepare fails with a conflict', async () => {
-    mockedUseWorkflowTimeline.mockReturnValue({ data: makeFailureTimeline('conflict') } as ReturnType<typeof useWorkflowTimeline>)
+    timelineData = makeFailureTimeline('conflict')
 
-    render(<WorkflowView issue={makeBlockedIssue(undefined)} />)
+    renderWorkflowView(makeBlockedIssue(undefined))
 
-    const taskButton = screen.getByRole('button', { name: /Prepare branch/ })
+    const taskButton = await screen.findByRole('button', { name: /Prepare branch/ })
     fireEvent.click(taskButton)
 
     expect(await screen.findByText('Failure kind')).toBeInTheDocument()
@@ -527,11 +531,11 @@ describe('WorkflowView delivery failure rendering', () => {
   })
 
   it('shows the base-moved kind, label, and next action when publish fails because the base moved', async () => {
-    mockedUseWorkflowTimeline.mockReturnValue({ data: makeFailureTimeline('base-moved') } as ReturnType<typeof useWorkflowTimeline>)
+    timelineData = makeFailureTimeline('base-moved')
 
-    render(<WorkflowView issue={makeBlockedIssue(undefined)} />)
+    renderWorkflowView(makeBlockedIssue(undefined))
 
-    const taskButton = screen.getByRole('button', { name: /Publish changes/ })
+    const taskButton = await screen.findByRole('button', { name: /Publish changes/ })
     fireEvent.click(taskButton)
 
     expect(await screen.findByText('Failure kind')).toBeInTheDocument()
@@ -541,11 +545,11 @@ describe('WorkflowView delivery failure rendering', () => {
   })
 
   it('shows the retry-safe kind, label, and next action for transient delivery failures', async () => {
-    mockedUseWorkflowTimeline.mockReturnValue({ data: makeFailureTimeline('retry-safe') } as ReturnType<typeof useWorkflowTimeline>)
+    timelineData = makeFailureTimeline('retry-safe')
 
-    render(<WorkflowView issue={makeBlockedIssue(undefined)} />)
+    renderWorkflowView(makeBlockedIssue(undefined))
 
-    const taskButton = screen.getByRole('button', { name: /Prepare branch/ })
+    const taskButton = await screen.findByRole('button', { name: /Prepare branch/ })
     fireEvent.click(taskButton)
 
     expect(await screen.findByText('Failure kind')).toBeInTheDocument()
@@ -555,11 +559,11 @@ describe('WorkflowView delivery failure rendering', () => {
   })
 
   it('shows the branch-invariant-violation kind, runner/action attribution, and branch evidence', async () => {
-    mockedUseWorkflowTimeline.mockReturnValue({ data: makeBranchViolationTimeline() } as ReturnType<typeof useWorkflowTimeline>)
+    timelineData = makeBranchViolationTimeline()
 
-    render(<WorkflowView issue={makeBlockedIssue(undefined)} />)
+    renderWorkflowView(makeBlockedIssue(undefined))
 
-    const taskButton = screen.getByRole('button', { name: /Prepare branch/ })
+    const taskButton = await screen.findByRole('button', { name: /Prepare branch/ })
     fireEvent.click(taskButton)
 
     expect(await screen.findByText('Failure kind')).toBeInTheDocument()
@@ -613,9 +617,9 @@ describe('WorkflowView delivery failure rendering', () => {
       ],
       availableActions: [],
     }
-    mockedUseWorkflowTimeline.mockReturnValue({ data: timeline } as ReturnType<typeof useWorkflowTimeline>)
+    timelineData = timeline
 
-    render(<WorkflowView issue={makeBlockedIssue('Build failed: agent crashed')} />)
+    renderWorkflowView(makeBlockedIssue('Build failed: agent crashed'))
 
     // Select the Build stage first so the failed task is visible.
     fireEvent.click(screen.getByRole('button', { name: 'Build' }))
@@ -627,7 +631,7 @@ describe('WorkflowView delivery failure rendering', () => {
     ).not.toBeInTheDocument()
   })
 
-  it('does not show a delivery failure banner for non-delivery task failures', () => {
+  it('does not show a delivery failure banner for non-delivery task failures', async () => {
     const timeline: WorkflowTimeline = {
       workflowRunId: 'workflow-run-2',
       status: 'failed',
@@ -660,21 +664,17 @@ describe('WorkflowView delivery failure rendering', () => {
       ],
       availableActions: [],
     }
-    mockedUseWorkflowTimeline.mockReturnValue({ data: timeline } as ReturnType<typeof useWorkflowTimeline>)
+    timelineData = timeline
 
-    render(<WorkflowView issue={makeBlockedIssue('Build failed: agent crashed')} />)
+    renderWorkflowView(makeBlockedIssue('Build failed: agent crashed'))
 
+    fireEvent.click(screen.getByRole('button', { name: 'Build' }))
+    await screen.findByRole('button', { name: /Implement WorkflowView/ })
     expect(screen.queryByText('Failure kind')).not.toBeInTheDocument()
   })
 
   it('surfaces the kind and next action in the Integrate failure panel from the blocked reason', () => {
-    mockedUseWorkflowTimeline.mockReturnValue({ data: undefined } as ReturnType<typeof useWorkflowTimeline>)
-
-    render(
-      <WorkflowView
-        issue={makeBlockedIssue('Prepare failed (base-moved): non-fast-forward')}
-      />,
-    )
+    renderWorkflowView(makeBlockedIssue('Prepare failed (base-moved): non-fast-forward'))
 
     expect(screen.getByText('Integration Failed')).toBeInTheDocument()
     expect(screen.getByText('Prepare branch')).toBeInTheDocument()
@@ -684,14 +684,10 @@ describe('WorkflowView delivery failure rendering', () => {
   })
 
   it('surfaces the branch-invariant-violation kind in the Integrate failure panel with branch evidence', () => {
-    mockedUseWorkflowTimeline.mockReturnValue({ data: undefined } as ReturnType<typeof useWorkflowTimeline>)
-
-    render(
-      <WorkflowView
-        issue={makeBlockedIssue(
-          "branch-invariant violation at end boundary for Publish changes: expected branch 'mohist/run-wr-1', observed 'master'",
-        )}
-      />,
+    renderWorkflowView(
+      makeBlockedIssue(
+        "branch-invariant violation at end boundary for Publish changes: expected branch 'mohist/run-wr-1', observed 'master'",
+      ),
     )
 
     expect(screen.getByText('Integration Failed')).toBeInTheDocument()
@@ -707,13 +703,11 @@ describe('WorkflowView delivery failure rendering', () => {
   it.each(['workspace-setup'] as const)(
     'shows the %s kind, workflow-infrastructure attribution, and a distinct next action in the task banner',
     async (kind) => {
-      mockedUseWorkflowTimeline.mockReturnValue({
-        data: makeFailureTimeline(kind),
-      } as ReturnType<typeof useWorkflowTimeline>)
+      timelineData = makeFailureTimeline(kind)
 
-      render(<WorkflowView issue={makeBlockedIssue(undefined)} />)
+      renderWorkflowView(makeBlockedIssue(undefined))
 
-      const taskButton = screen.getByRole('button', { name: /Prepare branch/ })
+      const taskButton = await screen.findByRole('button', { name: /Prepare branch/ })
       fireEvent.click(taskButton)
 
       expect(await screen.findByText('Failure kind')).toBeInTheDocument()
@@ -774,11 +768,11 @@ describe('WorkflowView delivery failure rendering', () => {
       ],
       availableActions: [],
     }
-    mockedUseWorkflowTimeline.mockReturnValue({ data: timeline } as ReturnType<typeof useWorkflowTimeline>)
+    timelineData = timeline
 
-    render(<WorkflowView issue={makeBlockedIssue(undefined)} />)
+    renderWorkflowView(makeBlockedIssue(undefined))
 
-    const taskButton = screen.getByRole('button', { name: /Prepare branch/ })
+    const taskButton = await screen.findByRole('button', { name: /Prepare branch/ })
     fireEvent.click(taskButton)
 
     expect(await screen.findByText('Failure kind')).toBeInTheDocument()

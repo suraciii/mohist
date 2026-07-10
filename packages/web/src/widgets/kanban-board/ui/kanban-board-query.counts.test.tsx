@@ -4,16 +4,27 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
-import { http, HttpResponse } from 'msw'
 import type { AgentStatus } from '../../../entities/agent'
 import { IssueStatus, IssueHealth, WorkflowStage, type ApprovalState } from '../../../entities/issue'
 import { ProjectProvider } from '../../../entities/project'
-import { server } from '../../../../tests/support/msw'
+import { useRunnerSummary } from '../../../entities/runner'
 import { makeIssue, makeIssues, mockAgentStatus } from './_kanbanBoardQueryTestUtils'
 
 const TEST_PROJECT = { id: 'test-project', name: 'test', createdAt: '2025-01-01T00:00:00Z', updatedAt: '2025-01-01T00:00:00Z', repositories: [] }
 
 let _runners: unknown[] = []
+
+const runnerSummaryHook: typeof useRunnerSummary = () => {
+  const rows = _runners as ReturnType<typeof useRunnerSummary>['rows']
+  const connectedIdleCount = rows.filter((row) => row.status === 'idle').length
+  const connectedBusyCount = rows.filter((row) => row.status === 'busy').length
+  return {
+    connectedIdleCount,
+    connectedBusyCount,
+    hasConnectedCapacity: connectedIdleCount > 0 || connectedBusyCount > 0,
+    rows,
+  }
+}
 
 import { KanbanBoard } from './KanbanBoard'
 
@@ -23,7 +34,11 @@ function renderBoard(issues: unknown[], agentStatus: unknown) {
     <QueryClientProvider client={queryClient}>
       <ProjectProvider initialProjectId={TEST_PROJECT.id} initialProjects={[TEST_PROJECT]}>
         <MemoryRouter>
-          <KanbanBoard issues={issues as any} agentStatus={agentStatus as any} />
+          <KanbanBoard
+            issues={issues as any}
+            agentStatus={agentStatus as any}
+            runnerSummaryHook={runnerSummaryHook}
+          />
         </MemoryRouter>
       </ProjectProvider>
     </QueryClientProvider>,
@@ -33,11 +48,6 @@ function renderBoard(issues: unknown[], agentStatus: unknown) {
 describe('KanbanBoard Component - Filtered Stage Counts', () => {
   beforeEach(() => {
     _runners = [{ id: 'r-default', kind: 'external', hostname: 'h', scope: { type: 'global' }, status: 'idle', capabilities: [], coderModels: [], coderModelCount: 0, connectionState: 'connected', activeWorks: [] }]
-    server.use(
-      http.get('/api/projects/:projectId/runners', () =>
-        HttpResponse.json({ success: true, data: { runners: _runners } }),
-      ),
-    )
     Object.defineProperty(window, 'location', {
       value: { search: '', pathname: '/', href: 'http://localhost/', origin: 'http://localhost' },
       writable: true,
@@ -148,11 +158,6 @@ describe('KanbanBoard Component - Filtered Stage Counts', () => {
 describe('Needs attention summary - user-action wording', () => {
   beforeEach(() => {
     _runners = [{ id: 'r-default', kind: 'external', hostname: 'h', scope: { type: 'global' }, status: 'idle', capabilities: [], coderModels: [], coderModelCount: 0, connectionState: 'connected', activeWorks: [] }]
-    server.use(
-      http.get('/api/projects/:projectId/runners', () =>
-        HttpResponse.json({ success: true, data: { runners: _runners } }),
-      ),
-    )
     Object.defineProperty(window, 'location', {
       value: { search: '', pathname: '/', href: 'http://localhost/', origin: 'http://localhost' },
       writable: true,

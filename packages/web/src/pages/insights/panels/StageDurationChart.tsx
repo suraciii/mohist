@@ -86,8 +86,18 @@ function hasPlottableStages(
   )
 }
 
-export function StageDurationChart({ range }: { range: InsightsRange }) {
-  const { data, isLoading, isError } = useStageDuration(range)
+export type StageDurationHook = (
+  range?: InsightsRange,
+) => Pick<ReturnType<typeof useStageDuration>, 'data' | 'isLoading' | 'isError'>
+
+export function StageDurationChart({
+  range,
+  stageDurationHook = useStageDuration,
+}: {
+  range: InsightsRange
+  stageDurationHook?: StageDurationHook
+}) {
+  const { data, isLoading, isError } = stageDurationHook(range)
   const [lens, setLens] = useState<DurationLens>('average')
 
   const visibleCount = data

@@ -4,16 +4,12 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
-import { http, HttpResponse } from 'msw'
-import { server, useMswServer } from '../../../../tests/support/msw'
 import { ProjectProvider } from '../../../entities/project'
 import { TEST_PROJECT } from '../../../../tests/test-utils'
 import { setPrefersReducedMotion } from '../../../../tests/setup'
 import type { QualityMetricsResponse, QualityTrendDto, QualityTrendPointDto } from '../../../entities/issue'
 
-import { FtrTrendChart } from './FtrTrendChart'
-
-useMswServer()
+import { FtrTrendChart, type QualityMetricsTrendHook } from './FtrTrendChart'
 
 function makeWindow(sampleCount: number, firstTimeRightRate: number | null) {
   return {
@@ -55,24 +51,20 @@ function buildTrendData(): QualityMetricsResponse {
   }
 }
 
-const QUALITY_PATH = '*/api/projects/:projectId/issues/metrics/quality'
+let qualityMetricsResult: ReturnType<QualityMetricsTrendHook>
+
+const qualityMetricsHook: QualityMetricsTrendHook = () => qualityMetricsResult
 
 function mockQualityResponse(data: QualityMetricsResponse) {
-  server.use(
-    http.get(QUALITY_PATH, () => HttpResponse.json({ success: true, data })),
-  )
+  qualityMetricsResult = { data, isLoading: false, isError: false }
 }
 
 function mockQualityPending() {
-  server.use(
-    http.get(QUALITY_PATH, () => new Promise(() => {})),
-  )
+  qualityMetricsResult = { data: undefined, isLoading: true, isError: false }
 }
 
 function mockQualityError() {
-  server.use(
-    http.get(QUALITY_PATH, () => HttpResponse.json({ success: false, error: { message: 'boom' } }, { status: 500 })),
-  )
+  qualityMetricsResult = { data: undefined, isLoading: false, isError: true }
 }
 
 function renderChart() {
@@ -81,7 +73,7 @@ function renderChart() {
     <QueryClientProvider client={queryClient}>
       <ProjectProvider initialProjectId={TEST_PROJECT.id} initialProjects={[TEST_PROJECT]}>
         <MemoryRouter initialEntries={['/']}>
-          <FtrTrendChart range="30d" />
+          <FtrTrendChart qualityMetricsHook={qualityMetricsHook} range="30d" />
         </MemoryRouter>
       </ProjectProvider>
     </QueryClientProvider>,
@@ -418,7 +410,7 @@ describe('FtrTrendChart', () => {
       <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
         <ProjectProvider initialProjectId={TEST_PROJECT.id} initialProjects={[TEST_PROJECT]}>
           <MemoryRouter initialEntries={['/']}>
-            <FtrTrendChart range="30d" />
+            <FtrTrendChart qualityMetricsHook={qualityMetricsHook} range="30d" />
           </MemoryRouter>
         </ProjectProvider>
       </QueryClientProvider>,

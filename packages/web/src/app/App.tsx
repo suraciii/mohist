@@ -32,7 +32,7 @@ import { AgentDetailPage } from '../pages/agent-detail/ui/AgentDetailPage'
 import { AgentSessionComposerPage } from '../pages/agent-session-composer/ui/AgentSessionComposerPage'
 import { isApplicationSection, isProjectSection, isSettingsSectionKey } from '../pages/settings/lib/sections'
 
-function AppContent() {
+export function AppContent() {
   const { projectId, setProjectId, setProjects } = useProject()
   const location = useLocation()
 

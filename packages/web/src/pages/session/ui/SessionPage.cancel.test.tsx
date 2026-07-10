@@ -5,7 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import { http, HttpResponse } from 'msw'
 import { ProjectProvider } from '../../../entities/project'
-import { SessionPage } from './SessionPage'
+import { SessionPage, type SessionPageDependencies } from './SessionPage'
 import type { AgentSessionMetadata } from '../../../entities/coder-session'
 import { useMswServer } from '../../../../tests/support/msw'
 
@@ -40,7 +40,7 @@ useMswServer(
   ),
 )
 
-const mocks = vi.hoisted(() => ({
+const mocks = {
   transcriptReturn: {
     turns: [] as any[],
     transcriptVersion: 0,
@@ -51,41 +51,27 @@ const mocks = vi.hoisted(() => ({
     isThinking: false,
     isStreaming: false,
   },
-}))
+}
 
-vi.mock('../../../widgets/session-transcript', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../widgets/session-transcript')>()
-  return {
-    ...actual,
-    useSessionTranscript: () => mocks.transcriptReturn,
-    projectTurn: (turn: any) => turn,
+const sessionPageDependencies: SessionPageDependencies = {
+  dataSource: {
+    useSessionTranscript: () => mocks.transcriptReturn as never,
+    projectTurn: (turn) => turn as never,
+  },
+  shellComponents: {
     SessionTranscriptLayout: ({ turns }: { turns: any[] }) => (
       <div data-testid="session-transcript-layout">{turns.length} turns</div>
     ),
-  }
-})
-
-vi.mock('../../../widgets/coder-session', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../widgets/coder-session')>()
-  return {
-    ...actual,
     SessionRecoveryActions: ({ bare }: { bare?: boolean }) => (
       <div data-testid="session-recovery-actions" data-bare={bare ? 'true' : 'false'} />
     ),
-    SessionFollowupComposer: ({ disabled }: { disabled: boolean }) => (
+    SessionFollowupComposer: ({ disabled }: { disabled?: boolean }) => (
       <div data-testid="session-followup-composer" data-disabled={disabled ? 'true' : 'false'} />
     ),
-  }
-})
-
-vi.mock('../../../widgets/session-health', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../widgets/session-health')>()
-  return {
-    ...actual,
     ContextHealthBar: () => <div data-testid="context-health-bar" />,
     CompactionLineageLink: () => <div data-testid="compaction-lineage-link" />,
-  }
-})
+  },
+}
 
 
 function createQueryClient() {
@@ -159,7 +145,7 @@ async function renderIssueSessionPage() {
           <Routes>
             <Route
               path="/issues/:number/workflow/sessions/:sessionName"
-              element={<SessionPage />}
+              element={<SessionPage dependencies={sessionPageDependencies} />}
             />
           </Routes>
         </MemoryRouter>

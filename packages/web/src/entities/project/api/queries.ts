@@ -2,6 +2,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { createProject, deleteProject, getProjects, getRepositories, addRepository, removeRepository, setDefaultRepository } from './client'
 
+export type ProjectCreator = typeof createProject
+
 export function useProjects() {
   return useQuery({
     queryKey: ['projects'],
@@ -65,10 +67,10 @@ export function useSetDefaultRepository() {
   })
 }
 
-export function useCreateProject() {
+export function useCreateProject(projectCreator: ProjectCreator = createProject) {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (data: { name: string }) => createProject(data),
+    mutationFn: (data: { name: string }) => projectCreator(data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['projects'] })
       toast.success('Project created')

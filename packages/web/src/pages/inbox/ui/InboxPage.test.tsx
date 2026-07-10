@@ -1,14 +1,16 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { QueryClient, QueryClientProvider, useMutation } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
-import { http, HttpResponse } from 'msw'
+import { useReducer } from 'react'
 import { NOTIFICATION_KINDS, type InboxItem } from '../../../entities/inbox'
 import { ProjectProvider } from '../../../entities/project'
-import { server } from '../../../../tests/support/msw'
-import { InboxPage } from './InboxPage'
+import {
+  InboxPage as DefaultInboxPage,
+  type InboxPageDataHook,
+} from './InboxPage'
 
 function makeItem(overrides: Partial<InboxItem> = {}): InboxItem {
   return {
@@ -76,19 +78,45 @@ const TEST_PROJECT = {
 }
 
 let _inboxData: InboxItem[] = []
-let markReadHandler: ReturnType<typeof vi.fn>
-let markAllReadHandler: ReturnType<typeof vi.fn>
-let archiveHandler: ReturnType<typeof vi.fn>
+let _inboxError: Error | null = null
+let _inboxLoading = false
+let refetchHandler: Mock<() => Promise<unknown>>
+let markReadHandler: Mock<(itemId: string) => Promise<unknown>>
+let markAllReadHandler: Mock<() => Promise<unknown>>
+let archiveHandler: Mock<(itemId: string) => Promise<unknown>>
 
-function setupHandlers() {
-  server.use(
-    http.get('*/api/projects/:projectId/inbox', () =>
-      HttpResponse.json({ success: true, data: _inboxData }),
-    ),
-    http.post('*/api/projects/:projectId/inbox/:itemId/read', markReadHandler as any),
-    http.post('*/api/projects/:projectId/inbox/read-all', markAllReadHandler as any),
-    http.post('*/api/projects/:projectId/inbox/:itemId/archive', archiveHandler as any),
-  )
+const dataHook: InboxPageDataHook = () => {
+  const [, rerender] = useReducer((revision: number) => revision + 1, 0)
+  const markRead = useMutation({ mutationFn: (itemId: string) => markReadHandler(itemId) })
+  const markAllRead = useMutation({ mutationFn: () => markAllReadHandler() })
+  const archive = useMutation({ mutationFn: (itemId: string) => archiveHandler(itemId) })
+  return {
+    items: _inboxData,
+    error: _inboxError,
+    isError: _inboxError !== null,
+    isLoading: _inboxLoading,
+    refetch: async () => {
+      await refetchHandler()
+      rerender()
+    },
+    markRead,
+    markAllRead,
+    archive,
+  }
+}
+
+function resetInboxState(items: InboxItem[] = []) {
+  _inboxData = items
+  _inboxError = null
+  _inboxLoading = false
+  refetchHandler = vi.fn(async () => undefined)
+  markReadHandler = vi.fn(async (itemId: string) => ({ itemId, read: true as const }))
+  markAllReadHandler = vi.fn(async () => ({ projectId: 'proj-1', marked: 0 }))
+  archiveHandler = vi.fn(async (itemId: string) => ({ itemId, archived: true as const }))
+}
+
+function InboxPage() {
+  return <DefaultInboxPage dataHook={dataHook} />
 }
 
 function renderPage(initialRoute: string = '/demo/inbox') {
@@ -109,17 +137,12 @@ function renderPage(initialRoute: string = '/demo/inbox') {
 
 describe('InboxPage empty state', () => {
   beforeEach(() => {
-    _inboxData = []
-    markReadHandler = vi.fn(() => HttpResponse.json({ success: true, data: { itemId: '', read: true } }))
-    markAllReadHandler = vi.fn(() => HttpResponse.json({ success: true, data: { projectId: 'proj-1', marked: 0 } }))
-    archiveHandler = vi.fn(() => HttpResponse.json({ success: true, data: { itemId: '', archived: true } }))
+    resetInboxState()
     vi.clearAllMocks()
-    setupHandlers()
   })
 
   afterEach(() => {
     cleanup()
-    server.resetHandlers()
   })
 
   it('renders the explicit empty state when the project has no items', async () => {
@@ -154,25 +177,16 @@ describe('InboxPage empty state', () => {
 
 describe('InboxPage loading state', () => {
   beforeEach(() => {
-    _inboxData = []
-    markReadHandler = vi.fn(() => HttpResponse.json({ success: true, data: { itemId: '', read: true } }))
-    markAllReadHandler = vi.fn(() => HttpResponse.json({ success: true, data: { projectId: 'proj-1', marked: 0 } }))
-    archiveHandler = vi.fn(() => HttpResponse.json({ success: true, data: { itemId: '', archived: true } }))
+    resetInboxState()
     vi.clearAllMocks()
   })
 
   afterEach(() => {
     cleanup()
-    server.resetHandlers()
   })
 
   it('shows a Loading message instead of the empty state', () => {
-    server.use(
-      http.get('*/api/projects/:projectId/inbox', () => new Promise(() => {})),
-      http.post('*/api/projects/:projectId/inbox/:itemId/read', markReadHandler as any),
-      http.post('*/api/projects/:projectId/inbox/read-all', markAllReadHandler as any),
-      http.post('*/api/projects/:projectId/inbox/:itemId/archive', archiveHandler as any),
-    )
+    _inboxLoading = true
 
     renderPage()
 
@@ -183,25 +197,16 @@ describe('InboxPage loading state', () => {
 
 describe('InboxPage error state', () => {
   beforeEach(() => {
-    _inboxData = []
-    markReadHandler = vi.fn(() => HttpResponse.json({ success: true, data: { itemId: '', read: true } }))
-    markAllReadHandler = vi.fn(() => HttpResponse.json({ success: true, data: { projectId: 'proj-1', marked: 0 } }))
-    archiveHandler = vi.fn(() => HttpResponse.json({ success: true, data: { itemId: '', archived: true } }))
+    resetInboxState()
     vi.clearAllMocks()
-    setupHandlers()
   })
 
   afterEach(() => {
     cleanup()
-    server.resetHandlers()
   })
 
   it('renders an error state instead of the empty state when the inbox query fails', async () => {
-    server.use(
-      http.get('*/api/projects/:projectId/inbox', () =>
-        HttpResponse.json({ success: false, error: 'Server unavailable' }, { status: 500 }),
-      ),
-    )
+    _inboxError = new Error('Server unavailable')
 
     renderPage()
 
@@ -211,23 +216,17 @@ describe('InboxPage error state', () => {
   })
 
   it('calls refetch when Retry is clicked', async () => {
-    server.use(
-      http.get('*/api/projects/:projectId/inbox', () =>
-        HttpResponse.json({ success: false, error: 'Server unavailable' }, { status: 500 }),
-      ),
-    )
+    _inboxError = new Error('Server unavailable')
 
     renderPage()
 
     expect(await screen.findByTestId('inbox-error-state')).toBeInTheDocument()
     expect(screen.getByText('Server unavailable')).toBeInTheDocument()
 
-    _inboxData = [makeItem()]
-    server.use(
-      http.get('*/api/projects/:projectId/inbox', () =>
-        HttpResponse.json({ success: true, data: _inboxData }),
-      ),
-    )
+    refetchHandler.mockImplementation(async () => {
+      _inboxData = [makeItem()]
+      _inboxError = null
+    })
 
     fireEvent.click(screen.getByTestId('inbox-retry'))
 
@@ -240,17 +239,12 @@ describe('InboxPage error state', () => {
 
 describe('InboxPage list rendering and link', () => {
   beforeEach(() => {
-    _inboxData = [unreadFailure, readFailure, approval, started, completed]
-    markReadHandler = vi.fn(() => HttpResponse.json({ success: true, data: { itemId: '', read: true } }))
-    markAllReadHandler = vi.fn(() => HttpResponse.json({ success: true, data: { projectId: 'proj-1', marked: 0 } }))
-    archiveHandler = vi.fn(() => HttpResponse.json({ success: true, data: { itemId: '', archived: true } }))
+    resetInboxState([unreadFailure, readFailure, approval, started, completed])
     vi.clearAllMocks()
-    setupHandlers()
   })
 
   afterEach(() => {
     cleanup()
-    server.resetHandlers()
   })
 
   it('renders one row per item', async () => {
@@ -365,17 +359,13 @@ describe('InboxPage list rendering and link', () => {
 
 describe('InboxPage mutations', () => {
   beforeEach(() => {
-    _inboxData = [unreadFailure, approval]
-    markReadHandler = vi.fn(() => HttpResponse.json({ success: true, data: { itemId: '', read: true } }))
-    markAllReadHandler = vi.fn(() => HttpResponse.json({ success: true, data: { projectId: 'proj-1', marked: 2 } }))
-    archiveHandler = vi.fn(() => HttpResponse.json({ success: true, data: { itemId: '', archived: true } }))
+    resetInboxState([unreadFailure, approval])
+    markAllReadHandler.mockResolvedValue({ projectId: 'proj-1', marked: 2 })
     vi.clearAllMocks()
-    setupHandlers()
   })
 
   afterEach(() => {
     cleanup()
-    server.resetHandlers()
   })
 
   it('invokes mark-read mutation with the item id when Mark read is clicked', async () => {
@@ -387,7 +377,7 @@ describe('InboxPage mutations', () => {
     await waitFor(() => {
       expect(markReadHandler).toHaveBeenCalledTimes(1)
     })
-    expect(markReadHandler.mock.calls[0][0].params.itemId).toBe('inb-1')
+    expect(markReadHandler).toHaveBeenCalledWith('inb-1')
   })
 
   it('invokes the archive mutation with the item id when Archive is clicked', async () => {
@@ -399,7 +389,7 @@ describe('InboxPage mutations', () => {
     await waitFor(() => {
       expect(archiveHandler).toHaveBeenCalledTimes(1)
     })
-    expect(archiveHandler.mock.calls[0][0].params.itemId).toBe('inb-1')
+    expect(archiveHandler).toHaveBeenCalledWith('inb-1')
   })
 
   it('invokes the mark-all-read mutation when Mark all read is clicked', async () => {
@@ -431,18 +421,13 @@ describe('InboxPage mutations', () => {
 describe('InboxPage live refresh', () => {
   afterEach(() => {
     cleanup()
-    server.resetHandlers()
   })
 
   it('renders directly from the API query result and does not synthesize items locally', async () => {
-    _inboxData = [
+    resetInboxState([
       makeItem({ itemId: 'inb-a', notificationKind: NOTIFICATION_KINDS.IssueStarted, issueNumber: 1, isRead: false }),
-    ]
-    markReadHandler = vi.fn(() => HttpResponse.json({ success: true, data: { itemId: '', read: true } }))
-    markAllReadHandler = vi.fn(() => HttpResponse.json({ success: true, data: { projectId: 'proj-1', marked: 0 } }))
-    archiveHandler = vi.fn(() => HttpResponse.json({ success: true, data: { itemId: '', archived: true } }))
+    ])
     vi.clearAllMocks()
-    setupHandlers()
 
     renderPage()
 

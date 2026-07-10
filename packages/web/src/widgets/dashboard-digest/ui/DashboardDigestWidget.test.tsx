@@ -4,26 +4,35 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
-import { http, HttpResponse } from 'msw'
 import type { ReactNode } from 'react'
 import { ProjectProvider } from '../../../entities/project'
 import { TEST_PROJECT } from '../../../../tests/test-utils'
-import { IssueStatus, IssueHealth, type Issue } from '../../../entities/issue'
-import { server, useMswServer } from '../../../../tests/support/msw'
+import {
+  deriveRecentDigest,
+  IssueStatus,
+  IssueHealth,
+  type Issue,
+  type UseRecentDigestResult,
+} from '../../../entities/issue'
 import { DashboardDigestWidget } from './DashboardDigestWidget'
 import { DigestRow } from './DigestRow'
 
-useMswServer()
-
-const ISSUES_PATH = '*/api/projects/:projectId/issues'
+let digest: UseRecentDigestResult = {
+  completed: [],
+  failed: [],
+  archived: [],
+  isLoading: false,
+}
 
 function mockIssuesResponse(issues: Issue[]) {
-  server.use(http.get(ISSUES_PATH, () => HttpResponse.json({ success: true, data: issues })))
+  digest = { ...deriveRecentDigest(issues, issues), isLoading: false }
 }
 
 function mockIssuesPending() {
-  server.use(http.get(ISSUES_PATH, () => new Promise(() => {})))
+  digest = { completed: [], failed: [], archived: [], isLoading: true }
 }
+
+const digestHook = () => digest
 
 function makeIssue(overrides: Partial<Issue> & { id: string }): Issue {
   return {
@@ -88,7 +97,7 @@ describe('DashboardDigestWidget', () => {
       }),
     ])
 
-    render(<DashboardDigestWidget />, { wrapper: makeWrapper() })
+    render(<DashboardDigestWidget digestHook={digestHook} />, { wrapper: makeWrapper() })
 
     await waitFor(() => {
       expect(screen.getByTestId('dashboard-digest-content')).toBeInTheDocument()
@@ -109,7 +118,7 @@ describe('DashboardDigestWidget', () => {
   })
 
   it('renders a single empty-state message when all three categories resolve empty', async () => {
-    render(<DashboardDigestWidget />, { wrapper: makeWrapper() })
+    render(<DashboardDigestWidget digestHook={digestHook} />, { wrapper: makeWrapper() })
 
     await waitFor(() => {
       expect(screen.getByTestId('dashboard-digest-empty')).toBeInTheDocument()
@@ -126,7 +135,7 @@ describe('DashboardDigestWidget', () => {
   it('renders a loading indicator while queries are isLoading and no empty state', () => {
     mockIssuesPending()
 
-    render(<DashboardDigestWidget />, { wrapper: makeWrapper() })
+    render(<DashboardDigestWidget digestHook={digestHook} />, { wrapper: makeWrapper() })
 
     const loading = screen.getByTestId('dashboard-digest-loading')
     expect(loading).toBeInTheDocument()
@@ -148,7 +157,7 @@ describe('DashboardDigestWidget', () => {
       }),
     ])
 
-    render(<DashboardDigestWidget />, { wrapper: makeWrapper() })
+    render(<DashboardDigestWidget digestHook={digestHook} />, { wrapper: makeWrapper() })
 
     await waitFor(() => {
       expect(screen.getByTestId('dashboard-digest-completed')).toBeInTheDocument()
@@ -178,7 +187,7 @@ describe('DashboardDigestWidget', () => {
       }),
     ])
 
-    render(<DashboardDigestWidget />, { wrapper: makeWrapper() })
+    render(<DashboardDigestWidget digestHook={digestHook} />, { wrapper: makeWrapper() })
 
     const rows = await waitFor(() => screen.getAllByTestId('digest-row'))
     expect(rows).toHaveLength(2)

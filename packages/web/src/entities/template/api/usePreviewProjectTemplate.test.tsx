@@ -1,11 +1,9 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { http, HttpResponse } from 'msw'
-import { server, useMswServer } from '../../../../tests/support/msw'
 import type { ReactNode } from 'react'
-import { usePreviewProjectTemplate } from '..'
+import { usePreviewProjectTemplate, type ProjectTemplatePreviewer } from '..'
 
 const PROJECT_ID = 'test-project'
 const KEY = 'proposal'
@@ -23,11 +21,15 @@ const PREVIEW_RESPONSE = {
   depth: 1,
 }
 
-const defaultHandlers = [
-  http.post(`/api/projects/${PROJECT_ID}/templates/${KEY}/preview`, () =>
-    HttpResponse.json({ success: true, data: PREVIEW_RESPONSE }),
-  ),
-]
+let previewResponse = PREVIEW_RESPONSE
+let previewError: Error | null = null
+const previewCalls: Parameters<ProjectTemplatePreviewer>[] = []
+
+const previewer: ProjectTemplatePreviewer = async (...args) => {
+  previewCalls.push(args)
+  if (previewError) throw previewError
+  return previewResponse
+}
 
 const queryClients: QueryClient[] = []
 
@@ -47,11 +49,15 @@ function renderUsePreview(projectId: string | undefined, key: string | undefined
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
   )
-  const result = renderHook(() => usePreviewProjectTemplate(projectId, key), { wrapper })
+  const result = renderHook(() => usePreviewProjectTemplate(projectId, key, previewer), { wrapper })
   return { queryClient, result, wrapper }
 }
 
-useMswServer(...defaultHandlers)
+beforeEach(() => {
+  previewResponse = PREVIEW_RESPONSE
+  previewError = null
+  previewCalls.length = 0
+})
 
 afterEach(() => {
   for (const qc of queryClients) qc.clear()
@@ -59,19 +65,7 @@ afterEach(() => {
 })
 
 describe('usePreviewProjectTemplate hook', () => {
-  it('issues POST /api/projects/{id}/templates/{key}/preview with the variables payload', async () => {
-    const previewRequests: { method: string; url: string; body: unknown }[] = []
-    server.resetHandlers(
-      http.post(
-        `/api/projects/${PROJECT_ID}/templates/${KEY}/preview`,
-        async ({ request }) => {
-          const body = await request.json()
-          previewRequests.push({ method: request.method, url: request.url, body })
-          return HttpResponse.json({ success: true, data: PREVIEW_RESPONSE })
-        },
-      ),
-    )
-
+  it('calls the preview client with project, key, and variables', async () => {
     const { result } = renderUsePreview(PROJECT_ID, KEY)
 
     await act(async () => {
@@ -82,12 +76,7 @@ describe('usePreviewProjectTemplate hook', () => {
       expect(result.result.current.isSuccess).toBe(true)
     })
 
-    expect(previewRequests).toHaveLength(1)
-    expect(previewRequests[0].method).toBe('POST')
-    expect(previewRequests[0].url).toContain(
-      `/api/projects/${PROJECT_ID}/templates/${KEY}/preview`,
-    )
-    expect(previewRequests[0].body).toEqual({ variables: VARIABLES })
+    expect(previewCalls).toEqual([[PROJECT_ID, KEY, VARIABLES]])
   })
 
   it('returns the { rendered, missingVariables, depth } shape on success', async () => {
@@ -110,20 +99,11 @@ describe('usePreviewProjectTemplate hook', () => {
   })
 
   it('records empty missingVariables when all references resolve', async () => {
-    server.resetHandlers(
-      http.post(
-        `/api/projects/${PROJECT_ID}/templates/${KEY}/preview`,
-        () =>
-          HttpResponse.json({
-            success: true,
-            data: {
-              rendered: 'fully resolved body',
-              missingVariables: [],
-              depth: 1,
-            },
-          }),
-      ),
-    )
+    previewResponse = {
+      rendered: 'fully resolved body',
+      missingVariables: [],
+      depth: 1,
+    }
 
     const { result } = renderUsePreview(PROJECT_ID, KEY)
 
@@ -140,14 +120,7 @@ describe('usePreviewProjectTemplate hook', () => {
   })
 
   it('surfaces API errors from the preview endpoint', async () => {
-    server.resetHandlers(
-      http.post(`/api/projects/${PROJECT_ID}/templates/${KEY}/preview`, () =>
-        HttpResponse.json(
-          { success: false, error: 'Render failed', code: 'render_error' },
-          { status: 500 },
-        ),
-      ),
-    )
+    previewError = new Error('Render failed')
 
     const { result } = renderUsePreview(PROJECT_ID, KEY)
 

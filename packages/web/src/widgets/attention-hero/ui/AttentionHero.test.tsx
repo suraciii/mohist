@@ -4,7 +4,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
-import { http, HttpResponse } from 'msw'
 import {
   IssueHealth,
   IssueStatus,
@@ -15,16 +14,11 @@ import {
 } from '../../../entities/issue'
 import { type AgentStatus } from '../../../entities/agent'
 import { ProjectProvider } from '../../../entities/project'
-import { server, useMswServer } from '../../../../tests/support/msw'
-import { AttentionHero } from './AttentionHero'
-
-useMswServer()
-
-const ISSUES_PATH = '*/api/projects/:projectId/issues'
-const AGENT_STATUS_PATH = '*/api/projects/:projectId/agent/status'
-const APPROVAL_WAIT_PATH = '*/api/projects/:projectId/issues/metrics/approval-wait'
-const APPROVE_PATH = '*/api/projects/:projectId/issues/:issueNumber/approve'
-const RESUME_PATH = '*/api/projects/:projectId/issues/:issueNumber/resume'
+import {
+  AttentionHero as DefaultAttentionHero,
+  type AttentionHeroDataHook,
+  type AttentionHeroProps,
+} from './AttentionHero'
 
 let _issues: Issue[] | undefined
 let _agentStatus: AgentStatus | undefined
@@ -32,9 +26,39 @@ let _approvalWait: ApprovalWaitMetricsResponse | null
 const _approveHandler = vi.fn()
 const _resumeHandler = vi.fn()
 
+const dataHook: AttentionHeroDataHook = () => ({
+  issues: _issues,
+  agentStatus: _agentStatus,
+  approvalWait: _approvalWait,
+  issuesResolved: _issues !== undefined,
+})
+
+const approveIssueFn: NonNullable<AttentionHeroProps['approveIssueFn']> = async (issueNumber, projectId) => {
+  _approveHandler(issueNumber, projectId)
+  return { issue: makeIssue({ number: issueNumber }), context: null, message: 'approved' }
+}
+
+const resumeIssueFn: NonNullable<AttentionHeroProps['resumeIssueFn']> = async (issueNumber, projectId) => {
+  _resumeHandler(issueNumber, projectId)
+  return { issue: makeIssue({ number: issueNumber }), message: 'resumed' }
+}
+
+function AttentionHero(
+  props: Omit<AttentionHeroProps, 'dataHook' | 'approveIssueFn' | 'resumeIssueFn'>,
+) {
+  return (
+    <DefaultAttentionHero
+      {...props}
+      dataHook={dataHook}
+      approveIssueFn={approveIssueFn}
+      resumeIssueFn={resumeIssueFn}
+    />
+  )
+}
+
 function makeIssue(overrides: Partial<Issue> = {}): Issue {
   return {
-    id: `issue-${Math.random().toString(36).slice(2, 8)}`,
+    id: `issue-${overrides.number ?? 100}-${overrides.title ?? 'default'}`,
     number: 100,
     title: 'Default issue title',
     status: IssueStatus.Backlog,
@@ -105,47 +129,6 @@ beforeEach(() => {
   _agentStatus = makeAgentStatus({ runnerAvailable: true })
   _approvalWait = null
 
-  server.use(
-    http.get(ISSUES_PATH, () => {
-      if (_issues === undefined) {
-        return HttpResponse.json({ success: false, error: 'not available' }, { status: 500 })
-      }
-      return HttpResponse.json({ success: true, data: _issues })
-    }),
-    http.get(AGENT_STATUS_PATH, () => {
-      if (_agentStatus === undefined) {
-        return HttpResponse.json({ success: false, error: 'not available' }, { status: 500 })
-      }
-      return HttpResponse.json({ success: true, data: _agentStatus })
-    }),
-    http.get(APPROVAL_WAIT_PATH, () => {
-      if (_approvalWait === undefined) {
-        return HttpResponse.json({ success: false, error: 'not available' }, { status: 500 })
-      }
-      return HttpResponse.json({ success: true, data: _approvalWait })
-    }),
-    http.post(APPROVE_PATH, async ({ params }) => {
-      _approveHandler(Number(params.issueNumber), params.projectId)
-      return HttpResponse.json({
-        success: true,
-        data: {
-          issue: makeIssue({ number: Number(params.issueNumber) }),
-          context: null,
-          message: 'approved',
-        },
-      })
-    }),
-    http.post(RESUME_PATH, async ({ params }) => {
-      _resumeHandler(Number(params.issueNumber), params.projectId)
-      return HttpResponse.json({
-        success: true,
-        data: {
-          issue: makeIssue({ number: Number(params.issueNumber) }),
-          message: 'resumed',
-        },
-      })
-    }),
-  )
 })
 
 afterEach(() => {

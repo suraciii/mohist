@@ -1,15 +1,26 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
+import { useState } from 'react'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ProjectProvider } from '../../../entities/project'
 import type { Project } from '../../../entities/project'
+import type { EventTimelineHistoryHook } from '../useEventTimeline'
 import { ActivityDialog } from './ActivityDialog'
+import { EventTimelinePanel, type EventTimelinePanelProps } from './EventTimelinePanel'
 
-const mockUseEventTimeline = vi.fn()
+let eventRequests = 0
 
-vi.mock('../useEventTimeline', () => ({
-  useEventTimeline: (...args: unknown[]) => mockUseEventTimeline(...args),
-}))
+const historyHook: EventTimelineHistoryHook = () => {
+  const [data] = useState(() => {
+    eventRequests++
+    return []
+  })
+  return { data, isLoading: false }
+}
+
+function TestTimelinePanel(props: EventTimelinePanelProps) {
+  return <EventTimelinePanel {...props} historyHook={historyHook} />
+}
 
 const projects: Project[] = [
   {
@@ -30,6 +41,7 @@ function renderDialog(props: { issueNumber?: number; issueId?: string | null; wo
           issueNumber={props.issueNumber ?? 42}
           issueId={props.issueId ?? 'issue-42'}
           workflowStatus={props.workflowStatus ?? null}
+          TimelinePanel={TestTimelinePanel}
         />
       </ProjectProvider>
     </QueryClientProvider>,
@@ -39,8 +51,7 @@ function renderDialog(props: { issueNumber?: number; issueId?: string | null; wo
 describe('ActivityDialog', () => {
   beforeEach(() => {
     cleanup()
-    vi.clearAllMocks()
-    mockUseEventTimeline.mockReturnValue({ entries: [], isLoading: false })
+    eventRequests = 0
   })
 
   it('renders an Activity entry button in the header area with aria-label and a min hit-target', () => {
@@ -52,19 +63,19 @@ describe('ActivityDialog', () => {
     expect(entry).toHaveClass('min-w-11')
   })
 
-  it('does not call useEventTimeline (so no events fetch) before the entry opens the dialog', () => {
+  it('does not fetch events before the entry opens the dialog', () => {
     renderDialog()
 
-    expect(mockUseEventTimeline).not.toHaveBeenCalled()
+    expect(eventRequests).toBe(0)
   })
 
-  it('opens the timeline inside a Dialog on click, and forwards enabled=true to useEventTimeline', async () => {
+  it('opens the timeline inside a Dialog and fetches persisted events', async () => {
     renderDialog({ issueNumber: 42, issueId: 'issue-42' })
 
     fireEvent.click(screen.getByTestId('activity-entry'))
 
     await waitFor(() => expect(screen.getByTestId('activity-dialog-content')).toBeTruthy())
-    expect(mockUseEventTimeline).toHaveBeenLastCalledWith(42, 'issue-42', true)
+    await waitFor(() => expect(eventRequests).toBe(1))
   })
 
   it('does not show a precise event count on the entry button', () => {
@@ -91,10 +102,10 @@ describe('ActivityDialog', () => {
   it('unmounts the panel (and stops forwarding live accumulation) when the dialog closes', async () => {
     const { container } = renderDialog()
 
-    expect(mockUseEventTimeline).not.toHaveBeenCalled()
+    expect(eventRequests).toBe(0)
 
     fireEvent.click(screen.getByTestId('activity-entry'))
-    await waitFor(() => expect(mockUseEventTimeline).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(eventRequests).toBe(1))
 
     const dialogContent = screen.getByTestId('activity-dialog-content')
     fireEvent.keyDown(dialogContent, { key: 'Escape' })
@@ -104,19 +115,17 @@ describe('ActivityDialog', () => {
     })
   })
 
-  it('remounts the panel on reopen and forwards enabled=true again to refetch the full persisted history', async () => {
+  it('remounts the panel on reopen and refetches the full persisted history', async () => {
     renderDialog()
 
     fireEvent.click(screen.getByTestId('activity-entry'))
-    await waitFor(() => expect(mockUseEventTimeline).toHaveBeenLastCalledWith(42, 'issue-42', true))
+    await waitFor(() => expect(eventRequests).toBe(1))
 
     const dialogContent = screen.getByTestId('activity-dialog-content')
     fireEvent.keyDown(dialogContent, { key: 'Escape' })
     await waitFor(() => expect(screen.queryByTestId('event-timeline-panel')).toBeNull())
 
     fireEvent.click(screen.getByTestId('activity-entry'))
-    await waitFor(() =>
-      expect(mockUseEventTimeline).toHaveBeenLastCalledWith(42, 'issue-42', true),
-    )
+    await waitFor(() => expect(eventRequests).toBe(2))
   })
 })

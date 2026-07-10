@@ -5,14 +5,19 @@ import { Button } from '@/shared/ui/components/button'
 import { MarkdownReader } from '@/shared/ui'
 import { useIssueWorkflowArtifactContent, type WorkflowArtifactDirectoryEntry } from '../../../entities/issue'
 
-interface ArtifactContentViewerProps {
+export interface ArtifactContentViewerProps {
   issueNumber: number
   artifactId: string
   path?: string
   size?: number | null
   open: boolean
   onOpenChange: (open: boolean) => void
+  contentHook?: ArtifactContentHook
 }
+
+export type ArtifactContentHook = (
+  ...args: Parameters<typeof useIssueWorkflowArtifactContent>
+) => Pick<ReturnType<typeof useIssueWorkflowArtifactContent>, 'data' | 'isLoading' | 'error'>
 
 function formatBytes(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes < 0) return '0 B'
@@ -48,12 +53,20 @@ function DirectoryEntryList({
   )
 }
 
-export function ArtifactContentViewer({ issueNumber, artifactId, path, size, open, onOpenChange }: ArtifactContentViewerProps) {
+export function ArtifactContentViewer({
+  issueNumber,
+  artifactId,
+  path,
+  size,
+  open,
+  onOpenChange,
+  contentHook = useIssueWorkflowArtifactContent,
+}: ArtifactContentViewerProps) {
   const [selectedEntry, setSelectedEntry] = useState<WorkflowArtifactDirectoryEntry | null>(null)
   const [copyStatus, setCopyStatus] = useState<'idle' | 'copied' | 'error'>('idle')
   const copyResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  const { data, isLoading, error } = useIssueWorkflowArtifactContent(
+  const { data, isLoading, error } = contentHook(
     issueNumber,
     artifactId,
     { file: selectedEntry?.relativePath },

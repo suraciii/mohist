@@ -2,8 +2,8 @@
 /**
  * Shared fixtures + harness for the kanban-board-query colocated component test files.
  *
- * `vi.mock()` / `vi.hoisted()` are hoisted per-file, so each `*.test.tsx` declares
- * its own `vi.mock(...)` blocks (those cannot be imported). This module exports the
+ * Module mocks and hoisted values are scoped per-file, so each `*.test.tsx` declares
+ * its own mock blocks (those cannot be imported). This module exports the
  * non-mock helpers shared across the component render tests:
  *   - `makeIssue` / `makeIssues` (also re-used by the pure-query tests)
  *   - `mockAgentStatus`

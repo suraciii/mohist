@@ -4,16 +4,12 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
-import { http, HttpResponse } from 'msw'
-import { server, useMswServer } from '../../../../tests/support/msw'
 import { ProjectProvider } from '../../../entities/project'
 import { TEST_PROJECT } from '../../../../tests/test-utils'
 import { setPrefersReducedMotion } from '../../../../tests/setup'
 import type { StageDurationMetricsResponse } from '../../../entities/issue'
 
-import { StageDurationChart } from './StageDurationChart'
-
-useMswServer()
+import { StageDurationChart, type StageDurationHook } from './StageDurationChart'
 
 function buildData(overrides?: Partial<StageDurationMetricsResponse>): StageDurationMetricsResponse {
   return {
@@ -45,24 +41,20 @@ function buildEmpty(): StageDurationMetricsResponse {
   }
 }
 
-const STAGE_DURATION_PATH = '*/api/projects/:projectId/issues/metrics/stage-duration'
+let stageDurationResult: ReturnType<StageDurationHook>
+
+const stageDurationHook: StageDurationHook = () => stageDurationResult
 
 function mockStageDurationResponse(data: StageDurationMetricsResponse) {
-  server.use(
-    http.get(STAGE_DURATION_PATH, () => HttpResponse.json({ success: true, data })),
-  )
+  stageDurationResult = { data, isLoading: false, isError: false }
 }
 
 function mockStageDurationPending() {
-  server.use(
-    http.get(STAGE_DURATION_PATH, () => new Promise(() => {})),
-  )
+  stageDurationResult = { data: undefined, isLoading: true, isError: false }
 }
 
 function mockStageDurationError() {
-  server.use(
-    http.get(STAGE_DURATION_PATH, () => HttpResponse.json({ success: false, error: { message: 'boom' } }, { status: 500 })),
-  )
+  stageDurationResult = { data: undefined, isLoading: false, isError: true }
 }
 
 function renderChart() {
@@ -71,7 +63,7 @@ function renderChart() {
     <QueryClientProvider client={queryClient}>
       <ProjectProvider initialProjectId={TEST_PROJECT.id} initialProjects={[TEST_PROJECT]}>
         <MemoryRouter initialEntries={['/']}>
-          <StageDurationChart range="30d" />
+          <StageDurationChart range="30d" stageDurationHook={stageDurationHook} />
         </MemoryRouter>
       </ProjectProvider>
     </QueryClientProvider>,

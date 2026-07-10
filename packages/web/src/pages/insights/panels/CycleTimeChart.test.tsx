@@ -4,15 +4,11 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
-import { http, HttpResponse } from 'msw'
-import { server, useMswServer } from '../../../../tests/support/msw'
 import { ProjectProvider } from '../../../entities/project'
 import { TEST_PROJECT } from '../../../../tests/test-utils'
 import type { DeliveryTimeMetricsResponse } from '../../../entities/issue'
 
-import { CycleTimeChart } from './CycleTimeChart'
-
-useMswServer()
+import { CycleTimeChart, type DeliveryTimeHook } from './CycleTimeChart'
 
 type RangeCode = '7d' | '30d' | '90d'
 
@@ -33,24 +29,20 @@ function buildEmpty(): DeliveryTimeMetricsResponse {
   return { points: [] }
 }
 
-const DELIVERY_PATH = '*/api/projects/:projectId/issues/metrics/delivery-time'
+let deliveryTimeResult: ReturnType<DeliveryTimeHook>
+
+const deliveryTimeHook: DeliveryTimeHook = () => deliveryTimeResult
 
 function mockDeliveryResponse(data: DeliveryTimeMetricsResponse) {
-  server.use(
-    http.get(DELIVERY_PATH, () => HttpResponse.json({ success: true, data })),
-  )
+  deliveryTimeResult = { data, isLoading: false, isError: false }
 }
 
 function mockDeliveryPending() {
-  server.use(
-    http.get(DELIVERY_PATH, () => new Promise(() => {})),
-  )
+  deliveryTimeResult = { data: undefined, isLoading: true, isError: false }
 }
 
 function mockDeliveryError() {
-  server.use(
-    http.get(DELIVERY_PATH, () => HttpResponse.json({ success: false, error: { message: 'boom' } }, { status: 500 })),
-  )
+  deliveryTimeResult = { data: undefined, isLoading: false, isError: true }
 }
 
 function renderChart(range: RangeCode = '30d') {
@@ -59,7 +51,7 @@ function renderChart(range: RangeCode = '30d') {
     <QueryClientProvider client={queryClient}>
       <ProjectProvider initialProjectId={TEST_PROJECT.id} initialProjects={[TEST_PROJECT]}>
         <MemoryRouter initialEntries={['/']}>
-          <CycleTimeChart range={range} />
+          <CycleTimeChart deliveryTimeHook={deliveryTimeHook} range={range} />
         </MemoryRouter>
       </ProjectProvider>
     </QueryClientProvider>,
@@ -593,7 +585,7 @@ describe('CycleTimeChart', () => {
       <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
         <ProjectProvider initialProjectId={TEST_PROJECT.id} initialProjects={[TEST_PROJECT]}>
           <MemoryRouter initialEntries={['/']}>
-            <CycleTimeChart range="7d" />
+            <CycleTimeChart deliveryTimeHook={deliveryTimeHook} range="7d" />
           </MemoryRouter>
         </ProjectProvider>
       </QueryClientProvider>,
@@ -606,7 +598,7 @@ describe('CycleTimeChart', () => {
       <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
         <ProjectProvider initialProjectId={TEST_PROJECT.id} initialProjects={[TEST_PROJECT]}>
           <MemoryRouter initialEntries={['/']}>
-            <CycleTimeChart range="30d" />
+            <CycleTimeChart deliveryTimeHook={deliveryTimeHook} range="30d" />
           </MemoryRouter>
         </ProjectProvider>
       </QueryClientProvider>,
@@ -619,7 +611,7 @@ describe('CycleTimeChart', () => {
       <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
         <ProjectProvider initialProjectId={TEST_PROJECT.id} initialProjects={[TEST_PROJECT]}>
           <MemoryRouter initialEntries={['/']}>
-            <CycleTimeChart range="90d" />
+            <CycleTimeChart deliveryTimeHook={deliveryTimeHook} range="90d" />
           </MemoryRouter>
         </ProjectProvider>
       </QueryClientProvider>,

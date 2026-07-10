@@ -1,20 +1,16 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { renderHook } from '@testing-library/react'
+import { act, renderHook } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { createElement, type ReactNode } from 'react'
 import { IssueStatus, type Issue, type IssueHealth } from '../model/types'
-
-const useIssuesMock = vi.fn()
-vi.mock('../api/queries', () => ({
-  useIssues: (...args: unknown[]) => useIssuesMock(...args),
-}))
-
 import { deriveCompletionSnapshot, useCompletionSnapshot } from './completion-snapshot'
 
 type StatusLiteral = 'backlog' | 'in_progress' | 'done' | 'cancelled'
 
 function makeIssue(overrides: { status: StatusLiteral; createdAt: string; updatedAt: string; id?: string; number?: number }): Issue {
   return {
-    id: overrides.id ?? `id-${Math.random().toString(36).slice(2)}`,
+    id: overrides.id ?? `id-${overrides.number ?? 1}-${overrides.status}-${overrides.createdAt}`,
     number: overrides.number ?? 1,
     title: 'title',
     status: overrides.status as IssueStatus,
@@ -31,6 +27,20 @@ function makeIssue(overrides: { status: StatusLiteral; createdAt: string; update
 
 const NOW = new Date('2026-06-19T12:00:00.000Z').getTime()
 const ONE_DAY_MS = 24 * 60 * 60 * 1000
+const issuesQueryKey = ['issues', undefined] as const
+
+function renderSnapshot(issues?: Issue[]) {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false, gcTime: Number.POSITIVE_INFINITY } },
+  })
+  if (issues !== undefined) {
+    queryClient.setQueryDefaults(issuesQueryKey, { staleTime: Number.POSITIVE_INFINITY })
+    queryClient.setQueryData(issuesQueryKey, issues)
+  }
+  const wrapper = ({ children }: { children: ReactNode }) =>
+    createElement(QueryClientProvider, { client: queryClient }, children)
+  return { ...renderHook(() => useCompletionSnapshot(), { wrapper }), queryClient }
+}
 
 function daysAgo(days: number, now: number = NOW): string {
   return new Date(now - days * ONE_DAY_MS).toISOString()
@@ -231,46 +241,37 @@ describe('useCompletionSnapshot', () => {
   })
 
   it('returns the {completed, failed, new} shape derived from useIssues()', () => {
-    useIssuesMock.mockReturnValue({
-        data: [
-          makeIssue({ status: 'done', createdAt: daysAgo(2), updatedAt: daysAgo(1) }),
-          makeIssue({ status: 'cancelled', createdAt: daysAgo(3), updatedAt: daysAgo(2) }),
-          makeIssue({ status: 'in_progress', createdAt: daysAgo(1), updatedAt: daysAgo(1) }),
-        ],
-      })
-
-    const { result } = renderHook(() => useCompletionSnapshot())
+    const { result } = renderSnapshot([
+      makeIssue({ status: 'done', createdAt: daysAgo(2), updatedAt: daysAgo(1) }),
+      makeIssue({ status: 'cancelled', createdAt: daysAgo(3), updatedAt: daysAgo(2) }),
+      makeIssue({ status: 'in_progress', createdAt: daysAgo(1), updatedAt: daysAgo(1) }),
+    ])
     expect(result.current).toEqual({ completed: 1, failed: 1, new: 3 })
   })
 
   it('returns the zeroed snapshot when useIssues() data is undefined', () => {
-    useIssuesMock.mockReturnValue({ data: undefined })
-
-    const { result } = renderHook(() => useCompletionSnapshot())
+    const { result } = renderSnapshot()
     expect(result.current).toEqual({ completed: 0, failed: 0, new: 0 })
   })
 
   it('returns the zeroed snapshot for an empty issue list', () => {
-    useIssuesMock.mockReturnValue({ data: [] })
-
-    const { result } = renderHook(() => useCompletionSnapshot())
+    const { result } = renderSnapshot([])
     expect(result.current).toEqual({ completed: 0, failed: 0, new: 0 })
   })
 
   it('exposes only the {completed, failed, new} shape — the documented reservation for the endpoint-backed swap', () => {
-    useIssuesMock.mockReturnValue({ data: [] })
-
-    const { result } = renderHook(() => useCompletionSnapshot())
+    const { result } = renderSnapshot([])
     expect(Object.keys(result.current).sort()).toEqual(['completed', 'failed', 'new'])
   })
 
   it('recomputes when the underlying useIssues() data changes', () => {
-    useIssuesMock.mockReturnValue({ data: [] })
-    const { result, rerender } = renderHook(() => useCompletionSnapshot())
+    const { result, queryClient, rerender } = renderSnapshot([])
     expect(result.current).toEqual({ completed: 0, failed: 0, new: 0 })
 
-    useIssuesMock.mockReturnValue({
-      data: [makeIssue({ status: 'done', createdAt: daysAgo(1), updatedAt: daysAgo(1) })],
+    act(() => {
+      queryClient.setQueryData(issuesQueryKey, [
+        makeIssue({ status: 'done', createdAt: daysAgo(1), updatedAt: daysAgo(1) }),
+      ])
     })
     rerender()
     expect(result.current).toEqual({ completed: 1, failed: 0, new: 1 })

@@ -1,5 +1,6 @@
 export { useAgentRuntime, useAllWorkflowProfiles, useAvailableModelIds, useClearProjectDefaultWorkflowProfile, useConfig, useDisableWorkflowProfile, useEffectiveDefaultWorkflowProfile, useEnableWorkflowProfile, useLogLevel, useModelVariants, useOpencodeModel, useOpencodeRuntime, useProjectDefaultWorkflowProfile, useRuntimeConsistency, useSetAgentRuntime, useSetLogLevel, useSetProjectDefaultWorkflowProfile, useSetStageModels, useStageModels, useSystemInfo, useSystemUpdate, useSystemUpdateStatus, useUpdateConfig, useUpdateOpencodeModel, useWorkflowProfile, useWorkflowProfiles } from './api/queries'
 export { agentRuntimeToConfigKey, configToAgentRuntime, SUPPORTED_RUNTIME_KEYS } from './api/client'
+export type { ProjectDefaultWorkflowProfile } from './api/client'
 export * from './model/types'
 export * from './model/updateOutcome'
 export { ProgressStages } from './ui/ProgressStages'

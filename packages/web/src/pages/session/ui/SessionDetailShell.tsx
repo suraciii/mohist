@@ -1,16 +1,45 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import { ChevronLeftIcon, CircleStopIcon } from 'lucide-react'
-import { SessionTranscriptLayout } from '../../../widgets/session-transcript'
-import { SessionFollowupComposer, SessionRecoveryActions } from '../../../widgets/coder-session'
-import { ContextHealthBar, CompactionLineageLink } from '../../../widgets/session-health'
+import { SessionTranscriptLayout as DefaultSessionTranscriptLayout } from '../../../widgets/session-transcript'
+import { SessionFollowupComposer as DefaultSessionFollowupComposer, SessionRecoveryActions as DefaultSessionRecoveryActions } from '../../../widgets/coder-session'
+import { ContextHealthBar as DefaultContextHealthBar, CompactionLineageLink as DefaultCompactionLineageLink } from '../../../widgets/session-health'
 import { Button } from '@/shared/ui/components/button'
 import { AlertDialog } from '@/shared/ui/components/alert-dialog'
 import { formatCompact, formatCost } from '../../../shared/lib/format-compact'
 import type { StatusKind, SessionDataSourceResult } from '../data/SessionDataSource'
 import { SessionUsageSummary } from './SessionUsageSummary'
 
-export function SessionDetailShell({ data }: { data: SessionDataSourceResult }) {
+export interface SessionDetailShellComponents {
+  SessionTranscriptLayout: typeof DefaultSessionTranscriptLayout
+  SessionFollowupComposer: typeof DefaultSessionFollowupComposer
+  SessionRecoveryActions: typeof DefaultSessionRecoveryActions
+  ContextHealthBar: typeof DefaultContextHealthBar
+  CompactionLineageLink: typeof DefaultCompactionLineageLink
+}
+
+const defaultComponents: SessionDetailShellComponents = {
+  SessionTranscriptLayout: DefaultSessionTranscriptLayout,
+  SessionFollowupComposer: DefaultSessionFollowupComposer,
+  SessionRecoveryActions: DefaultSessionRecoveryActions,
+  ContextHealthBar: DefaultContextHealthBar,
+  CompactionLineageLink: DefaultCompactionLineageLink,
+}
+
+export function SessionDetailShell({
+  data,
+  components,
+}: {
+  data: SessionDataSourceResult
+  components?: Partial<SessionDetailShellComponents>
+}) {
+  const {
+    SessionTranscriptLayout,
+    SessionFollowupComposer,
+    SessionRecoveryActions,
+    ContextHealthBar,
+    CompactionLineageLink,
+  } = { ...defaultComponents, ...components }
   const {
     meta,
     statusKind,

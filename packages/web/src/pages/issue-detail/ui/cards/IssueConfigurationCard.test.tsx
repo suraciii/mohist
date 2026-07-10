@@ -2,17 +2,15 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { http, HttpResponse } from 'msw'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
 import { IssueHealth, IssueStatus, type Issue, type IssuePrerequisiteSummary } from '../../../../entities/issue'
 import { IssueConfigurationCard } from './IssueConfigurationCard'
 import type { IssueDetailMutations } from '../../model/useIssueDetailMutations'
-import { server, useMswServer } from '../../../../../tests/support/msw'
+import type { IssuePrerequisitePickerProps } from '../../../../features/prerequisite-picker'
 
 const PROJECT_ID = 'proj_live_001'
 const ISSUE_NUMBER = 10
-const ISSUES_PATH = '*/api/projects/:projectId/issues'
 
 function buildIssue(overrides: Partial<Issue> & Pick<Issue, 'number' | 'title'>): Issue {
   return {
@@ -40,13 +38,13 @@ const CANDIDATE_ISSUES: Issue[] = [
 
 let currentIssues: Issue[] = CANDIDATE_ISSUES
 
-useMswServer(
-  http.get(ISSUES_PATH, () => HttpResponse.json({ success: true, data: currentIssues })),
-)
+const issuesHook: NonNullable<IssuePrerequisitePickerProps['issuesHook']> = () => ({
+  data: currentIssues,
+  isLoading: false,
+}) as ReturnType<NonNullable<IssuePrerequisitePickerProps['issuesHook']>>
 
 function setIssues(issues: Issue[]) {
   currentIssues = issues
-  server.use(http.get(ISSUES_PATH, () => HttpResponse.json({ success: true, data: issues })))
 }
 
 interface MutationStubs {
@@ -109,6 +107,7 @@ function renderCard({
         }}
         projectId={PROJECT_ID}
         mutations={mutations ?? buildMutations({ addPrerequisite: vi.fn(), removePrerequisite: vi.fn() })}
+        prerequisitePickerIssuesHook={issuesHook}
       />
     </QueryClientProvider>,
   )

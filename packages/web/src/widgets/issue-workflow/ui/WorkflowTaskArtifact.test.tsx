@@ -1,21 +1,45 @@
 // @vitest-environment jsdom
-import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
+import { describe, expect, it, beforeEach } from 'vitest'
 import { screen, waitFor, fireEvent } from '@testing-library/react'
 import { render } from '../../../../tests/test-utils'
-import { WorkflowView } from './WorkflowView'
+import { WorkflowView as DefaultWorkflowView, type WorkflowTimelineHook } from './WorkflowView'
 import { IssueStatus, IssueHealth, WorkflowStage, type Issue, type WorkflowTimeline } from '../../../entities/issue'
-import { useWorkflowTimeline, getFileContent } from '../../../entities/issue'
 import { IssueCard } from '../../kanban-board/ui/IssueCard'
 import type { AgentStatus } from '../../../entities/agent'
 
-vi.mock('../../../entities/issue', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../../../entities/issue')>()),
-  useWorkflowTimeline: vi.fn(),
-  getFileContent: vi.fn(),
-}))
+let timelineData: WorkflowTimeline | null = null
+let fileContent: { base: string; head: string } | null = null
+let fileContentError: string | null = null
+let fileContentRequests: Array<{ issueNumber: number; path: string | null; projectId: string }> = []
 
-const mockedUseWorkflowTimeline = vi.mocked(useWorkflowTimeline)
-const mockedGetFileContent = vi.mocked(getFileContent)
+const timelineHook: WorkflowTimelineHook = () => ({ data: timelineData })
+
+const fileContentFn = async (
+  issueNumber: number,
+  path: string,
+  projectId?: string | null,
+) => {
+  fileContentRequests.push({ issueNumber, path, projectId: projectId ?? '' })
+  if (fileContentError) throw new Error(fileContentError)
+  return fileContent ?? { base: '', head: '' }
+}
+
+function WorkflowView({ issue }: { issue: Issue }) {
+  return (
+    <DefaultWorkflowView
+      issue={issue}
+      timelineHook={timelineHook}
+      dependencies={{ fileContentFn }}
+    />
+  )
+}
+
+beforeEach(() => {
+  timelineData = null
+  fileContent = null
+  fileContentError = null
+  fileContentRequests = []
+})
 
 function makeIssue(overrides: Partial<Issue> = {}): Issue {
   return {
@@ -189,7 +213,7 @@ async function expandTask(taskTitle: string) {
 describe('Task artifact rendering', () => {
   describe('required file entries appear on task rows', () => {
     it('renders required file paths for task with required files', async () => {
-      mockedUseWorkflowTimeline.mockReturnValue({ data: makeTimelineWithRequiredFiles() } as ReturnType<typeof useWorkflowTimeline>)
+      timelineData = makeTimelineWithRequiredFiles()
 
       render(<WorkflowView issue={makeIssue()} />)
 
@@ -206,7 +230,7 @@ describe('Task artifact rendering', () => {
     })
 
     it('marks required file entries with task-expect source indicator', async () => {
-      mockedUseWorkflowTimeline.mockReturnValue({ data: makeTimelineWithRequiredFiles() } as ReturnType<typeof useWorkflowTimeline>)
+      timelineData = makeTimelineWithRequiredFiles()
 
       render(<WorkflowView issue={makeIssue()} />)
 
@@ -223,7 +247,7 @@ describe('Task artifact rendering', () => {
     })
 
     it('renders review.md required file entry when markers are declared', async () => {
-      mockedUseWorkflowTimeline.mockReturnValue({ data: makeTimelineWithMarkerRequiredFiles() } as ReturnType<typeof useWorkflowTimeline>)
+      timelineData = makeTimelineWithMarkerRequiredFiles()
 
       render(<WorkflowView issue={makeIssue()} />)
 
@@ -239,7 +263,7 @@ describe('Task artifact rendering', () => {
     })
 
   it('shows self-review.md entry with disabled button indicator when canFetchContent is false', async () => {
-    mockedUseWorkflowTimeline.mockReturnValue({ data: makeTimelineWithMarkerRequiredFiles() } as ReturnType<typeof useWorkflowTimeline>)
+    timelineData = makeTimelineWithMarkerRequiredFiles()
 
     render(<WorkflowView issue={makeIssue()} />)
 
@@ -257,7 +281,7 @@ describe('Task artifact rendering', () => {
 
   describe('tasks without required files remain compact', () => {
     it('does not render empty artifact chrome for task without required files', async () => {
-      mockedUseWorkflowTimeline.mockReturnValue({ data: makeTimelineNoRequiredFiles() } as ReturnType<typeof useWorkflowTimeline>)
+      timelineData = makeTimelineNoRequiredFiles()
 
       render(<WorkflowView issue={makeIssue()} />)
 
@@ -267,7 +291,7 @@ describe('Task artifact rendering', () => {
     })
 
     it('task row shows no artifact list when requiredFiles is absent', async () => {
-      mockedUseWorkflowTimeline.mockReturnValue({ data: makeTimelineNoRequiredFiles() } as ReturnType<typeof useWorkflowTimeline>)
+      timelineData = makeTimelineNoRequiredFiles()
 
       render(<WorkflowView issue={makeIssue()} />)
 
@@ -289,17 +313,9 @@ describe('Task artifact rendering', () => {
 })
 
 describe('On-demand required file viewer', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-  })
-
-  afterEach(() => {
-    vi.clearAllMocks()
-  })
-
   it('calls file-content API and renders viewer panel when required file is selected', async () => {
-    mockedUseWorkflowTimeline.mockReturnValue({ data: makeTimelineWithRequiredFiles() } as ReturnType<typeof useWorkflowTimeline>)
-    mockedGetFileContent.mockResolvedValue({ base: '# Design Proposal\n\nContent here', head: '' })
+    timelineData = makeTimelineWithRequiredFiles()
+    fileContent = { base: '# Design Proposal\n\nContent here', head: '' }
 
     render(<WorkflowView issue={makeIssue()} />)
 
@@ -311,13 +327,14 @@ describe('On-demand required file viewer', () => {
 
     fireEvent.click(screen.getByText('proposal.md'))
 
-    expect(mockedGetFileContent).toHaveBeenCalled()
-    expect(mockedGetFileContent).toHaveBeenCalledWith(1, 'proposal.md', 'test-project')
+    await waitFor(() => expect(fileContentRequests).toEqual([
+      { issueNumber: 1, path: 'proposal.md', projectId: 'test-project' },
+    ]))
   })
 
   it('shows unavailable state when file-content API fails', async () => {
-    mockedUseWorkflowTimeline.mockReturnValue({ data: makeTimelineWithRequiredFiles() } as ReturnType<typeof useWorkflowTimeline>)
-    mockedGetFileContent.mockRejectedValue(new Error('file not found'))
+    timelineData = makeTimelineWithRequiredFiles()
+    fileContentError = 'file not found'
 
     render(<WorkflowView issue={makeIssue()} />)
 
@@ -335,7 +352,7 @@ describe('On-demand required file viewer', () => {
   })
 
   it('does not call file-content API when canFetchContent is false', async () => {
-    mockedUseWorkflowTimeline.mockReturnValue({ data: makeTimelineWithMarkerRequiredFiles() } as ReturnType<typeof useWorkflowTimeline>)
+    timelineData = makeTimelineWithMarkerRequiredFiles()
 
     render(<WorkflowView issue={makeIssue()} />)
 
@@ -347,12 +364,12 @@ describe('On-demand required file viewer', () => {
 
     fireEvent.click(screen.getByText('self-review.md'))
 
-    expect(mockedGetFileContent).not.toHaveBeenCalled()
+    expect(fileContentRequests).toHaveLength(0)
   })
 
   it('closes and reopens viewer without refetching when content is already loaded', async () => {
-    mockedUseWorkflowTimeline.mockReturnValue({ data: makeTimelineWithRequiredFiles() } as ReturnType<typeof useWorkflowTimeline>)
-    mockedGetFileContent.mockResolvedValue({ base: '# Design', head: '' })
+    timelineData = makeTimelineWithRequiredFiles()
+    fileContent = { base: '# Design', head: '' }
 
     render(<WorkflowView issue={makeIssue()} />)
 
@@ -378,7 +395,7 @@ describe('On-demand required file viewer', () => {
 
     await waitFor(() => {
       expect(screen.getByText('# Design')).toBeInTheDocument()
-      expect(mockedGetFileContent).toHaveBeenCalledTimes(1)
+      expect(fileContentRequests).toHaveLength(1)
     }, { timeout: 2000 })
   })
 })

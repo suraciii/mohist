@@ -1,9 +1,23 @@
+import type { ComponentProps, ComponentType } from 'react'
 import { useIssues, useArchivedIssues } from '../../../entities/issue'
 import { useProject } from '../../../entities/project'
 import { useAgentStatus } from '../../../entities/agent'
-import { KanbanBoard } from '../../../widgets/kanban-board'
+import { KanbanBoard as DefaultKanbanBoard } from '../../../widgets/kanban-board'
 
-export function IssuesPage() {
+export interface IssuesPageComponents {
+  KanbanBoard: ComponentType<ComponentProps<typeof DefaultKanbanBoard>>
+}
+
+const defaultComponents: IssuesPageComponents = {
+  KanbanBoard: DefaultKanbanBoard,
+}
+
+export function IssuesPage({
+  components,
+}: {
+  components?: Partial<IssuesPageComponents>
+} = {}) {
+  const { KanbanBoard } = { ...defaultComponents, ...components }
   const { projectId } = useProject()
   const { data: issues, isLoading } = useIssues(projectId ? { projectId } : undefined)
   const { data: archivedIssues } = useArchivedIssues(projectId ? { projectId } : undefined)

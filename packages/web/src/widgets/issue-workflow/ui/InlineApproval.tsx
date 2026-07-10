@@ -2,7 +2,7 @@ import { useState, useCallback, useMemo } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/shared/ui/components/button'
 import { Textarea } from '@/shared/ui/components/textarea'
-import { IssueStatus, WorkflowStage, approveIssue, invalidateApprovalWait, useRequestChangesIssue } from '../../../entities/issue'
+import { IssueStatus, WorkflowStage, approveIssue, getFileContent, invalidateApprovalWait, useRequestChangesIssue } from '../../../entities/issue'
 import type { Issue, StageTaskState, StageCheckState, StageStateRead } from '../../../entities/issue'
 import { useProject } from '../../../entities/project'
 import { ReviewSummary, parseReviewOutput } from './ReviewSummary'
@@ -11,18 +11,35 @@ import { FullReportModal } from './ReviewReportModal'
 import { FeedbackHistory } from './FeedbackHistory'
 import { classifyResult } from './format'
 import { TaskItem } from './TaskItem'
+import type { ArtifactContentHook } from './ArtifactContentViewer'
 import { CheckItem } from './CheckItem'
 import { WORKFLOW_STAGES } from './StageBar'
 import { isScriptHealthCheck } from '../model/runtime-query-helpers'
+
+export type RequestChangesHook = () => Pick<
+  ReturnType<typeof useRequestChangesIssue>,
+  'mutate' | 'isPending' | 'error'
+>
+
+export interface StepListDependencies {
+  approveIssue: typeof approveIssue
+  requestChangesHook: RequestChangesHook
+  artifactContentHook: ArtifactContentHook
+  fileContentFn?: typeof getFileContent
+}
 
 export function InlineApprovalControls({
   issueNumber,
   stage,
   approvalOutput,
+  approveIssueFn = approveIssue,
+  requestChangesHook = useRequestChangesIssue,
 }: {
   issueNumber: number
   stage: WorkflowStage
   approvalOutput?: Record<string, unknown>
+  approveIssueFn?: typeof approveIssue
+  requestChangesHook?: RequestChangesHook
 }) {
   const queryClient = useQueryClient()
   const { projectId } = useProject()
@@ -34,7 +51,7 @@ export function InlineApprovalControls({
   const classified = useMemo(() => classifyResult(review.result), [review.result])
 
   const approveMutation = useMutation({
-    mutationFn: () => approveIssue(issueNumber, projectId),
+    mutationFn: () => approveIssueFn(issueNumber, projectId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['issues'] })
       queryClient.invalidateQueries({ queryKey: ['agent-status'] })
@@ -43,7 +60,7 @@ export function InlineApprovalControls({
     },
   })
 
-  const requestChangesMutation = useRequestChangesIssue()
+  const requestChangesMutation = requestChangesHook()
 
   const handleApprove = useCallback(() => {
     approveMutation.mutate()
@@ -212,11 +229,13 @@ export function StepList({
   stageStateMap,
   issue,
   readOnly,
+  dependencies,
 }: {
   stage: WorkflowStage
   stageStateMap: Map<string, StageStateRead>
   issue: Issue
   readOnly: boolean
+  dependencies?: Partial<StepListDependencies>
 }) {
   const stageState = stageStateMap.get(stage)
   const taskResults: StageTaskState[] = stageState?.tasks ?? []
@@ -246,6 +265,8 @@ export function StepList({
                 task={task}
                 issueNumber={issue.number}
                 readOnly={readOnly}
+                artifactContentHook={dependencies?.artifactContentHook}
+                fileContentFn={dependencies?.fileContentFn}
               />
             ))
           ) : (
@@ -287,6 +308,8 @@ export function StepList({
             issueNumber={issue.number}
             stage={stage}
             approvalOutput={issue.approvalState?.output}
+            approveIssueFn={dependencies?.approveIssue}
+            requestChangesHook={dependencies?.requestChangesHook}
           />
         </div>
       )}

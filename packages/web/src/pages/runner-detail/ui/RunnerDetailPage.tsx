@@ -7,7 +7,10 @@ import { useProjectPath } from '../../../entities/project'
 import { CardSection } from '@/shared/ui/components/card-section'
 import { Card } from '@/shared/ui/components/card'
 import { Button } from '@/shared/ui/components/button'
-import { SlotsEditor } from '../../../widgets/runner-status/ui/SlotsEditor'
+import {
+  SlotsEditor,
+  type SlotsEditorMutationHook,
+} from '../../../widgets/runner-status/ui/SlotsEditor'
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
 
 function formatTimestamp(value: string | null | undefined): string {
@@ -123,7 +126,13 @@ function ActiveWorkRow({
   )
 }
 
-function RunnerDetailContent({ row }: { row: RunnerStatusRow }) {
+function RunnerDetailContent({
+  row,
+  slotsMutationHook,
+}: {
+  row: RunnerStatusRow
+  slotsMutationHook?: SlotsEditorMutationHook
+}) {
   const toProjectPath = useProjectPath()
   const activeWorks = row.activeWorks ?? []
   const maxSlots = row.maxWorkflowSlots ?? row.capacity?.totalSlots ?? null
@@ -207,7 +216,7 @@ function RunnerDetailContent({ row }: { row: RunnerStatusRow }) {
               <dt className="text-muted-foreground">Max workflow slots</dt>
               <dd className="text-foreground" data-testid="runner-detail-max-slots">
                 {maxSlots != null ? (
-                  <SlotsEditor runnerId={row.id} value={maxSlots} />
+                  <SlotsEditor runnerId={row.id} value={maxSlots} mutationHook={slotsMutationHook} />
                 ) : (
                   '—'
                 )}
@@ -268,11 +277,21 @@ function RunnerDetailContent({ row }: { row: RunnerStatusRow }) {
   )
 }
 
-export function RunnerDetailPage() {
+export interface RunnerDetailPageDependencies {
+  runnerHook?: typeof useRunner
+  slotsMutationHook?: SlotsEditorMutationHook
+}
+
+export function RunnerDetailPage({
+  dependencies,
+}: {
+  dependencies?: RunnerDetailPageDependencies
+} = {}) {
   const { runnerId } = useParams<{ runnerId: string }>()
   const navigate = useNavigate()
   const toProjectPath = useProjectPath()
-  const { data: runner, isLoading, error } = useRunner(runnerId)
+  const runnerHook = dependencies?.runnerHook ?? useRunner
+  const { data: runner, isLoading, error } = runnerHook(runnerId)
   useDocumentTitle(`Runner ${runnerId ?? ''} — Mohist`)
 
   if (error && (error instanceof ApiError ? error.status === 404 : (error as { status?: number }).status === 404)) {
@@ -346,7 +365,7 @@ export function RunnerDetailPage() {
           <ArrowLeftIcon className="size-3.5" />
           <span>Back to activity</span>
         </button>
-        <RunnerDetailContent row={runner} />
+        <RunnerDetailContent row={runner} slotsMutationHook={dependencies?.slotsMutationHook} />
       </div>
     </div>
   )

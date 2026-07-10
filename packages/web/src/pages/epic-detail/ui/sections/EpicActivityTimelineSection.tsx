@@ -119,10 +119,14 @@ function formatTime(time: string): string {
 
 export interface EpicActivityTimelineSectionProps {
   epicId: string
+  eventsHook?: typeof useEpicEvents
 }
 
-export function EpicActivityTimelineSection({ epicId }: EpicActivityTimelineSectionProps) {
-  const { data: events, isLoading, isError } = useEpicEvents(epicId)
+export function EpicActivityTimelineSection({
+  epicId,
+  eventsHook = useEpicEvents,
+}: EpicActivityTimelineSectionProps) {
+  const { data: events, isLoading, isError } = eventsHook(epicId)
 
   const entries = useMemo(() => {
     if (!events) return []

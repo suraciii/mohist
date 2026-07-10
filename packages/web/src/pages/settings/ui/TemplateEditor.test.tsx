@@ -9,11 +9,11 @@ import {
 import { fireEvent, render, screen, waitFor, within } from '../../../../tests/test-utils'
 import {
   TemplateEditor,
+  type TemplateEditorHooks,
   type TemplateEditorTarget,
 } from './TemplateEditor'
 import type { ProjectTemplate } from '../../../entities/template'
-import { http, HttpResponse } from 'msw'
-import { server, useMswServer } from '../../../../tests/support/msw'
+import { useMutation } from '@tanstack/react-query'
 
 const PROJECT_ID = 'test-project'
 
@@ -37,75 +37,70 @@ const SYSTEM_TARGET_EDITOR: TemplateEditorTarget = {
   initialStage: SYSTEM_TARGET.stage,
 }
 
-const handlers = [
-  http.post(
-    `/api/projects/${PROJECT_ID}/templates/:key/override`,
-    async ({ request }) => {
-      await request.json()
-      return HttpResponse.json({
-        success: true,
-        data: {
-          projectId: PROJECT_ID,
-          key: 'proposal',
-          displayName: 'Updated Proposal',
-          description: 'Updated',
-          tags: ['plan'],
-          stage: 'plan',
-          body: 'updated body',
-          updatedAt: '2024-01-01T00:00:00.000Z',
-        },
-      })
-    },
-  ),
-  http.post(
-    `/api/projects/${PROJECT_ID}/templates/:key/preview`,
-    async ({ request }) => {
-      const body = (await request.json()) as { variables: Record<string, unknown> }
-      const issue = (body.variables.issue as { number?: unknown } | undefined) ?? {}
-      const project = (body.variables.project as { id?: unknown } | undefined) ?? {}
-      const rendered = `proposal body for ${issue.number ?? '<missing>'} and ${
-        project.id ?? '<missing>'
-      } and <missing>`
-      return HttpResponse.json({
-        success: true,
-        data: {
-          rendered,
-          missingVariables: ['unknownVar'],
-          depth: 1,
-        },
-      })
-    },
-  ),
-  http.post('/api/templates/extract-variables', async ({ request }) => {
-    const body = (await request.json()) as { body: string }
-    const matches = body.body.match(/\$\{\{\s*([\w.]+)\s*\}\}/g) ?? []
-    const variables = Array.from(
-      new Set(
-        matches.map((m) => {
-          const inner = m.replace(/^\$\{\{\s*/, '').replace(/\s*\}\}$/, '')
-          return inner
-        }),
-      ),
-    ).sort()
-    return HttpResponse.json({ success: true, data: { variables } })
-  }),
-]
+let upsertCalls: Array<{ key: string; payload: Record<string, unknown> }> = []
 
-useMswServer(...handlers)
+const testHooks = {
+  useUpsert: () => useMutation({
+    mutationFn: async ({ key, payload }: { key: string; payload: Record<string, unknown> }) => {
+      upsertCalls.push({ key, payload })
+      return {
+        projectId: PROJECT_ID,
+        key,
+        displayName: String(payload.displayName),
+        description: String(payload.description),
+        tags: payload.tags as string[],
+        stage: payload.stage as string | null,
+        body: String(payload.body),
+        updatedAt: '2024-01-01T00:00:00.000Z',
+      }
+    },
+  }),
+  usePreview: () => useMutation({
+    mutationFn: async ({ variables }: { variables: Record<string, unknown> }) => {
+      const issue = (variables.issue as { number?: unknown } | undefined) ?? {}
+      const project = (variables.project as { id?: unknown } | undefined) ?? {}
+      return {
+        rendered: `proposal body for ${issue.number ?? '<missing>'} and ${project.id ?? '<missing>'} and <missing>`,
+        missingVariables: ['unknownVar'],
+        depth: 1,
+      }
+    },
+  }),
+  useExtract: () => useMutation({
+    mutationFn: async ({ body }: { body: string }) => {
+      const matches = body.match(/\$\{\{\s*([\w.]+)\s*\}\}/g) ?? []
+      const variables = Array.from(
+        new Set(
+          matches.map((m) => {
+            const inner = m.replace(/^\$\{\{\s*/, '').replace(/\s*\}\}$/, '')
+            return inner
+          }),
+        ),
+      ).sort()
+      return { variables }
+    },
+  }),
+} as unknown as TemplateEditorHooks
+
+function renderEditor(onClose = vi.fn()) {
+  return render(
+    <TemplateEditor
+      projectId={PROJECT_ID}
+      target={SYSTEM_TARGET_EDITOR}
+      onClose={onClose}
+      hooks={testHooks}
+    />,
+  )
+}
 
 beforeEach(() => {
   vi.restoreAllMocks()
+  upsertCalls = []
 })
 
 describe('TemplateEditor', () => {
   it('opens with all metadata fields populated from the target', () => {
-    render(
-      <TemplateEditor
-        projectId={PROJECT_ID}
-        target={SYSTEM_TARGET_EDITOR}
-        onClose={vi.fn()}
-      />,
-    )
+    renderEditor()
 
     const editor = screen.getByTestId('template-editor')
     expect(within(editor).getByTestId('template-editor-key')).toHaveValue('proposal')
@@ -124,13 +119,7 @@ describe('TemplateEditor', () => {
   })
 
   it('renders the preview and lists referenced variables with availability indicators', async () => {
-    render(
-      <TemplateEditor
-        projectId={PROJECT_ID}
-        target={SYSTEM_TARGET_EDITOR}
-        onClose={vi.fn()}
-      />,
-    )
+    renderEditor()
 
     const previewPane = await screen.findByTestId('template-editor-preview')
     await waitFor(() => {
@@ -152,40 +141,9 @@ describe('TemplateEditor', () => {
     )
   })
 
-  it('Save sends PUT and closes the editor on success', async () => {
+  it('Save sends the override payload and closes the editor on success', async () => {
     const onClose = vi.fn()
-    let putPayload: unknown = null
-    let putKey: string | null = null
-    server.use(
-      http.put(
-        `/api/projects/${PROJECT_ID}/templates/:key/override`,
-        async ({ params, request }) => {
-          putKey = String(params.key)
-          putPayload = await request.json()
-          return HttpResponse.json({
-            success: true,
-            data: {
-              projectId: PROJECT_ID,
-              key: putKey,
-              displayName: 'Generate Proposal',
-              description: 'Creates the OpenSpec proposal.md for an issue',
-              tags: ['plan', 'openspec'],
-              stage: 'plan',
-              body: 'updated body',
-              updatedAt: '2024-01-01T00:00:00.000Z',
-            },
-          })
-        },
-      ),
-    )
-
-    render(
-      <TemplateEditor
-        projectId={PROJECT_ID}
-        target={SYSTEM_TARGET_EDITOR}
-        onClose={onClose}
-      />,
-    )
+    renderEditor(onClose)
 
     const editor = screen.getByTestId('template-editor')
     fireEvent.change(within(editor).getByTestId('template-editor-body'), {
@@ -194,59 +152,28 @@ describe('TemplateEditor', () => {
     fireEvent.click(within(editor).getByTestId('template-editor-save'))
 
     await waitFor(() => {
-      expect(putKey).toBe('proposal')
+      expect(upsertCalls).toHaveLength(1)
     })
-    expect(putPayload).toMatchObject({ body: 'updated body' })
+    expect(upsertCalls[0]).toMatchObject({
+      key: 'proposal',
+      payload: { body: 'updated body' },
+    })
     await waitFor(() => expect(onClose).toHaveBeenCalled())
   })
 
-  it('Cancel closes the editor without sending a PUT', async () => {
+  it('Cancel closes the editor without saving', async () => {
     const onClose = vi.fn()
-    const putSpy = vi.fn()
-    server.use(
-      http.put(
-        `/api/projects/${PROJECT_ID}/templates/:key/override`,
-        async ({ request }) => {
-          putSpy(await request.json())
-          return HttpResponse.json({ success: true, data: {} })
-        },
-      ),
-    )
-
-    render(
-      <TemplateEditor
-        projectId={PROJECT_ID}
-        target={SYSTEM_TARGET_EDITOR}
-        onClose={onClose}
-      />,
-    )
+    renderEditor(onClose)
 
     fireEvent.click(screen.getByTestId('template-editor-cancel'))
 
     await waitFor(() => expect(onClose).toHaveBeenCalled())
-    expect(putSpy).not.toHaveBeenCalled()
+    expect(upsertCalls).toEqual([])
   })
 
-  it('Reset reverts the form to the original values without sending a PUT', async () => {
+  it('Reset reverts the form to the original values without saving', async () => {
     const onClose = vi.fn()
-    const putSpy = vi.fn()
-    server.use(
-      http.put(
-        `/api/projects/${PROJECT_ID}/templates/:key/override`,
-        async ({ request }) => {
-          putSpy(await request.json())
-          return HttpResponse.json({ success: true, data: {} })
-        },
-      ),
-    )
-
-    render(
-      <TemplateEditor
-        projectId={PROJECT_ID}
-        target={SYSTEM_TARGET_EDITOR}
-        onClose={onClose}
-      />,
-    )
+    renderEditor(onClose)
 
     const editor = screen.getByTestId('template-editor')
     const bodyField = within(editor).getByTestId(
@@ -263,7 +190,7 @@ describe('TemplateEditor', () => {
 
     expect(bodyField.value).toBe(SYSTEM_TARGET.body)
     expect(displayNameField.value).toBe('Generate Proposal')
-    expect(putSpy).not.toHaveBeenCalled()
+    expect(upsertCalls).toEqual([])
     expect(onClose).not.toHaveBeenCalled()
   })
 })

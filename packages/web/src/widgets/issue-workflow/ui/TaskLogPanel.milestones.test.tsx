@@ -2,10 +2,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { http, HttpResponse } from 'msw'
+import { useQuery } from '@tanstack/react-query'
 import type { TaskLogPage } from '../../../entities/issue/model/task-log'
 import type { WorkflowRunSession } from '../../../entities/coder-session/model/types'
-import { TaskLogPanel } from './TaskLogPanel'
+import { issueWorkflowTaskLogQueryOptions } from '../../../entities/issue'
+import {
+  TaskLogPanel as DefaultTaskLogPanel,
+  type TaskLogDataHook,
+  type TaskLogPanelProps,
+  type WorkflowRunSessionsHook,
+} from './TaskLogPanel'
 import {
   fakeConnections,
   installDownloadSpy,
@@ -19,13 +25,44 @@ import {
   sessionFixture,
   type TestHarness,
 } from './_taskLogPanelTestUtils'
-import { server, useMswServer } from '../../../../tests/support/msw'
-
-useMswServer()
 
 const _taskLogPageRef: { current: TaskLogPage | undefined } = { current: undefined }
 const _workflowRunSessionsRef: { current: WorkflowRunSession[] } = { current: [] }
 const _workflowRunSessionCalls: string[] = []
+let _workflowRunSessionsLoading = false
+
+const taskLogHook: TaskLogDataHook = ({ issueNumber, taskId, projectId, workflowRunId }) =>
+  useQuery({
+    ...issueWorkflowTaskLogQueryOptions(
+      projectId,
+      issueNumber,
+      taskId,
+      { limit: 5000 },
+      true,
+      workflowRunId,
+    ),
+    queryFn: async () => _taskLogPageRef.current ?? makePage([]),
+  })
+
+const workflowSessionsHook: WorkflowRunSessionsHook = (workflowRunId) => {
+  if (workflowRunId) _workflowRunSessionCalls.push(workflowRunId)
+  return {
+    sessions: _workflowRunSessionsRef.current,
+    isLoading: _workflowRunSessionsLoading,
+  }
+}
+
+function TaskLogPanel(
+  props: Omit<TaskLogPanelProps, 'taskLogHook' | 'workflowSessionsHook'>,
+) {
+  return (
+    <DefaultTaskLogPanel
+      {...props}
+      taskLogHook={taskLogHook}
+      workflowSessionsHook={workflowSessionsHook}
+    />
+  )
+}
 
 function buildMswHarness(initialPage: TaskLogPage | undefined): TestHarness {
   const queryClient = newQueryClient()
@@ -47,17 +84,8 @@ describe('TaskLogPanel — agent-task milestone rows (Phase 3b T-001)', () => {
     _taskLogPageRef.current = undefined
     _workflowRunSessionsRef.current = []
     _workflowRunSessionCalls.length = 0
+    _workflowRunSessionsLoading = false
     mockConnectionBuilder()
-    server.use(
-      http.get('*/api/projects/:projectId/issues/:issueNumber/workflow/tasks/:taskId/logs', () => {
-        const data = _taskLogPageRef.current ?? { lines: [], nextCursor: null, truncated: false }
-        return HttpResponse.json({ success: true, data })
-      }),
-      http.get('*/api/workflow-runs/:workflowRunId/sessions', ({ params }) => {
-        _workflowRunSessionCalls.push(params.workflowRunId as string)
-        return HttpResponse.json({ success: true, data: _workflowRunSessionsRef.current })
-      }),
-    )
   })
 
   afterEach(() => {
@@ -145,12 +173,7 @@ describe('TaskLogPanel — agent-task milestone rows (Phase 3b T-001)', () => {
   })
 
   it('keeps showing a loading state instead of the true-empty copy while agent session summaries load', async () => {
-    server.use(
-      http.get('*/api/workflow-runs/:workflowRunId/sessions', ({ params }) => {
-        _workflowRunSessionCalls.push(params.workflowRunId as string)
-        return new Promise<Response>(() => {})
-      }),
-    )
+    _workflowRunSessionsLoading = true
     const harness = buildMswHarness(makePage([]))
 
     renderWithHarness(

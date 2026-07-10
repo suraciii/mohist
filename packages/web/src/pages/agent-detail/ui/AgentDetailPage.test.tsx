@@ -1,71 +1,80 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen, fireEvent } from '@testing-library/react'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { QueryClient, QueryClientProvider, useMutation } from '@tanstack/react-query'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
-import { http, HttpResponse } from 'msw'
 import { ProjectProvider } from '../../../entities/project'
 import type { AgentInfo, AgentSessionListItemDto } from '../../../entities/agent'
-import { server, useMswServer } from '../../../../tests/support/msw'
-import { AgentDetailPage } from './AgentDetailPage'
+import {
+  AgentDetailPage,
+  type AgentDetailPageComponents,
+  type AgentDetailPageDataHook,
+} from './AgentDetailPage'
 
-const state = vi.hoisted(() => ({
+const state: {
+  agent: AgentInfo | undefined
+  agentState: 'loading' | 'ready' | 'error'
+  sessions: AgentSessionListItemDto[]
+  archiveCalls: string[]
+  unarchiveCalls: string[]
+} = {
+  agent: undefined,
+  agentState: 'loading',
+  sessions: [],
   archiveCalls: [] as string[],
   unarchiveCalls: [] as string[],
-}))
+}
 
-vi.mock('../../../widgets/agent-profile-editor/ui/AgentProfileEditor', () => ({
-  AgentProfileEditor: ({ open }: { open: boolean }) =>
-    open ? <div data-testid="agent-profile-editor" /> : null,
-}))
-
-vi.mock('../../../widgets/agent-subscriptions/ui/SubscriptionsSection', () => ({
-  SubscriptionsSection: ({ agent }: { agent: { id: string; status: string } }) => (
+const components: AgentDetailPageComponents = {
+  AgentProfileEditor: ({ open }) => (
+    open ? <div data-testid="agent-profile-editor" /> : null
+  ),
+  SubscriptionsSection: ({ agent }) => (
     <div
       data-testid="agent-subscriptions-section"
       data-agent-id={agent.id}
       data-agent-status={agent.status}
     />
   ),
-}))
+}
 
-useMswServer(
-  http.get('*/api/projects/:projectId/agents/:agentRef', () => new Promise(() => {})),
-  http.get('*/api/projects/:projectId/agents/:agentRef/sessions', () =>
-    HttpResponse.json({ success: true, data: [] }),
-  ),
-  http.delete('*/api/projects/:projectId/agents/:agentRef', ({ params }) => {
-    state.archiveCalls.push(params.agentRef as string)
-    return HttpResponse.json({ success: true, data: { id: params.agentRef, status: 'archived' } })
-  }),
-  http.post('*/api/projects/:projectId/agents/:agentRef/unarchive', ({ params }) => {
-    state.unarchiveCalls.push(params.agentRef as string)
-    return HttpResponse.json({ success: true, data: { id: params.agentRef, status: 'active' } })
-  }),
-)
+const dataHook: AgentDetailPageDataHook = () => {
+  const archiveAgent = useMutation<AgentInfo, Error, string>({
+    mutationFn: async (agentId) => {
+      state.archiveCalls.push(agentId)
+      return { ...state.agent!, status: 'archived' }
+    },
+  })
+  const unarchiveAgent = useMutation<AgentInfo, Error, string>({
+    mutationFn: async (agentId) => {
+      state.unarchiveCalls.push(agentId)
+      return { ...state.agent!, status: 'active' }
+    },
+  })
+
+  return {
+    agent: state.agent,
+    isLoading: state.agentState === 'loading',
+    isError: state.agentState === 'error',
+    sessions: state.sessions,
+    sessionsLoading: false,
+    archiveAgent,
+    unarchiveAgent,
+  }
+}
 
 function mockAgent(agent: AgentInfo) {
-  server.use(
-    http.get('*/api/projects/:projectId/agents/:agentRef', () =>
-      HttpResponse.json({ success: true, data: agent }),
-    ),
-  )
+  state.agent = agent
+  state.agentState = 'ready'
 }
 
 function mockAgentError() {
-  server.use(
-    http.get('*/api/projects/:projectId/agents/:agentRef', () =>
-      HttpResponse.json({ success: false, error: 'fail' }, { status: 500 }),
-    ),
-  )
+  state.agent = undefined
+  state.agentState = 'error'
 }
 
 function mockSessions(sessions: AgentSessionListItemDto[]) {
-  server.use(
-    http.get('*/api/projects/:projectId/agents/:agentRef/sessions', () =>
-      HttpResponse.json({ success: true, data: sessions }),
-    ),
-  )
+  state.sessions = sessions
 }
 
 function createQueryClient() {
@@ -83,7 +92,10 @@ function renderPage() {
       }]}>
         <MemoryRouter initialEntries={['/agents/agent-1']}>
           <Routes>
-            <Route path="/agents/:agentId" element={<AgentDetailPage />} />
+            <Route
+              path="/agents/:agentId"
+              element={<AgentDetailPage components={components} dataHook={dataHook} />}
+            />
           </Routes>
         </MemoryRouter>
       </ProjectProvider>
@@ -124,6 +136,9 @@ function makeSession(overrides: Partial<AgentSessionListItemDto> = {}): AgentSes
 
 describe('AgentDetailPage', () => {
   beforeEach(() => {
+    state.agent = undefined
+    state.agentState = 'loading'
+    state.sessions = []
     state.archiveCalls.length = 0
     state.unarchiveCalls.length = 0
   })

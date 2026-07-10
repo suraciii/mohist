@@ -4,16 +4,12 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
-import { http, HttpResponse } from 'msw'
-import { server, useMswServer } from '../../../../tests/support/msw'
 import { ProjectProvider } from '../../../entities/project'
 import { TEST_PROJECT } from '../../../../tests/test-utils'
 import { setPrefersReducedMotion } from '../../../../tests/setup'
 import type { AgentUsageTimeseriesDto } from '../../../entities/agent'
 
-import { CostTrendChart } from './CostTrendChart'
-
-useMswServer()
+import { CostTrendChart, type AgentUsageHook } from './CostTrendChart'
 
 function buildUsageData(overrides?: Partial<AgentUsageTimeseriesDto>): AgentUsageTimeseriesDto {
   return {
@@ -71,24 +67,20 @@ function buildZeroSampleUsageData(): AgentUsageTimeseriesDto {
   }
 }
 
-const USAGE_PATH = '*/api/projects/:projectId/agent/usage'
+let agentUsageResult: ReturnType<AgentUsageHook>
+
+const agentUsageHook: AgentUsageHook = () => agentUsageResult
 
 function mockUsageResponse(data: AgentUsageTimeseriesDto) {
-  server.use(
-    http.get(USAGE_PATH, () => HttpResponse.json({ success: true, data })),
-  )
+  agentUsageResult = { data, isLoading: false, isError: false }
 }
 
 function mockUsagePending() {
-  server.use(
-    http.get(USAGE_PATH, () => new Promise(() => {})),
-  )
+  agentUsageResult = { data: undefined, isLoading: true, isError: false }
 }
 
 function mockUsageError() {
-  server.use(
-    http.get(USAGE_PATH, () => HttpResponse.json({ success: false, error: { message: 'boom' } }, { status: 500 })),
-  )
+  agentUsageResult = { data: undefined, isLoading: false, isError: true }
 }
 
 function renderChart() {
@@ -97,7 +89,7 @@ function renderChart() {
     <QueryClientProvider client={queryClient}>
       <ProjectProvider initialProjectId={TEST_PROJECT.id} initialProjects={[TEST_PROJECT]}>
         <MemoryRouter initialEntries={['/']}>
-          <CostTrendChart range="30d" />
+          <CostTrendChart range="30d" agentUsageHook={agentUsageHook} />
         </MemoryRouter>
       </ProjectProvider>
     </QueryClientProvider>,

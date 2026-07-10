@@ -1,11 +1,9 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { renderHook, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { http, HttpResponse } from 'msw'
-import { server, useMswServer } from '../../../../tests/support/msw'
 import type { ReactNode } from 'react'
-import { useProjectTemplates } from '..'
+import { useProjectTemplates, type ProjectTemplate, type ProjectTemplatesFetcher } from '..'
 
 const PROJECT_ID = 'test-project'
 const OTHER_PROJECT_ID = 'other-project'
@@ -31,11 +29,13 @@ const BASE_TEMPLATES = [
   },
 ]
 
-const defaultHandlers = [
-  http.get(`/api/projects/${PROJECT_ID}/templates`, () =>
-    HttpResponse.json({ success: true, data: BASE_TEMPLATES }),
-  ),
-]
+let templatesResponse: ProjectTemplate[] = BASE_TEMPLATES
+const fetchCalls: string[] = []
+
+const fetcher: ProjectTemplatesFetcher = async (projectId) => {
+  fetchCalls.push(projectId)
+  return templatesResponse
+}
 
 const queryClients: QueryClient[] = []
 
@@ -52,14 +52,17 @@ function createQueryClient() {
 
 function renderUseProjectTemplates(projectId: string | undefined) {
   const queryClient = createQueryClient()
-  return renderHook(() => useProjectTemplates(projectId), {
+  return renderHook(() => useProjectTemplates(projectId, fetcher), {
     wrapper: ({ children }: { children: ReactNode }) => (
       <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
     ),
   })
 }
 
-useMswServer(...defaultHandlers)
+beforeEach(() => {
+  templatesResponse = BASE_TEMPLATES
+  fetchCalls.length = 0
+})
 
 afterEach(() => {
   for (const qc of queryClients) qc.clear()
@@ -67,24 +70,14 @@ afterEach(() => {
 })
 
 describe('useProjectTemplates hook', () => {
-  it('issues GET /api/projects/{id}/templates and returns the effective templates', async () => {
-    const requests: { method: string; url: string }[] = []
-    server.use(
-      http.get(`/api/projects/${PROJECT_ID}/templates`, ({ request }) => {
-        requests.push({ method: request.method, url: request.url })
-        return HttpResponse.json({ success: true, data: BASE_TEMPLATES })
-      }),
-    )
-
+  it('calls the project templates client and returns the effective templates', async () => {
     const { result } = renderUseProjectTemplates(PROJECT_ID)
 
     await waitFor(() => {
       expect(result.current.data).toEqual(BASE_TEMPLATES)
     })
 
-    expect(requests).toHaveLength(1)
-    expect(requests[0].method).toBe('GET')
-    expect(requests[0].url).toContain(`/api/projects/${PROJECT_ID}/templates`)
+    expect(fetchCalls).toEqual([PROJECT_ID])
   })
 
   it('returns templates with the source field preserved', async () => {
@@ -101,11 +94,7 @@ describe('useProjectTemplates hook', () => {
         source: 'project-new' as const,
       },
     ]
-    server.use(
-      http.get(`/api/projects/${PROJECT_ID}/templates`, () =>
-        HttpResponse.json({ success: true, data: mixed }),
-      ),
-    )
+    templatesResponse = mixed
 
     const { result } = renderUseProjectTemplates(PROJECT_ID)
 
@@ -122,29 +111,15 @@ describe('useProjectTemplates hook', () => {
   })
 
   it('does not fetch when projectId is undefined', () => {
-    let fetchCalled = false
-    server.use(
-      http.get(`/api/projects/${PROJECT_ID}/templates`, () => {
-        fetchCalled = true
-        return HttpResponse.json({ success: true, data: [] })
-      }),
-    )
-
     const { result } = renderUseProjectTemplates(undefined)
 
     expect(result.current.isLoading).toBe(false)
     expect(result.current.data).toBeUndefined()
-    expect(fetchCalled).toBe(false)
+    expect(fetchCalls).toEqual([])
   })
 
   it('scopes the fetch to the provided projectId', async () => {
-    const seenUrls: string[] = []
-    server.resetHandlers(
-      http.get(`/api/projects/${OTHER_PROJECT_ID}/templates`, ({ request }) => {
-        seenUrls.push(request.url)
-        return HttpResponse.json({ success: true, data: [] })
-      }),
-    )
+    templatesResponse = []
 
     const { result } = renderUseProjectTemplates(OTHER_PROJECT_ID)
 
@@ -152,7 +127,6 @@ describe('useProjectTemplates hook', () => {
       expect(result.current.isSuccess).toBe(true)
     })
 
-    expect(seenUrls).toHaveLength(1)
-    expect(seenUrls[0]).toContain(`/api/projects/${OTHER_PROJECT_ID}/templates`)
+    expect(fetchCalls).toEqual([OTHER_PROJECT_ID])
   })
 })

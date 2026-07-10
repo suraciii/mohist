@@ -2,7 +2,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
 import { cleanup, render, waitFor } from '@testing-library/react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 
 import { settingsSearchRegistry } from '../src/features/settings-search'
 import { AiSettingsSection } from '../src/pages/settings/ui/AiSettingsSection'
@@ -16,16 +16,6 @@ import {
   WorkflowProfilesSection,
 } from '../src/pages/settings/ui/WorkflowProfilesSection'
 import { SidebarProvider } from '../src/shared/ui/components/sidebar'
-
-const aiSettingsClient = vi.hoisted(() => ({
-  useOpencodeRuntime: vi.fn(),
-  useAvailableModelIds: vi.fn(),
-  useOpencodeModel: vi.fn(),
-  useUpdateOpencodeModel: vi.fn(),
-  useStageModels: vi.fn(),
-  useSetStageModels: vi.fn(),
-  useProjectDefaultWorkflowProfile: vi.fn(),
-}))
 
 const RUNTIME_CONFIG = {
   timeout: 1800000,
@@ -82,141 +72,52 @@ const SYSTEM_INFO = {
   },
 }
 
-vi.mock('../src/entities/settings', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../src/entities/settings')>()
-  return {
-    ...actual,
-    useOpencodeRuntime: aiSettingsClient.useOpencodeRuntime,
-    useAvailableModelIds: aiSettingsClient.useAvailableModelIds,
-    useOpencodeModel: aiSettingsClient.useOpencodeModel,
-    useUpdateOpencodeModel: aiSettingsClient.useUpdateOpencodeModel,
-    useStageModels: aiSettingsClient.useStageModels,
-    useSetStageModels: aiSettingsClient.useSetStageModels,
-    useAgentRuntime: () => ({
-      data: RUNTIME_CONFIG,
-      isLoading: false,
-      error: null,
-      refetch: vi.fn(),
-    }),
-    useConfig: () => ({ data: GENERAL_CONFIG }),
-    useSetAgentRuntime: () => ({ mutateAsync: vi.fn() }),
-    useLogLevel: () => ({
-      data: { level: 'INFO' },
-      isLoading: false,
-      isError: false,
-      error: null,
-    }),
-    useSetLogLevel: () => ({ mutateAsync: vi.fn() }),
-    useSystemInfo: () => ({
-      data: SYSTEM_INFO,
-      isLoading: false,
-      isError: false,
-      error: null,
-      refetch: vi.fn(),
-    }),
-    useSystemUpdate: () => ({ mutateAsync: vi.fn(), isPending: false }),
-    useSystemUpdateStatus: () => ({ data: null, refetch: vi.fn() }),
-    useWorkflowProfiles: () => ({ data: [], isLoading: false, isError: false }),
-    useAllWorkflowProfiles: () => ({ data: [], isLoading: false, isError: false }),
-    useWorkflowProfile: () => ({ data: null, isLoading: false, isError: false }),
-    useProjectDefaultWorkflowProfile: () => aiSettingsClient.useProjectDefaultWorkflowProfile(),
-    useDisableWorkflowProfile: () => ({ mutate: vi.fn() }),
-    useEnableWorkflowProfile: () => ({ mutate: vi.fn() }),
-  }
-})
-
-const projectClient = vi.hoisted(() => ({
-  useRepositories: vi.fn(),
-  useAddRepository: vi.fn(),
-  useRemoveRepository: vi.fn(),
-  useSetDefaultRepository: vi.fn(),
-}))
-
-vi.mock('../src/entities/project', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../src/entities/project')>()
-  return {
-    ...actual,
-    useRepositories: projectClient.useRepositories,
-    useAddRepository: projectClient.useAddRepository,
-    useRemoveRepository: projectClient.useRemoveRepository,
-    useSetDefaultRepository: projectClient.useSetDefaultRepository,
-  }
-})
-
-const templateClient = vi.hoisted(() => ({
-  useProjectTemplates: vi.fn(),
-  useSystemTemplates: vi.fn(),
-  useDeleteProjectTemplateOverride: vi.fn(),
-}))
-
-vi.mock('../src/entities/template', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../src/entities/template')>()
-  return {
-    ...actual,
-    useProjectTemplates: templateClient.useProjectTemplates,
-    useSystemTemplates: templateClient.useSystemTemplates,
-    useDeleteProjectTemplateOverride: templateClient.useDeleteProjectTemplateOverride,
-  }
-})
-
-function arrangeAiLoaded() {
-  aiSettingsClient.useOpencodeRuntime.mockReturnValue({ isLoading: false, error: null })
-  aiSettingsClient.useAvailableModelIds.mockReturnValue({
-    data: ['openai/gpt-4', 'anthropic/claude-3'],
-    isLoading: false,
-    error: null,
-  })
-  aiSettingsClient.useOpencodeModel.mockReturnValue({ data: { model: null } })
-  aiSettingsClient.useUpdateOpencodeModel.mockReturnValue({ mutate: vi.fn() })
-  aiSettingsClient.useStageModels.mockReturnValue({ data: { stageModels: null } })
-  aiSettingsClient.useSetStageModels.mockReturnValue({ mutate: vi.fn() })
-  aiSettingsClient.useProjectDefaultWorkflowProfile.mockReturnValue({
-    data: { projectId: 'proj-1', defaultTemplateId: null, disabledWorkflowProfileIds: [] },
-    isLoading: false,
-    isError: false,
-  })
-}
-
-function arrangeProjectLoaded() {
-  projectClient.useRepositories.mockReturnValue({
-    data: [
-      {
-        name: 'frontend',
-        gitUrl: 'https://github.com/example/frontend.git',
-        baseBranch: 'main',
-        isDefault: true,
-      },
-    ],
-    isLoading: false,
-  })
-  projectClient.useAddRepository.mockReturnValue({ mutate: vi.fn(), isPending: false })
-  projectClient.useRemoveRepository.mockReturnValue({ mutate: vi.fn(), isPending: false })
-  projectClient.useSetDefaultRepository.mockReturnValue({ mutate: vi.fn(), isPending: false })
-}
-
-function arrangeTemplatesLoaded() {
-  templateClient.useProjectTemplates.mockReturnValue({
-    data: [],
-    isLoading: false,
-    isError: false,
-    refetch: vi.fn(),
-  })
-  templateClient.useSystemTemplates.mockReturnValue({ data: [] })
-  templateClient.useDeleteProjectTemplateOverride.mockReturnValue({
-    mutate: vi.fn(),
-    isPending: false,
-  })
-}
+const REPOSITORIES = [
+  {
+    name: 'frontend',
+    gitUrl: 'https://github.com/example/frontend.git',
+    baseBranch: 'main',
+    isDefault: true,
+  },
+]
 
 function makeQueryClient() {
-  return new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
+  const queryClient = new QueryClient({
+    defaultOptions: {
+      queries: { retry: false, staleTime: Infinity },
+      mutations: { retry: false },
+    },
+  })
+  queryClient.setQueryData(['agent-runtime'], RUNTIME_CONFIG)
+  queryClient.setQueryData(['config'], GENERAL_CONFIG)
+  queryClient.setQueryData(['log-level'], { level: GENERAL_CONFIG.logLevel })
+  queryClient.setQueryData(['opencode-runtime'], { mode: 'local', command: 'opencode', model: null, note: '' })
+  queryClient.setQueryData(['opencode-model-ids', 'proj-1'], {
+    models: ['openai/gpt-4', 'anthropic/claude-3'],
+    modelVariants: {},
+  })
+  queryClient.setQueryData(['opencode-model', 'proj-1'], { model: null, variant: null })
+  queryClient.setQueryData(['stage-models', 'proj-1'], { stageModels: null, stageModelVariants: null })
+  queryClient.setQueryData(['repositories', 'proj-1'], REPOSITORIES)
+  queryClient.setQueryData(['system-info'], SYSTEM_INFO)
+  queryClient.setQueryData(['system-update-status'], { hasJob: false, job: null })
+  queryClient.setQueryData(['workflow-templates', 'system'], [])
+  queryClient.setQueryData(['workflow-templates', 'system', 'proj-1'], [])
+  queryClient.setQueryData(['project-workflow-profile', 'proj-1'], {
+    projectId: 'proj-1',
+    defaultTemplateId: null,
+    disabledWorkflowProfileIds: [],
+  })
+  queryClient.setQueryData(['project-templates', 'proj-1'], [])
+  queryClient.setQueryData(['system-templates'], [])
+  return queryClient
 }
 
 function renderSection(node: React.ReactNode) {
   const queryClient = makeQueryClient()
   return render(
     <QueryClientProvider client={queryClient}>
-      <ProjectProvider initialProjectId="proj-1" initialProjects={[{ id: 'proj-1', name: 'proj-1', createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z', repositories: [{ name: 'frontend', gitUrl: 'https://github.com/example/frontend.git', baseBranch: 'main', isDefault: true }] }]}>
+      <ProjectProvider initialProjectId="proj-1" initialProjects={[{ id: 'proj-1', name: 'proj-1', createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z', repositories: REPOSITORIES }]}>
         <MemoryRouter>
           <SidebarProvider>{node}</SidebarProvider>
         </MemoryRouter>
@@ -227,7 +128,6 @@ function renderSection(node: React.ReactNode) {
 
 afterEach(() => {
   cleanup()
-  vi.clearAllMocks()
 })
 
 describe('settingsSearchRegistry', () => {
@@ -359,7 +259,6 @@ describe('settingsSearchRegistry', () => {
 
 describe('settingsSearchRegistry focusTargetId resolves when each tab is rendered', () => {
   it('focusTargetId from the agent tab resolves to a focusable element', async () => {
-    arrangeAiLoaded()
     const { baseElement } = renderSection(<AgentSettingsSection />)
 
     await waitFor(() => {
@@ -373,7 +272,6 @@ describe('settingsSearchRegistry focusTargetId resolves when each tab is rendere
   })
 
   it('every agent runtime focus target resolves to an input', async () => {
-    arrangeAiLoaded()
     const { baseElement } = renderSection(<AgentSettingsSection />)
 
     const ids = [
@@ -396,7 +294,6 @@ describe('settingsSearchRegistry focusTargetId resolves when each tab is rendere
   })
 
   it('focusTargetId from the ai tab resolves to a focusable element', () => {
-    arrangeAiLoaded()
     const { baseElement } = renderSection(<AiSettingsSection />)
 
     expect(baseElement.querySelector('#settings-default-model')).toBeTruthy()
@@ -408,7 +305,6 @@ describe('settingsSearchRegistry focusTargetId resolves when each tab is rendere
   })
 
   it('every ai stage focus target resolves to a button when stage overrides are opened', async () => {
-    arrangeAiLoaded()
     const user = (await import('@testing-library/user-event')).default.setup()
     const { baseElement } = renderSection(<AiSettingsSection />)
 
@@ -432,7 +328,6 @@ describe('settingsSearchRegistry focusTargetId resolves when each tab is rendere
   })
 
   it('every repositories focus target resolves to a focusable element', () => {
-    arrangeProjectLoaded()
     const { baseElement } = renderSection(<RepositoriesSection projectId="proj-1" />)
 
     const ids = ['repository-add-name', 'repository-add-branch', 'repository-add-giturl']
@@ -446,8 +341,6 @@ describe('settingsSearchRegistry focusTargetId resolves when each tab is rendere
   })
 
   it('every templates focus target resolves to a focusable element', () => {
-    arrangeProjectLoaded()
-    arrangeTemplatesLoaded()
     const { baseElement } = renderSection(<TemplatesSection />)
 
     const el = baseElement.querySelector<HTMLElement>('#templates-search')
@@ -492,10 +385,6 @@ describe('settingsSearchRegistry focusTargetId resolves when each tab is rendere
   })
 
   it('every focusTargetId across the registry resolves to a real element when its tab is rendered', async () => {
-    arrangeAiLoaded()
-    arrangeProjectLoaded()
-    arrangeTemplatesLoaded()
-
     const user = (await import('@testing-library/user-event')).default.setup()
     const rendered: Array<{ tab: string; element: HTMLElement }> = []
 

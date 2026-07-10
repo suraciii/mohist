@@ -79,8 +79,18 @@ function hasPlottablePoints(
   return data.points.length > 0
 }
 
-export function CycleTimeChart({ range }: { range: InsightsRange }) {
-  const { data, isLoading, isError } = useDeliveryTime(range)
+export type DeliveryTimeHook = (
+  range?: InsightsRange,
+) => Pick<ReturnType<typeof useDeliveryTime>, 'data' | 'isLoading' | 'isError'>
+
+export function CycleTimeChart({
+  range,
+  deliveryTimeHook = useDeliveryTime,
+}: {
+  range: InsightsRange
+  deliveryTimeHook?: DeliveryTimeHook
+}) {
+  const { data, isLoading, isError } = deliveryTimeHook(range)
   const [lens, setLens] = useState<DurationLens>('lead')
 
   const visibleCount = data && lens === 'cycle'

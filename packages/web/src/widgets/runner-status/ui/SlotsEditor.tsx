@@ -5,12 +5,19 @@ import { useUpdateRunnerSlots } from '../../../entities/runner'
 interface SlotsEditorProps {
   runnerId: string
   value: number
+  mutationHook?: SlotsEditorMutationHook
 }
 
-export function SlotsEditor({ runnerId, value }: SlotsEditorProps) {
+export type SlotsEditorMutationHook = typeof useUpdateRunnerSlots
+
+export function SlotsEditor({
+  runnerId,
+  value,
+  mutationHook = useUpdateRunnerSlots,
+}: SlotsEditorProps) {
   const [local, setLocal] = useState(value)
   const [committed, setCommitted] = useState(value)
-  const mutation = useUpdateRunnerSlots()
+  const mutation = mutationHook()
 
   useEffect(() => {
     setLocal(value)

@@ -49,6 +49,13 @@ Any order, any parallelism, 1000 reruns = same result.
 - Restore stubs: vitest auto-restore; fake timers close in afterEach.
 - Never `it.skip` to hide flaky tests. Fix or delete.
 
+Web tests run with `isolate: false`: test files share a worker module registry and must be order-independent.
+
+- `vi.mock` is forbidden in web tests. HTTP uses MSW; the only module replacements are the `sonner` and `@microsoft/signalr` fakes declared by the Vitest config alias allowlist.
+- MSW uses `onUnhandledRequest: 'error'`. Every request is either handled deliberately or fails the test.
+- Mutable module singletons and test control ports must expose a reset seam. Register the reset in `afterEach`; never rely on another file's imports, handlers, fake state, timers, globals, storage, or execution order.
+- Web tests must pass both the normal suite and shuffled execution. A shuffle failure is a state leak, not a seed-specific exception.
+
 ### 4. Fast and concise
 
 | Track | Per test | Per file |
@@ -74,13 +81,13 @@ xUnit collection = scheduling unit; classes inside a collection run serially, so
 Existing:
 - ArchTests: layer deps, spec naming, 24KB budget, namespace, public.
 - BannedApiAnalyzer: compile-time ban on direct env reads.
-- vitest: restoreMocks, unstubGlobals, unstubEnvs auto; projects by suffix.
+- vitest: `isolate: false`; restoreMocks, unstubGlobals, unstubEnvs auto; projects by suffix.
+- web boundary guards: `vi.mock` ratchet locked at zero; MSW unhandled requests fail; weekly shuffled suite records a reproducible seed.
 
 Planned:
 - C# BannedSymbols: `DateTime.UtcNow`, `Task.Delay`, `Thread.Sleep`, bare `new HttpClient()`, `Process.Start`, test `Migrate()`.
 - UnitTests csproj backstop: ban heavy fixtures (WebApplicationFactory, Orleans.TestingHost).
 - ESLint: ban `child_process`, real `@microsoft/signalr` import in tests.
-- MSW `onUnhandledRequest: 'error'`.
 
 ## Fake quick reference
 
@@ -88,7 +95,8 @@ Planned:
 |---|---|---|---|---|
 | time | FakeTimeProvider | vi.useFakeTimers | same as runner | seam missing |
 | HTTP | WebApplicationFactory + TestServer | vi.stubGlobal('fetch') | MSW | RecordingHttpHandler |
-| SignalR | RecordingRunnerHubContext | vi.mock('@microsoft/signalr') | same as runner | — |
+| SignalR | RecordingRunnerHubContext | vi.mock('@microsoft/signalr') | config alias → tests/support/signalr-fake.ts | — |
+| notification | — | — | config alias → tests/support/sonner-fake.ts | — |
 | process | — | setAcpProcessFactoryForTest | — | FakeCommandExecutor |
 | DB | in-memory SQLite, clone from MigratedSqliteTemplate.CopyTo (no Migrate()) | — | — | fake IOtelQueryExecutor |
 | grain | InProcessTestCluster, ControllableReminderTable | — | — | — |

@@ -12,6 +12,28 @@ import { SettingsSection } from './SettingsSection'
 
 interface Props {
   projectId: string
+  dataHook?: RepositoriesSectionDataHook
+}
+
+export interface RepositoriesSectionData {
+  repositories: ReturnType<typeof useRepositories>['data']
+  isLoading: boolean
+  addRepo: Pick<ReturnType<typeof useAddRepository>, 'mutate' | 'isPending'>
+  removeRepo: Pick<ReturnType<typeof useRemoveRepository>, 'mutate' | 'isPending'>
+  setDefault: Pick<ReturnType<typeof useSetDefaultRepository>, 'mutate'>
+}
+
+export type RepositoriesSectionDataHook = (projectId: string) => RepositoriesSectionData
+
+const useDefaultData: RepositoriesSectionDataHook = (projectId) => {
+  const { data: repositories, isLoading } = useRepositories(projectId)
+  return {
+    repositories,
+    isLoading,
+    addRepo: useAddRepository(),
+    removeRepo: useRemoveRepository(),
+    setDefault: useSetDefaultRepository(),
+  }
 }
 
 export const REVEAL_REPOSITORY_ADD_FORM_EVENT = 'mohist:settings:reveal-repository-add-form'
@@ -43,11 +65,8 @@ export const REPOSITORIES_DESCRIPTORS: SettingsSearchEntry[] = [
   },
 ]
 
-export function RepositoriesSection({ projectId }: Props) {
-  const { data: repositories, isLoading } = useRepositories(projectId)
-  const addRepo = useAddRepository()
-  const removeRepo = useRemoveRepository()
-  const setDefault = useSetDefaultRepository()
+export function RepositoriesSection({ projectId, dataHook = useDefaultData }: Props) {
+  const { repositories, isLoading, addRepo, removeRepo, setDefault } = dataHook(projectId)
   const { label: sectionLabel } = getSectionMeta('repositories')
 
   const [newName, setNewName] = useState('')

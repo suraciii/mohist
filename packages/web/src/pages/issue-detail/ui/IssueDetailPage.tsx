@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, type ComponentType } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { ArrowLeftIcon, PencilIcon } from 'lucide-react'
 import { IssueStatus } from '../../../entities/issue'
@@ -9,7 +9,7 @@ import { EditIssueDialog } from '../../../features/edit-issue'
 import { WorkflowConvergencePanel } from '../../../widgets/issue-workflow'
 import { NotFoundPage } from '../../not-found/ui/NotFoundPage'
 import { BranchBar, RuntimeDecisionSurface, WorkflowView, TaskProgressPanel, WorkflowSessionsPanel, IssueWorkflowProfileEditor, LatestArtifactsPanel, PrDeliverySummary, findPublishViaPrMetadata, WorkflowProfileControl } from '../../../widgets/issue-workflow'
-import { ActivityDialog } from '../../../widgets/issue-event-timeline'
+import { ActivityDialog, type EventTimelinePanelProps } from '../../../widgets/issue-event-timeline'
 import { formatTime } from '../../../shared/lib/format-time'
 import { useNarrowViewport } from '../../../shared/lib/use-narrow-viewport'
 import { useProject, useProjectPath } from '../../../entities/project'
@@ -18,7 +18,10 @@ import { getLabelStyle, sortLabels } from '../../../shared/lib/label-colors'
 
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
 import { attachmentFromMetadata } from '../model/format'
-import { useIssueDetailMutations } from '../model/useIssueDetailMutations'
+import {
+  useIssueDetailMutations,
+  type IssueDetailMutationDependencies,
+} from '../model/useIssueDetailMutations'
 import { deriveRuntimeDecision } from '../../../widgets/issue-workflow/model/derive-runtime-decision'
 import { ArchivedPill, DraftPill, PriorityChip, RuntimeSummaryPill } from './pills'
 import { StatusHeadline } from './StatusHeadline'
@@ -36,7 +39,19 @@ import { IssueCommitsSection } from './sections/IssueCommitsSection'
 import { IssueCommentsSection } from './sections/IssueCommentsSection'
 import { MobileActionBar } from './MobileActionBar'
 
-export function IssueDetailPage() {
+export interface IssueDetailPageComponents {
+  EventTimelinePanel: ComponentType<EventTimelinePanelProps>
+}
+
+export interface IssueDetailPageProps {
+  components?: Partial<IssueDetailPageComponents>
+  mutationDependencies?: Partial<IssueDetailMutationDependencies>
+}
+
+export function IssueDetailPage({
+  components,
+  mutationDependencies,
+}: IssueDetailPageProps = {}) {
   const { number } = useParams<{ number: string }>()
   const navigate = useNavigate()
   const toProjectPath = useProjectPath()
@@ -62,19 +77,22 @@ export function IssueDetailPage() {
     rerunMutation,
     addCommentMutation,
     deleteCommentMutation,
-  } = useIssueDetailMutations({
-    issueNumber,
-    projectId,
-    onAddCommentSuccess: () => setCommentText(''),
-    onDeleteCommentSuccess: () => {
-      setDeletingCommentId(null)
-      setDeleteCommentError(null)
+  } = useIssueDetailMutations(
+    {
+      issueNumber,
+      projectId,
+      onAddCommentSuccess: () => setCommentText(''),
+      onDeleteCommentSuccess: () => {
+        setDeletingCommentId(null)
+        setDeleteCommentError(null)
+      },
+      onDeleteCommentError: (err) => {
+        setDeleteCommentError(err.message)
+        setDeletingCommentId(null)
+      },
     },
-    onDeleteCommentError: (err) => {
-      setDeleteCommentError(err.message)
-      setDeletingCommentId(null)
-    },
-  })
+    mutationDependencies,
+  )
 
   const { data: issue, isLoading, isError } = useIssue(issueNumber)
   const { data: agentStatus } = useAgentStatus()
@@ -214,6 +232,7 @@ export function IssueDetailPage() {
                     issueNumber={issueNumber}
                     issueId={issue?.id}
                     workflowStatus={issue?.workflowStatus}
+                    TimelinePanel={components?.EventTimelinePanel}
                   />
                   <Button
                     variant="ghost"

@@ -5,7 +5,7 @@ import { Button } from '@/shared/ui/components/button'
 import { getFileContent } from '../../../entities/issue'
 import type { StageTaskState, WorkflowArtifactSummary } from '../../../entities/issue'
 import { useProject, useProjectPath } from '../../../entities/project'
-import { ArtifactContentViewer } from './ArtifactContentViewer'
+import { ArtifactContentViewer, type ArtifactContentHook } from './ArtifactContentViewer'
 import { resolveDeliveryFailureFromOutput, resolveDeliveryFailureFromMessage } from '../../../shared/lib/delivery-failure'
 import { formatClock, formatDuration, formatOriginLabel, formatOriginTitle } from './format'
 import { CheckmarkIcon, CrossIcon, EmptyCircleIcon, SpinnerIcon } from './StageStatusIcons'
@@ -54,7 +54,15 @@ function RunningElapsed({ startClock, startedAt }: { startClock: string; started
   )
 }
 
-function RequiredFileEntry({ rf, issueNumber }: { rf: { path: string; source: string; canFetchContent: boolean; markers?: string[] }; issueNumber: number }) {
+function RequiredFileEntry({
+  rf,
+  issueNumber,
+  fileContentFn,
+}: {
+  rf: { path: string; source: string; canFetchContent: boolean; markers?: string[] }
+  issueNumber: number
+  fileContentFn: typeof getFileContent
+}) {
   const [open, setOpen] = useState(false)
   const [loading, setLoading] = useState(false)
   const [content, setContent] = useState<string | null>(null)
@@ -69,13 +77,13 @@ function RequiredFileEntry({ rf, issueNumber }: { rf: { path: string; source: st
       if (!content && !loading && rf.canFetchContent) {
         setLoading(true)
         setError(false)
-        getFileContent(issueNumber, rf.path, projectId)
+        fileContentFn(issueNumber, rf.path, projectId)
           .then((resp) => setContent(resp.head || resp.base))
           .catch(() => setError(true))
           .finally(() => setLoading(false))
       }
     }
-  }, [open, content, loading, rf.canFetchContent, rf.path, issueNumber, projectId])
+  }, [open, content, loading, rf.canFetchContent, rf.path, issueNumber, projectId, fileContentFn])
 
   return (
     <div className="text-xs">
@@ -184,10 +192,14 @@ export function TaskItem({
   task,
   issueNumber,
   readOnly,
+  artifactContentHook,
+  fileContentFn = getFileContent,
 }: {
   task: StageTaskState
   issueNumber: number
   readOnly: boolean
+  artifactContentHook?: ArtifactContentHook
+  fileContentFn?: typeof getFileContent
 }) {
   const [expanded, setExpanded] = useState(false)
   const [selectedArtifact, setSelectedArtifact] = useState<WorkflowArtifactSummary | null>(null)
@@ -315,7 +327,12 @@ export function TaskItem({
               </div>
             )}
             {task.requiredFiles?.map((rf) => (
-              <RequiredFileEntry key={rf.path} rf={rf} issueNumber={issueNumber} />
+              <RequiredFileEntry
+                key={rf.path}
+                rf={rf}
+                issueNumber={issueNumber}
+                fileContentFn={fileContentFn}
+              />
             ))}
             {hasOutput && (
               <pre className="text-xs text-muted-foreground whitespace-pre-wrap break-words font-mono bg-muted rounded p-2 max-h-40 overflow-auto">
@@ -332,6 +349,7 @@ export function TaskItem({
           path={selectedArtifact.path}
           size={selectedArtifact.size}
           open={selectedArtifact !== null}
+          contentHook={artifactContentHook}
           onOpenChange={(open) => {
             if (!open) setSelectedArtifact(null)
           }}

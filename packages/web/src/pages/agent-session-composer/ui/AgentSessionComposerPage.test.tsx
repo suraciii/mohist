@@ -1,56 +1,64 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen, fireEvent } from '@testing-library/react'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { QueryClient, QueryClientProvider, useMutation } from '@tanstack/react-query'
 import { MemoryRouter, Routes, Route, useLocation } from 'react-router-dom'
-import { http, HttpResponse } from 'msw'
 import { ProjectProvider } from '../../../entities/project'
-import type { AgentInfo } from '../../../entities/agent'
-import { useMswServer } from '../../../../tests/support/msw'
-import { AgentSessionComposerPage } from './AgentSessionComposerPage'
+import type {
+  AgentInfo,
+  AgentSessionLaunchContext,
+  AgentSessionLaunchResponse,
+} from '../../../entities/agent'
+import {
+  AgentSessionComposerPage,
+  type AgentSessionComposerDataHook,
+  type AgentSessionComposerPageComponents,
+} from './AgentSessionComposerPage'
 
-const mocks = vi.hoisted(() => ({
-  toProjectPath: vi.fn((path: string) => `/Test${path}`),
-}))
-
-const state = vi.hoisted(() => ({
+const state = {
   agentsData: [] as AgentInfo[],
   launchCalls: [] as Array<{ agentRef: string; body: unknown }>,
   launchError: null as { error: string; code?: string } | null,
-}))
+}
 
-vi.mock('../../../entities/project', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../entities/project')>()
-  return {
-    ...actual,
-    useProjectPath: () => mocks.toProjectPath,
-  }
-})
-
-vi.mock('../../../shared/ui/attachment-composer', () => ({
-  AttachmentComposer: ({ value, onChange, ...props }: { value: string; onChange: (v: string) => void; [key: string]: unknown }) =>
-    <textarea data-testid="prompt-textarea" value={value} onChange={(e) => onChange(e.target.value)} {...props} />,
-}))
-
-useMswServer(
-  http.get('*/api/projects/:projectId/agents', () =>
-    HttpResponse.json({ success: true, data: state.agentsData }),
+const components: AgentSessionComposerPageComponents = {
+  AttachmentComposer: ({ value, onChange, onBlur, placeholder }) => (
+    <textarea
+      data-testid="prompt-textarea"
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+      onBlur={onBlur}
+      placeholder={placeholder}
+    />
   ),
-  http.post('*/api/projects/:projectId/agents/:agentRef/sessions', async ({ params, request }) => {
-    const body = await request.json()
-    state.launchCalls.push({ agentRef: params.agentRef as string, body })
-    if (state.launchError) {
-      return HttpResponse.json(
-        { success: false, error: state.launchError.error, code: state.launchError.code },
-        { status: 500 },
-      )
-    }
-    return HttpResponse.json({
-      success: true,
-      data: { sessionId: 'sess-123', agentId: params.agentRef as string, agentName: 'Agent 1', status: 'running', transcriptUrl: '' },
-    })
-  }),
-)
+}
+
+const dataHook: AgentSessionComposerDataHook = () => {
+  const launchMutation = useMutation<
+    AgentSessionLaunchResponse,
+    Error,
+    { agentRef: string; prompt: string; context?: AgentSessionLaunchContext | null }
+  >({
+    mutationFn: async ({ agentRef, prompt, context }) => {
+      state.launchCalls.push({ agentRef, body: { prompt, context } })
+      if (state.launchError) {
+        throw Object.assign(new Error(state.launchError.error), { code: state.launchError.code })
+      }
+      return {
+        sessionId: 'sess-123',
+        agentId: agentRef,
+        agentName: 'Agent 1',
+        status: 'running',
+        transcriptUrl: '',
+      } as AgentSessionLaunchResponse
+    },
+  })
+  return {
+    agents: state.agentsData,
+    agentsLoading: false,
+    launchMutation,
+  }
+}
 
 function createQueryClient() {
   return new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -92,7 +100,10 @@ function renderPage(initialEntries = ['/agent-sessions/new']) {
       >
         <MemoryRouter initialEntries={initialEntries}>
           <Routes>
-            <Route path="/agent-sessions/new" element={<AgentSessionComposerPage />} />
+            <Route
+              path="/agent-sessions/new"
+              element={<AgentSessionComposerPage components={components} dataHook={dataHook} />}
+            />
           </Routes>
           <LocationProbe />
         </MemoryRouter>
@@ -106,7 +117,6 @@ describe('AgentSessionComposerPage', () => {
     state.agentsData = []
     state.launchCalls.length = 0
     state.launchError = null
-    mocks.toProjectPath.mockClear()
   })
 
   afterEach(() => {
@@ -239,7 +249,6 @@ describe('AgentSessionComposerPage', () => {
     fireEvent.change(textarea, { target: { value: 'Hello' } })
     fireEvent.click(screen.getByTestId('launch-button'))
     await vi.waitFor(() => {
-      expect(mocks.toProjectPath).toHaveBeenCalledWith('/agent-sessions/sess-123')
       expect(screen.getByTestId('current-path')).toHaveTextContent('/Test/agent-sessions/sess-123')
     })
   })

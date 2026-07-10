@@ -1,11 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { http, HttpResponse } from 'msw'
 import { TEST_PROJECT, baseRender, screen, waitFor, fireEvent } from './test-utils'
-import { SessionPage } from '../src/pages/session/ui/SessionPage'
+import { SessionPage, type SessionPageDependencies } from '../src/pages/session/ui/SessionPage'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ProjectProvider } from '../src/entities/project/model/ProjectContext'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
-import { useMswServer } from './support/msw'
 import React from 'react'
 import type {
   AgentSessionMetadata,
@@ -24,24 +22,31 @@ const _sessionsHandler = vi.fn()
 const _metadataHandler = vi.fn()
 const _transcriptHandler = vi.fn()
 
-useMswServer(
-  http.get('*/api/projects/:projectId/issues/:number/coder-sessions', ({ params }) => {
-    _sessionsHandler(Number(params.number), params.projectId)
-    if (_sessionsLoading) return new Promise(() => {})
-    return HttpResponse.json({ success: true, data: _sessionsData })
-  }),
-  http.get('*/api/projects/:projectId/issues/:number', () => {
-    return HttpResponse.json({ success: true, data: _issueData })
-  }),
-  http.get('*/api/projects/:projectId/issues/:number/sessions/:name', ({ params }) => {
-    _metadataHandler(Number(params.number), params.name, params.projectId)
-    return HttpResponse.json({ success: true, data: _metadataData })
-  }),
-  http.get('*/api/projects/:projectId/issues/:number/sessions/:name/transcript', ({ params }) => {
-    _transcriptHandler(Number(params.number), params.name, params.projectId)
-    return HttpResponse.json({ success: true, data: _transcriptData })
-  }),
-)
+const sessionPageDependencies: SessionPageDependencies = {
+  dataSource: {
+    useIssue: () => ({ data: _issueData }) as never,
+    useCoderSessions: (issueNumber) => {
+      _sessionsHandler(issueNumber, TEST_PROJECT.id)
+      return { sessions: _sessionsData, isLoading: _sessionsLoading }
+    },
+    useSiblingSessions: () => ({
+      sessions: [],
+      currentIndex: -1,
+      previous: null,
+      next: null,
+      hasPrevious: false,
+      hasNext: false,
+    }),
+    getAgentSessionMetadata: async (issueNumber, sessionName, projectId) => {
+      _metadataHandler(issueNumber, sessionName, projectId)
+      return _metadataData!
+    },
+    getAgentSessionTranscript: async (issueNumber, sessionName, projectId) => {
+      _transcriptHandler(issueNumber, sessionName, projectId)
+      return _transcriptData
+    },
+  },
+}
 
 const originalScrollTo = Element.prototype.scrollTo
 const queryClients: QueryClient[] = []
@@ -89,6 +94,10 @@ function renderWithQueryClient(ui: React.ReactElement) {
       </ProjectProvider>
     </QueryClientProvider>,
   )
+}
+
+function renderSessionPage() {
+  return renderWithQueryClient(<SessionPage dependencies={sessionPageDependencies} />)
 }
 
 function makeMetadata(overrides: Partial<AgentSessionMetadata> = {}): AgentSessionMetadata {
@@ -224,7 +233,7 @@ describe('T-009: SessionPage split endpoints', () => {
         issue: { number: 51, title: 'Split session endpoints' },
       })
 
-      renderWithQueryClient(<SessionPage />)
+      renderSessionPage()
 
       await waitFor(() => {
         expect(_metadataHandler).toHaveBeenCalledWith(51, 'T-003.1', TEST_PROJECT.id)
@@ -246,7 +255,7 @@ describe('T-009: SessionPage split endpoints', () => {
         issue: { number: 51, title: 'Split session endpoints' },
       })
 
-      renderWithQueryClient(<SessionPage />)
+      renderSessionPage()
 
       await waitFor(() => {
         expect(screen.getByRole('heading', { name: 'T-003.1' })).toBeInTheDocument()
@@ -271,7 +280,7 @@ describe('T-009: SessionPage split endpoints', () => {
         issue: { number: 51, title: 'Split session endpoints' },
       })
 
-      renderWithQueryClient(<SessionPage />)
+      renderSessionPage()
 
       await waitFor(() => {
         expect(screen.getByRole('heading', { name: 'T-003.1' })).toBeInTheDocument()
@@ -297,7 +306,7 @@ describe('T-009: SessionPage split endpoints', () => {
         metadata,
       })
 
-      renderWithQueryClient(<SessionPage />)
+      renderSessionPage()
 
       await waitFor(() => {
         expect(screen.getByRole('heading', { name: 'plan' })).toBeInTheDocument()
@@ -315,7 +324,7 @@ describe('T-009: SessionPage split endpoints', () => {
         transcript: makeTranscript([makeTurn()]),
       })
 
-      const { container } = renderWithQueryClient(<SessionPage />)
+      const { container } = renderSessionPage()
 
       await waitFor(() => {
         expect(screen.getByText('Show full prompt')).toBeInTheDocument()
@@ -356,7 +365,7 @@ describe('T-009: SessionPage split endpoints', () => {
         ]),
       })
 
-      const { container } = renderWithQueryClient(<SessionPage />)
+      const { container } = renderSessionPage()
 
       await waitFor(() => {
         expect(screen.getByText('Assistant reply from persisted transcript')).toBeInTheDocument()
