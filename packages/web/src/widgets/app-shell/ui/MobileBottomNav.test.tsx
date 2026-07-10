@@ -4,8 +4,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
+import { http, HttpResponse } from 'msw'
 import { ProjectProvider } from '../../../entities/project'
 import { SidebarProvider } from '@/shared/ui/components/sidebar'
+import { useMswServer } from '../../../../tests/support/msw'
 import { MobileBottomNav } from './MobileBottomNav'
 import type { InboxItem } from '../../../entities/inbox'
 
@@ -16,6 +18,12 @@ const TEST_PROJECT = {
   updatedAt: '2024-01-01T00:00:00.000Z',
   repositories: [],
 }
+
+useMswServer(
+  http.get(`*/api/projects/${TEST_PROJECT.id}/inbox`, () =>
+    HttpResponse.json({ success: true, data: [] }),
+  ),
+)
 
 function renderMobileNav(initialRoute: string) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })

@@ -5,6 +5,7 @@ interface MswState {
   server: ReturnType<typeof setupServer>
   listening: boolean
   installedFetch: typeof fetch | null
+  unhandledRequests: Map<string, number>
 }
 
 const testGlobal = globalThis as typeof globalThis & {
@@ -16,9 +17,17 @@ const state = testGlobal.__mohistWebMswState ??= {
   server: setupServer(),
   listening: false,
   installedFetch: null,
+  unhandledRequests: new Map(),
 }
 
 export const server = state.server
+
+function rejectUnhandledRequest(request: Request): never {
+  const url = new URL(request.url)
+  const description = `${request.method} ${url.pathname}${url.search}`
+  state.unhandledRequests.set(description, (state.unhandledRequests.get(description) ?? 0) + 1)
+  throw new Error(`Unhandled MSW request: ${description}`)
+}
 
 function absolutizeRelativeFetchUrls() {
   const interceptedFetch = globalThis.fetch.bind(globalThis)
@@ -35,10 +44,24 @@ export function ensureMswServerListening() {
   if (state.listening && globalThis.fetch === state.installedFetch) return
   if (state.listening) server.close()
 
-  server.listen({ onUnhandledRequest: 'error' })
+  server.listen({ onUnhandledRequest: rejectUnhandledRequest })
   absolutizeRelativeFetchUrls()
   state.installedFetch = globalThis.fetch
   state.listening = true
+}
+
+export function resetUnhandledRequests() {
+  state.unhandledRequests.clear()
+}
+
+export function takeUnhandledRequestError(): Error | null {
+  if (state.unhandledRequests.size === 0) return null
+
+  const requests = [...state.unhandledRequests.entries()]
+    .map(([request, count]) => `  - ${request}${count === 1 ? '' : ` (${count}x)`}`)
+    .join('\n')
+  state.unhandledRequests.clear()
+  return new Error(`Unhandled MSW requests:\n${requests}`)
 }
 
 export function useMswServer(...handlers: Parameters<typeof server.use>) {

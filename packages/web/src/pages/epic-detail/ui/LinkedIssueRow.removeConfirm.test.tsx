@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, screen } from '@testing-library/react'
+import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react'
 import { useMutation } from '@tanstack/react-query'
 import { http, HttpResponse } from 'msw'
 import type { EpicDetail } from '../../../entities/epic'
@@ -202,7 +202,10 @@ describe('EpicDetailPage LinkedIssueRow Remove confirmation flow (T-002)', () =>
     fireEvent.click(screen.getByTestId('linked-issue-remove'))
     fireEvent.click(screen.getByTestId('linked-issue-remove-confirm'))
 
-    await vi.waitFor(() => expect(_removeIssueHandler).toHaveBeenCalledWith('issue-3'))
+    await waitFor(() => {
+      expect(_removeIssueHandler).toHaveBeenCalledWith('issue-3')
+      expect(screen.queryByTestId('linked-issue-remove-confirm-dialog')).toBeNull()
+    })
     expect(_removeIssueHandler).toHaveBeenCalledTimes(1)
   })
 
@@ -271,11 +274,11 @@ describe('EpicDetailPage LinkedIssueRow Remove confirmation flow (T-002)', () =>
     fireEvent.click(screen.getByTestId('linked-issue-remove'))
     fireEvent.click(screen.getByTestId('linked-issue-remove-confirm'))
 
-    await vi.waitFor(() => expect(_removeIssueHandler).toHaveBeenCalledTimes(1))
-
-    // Now removeEpicIssue.isPending is true, button should be disabled
     const removeButton = screen.getByTestId('linked-issue-remove')
-    expect(removeButton).toBeDisabled()
+    await waitFor(() => {
+      expect(_removeIssueHandler).toHaveBeenCalledTimes(1)
+      expect(removeButton).toBeDisabled()
+    })
 
     fireEvent.click(removeButton)
     expect(screen.queryByTestId('linked-issue-remove-confirm-dialog')).toBeNull()

@@ -12,6 +12,18 @@ import { InsightsPage } from './InsightsPage'
 useMswServer()
 
 const EMPTY_HANDLERS = [
+  http.get('*/api/projects/:projectId/agent/usage', () =>
+    HttpResponse.json({
+      success: true,
+      data: {
+        rangeFrom: '2026-01-01T00:00:00Z',
+        rangeTo: '2026-01-31T23:59:59Z',
+        bucketGranularity: 'day',
+        buckets: [],
+        cumulativeCostPerShip: [],
+      },
+    }),
+  ),
   http.get('*/api/projects/:projectId/issues/metrics/completion', () =>
     HttpResponse.json({ success: true, data: { bucket: 'day', window: null, buckets: [] } }),
   ),

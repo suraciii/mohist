@@ -6,8 +6,8 @@
 
 ### 前置条件
 
-- Node.js >= 18.0.0
-- npm >= 9.0.0
+- Node.js >= 22.0.0
+- npm >= 10.0.0
 - opencode CLI
 
 ### 安装

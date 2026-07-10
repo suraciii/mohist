@@ -221,7 +221,7 @@ describe('EpicDetailPage linked issues view toggle', () => {
     expect(_removeEpicIssueTracker).not.toHaveBeenCalled()
 
     fireEvent.click(screen.getByTestId('linked-issue-remove-confirm'))
-    await vi.waitFor(() =>
+    await waitFor(() =>
       expect(_removeEpicIssueTracker).toHaveBeenCalledWith({ epicId: 'epic-12345678', issueId: 'issue-1' }),
     )
   })

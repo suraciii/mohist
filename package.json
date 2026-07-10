@@ -2,6 +2,10 @@
   "name": "mohist-monorepo",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": ">=22.0.0",
+    "npm": ">=10.0.0"
+  },
   "workspaces": [
     "packages/web",
     "packages/runner"
@@ -19,6 +23,6 @@
     "install:cli": "dotnet pack packages/cli/Mohist.Cli/Mohist.Cli.csproj -c Release -o ./nupkg && dotnet tool install -g Mohist.Cli --add-source ./nupkg"
   },
   "devDependencies": {
-    "concurrently": "^9.2.1"
+    "concurrently": "^9.2.3"
   }
 }

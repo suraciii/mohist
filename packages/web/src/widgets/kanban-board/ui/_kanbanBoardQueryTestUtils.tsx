@@ -18,7 +18,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
 import { http, HttpResponse } from 'msw'
 import { ProjectProvider } from '../../../entities/project'
-import { useMswServer } from '../../../../tests/support/msw'
+import { server } from '../../../../tests/support/msw'
 import { KanbanBoard } from './KanbanBoard'
 import type { AgentStatus } from '../../../entities/agent'
 import { IssueStatus, IssueHealth, type Issue } from '../../../entities/issue'
@@ -29,13 +29,12 @@ function defaultRunnersHandler() {
   return http.get(RUNNERS_PATH, () => HttpResponse.json({ success: true, data: { runners: [] } }))
 }
 
-useMswServer(defaultRunnersHandler())
-
 export function runnerRowsHandler(rows: Array<Record<string, unknown>>) {
   return http.get(RUNNERS_PATH, () => HttpResponse.json({ success: true, data: { runners: rows } }))
 }
 
 export function renderBoard(ui: ReactNode): ReturnType<typeof render> {
+  server.use(defaultRunnersHandler())
   const queryClient = new QueryClient()
   return render(
     <QueryClientProvider client={queryClient}>

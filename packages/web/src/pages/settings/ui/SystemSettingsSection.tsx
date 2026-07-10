@@ -292,7 +292,7 @@ export function SystemSettingsSection({
           <div className="space-y-1.5">
             <label id="system-log-level-label" className="block text-xs font-medium text-muted-foreground">Log Level</label>
             <Select
-              value={currentLevel ?? undefined}
+              value={currentLevel}
               onValueChange={(value) => value && handleLogLevelChange(value)}
               disabled={saving || !currentLevel}
             >

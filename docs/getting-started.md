@@ -7,8 +7,8 @@
 | 工具 | 版本 | 检查命令 |
 |---|---|---|
 | .NET SDK | 11.0+ | `dotnet --version` |
-| Node.js | 18+ | `node --version` |
-| npm | 9+ | `npm --version` |
+| Node.js | 22+ | `node --version` |
+| npm | 10+ | `npm --version` |
 | opencode CLI | 任意 | `opencode --version` |
 
 如果 `opencode` 没装，按 [opencode 官方文档](https://opencode.ai) 装。Mohist 不内置 AI 模型，依赖 opencode 作为 coder agent。

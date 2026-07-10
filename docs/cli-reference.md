@@ -328,31 +328,7 @@ mo update runner                    仅升级执行器
 
 ## 实装差距
 
-<<<<<<< Updated upstream
 当前实装与本文无未收敛项。命令面随各命令组改进 issue 进一步对齐到本文。
-=======
-命令面随各命令组改进 issue 逐步对齐到本文。当前实装与本文的已知差距：
-
-| 当前实装 | 本文 spec | 性质 |
-|---|---|---|
-| `mo workflow list`（WorkflowProfile） | `mo project workflow profile list` | 路径变更（profile 让位给 WorkflowRun） |
-| `mo project workflow config ...` | `mo project workflow profile ...` | 正名（config → profile） |
-| `mo repo ...`（顶层）与 `mo project repo ...`（嵌套）双轨 | `mo repo --project`（扁平，作用域用 flag） | 双轨合并 + 作用域用 flag 原则 |
-| `mo agent delete` | `mo agent archive` | 正名（delete → archive） |
-| `mo label remove` | `mo label delete`（remove 转别名） | 词表统一 |
-| `mo server install/update`、`mo runner install/update` | `mo install/update` | 双入口合并 |
-| `mo issue rerun-from-stage` | `mo issue rerun --from-stage` | 命令收敛为 flag |
-| `mo status` | `mo project status` | 裸动词归位 |
-| `mo logs` | `mo system logs` | 裸动词归位 |
-| `mo use` | （删除，留 `mo project use`） | 重复入口删除 |
-| `mo notify setup` | `mo notification setup` | 资源化 |
-| `mo system info` | `mo server info` | 消歧（与 `mo info` 区分） |
-| `mo <资源> show` | `mo <资源> get` | 词表统一（show → get） |
-| `mo workflow <control/read> <runId>` | （本文已列） | 新增，待实装 |
-| `mo project workflow profile enable/disable` | （本文已列） | 新增，待实装 |
-
-未对齐处以代码为实装事实，但本文是目标。各差距对应 epic #40 下的子 issue。
->>>>>>> Stashed changes
 
 ## 典型工作流脚本
 

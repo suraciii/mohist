@@ -198,7 +198,7 @@ function MarkdownImage({ alt, src, resolveAttachment, onOpenLightbox, ...props }
     )
   }
 
-  return <img alt={alt} src={src} {...props} />
+  return <img alt={alt} src={src || undefined} {...props} />
 }
 
 function MarkdownHr(props: HrProps) {

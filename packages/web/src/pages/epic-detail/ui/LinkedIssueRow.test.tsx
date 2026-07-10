@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, screen } from '@testing-library/react'
+import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react'
 import { http, HttpResponse } from 'msw'
 import { IssueHealth, IssueStatus, WorkflowStage } from '../../../entities/issue'
 import type { LinkedIssue } from '../../../entities/epic'
@@ -180,7 +180,7 @@ describe('EpicDetailPage LinkedIssueRow inline Start', () => {
 
     fireEvent.click(screen.getByTestId('linked-issue-start'))
 
-    await vi.waitFor(() => expect(_startIssueHandler).toHaveBeenCalledWith(3))
+    await waitFor(() => expect(_startIssueHandler).toHaveBeenCalledWith(3))
     expect(_startIssueHandler).toHaveBeenCalledTimes(1)
   })
 

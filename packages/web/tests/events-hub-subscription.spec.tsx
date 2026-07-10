@@ -1,4 +1,4 @@
-import { renderHook, waitFor } from '@testing-library/react'
+import { act, renderHook, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { useEventsConnection } from '../src/shared/api/events-hub'
 import { EVENT_TYPES, REVERSE_DNS_EVENT_TYPES, TRANSCRIPT_EVENT_TYPES } from '../src/shared/lib/canonical-event-types'
@@ -29,9 +29,21 @@ function getSubscribeCalls(): Array<{ method: string; args: unknown[] }> {
   return lastConnection().invokes
 }
 
+async function renderConnectedHook(
+  onEvent = vi.fn(),
+  onTranscriptEvent?: (envelope: unknown) => void,
+) {
+  const rendered = renderHook(() => useEventsConnection('project-1', onEvent, onTranscriptEvent))
+  await waitFor(() => {
+    expect(rendered.result.current.status).toBe('connected')
+    expect(rendered.result.current.connection).not.toBeNull()
+  })
+  return rendered
+}
+
 describe('useEventsConnection subscription behavior', () => {
   it('invokes SetSubscriptionsAsync with the canonical EVENT_TYPES list after start resolves', async () => {
-    renderHook(() => useEventsConnection('project-1', vi.fn()))
+    await renderConnectedHook()
 
     await waitFor(() => {
       expect(vi.mocked(lastConnection().invoke)).toHaveBeenCalledWith(
@@ -52,27 +64,25 @@ describe('useEventsConnection subscription behavior', () => {
   })
 
   it('re-invokes SetSubscriptionsAsync with the canonical list when onreconnected fires', async () => {
-    renderHook(() => useEventsConnection('project-1', vi.fn()))
-
-    await waitFor(() => {
-      expect(vi.mocked(lastConnection().invoke)).toHaveBeenCalledWith(
-        'SetSubscriptionsAsync',
-        expect.any(Array),
-      )
-    })
+    const { result } = await renderConnectedHook()
 
     const initialSubscribeCount = getSubscribeCalls().filter(
       ({ method }) => method === 'SetSubscriptionsAsync',
     ).length
+    const initialReconnectVersion = result.current.reconnectVersion
 
     const onReconnected = getOnReconnectedCallback()
-    onReconnected()
+    await act(async () => {
+      onReconnected()
+      await Promise.resolve()
+    })
 
     await waitFor(() => {
       const totalSubscribeCalls = getSubscribeCalls().filter(
         ({ method }) => method === 'SetSubscriptionsAsync',
       ).length
       expect(totalSubscribeCalls).toBeGreaterThan(initialSubscribeCount)
+      expect(result.current.reconnectVersion).toBe(initialReconnectVersion + 1)
     })
 
     const allSubscribeCalls = getSubscribeCalls().filter(
@@ -85,7 +95,7 @@ describe('useEventsConnection subscription behavior', () => {
 
   it('registers an OnTranscriptEvent handler that forwards envelopes to the supplied callback', async () => {
     const onTranscriptEvent = vi.fn()
-    renderHook(() => useEventsConnection('project-1', vi.fn(), onTranscriptEvent))
+    await renderConnectedHook(vi.fn(), onTranscriptEvent)
 
     const handler = getTranscriptHandler()
     const envelope = { type: 'coder_text_chunk', session: 's1', chunk: 'hi' }
@@ -94,8 +104,8 @@ describe('useEventsConnection subscription behavior', () => {
     expect(onTranscriptEvent).toHaveBeenCalledWith(envelope)
   })
 
-  it('registers an OnTranscriptEvent handler even when no transcript callback is supplied', () => {
-    renderHook(() => useEventsConnection('project-1', vi.fn()))
+  it('registers an OnTranscriptEvent handler even when no transcript callback is supplied', async () => {
+    await renderConnectedHook()
 
     const handler = getTranscriptHandler()
     expect(() => handler({ type: 'coder_text_chunk' })).not.toThrow()
@@ -103,10 +113,9 @@ describe('useEventsConnection subscription behavior', () => {
 
   it('catches invoke failures and does not tear down the connection', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
 
     rejectNextInvoke(new Error('transient hub error'))
-    const { unmount } = renderHook(() => useEventsConnection('project-1', vi.fn()))
+    const { result, unmount } = await renderConnectedHook()
 
     await waitFor(() => {
       expect(warnSpy).toHaveBeenCalled()
@@ -116,17 +125,23 @@ describe('useEventsConnection subscription behavior', () => {
     expect(warnMessage).toContain('SetSubscriptionsAsync')
 
     const onReconnected = getOnReconnectedCallback()
-    expect(() => onReconnected()).not.toThrow()
+    const initialReconnectVersion = result.current.reconnectVersion
+    await act(async () => {
+      onReconnected()
+      await Promise.resolve()
+    })
 
-    const reconnectInvokeCalls = getSubscribeCalls().filter(
-      ({ method }) => method === 'SetSubscriptionsAsync',
-    ).length
-    expect(reconnectInvokeCalls).toBeGreaterThan(1)
+    await waitFor(() => {
+      const reconnectInvokeCalls = getSubscribeCalls().filter(
+        ({ method }) => method === 'SetSubscriptionsAsync',
+      ).length
+      expect(reconnectInvokeCalls).toBeGreaterThan(1)
+      expect(result.current.reconnectVersion).toBe(initialReconnectVersion + 1)
+    })
 
     unmount()
 
     warnSpy.mockRestore()
-    errorSpy.mockRestore()
   })
 
   it('does not invoke SetSubscriptionsAsync when projectId is null', async () => {

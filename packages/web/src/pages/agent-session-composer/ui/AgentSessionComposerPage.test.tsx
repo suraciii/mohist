@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, render, screen, fireEvent } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { cleanup, render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider, useMutation } from '@tanstack/react-query'
 import { MemoryRouter, Routes, Route, useLocation } from 'react-router-dom'
 import { ProjectProvider } from '../../../entities/project'
@@ -104,6 +104,7 @@ function renderPage(initialEntries = ['/agent-sessions/new']) {
               path="/agent-sessions/new"
               element={<AgentSessionComposerPage components={components} dataHook={dataHook} />}
             />
+            <Route path="/:projectName/agent-sessions/:sessionId" element={<div>Agent Session</div>} />
           </Routes>
           <LocationProbe />
         </MemoryRouter>
@@ -218,8 +219,9 @@ describe('AgentSessionComposerPage', () => {
     const textarea = await screen.findByTestId('prompt-textarea')
     fireEvent.change(textarea, { target: { value: 'Hello agent' } })
     fireEvent.click(screen.getByTestId('launch-button'))
-    await vi.waitFor(() => {
+    await waitFor(() => {
       expect(state.launchCalls).toHaveLength(1)
+      expect(screen.getByTestId('current-path')).toHaveTextContent('/Test/agent-sessions/sess-123')
     })
     expect(state.launchCalls[0]).toMatchObject({
       agentRef: 'agent-1',
@@ -233,8 +235,9 @@ describe('AgentSessionComposerPage', () => {
     const textarea = await screen.findByTestId('prompt-textarea')
     fireEvent.change(textarea, { target: { value: 'Analyze this' } })
     fireEvent.click(screen.getByTestId('launch-button'))
-    await vi.waitFor(() => {
+    await waitFor(() => {
       expect(state.launchCalls).toHaveLength(1)
+      expect(screen.getByTestId('current-path')).toHaveTextContent('/Test/agent-sessions/sess-123')
     })
     expect(state.launchCalls[0]).toMatchObject({
       agentRef: 'agent-1',
@@ -248,7 +251,7 @@ describe('AgentSessionComposerPage', () => {
     const textarea = await screen.findByTestId('prompt-textarea')
     fireEvent.change(textarea, { target: { value: 'Hello' } })
     fireEvent.click(screen.getByTestId('launch-button'))
-    await vi.waitFor(() => {
+    await waitFor(() => {
       expect(screen.getByTestId('current-path')).toHaveTextContent('/Test/agent-sessions/sess-123')
     })
   })
@@ -302,7 +305,7 @@ describe('AgentSessionComposerPage', () => {
     const textarea = await screen.findByTestId('prompt-textarea')
     fireEvent.change(textarea, { target: { value: 'Hello' } })
     fireEvent.click(screen.getByTestId('launch-button'))
-    await vi.waitFor(() => {
+    await waitFor(() => {
       expect(screen.getByTestId('error-no-runner')).toBeInTheDocument()
     })
     expect(screen.getByTestId('error-no-runner')).toHaveTextContent(/no available runner/i)
@@ -315,7 +318,7 @@ describe('AgentSessionComposerPage', () => {
     const textarea = await screen.findByTestId('prompt-textarea')
     fireEvent.change(textarea, { target: { value: 'Hello' } })
     fireEvent.click(screen.getByTestId('launch-button'))
-    await vi.waitFor(() => {
+    await waitFor(() => {
       expect(screen.getByTestId('error-external-agent')).toBeInTheDocument()
     })
     expect(screen.getByTestId('error-external-agent')).toHaveTextContent(/external agent/i)
@@ -328,7 +331,7 @@ describe('AgentSessionComposerPage', () => {
     const textarea = await screen.findByTestId('prompt-textarea')
     fireEvent.change(textarea, { target: { value: 'Hello' } })
     fireEvent.click(screen.getByTestId('launch-button'))
-    await vi.waitFor(() => {
+    await waitFor(() => {
       expect(screen.getByTestId('error-no-runner')).toBeInTheDocument()
     })
   })
@@ -340,7 +343,7 @@ describe('AgentSessionComposerPage', () => {
     const textarea = await screen.findByTestId('prompt-textarea')
     fireEvent.change(textarea, { target: { value: 'Hello' } })
     fireEvent.click(screen.getByTestId('launch-button'))
-    await vi.waitFor(() => {
+    await waitFor(() => {
       expect(screen.getByTestId('error-no-runner')).toBeInTheDocument()
     })
     fireEvent.change(screen.getByTestId('prompt-textarea'), { target: { value: 'Hello' } })

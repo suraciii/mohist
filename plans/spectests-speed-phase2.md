@@ -31,7 +31,7 @@ dotnet build packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTes
 - 跑前确认机器没有明显竞争负载。需要交替 A/B 时,为基线 commit 建独立 worktree;**不要用无路径限制的 `git stash` 切换**,避免卷入用户的其他改动。
 - T0 从当前源码重建 collection 归属,所以分析 TRX 时源码必须与生成该 TRX 的 revision 一致。历史基线在基线 worktree 中分析。
 - 当前 SpecTests 初始基线是 `total=2801, Passed=2792, NotExecuted=9`。T1/T2/T5 不改变计数;T3 只允许显式新增的 orderer 测试增加 Passed。每个被接受的任务完成后冻结新的 outcome 向量,下一任务不得减少 total/Passed 或增加 Failed/NotExecuted。
-- 当前 HEAD 已知 `Mohist.Cli.Tests.CliReferenceDocsTests.CliReference_DocumentsRealTopLevelCommandGroupsAndCriticalSubcommands` 有一个与本计划无关的预存失败(docs 含 `mo status`)。开始执行时先跑一次 unfiltered solution:若该失败仍存在,A/B 性能对照统一排除它;若已被其他改动修复,不得继续 filter。最终验证不得出现基线之外的新失败。
+- 开始执行时先跑一次 unfiltered solution，确认基线全绿。A/B 性能对照不得过滤失败；最终验证不得出现任何新失败。
 
 ## T0:落地时间线分析脚本
 

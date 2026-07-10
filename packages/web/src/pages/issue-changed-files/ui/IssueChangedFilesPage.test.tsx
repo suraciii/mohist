@@ -172,10 +172,18 @@ function setupDefaults() {
   _blockCommitDiff = false
 }
 
-function renderPage(initialRoute = '/issues/123/files') {
+const queryClients = new Set<QueryClient>()
+
+function createQueryClient() {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
+  queryClients.add(queryClient)
+  return queryClient
+}
+
+function renderPage(initialRoute = '/issues/123/files') {
+  const queryClient = createQueryClient()
 
   return render(
     <QueryClientProvider client={queryClient}>
@@ -205,6 +213,8 @@ describe('IssueChangedFilesPage', () => {
 
   afterEach(() => {
     cleanup()
+    queryClients.forEach((queryClient) => queryClient.clear())
+    queryClients.clear()
     sessionStorage.clear()
   })
 
@@ -263,7 +273,7 @@ describe('IssueChangedFilesPage', () => {
       _issueError = true
       _issueData = undefined
       renderPage()
-      await vi.waitFor(() => {
+      await waitFor(() => {
         expect(screen.getByText('Failed to load issue details.')).toBeTruthy()
       })
       expect(screen.getByText('View issue detail')).toBeTruthy()
@@ -273,7 +283,7 @@ describe('IssueChangedFilesPage', () => {
       _diffError = true
       _diffData = undefined
       renderPage()
-      await vi.waitFor(() => {
+      await waitFor(() => {
         expect(screen.getByText('Failed to load issue diff.')).toBeTruthy()
       })
       expect(screen.getByText('View issue detail')).toBeTruthy()
@@ -283,7 +293,7 @@ describe('IssueChangedFilesPage', () => {
       _commitsError = true
       _commitsData = undefined
       renderPage()
-      await vi.waitFor(() => {
+      await waitFor(() => {
         expect(screen.getByText('Failed to load issue commits.')).toBeTruthy()
       })
       expect(screen.getByText('View issue detail')).toBeTruthy()
@@ -595,9 +605,7 @@ ${Array.from({ length: 350 }, (_, i) => (i % 2 === 0 ? `-line ${i}` : `+line ${i
 
   describe('refresh-equivalent initial routing', () => {
     it('renders the files page with fresh MemoryRouter entry', async () => {
-      const queryClient = new QueryClient({
-        defaultOptions: { queries: { retry: false } },
-      })
+      const queryClient = createQueryClient()
       const { container } = render(
         <QueryClientProvider client={queryClient}>
           <ProjectProvider initialProjectId="proj-1">
@@ -629,7 +637,7 @@ ${Array.from({ length: 350 }, (_, i) => (i % 2 === 0 ? `-line ${i}` : `+line ${i
       _issueError = true
       _issueData = undefined
       renderPage()
-      await vi.waitFor(() => {
+      await waitFor(() => {
         expect(screen.getByText('Failed to load issue details.')).toBeTruthy()
       })
       expect(screen.getByText('View issue detail')).toBeTruthy()
@@ -639,7 +647,7 @@ ${Array.from({ length: 350 }, (_, i) => (i % 2 === 0 ? `-line ${i}` : `+line ${i
       _diffError = true
       _diffData = undefined
       renderPage()
-      await vi.waitFor(() => {
+      await waitFor(() => {
         expect(screen.getByText('Failed to load issue diff.')).toBeTruthy()
       })
       expect(screen.getByText('View issue detail')).toBeTruthy()
@@ -649,7 +657,7 @@ ${Array.from({ length: 350 }, (_, i) => (i % 2 === 0 ? `-line ${i}` : `+line ${i
       _commitsError = true
       _commitsData = undefined
       renderPage()
-      await vi.waitFor(() => {
+      await waitFor(() => {
         expect(screen.getByText('Failed to load issue commits.')).toBeTruthy()
       })
       expect(screen.getByText('View issue detail')).toBeTruthy()
@@ -659,7 +667,7 @@ ${Array.from({ length: 350 }, (_, i) => (i % 2 === 0 ? `-line ${i}` : `+line ${i
       _issueError = true
       _issueData = undefined
       renderPage()
-      await vi.waitFor(() => {
+      await waitFor(() => {
         expect(screen.getByText('View issue detail')).toBeTruthy()
       })
       const backLink = screen.getByText('View issue detail')
@@ -669,9 +677,7 @@ ${Array.from({ length: 350 }, (_, i) => (i % 2 === 0 ? `-line ${i}` : `+line ${i
     })
 
     it('renders error state for invalid issue number', () => {
-      const queryClient = new QueryClient({
-        defaultOptions: { queries: { retry: false } },
-      })
+      const queryClient = createQueryClient()
       render(
         <QueryClientProvider client={queryClient}>
           <ProjectProvider initialProjectId="proj-1">
@@ -898,7 +904,7 @@ ${Array.from({ length: 350 }, (_, i) => (i % 2 === 0 ? `-line ${i}` : `+line ${i
       }
 
       rerender(
-        <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <QueryClientProvider client={createQueryClient()}>
           <ProjectProvider initialProjectId="proj-1">
             <MemoryRouter initialEntries={['/issues/124/files']}>
               <Routes>

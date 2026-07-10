@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { http, HttpResponse } from 'msw'
 import { ProjectProvider } from '@/entities/project/model/ProjectContext'
 import { IssueHealth, IssueStatus, WorkflowStage, type Issue } from '@/entities/issue'
 import type {
@@ -13,11 +14,21 @@ import type {
 } from '@/entities/agent/model/types'
 import { sessionToCard, useActivityCards } from '@/widgets/coder-session/model/activity-cards'
 import { TEST_PROJECT } from '../../../../tests/test-utils'
+import { useMswServer } from '../../../../tests/support/msw'
 import { PulseZone } from './PulseZone'
 
 let _issues: Issue[] = []
 let _agentStatus: AgentStatus
 let _agentActivity: AgentActivity | null = null
+
+useMswServer(
+  http.get('*/api/projects/:projectId/issues', () =>
+    HttpResponse.json({ success: true, data: _issues }),
+  ),
+  http.get('*/api/projects/:projectId/agent/status', () =>
+    HttpResponse.json({ success: true, data: _agentStatus }),
+  ),
+)
 
 function mockIssuesResponse(issues: Issue[]) {
   _issues = issues

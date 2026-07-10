@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, render, screen, fireEvent } from '@testing-library/react'
+import { cleanup, render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider, useMutation } from '@tanstack/react-query'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import { ProjectProvider } from '../../../entities/project'
@@ -270,11 +270,11 @@ describe('AgentDetailPage', () => {
       renderPage()
       fireEvent.click(await screen.findByTestId('agent-detail-archive-btn'))
       fireEvent.click(screen.getByTestId('agent-detail-archive-confirm'))
-      await vi.waitFor(() => {
+      await waitFor(() => {
         expect(state.archiveCalls).toHaveLength(1)
+        expect(screen.queryByTestId('agent-detail-archive-confirm-dialog')).not.toBeInTheDocument()
       })
       expect(state.archiveCalls[0]).toBe('agent-1')
-      expect(screen.queryByTestId('agent-detail-archive-confirm-dialog')).not.toBeInTheDocument()
     })
 
     it('for an archived agent, the static archived notice is replaced by an Unarchive control', async () => {
@@ -290,8 +290,9 @@ describe('AgentDetailPage', () => {
       mockAgent(makeAgent({ status: 'archived' }))
       renderPage()
       fireEvent.click(await screen.findByTestId('agent-detail-unarchive-btn'))
-      await vi.waitFor(() => {
+      await waitFor(() => {
         expect(state.unarchiveCalls).toEqual(['agent-1'])
+        expect(screen.getByTestId('agent-detail-unarchive-btn')).not.toBeDisabled()
       })
     })
 

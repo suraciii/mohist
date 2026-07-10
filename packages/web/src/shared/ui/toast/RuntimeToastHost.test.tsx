@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ProjectProvider } from '../../../entities/project'
 import { RuntimeToastHost, useRuntimeToast } from './RuntimeToastHost'
@@ -74,12 +74,15 @@ describe('RuntimeToastHost', () => {
   })
 
   it('auto-dismisses a notice with a positive ttl', async () => {
+    vi.useFakeTimers()
     renderWithHost(<TriggerToast testId="runtime-toast-short" title="Reconnecting…" ttlMs={50} />)
     fireEvent.click(screen.getByTestId('trigger-runtime-toast-short'))
-    await waitFor(() => {
-      expect(screen.getByTestId('runtime-toast-short')).toBeTruthy()
+    expect(screen.getByTestId('runtime-toast-short')).toBeTruthy()
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(50)
     })
-    await new Promise((resolve) => setTimeout(resolve, 200))
+
     expect(screen.queryByTestId('runtime-toast-short')).toBeNull()
   })
 

@@ -37,7 +37,7 @@ jobs:
       # folder keyed on the props hash instead, to skip re-downloading ~120
       # packages from nuget.org on every run.
       - name: Cache NuGet packages
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.nuget/packages
           key: ${{ runner.os }}-nuget-${{ hashFiles('Directory.Packages.props') }}

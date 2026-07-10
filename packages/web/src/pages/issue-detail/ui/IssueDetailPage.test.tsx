@@ -64,6 +64,7 @@ function renderPage() {
           <LocationProbe />
           <Routes>
             <Route path="/issues/:number" element={<IssueDetailPage components={components} />} />
+            <Route path="/:projectName/agent-sessions/new" element={<div>Agent Session Composer</div>} />
           </Routes>
         </ProjectProvider>
       </MemoryRouter>
@@ -389,6 +390,7 @@ function renderPageWithToastHost() {
           <RuntimeToastHost>
             <Routes>
               <Route path="/issues/:number" element={<IssueDetailPage components={components} />} />
+              <Route path="/:projectName/agent-sessions/new" element={<div>Agent Session Composer</div>} />
             </Routes>
             <TransportNoticeTrigger />
           </RuntimeToastHost>

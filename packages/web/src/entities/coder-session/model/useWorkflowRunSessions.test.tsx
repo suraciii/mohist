@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { renderHook, waitFor } from '@testing-library/react'
+import { act, renderHook, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import type { WorkflowRunSession } from './types'
 import { useWorkflowRunSessions } from './useWorkflowRunSessions'
@@ -103,11 +103,13 @@ describe('useWorkflowRunSessions', () => {
         expect(result.current.sessions.length).toBe(1)
       })
 
-      ;(dispatchAgentEvent as any)('usage.updated', {
-        coderSessionId: 'sess-1',
-        acpSessionId: 'acp-1',
-        contextUsagePercent: 72,
-        healthStatus: 'yellow',
+      act(() => {
+        ;(dispatchAgentEvent as any)('usage.updated', {
+          coderSessionId: 'sess-1',
+          acpSessionId: 'acp-1',
+          contextUsagePercent: 72,
+          healthStatus: 'yellow',
+        })
       })
 
       await waitFor(() => {
@@ -136,10 +138,12 @@ describe('useWorkflowRunSessions', () => {
 
       const fetchCountBefore = workflowRunSessionsFetcher.mock.calls.length
 
-      ;(dispatchAgentEvent as any)('usage.updated', {
-        coderSessionId: 'sess-1',
-        contextUsagePercent: 72,
-        healthStatus: 'yellow',
+      act(() => {
+        ;(dispatchAgentEvent as any)('usage.updated', {
+          coderSessionId: 'sess-1',
+          contextUsagePercent: 72,
+          healthStatus: 'yellow',
+        })
       })
 
       await waitFor(() => {
@@ -166,13 +170,15 @@ describe('useWorkflowRunSessions', () => {
         expect(result.current.sessions.length).toBe(1)
       })
 
-      ;(dispatchAgentEvent as any)('context_health_update', {
-        coderSessionId: 'sess-1',
-        acpSessionId: 'acp-1',
-        healthStatus: 'red',
-        contextUsagePercent: 91,
-        contextWindowUsed: 182000,
-        contextWindowSize: 200000,
+      act(() => {
+        ;(dispatchAgentEvent as any)('context_health_update', {
+          coderSessionId: 'sess-1',
+          acpSessionId: 'acp-1',
+          healthStatus: 'red',
+          contextUsagePercent: 91,
+          contextWindowUsed: 182000,
+          contextWindowSize: 200000,
+        })
       })
 
       await waitFor(() => {
@@ -201,13 +207,15 @@ describe('useWorkflowRunSessions', () => {
         expect(result.current.sessions.length).toBe(1)
       })
 
-      ;(dispatchAgentEvent as any)('context_health_update', {
-        coderSessionId: undefined,
-        acpSessionId: 'acp-1',
-        healthStatus: 'yellow',
-        contextUsagePercent: 65,
-        contextWindowUsed: 130000,
-        contextWindowSize: 200000,
+      act(() => {
+        ;(dispatchAgentEvent as any)('context_health_update', {
+          coderSessionId: undefined,
+          acpSessionId: 'acp-1',
+          healthStatus: 'yellow',
+          contextUsagePercent: 65,
+          contextWindowUsed: 130000,
+          contextWindowSize: 200000,
+        })
       })
 
       await waitFor(() => {
@@ -239,13 +247,15 @@ describe('useWorkflowRunSessions', () => {
         expect(result.current.sessions.length).toBe(1)
       })
 
-      ;(dispatchAgentEvent as any)('context_health_update', {
-        coderSessionId: 'sess-unknown',
-        acpSessionId: 'acp-unknown',
-        healthStatus: 'red',
-        contextUsagePercent: 95,
-        contextWindowUsed: 190000,
-        contextWindowSize: 200000,
+      act(() => {
+        ;(dispatchAgentEvent as any)('context_health_update', {
+          coderSessionId: 'sess-unknown',
+          acpSessionId: 'acp-unknown',
+          healthStatus: 'red',
+          contextUsagePercent: 95,
+          contextWindowUsed: 190000,
+          contextWindowSize: 200000,
+        })
       })
 
       await waitFor(() => {

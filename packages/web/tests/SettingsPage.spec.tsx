@@ -92,6 +92,12 @@ useMswServer(
   http.get('*/api/system/update/status', () =>
     HttpResponse.json({ success: true, data: _systemUpdateStatusData }),
   ),
+  http.get('*/api/templates/system', () =>
+    HttpResponse.json({ success: true, data: [] }),
+  ),
+  http.get('*/api/workflow-templates/system', () =>
+    HttpResponse.json({ success: true, data: [] }),
+  ),
 )
 
 function createSystemInfo(overrides: Partial<any> = {}) {

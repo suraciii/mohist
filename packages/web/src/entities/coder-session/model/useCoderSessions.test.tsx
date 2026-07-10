@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { TEST_PROJECT, waitFor } from '../../../../tests/test-utils'
-import { renderHook } from '@testing-library/react'
+import { act, renderHook } from '@testing-library/react'
 import { useCoderSessions } from './useCoderSessions'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ProjectProvider } from '../../project/model/ProjectContext'
@@ -247,18 +247,20 @@ describe('useCoderSessions live event handling', () => {
       expect(result.current.sessions.length).toBe(1)
     })
 
-    dispatchAgentEvent('usage.updated', {
-      coderSessionId: 'session-1',
-      inputTokens: 100,
-      outputTokens: 50,
-      totalTokens: 150,
-      cachedReadTokens: 10,
-      thoughtTokens: 5,
-      costAmount: 0.01,
-      costCurrency: 'USD',
-      contextWindowSize: 200000,
-      contextWindowUsed: 150,
-    } as any)
+    act(() => {
+      dispatchAgentEvent('usage.updated', {
+        coderSessionId: 'session-1',
+        inputTokens: 100,
+        outputTokens: 50,
+        totalTokens: 150,
+        cachedReadTokens: 10,
+        thoughtTokens: 5,
+        costAmount: 0.01,
+        costCurrency: 'USD',
+        contextWindowSize: 200000,
+        contextWindowUsed: 150,
+      } as any)
+    })
 
     await waitFor(() => {
       const session = result.current.sessions[0]
@@ -283,10 +285,12 @@ describe('useCoderSessions live event handling', () => {
       expect(result.current.sessions.length).toBe(1)
     })
 
-    dispatchAgentEvent('usage.updated', {
-      coderSessionId: 'session-unknown',
-      inputTokens: 100,
-    } as any)
+    act(() => {
+      dispatchAgentEvent('usage.updated', {
+        coderSessionId: 'session-unknown',
+        inputTokens: 100,
+      } as any)
+    })
 
     await waitFor(() => {
       expect(result.current.sessions[0].usage?.inputTokens).toBeUndefined()
@@ -308,10 +312,12 @@ describe('useCoderSessions live event handling', () => {
       expect(result.current.sessions.length).toBe(1)
     })
 
-    dispatchAgentEvent('usage.updated', {
-      coderSessionId: 'session-1',
-      outputTokens: 25,
-    } as any)
+    act(() => {
+      dispatchAgentEvent('usage.updated', {
+        coderSessionId: 'session-1',
+        outputTokens: 25,
+      } as any)
+    })
 
     await waitFor(() => {
       const session = result.current.sessions[0]
