@@ -57,11 +57,26 @@ export interface ExecutionSignal {
   runnerGating?: RunnerGatingReason | null
 }
 
+export interface DriftRecoveryAction {
+  baseBranch: string
+  trigger: () => void
+  isPending: boolean
+  isQueued: boolean
+  isRebasing: boolean
+  isConflictResolving: boolean
+  isConflictFailed: boolean
+  canRequest: boolean
+  hasConflicts: string[] | null
+  error: Error | null
+  branch: string
+}
+
 export interface RuntimeDecisionSurfaceProps {
   decision: RuntimeDecision
   mutations: RuntimeDecisionSurfaceMutations
   evidence?: DecisionEvidence
   executionSignal?: ExecutionSignal | null
+  driftRecovery?: DriftRecoveryAction | null
 }
 
 interface SummaryPresentation {
@@ -158,6 +173,7 @@ export function RuntimeDecisionSurface({
   mutations,
   evidence,
   executionSignal,
+  driftRecovery,
 }: RuntimeDecisionSurfaceProps) {
   const [stopConfirming, setStopConfirming] = useState(false)
   const [sendBackOpen, setSendBackOpen] = useState(false)
@@ -278,6 +294,59 @@ export function RuntimeDecisionSurface({
         >
           Drift: {decision.driftNote}
         </p>
+      )}
+
+      {driftRecovery && decision.driftNote && (
+        <div
+          data-testid="runtime-drift-recovery"
+          data-summary={decision.summary}
+          className="mt-3 rounded-md border border-warning-border bg-warning-subtle px-3 py-2 text-xs text-warning"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <span className="font-medium text-warning">
+              Base drift needs attention
+            </span>
+            <Button
+              data-testid="runtime-drift-recovery-action"
+              variant="outline"
+              size="sm"
+              onClick={driftRecovery.trigger}
+              disabled={!driftRecovery.canRequest}
+              title={driftRecovery.canRequest ? undefined : 'Rebase unavailable right now'}
+              className="min-w-[7rem] border-warning-border text-warning hover:bg-warning-subtle"
+            >
+              {driftRecovery.isQueued
+                ? 'Rebase queued'
+                : driftRecovery.isPending
+                  ? 'Rebasing...'
+                  : driftRecovery.isConflictResolving
+                    ? 'Resolving conflicts...'
+                    : `Rebase onto ${driftRecovery.baseBranch}`}
+            </Button>
+          </div>
+          {driftRecovery.branch && (
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              Current branch <span className="font-mono">{driftRecovery.branch}</span>
+              {' '}onto <span className="font-mono">{driftRecovery.baseBranch}</span>
+            </p>
+          )}
+          {driftRecovery.hasConflicts && !driftRecovery.isConflictFailed && (
+            <div className="mt-2 rounded-md border border-danger-border bg-danger-subtle px-2 py-1 text-[11px] text-danger">
+              <span className="font-medium">Conflicting files: </span>
+              <span className="font-mono">{driftRecovery.hasConflicts.join(', ')}</span>
+            </div>
+          )}
+          {driftRecovery.isConflictFailed && (
+            <div className="mt-2 rounded-md border border-danger-border bg-danger-subtle px-2 py-1 text-[11px] text-danger">
+              Conflict resolution failed
+            </div>
+          )}
+          {driftRecovery.error && !driftRecovery.isConflictFailed && (
+            <div className="mt-2 rounded-md border border-danger-border bg-danger-subtle px-2 py-1 text-[11px] text-danger">
+              {driftRecovery.error.message}
+            </div>
+          )}
+        </div>
       )}
 
       {showExecutionSignal && executionSignal && (

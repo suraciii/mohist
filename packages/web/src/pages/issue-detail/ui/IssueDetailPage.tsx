@@ -9,7 +9,7 @@ import { useWorkflowRunSessions } from '../../../entities/coder-session'
 import { EditIssueDialog } from '../../../features/edit-issue'
 import { WorkflowConvergencePanel } from '../../../widgets/issue-workflow'
 import { NotFoundPage } from '../../not-found/ui/NotFoundPage'
-import { BranchBar, RuntimeDecisionSurface, WorkflowView, TaskProgressPanel, WorkflowSessionsPanel, IssueWorkflowProfileEditor, LatestArtifactsPanel, PrDeliverySummary, findPublishViaPrMetadata, WorkflowProfileControl } from '../../../widgets/issue-workflow'
+import { BranchBar, RuntimeDecisionSurface, WorkflowView, TaskProgressPanel, WorkflowSessionsPanel, IssueWorkflowProfileEditor, LatestArtifactsPanel, PrDeliverySummary, findPublishViaPrMetadata, WorkflowProfileControl, useRebaseRecovery } from '../../../widgets/issue-workflow'
 import { ActivityDialog, type EventTimelinePanelProps } from '../../../widgets/issue-event-timeline'
 import { formatTime } from '../../../shared/lib/format-time'
 import { useNarrowViewport } from '../../../shared/lib/use-narrow-viewport'
@@ -25,6 +25,7 @@ import {
 } from '../model/useIssueDetailMutations'
 import { deriveRuntimeDecision } from '../../../widgets/issue-workflow/model/derive-runtime-decision'
 import { buildExecutionSignal } from '../model/buildExecutionSignal'
+import { buildDriftRecoveryAction } from '../model/buildDriftRecoveryAction'
 import { ArchivedPill, DraftPill, PriorityChip, RuntimeSummaryPill } from './pills'
 import { StatusHeadline } from './StatusHeadline'
 import { WorkflowYamlDialog } from './WorkflowYamlDialog'
@@ -113,6 +114,8 @@ export function IssueDetailPage({
     || session.status === 'probing'
   ))
 
+  const rebaseRecovery = useRebaseRecovery(issueNumber)
+
   useDocumentTitle(`Issue #${issueNumber} — Mohist`, isAgentRunningOnThis)
 
   const { data: commitsData } = useIssueCommits(issueNumber)
@@ -174,6 +177,11 @@ export function IssueDetailPage({
     agentStatus: agentStatus ?? null,
     blocker: issue.blocker,
     summary: decision.summary,
+  })
+  const driftRecovery = buildDriftRecoveryAction({
+    drift: issue.drift ?? null,
+    rebase: rebaseRecovery,
+    baseBranchFallback: issue.repository?.baseBranch ?? null,
   })
   const comments = [...(issue.comments ?? [])].sort(
     (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
@@ -321,6 +329,7 @@ export function IssueDetailPage({
                     workflowRunId: issue.workflowRunId ?? null,
                   }}
                   executionSignal={executionSignal}
+                  driftRecovery={driftRecovery}
                   mutations={{
                     approveMutation,
                     sendBackMutation,

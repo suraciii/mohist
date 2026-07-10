@@ -16,7 +16,7 @@ export { WorkflowSessionsPanel } from './ui/WorkflowSessionsPanel'
 export { RuntimeDecisionSurface } from './ui/RuntimeDecisionSurface'
 export type { RuntimeDecisionSurfaceProps } from './ui/RuntimeDecisionSurface'
 export type { RuntimeDecisionSurfaceMutations } from './ui/RuntimeDecisionSurface'
-export type { DecisionEvidence, ExecutionSignal, ActiveSessionCue, RunnerGatingReason } from './ui/RuntimeDecisionSurface'
+export type { DecisionEvidence, ExecutionSignal, ActiveSessionCue, RunnerGatingReason, DriftRecoveryAction } from './ui/RuntimeDecisionSurface'
 export { getStopConsequenceCopy, invokeAction } from './runtime-action-handlers'
 export type { InvokeActionParams, InvokeActionCallbacks, StopConsequenceCopy } from './runtime-action-handlers'
 export { WorkflowRunStatusPill } from './ui/WorkflowRunStatusPill'
@@ -57,3 +57,10 @@ export type {
   SiblingSessionNavigation,
   UseSiblingSessionsOptions,
 } from './model/useSiblingSessions'
+export { useRebaseRecovery } from './model/useRebaseRecovery'
+export type {
+  RebaseRecoveryResult,
+  RebaseRecoveryWorkspaceStatus,
+  RebaseRecoveryWorkspaceView,
+  RebaseRecovery,
+} from './model/useRebaseRecovery'
