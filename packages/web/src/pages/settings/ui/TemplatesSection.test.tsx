@@ -87,6 +87,15 @@ const handlers = [
   http.get(`/api/projects/${PROJECT_ID}/templates`, () =>
     HttpResponse.json({ success: true, data: EFFECTIVE_TEMPLATES }),
   ),
+  http.post('/api/templates/extract-variables', () =>
+    HttpResponse.json({ success: true, data: { variables: [] } }),
+  ),
+  http.post(`/api/projects/${PROJECT_ID}/templates/:key/preview`, () =>
+    HttpResponse.json({
+      success: true,
+      data: { rendered: 'Preview', missingVariables: [], depth: 0 },
+    }),
+  ),
   http.delete(
     `/api/projects/${PROJECT_ID}/templates/:key/override`,
     ({ params }) =>

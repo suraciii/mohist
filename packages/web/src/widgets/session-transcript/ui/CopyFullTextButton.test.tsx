@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom'
-import { fireEvent, render, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { toast } from 'sonner'
 import { CopyFullTextButton } from './CopyFullTextButton'
@@ -179,7 +179,7 @@ describe('CopyFullTextButton', () => {
     expect(button.textContent).toBe('Copy full text')
   })
 
-  it('uses the robust clipboard-existence check from ArtifactContentViewer (no bare .then)', () => {
+  it('uses the robust clipboard-existence check from ArtifactContentViewer (no bare .then)', async () => {
     const writeText = vi.fn().mockResolvedValue(undefined)
     setClipboard({ writeText })
 
@@ -189,6 +189,7 @@ describe('CopyFullTextButton', () => {
     fireEvent.click(button)
 
     expect(writeText).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(button.getAttribute('data-state')).toBe('copied'))
   })
 
   it('memoizes the serialized text on the turns reference', async () => {
@@ -260,11 +261,20 @@ describe('CopyFullTextButton', () => {
       const button = document.querySelector('[data-copy-full-text]') as HTMLButtonElement
       fireEvent.click(button)
 
-      await vi.waitFor(() => expect(button.getAttribute('data-state')).toBe('copied'))
-      vi.advanceTimersByTime(2000)
-      await vi.waitFor(() => expect(button.getAttribute('data-state')).toBe('idle'))
+      const copyPromise = writeText.mock.results[0]?.value as Promise<void>
+      await act(async () => {
+        await copyPromise
+      })
+      expect(button.getAttribute('data-state')).toBe('copied')
+      act(() => {
+        vi.advanceTimersByTime(2000)
+      })
+      expect(button.getAttribute('data-state')).toBe('idle')
       expect(button.textContent).toBe('Copy full text')
     } finally {
+      act(() => {
+        vi.runOnlyPendingTimers()
+      })
       vi.useRealTimers()
     }
   })
@@ -279,11 +289,20 @@ describe('CopyFullTextButton', () => {
       const button = document.querySelector('[data-copy-full-text]') as HTMLButtonElement
       fireEvent.click(button)
 
-      await vi.waitFor(() => expect(button.getAttribute('data-state')).toBe('failed'))
-      vi.advanceTimersByTime(2000)
-      await vi.waitFor(() => expect(button.getAttribute('data-state')).toBe('idle'))
+      const copyPromise = writeText.mock.results[0]?.value as Promise<void>
+      await act(async () => {
+        await copyPromise.catch(() => undefined)
+      })
+      expect(button.getAttribute('data-state')).toBe('failed')
+      act(() => {
+        vi.advanceTimersByTime(2000)
+      })
+      expect(button.getAttribute('data-state')).toBe('idle')
       expect(button.textContent).toBe('Copy full text')
     } finally {
+      act(() => {
+        vi.runOnlyPendingTimers()
+      })
       vi.useRealTimers()
     }
   })

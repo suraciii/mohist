@@ -76,13 +76,14 @@ function getNumberInputByLabel(label: string): HTMLInputElement {
 
 function renderSection() {
   const queryClient = createMockQueryClient()
-  return baseRender(
+  const result = baseRender(
     <MemoryRouter>
       <QueryClientProvider client={queryClient}>
         <AgentSettingsSection />
       </QueryClientProvider>
     </MemoryRouter>,
   )
+  return { ...result, queryClient }
 }
 
 async function renderLoaded() {
@@ -114,9 +115,10 @@ afterEach(() => {
 
 describe('AgentSettingsSection (Runtime tab)', () => {
   it('renders the runtime panel successfully when config exposes scheduling values', async () => {
-    renderSection()
+    const { queryClient } = renderSection()
 
     await waitFor(() => {
+      expect(queryClient.isFetching()).toBe(0)
       expect(screen.getByText('Runtime')).toBeInTheDocument()
     })
     expect(screen.queryByText(/Failed to load settings/i)).not.toBeInTheDocument()

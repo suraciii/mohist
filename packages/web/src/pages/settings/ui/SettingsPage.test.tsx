@@ -37,6 +37,51 @@ useMswServer(
   http.put('/api/config/:key', () => {
     return HttpResponse.json({ success: true, data: _configData })
   }),
+  http.get('/api/opencode/runtime', () =>
+    HttpResponse.json({
+      success: true,
+      data: { mode: 'local-opencode', command: 'opencode', model: null, note: '' },
+    }),
+  ),
+  http.get('/api/projects/:projectId/opencode/models', () =>
+    HttpResponse.json({ success: true, data: { models: [], modelVariants: {} } }),
+  ),
+  http.get('/api/projects/:projectId/workflow-profile/variables', () =>
+    HttpResponse.json({ success: true, data: { vars: null, stages: null } }),
+  ),
+  http.get('/api/projects/:projectId/inbox/subscription', () =>
+    HttpResponse.json({
+      success: true,
+      data: {
+        workflow_failed: true,
+        approval_requested: true,
+        issue_started: true,
+        issue_completed: true,
+      },
+    }),
+  ),
+  http.get('/api/system/info', () =>
+    HttpResponse.json({
+      success: true,
+      data: {
+        running: { version: '1.0.0', gitHash: 'test-hash', startedAt: '2026-01-01T00:00:00Z' },
+        source: { path: '/repo', branch: 'master', head: 'test-hash', dirty: false },
+        install: {
+          mode: 'local-source',
+          serviceManager: null,
+          serverUnit: null,
+          runnerUnit: null,
+          reason: null,
+        },
+        update: { status: 'up-to-date', available: false, reason: null },
+        services: { server: 'active', runner: 'active' },
+        paths: { db: '/db', config: '/config', opencode: '/opencode', logs: '/logs' },
+      },
+    }),
+  ),
+  http.get('/api/system/update/status', () =>
+    HttpResponse.json({ success: true, data: { hasJob: false, job: null } }),
+  ),
 )
 
 beforeEach(() => {

@@ -146,6 +146,10 @@ export interface EpicDetailRenderOptions {
 
 export function renderPage(options: EpicDetailRenderOptions = {}): RenderResult & { rerenderPage: () => void } {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  const epicId = options.epic?.id ?? epic.id
+  const eventsQueryKey = ['epics', 'proj-1', epicId, 'events']
+  queryClient.setQueryDefaults(eventsQueryKey, { staleTime: Infinity })
+  queryClient.setQueryData(eventsQueryKey, [])
   if (options.epic) {
     queryClient.setQueryDefaults(['epics', 'proj-1', 'epic-12345678'], { staleTime: Infinity })
     queryClient.setQueryData(['epics', 'proj-1', 'epic-12345678'], options.epic)

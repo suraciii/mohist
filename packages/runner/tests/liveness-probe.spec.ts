@@ -277,29 +277,18 @@ describe("forceReconnect", () => {
   })
 
   it("short-circuits start when the abort signal fires after stop completes but before start", async () => {
-    let triggerStart: () => void = () => undefined
+    const ac = new AbortController()
     const conn = makeConnection({
       state: signalR.HubConnectionState.Connected,
       stop: async () => {
-        // Stop resolves immediately; the abort fires before start.
+        queueMicrotask(() => ac.abort())
       },
-      start: () => new Promise<void>((resolve) => {
-        triggerStart = resolve
-      }),
     })
-    const ac = new AbortController()
-    const reconnectPromise = forceReconnect(conn as unknown as signalR.HubConnection, undefined, ac.signal)
 
-    // Let stop's microtask settle.
-    await Promise.resolve()
-    // Abort now — start must NOT be called (and must NOT resolve via start).
-    ac.abort()
-    await reconnectPromise
+    await forceReconnect(conn as unknown as signalR.HubConnection, undefined, ac.signal)
 
     expect(conn.stop).toHaveBeenCalledTimes(1)
     expect(conn.start).not.toHaveBeenCalled()
-    // Drain the dangling start promise so vitest doesn't keep it alive.
-    triggerStart()
   })
 
   it("starts after stop when the abort signal remains active", async () => {

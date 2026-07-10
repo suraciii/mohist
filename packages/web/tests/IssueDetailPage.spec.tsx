@@ -66,6 +66,31 @@ useMswServer(
   http.get('*/api/projects/:projectId/issues/:number/workflow-profile/variables', () =>
     HttpResponse.json({ success: true, data: { vars: {}, stages: {} } }),
   ),
+  http.get('*/api/projects/:projectId/workflow-profile/variables', () =>
+    HttpResponse.json({ success: true, data: { vars: {}, stages: {} } }),
+  ),
+  http.get('*/api/projects/:projectId/issues', () =>
+    HttpResponse.json({ success: true, data: [] }),
+  ),
+  http.get('*/api/projects/:projectId/agent/status', () =>
+    HttpResponse.json({
+      success: true,
+      data: {
+        running: false,
+        issueId: null,
+        issueNumber: null,
+        activeAgents: [],
+        runnerAvailable: true,
+        capacity: { active: 0, max: 1 },
+      },
+    }),
+  ),
+  http.get('*/api/projects/:projectId/issues/:number/workflow/artifacts', () =>
+    HttpResponse.json({ success: true, data: [] }),
+  ),
+  http.get('*/api/workflow-runs/:runId/sessions', () =>
+    HttpResponse.json({ success: true, data: [] }),
+  ),
   http.patch('*/api/projects/:projectId/issues/:number/workflow-profile/variables', () =>
     HttpResponse.json({ success: true, data: { vars: {}, stages: {} } }),
   ),
@@ -1073,7 +1098,7 @@ describe('IssueDetailPage workflow profile integration', () => {
     expect(reason).toHaveTextContent(/started/i)
   })
 
-  it.skip('sends the new profile id to the PATCH endpoint when the user changes profile on a backlog issue', async () => {
+  it('sends the new profile id to the PATCH endpoint when the user changes profile on a backlog issue', async () => {
     const _patchHandler = vi.fn()
     server.use(
       http.patch('*/api/projects/:projectId/issues/:number', async ({ params, request }) => {
@@ -1099,6 +1124,7 @@ describe('IssueDetailPage workflow profile integration', () => {
 
     renderWithQueryClient(<IssueDetailPage />)
 
+    await screen.findByRole('option', { name: 'PR' })
     const select = await waitFor(() => screen.getByTestId('issue-workflow-profile-select') as HTMLSelectElement)
     expect(select.disabled).toBe(false)
 

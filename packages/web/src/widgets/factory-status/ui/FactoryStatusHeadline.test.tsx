@@ -32,6 +32,17 @@ useMswServer(
   http.get(STATUS_PATH, () =>
     HttpResponse.json({ success: true, data: makeAgentStatus({ runnerAvailable: true }) }),
   ),
+  http.get(COST_PATH, () =>
+    HttpResponse.json({
+      success: true,
+      data: {
+        totalCost: { amount: null, currency: null, sampleCount: 0 },
+        todayCost: { amount: null, currency: null, sampleCount: 0 },
+        doneIssuesCount: 0,
+        costPerShip: { amount: null, currency: null, sampleCount: 0 },
+      },
+    }),
+  ),
 )
 
 function makeIssue(overrides: Partial<Issue> = {}): Issue {

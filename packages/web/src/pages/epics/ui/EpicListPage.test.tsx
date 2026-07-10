@@ -181,6 +181,7 @@ function renderPage() {
           <LocationProbe />
           <Routes>
             <Route path="/epics" element={<EpicListPage />} />
+            <Route path="/epics/:id" element={<div>Epic Detail</div>} />
           </Routes>
         </MemoryRouter>
       </ProjectProvider>

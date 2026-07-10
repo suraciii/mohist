@@ -590,6 +590,9 @@ describe('SettingsSearch scope-aware navigation', () => {
     const pathname = screen.getByTestId('location-spy').getAttribute('data-pathname')
     expect(pathname).toBe('/settings/ai')
     expect(pathname ?? '').not.toContain('selected-project')
+    await waitFor(() => {
+      expect(document.activeElement?.id).toBe('settings-default-model')
+    })
   })
 
   it('routes a project-level result (Repositories) to /:projectName/settings/<section>', async () => {
@@ -611,6 +614,9 @@ describe('SettingsSearch scope-aware navigation', () => {
     const pathname = screen.getByTestId('location-spy').getAttribute('data-pathname')
     expect(pathname).toBe('/selected-project/settings/repositories')
     expect(pathname ?? '').toContain('selected-project')
+    await waitFor(() => {
+      expect(document.activeElement?.id).toBe('repository-add-name')
+    })
   })
 
   it('routes another application-level result (Runtime) to /settings/<section> without a project segment', async () => {
@@ -630,6 +636,9 @@ describe('SettingsSearch scope-aware navigation', () => {
       expect(screen.queryByTestId('settings-search-input')).not.toBeInTheDocument()
     })
     expect(screen.getByTestId('location-spy').getAttribute('data-pathname')).toBe('/settings/agent')
+    await waitFor(() => {
+      expect(document.activeElement?.id).toBe('agent-runtime-timeout')
+    })
   })
 
   it('routes a Workflows result (project scope) to /:projectName/settings/workflows', async () => {
@@ -651,6 +660,9 @@ describe('SettingsSearch scope-aware navigation', () => {
     const pathname = screen.getByTestId('location-spy').getAttribute('data-pathname')
     expect(pathname).toBe('/selected-project/settings/workflows')
     expect(pathname ?? '').toContain('selected-project')
+    await waitFor(() => {
+      expect(document.activeElement?.id).toBe('workflow-profiles-section')
+    })
   })
 
   it('does not route a project-level result to /settings/<section> when no project is selected', async () => {

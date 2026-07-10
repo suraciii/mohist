@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { cleanup, fireEvent, screen } from '@testing-library/react'
+import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react'
 import { http, HttpResponse } from 'msw'
 
 import { EpicStatus } from '../../../entities/epic'
@@ -107,7 +107,7 @@ describe('EpicDetailPage single prominent primary action (T-001)', () => {
     await screen.findByTestId('start-epic-trigger')
     fireEvent.click(screen.getByTestId('start-epic-trigger'))
 
-    await vi.waitFor(() => {
+    await waitFor(() => {
       expect(_startEpicHandler).toHaveBeenCalledTimes(1)
       expect(_startEpicHandler).toHaveBeenCalledWith('epic-12345678')
     })
@@ -134,7 +134,7 @@ describe('EpicDetailPage single prominent primary action (T-001)', () => {
     expect(screen.getByText('Pause Epic?')).toBeTruthy()
 
     fireEvent.click(screen.getByTestId('pause-epic-confirm'))
-    await vi.waitFor(() => expect(_pauseEpicHandler).toHaveBeenCalledWith(
+    await waitFor(() => expect(_pauseEpicHandler).toHaveBeenCalledWith(
       { id: 'epic-12345678', reason: null },
     ))
   })
@@ -197,7 +197,7 @@ describe('EpicDetailPage single prominent primary action (T-001)', () => {
     await screen.findByTestId('resume-epic-trigger')
     fireEvent.click(screen.getByTestId('resume-epic-trigger'))
 
-    await vi.waitFor(() => {
+    await waitFor(() => {
       expect(_resumeEpicHandler).toHaveBeenCalledTimes(1)
       expect(_resumeEpicHandler).toHaveBeenCalledWith('epic-12345678')
     })
@@ -285,7 +285,7 @@ describe('EpicDetailPage single prominent primary action (T-001)', () => {
     await screen.findByTestId('mark-epic-done')
     fireEvent.click(screen.getByTestId('mark-epic-done'))
 
-    await vi.waitFor(() => {
+    await waitFor(() => {
       expect(_markDoneHandler).toHaveBeenCalledTimes(1)
       expect(_markDoneHandler).toHaveBeenCalledWith('epic-12345678')
     })
@@ -503,7 +503,7 @@ describe('EpicDetailPage Start Epic refresh on success', () => {
     await screen.findByTestId('start-epic-trigger')
     fireEvent.click(screen.getByTestId('start-epic-trigger'))
 
-    await vi.waitFor(() => {
+    await waitFor(() => {
       expect(_startEpicHandler).toHaveBeenCalledTimes(1)
       expect(_startEpicHandler).toHaveBeenCalledWith('epic-12345678')
     })

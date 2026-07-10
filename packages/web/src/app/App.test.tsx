@@ -29,6 +29,76 @@ useMswServer(
     inboxRequests++
     return HttpResponse.json({ success: true, data: [] })
   }),
+  http.get('*/api/projects/:projectId/issues', () =>
+    HttpResponse.json({ success: true, data: [] }),
+  ),
+  http.get('*/api/projects/:projectId/repositories', () =>
+    HttpResponse.json({ success: true, data: [] }),
+  ),
+  http.get('*/api/projects/:projectId/workflow-profile', ({ params }) =>
+    HttpResponse.json({
+      success: true,
+      data: {
+        projectId: params.projectId,
+        defaultTemplateId: null,
+        disabledWorkflowProfileIds: [],
+      },
+    }),
+  ),
+  http.get('*/api/workflow-templates/system', () =>
+    HttpResponse.json({ success: true, data: [] }),
+  ),
+  http.get('*/api/issue-templates', () =>
+    HttpResponse.json({ success: true, data: [] }),
+  ),
+  http.get('*/api/config', () =>
+    HttpResponse.json({
+      success: true,
+      data: {
+        agentTimeout: 600,
+        taskTimeout: 600,
+        stageTimeout: 3600,
+        maxConcurrentAgents: 3,
+        maxGracePeriods: 3,
+        pollInterval: 5000,
+        logLevel: 'INFO',
+      },
+    }),
+  ),
+  http.get('*/api/opencode/runtime', () =>
+    HttpResponse.json({
+      success: true,
+      data: { mode: 'local-opencode', command: 'opencode', model: null, note: '' },
+    }),
+  ),
+  http.get('*/api/projects/:projectId/agent/activity', () =>
+    HttpResponse.json({
+      success: true,
+      data: {
+        summary: {
+          active: 0,
+          waiting: 0,
+          completed: 0,
+          failed: 0,
+          slots: { active: 0, max: 8 },
+        },
+        sessions: [],
+        waiting: [],
+      },
+    }),
+  ),
+  http.get('*/api/projects/:projectId/agent/usage', () =>
+    HttpResponse.json({
+      success: true,
+      data: {
+        rangeFrom: '2026-01-01T00:00:00Z',
+        rangeTo: '2026-01-31T23:59:59Z',
+        bucketGranularity: 'day',
+        buckets: [],
+        cumulativeCostPerShip: [],
+      },
+    }),
+  ),
   http.get('*/api/projects/:projectId/agent/status', () =>
     HttpResponse.json({
       success: true,
@@ -60,6 +130,28 @@ useMswServer(
       success: true,
       data: { window: null, stages: [], flowEfficiencyRatio: null, waitBreakout: null },
     }),
+  ),
+  http.get('*/api/system/info', () =>
+    HttpResponse.json({
+      success: true,
+      data: {
+        running: { version: '1.0.0', gitHash: 'test-hash', startedAt: '2026-01-01T00:00:00Z' },
+        source: { path: '/repo', branch: 'master', head: 'test-hash', dirty: false },
+        install: {
+          mode: 'local-source',
+          serviceManager: null,
+          serverUnit: null,
+          runnerUnit: null,
+          reason: null,
+        },
+        update: { status: 'up-to-date', available: false, reason: null },
+        services: { server: 'active', runner: 'active' },
+        paths: { db: '/db', config: '/config', opencode: '/opencode', logs: '/logs' },
+      },
+    }),
+  ),
+  http.get('*/api/system/update/status', () =>
+    HttpResponse.json({ success: true, data: { hasJob: false, job: null } }),
   ),
   http.get('*/logs/tail', () => {
     logRequests++

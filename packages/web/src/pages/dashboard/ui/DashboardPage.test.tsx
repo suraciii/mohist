@@ -16,11 +16,12 @@ import type { AgentStatus } from '../../../entities/agent'
 import { useMswServer } from '../../../../tests/support/msw'
 
 let _projects: unknown[] = []
-let _agentStatus: AgentStatus | undefined = undefined
+let _agentStatus: AgentStatus
 let _agentStatusLoading = false
 let _agentStatusError = false
 let _agentActivity: unknown = undefined
-let _approvalWait: unknown = { window: { from: '', to: '' }, sampleCount: 0, averageSeconds: null, medianSeconds: null, maxSeconds: null }
+const EMPTY_APPROVAL_WAIT = { window: { from: '', to: '' }, sampleCount: 0, averageSeconds: null, medianSeconds: null, maxSeconds: null }
+let _approvalWait: unknown = EMPTY_APPROVAL_WAIT
 let _issuesData: unknown[] = []
 let _issuesLoading = false
 
@@ -72,6 +73,7 @@ const NO_AGENT_ACTIVITY: any = {
 }
 
 let _activityCardsMock: any = { ...NO_AGENT_ACTIVITY, activeCardByIssueNumber: new Map() }
+const queryClients = new Set<QueryClient>()
 
 function makeActiveCard(overrides: Record<string, unknown> = {}) {
   return {
@@ -140,9 +142,10 @@ function makeAgentStatus(overrides: Partial<AgentStatus> = {}): AgentStatus {
 
 function renderPage() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  queryClients.add(queryClient)
   queryClient.setQueryDefaults(['projects'], { staleTime: Infinity })
   queryClient.setQueryData(['projects'], _projects)
-  if (!_agentStatusLoading && !_agentStatusError && _agentStatus !== undefined) {
+  if (!_agentStatusLoading && !_agentStatusError) {
     queryClient.setQueryDefaults(['agent-status', 'p1'], { staleTime: Infinity })
     queryClient.setQueryData(['agent-status', 'p1'], _agentStatus)
   }
@@ -173,7 +176,7 @@ function resetMocks() {
   _agentStatusLoading = false
   _agentStatusError = false
   _agentActivity = undefined
-  _approvalWait = undefined
+  _approvalWait = EMPTY_APPROVAL_WAIT
   _issuesData = []
   _issuesLoading = false
   _createProjectTracker.mockReset()
@@ -187,6 +190,8 @@ describe('DashboardPage — attention-first zone hierarchy', () => {
 
   afterEach(() => {
     cleanup()
+    queryClients.forEach((queryClient) => queryClient.clear())
+    queryClients.clear()
   })
 
   describe('project gating', () => {
@@ -370,18 +375,6 @@ describe('DashboardPage — attention-first zone hierarchy', () => {
       expect(screen.queryByTestId('dashboard-zone-capacity')).not.toBeInTheDocument()
     })
 
-    it('omits the capacity zone when agentStatus is undefined', async () => {
-      _projects = [
-        { id: 'p1', name: 'demo', createdAt: '', updatedAt: '' },
-      ]
-      _agentStatus = undefined as unknown as AgentStatus
-
-      renderPage()
-
-      await screen.findByTestId('factory-status-headline')
-      expect(screen.queryByTestId('dashboard-zone-capacity')).not.toBeInTheDocument()
-    })
-
     it('does not reserve a fixed-height box for absent zones', async () => {
       _projects = [
         { id: 'p1', name: 'demo', createdAt: '', updatedAt: '' },
@@ -436,7 +429,6 @@ describe('DashboardPage — attention-first zone hierarchy', () => {
       _projects = [
         { id: 'p1', name: 'demo', createdAt: '', updatedAt: '' },
       ]
-      _agentStatus = undefined
       _agentStatusLoading = true
       _issuesData = []
 

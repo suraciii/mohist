@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, waitFor } from '@testing-library/react'
+import { act, render, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { http, HttpResponse } from 'msw'
 import { toast } from 'sonner'
 import { __testing__, type EventsConnectionHook } from '../src/app/providers/LiveTaskProvider'
 import { dispatchRebaseEvent, onRebaseEvent } from '../src/entities/issue/model/rebase-events'
@@ -9,6 +10,23 @@ import { RuntimeToastHost } from '../src/shared/ui/toast'
 import { ProjectProvider } from '../src/entities/project'
 import { useLiveTask } from '../src/entities/issue'
 import { onAgentEvent } from '../src/entities/agent'
+import { useMswServer } from './support/msw'
+
+useMswServer(
+  http.get('*/api/projects/:projectId/agent/status', () =>
+    HttpResponse.json({
+      success: true,
+      data: {
+        running: false,
+        issueId: null,
+        issueNumber: null,
+        activeAgents: [],
+        runnerAvailable: true,
+        capacity: { active: 0, max: 1 },
+      },
+    }),
+  ),
+)
 
 const eventsConnectionHook = vi.fn<EventsConnectionHook>(() => ({
   status: 'connected',
@@ -296,34 +314,6 @@ describe('LiveTaskProvider transcript routing', () => {
     off()
   })
 
-  // Legacy approval_requested event format is no longer directly handled;
-  // only the reverse-DNS com.mohist.workflow.stage.approval-requested is routed.
-  it.skip('shows approval toast for legacy approval_requested events', async () => {
-    const queryClient = new QueryClient()
-    queryClient.setQueryData(['issues'], [{ id: 'issue-1', number: 82 }])
-
-    rtlRender(
-      <QueryClientProvider client={queryClient}>
-        <ProjectProvider initialProjectId="project-1">
-          <RuntimeToastHost>
-            <LiveTaskProvider eventsConnectionHook={eventsConnectionHook}>
-              <LiveTaskProbe />
-            </LiveTaskProvider>
-          </RuntimeToastHost>
-        </ProjectProvider>
-      </QueryClientProvider>,
-    )
-
-    const connectionCall = eventsConnectionHook.mock.calls[0]
-    const onEvent = connectionCall[1] as (eventName: string, envelope: unknown) => void
-
-    onEvent('approval_requested', { issueId: 'issue-1', projectId: 'project-1', stage: 'review' })
-
-    await waitFor(() => {
-      expect(toast.info).toHaveBeenCalledWith('Issue #82 needs approval')
-    })
-  })
-
   it('shows approval toast for reverse-DNS approval-requested events', async () => {
     const queryClient = new QueryClient()
     const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
@@ -474,19 +464,21 @@ describe('LiveTaskProvider transcript routing', () => {
     const connectionCall = eventsConnectionHook.mock.calls[0]
     const onEvent = connectionCall[1] as (eventName: string, envelope: unknown) => void
 
-    onEvent('com.mohist.workflow.stage.failed', {
-      id: 'evt-rebase-conflict-1',
-      source: '/mohist/test',
-      specVersion: '1.0',
-      type: 'com.mohist.workflow.stage.failed',
-      payload: {
-        issueId: 'issue-1',
-        projectId: 'project-1',
-        issueNumber: 82,
-        operation: 'rebase',
-        conflicts: ['src/App.tsx'],
-        error: 'conflict',
-      },
+    act(() => {
+      onEvent('com.mohist.workflow.stage.failed', {
+        id: 'evt-rebase-conflict-1',
+        source: '/mohist/test',
+        specVersion: '1.0',
+        type: 'com.mohist.workflow.stage.failed',
+        payload: {
+          issueId: 'issue-1',
+          projectId: 'project-1',
+          issueNumber: 82,
+          operation: 'rebase',
+          conflicts: ['src/App.tsx'],
+          error: 'conflict',
+        },
+      })
     })
 
     await waitFor(() => {

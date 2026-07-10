@@ -164,6 +164,8 @@ function renderPage() {
             <Route path="/epic/:id" element={<EpicDetailPage components={components} />} />
             <Route path="/epics" element={<div>Epics</div>} />
             <Route path="/issues/:number" element={<div>Issue</div>} />
+            <Route path="/agent-sessions/new" element={<div>Agent Session Composer</div>} />
+            <Route path="/:projectName/agent-sessions/:sessionId" element={<div>Agent Session</div>} />
           </Routes>
         </MemoryRouter>
       </ProjectProvider>
@@ -208,7 +210,7 @@ describe('EpicDetailPage', () => {
     fireEvent.click(option)
     fireEvent.click(screen.getByRole('button', { name: 'Add Issue' }))
 
-    await vi.waitFor(() => {
+    await waitFor(() => {
       expect(_addEpicIssueHandler).toHaveBeenCalledWith(
         { epicId: 'epic-12345678', issueId: 'issue-3' },
       )
@@ -232,7 +234,7 @@ describe('EpicDetailPage', () => {
     fireEvent.click(option)
     fireEvent.click(screen.getByRole('button', { name: 'Add Issue' }))
 
-    await vi.waitFor(() => {
+    await waitFor(() => {
       expect(screen.getByText('Issue already belongs to Epic #epic-run Runtime model.')).toBeTruthy()
     })
   })
@@ -248,7 +250,7 @@ describe('EpicDetailPage', () => {
 
     fireEvent.click(screen.getByTestId('linked-issue-remove-confirm'))
 
-    await vi.waitFor(() => {
+    await waitFor(() => {
       expect(_removeEpicIssueHandler).toHaveBeenCalledWith({ epicId: 'epic-12345678', issueId: 'issue-1' })
     })
   })
@@ -392,7 +394,7 @@ progress: {
 
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
 
-    await vi.waitFor(() => {
+    await waitFor(() => {
       expect(_updateEpicHandler).toHaveBeenCalledTimes(1)
       const [callId, callBody] = _updateEpicHandler.mock.calls[0]
       expect(callId).toBe('epic-12345678')
@@ -437,7 +439,7 @@ progress: {
     fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Renamed' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
 
-    await vi.waitFor(() => expect(_updateEpicHandler).toHaveBeenCalled())
+    await waitFor(() => expect(_updateEpicHandler).toHaveBeenCalled())
 
     expect(screen.getByText('Member issue')).toBeTruthy()
     expect(screen.getByTestId('linked-issues-list-region')).toHaveTextContent('active')
@@ -453,7 +455,7 @@ progress: {
 
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
 
-    await vi.waitFor(() => {
+    await waitFor(() => {
       const saveButton = screen.getByRole('button', { name: 'Saving...' })
       expect(saveButton).toBeDisabled()
     })
@@ -469,7 +471,7 @@ progress: {
 
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
 
-    await vi.waitFor(() => {
+    await waitFor(() => {
       expect(screen.getByText('Update failed: invalid priority')).toBeTruthy()
     })
   })

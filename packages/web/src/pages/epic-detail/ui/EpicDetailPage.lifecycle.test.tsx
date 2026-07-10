@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { cleanup, fireEvent, screen } from '@testing-library/react'
+import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react'
 import { http, HttpResponse } from 'msw'
 
 import { EpicStatus } from '../../../entities/epic'
@@ -179,7 +179,7 @@ describe('EpicDetailPage lifecycle guards', () => {
 
     fireEvent.click(markDone)
 
-    await vi.waitFor(() => expect(_markDoneHandler).toHaveBeenCalledWith('epic-12345678'))
+    await waitFor(() => expect(_markDoneHandler).toHaveBeenCalledWith('epic-12345678'))
   })
 
   it('opens a close confirmation dialog that lists the linked issue count before submitting', async () => {
@@ -202,7 +202,7 @@ describe('EpicDetailPage lifecycle guards', () => {
 
     fireEvent.click(screen.getByTestId('close-epic-confirm'))
 
-    await vi.waitFor(() => expect(_closeEpicHandler).toHaveBeenCalledWith('epic-12345678'))
+    await waitFor(() => expect(_closeEpicHandler).toHaveBeenCalledWith('epic-12345678'))
   })
 
   it('shows a singular linked issue message when only one issue is associated', async () => {
@@ -340,7 +340,7 @@ describe('EpicDetailPage pause/resume actions', () => {
 
     fireEvent.click(screen.getByTestId('pause-epic-confirm'))
 
-    await vi.waitFor(() => expect(_pauseEpicHandler).toHaveBeenCalledWith(
+    await waitFor(() => expect(_pauseEpicHandler).toHaveBeenCalledWith(
       { id: 'epic-12345678', reason: 'Waiting for design review' },
     ))
   })
@@ -354,7 +354,7 @@ describe('EpicDetailPage pause/resume actions', () => {
     fireEvent.click(screen.getByTestId('pause-epic-trigger'))
     fireEvent.click(screen.getByTestId('pause-epic-confirm'))
 
-    await vi.waitFor(() => expect(_pauseEpicHandler).toHaveBeenCalledWith(
+    await waitFor(() => expect(_pauseEpicHandler).toHaveBeenCalledWith(
       { id: 'epic-12345678', reason: null },
     ))
   })
@@ -383,7 +383,7 @@ describe('EpicDetailPage pause/resume actions', () => {
 
     fireEvent.click(resumeTrigger)
 
-    await vi.waitFor(() => expect(_resumeEpicHandler).toHaveBeenCalledWith('epic-12345678'))
+    await waitFor(() => expect(_resumeEpicHandler).toHaveBeenCalledWith('epic-12345678'))
   })
 
   it('disables Mark Done when the Epic is paused and shows the resume-first hint', async () => {
@@ -501,7 +501,7 @@ describe('EpicDetailPage pause/resume actions', () => {
       await screen.findByTestId('reopen-epic-trigger')
       fireEvent.click(screen.getByTestId('reopen-epic-trigger'))
 
-      await vi.waitFor(() => expect(_reopenEpicHandler).toHaveBeenCalledWith('epic-12345678'))
+      await waitFor(() => expect(_reopenEpicHandler).toHaveBeenCalledWith('epic-12345678'))
     })
 
     it('disables the Reopen button while the mutation is in flight', async () => {
@@ -513,7 +513,7 @@ describe('EpicDetailPage pause/resume actions', () => {
 
       fireEvent.click(screen.getByTestId('reopen-epic-trigger'))
 
-      await vi.waitFor(() => {
+      await waitFor(() => {
         const reopenButton = screen.getByTestId('reopen-epic-trigger')
         expect(reopenButton).toBeDisabled()
         expect(reopenButton).toHaveTextContent(/Reopening/)
@@ -555,7 +555,7 @@ describe('EpicDetailPage lifecycle header actions', () => {
     await screen.findByTestId('start-epic-trigger')
     fireEvent.click(screen.getByTestId('start-epic-trigger'))
 
-    await vi.waitFor(() => {
+    await waitFor(() => {
       expect(_startEpicHandler).toHaveBeenCalledTimes(1)
       expect(_startEpicHandler).toHaveBeenCalledWith('epic-12345678')
     })
@@ -635,7 +635,7 @@ describe('EpicDetailPage lifecycle header actions', () => {
 
     fireEvent.click(screen.getByTestId('start-epic-trigger'))
 
-    await vi.waitFor(() => {
+    await waitFor(() => {
       const start = screen.getByTestId('start-epic-trigger')
       expect(start).toHaveTextContent('Starting...')
       expect(start).toBeDisabled()

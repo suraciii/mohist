@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { MemoryRouter } from 'react-router-dom'
+import { MemoryRouter, useLocation } from 'react-router-dom'
 import { http, HttpResponse } from 'msw'
 import { ProjectProvider } from '../../../entities/project'
 import type { AgentInfo } from '../../../entities/agent'
@@ -40,6 +40,11 @@ const defaultProps = {
   onClose: vi.fn(),
 }
 
+function LocationProbe() {
+  const location = useLocation()
+  return <div data-testid="current-path">{location.pathname}</div>
+}
+
 function renderEditor(overrides: Partial<Parameters<typeof AgentProfileEditor>[0]> = {}) {
   const queryClient = createQueryClient()
   return render(
@@ -55,6 +60,7 @@ function renderEditor(overrides: Partial<Parameters<typeof AgentProfileEditor>[0
             {...overrides}
             operationsHook={operationsHook}
           />
+          <LocationProbe />
         </MemoryRouter>
       </ProjectProvider>
     </QueryClientProvider>,
@@ -121,8 +127,13 @@ describe('AgentProfileEditor', () => {
       const mutateFn = mocks.createMutation.mutate
       const onSuccess = (mutateFn as ReturnType<typeof vi.fn>).mock.calls[0][1]?.onSuccess
       expect(onSuccess).toBeDefined()
-      onSuccess({ id: 'new-id', name: 'Agent X' })
-      expect(onClose).toHaveBeenCalled()
+      await act(async () => {
+        onSuccess({ id: 'new-id', name: 'Agent X' })
+      })
+      await waitFor(() => {
+        expect(onClose).toHaveBeenCalled()
+        expect(screen.getByTestId('current-path')).toHaveTextContent('/Test/agents/new-id')
+      })
     })
   })
 
@@ -177,7 +188,9 @@ describe('AgentProfileEditor', () => {
         screen.getByTestId('editor-save').click()
       })
       const onError = (mocks.updateMutation.mutate as ReturnType<typeof vi.fn>).mock.calls[0][1]?.onError
-      onError(new Error('UPDATE_FAILED'))
+      await act(async () => {
+        onError(new Error('UPDATE_FAILED'))
+      })
       await waitFor(() => {
         expect(screen.getByTestId('editor-api-error')).toHaveTextContent('UPDATE_FAILED')
       })
@@ -279,7 +292,9 @@ describe('AgentProfileEditor', () => {
       const mutate = mocks.createMutation.mutate
       const onError = (mutate as ReturnType<typeof vi.fn>).mock.calls[0]?.[1]?.onError
       expect(onError).toBeDefined()
-      onError(new Error('API_ERROR'))
+      await act(async () => {
+        onError(new Error('API_ERROR'))
+      })
       await waitFor(() => {
         expect(screen.getByTestId('editor-api-error')).toHaveTextContent('API_ERROR')
       })

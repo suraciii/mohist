@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider, useMutation } from '@tanstack/react-query'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import { ProjectProvider } from '../../../entities/project'
@@ -384,8 +384,9 @@ describe('GenericSessionPage', () => {
       fireEvent.click(screen.getByTestId('session-cancel-trigger'))
       fireEvent.click(screen.getByTestId('session-cancel-alert-confirm'))
 
-      await vi.waitFor(() => {
+      await waitFor(() => {
         expect(_cancelHandler).toHaveBeenCalledWith('sess-abc')
+        expect(screen.queryByTestId('session-cancel-alert')).not.toBeInTheDocument()
       })
     })
 
@@ -425,7 +426,12 @@ describe('GenericSessionPage', () => {
         expect(screen.getByTestId('session-cancel-alert-confirm').textContent).toContain('Working')
       })
 
-      _cancelResolve?.()
+      await act(async () => {
+        _cancelResolve?.()
+      })
+      await waitFor(() => {
+        expect(screen.queryByTestId('session-cancel-alert')).not.toBeInTheDocument()
+      })
     })
   })
 })

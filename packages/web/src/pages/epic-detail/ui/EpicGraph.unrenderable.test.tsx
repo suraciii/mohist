@@ -123,6 +123,18 @@ function TestDependencyGraphWidget(props: DependencyGraphWidgetProps) {
   return null
 }
 
+function captureExpectedGraphRenderError() {
+  const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+  return () => {
+    expect(consoleError.mock.calls.some((call) => call.some((value) =>
+      value instanceof Error
+        ? value.message === 'Simulated render error from DependencyGraphWidget'
+        : String(value).includes('Simulated render error from DependencyGraphWidget'),
+    ))).toBe(true)
+    consoleError.mockRestore()
+  }
+}
+
 const graphComponents: EpicDetailPageComponents = {
   DependencyGraphErrorBoundary,
   DependencyGraphWidget: TestDependencyGraphWidget,
@@ -221,6 +233,7 @@ describe('EpicDetailPage Graph unrenderable banner + Error Boundary (T-004)', ()
 
     await screen.findByTestId('linked-issues-view-toggle')
 
+    const assertExpectedRenderError = captureExpectedGraphRenderError()
     fireEvent.click(screen.getByTestId('linked-issues-view-graph'))
 
     const banner = await screen.findByTestId('linked-issues-graph-unavailable-banner')
@@ -231,6 +244,7 @@ describe('EpicDetailPage Graph unrenderable banner + Error Boundary (T-004)', ()
 
     expect(screen.queryByTestId('epic-dep-graph-canvas')).toBeNull()
     expect(screen.queryByTestId('linked-issues-graph-scroll-container')).toBeNull()
+    assertExpectedRenderError()
   })
 
   it('keeps the List view rendered as fallback for the empty unrenderable scenario', async () => {
@@ -267,6 +281,7 @@ describe('EpicDetailPage Graph unrenderable banner + Error Boundary (T-004)', ()
 
     await screen.findByTestId('linked-issues-view-toggle')
 
+    const assertExpectedRenderError = captureExpectedGraphRenderError()
     fireEvent.click(screen.getByTestId('linked-issues-view-graph'))
 
     await screen.findByTestId('linked-issues-graph-unavailable-banner')
@@ -277,6 +292,7 @@ describe('EpicDetailPage Graph unrenderable banner + Error Boundary (T-004)', ()
 
     const listRows = screen.getAllByTestId('linked-issue-row')
     expect(listRows).toHaveLength(2)
+    assertExpectedRenderError()
   })
 
   it('keeps the List view rendered as fallback for the cyclic unrenderable scenario (existing behavior)', async () => {
@@ -359,9 +375,11 @@ describe('EpicDetailPage Graph unrenderable banner + Error Boundary (T-004)', ()
 
     await screen.findByTestId('linked-issues-view-toggle')
 
+    const assertExpectedRenderError = captureExpectedGraphRenderError()
     fireEvent.click(screen.getByTestId('linked-issues-view-graph'))
     await screen.findByTestId('linked-issues-graph-unavailable-banner')
     expect(screen.getByTestId('linked-issues-graph-unavailable-banner').getAttribute('data-reason')).toBe('error')
+    assertExpectedRenderError()
 
     fireEvent.click(screen.getByTestId('linked-issues-view-list'))
     await waitFor(() => {
@@ -436,11 +454,15 @@ describe('EpicDetailPage Graph unrenderable banner + Error Boundary (T-004)', ()
 
       await screen.findByTestId('linked-issues-view-toggle')
 
+      const assertExpectedRenderError = scenario.reason === 'error'
+        ? captureExpectedGraphRenderError()
+        : null
       fireEvent.click(screen.getByTestId('linked-issues-view-graph'))
 
       const banner = await screen.findByTestId('linked-issues-graph-unavailable-banner')
       expect(banner.textContent).toMatch(scenario.expectedKeyword)
       expect(banner.textContent).toMatch(/use the list below/i)
+      assertExpectedRenderError?.()
       unmount()
       widgetBehavior.mode = 'default'
     }

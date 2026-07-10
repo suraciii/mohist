@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { useRef, type ReactNode } from 'react'
 import { MarkdownReader, type MarkdownAttachment } from './MarkdownReader'
 import * as SharedUiBarrel from '@/shared/ui'
@@ -336,7 +336,7 @@ describe('MarkdownReader copy-code affordance', () => {
     cleanup()
   })
 
-  it('renders a copy affordance when showCopyCode is enabled and writes the block text to the clipboard', () => {
+  it('renders a copy affordance when showCopyCode is enabled and writes the block text to the clipboard', async () => {
     const writeText = vi.fn().mockResolvedValue(undefined)
     const originalClipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard')
     Object.defineProperty(navigator, 'clipboard', {
@@ -353,6 +353,9 @@ describe('MarkdownReader copy-code affordance', () => {
 
       fireEvent.click(button)
 
+      await waitFor(() => {
+        expect(button).toHaveAttribute('aria-label', 'Copied')
+      })
       expect(writeText).toHaveBeenCalledTimes(1)
       const written = writeText.mock.calls[0]?.[0] as string
       expect(written.replace(/\n$/, '')).toBe('const greet = () => "hi"')

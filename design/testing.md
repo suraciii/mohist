@@ -52,7 +52,8 @@ Any order, any parallelism, 1000 reruns = same result.
 Web tests run with `isolate: false`: test files share a worker module registry and must be order-independent.
 
 - `vi.mock` is forbidden in web tests. HTTP uses MSW; the only module replacements are the `sonner` and `@microsoft/signalr` fakes declared by the Vitest config alias allowlist.
-- MSW uses `onUnhandledRequest: 'error'`. Every request is either handled deliberately or fails the test.
+- MSW rejects and records every unhandled request; `afterEach` fails the owning test even when application code catches the request error. Every request must be handled deliberately.
+- Unexpected `console.error` / `console.warn` output fails the test. Tests that intentionally exercise an error boundary or warning path must capture and assert that output locally.
 - Mutable module singletons and test control ports must expose a reset seam. Register the reset in `afterEach`; never rely on another file's imports, handlers, fake state, timers, globals, storage, or execution order.
 - Web tests must pass both the normal suite and shuffled execution. A shuffle failure is a state leak, not a seed-specific exception.
 

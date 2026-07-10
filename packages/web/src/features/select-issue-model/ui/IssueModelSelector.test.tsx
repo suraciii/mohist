@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ProjectProvider } from '../../../entities/project'
 import {
@@ -61,15 +61,20 @@ function openAdvanced() {
 }
 
 describe('IssueModelSelector default-model variant chips', () => {
-  it('renders no variant chips for a model that has no variants', () => {
+  it('renders no variant chips for a model that has no variants', async () => {
     mocks.useAvailableModelIds.mockReturnValue({
       data: { models: ['openai/gpt-4'], modelVariants: {} },
       isLoading: false,
       error: null,
     })
     mocks.useModelVariants.mockReturnValue({})
-    mocks.getIssueWorkflowVariables.mockResolvedValue({ vars: { agent: { model: 'openai/gpt-4' } }, stages: {} })
+    const workflowVariables = Promise.resolve({ vars: { agent: { model: 'openai/gpt-4' } }, stages: {} })
+    mocks.getIssueWorkflowVariables.mockReturnValue(workflowVariables)
     renderSelector({ currentModel: 'openai/gpt-4' })
+
+    await act(async () => {
+      await workflowVariables
+    })
 
     expect(screen.queryByTestId('issue-coder-model-variant-openai/gpt-4-low')).not.toBeInTheDocument()
     expect(screen.queryByTestId('issue-coder-model-variant-openai/gpt-4-high')).not.toBeInTheDocument()
@@ -99,7 +104,7 @@ describe('IssueModelSelector default-model variant chips', () => {
     expect(screen.queryByTestId('issue-coder-model-variant-openai/gpt-4-low')).not.toBeInTheDocument()
   })
 
-  it('renders no standalone variant dropdown next to the default model selector', () => {
+  it('renders no standalone variant dropdown next to the default model selector', async () => {
     mocks.useAvailableModelIds.mockReturnValue({
       data: {
         models: ['anthropic/claude'],
@@ -109,8 +114,13 @@ describe('IssueModelSelector default-model variant chips', () => {
       error: null,
     })
     mocks.useModelVariants.mockReturnValue({ 'anthropic/claude': ['low', 'medium', 'high'] })
-    mocks.getIssueWorkflowVariables.mockResolvedValue({ vars: { agent: { model: 'anthropic/claude' } }, stages: {} })
+    const workflowVariables = Promise.resolve({ vars: { agent: { model: 'anthropic/claude' } }, stages: {} })
+    mocks.getIssueWorkflowVariables.mockReturnValue(workflowVariables)
     renderSelector({ currentModel: 'anthropic/claude' })
+
+    await act(async () => {
+      await workflowVariables
+    })
 
     expect(screen.queryByTestId('issue-coder-model-variant-variant-trigger')).not.toBeInTheDocument()
   })

@@ -28,6 +28,9 @@ useMswServer(
       data: { running: false, activeAgents: [], capacity: { active: 0, max: 8 } },
     }),
   ),
+  http.get(`*/api/projects/${TEST_PROJECT.id}/inbox`, () =>
+    HttpResponse.json({ success: true, data: [] }),
+  ),
 )
 
 function renderSidebar(initialRoute: string, initialProjectId: string | null = TEST_PROJECT.id) {
