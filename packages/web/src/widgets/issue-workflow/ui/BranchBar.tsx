@@ -1,11 +1,7 @@
-import { useState } from 'react'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { Button } from '@/shared/ui/components/button'
-import { WorkflowStage, useLiveTask } from '../../../entities/issue'
+import { WorkflowStage } from '../../../entities/issue'
 import { ApiError } from '../../../shared/api/client'
-import { rebaseIssue } from '../../../entities/issue'
-import { useWorkspaceStatus } from '../../../entities/issue'
-import { useProject } from '../../../entities/project'
+import { Button } from '@/shared/ui/components/button'
+import { useRebaseRecovery } from '../model/useRebaseRecovery'
 
 interface BranchBarProps {
   issueNumber: number
@@ -16,72 +12,38 @@ interface BranchBarProps {
 }
 
 export function BranchBar({ issueNumber, stage, baseBranch: fallbackBaseBranch, allowRebase = false }: BranchBarProps) {
-  const queryClient = useQueryClient()
-  const { projectId } = useProject()
-  const { rebaseConflict } = useLiveTask()
-  const [rebaseQueued, setRebaseQueued] = useState(false)
+  const rebase = useRebaseRecovery(issueNumber)
+  const { workspace } = rebase
 
-  const { data, isLoading } = useWorkspaceStatus(issueNumber, true)
+  if (!workspace.isChecking && (!workspace.data || !workspace.data.exists) && !allowRebase) return null
 
-  const rebaseMutation = useMutation({
-    mutationFn: () => rebaseIssue(issueNumber, projectId),
-    onSuccess: (data) => {
-      if (data.status === 'queued') setRebaseQueued(true)
-    },
-    onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: ['issues', issueNumber, projectId, 'workspace-status'] })
-      queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
-      queryClient.invalidateQueries({ queryKey: ['issues'] })
-    },
-  })
-
-  const rebaseResult = rebaseMutation.data
-  const isChecking = isLoading || data === undefined
-  if (!isChecking && (!data || !data.exists) && !allowRebase) return null
-
-  const rawAhead = data?.ahead
-  const rawBehind = data?.behind
-  const hasWorkspaceError = !!data?.reason || data?.exists === false
-  const isUpstreamUnknown = !!data?.reason
-  const hasAheadBehind = data?.exists === true && !hasWorkspaceError && typeof rawAhead === 'number' && typeof rawBehind === 'number'
-  const isBehind = hasAheadBehind && rawBehind > 0
-  const isConflictResolving = rebaseConflict?.issueNumber === issueNumber && rebaseConflict.status === 'resolving'
-  const isConflictFailed = rebaseConflict?.issueNumber === issueNumber && rebaseConflict.status === 'failed'
-  const canRequestRebase = hasAheadBehind && allowRebase && !rebaseMutation.isPending && !isConflictResolving && !rebaseQueued
-  const isRebasing = data?.rebaseInProgress === true || rebaseMutation.isPending || isConflictResolving || rebaseQueued
-  const hasConflicts = rebaseResult?.conflicts && rebaseResult.conflicts.length > 0
-    ? rebaseResult.conflicts
-    : data?.conflictingFiles && data.conflictingFiles.length > 0
-      ? data.conflictingFiles
-      : null
-
-  const ahead = hasAheadBehind ? rawAhead : 0
-  const behind = hasAheadBehind ? rawBehind : 0
-  const branch = data?.branch ?? 'workspace'
-  const baseBranch = data?.baseBranch ?? fallbackBaseBranch ?? 'master'
+  const isUpstreamUnknown = workspace.isUpstreamUnknown
+  const isBehind = workspace.isBehind
+  const canRequestRebase = rebase.canRequest && allowRebase
+  const baseBranch = workspace.data?.baseBranch ?? fallbackBaseBranch ?? 'master'
   const isDone = stage === WorkflowStage.Done
 
-  if (isRebasing) {
+  if (rebase.isRebasing) {
     return (
       <div className="mb-8" data-testid="branch-bar-frame">
         <div data-testid="branch-bar" className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 space-y-2">
           <div className="flex items-center gap-3">
-            {!rebaseQueued && (
+            {!rebase.isQueued && (
               <svg className="h-4 w-4 animate-spin text-blue-600" viewBox="0 0 24 24" fill="none">
                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
               </svg>
             )}
             <span className="text-sm font-medium text-blue-800">
-              {rebaseQueued ? 'Rebase queued' : isConflictResolving ? 'Resolving conflicts...' : 'Rebasing...'}
+              {rebase.isQueued ? 'Rebase queued' : rebase.isConflictResolving ? 'Resolving conflicts...' : 'Rebasing...'}
             </span>
-            <span className="text-xs text-blue-600 font-mono">{branch}</span>
+            <span className="text-xs text-blue-600 font-mono">{workspace.branch}</span>
           </div>
-          {hasConflicts && (
+          {rebase.hasConflicts && (
             <div className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-600">
               <span>Conflicting files:</span>
               <ul className="mt-1 ml-3 list-disc">
-                {hasConflicts.map((f) => (
+                {rebase.hasConflicts.map((f) => (
                   <li key={f} className="font-mono">{f}</li>
                 ))}
               </ul>
@@ -98,7 +60,7 @@ export function BranchBar({ issueNumber, stage, baseBranch: fallbackBaseBranch, 
         <div data-testid="branch-bar" className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-3 min-w-0">
-              <span className="text-sm font-mono font-medium text-foreground truncate">{branch}</span>
+              <span className="text-sm font-mono font-medium text-foreground truncate">{workspace.branch}</span>
               <span className="text-xs text-muted-foreground shrink-0">onto</span>
               <span className="text-xs font-mono text-muted-foreground/80 shrink-0">{baseBranch}</span>
             </div>
@@ -107,12 +69,12 @@ export function BranchBar({ issueNumber, stage, baseBranch: fallbackBaseBranch, 
               {allowRebase && (
                 <Button
                   variant="outline"
-                  onClick={() => rebaseMutation.mutate()}
+                  onClick={() => rebase.trigger()}
                   disabled={!canRequestRebase}
                   title={
-                    !hasAheadBehind
+                    !workspace.hasAheadBehind
                       ? 'Waiting for workspace status'
-                      : isConflictResolving
+                      : rebase.isConflictResolving
                         ? 'Conflict resolution in progress'
                         : undefined
                   }
@@ -134,27 +96,27 @@ export function BranchBar({ issueNumber, stage, baseBranch: fallbackBaseBranch, 
         <div data-testid="branch-bar" className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 space-y-2">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex min-w-[14rem] flex-1 items-center gap-3">
-              <span className="text-sm font-mono font-medium text-foreground truncate">{branch}</span>
+              <span className="text-sm font-mono font-medium text-foreground truncate">{workspace.branch}</span>
               <span className="text-xs text-muted-foreground shrink-0">onto</span>
               <span className="text-xs font-mono text-muted-foreground/80 shrink-0">{baseBranch}</span>
             </div>
             <div className="flex w-full flex-wrap items-center gap-3 sm:w-auto sm:shrink-0">
-              {isChecking || !hasAheadBehind ? (
+              {workspace.isChecking || !workspace.hasAheadBehind ? (
                 <span className="text-xs font-medium text-amber-700">Checking upstream...</span>
               ) : (
                 <span className="text-xs font-medium text-amber-700">
-                  {ahead > 0 && <span className="text-muted-foreground">↑{ahead} </span>}
-                  {behind > 0 ? <span>↓{behind} behind</span> : <span>up to date</span>}
+                  {workspace.ahead > 0 && <span className="text-muted-foreground">↑{workspace.ahead} </span>}
+                  {workspace.behind > 0 ? <span>↓{workspace.behind} behind</span> : <span>up to date</span>}
                 </span>
               )}
               <Button
                 variant="outline"
-                onClick={() => rebaseMutation.mutate()}
+                onClick={() => rebase.trigger()}
                 disabled={!canRequestRebase}
                 title={
-                  !hasAheadBehind
+                  !workspace.hasAheadBehind
                     ? 'Waiting for workspace status'
-                    : isConflictResolving
+                    : rebase.isConflictResolving
                       ? 'Conflict resolution in progress'
                       : undefined
                 }
@@ -169,26 +131,26 @@ export function BranchBar({ issueNumber, stage, baseBranch: fallbackBaseBranch, 
               This Done workflow workspace is retained for review, traceability, diff inspection, and debugging. Archiving will remove the retained workspace.
             </p>
           )}
-          {rebaseMutation.isError && (
+          {rebase.error && (
             <div className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-600">
-              {rebaseMutation.error instanceof ApiError
-                ? rebaseMutation.error.message
+              {rebase.error instanceof ApiError
+                ? rebase.error.message
                 : 'Rebase failed'}
             </div>
           )}
-          {hasConflicts && !isConflictFailed && (
+          {rebase.hasConflicts && !rebase.isConflictFailed && (
             <div className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-600">
               <span>Conflicting files:</span>
               <ul className="mt-1 ml-3 list-disc">
-                {hasConflicts.map((f) => (
+                {rebase.hasConflicts.map((f) => (
                   <li key={f} className="font-mono">{f}</li>
                 ))}
               </ul>
             </div>
           )}
-          {isConflictFailed && (
+          {rebase.isConflictFailed && (
             <div className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-600">
-              <span>Conflict resolution failed{rebaseConflict?.error ? `: ${rebaseConflict.error}` : ''}</span>
+              <span>Conflict resolution failed{rebase.rebaseConflict?.error ? `: ${rebase.rebaseConflict.error}` : ''}</span>
             </div>
           )}
         </div>
@@ -201,12 +163,12 @@ export function BranchBar({ issueNumber, stage, baseBranch: fallbackBaseBranch, 
       <div data-testid="branch-bar" className="rounded-lg border bg-background px-4 py-3">
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-3 min-w-0">
-            <span className="text-sm font-mono font-medium text-foreground truncate">{branch}</span>
+            <span className="text-sm font-mono font-medium text-foreground truncate">{workspace.branch}</span>
             <span className="text-xs text-muted-foreground shrink-0">onto</span>
             <span className="text-xs font-mono text-muted-foreground/80 shrink-0">{baseBranch}</span>
           </div>
           <div className="flex items-center gap-3 shrink-0">
-            {ahead > 0 && <span className="text-xs text-muted-foreground">↑{ahead} ahead</span>}
+            {workspace.ahead > 0 && <span className="text-xs text-muted-foreground">↑{workspace.ahead} ahead</span>}
             <span className="text-xs font-medium text-green-600">up to date</span>
           </div>
         </div>

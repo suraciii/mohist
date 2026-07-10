@@ -5,10 +5,11 @@ import { IssueStatus } from '../../../entities/issue'
 import { issueAttachmentContentPath } from '../../../entities/issue'
 import { useIssue, useIssueDiff, useIssueCommits, useWorkflowTimeline } from '../../../entities/issue'
 import { useAgentStatus } from '../../../entities/agent'
+import { useWorkflowRunSessions } from '../../../entities/coder-session'
 import { EditIssueDialog } from '../../../features/edit-issue'
 import { WorkflowConvergencePanel } from '../../../widgets/issue-workflow'
 import { NotFoundPage } from '../../not-found/ui/NotFoundPage'
-import { BranchBar, RuntimeDecisionSurface, WorkflowView, TaskProgressPanel, WorkflowSessionsPanel, IssueWorkflowProfileEditor, LatestArtifactsPanel, PrDeliverySummary, findPublishViaPrMetadata, WorkflowProfileControl } from '../../../widgets/issue-workflow'
+import { BranchBar, RuntimeDecisionSurface, WorkflowView, TaskProgressPanel, WorkflowSessionsPanel, IssueWorkflowProfileEditor, LatestArtifactsPanel, PrDeliverySummary, findPublishViaPrMetadata, WorkflowProfileControl, useRebaseRecovery } from '../../../widgets/issue-workflow'
 import { ActivityDialog, type EventTimelinePanelProps } from '../../../widgets/issue-event-timeline'
 import { formatTime } from '../../../shared/lib/format-time'
 import { useNarrowViewport } from '../../../shared/lib/use-narrow-viewport'
@@ -23,6 +24,8 @@ import {
   type IssueDetailMutationDependencies,
 } from '../model/useIssueDetailMutations'
 import { deriveRuntimeDecision } from '../../../widgets/issue-workflow/model/derive-runtime-decision'
+import { buildExecutionSignal } from '../model/buildExecutionSignal'
+import { buildDriftRecoveryAction } from '../model/buildDriftRecoveryAction'
 import { ArchivedPill, DraftPill, PriorityChip, RuntimeSummaryPill } from './pills'
 import { StatusHeadline } from './StatusHeadline'
 import { WorkflowYamlDialog } from './WorkflowYamlDialog'
@@ -103,6 +106,16 @@ export function IssueDetailPage({
   const activeAgents = agentStatus?.activeAgents ?? []
   const isAgentRunningOnThis = activeAgents.some(a => a.issueNumber === issueNumber)
 
+  const workflowRunId = issue?.workflowRunId ?? null
+  const { sessions: workflowSessions } = useWorkflowRunSessions(workflowRunId)
+  const activeSession = workflowSessions.find((session) => (
+    session.status === 'active'
+    || session.status === 'running'
+    || session.status === 'probing'
+  ))
+
+  const rebaseRecovery = useRebaseRecovery(issueNumber)
+
   useDocumentTitle(`Issue #${issueNumber} — Mohist`, isAgentRunningOnThis)
 
   const { data: commitsData } = useIssueCommits(issueNumber)
@@ -152,6 +165,23 @@ export function IssueDetailPage({
     agentStatus: agentStatus ?? null,
     issueNumber,
     hasActiveAgent: isAgentRunningOnThis,
+  })
+
+  const executionSignal = buildExecutionSignal({
+    activeSession: activeSession
+      ? {
+          sessionName: activeSession.sessionName,
+          transcriptPath: toProjectPath(`/issues/${issueNumber}/workflow/sessions/${encodeURIComponent(activeSession.sessionName)}`),
+        }
+      : null,
+    agentStatus: agentStatus ?? null,
+    blocker: issue.blocker,
+    summary: decision.summary,
+  })
+  const driftRecovery = buildDriftRecoveryAction({
+    drift: issue.drift ?? null,
+    rebase: rebaseRecovery,
+    baseBranchFallback: issue.repository?.baseBranch ?? null,
   })
   const comments = [...(issue.comments ?? [])].sort(
     (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
@@ -294,6 +324,12 @@ export function IssueDetailPage({
               <div data-testid="runtime-decision-surface-frame">
                 <RuntimeDecisionSurface
                   decision={decision}
+                  evidence={{
+                    issueNumber,
+                    workflowRunId: issue.workflowRunId ?? null,
+                  }}
+                  executionSignal={executionSignal}
+                  driftRecovery={driftRecovery}
                   mutations={{
                     approveMutation,
                     sendBackMutation,
