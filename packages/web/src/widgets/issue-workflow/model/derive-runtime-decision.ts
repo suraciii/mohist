@@ -83,12 +83,6 @@ export interface RuntimeDecisionInput {
 
 const APPROVAL_FAILURE_OVERRIDE_SUMMARY: RuntimeSummary = 'failed'
 
-function isInterrupted(issue: RuntimeDecisionInput['issue']): boolean {
-  return issue?.health === IssueHealth.Interrupted
-    || issue?.workflowStatus?.toLowerCase() === 'interrupted'
-    || issue?.recovery?.latestAttemptState === 'interrupted'
-}
-
 function buildWaitReason(input: RuntimeDecisionInput): string | null {
   const blocker = input.issue?.blocker
   if (blocker?.kind === 'draft') {
@@ -98,9 +92,9 @@ function buildWaitReason(input: RuntimeDecisionInput): string | null {
     return `Waiting for #${blocker.issue.number} ${blocker.issue.title}`.trim()
   }
 
-  if (input.agentStatus?.runnerAvailable === false) {
+  if (input.agentStatus?.runnerAvailable === false && input.issue?.status !== 'backlog') {
     return input.agentStatus.runnerMessage
-      ?? 'No runner is connected. Start a runner before this issue can run.'
+      ?? 'No Runner is available. The workflow will continue automatically when one connects.'
   }
 
   const capacity = input.agentStatus?.capacity
@@ -137,6 +131,10 @@ function determineSummary(input: RuntimeDecisionInput): RuntimeSummary {
     return APPROVAL_FAILURE_OVERRIDE_SUMMARY
   }
 
+  if (health === IssueHealth.Blocked) {
+    return 'blocked'
+  }
+
   if (
     recovery?.latestAttemptState === 'failed'
     || (failedScriptHealthCheck && recovery?.latestAttemptState !== 'running')
@@ -151,13 +149,7 @@ function determineSummary(input: RuntimeDecisionInput): RuntimeSummary {
 
   const hasUnresolvedConvergence = !!issue.convergence
     && (issue.convergence.unresolvedItemIds?.length ?? 0) > 0
-  if (
-    health === IssueHealth.Blocked
-    || health === IssueHealth.Interrupted
-    || status === 'interrupted'
-    || recovery?.latestAttemptState === 'interrupted'
-    || hasUnresolvedConvergence
-  ) {
+  if (hasUnresolvedConvergence) {
     return 'blocked'
   }
 
@@ -277,11 +269,8 @@ export function deriveRuntimeDecision(input: RuntimeDecisionInput): RuntimeDecis
   const hasStop = presentation.actions.some((action) => action.kind === 'stop')
   const stopRecoverable = hasStop ? hasRecoverableStop(input) : null
   const driftNote = buildDriftNote(input)
-  const interruptedReason = isInterrupted(issue)
-    ? 'The workflow was interrupted. Resume or rerun to continue.'
-    : null
   const blockedReason = summary === 'failed' || summary === 'blocked'
-    ? (issue?.blockedReason ?? issue?.convergence?.blockedReason ?? interruptedReason)
+    ? (issue?.blockedReason ?? issue?.convergence?.blockedReason ?? null)
     : null
   const approvalStage = summary === 'approval-required'
     ? (issue?.approvalState?.stage ?? issue?.workflowStage ?? null)

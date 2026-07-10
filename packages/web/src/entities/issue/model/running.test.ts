@@ -21,11 +21,10 @@ function makeIssue(overrides: Partial<Issue> = {}): Issue {
 }
 
 describe('isRunningIssue', () => {
-  it('treats in-progress active, paused, blocked, and interrupted issues as running', () => {
+  it('treats in-progress active, paused, and blocked issues as running', () => {
     expect(isRunningIssue(makeIssue({ health: IssueHealth.Active }))).toBe(true)
     expect(isRunningIssue(makeIssue({ health: IssueHealth.Paused }))).toBe(true)
     expect(isRunningIssue(makeIssue({ health: IssueHealth.Blocked }))).toBe(true)
-    expect(isRunningIssue(makeIssue({ health: IssueHealth.Interrupted }))).toBe(true)
   })
 
   it('excludes done, cancelled, and non-in-progress issues', () => {

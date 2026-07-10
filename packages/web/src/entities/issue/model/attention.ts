@@ -1,9 +1,9 @@
 import type { AgentStatus } from '../../agent'
-import { IssueHealth, WorkflowStage, type Issue } from './issue'
+import { IssueHealth, IssueStatus, WorkflowStage, type Issue } from './issue'
 
 export type AttentionItem =
   | {
-      kind: 'approval-needed' | 'integration-failed' | 'interrupted' | 'blocked'
+      kind: 'approval-needed' | 'integration-failed' | 'blocked'
       issueNumber: number
       issueId: string
       label: string
@@ -24,10 +24,7 @@ function isIssueAttentionItem(item: AttentionItem): item is IssueAttentionItem {
 function isIntegrateFailure(issue: Issue): boolean {
   return (
     issue.workflowStage === WorkflowStage.Integrate
-    && (
-      issue.health === IssueHealth.Blocked
-      || issue.health === IssueHealth.Interrupted
-    )
+    && issue.health === IssueHealth.Blocked
   )
 }
 
@@ -48,16 +45,6 @@ function classifyIssueAttention(issue: Issue): IssueAttentionItem | null {
       issueNumber: issue.number,
       issueId: issue.id,
       label: 'Integration failed',
-      detail: issue.title,
-    }
-  }
-
-  if (issue.health === IssueHealth.Interrupted) {
-    return {
-      kind: 'interrupted',
-      issueNumber: issue.number,
-      issueId: issue.id,
-      label: 'Interrupted',
       detail: issue.title,
     }
   }
@@ -93,13 +80,16 @@ function deriveAttentionItems(issues: Issue[], agentStatus: AgentStatus): Attent
     }
   }
 
-  if (agentStatus.runnerAvailable === false) {
+  const runnerAffectsActiveWorkflow = issues.some(
+    (issue) => issue.status === IssueStatus.InProgress && issue.health === IssueHealth.Active,
+  )
+  if (agentStatus.runnerAvailable === false && runnerAffectsActiveWorkflow) {
     items.push({
       kind: 'runner-unavailable',
       label: 'Runner unavailable',
       detail: agentStatus.runnerMessage ?? 'No runner is connected.',
     })
-  } else {
+  } else if (agentStatus.runnerAvailable !== false) {
     const capacity = agentStatus.capacity
     if (capacity.max > 0 && capacity.active >= capacity.max) {
       items.push({

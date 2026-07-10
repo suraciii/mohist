@@ -12,7 +12,7 @@ mo issue show <number>
 
 | 字段 | 含义 |
 |---|---|
-| `health` | `blocked` / `interrupted` / `cancelled` / `done` |
+| `health` | `blocked` / `cancelled` / `done` |
 | `status` | `in-progress` / `done` / `cancelled` |
 | `blockedReason` | 如果 blocked，原因是什么 |
 
@@ -23,7 +23,6 @@ mo issue show <number>
 | `active` | 正在跑 | 等 |
 | `paused` | 等审批决策或手动 stop | Approve / Reject / Resume |
 | `blocked` | 失败了，需要介入 | 看下面"恢复动作" |
-| `interrupted` | 进程崩了/重启了 | Resume |
 | `cancelled` | 终态（你 close 了） | Reopen（如需要） |
 | `done` | 终态（完成了） | 验收 / 归档 |
 
@@ -32,7 +31,7 @@ mo issue show <number>
 | 场景 | 命令 | 说明 |
 |---|---|---|
 | AI 自检失败（check 没过） | `mo issue retry <n>` | 重新跑当前阶段 |
-| 进程崩了、机器重启了 | `mo issue resume <n>` | 从断点继续 |
+| Runner 崩了且自动恢复失败 | `mo issue retry <n>` | Runner 恢复后重试失败阶段 |
 | 想完全重做当前阶段 | `mo issue rerun <n>` | 丢弃当前产物重跑 |
 | 当前阶段彻底卡死 | `mo issue force-stop <n>` | 强杀 agent，再 retry/resume |
 | 不想继续了 | `mo issue stop <n>` | 终止运行（保留状态） |
@@ -118,22 +117,20 @@ mo issue rebase <n>     # 尝试自动 rebase
 3. `git add` + `git rebase --continue`
 4. 回到 Mohist：`mo issue resume <n>`
 
-### 5. Issue interrupted
+### 5. Runner 不可用
 
-**症状**：Health 是 `interrupted`。
+**症状**：Workflow 长时间等待，或 Issue 因 `runner-lost` 进入 blocked。
 
-**原因**：Server 或 Runner 进程崩了 / 重启了 / 你 kill 了。
+**原因**：Runner 没有运行、失去连接，或自动恢复没有成功。
 
 **解决**：
 
 ```bash
-# 确保 server 和 runner 都起来了
+# 确保 Runner 已经起来
 mo project status
-
-mo issue resume <n>
 ```
 
-进度保留，从断点继续。**不要 retry**——retry 会重做整个阶段，浪费之前的进度。
+仍在等待的 Workflow 会自动继续。已经 blocked 的 Workflow 在 Runner 恢复后执行 Retry；已完成阶段和历史不会丢失。
 
 ### 6. Agent session 卡死（无输出）
 
@@ -263,4 +260,4 @@ https://github.com/<your-org>/mohist/issues
 
 ---
 
-对应源码：跨域；恢复逻辑见 `Issue/`、`Workflow/`（health / interrupted / blocked 处理）。
+对应源码：跨域；恢复逻辑见 `Issue/`、`Workflow/`（health / blocked 处理）。

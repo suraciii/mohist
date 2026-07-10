@@ -69,7 +69,7 @@ full lifecycle. All take `<number>` (issue number in the active project, or use
 | Rerun from stage | `mo issue rerun-from-stage <number> --stage <stage>` | Invalidate the target stage and everything after it; create new attempts from that stage. |
 | Stop | `mo issue stop <number>` | **Terminal** stop — cannot be resumed. Use only when you intend to abandon the run. |
 | Force-stop | `mo issue force-stop <number>` | Hard-kill the in-flight agent; recoverable with `resume`. |
-| Resume | `mo issue resume <number>` | Continue from a paused/interrupted state. |
+| Resume | `mo issue resume <number>` | Continue from a paused state. |
 | Rebase | `mo issue rebase <number> [--base-branch <b>]` | Rebase the issue branch onto its base. |
 | Close | `mo issue close <number>` | Close a completed/abandoned issue. |
 | Reopen | `mo issue reopen <number>` | Reopen a closed issue. |

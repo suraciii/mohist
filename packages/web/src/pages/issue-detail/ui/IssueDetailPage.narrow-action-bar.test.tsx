@@ -173,13 +173,13 @@ describe('IssueDetailPage narrow-viewport MobileActionBar matrix', () => {
     mockIssue(baseIssue({
       status: 'in_progress',
       workflowStage: 'build',
-      workflowStatus: 'interrupted',
-      health: 'interrupted',
-      blockedReason: 'Workflow was interrupted.',
+      workflowStatus: 'failed',
+      health: 'blocked',
+      blockedReason: 'Runner lost while work was active.',
       recovery: {
         currentWorkItem: null,
-        latestAttemptState: 'interrupted',
-        workflowSummaryState: 'interrupted',
+        latestAttemptState: 'failed',
+        workflowSummaryState: 'waiting-for-recovery',
         allowedActions: ['retry', 'resume', 'rerun', 'stop'],
       },
     }))
@@ -258,7 +258,7 @@ describe('IssueDetailPage narrow-viewport MobileActionBar matrix', () => {
     expect(start).toHaveAttribute('title', 'Waiting for #9 Prepare spec')
   })
 
-  it('runner-blocked backlog surfaces disabled Start with the runner reason', async () => {
+  it('runner-unavailable backlog still surfaces enabled Start', async () => {
     mockAgentStatus({
       activeAgents: [],
       capacity: { max: 1 },
@@ -279,8 +279,8 @@ describe('IssueDetailPage narrow-viewport MobileActionBar matrix', () => {
     await waitFor(() => expect(screen.getByTestId('mobile-action-bar')).toBeTruthy())
 
     const start = screen.getByTestId('mobile-action-start')
-    expect(start).toBeDisabled()
-    expect(start).toHaveAttribute('title', 'No runner is connected. Start a runner before this issue can run.')
+    expect(start).toBeEnabled()
+    expect(start).not.toHaveAttribute('title')
   })
 
   it('failed state preserves the Start new workflow primary label', async () => {

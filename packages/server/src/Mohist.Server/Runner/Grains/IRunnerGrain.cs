@@ -8,7 +8,9 @@ public interface IRunnerGrain : IGrainWithStringKey
 {
     Task RegisterAsync(RunnerInfo info);
     Task UnregisterAsync();
+    /// <summary>Legacy heartbeat with no info payload. Does not refresh presence.</summary>
     Task HeartbeatAsync();
+    /// <summary>Refreshes runner information. Does not refresh presence.</summary>
     Task HeartbeatRepairAsync(RunnerInfo info);
     // Agent-job dispatch stays push-based (the job grain owns its single work
     // item; there is no run to re-render from, and jobs are short-lived). The

@@ -665,6 +665,14 @@ describe('DashboardPage — attention-first zone hierarchy', () => {
         { id: 'p1', name: 'demo', createdAt: '', updatedAt: '' },
       ]
       _agentStatus = makeAgentStatus({ runnerAvailable: false })
+      _issuesData = [makeIssue({
+        id: 'affected-1',
+        number: 49,
+        title: 'Affected workflow',
+        status: IssueStatus.InProgress,
+        health: IssueHealth.Active,
+        workflowStage: WorkflowStage.Build,
+      })]
 
       renderPage()
 

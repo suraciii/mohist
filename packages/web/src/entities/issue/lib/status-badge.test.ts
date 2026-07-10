@@ -15,10 +15,6 @@ describe('statusBadge', () => {
     expect(statusBadge(IssueHealth.Blocked)).toBe('text-red-700 bg-red-50')
   })
 
-  it('returns orange classes for Interrupted', () => {
-    expect(statusBadge(IssueHealth.Interrupted)).toBe('text-orange-700 bg-orange-50')
-  })
-
   it('returns gray classes for unknown/default', () => {
     expect(statusBadge('unknown' as IssueHealth)).toBe('text-gray-700 bg-gray-50')
   })
@@ -41,7 +37,6 @@ describe('statusBadge', () => {
       IssueHealth.Active,
       IssueHealth.Paused,
       IssueHealth.Blocked,
-      IssueHealth.Interrupted,
       IssueHealth.Cancelled,
       IssueHealth.Done,
     ]

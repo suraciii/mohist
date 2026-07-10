@@ -132,7 +132,7 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
-    public async Task HeartbeatRepair_OfflineGrain_RebuildsRunnerInfo()
+    public async Task HeartbeatRepair_OfflineGrain_RefreshesInfoButPollPresenceRestoresOnline()
     {
         var runnerId = $"repair-runner-{Guid.NewGuid():N}";
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
@@ -147,6 +147,10 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
         var info = await runner.GetInfoAsync();
         Assert.NotNull(info);
         Assert.Equal(2, info!.CoderModels?.Length);
+        Assert.Equal(RunnerStatus.Offline, (await runner.GetRuntimeStateAsync()).Status);
+
+        await runner.TouchPresenceAsync();
+
         Assert.Equal(RunnerStatus.Online, (await runner.GetRuntimeStateAsync()).Status);
     }
 

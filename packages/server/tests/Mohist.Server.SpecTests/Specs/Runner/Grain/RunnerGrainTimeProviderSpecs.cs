@@ -52,6 +52,29 @@ public class RunnerGrainTimeProviderSpecs : WorkflowGrainSpecs
         Assert.Equal(after, second.TakenAt);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
+    [Fact]
+    public async Task Heartbeat_DoesNotRefreshPresence_ButPollPresenceDoes()
+    {
+        var runnerId = $"presence-runner-{Guid.NewGuid():N}";
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        await runner.RegisterAsync(new RunnerInfo(
+            runnerId,
+            ["spec/*"],
+            "presence-host",
+            "test-project"));
+
+        var registeredPresence = (await runner.GetRuntimeStateAsync()).LastHeartbeatAt;
+        _fixture.TimeProvider.Advance(TimeSpan.FromSeconds(30));
+
+        await runner.HeartbeatAsync();
+        Assert.Equal(registeredPresence, (await runner.GetRuntimeStateAsync()).LastHeartbeatAt);
+
+        await runner.TouchPresenceAsync();
+        Assert.Equal(_fixture.TimeProvider.GetUtcNow(), (await runner.GetRuntimeStateAsync()).LastHeartbeatAt);
+    }
+
     // PollOneWorkflowAsync_RecordsTakeTimeFromFakeTimeProvider was removed:
     // under the reconciliation model the runner grain holds no workflow work
     // records, so it no longer records a take-time for dispatched workflow

@@ -297,14 +297,14 @@ describe('PulseZone — issue-led active production', () => {
     })
   })
 
-  it('shows the cue for a non-integrate Interrupted issue', async () => {
+  it('shows the cue for a non-integrate blocked issue', async () => {
     mockIssuesResponse([
       makeRunningIssue({
-        id: 'build-interrupted',
+        id: 'build-blocked',
         number: 110,
         title: 'Build halted',
         workflowStage: WorkflowStage.Build,
-        health: IssueHealth.Interrupted,
+        health: IssueHealth.Blocked,
       }),
     ])
     mockAgentActivityResponse(makeActivity([]))

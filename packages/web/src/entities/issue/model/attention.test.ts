@@ -43,27 +43,11 @@ describe('isIntegrateFailure', () => {
     }))).toBe(true)
   })
 
-  it('returns true for an Integrate-stage Interrupted issue', () => {
-    expect(isIntegrateFailure(makeIssue({
-      id: 'i-2',
-      workflowStage: WorkflowStage.Integrate,
-      health: IssueHealth.Interrupted,
-    }))).toBe(true)
-  })
-
   it('returns false for a Blocked issue in a non-integrate stage', () => {
     expect(isIntegrateFailure(makeIssue({
       id: 'i-3',
       workflowStage: WorkflowStage.Build,
       health: IssueHealth.Blocked,
-    }))).toBe(false)
-  })
-
-  it('returns false for an Interrupted issue in a non-integrate stage', () => {
-    expect(isIntegrateFailure(makeIssue({
-      id: 'i-4',
-      workflowStage: WorkflowStage.Check,
-      health: IssueHealth.Interrupted,
     }))).toBe(false)
   })
 
@@ -152,47 +136,6 @@ describe('deriveAttentionItems — integrate-failure rule', () => {
     }])
   })
 
-  it('surfaces an Integrate-stage Interrupted issue as "Integration failed"', () => {
-    const items = deriveAttentionItems([
-      makeIssue({
-        id: 'int-int-1',
-        number: 22,
-        title: 'Merge aborted',
-        workflowStage: WorkflowStage.Integrate,
-        health: IssueHealth.Interrupted,
-      }),
-    ], NO_AGENT)
-
-    expect(items).toEqual([{
-      kind: 'integration-failed',
-      issueNumber: 22,
-      issueId: 'int-int-1',
-      label: 'Integration failed',
-      detail: 'Merge aborted',
-    }])
-  })
-})
-
-describe('deriveAttentionItems — interrupted rule (non-integrate)', () => {
-  it('surfaces a non-integrate Interrupted issue as "Interrupted"', () => {
-    const items = deriveAttentionItems([
-      makeIssue({
-        id: 'int-build-1',
-        number: 31,
-        title: 'Build halted',
-        workflowStage: WorkflowStage.Build,
-        health: IssueHealth.Interrupted,
-      }),
-    ], NO_AGENT)
-
-    expect(items).toEqual([{
-      kind: 'interrupted',
-      issueNumber: 31,
-      issueId: 'int-build-1',
-      label: 'Interrupted',
-      detail: 'Build halted',
-    }])
-  })
 })
 
 describe('deriveAttentionItems — blocked rule with blockedReason fallback', () => {
@@ -261,21 +204,6 @@ describe('deriveAttentionItems — first match wins', () => {
       label: 'Approval needed',
     })
     expect(items[0]?.detail).toBe('Both awaiting and blocked')
-  })
-
-  it('uses the integrate-failure rule (over plain Interrupted) when an issue is Integrate-stage Interrupted', () => {
-    const items = deriveAttentionItems([
-      makeIssue({
-        id: 'multi-2',
-        number: 52,
-        title: 'Merge interrupted',
-        workflowStage: WorkflowStage.Integrate,
-        health: IssueHealth.Interrupted,
-      }),
-    ], NO_AGENT)
-
-    expect(items).toHaveLength(1)
-    expect(items[0]?.label).toBe('Integration failed')
   })
 
   it('uses the integrate-failure rule (over plain Blocked) when an issue is Integrate-stage Blocked', () => {
@@ -403,7 +331,7 @@ describe('deriveAttentionItems — output typing and signature', () => {
     expect(items[0]?.label).toBe('Needs action')
   })
 
-  it('consumes the AgentStatus parameter (now produces runner items)', () => {
+  it('adds a runner item only when an active workflow is affected', () => {
     const busyAgent = makeAgentStatus({
       runnerAvailable: false,
       capacity: { active: 0, max: 1 },
@@ -417,6 +345,12 @@ describe('deriveAttentionItems — output typing and signature', () => {
         health: IssueHealth.Blocked,
         blockedReason: 'reason',
       }),
+      makeIssue({
+        id: 'active-1',
+        number: 83,
+        status: IssueStatus.InProgress,
+        health: IssueHealth.Active,
+      }),
     ], busyAgent)
 
     expect(items).toHaveLength(2)
@@ -426,21 +360,20 @@ describe('deriveAttentionItems — output typing and signature', () => {
 })
 
 describe('deriveAttentionItems — runner-unavailable rule', () => {
-  it('emits runner-unavailable when runnerAvailable is false, even with an empty issue list', () => {
+  it('does not emit runner-unavailable without an affected workflow', () => {
     const items = deriveAttentionItems([], makeAgentStatus({
       runnerAvailable: false,
       runnerMessage: 'Embedded runner is offline',
     }))
 
-    expect(items).toEqual([{
-      kind: 'runner-unavailable',
-      label: 'Runner unavailable',
-      detail: 'Embedded runner is offline',
-    }])
+    expect(items).toEqual([])
   })
 
   it('falls back to "No runner is connected." when runnerMessage is null', () => {
-    const items = deriveAttentionItems([], makeAgentStatus({
+    const items = deriveAttentionItems([makeIssue({
+      status: IssueStatus.InProgress,
+      health: IssueHealth.Active,
+    })], makeAgentStatus({
       runnerAvailable: false,
       runnerMessage: null,
     }))
@@ -453,7 +386,10 @@ describe('deriveAttentionItems — runner-unavailable rule', () => {
   })
 
   it('falls back to "No runner is connected." when runnerMessage is undefined', () => {
-    const items = deriveAttentionItems([], makeAgentStatus({
+    const items = deriveAttentionItems([makeIssue({
+      status: IssueStatus.InProgress,
+      health: IssueHealth.Active,
+    })], makeAgentStatus({
       runnerAvailable: false,
     }))
 
@@ -478,6 +414,7 @@ describe('deriveAttentionItems — runner-unavailable rule', () => {
       makeIssue({
         id: 'await-1',
         number: 11,
+        status: IssueStatus.InProgress,
         approvalState: {
           status: 'awaiting',
           requestedAt: '2026-06-18T00:00:00.000Z',
@@ -562,14 +499,13 @@ describe('deriveAttentionItems — runner-capacity-limited rule', () => {
 })
 
 describe('deriveAttentionItems — runner-unavailable suppresses capacity-limited', () => {
-  it('emits only runner-unavailable when runnerAvailable is false even if at capacity', () => {
+  it('emits no infrastructure warning when no workflow is affected', () => {
     const items = deriveAttentionItems([], makeAgentStatus({
       runnerAvailable: false,
       capacity: { active: 4, max: 4 },
     }))
 
-    expect(items).toHaveLength(1)
-    expect(items[0]?.kind).toBe('runner-unavailable')
+    expect(items).toEqual([])
   })
 })
 
@@ -578,7 +514,6 @@ describe('deriveAttentionItems — union is exhaustive', () => {
     const issueKinds = new Set([
       'approval-needed',
       'integration-failed',
-      'interrupted',
       'blocked',
     ])
     const runnerKinds = new Set([
@@ -621,7 +556,6 @@ describe('deriveAttentionItems — union is exhaustive', () => {
       'approval-needed',
       'blocked',
       'integration-failed',
-      'interrupted',
       'runner-capacity-limited',
       'runner-unavailable',
     ])
@@ -665,22 +599,6 @@ describe('issueNeedsOwnerAction', () => {
     }))).toBe(true)
   })
 
-  it('returns true for an Integrate-stage Interrupted issue (integration-failed)', () => {
-    expect(issueNeedsOwnerAction(makeIssue({
-      id: 'a-3',
-      workflowStage: WorkflowStage.Integrate,
-      health: IssueHealth.Interrupted,
-    }))).toBe(true)
-  })
-
-  it('returns true for a non-integrate Interrupted issue', () => {
-    expect(issueNeedsOwnerAction(makeIssue({
-      id: 'a-4',
-      workflowStage: WorkflowStage.Build,
-      health: IssueHealth.Interrupted,
-    }))).toBe(true)
-  })
-
   it('returns true for a non-integrate Blocked issue', () => {
     expect(issueNeedsOwnerAction(makeIssue({
       id: 'a-5',
@@ -699,7 +617,7 @@ describe('issueNeedsOwnerAction', () => {
     }))).toBe(false)
   })
 
-  it('returns false for a paused issue (neither blocked nor interrupted)', () => {
+  it('returns false for a paused issue', () => {
     expect(issueNeedsOwnerAction(makeIssue({
       id: 'a-7',
       status: IssueStatus.InProgress,
@@ -784,9 +702,9 @@ describe('issueNeedsOwnerAction', () => {
       makeIssue({
         id: 'a-13',
         number: 102,
-        title: 'build-interrupted',
+        title: 'build-blocked-without-reason',
         workflowStage: WorkflowStage.Build,
-        health: IssueHealth.Interrupted,
+        health: IssueHealth.Blocked,
       }),
       makeIssue({
         id: 'a-14',

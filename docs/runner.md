@@ -84,9 +84,9 @@ Runner 有最大并发限制（默认 8）。意思是：
 
 如果 Runner 进程崩了：
 
-- Server 把该 Runner 上的 in-flight task 标记为 `interrupted`
-- Issue 进入 interrupted health
-- 你 `mo issue resume <n>` 可以从断点继续（重启 Runner 后）
+- 尚未开始执行的 Workflow 会等待可用 Runner
+- Mohist 会先尝试自动恢复正在执行的 task
+- 自动恢复失败时，Issue 进入 blocked health，并展示原因和推荐的恢复操作
 
 不会丢失 workflow 状态——状态在 Server，不在 Runner。
 
@@ -122,7 +122,7 @@ mo issue sessions <number>   # coder session 回放
 | 症状 | 原因 | 解决 |
 |---|---|---|
 | 看板显示 "No runner is connected" | Runner 没起 | `npm run dev:runner` |
-| Issue 启动失败 "Runner unavailable" | 同上 | 同上 |
+| Issue 启动后一直等待 | 没有可用 Runner | 启动 Runner；Workflow 会自动继续 |
 | Task 长时间无输出 | opencode 卡了 | `mo issue force-stop`，查 logs |
 | Worktree 已存在错误 | 上次没清理 | 删 `<repo>/.mohist/worktrees/issue-<n>/` |
 | Git push 失败 | 远程仓库权限 | 配 SSH key 或 token |

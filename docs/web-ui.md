@@ -37,7 +37,7 @@ Web UI 是日常使用 Mohist 的主要入口。访问 `http://localhost:3456`�
 - Priority chip（P0-P4）
 - Status pill（blocked / approval / running / waiting / drift）
 - Workflow stage pill（Plan / Build / Check / Integrate）
-- Health pill（active / paused / interrupted 等）
+- Health pill（active / paused / blocked 等）
 - Running indicator（脉冲蓝点，表示 Agent 正在工作）
 
 ### 筛选和排序
@@ -57,7 +57,7 @@ Web UI 是日常使用 Mohist 的主要入口。访问 `http://localhost:3456`�
 
 ### Runner 不可用条
 
-如果 Runner 没连上，看板顶部会有警告条。Runner 没连时启动 issue 会失败。
+如果 Runner 没连上并影响 Workflow 推进，看板顶部会有警告条。Issue 仍可启动并等待可用 Runner。
 
 ## Issue 详情页
 
@@ -91,7 +91,7 @@ Web UI 是日常使用 Mohist 的主要入口。访问 `http://localhost:3456`�
 1. **Details** — Issue Stage / Workflow Stage / Project / Repository
 2. **LatestArtifactsPanel** — Plan/Check 阶段产物（点开看 proposal.md、review.md 等）
 3. **Base Drift Detected**（如有）— base branch 漂移信息
-4. **Workflow Interrupted**（如有）— interrupted 提示和 Resume 按钮
+4. **Workflow Blocked**（如有）— blocked 原因和推荐恢复操作
 5. **WorkflowConvergencePanel**（如有）— convergence 信息
 6. **Actions** — 主要操作区（Start / Approve / Retry / Stop / 等）
 7. **IssueModelSelector** — 切换 AI 模型（整体或 per-stage）
@@ -104,8 +104,7 @@ Web UI 是日常使用 Mohist 的主要入口。访问 `http://localhost:3456`�
 | Backlog | Start | 启动 workflow |
 | Running | Running indicator + Force Stop | Agent 正在执行，可强停 |
 | Awaiting approval | Approve / Reject | 审批 |
-| Blocked | Retry / Resume / Rerun / Stop | 看错误原因选 |
-| Interrupted | Resume | 进程崩了，继续 |
+| Blocked | Retry / Resume / Rerun / Stop | 页面突出显示当前可用的推荐操作 |
 | Done | Close / Archive | 终态处理 |
 
 ## Issue 改动文件页

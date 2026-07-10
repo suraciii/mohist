@@ -156,10 +156,9 @@ Draft ──────▶ Plan ──────▶ Build ──────�
 
 | Health | 含义 |
 |---|---|
-| `active` | 正在 workflow 里跑 |
+| `active` | 正在运行，或正在等待系统自动继续 |
 | `paused` | 暂停（手动 stop 或等待审批决策） |
 | `blocked` | 卡住了，需要你介入 |
-| `interrupted` | 进程崩了/重启了，进度保留，可以 resume |
 | `cancelled` | 你取消了，不会再跑 |
 | `done` | 完成 |
 
@@ -172,7 +171,7 @@ Web UI 上每个 issue card 会用颜色点显示 health。
 1. **Plan 完成** — 审批点需要 approve 或 reject
 2. **Check 完成** — 审批点需要 approve 或 reject
 3. **Issue blocked** — 看原因，retry/rerun/stop
-4. **Issue interrupted** — Resume 继续
+4. **Runner 不可用且自动恢复失败** — 按页面给出的操作继续
 
 这些动作可以由 owner、脚本或 Agent 发起。Workflow 只关心审批动作本身和结果。
 

@@ -41,8 +41,8 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
     // single work item with no run to re-render from.
     private readonly IPersistentState<RunnerWorksState> _worksState;
     private readonly SemaphoreSlim _worksStateWriteGate = new(1, 1);
-    private DateTime _lastHeartbeat;
-    private IDisposable? _heartbeatTimer;
+    private DateTimeOffset _lastPresenceAt;
+    private IDisposable? _presenceTimer;
 
     // Authoritative source for dispatch capacity. Loaded from the persisted
     // definition state in OnActivateAsync / RegisterAsync and updated via
@@ -56,8 +56,8 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<RunnerGrain> _log;
 
-    private static readonly TimeSpan HeartbeatTimeout = TimeSpan.FromMinutes(2);
-    private static readonly TimeSpan HeartbeatCheckInterval = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan PresenceTimeout = TimeSpan.FromMinutes(2);
+    private static readonly TimeSpan PresenceCheckInterval = TimeSpan.FromSeconds(10);
     private const string PresenceReminderName = "presence";
 
     public RunnerGrain(
@@ -114,17 +114,17 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
 
     public override Task OnDeactivateAsync(DeactivationReason reason, CancellationToken ct)
     {
-        _heartbeatTimer?.Dispose();
-        _heartbeatTimer = null;
+        _presenceTimer?.Dispose();
+        _presenceTimer = null;
         return Task.CompletedTask;
     }
 
     public Task ReceiveReminder(string reminderName, TickStatus status)
     {
         // The presence reminder is a no-op tick carrier; the actual presence
-        // check is driven by the grain timer registered in RegisterAsync. The
-        // reminder exists only so presence-expiry survives silo restart (a
-        // grain timer does not). kept minimal here.
+        // check is driven by the grain timer registered on register or poll.
+        // The reminder exists only so presence-expiry survives silo restart
+        // (a grain timer does not). Kept minimal here.
         return Task.CompletedTask;
     }
 
@@ -132,14 +132,11 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
     {
         _info = InfoForRegister(info);
         _status = RunnerStatus.Online;
-        _lastHeartbeat = _timeProvider.GetUtcNow().UtcDateTime;
+        _lastPresenceAt = _timeProvider.GetUtcNow();
         _pendingBuildGitHash = null;
         _slots = await _definitions.GetOrInitAsync(RunnerId);
         await UpsertRegistryAsync();
-        _heartbeatTimer ??= this.RegisterGrainTimer(
-            _ => CheckHeartbeatAsync(),
-            HeartbeatCheckInterval,
-            HeartbeatCheckInterval);
+        EnsurePresenceTimer();
         _log.LogInformation("Runner {Id} registered from {Host} as global resource with {Slots} persisted workflow slots", info.RunnerId, info.Hostname, _slots);
     }
 
@@ -155,37 +152,30 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
         await registry.UnregisterAsync(RunnerId);
     }
 
-    public async Task HeartbeatAsync()
-    {
-        if (_status == RunnerStatus.Offline)
-            throw new InvalidOperationException($"Runner '{RunnerId}' is offline");
-
-        await TouchPresenceAsync();
-    }
+    public Task HeartbeatAsync() => Task.CompletedTask;
 
     public async Task HeartbeatRepairAsync(RunnerInfo info)
     {
-        if (_status != RunnerStatus.Online)
-        {
-            await RegisterAsync(info);
-            return;
-        }
-
         _info = InfoForHeartbeat(info);
         _pendingBuildGitHash = null;
-        await UpsertRegistryAsync();
-        await TouchPresenceAsync();
+        if (_status == RunnerStatus.Online)
+            await UpsertRegistryAsync();
     }
 
     /// <summary>
-    /// Poll IS heartbeat (design §Supervision). Refreshes presence without a
-    /// registry write — the registry is written only on state or info change
-    /// (register / unregister / heartbeat-repair), not per poll.
+    /// A successful poll proves presence. It refreshes the presence timestamp
+    /// and restores an expired runner to the registry using the latest info
+    /// received from register or heartbeat-repair.
     /// </summary>
-    public Task TouchPresenceAsync()
+    public async Task TouchPresenceAsync()
     {
-        _lastHeartbeat = _timeProvider.GetUtcNow().UtcDateTime;
-        return Task.CompletedTask;
+        _lastPresenceAt = _timeProvider.GetUtcNow();
+        EnsurePresenceTimer();
+        if (_status == RunnerStatus.Online || _info is null)
+            return;
+
+        _status = RunnerStatus.Online;
+        await UpsertRegistryAsync();
     }
 
     public async Task<RunnerWorkAssignmentResult> AssignAgentJobAsync(WorkDispatch work)
@@ -361,7 +351,7 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
                 TakenAt: w.CreatedAt));
         }
 
-        return new RunnerRuntimeState(_status, _lastHeartbeat, activeWorks);
+        return new RunnerRuntimeState(_status, _lastPresenceAt, activeWorks);
     }
 
     public async Task UpdateBuildGitHashAsync(string? buildGitHash)
@@ -378,7 +368,8 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
 
         _info = _info with { BuildGitHash = normalized };
         _log.LogInformation("Runner {Id} reported buildGitHash {Hash}", RunnerId, normalized ?? "<null>");
-        await UpsertRegistryAsync();
+        if (_status == RunnerStatus.Online)
+            await UpsertRegistryAsync();
     }
 
     private RunnerInfo InfoForRegister(RunnerInfo info)
@@ -437,14 +428,22 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
     private int MaxWorkflowSlots =>
         _slots ?? RunnerCapacity.DefaultMaxWorkflowSlots;
 
-    private async Task CheckHeartbeatAsync()
+    private void EnsurePresenceTimer()
+    {
+        _presenceTimer ??= this.RegisterGrainTimer(
+            _ => CheckPresenceAsync(),
+            PresenceCheckInterval,
+            PresenceCheckInterval);
+    }
+
+    private async Task CheckPresenceAsync()
     {
         if (_status == RunnerStatus.Offline) return;
 
-        var elapsed = _timeProvider.GetUtcNow().UtcDateTime - _lastHeartbeat;
-        if (elapsed > HeartbeatTimeout)
+        var elapsed = _timeProvider.GetUtcNow() - _lastPresenceAt;
+        if (elapsed > PresenceTimeout)
         {
-            _log.LogWarning("Runner {Id} heartbeat timeout ({Elapsed}s)", RunnerId, elapsed.TotalSeconds);
+            _log.LogWarning("Runner {Id} poll presence timeout ({Elapsed}s)", RunnerId, elapsed.TotalSeconds);
             await HandleTimeoutAsync();
         }
     }

@@ -1,4 +1,3 @@
-import { IssueHealth } from '../../../entities/issue'
 import { formatStageLabel } from './runtime-query-helpers'
 import type {
   RuntimeActionKind,
@@ -63,12 +62,6 @@ function actionEnabled(
     return allowed.has('inspect')
   }
   return false
-}
-
-function isInterrupted(issue: RuntimeDecisionInput['issue']): boolean {
-  return issue?.health === IssueHealth.Interrupted
-    || issue?.workflowStatus?.toLowerCase() === 'interrupted'
-    || issue?.recovery?.latestAttemptState === 'interrupted'
 }
 
 function buildInspectAction(): RuntimeAvailableAction {
@@ -193,7 +186,7 @@ function buildQueuedActions(ctx: SummaryPresentationContext): RuntimeAvailableAc
     || (ctx.isBacklog && ctx.input.issue?.canStart === true)
   const startEnabled = !ctx.isClosed && startOffered && !ctx.waitReason
   const startReason = ctx.waitReason
-    ?? (startOffered ? undefined : 'Start is not currently offered by the backend projection.')
+    ?? (!startOffered ? 'Start is not currently offered by the backend projection.' : undefined)
   return [
     {
       kind: 'start',
@@ -250,9 +243,6 @@ const PRESENTATIONS: Record<RuntimeSummary, SummaryPresentation> = {
       const issue = ctx.issue
       if (issue?.blockedReason) return issue.blockedReason
       if (issue?.convergence?.blockedReason) return issue.convergence.blockedReason
-      if (isInterrupted(issue)) {
-        return 'The workflow was interrupted. Resume or rerun to continue.'
-      }
       return 'The workflow is blocked and needs an action to continue.'
     },
     nextAction: (ctx) => {

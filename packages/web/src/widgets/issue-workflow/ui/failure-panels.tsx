@@ -1,11 +1,11 @@
 import { useMutation } from '@tanstack/react-query'
 import { useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/shared/ui/components/button'
-import { IssueStatus, IssueHealth, WorkflowStage, startIssue, resumeIssue } from '../../../entities/issue'
+import { IssueStatus, IssueHealth, WorkflowStage, startIssue } from '../../../entities/issue'
 import type { Issue } from '../../../entities/issue'
 import { useProject } from '../../../entities/project'
 import { resolveDeliveryFailureFromMessage, type DeliveryFailureKind } from '../../../shared/lib/delivery-failure'
-import { CrossIcon, InterruptedIcon } from './StageStatusIcons'
+import { CrossIcon } from './StageStatusIcons'
 
 export function DeliveryFailureBanner({
   failureKind,
@@ -88,7 +88,7 @@ export function DeliveryFailureBanner({
 
 export function IntegrateFailurePanel({ issue }: { issue: Issue }) {
   if (issue.workflowStage !== WorkflowStage.Integrate) return null
-  if (issue.health !== IssueHealth.Blocked && issue.health !== IssueHealth.Interrupted) return null
+  if (issue.health !== IssueHealth.Blocked) return null
 
   const blockedReason = issue.blockedReason ?? 'Integration step failed'
 
@@ -229,14 +229,6 @@ export function SpecialStatePanel({
     },
   })
 
-  const resumeMutation = useMutation({
-    mutationFn: () => resumeIssue(issueNumber, projectId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['issues'] })
-      queryClient.invalidateQueries({ queryKey: ['agent-status'] })
-    },
-  })
-
   if (issue.status === IssueStatus.Backlog) {
     return (
       <div className="flex justify-center py-4">
@@ -261,27 +253,6 @@ export function SpecialStatePanel({
         {issue.blockedReason && (
           <p className="text-sm text-danger">{issue.blockedReason}</p>
         )}
-      </div>
-    )
-  }
-
-  if (issue.health === IssueHealth.Interrupted) {
-    return (
-      <div className="rounded-lg border border-warning-border bg-warning-subtle p-4 space-y-3">
-        <div className="flex items-center gap-2">
-          <InterruptedIcon />
-          <span className="text-sm font-semibold text-warning">Workflow Interrupted</span>
-        </div>
-        <p className="text-xs text-warning">
-          The workflow was interrupted. Click &quot;Resume&quot; to continue from where it left off.
-        </p>
-        <Button
-          onClick={() => resumeMutation.mutate()}
-          disabled={resumeMutation.isPending}
-          className="bg-warning hover:bg-warning/90 text-warning-foreground"
-        >
-          {resumeMutation.isPending ? 'Resuming...' : 'Resume'}
-        </Button>
       </div>
     )
   }

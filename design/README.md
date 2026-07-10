@@ -30,6 +30,6 @@
 - [issue-templates.md](issue-templates.md) — 三类 issue 模板（Feature / Bug / Refactor）的 body 结构与设计依据。
 - [mobile-pwa.md](mobile-pwa.md) — 移动端 PWA + 推送（**WIP，暂不实现**）：self-host 自治系统的移动端 promise，原 #106 关闭后的方案记录。
 - [prompt-management.md](prompt-management.md) — project-scoped prompt 库和 workflow 的关系。
-- [runner.md](runner.md) — Runner 聚合信息结构与自报 status。
+- [runner.md](runner.md) — Runner 聚合信息结构、poll presence 与进程监督契约。
 - [task-log.md](task-log.md) — task 执行日志的采集管道、上报通道与存储归属。
 - [web-ui.md](web-ui.md) — Web UI 设计边界。

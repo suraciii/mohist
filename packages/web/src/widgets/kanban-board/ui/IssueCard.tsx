@@ -5,7 +5,7 @@ import { ArchiveIcon } from 'lucide-react'
 import { Button } from '@/shared/ui/components/button'
 import type { AgentStatus } from '../../../entities/agent'
 import { IssueStatus, WorkflowStage, IssueHealth, type Issue, type WorkflowStageProgress } from '../../../entities/issue'
-import { archiveIssue, rerunIssue, resumeIssue } from '../../../entities/issue'
+import { archiveIssue, rerunIssue } from '../../../entities/issue'
 import { getPriorityStripColor, getLabelStyle, formatPriority, getPriorityStyle, sortLabels } from '../../../shared/lib/label-colors'
 import { formatRelativeTime } from '../../../shared/lib/relative-time'
 import { useProject, useProjectPath } from '../../../entities/project'
@@ -251,17 +251,8 @@ export function IssueCard({ issue, agentStatus, showArchiveButton }: Props) {
   ) ?? false
   const indicator = getStatusIndicator(issue, isAgentRunning)
   const isCancelled = issue.status === IssueStatus.Cancelled
-  const isInterrupted = issue.health === IssueHealth.Interrupted
   const isAwaitingApproval = issue.approvalState?.status === 'awaiting'
   const isDone = issue.status === IssueStatus.Done
-
-  const resumeMutation = useMutation({
-    mutationFn: () => resumeIssue(issue.number, projectId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['issues'] })
-      queryClient.invalidateQueries({ queryKey: ['agent-status'] })
-    },
-  })
 
   const rerunMutation = useMutation({
     mutationFn: () => rerunIssue(issue.number, projectId),
@@ -293,7 +284,7 @@ export function IssueCard({ issue, agentStatus, showArchiveButton }: Props) {
   const isIntegrateWithFailure =
     issue.workflowStage === WorkflowStage.Integrate &&
     !isDone &&
-    (issue.health === IssueHealth.Blocked || issue.health === IssueHealth.Interrupted)
+    issue.health === IssueHealth.Blocked
   const isDraft = issue.isDraft
   const workflowProfileId = issue.workflowProfileId ?? SYSTEM_DEFAULT_WORKFLOW_PROFILE_ID
   const waitingFor = !isDraft && issue.blocker?.kind === 'waiting-for' ? issue.blocker.issue : null
@@ -419,13 +410,13 @@ export function IssueCard({ issue, agentStatus, showArchiveButton }: Props) {
               {relativeTime}
             </span>
           )}
-          {(isInterrupted ||
-            (!isCancelled &&
+          {!isCancelled &&
               !isDone &&
               !isDraft &&
               !isAwaitingApproval &&
               issue.workflowStage &&
-              !isAgentRunning)) && (
+              agentStatus.runnerAvailable !== false &&
+              !isAgentRunning && (
             <Button
               variant="ghost"
               size="sm"
@@ -434,19 +425,11 @@ export function IssueCard({ issue, agentStatus, showArchiveButton }: Props) {
               onClick={(e) => {
                 e.preventDefault()
                 e.stopPropagation()
-                if (isInterrupted) {
-                  resumeMutation.mutate()
-                } else {
-                  rerunMutation.mutate()
-                }
+                rerunMutation.mutate()
               }}
-              disabled={resumeMutation.isPending || rerunMutation.isPending}
+              disabled={rerunMutation.isPending}
             >
-              {resumeMutation.isPending || rerunMutation.isPending
-                ? 'Working...'
-                : isInterrupted
-                  ? 'Resume'
-                  : 'Rerun'}
+              {rerunMutation.isPending ? 'Working...' : 'Rerun'}
             </Button>
           )}
         </div>

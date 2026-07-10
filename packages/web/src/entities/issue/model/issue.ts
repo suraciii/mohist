@@ -36,7 +36,6 @@ export enum IssueHealth {
   Active = 'active',
   Paused = 'paused',
   Blocked = 'blocked',
-  Interrupted = 'interrupted',
   Cancelled = 'cancelled',
   Done = 'done',
 }

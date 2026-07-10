@@ -13,8 +13,6 @@ const eventsConnectionHook: EventsConnectionHook = (...args) => {
   eventsConnectionCalls.push(args)
   return { status: 'disconnected', connection: null, reconnectVersion: 0 }
 }
-const runnerDropNoticeHook = () => {}
-
 beforeEach(() => {
   vi.clearAllMocks()
   eventsConnectionCalls = []
@@ -190,7 +188,6 @@ describe('LiveTaskProvider timeline forwarding', () => {
               {
                 children: createElement('div', null, 'child'),
                 eventsConnectionHook,
-                runnerDropNoticeHook,
               },
             ),
           },
