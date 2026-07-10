@@ -6,6 +6,7 @@ import { http, HttpResponse } from 'msw'
 import type { LogEntry, LogTailResult } from './api'
 import { useMswServer } from '../../../../tests/support/msw'
 import { useLogs } from './useLogs'
+import { setScopedProperty } from '../../../../tests/support/scoped-property'
 
 let _logTailResponses: LogTailResult[] = []
 
@@ -413,7 +414,7 @@ describe('useLogs: auto-follow polling', () => {
       await Promise.resolve()
     })
 
-    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' })
+    setScopedProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' })
     document.dispatchEvent(new Event('visibilitychange'))
 
     logTailHandler.mockClear()

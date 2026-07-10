@@ -8,6 +8,7 @@ import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import { ProjectProvider } from '../src/entities/project/model/ProjectContext'
 import { TEST_PROJECT } from './test-utils'
 import { server, useMswServer } from './support/msw'
+import { setScopedProperty, setScopedValue } from './support/scoped-property'
 import React from 'react'
 import { IssueHealth, WorkflowStage } from '../src/entities/issue'
 
@@ -167,22 +168,13 @@ class StubResizeObserver {
 }
 
 async function withSimulatedReaderHeight(scrollHeight: number, run: () => Promise<void>) {
-  const original = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollHeight')
-  Object.defineProperty(HTMLElement.prototype, 'scrollHeight', {
+  setScopedProperty(HTMLElement.prototype, 'scrollHeight', {
     configurable: true,
     get() {
       return scrollHeight
     },
   })
-  try {
-    await run()
-  } finally {
-    if (original) {
-      Object.defineProperty(HTMLElement.prototype, 'scrollHeight', original)
-    } else {
-      delete (HTMLElement.prototype as unknown as { scrollHeight?: number }).scrollHeight
-    }
-  }
+  await run()
 }
 
 beforeEach(() => {
@@ -209,7 +201,7 @@ beforeEach(() => {
   resizeObserverSpy = vi.fn(function (this: unknown, callback: ResizeObserverCallback) {
     return new StubResizeObserver(callback)
   })
-  ;(globalThis as { ResizeObserver?: unknown }).ResizeObserver = resizeObserverSpy
+  setScopedValue(globalThis, 'ResizeObserver', resizeObserverSpy)
   let objectUrlCounter = 0
   vi.spyOn(URL, 'createObjectURL').mockImplementation(() => `blob:test-${++objectUrlCounter}`)
   vi.spyOn(URL, 'revokeObjectURL').mockImplementation(vi.fn())
@@ -233,8 +225,6 @@ beforeEach(() => {
 
 afterEach(() => {
   queryClient.clear()
-  delete (globalThis as { ResizeObserver?: unknown }).ResizeObserver
-  vi.unstubAllGlobals()
 })
 
 function fileList(files: File[]) {
@@ -709,8 +699,6 @@ describe('IssueDetailPage Markdown rendering', () => {
         expect(_deleteCommentHandler).toHaveBeenCalledTimes(1)
       })
       expect(windowConfirmSpy).not.toHaveBeenCalled()
-
-      windowConfirmSpy.mockRestore()
     })
 
     it('shows empty comments message when no comments exist', async () => {

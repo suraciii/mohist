@@ -5,7 +5,8 @@ import { http, HttpResponse } from 'msw'
 import { SessionPage } from '../src/pages/session/ui/SessionPage'
 import type { SessionTurn, CoderSessionDetail, SessionMetadata, AgentSessionMetadata } from '../src/entities/coder-session'
 import { useMswServer } from './support/msw'
-import { renderWithQueryClient as renderPageWithQueryClient, makeTurn, convertLegacyToAgentMetadata, queryClients, originalScrollTo } from './session-page-test-utils'
+import { renderWithQueryClient as renderPageWithQueryClient, makeTurn, convertLegacyToAgentMetadata, queryClients } from './session-page-test-utils'
+import { setScopedValue } from './support/scoped-property'
 
 const sessionPageMocks = {
   sessions: [] as any[],
@@ -85,14 +86,8 @@ function renderWithQueryClient(_ui: ReactElement) {
   return renderPageWithQueryClient(<SessionPage />, route)
 }
 
-const originalClipboardDescriptor = Object.getOwnPropertyDescriptor(navigator, 'clipboard')
-const clipboard = { writeText: vi.fn().mockResolvedValue(undefined) }
-
 beforeEach(() => {
-  Object.defineProperty(navigator, 'clipboard', {
-    value: clipboard,
-    configurable: true,
-  })
+  setScopedValue(navigator, 'clipboard', { writeText: vi.fn().mockResolvedValue(undefined) })
   vi.clearAllMocks()
   sessionApiCalls = []
   sessionPageMocks.sessions = []
@@ -105,19 +100,13 @@ beforeEach(() => {
   sessionPageMocks.detailPending = false
   sessionPageMocks.params = { number: '123', sessionName: 'session-123' }
   sessionPageMocks.workflowRunSessions = []
-  Element.prototype.scrollTo = vi.fn()
+  setScopedValue(Element.prototype, 'scrollTo', vi.fn())
 })
 
 afterEach(() => {
   vi.useRealTimers()
-  Element.prototype.scrollTo = originalScrollTo
   for (const queryClient of queryClients) queryClient.clear()
   queryClients.length = 0
-  if (originalClipboardDescriptor) {
-    Object.defineProperty(navigator, 'clipboard', originalClipboardDescriptor)
-  } else {
-    Reflect.deleteProperty(navigator, 'clipboard')
-  }
 })
 
 describe('SessionPage header and states', () => {

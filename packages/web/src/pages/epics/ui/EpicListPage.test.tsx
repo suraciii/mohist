@@ -9,6 +9,7 @@ import { ProjectProvider } from '../../../entities/project'
 import { EpicStatus } from '../../../entities/epic'
 import { EpicListPage } from './EpicListPage'
 import { useMswServer } from '../../../../tests/support/msw'
+import { setScopedProperty } from '../../../../tests/support/scoped-property'
 
 function LocationProbe() {
   const location = useLocation()
@@ -755,11 +756,11 @@ describe('EpicListPage mobile no-overflow invariants', () => {
   })
 
   function stubWidth(width: number) {
-    Object.defineProperty(document.documentElement, 'scrollWidth', {
+    setScopedProperty(document.documentElement, 'scrollWidth', {
       configurable: true,
       get: () => width,
     })
-    Object.defineProperty(document.documentElement, 'clientWidth', {
+    setScopedProperty(document.documentElement, 'clientWidth', {
       configurable: true,
       get: () => width,
     })

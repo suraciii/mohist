@@ -7,6 +7,7 @@ import { ProjectProvider } from '../../../entities/project'
 import type { Project } from '../../../entities/project'
 import { IssueDetailPage } from './IssueDetailPage'
 import { mockAgentStatus, mockIssue, mockIssueCommits, mockIssueDiff, mockWorkflowTimeline, mountIssueDetail } from './_issueDetailMsw'
+import { setScopedValue } from '../../../../tests/support/scoped-property'
 
 
 const projects: Project[] = [
@@ -31,7 +32,7 @@ function mockMatchMedia(narrow: boolean) {
     onchange: null,
   }
   vi.stubGlobal('matchMedia', vi.fn(() => mql))
-  Object.defineProperty(window, 'innerWidth', { configurable: true, value: narrow ? 375 : 1280 })
+  setScopedValue(window, 'innerWidth', narrow ? 375 : 1280)
 }
 
 function renderPage() {
@@ -123,7 +124,7 @@ mountIssueDetail({ issue: baseIssue() })
 
 function resetViewport() {
   mockMatchMedia(false)
-  Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1280 })
+  setScopedValue(window, 'innerWidth', 1280)
   window.dispatchEvent(new Event('resize'))
 }
 
@@ -133,7 +134,6 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup()
-  vi.unstubAllGlobals()
 })
 
 function expectAssigned(testId: string, anchor: string) {
@@ -610,7 +610,6 @@ describe('T-004: cross-tier verification — three-tier weight hierarchy holds o
       expect(referenceRail.className).toMatch(/lg:col-span-1\b/)
 
       cleanup()
-      vi.unstubAllGlobals()
     })
   }
 })

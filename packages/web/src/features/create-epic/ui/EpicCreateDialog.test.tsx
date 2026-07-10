@@ -11,6 +11,7 @@ import { EpicCreateDialog } from './EpicCreateDialog'
 import { EPIC_DESCRIPTION_TEMPLATE, hasEpicDescriptionStructure } from '@/shared/lib/epic-description-template'
 import { useMswServer } from '../../../../tests/support/msw'
 import type { Epic, EpicStatus } from '../../../entities/epic'
+import { setScopedProperty } from '../../../../tests/support/scoped-property'
 
 let _createResponse: Epic | null = null
 
@@ -81,11 +82,11 @@ function renderDialog(props: { open?: boolean; onClose?: () => void } = {}) {
 }
 
 function stubWidth(width: number) {
-  Object.defineProperty(document.documentElement, 'scrollWidth', {
+  setScopedProperty(document.documentElement, 'scrollWidth', {
     configurable: true,
     get: () => width,
   })
-  Object.defineProperty(document.documentElement, 'clientWidth', {
+  setScopedProperty(document.documentElement, 'clientWidth', {
     configurable: true,
     get: () => width,
   })

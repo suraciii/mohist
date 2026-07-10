@@ -2,21 +2,17 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { screen, fireEvent, waitFor } from '../../../../tests/test-utils'
 import { SessionTranscriptView } from './SessionTranscriptView'
 import type { SessionTurn, TextPart, ReasoningPart, ToolPart, ErrorPart } from '../../../entities/coder-session'
-import { renderWithQueryClient, makeTurn, queryClients, originalScrollTo } from '../../../../tests/session-page-test-utils'
-
-Object.defineProperty(navigator, 'clipboard', {
-  value: { writeText: vi.fn().mockResolvedValue(undefined) },
-  configurable: true,
-})
+import { renderWithQueryClient, makeTurn, queryClients } from '../../../../tests/session-page-test-utils'
+import { setScopedValue } from '../../../../tests/support/scoped-property'
 
 beforeEach(() => {
   vi.clearAllMocks()
-  Element.prototype.scrollTo = vi.fn()
+  setScopedValue(navigator, 'clipboard', { writeText: vi.fn().mockResolvedValue(undefined) })
+  setScopedValue(Element.prototype, 'scrollTo', vi.fn())
 })
 
 afterEach(() => {
   vi.useRealTimers()
-  Element.prototype.scrollTo = originalScrollTo
   for (const queryClient of queryClients) queryClient.clear()
   queryClients.length = 0
 })
@@ -99,10 +95,7 @@ describe('SessionTranscriptView', () => {
 
     it('copies prompt text when Copy button is clicked', async () => {
       const mockWriteText = vi.fn().mockResolvedValue(undefined)
-      Object.defineProperty(navigator, 'clipboard', {
-        value: { writeText: mockWriteText },
-        configurable: true,
-      })
+      setScopedValue(navigator, 'clipboard', { writeText: mockWriteText })
 
       const turns = [makeTurn({
         user: {
@@ -1531,4 +1524,3 @@ describe('SessionTranscriptView', () => {
     })
   })
 })
-

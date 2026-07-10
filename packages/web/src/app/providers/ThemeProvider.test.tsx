@@ -52,7 +52,7 @@ function installMatchMedia(initialMatches: boolean): { setMatches(next: boolean)
     return list
   }
 
-  window.matchMedia = vi.fn(factory) as unknown as typeof window.matchMedia
+  vi.stubGlobal('matchMedia', vi.fn(factory))
 
   return {
     lists,
@@ -80,12 +80,12 @@ function ThemeProbe({ testId = 'theme-probe' }: { testId?: string }) {
 describe('ThemeProvider', () => {
   beforeEach(() => {
     window.localStorage.clear()
-    document.documentElement.className = ''
+    document.documentElement.removeAttribute('class')
   })
 
   afterEach(() => {
     window.localStorage.clear()
-    document.documentElement.className = ''
+    document.documentElement.removeAttribute('class')
   })
 
   it('defaults to system when no stored preference exists', () => {

@@ -10,6 +10,7 @@ import type {
   AgentSessionTranscriptResponse,
   SessionTurn,
 } from '../src/entities/coder-session'
+import { setScopedValue } from './support/scoped-property'
 
 const ISSUE = 42
 const SESSION = 'T-003.1'
@@ -47,7 +48,6 @@ const sessionPageDependencies: SessionPageDependencies = {
   },
 }
 
-const originalScrollTo = Element.prototype.scrollTo
 const queryClients: QueryClient[] = []
 
 beforeEach(() => {
@@ -56,12 +56,11 @@ beforeEach(() => {
   sessionsLoading = false
   metadata = null
   transcript = { turns: [], partCount: 0, lastActivityAt: null }
-  Element.prototype.scrollTo = vi.fn()
+  setScopedValue(Element.prototype, 'scrollTo', vi.fn())
 })
 
 afterEach(() => {
   vi.useRealTimers()
-  Element.prototype.scrollTo = originalScrollTo
   for (const queryClient of queryClients) queryClient.clear()
   queryClients.length = 0
 })

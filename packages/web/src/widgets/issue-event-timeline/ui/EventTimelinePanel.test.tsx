@@ -5,6 +5,7 @@ import { render } from '../../../../tests/test-utils'
 import { EventTimelinePanel, EventTimelinePanelView } from './EventTimelinePanel'
 import type { TimelineEntry } from '../model/types'
 import type { EventTimelineHistoryHook } from '../useEventTimeline'
+import { setScopedValue } from '../../../../tests/support/scoped-property'
 
 let timeline = { entries: [] as TimelineEntry[], isLoading: false }
 let requestedIssueNumbers: string[] = []
@@ -377,7 +378,7 @@ describe('EventTimelinePanel', () => {
         isLoading: false,
       }
 
-      Object.defineProperty(window, 'innerWidth', { configurable: true, value: 375 })
+      setScopedValue(window, 'innerWidth', 375)
       window.dispatchEvent(new Event('resize'))
 
       renderTimelineView()

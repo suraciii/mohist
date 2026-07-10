@@ -7,6 +7,7 @@ import type { Project } from '../../../entities/project'
 import type { EventTimelineHistoryHook } from '../useEventTimeline'
 import { ActivityDialog } from './ActivityDialog'
 import { EventTimelinePanel, type EventTimelinePanelProps } from './EventTimelinePanel'
+import { setScopedValue } from '../../../../tests/support/scoped-property'
 
 let eventRequests = 0
 
@@ -86,7 +87,7 @@ describe('ActivityDialog', () => {
   })
 
   it('renders the dialog as a near-fullscreen sheet on mobile width', () => {
-    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 375 })
+    setScopedValue(window, 'innerWidth', 375)
     window.dispatchEvent(new Event('resize'))
 
     renderDialog()

@@ -119,7 +119,7 @@ describe('storage helpers', () => {
 
 describe('applyResolvedTheme', () => {
   beforeEach(() => {
-    document.documentElement.className = ''
+    document.documentElement.removeAttribute('class')
   })
 
   it('adds the .dark class for resolved dark', () => {
@@ -142,7 +142,6 @@ describe('applyResolvedTheme', () => {
 
 describe('createMatchMedia', () => {
   it('returns the real matchMedia value when available', () => {
-    const original = window.matchMedia
     const matchesSpy = vi.fn((query: string) => ({
       matches: true,
       media: query,
@@ -153,24 +152,21 @@ describe('createMatchMedia', () => {
       removeListener: vi.fn(),
       dispatchEvent: vi.fn(),
     }))
-    window.matchMedia = matchesSpy as unknown as typeof window.matchMedia
+    vi.stubGlobal('matchMedia', matchesSpy)
 
     const mql = createMatchMedia('(prefers-color-scheme: dark)')
     expect(mql.matches).toBe(true)
     expect(mql.media).toBe('(prefers-color-scheme: dark)')
 
-    window.matchMedia = original
   })
 
   it('falls back to a no-op listener when matchMedia is unavailable', () => {
-    const original = window.matchMedia
-    delete (window as { matchMedia?: unknown }).matchMedia
+    vi.stubGlobal('matchMedia', undefined)
 
     const mql = createMatchMedia('(prefers-color-scheme: dark)')
     expect(mql.matches).toBe(false)
     expect(() => mql.addEventListener('change', () => {})).not.toThrow()
     expect(() => mql.removeEventListener('change', () => {})).not.toThrow()
 
-    window.matchMedia = original
   })
 })

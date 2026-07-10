@@ -8,6 +8,7 @@ import { IssueStatus, WorkflowStage, IssueHealth } from '../../../entities/issue
 
 import { issues, linkedIssue, renderPage, getActionGroup } from './_epicDetailPageTestUtils'
 import { mountEpicDetail, mockEpic } from './_epicDetailMsw'
+import { setScopedProperty } from '../../../../tests/support/scoped-property'
 
 describe('EpicDetailPage summary-first information architecture (T-002)', () => {
   const LONG_DESCRIPTION = [
@@ -121,29 +122,21 @@ describe('EpicDetailPage summary-first information architecture (T-002)', () => 
     })
 
     it('exposes the expand/collapse test hooks from MarkdownReader inside the Overview card', async () => {
-      const originalScrollHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollHeight')
-      Object.defineProperty(HTMLElement.prototype, 'scrollHeight', {
+      setScopedProperty(HTMLElement.prototype, 'scrollHeight', {
         configurable: true,
         get() {
           return 5000
         },
       })
-      try {
-        mockEpic(makeEpic({
-          description: Array.from({ length: 80 }, (_, i) => `Line ${i + 1} content that exceeds the collapsed height.`).join('\n\n'),
-        }))
-        await renderPageReady()
 
-        const description = screen.getByTestId('epic-description')
-        const expandControl = description.querySelector('[data-testid="markdown-expand-control"]') as HTMLElement
-        expect(expandControl).toBeTruthy()
-      } finally {
-        if (originalScrollHeight) {
-          Object.defineProperty(HTMLElement.prototype, 'scrollHeight', originalScrollHeight)
-        } else {
-          delete (HTMLElement.prototype as unknown as Record<string, unknown>).scrollHeight
-        }
-      }
+      mockEpic(makeEpic({
+        description: Array.from({ length: 80 }, (_, i) => `Line ${i + 1} content that exceeds the collapsed height.`).join('\n\n'),
+      }))
+      await renderPageReady()
+
+      const description = screen.getByTestId('epic-description')
+      const expandControl = description.querySelector('[data-testid="markdown-expand-control"]') as HTMLElement
+      expect(expandControl).toBeTruthy()
     })
   })
 

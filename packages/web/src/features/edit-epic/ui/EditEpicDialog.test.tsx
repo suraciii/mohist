@@ -8,6 +8,7 @@ import { ProjectProvider } from '../../../entities/project'
 import { EditEpicDialog } from './EditEpicDialog'
 import type { EpicDetail, EpicPriority, EpicStatus } from '../../../entities/epic'
 import { EPIC_DESCRIPTION_TEMPLATE } from '@/shared/lib/epic-description-template'
+import { setScopedProperty } from '../../../../tests/support/scoped-property'
 
 const updateHandler = vi.fn(async ({ id, data }: {
   id: string
@@ -70,15 +71,12 @@ function renderDialog(props: { open?: boolean; onClose?: () => void; epic?: Epic
   )
 }
 
-const originalScrollWidthDescriptor = Object.getOwnPropertyDescriptor(document.documentElement, 'scrollWidth')
-const originalClientWidthDescriptor = Object.getOwnPropertyDescriptor(document.documentElement, 'clientWidth')
-
 function stubWidth(width: number) {
-  Object.defineProperty(document.documentElement, 'scrollWidth', {
+  setScopedProperty(document.documentElement, 'scrollWidth', {
     configurable: true,
     get: () => width,
   })
-  Object.defineProperty(document.documentElement, 'clientWidth', {
+  setScopedProperty(document.documentElement, 'clientWidth', {
     configurable: true,
     get: () => width,
   })
@@ -87,16 +85,6 @@ function stubWidth(width: number) {
 afterEach(() => {
   cleanup()
   vi.clearAllMocks()
-  if (originalScrollWidthDescriptor) {
-    Object.defineProperty(document.documentElement, 'scrollWidth', originalScrollWidthDescriptor)
-  } else {
-    Reflect.deleteProperty(document.documentElement, 'scrollWidth')
-  }
-  if (originalClientWidthDescriptor) {
-    Object.defineProperty(document.documentElement, 'clientWidth', originalClientWidthDescriptor)
-  } else {
-    Reflect.deleteProperty(document.documentElement, 'clientWidth')
-  }
 })
 
 describe('EditEpicDialog verbatim load', () => {

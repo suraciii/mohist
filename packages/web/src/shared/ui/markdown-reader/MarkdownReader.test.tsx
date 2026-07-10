@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { useRef, type ReactNode } from 'react'
 import { MarkdownReader, type MarkdownAttachment } from './MarkdownReader'
 import * as SharedUiBarrel from '@/shared/ui'
+import { setScopedProperty, setScopedValue } from '../../../../tests/support/scoped-property'
 
 type ResizeObserverCtor = new (callback: ResizeObserverCallback) => ResizeObserver
 
@@ -48,12 +49,8 @@ function setupResizeObserver() {
     instances.push(instance)
     return instance
   }) as unknown as ResizeObserverCtor
-  ;(globalThis as { ResizeObserver?: ResizeObserverCtor }).ResizeObserver = spy
+  setScopedValue(globalThis, 'ResizeObserver', spy)
   return { instances, spy }
-}
-
-function teardownResizeObserver() {
-  delete (globalThis as { ResizeObserver?: ResizeObserverCtor }).ResizeObserver
 }
 
 describe('MarkdownReader barrel export', () => {
@@ -259,21 +256,17 @@ describe('MarkdownReader code-block overflow', () => {
 
   afterEach(() => {
     cleanup()
-    teardownResizeObserver()
   })
 
   it('does not produce page-level horizontal overflow for a long code line', () => {
     const longLine = 'a'.repeat(2000)
     const content = '```\n' + longLine + '\n```'
 
-    const originalScrollWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollWidth')
-    const originalClientWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth')
-
     const measured = { code: { scrollWidth: 0, clientWidth: 0 }, pre: { scrollWidth: 0, clientWidth: 0 }, probe: { scrollWidth: 0, clientWidth: 0 } }
 
-    Object.defineProperty(HTMLElement.prototype, 'scrollWidth', {
+    setScopedProperty(HTMLElement.prototype, 'scrollWidth', {
       configurable: true,
-      get() {
+      get(this: HTMLElement) {
         const testId = this.getAttribute?.('data-testid')
         if (testId === 'markdown-code-block') return measured.code.scrollWidth
         if (testId === 'markdown-pre') return measured.pre.scrollWidth
@@ -281,9 +274,9 @@ describe('MarkdownReader code-block overflow', () => {
         return 0
       },
     })
-    Object.defineProperty(HTMLElement.prototype, 'clientWidth', {
+    setScopedProperty(HTMLElement.prototype, 'clientWidth', {
       configurable: true,
-      get() {
+      get(this: HTMLElement) {
         const testId = this.getAttribute?.('data-testid')
         if (testId === 'markdown-code-block') return measured.code.clientWidth
         if (testId === 'markdown-pre') return measured.pre.clientWidth
@@ -292,42 +285,29 @@ describe('MarkdownReader code-block overflow', () => {
       },
     })
 
-    try {
-      render(
-        <OverflowProbe>
-          <MarkdownReader content={content} baseHeadingLevel={2} />
-        </OverflowProbe>,
-      )
+    render(
+      <OverflowProbe>
+        <MarkdownReader content={content} baseHeadingLevel={2} />
+      </OverflowProbe>,
+    )
 
-      measured.code.scrollWidth = 5000
-      measured.code.clientWidth = 300
-      measured.pre.scrollWidth = 5000
-      measured.pre.clientWidth = 300
-      measured.probe.scrollWidth = 400
-      measured.probe.clientWidth = 400
+    measured.code.scrollWidth = 5000
+    measured.code.clientWidth = 300
+    measured.pre.scrollWidth = 5000
+    measured.pre.clientWidth = 300
+    measured.probe.scrollWidth = 400
+    measured.probe.clientWidth = 400
 
-      const probe = screen.getByTestId('overflow-probe')
-      expect(probe.scrollWidth).toBe(probe.clientWidth)
+    const probe = screen.getByTestId('overflow-probe')
+    expect(probe.scrollWidth).toBe(probe.clientWidth)
 
-      const codeEl = screen.getByTestId('markdown-code-block')
-      expect(codeEl.scrollWidth).toBeGreaterThan(codeEl.clientWidth)
-      expect(codeEl.className).toContain('overflow-x-auto')
+    const codeEl = screen.getByTestId('markdown-code-block')
+    expect(codeEl.scrollWidth).toBeGreaterThan(codeEl.clientWidth)
+    expect(codeEl.className).toContain('overflow-x-auto')
 
-      const preEl = screen.getByTestId('markdown-pre')
-      expect(preEl.scrollWidth).toBeGreaterThan(preEl.clientWidth)
-      expect(preEl.className).toContain('overflow-x-auto')
-    } finally {
-      if (originalScrollWidth) {
-        Object.defineProperty(HTMLElement.prototype, 'scrollWidth', originalScrollWidth)
-      } else {
-        Object.defineProperty(HTMLElement.prototype, 'scrollWidth', { configurable: true, value: 0 })
-      }
-      if (originalClientWidth) {
-        Object.defineProperty(HTMLElement.prototype, 'clientWidth', originalClientWidth)
-      } else {
-        Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, value: 0 })
-      }
-    }
+    const preEl = screen.getByTestId('markdown-pre')
+    expect(preEl.scrollWidth).toBeGreaterThan(preEl.clientWidth)
+    expect(preEl.className).toContain('overflow-x-auto')
   })
 })
 
@@ -338,34 +318,22 @@ describe('MarkdownReader copy-code affordance', () => {
 
   it('renders a copy affordance when showCopyCode is enabled and writes the block text to the clipboard', async () => {
     const writeText = vi.fn().mockResolvedValue(undefined)
-    const originalClipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard')
-    Object.defineProperty(navigator, 'clipboard', {
-      configurable: true,
-      value: { writeText },
+    setScopedValue(navigator, 'clipboard', { writeText })
+
+    const content = '```ts\nconst greet = () => "hi"\n```'
+    render(<MarkdownReader content={content} baseHeadingLevel={2} showCopyCode />)
+
+    const button = screen.getByTestId('markdown-copy-code')
+    expect(button).toBeInTheDocument()
+
+    fireEvent.click(button)
+
+    await waitFor(() => {
+      expect(button).toHaveAttribute('aria-label', 'Copied')
     })
-
-    try {
-      const content = '```ts\nconst greet = () => "hi"\n```'
-      render(<MarkdownReader content={content} baseHeadingLevel={2} showCopyCode />)
-
-      const button = screen.getByTestId('markdown-copy-code')
-      expect(button).toBeInTheDocument()
-
-      fireEvent.click(button)
-
-      await waitFor(() => {
-        expect(button).toHaveAttribute('aria-label', 'Copied')
-      })
-      expect(writeText).toHaveBeenCalledTimes(1)
-      const written = writeText.mock.calls[0]?.[0] as string
-      expect(written.replace(/\n$/, '')).toBe('const greet = () => "hi"')
-    } finally {
-      if (originalClipboard) {
-        Object.defineProperty(navigator, 'clipboard', originalClipboard)
-      } else {
-        Object.defineProperty(navigator, 'clipboard', { configurable: true, value: undefined })
-      }
-    }
+    expect(writeText).toHaveBeenCalledTimes(1)
+    const written = writeText.mock.calls[0]?.[0] as string
+    expect(written.replace(/\n$/, '')).toBe('const greet = () => "hi"')
   })
 
   it('does not render a copy affordance when showCopyCode is omitted', () => {
@@ -431,30 +399,19 @@ describe('MarkdownReader long link and inline-code wrapping', () => {
 
 describe('MarkdownReader collapsible vs full modes', () => {
   function withSimulatedHeight(scrollHeight: number, run: () => void) {
-    const originalScrollHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollHeight')
-    const originalClientHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientHeight')
-    Object.defineProperty(HTMLElement.prototype, 'scrollHeight', {
+    setScopedProperty(HTMLElement.prototype, 'scrollHeight', {
       configurable: true,
       get() {
         return scrollHeight
       },
     })
-    Object.defineProperty(HTMLElement.prototype, 'clientHeight', {
+    setScopedProperty(HTMLElement.prototype, 'clientHeight', {
       configurable: true,
       get() {
         return 0
       },
     })
-    try {
-      run()
-    } finally {
-      if (originalScrollHeight) {
-        Object.defineProperty(HTMLElement.prototype, 'scrollHeight', originalScrollHeight)
-      }
-      if (originalClientHeight) {
-        Object.defineProperty(HTMLElement.prototype, 'clientHeight', originalClientHeight)
-      }
-    }
+    run()
   }
 
   beforeEach(() => {
@@ -463,7 +420,6 @@ describe('MarkdownReader collapsible vs full modes', () => {
 
   afterEach(() => {
     cleanup()
-    teardownResizeObserver()
   })
 
   function makeTallContent() {

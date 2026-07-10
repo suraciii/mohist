@@ -4,21 +4,17 @@ import { SessionTranscriptView } from '../src/widgets/session-transcript/ui/Sess
 import { useSessionTranscript } from '../src/widgets/session-transcript/model/useSessionTranscript'
 import { dispatchAgentEvent } from '../src/entities/agent'
 import type { TextPart, ToolPart } from '../src/entities/coder-session'
-import { renderWithQueryClient, renderHookWithQueryClient, makeTurn, getAssistantCopyButton, expandChangedFilesTool, queryClients, originalScrollTo } from './session-page-test-utils'
-
-Object.defineProperty(navigator, 'clipboard', {
-  value: { writeText: vi.fn().mockResolvedValue(undefined) },
-  configurable: true,
-})
+import { renderWithQueryClient, renderHookWithQueryClient, makeTurn, getAssistantCopyButton, expandChangedFilesTool, queryClients } from './session-page-test-utils'
+import { setScopedValue } from './support/scoped-property'
 
 beforeEach(() => {
   vi.clearAllMocks()
-  Element.prototype.scrollTo = vi.fn()
+  setScopedValue(navigator, 'clipboard', { writeText: vi.fn().mockResolvedValue(undefined) })
+  setScopedValue(Element.prototype, 'scrollTo', vi.fn())
 })
 
 afterEach(() => {
   vi.useRealTimers()
-  Element.prototype.scrollTo = originalScrollTo
   for (const queryClient of queryClients) queryClient.clear()
   queryClients.length = 0
 })
@@ -638,10 +634,7 @@ describe('T-006: Transcript affordances', () => {
 
     it('copies assistant text when copy button is clicked', async () => {
       const mockWriteText = vi.fn().mockResolvedValue(undefined)
-      Object.defineProperty(navigator, 'clipboard', {
-        value: { writeText: mockWriteText },
-        configurable: true,
-      })
+      setScopedValue(navigator, 'clipboard', { writeText: mockWriteText })
 
       const turns = [makeTurn({
         assistant: [{
@@ -668,10 +661,7 @@ describe('T-006: Transcript affordances', () => {
     it('copy button shows Copy again after timeout', async () => {
       vi.useFakeTimers()
       const mockWriteText = vi.fn().mockResolvedValue(undefined)
-      Object.defineProperty(navigator, 'clipboard', {
-        value: { writeText: mockWriteText },
-        configurable: true,
-      })
+      setScopedValue(navigator, 'clipboard', { writeText: mockWriteText })
 
       const turns = [makeTurn({
         assistant: [{
@@ -863,7 +853,7 @@ describe('T-007: Follow-mode scrolling and streaming text pacing', () => {
   describe('follow-mode pause/resume', () => {
     it('auto-scrolls when reader is near bottom during live session', async () => {
       const scrollToMock = vi.fn()
-      Element.prototype.scrollTo = scrollToMock
+      setScopedValue(Element.prototype, 'scrollTo', scrollToMock)
 
       const initialTurns = [makeTurn({
         assistant: [{
@@ -904,7 +894,7 @@ describe('T-007: Follow-mode scrolling and streaming text pacing', () => {
 
     it('does not auto-scroll when user scrolls away from bottom', async () => {
       const scrollToMock = vi.fn()
-      Element.prototype.scrollTo = scrollToMock
+      setScopedValue(Element.prototype, 'scrollTo', scrollToMock)
 
       const initialTurns = [makeTurn({
         assistant: [{
@@ -943,7 +933,7 @@ describe('T-007: Follow-mode scrolling and streaming text pacing', () => {
 
     it('restores follow mode when scrollToBottom is called', async () => {
       const scrollToMock = vi.fn()
-      Element.prototype.scrollTo = scrollToMock
+      setScopedValue(Element.prototype, 'scrollTo', scrollToMock)
 
       const initialTurns = [makeTurn()]
 
@@ -1066,7 +1056,7 @@ describe('T-007: Follow-mode scrolling and streaming text pacing', () => {
   describe('nested scrollable regions', () => {
     it('does not toggle follow mode when scrolling within nested scrollable region', async () => {
       const scrollToMock = vi.fn()
-      Element.prototype.scrollTo = scrollToMock
+      setScopedValue(Element.prototype, 'scrollTo', scrollToMock)
 
       const initialTurns = [makeTurn({
         assistant: [{

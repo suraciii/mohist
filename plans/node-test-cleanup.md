@@ -64,7 +64,7 @@ Update table after every gate. Another agent should resume without archaeology.
 |---|---|---|
 | Baseline | DONE | Web 296/4527; Runner 72/1031; fixed shuffle passed; hidden `uploadTaskLog` TypeError reproduced |
 | Runner truth | DONE | Runner production/test typecheck, target retry regression, 73/1036 suite, fixed shuffle seed 20260710, and build passed |
-| Shared state | TODO | |
+| Shared state | DONE | Boundary checker self-test, 297-file scan, Web typecheck, 297/4531 suite, and fixed shuffle seed 20260710 passed |
 | Fake time | TODO | |
 | Browser truth | TODO | |
 | Temp ownership | TODO | |
@@ -434,6 +434,7 @@ Migrate exact files:
 - `packages/web/tests/SessionPage.live-transcript.spec.tsx`
 - `packages/web/tests/SessionPageHeader.spec.tsx`
 - `packages/web/tests/ToolRegistryAndRefetch.spec.tsx`
+- `packages/web/src/widgets/epic-dependency-graph/ui/DependencyGraphCanvas.test.tsx`
 
 Move common successful clipboard fake to scoped support. Delete module-load
 clipboard mutation. Delete bespoke restore bookkeeping after helper owns it.

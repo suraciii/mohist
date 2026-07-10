@@ -8,6 +8,7 @@ import { ProjectProvider } from '../../../entities/project'
 import { IssueChangedFilesPage } from './IssueChangedFilesPage'
 import { parseDiff, parseDiffFiles } from '../../../widgets/issue-changed-files'
 import { useMswServer } from '../../../../tests/support/msw'
+import { setScopedValue } from '../../../../tests/support/scoped-property'
 
 function LocationProbe() {
   const location = useLocation()
@@ -204,10 +205,7 @@ describe('IssueChangedFilesPage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     sessionStorage.clear()
-    Object.defineProperty(Element.prototype, 'scrollIntoView', {
-      configurable: true,
-      value: vi.fn(),
-    })
+    setScopedValue(Element.prototype, 'scrollIntoView', vi.fn())
     setupDefaults()
   })
 

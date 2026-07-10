@@ -10,6 +10,7 @@ import {
   type TaskProgressTimelineHook,
 } from './TaskProgressPanel'
 import type { TaskLogDataHook } from './TaskLogPanel'
+import { setScopedProperty } from '../../../../tests/support/scoped-property'
 import {
   issueWorkflowTaskLogQueryOptions,
   WorkflowStage,
@@ -313,38 +314,29 @@ describe('TaskProgressPanel — task execution log panel', () => {
   })
 
   it('scrolls to the retained tail when log lines render', async () => {
-    const scrollHeightDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollHeight')
-    Object.defineProperty(HTMLElement.prototype, 'scrollHeight', {
+    setScopedProperty(HTMLElement.prototype, 'scrollHeight', {
       configurable: true,
-      get() {
+      get(this: HTMLElement) {
         return this.getAttribute('data-testid') === 'task-log-scroll' ? 1234 : 0
       },
     })
 
-    try {
-      setWorkflowTimeline({ data: makeTimeline() })
-      setLogPage({
-        lines: [
-          makeLine({ seq: 4999, source: 'action:rebase', text: 'CONFLICT (content): Merge conflict in src/foo.ts' }),
-          makeLine({ seq: 5000, source: 'action:rebase', text: 'Patch failed at 0001 feat: add foo' }),
-        ],
-        nextCursor: null,
-        truncated: true,
-      })
+    setWorkflowTimeline({ data: makeTimeline() })
+    setLogPage({
+      lines: [
+        makeLine({ seq: 4999, source: 'action:rebase', text: 'CONFLICT (content): Merge conflict in src/foo.ts' }),
+        makeLine({ seq: 5000, source: 'action:rebase', text: 'Patch failed at 0001 feat: add foo' }),
+      ],
+      nextCursor: null,
+      truncated: true,
+    })
 
-      renderWithQueryClient(<TaskProgressPanel issueNumber={161} currentStage={WorkflowStage.Build} isAgentRunning={false} />)
+    renderWithQueryClient(<TaskProgressPanel issueNumber={161} currentStage={WorkflowStage.Build} isAgentRunning={false} />)
 
-      await expandFailedTask('Rebase onto master')
+    await expandFailedTask('Rebase onto master')
 
-      const scroll = await waitFor(() => screen.getByTestId('task-log-scroll') as HTMLElement)
-      await waitFor(() => expect(scroll.scrollTop).toBe(1234))
-    } finally {
-      if (scrollHeightDescriptor) {
-        Object.defineProperty(HTMLElement.prototype, 'scrollHeight', scrollHeightDescriptor)
-      } else {
-        delete (HTMLElement.prototype as { scrollHeight?: number }).scrollHeight
-      }
-    }
+    const scroll = await waitFor(() => screen.getByTestId('task-log-scroll') as HTMLElement)
+    await waitFor(() => expect(scroll.scrollTop).toBe(1234))
   })
 
   it('shows a truncation indicator when the response reports truncated: true', async () => {

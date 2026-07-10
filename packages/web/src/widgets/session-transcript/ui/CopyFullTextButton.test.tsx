@@ -4,6 +4,7 @@ import { act, fireEvent, render, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { toast } from 'sonner'
 import { CopyFullTextButton } from './CopyFullTextButton'
+import { setScopedValue } from '../../../../tests/support/scoped-property'
 import type {
   DisplayTurn,
   DisplayPrompt,
@@ -78,22 +79,15 @@ function makeMultiTurnFixture(): DisplayTurn[] {
 }
 
 function setClipboard(value: unknown) {
-  Object.defineProperty(navigator, 'clipboard', {
-    value,
-    configurable: true,
-  })
+  setScopedValue(navigator, 'clipboard', value)
 }
 
 describe('CopyFullTextButton', () => {
-  let originalClipboard: unknown
-
   beforeEach(() => {
-    originalClipboard = (navigator as { clipboard?: unknown }).clipboard
     setClipboard({ writeText: vi.fn().mockResolvedValue(undefined) })
   })
 
   afterEach(() => {
-    setClipboard(originalClipboard)
     vi.clearAllMocks()
   })
 

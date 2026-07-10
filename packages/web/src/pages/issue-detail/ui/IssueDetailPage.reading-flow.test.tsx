@@ -7,6 +7,7 @@ import { ProjectProvider } from '../../../entities/project'
 import type { Project } from '../../../entities/project'
 import { IssueDetailPage } from './IssueDetailPage'
 import { mockIssue, mockIssueCommits, mockIssueDiff, mountIssueDetail } from './_issueDetailMsw'
+import { setScopedValue } from '../../../../tests/support/scoped-property'
 
 
 const projects: Project[] = [
@@ -135,7 +136,7 @@ function describeEl(el: Element): string {
 mountIssueDetail({ issue: makeIssue() })
 
 beforeEach(() => {
-  Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1280 })
+  setScopedValue(window, 'innerWidth', 1280)
   window.dispatchEvent(new Event('resize'))
 })
 

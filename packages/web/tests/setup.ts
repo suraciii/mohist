@@ -1,6 +1,7 @@
 import '@testing-library/jest-dom'
 import { cleanup } from '@testing-library/react'
 import { afterEach, beforeEach, vi } from 'vitest'
+import { restoreScopedProperties } from './support/scoped-property'
 import { resetSonnerFake } from './support/sonner-fake'
 import { resetSignalrFake } from './support/signalr-fake'
 import {
@@ -70,6 +71,7 @@ const _matchMediaMock = ((query: string) => ({
 
 afterEach(() => {
   cleanup()
+  restoreScopedProperties()
   server.resetHandlers()
   _reducedMotionOverride = undefined
   resetSonnerFake()
