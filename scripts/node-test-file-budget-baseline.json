@@ -109,5 +109,5 @@
   "packages/web/src/widgets/session-transcript/ui/SessionTranscriptLayout.integration.test.tsx": 591,
   "packages/web/tests/IssueDetailPage.spec.tsx": 1180,
   "packages/web/tests/SessionLiveUpdates.spec.tsx": 913,
-  "packages/web/tests/SessionPageHeader.spec.tsx": 1007
+  "packages/web/tests/SessionPageHeader.spec.tsx": 1006
 }
