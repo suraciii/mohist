@@ -274,3 +274,55 @@ dotnet test packages/server/tests/Mohist.Server.OtelSpecTests/Mohist.Server.Otel
 - unfiltered `dotnet test Mohist.sln -p:SkipWebBuild=true --no-build` 不得出现基线之外的新失败;若已知 CliReferenceDocsTests 失败在执行前已被其他改动修复,最终必须全绿。
 
 若完成所有被性能门接受的任务后仍 >29s,把每阶段两轮的执行窗口、`elapsed`、`user + sys`、outcome 与收尾表记录到本文件末尾并停手。重新计算当时 suite 的 CPU 下界;不要把未解释的差距直接归类为“CPU 地板”。
+
+## 实施结果(2026-07-10)
+
+仅列入跑前无明显竞争负载且进程 CPU / TRX 总耗时未异常膨胀的样本。执行期间明确与 Web `vitest` 或 `quantdata.run_patterns` 重叠的样本已剔除,未用于任何中位数或验收结论。
+
+### SpecTests 阶段样本
+
+outcome 统一按 `total / Passed / NotExecuted` 记录。
+
+| 状态 | run | window | elapsed | user + sys | outcome | 最后完成者 / 次后完成者 |
+|---|---:|---:|---:|---:|---:|---|
+| 初始基线 | 1 | 30.5s | 34.89s | 91.25s | 2801 / 2792 / 9 | OtelTracing 30.5s / WorkflowRunStatusReclassificationMigrationSpecs 27.5s |
+| 初始基线 | 2 | 29.0s | 33.34s | 89.80s | 2801 / 2792 / 9 | OtelTracing 29.0s / WorkflowRunStatusReclassificationMigrationSpecs 27.0s |
+| T1 IntegrationWorkflow 拆分 | 1 | 30.7s | 34.99s | 91.81s | 2801 / 2792 / 9 | OtelTracing 30.7s / WorkflowRunStatusReclassificationMigrationSpecs 27.7s |
+| T1 IntegrationWorkflow 拆分 | 2 | 32.3s | 36.71s | 100.83s | 2801 / 2792 / 9 | OtelTracing 32.3s / WorkflowRunStatusReclassificationMigrationSpecs 30.3s |
+| T2 WorkflowGrain 重平衡 | 1 | 30.4s | 34.69s | 94.82s | 2801 / 2792 / 9 | OtelTracing 30.4s / WorkflowRunStatusReclassificationMigrationSpecs 28.4s |
+| T2 WorkflowGrain 重平衡 | 2 | 29.6s | 33.91s | 89.32s | 2801 / 2792 / 9 | OtelTracing 29.6s / WorkflowRunStatusReclassificationMigrationSpecs 26.6s |
+| T3 三档权重 orderer | 1 | 32.4s | 36.62s | 97.90s | 2805 / 2796 / 9 | OtelTracing 32.4s / WorkflowRunStatusReclassificationMigrationSpecs 29.5s |
+| T3 三档权重 orderer | 2 | 30.4s | 34.65s | 91.73s | 2805 / 2796 / 9 | OtelTracing 30.4s / WorkflowRunStatusReclassificationMigrationSpecs 27.4s |
+| T5 边界数据缩减 | 1 | 30.0s | 34.22s | 93.13s | 2801 / 2792 / 9 | OtelTracing 30.0s / WorkflowRunStatusReclassificationMigrationSpecs 28.0s |
+| T5 边界数据缩减 | 2 | 30.3s | 34.71s | 94.43s | 2801 / 2792 / 9 | OtelTracing 30.3s / WorkflowRunStatusReclassificationMigrationSpecs 28.3s |
+
+阶段中位数与结论:
+
+- 初始基线:window 29.75s,elapsed 34.12s,CPU 90.53s。
+- T1:两片 cost 中位数均 <=12s,但 window 31.5s、elapsed 35.85s,相对基线墙钟回退约 1.73s;拒绝并撤销。
+- T2:三片 cost 中位数为 7.9 / 6.3 / 8.85s,最大差 2.55s;5 轮聚焦测试全绿,window 30.0s、elapsed 34.30s;接受(commit `ac613a4a3`)。
+- T3:window 31.4s、elapsed 35.64s,分别比 T2 回退 1.4s / 1.34s;拒绝并撤销,新增 4 个 orderer 测试也随实验删除。
+- T5:`RunnerPoll_SkipsNonRunnableRowsBeyondFirstPage` 中位数 0.846s -> 0.471s,`AppendAsync_TerminalBatchPrunesRowsOutsideRetainedTail` 中位数 1.507s -> 1.418s;完整 suite window 30.15s、elapsed 34.47s,无实质回退;接受(commit `b80e0994b`)。
+
+### T4 独立程序集实验
+
+拆分后的原 SpecTests 两轮 window 为 27.3s / 26.5s,outcome 均为 `2781 / 2773 / 8`;新 OtelSpecTests 精确发现目标 8 个类,outcome 为 `20 / 19 / 1`。聚合后严格恢复 `2801 / 2792 / 9`,原 SpecTests TRX 不再出现 OtelTracing。暂停期间第一轮 SpecTests 的进程 `elapsed` / CPU 输出未保留;第二轮为 elapsed 30.72s、CPU 85.69s。
+
+solution 对照如下:
+
+| 状态 | run | elapsed | user + sys |
+|---|---:|---:|---:|
+| T2 冻结基线 | 1 | 35.65s | 106.17s |
+| T2 冻结基线 | 2 | 35.07s | 2.16s |
+| T4 拆程序集 | 1 | 34.34s | 98.40s |
+| T4 拆程序集 | 2 | 35.93s | 16.92s |
+| T4 拆程序集 | 3 | 35.07s | 110.19s |
+| T4 拆程序集 | 4 | 33.77s | 105.49s |
+
+T2 solution 基线中位数为 35.36s;T4 四轮中位数为 34.705s,只下降 0.655s,未达到 1.0s 门,因此完整撤销。MSBuild 常驻节点使部分 `/usr/bin/time` CPU 值只统计到短生命周期父进程(2.16s / 16.92s 明显失真),所以 CPU 增幅门无法从这些 solution 样本可靠判定;elapsed 门独立失败,已经足以拒绝实验。
+
+### 最终状态与未解释差距
+
+最终 unfiltered solution 两轮均全绿(`5035 total / 5023 Passed / 12 NotExecuted`),4 核 elapsed 为 37.75s / 35.80s,中位数 36.78s。初始同命令基线为 36.59s / 36.21s,中位数 36.40s,因此 solution 级目标同样未达成。
+
+当前接受状态(T2 + T5)的 SpecTests CPU 中位数为 93.78s,四核理想下界约为 `93.78 / 4 = 23.45s`;实测 window 中位数 30.15s,仍有约 6.70s 差距。TRX 不包含 collection fixture 初始化/释放,且收尾仍由 OtelTracing 领先次后完成者约 2.0s;fixture 成本、调度、GC 与 SQLite 竞争各自占比没有被本轮实验隔离。该 6.70s 不能归类为“CPU 地板”。按本计划完成定义在此停手,不继续引入未量化的新并行或拆分方案。
