@@ -168,7 +168,7 @@ describe("WorkspaceManager + WorkspaceRegistry (T-002)", () => {
     const runnerRoot = join(root, "runner")
     const first = new Date("2026-06-01T00:00:00.000Z")
     const second = new Date("2026-06-25T12:00:00.000Z")
-    const now = vi.fn<[], Date>()
+    const now = vi.fn<() => Date>()
       .mockReturnValueOnce(first)
       .mockReturnValueOnce(second)
     const registry = new WorkspaceRegistry(runnerRoot, { now })

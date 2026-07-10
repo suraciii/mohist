@@ -146,6 +146,20 @@ describe("CleanupLoop", () => {
     return path
   }
 
+  async function expectWarnings<T>(messages: readonly string[], operation: () => Promise<T>): Promise<T> {
+    const warningSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined)
+    try {
+      const result = await operation()
+      expect(warningSpy).toHaveBeenCalledTimes(messages.length)
+      for (const [index, message] of messages.entries()) {
+        expect(warningSpy).toHaveBeenNthCalledWith(index + 1, message)
+      }
+      return result
+    } finally {
+      warningSpy.mockRestore()
+    }
+  }
+
   // ===============================================================
   // Retention eviction
   // ===============================================================
@@ -352,7 +366,10 @@ describe("CleanupLoop", () => {
       stub.outOfRootPaths.add(outPath)
 
       const policy: CleanupPolicy = { retentionDays: 5 }
-      const result = await loop.runOnce(policy, new AbortController().signal)
+      const result = await expectWarnings(
+        [`workspace cleanup: refused to remove ${outPath} — path is outside runnerRoot`],
+        () => loop.runOnce(policy, new AbortController().signal),
+      )
 
       expect(result.guardAborted).toBe(1)
       expect(result.retentionRemoved).toBe(0)
@@ -368,7 +385,10 @@ describe("CleanupLoop", () => {
       stub.markerRunIds.delete(path)
 
       const policy: CleanupPolicy = { retentionDays: 5 }
-      const result = await loop.runOnce(policy, new AbortController().signal)
+      const result = await expectWarnings(
+        [`workspace cleanup: refused to remove ${path} — marker is missing or unreadable`],
+        () => loop.runOnce(policy, new AbortController().signal),
+      )
 
       expect(result.guardAborted).toBe(1)
       expect(result.retentionRemoved).toBe(0)
@@ -383,7 +403,10 @@ describe("CleanupLoop", () => {
       stub.markerRunIds.set(path, "wr-other-run")
 
       const policy: CleanupPolicy = { retentionDays: 5 }
-      const result = await loop.runOnce(policy, new AbortController().signal)
+      const result = await expectWarnings(
+        [`workspace cleanup: refused to remove ${path} — marker workflowRunId (wr-other-run) does not match registry (wr-mismatch)`],
+        () => loop.runOnce(policy, new AbortController().signal),
+      )
 
       expect(result.guardAborted).toBe(1)
       expect(result.retentionRemoved).toBe(0)
@@ -398,12 +421,18 @@ describe("CleanupLoop", () => {
 
       const policy: CleanupPolicy = { retentionDays: 5 }
       // First tick: guard aborts, entry remains
-      let result = await loop.runOnce(policy, new AbortController().signal)
+      let result = await expectWarnings(
+        [`workspace cleanup: refused to remove ${path} — path is outside runnerRoot`],
+        () => loop.runOnce(policy, new AbortController().signal),
+      )
       expect(result.guardAborted).toBe(1)
       expect(registry.get("wr-guard")).not.toBeNull()
 
       // Second tick: guard still aborts
-      result = await loop.runOnce(policy, new AbortController().signal)
+      result = await expectWarnings(
+        [`workspace cleanup: refused to remove ${path} — path is outside runnerRoot`],
+        () => loop.runOnce(policy, new AbortController().signal),
+      )
       expect(result.guardAborted).toBe(1)
       expect(registry.get("wr-guard")).not.toBeNull()
     })
@@ -555,10 +584,21 @@ describe("CleanupLoop", () => {
       stub.markerRunIds.set(path, "wr-1")
       stub.failedDeletePaths.add(path)
 
-      const removed = await loop.safeRemove(entry)
+      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
+      try {
+        const removed = await loop.safeRemove(entry)
 
-      expect(removed).toBe(false)
-      expect(registry.get("wr-1")).not.toBeNull()
+        expect(removed).toBe(false)
+        expect(registry.get("wr-1")).not.toBeNull()
+        expect(errorSpy).toHaveBeenCalledTimes(1)
+        expect(errorSpy).toHaveBeenNthCalledWith(
+          1,
+          `workspace cleanup: failed to remove ${path}:`,
+          expect.objectContaining({ name: "Error", message: `stub delete failed: ${path}` }),
+        )
+      } finally {
+        errorSpy.mockRestore()
+      }
     })
 
     it("out-of-root path aborts before any deletion", async () => {
@@ -572,7 +612,10 @@ describe("CleanupLoop", () => {
       stub.outOfRootPaths.add(outPath)
       stub.markerRunIds.set(outPath, "wr-outside")
 
-      const removed = await loop.safeRemove(entry)
+      const removed = await expectWarnings(
+        [`workspace cleanup: refused to remove ${outPath} — path is outside runnerRoot`],
+        () => loop.safeRemove(entry),
+      )
 
       expect(removed).toBe(false)
       expect(registry.get("wr-outside")).not.toBeNull()
@@ -589,7 +632,10 @@ describe("CleanupLoop", () => {
       })
       stub.markerRunIds.set(path, "wr-other")
 
-      const removed = await loop.safeRemove(entry)
+      const removed = await expectWarnings(
+        [`workspace cleanup: refused to remove ${path} — marker workflowRunId (wr-other) does not match registry (wr-1)`],
+        () => loop.safeRemove(entry),
+      )
 
       expect(removed).toBe(false)
       expect(registry.get("wr-1")).not.toBeNull()
@@ -606,7 +652,10 @@ describe("CleanupLoop", () => {
       })
       // No marker set
 
-      const removed = await loop.safeRemove(entry)
+      const removed = await expectWarnings(
+        [`workspace cleanup: refused to remove ${path} — marker is missing or unreadable`],
+        () => loop.safeRemove(entry),
+      )
 
       expect(removed).toBe(false)
       expect(registry.get("wr-1")).not.toBeNull()

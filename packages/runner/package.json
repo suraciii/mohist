@@ -12,8 +12,10 @@
     "dev": "tsx src/cli.ts",
     "start": "node dist/cli.js",
     "test": "vitest run",
-    "test:ci": "vitest run",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "test:run": "vitest run",
+    "test:ci": "npm run typecheck:tests && npm run test:run",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck:tests": "tsc -p tsconfig.tests.json --noEmit"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "0.21.0",

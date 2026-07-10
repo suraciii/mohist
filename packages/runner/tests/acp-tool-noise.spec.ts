@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
-import { afterEach, describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { acpAgentAction, setAcpProcessFactoryForTest, type AcpProcessHandle } from "../src/actions/acp-agent.js"
 import type { ActionContext } from "../src/core/types.js"
 import { runCommand } from "../src/system/process.js"
@@ -11,27 +11,45 @@ afterEach(() => setAcpProcessFactoryForTest(null))
 
 describe("mohist/acp-agent tool noise cleanup", () => {
   it("AgentMutatesOpencodeLockfile_ActionRestoresToolNoiseBeforeVerification", async () => {
-    const root = await mkdtemp(join(tmpdir(), "mohist-acp-noise-"))
-    await git(root, "init")
-    await git(root, "config", "user.email", "test@example.com")
-    await git(root, "config", "user.name", "Test User")
-    await writeFile(join(root, "README.md"), "base\n")
-    await mkdir(join(root, ".opencode"), { recursive: true })
-    await writeFile(join(root, ".opencode", "package-lock.json"), "locked\n")
-    await git(root, "add", ".")
-    await git(root, "commit", "-m", "base")
+    const warningSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined)
+    try {
+      const root = await mkdtemp(join(tmpdir(), "mohist-acp-noise-"))
+      await git(root, "init")
+      await git(root, "config", "user.email", "test@example.com")
+      await git(root, "config", "user.name", "Test User")
+      await writeFile(join(root, "README.md"), "base\n")
+      await mkdir(join(root, ".opencode"), { recursive: true })
+      await writeFile(join(root, ".opencode", "package-lock.json"), "locked\n")
+      await git(root, "add", ".")
+      await git(root, "commit", "-m", "base")
 
-    setAcpProcessFactoryForTest(() => fakeAcpProcess(async () => {
-      await writeFile(join(root, ".opencode", "package-lock.json"), "mutated\n")
-      await writeFile(join(root, "artifact.txt"), "done\n")
-    }))
+      setAcpProcessFactoryForTest(() => fakeAcpProcess(async () => {
+        await writeFile(join(root, ".opencode", "package-lock.json"), "mutated\n")
+        await writeFile(join(root, "artifact.txt"), "done\n")
+      }))
 
-    const result = await acpAgentAction(context(root))
+      const result = await acpAgentAction(context(root))
 
-    expect(result.status).toBe("success")
-    expect(await readFile(join(root, ".opencode", "package-lock.json"), "utf8")).toBe("locked\n")
-    const status = await git(root, "status", "--short")
-    expect(status.stdout.trim()).toBe("?? artifact.txt")
+      expect(result.status).toBe("success")
+      expect(await readFile(join(root, ".opencode", "package-lock.json"), "utf8")).toBe("locked\n")
+      const status = await git(root, "status", "--short")
+      expect(status.stdout.trim()).toBe("?? artifact.txt")
+      expect(warningSpy).toHaveBeenCalledTimes(1)
+      expect(warningSpy).toHaveBeenNthCalledWith(
+        1,
+        "mohist acp model not configured; using provider default",
+        {
+          workflowRunId: "workflow-1",
+          workId: "proposal.1",
+          stage: "plan",
+          sessionName: "proposal.1",
+          requestedModel: null,
+          requestedModelSource: "none",
+        },
+      )
+    } finally {
+      warningSpy.mockRestore()
+    }
   })
 })
 

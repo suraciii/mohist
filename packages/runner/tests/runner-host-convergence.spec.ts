@@ -422,7 +422,8 @@ describe("RunnerHost convergence wiring (T-003)", () => {
     vi.clearAllMocks()
     const wsPath = join(root, "mohist-local/workspaces/issue-1")
     await seedActiveEntry("wr-1", wsPath)
-    workflowRunsStatus.mockRejectedValue(new Error("network blip"))
+    const failure = new Error("network blip")
+    workflowRunsStatus.mockRejectedValue(failure)
     poll.mockResolvedValue([])
     startSignalR.mockResolvedValue(undefined)
     stopSignalR.mockResolvedValue(undefined)
@@ -433,18 +434,25 @@ describe("RunnerHost convergence wiring (T-003)", () => {
       ...defaultOptions(),
       cleanupConvergenceIntervalMs: 5 * 60_000,
     })
-    const run = host.run(controller.signal)
-    await vi.waitFor(() => expect(connect).toHaveBeenCalled())
-    await vi.waitFor(() => expect(workflowRunsStatus).toHaveBeenCalled(), { timeout: 5_000 })
-    // Worker pool is still ticking: heartbeat fires per its interval.
-    await vi.waitFor(() => expect(poll).toHaveBeenCalled(), { timeout: 5_000 })
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
+    try {
+      const run = host.run(controller.signal)
+      await vi.waitFor(() => expect(connect).toHaveBeenCalled())
+      await vi.waitFor(() => expect(workflowRunsStatus).toHaveBeenCalled(), { timeout: 5_000 })
+      // Worker pool is still ticking: heartbeat fires per its interval.
+      await vi.waitFor(() => expect(poll).toHaveBeenCalled(), { timeout: 5_000 })
 
-    // The registry entry is still active.
-    const onDisk = JSON.parse(await readFile(defaultWorkspaceRegistryFilePath(root), "utf8"))
-    expect(onDisk.entries["wr-1"].phase).toBe("active")
+      // The registry entry is still active.
+      const onDisk = JSON.parse(await readFile(defaultWorkspaceRegistryFilePath(root), "utf8"))
+      expect(onDisk.entries["wr-1"].phase).toBe("active")
 
-    controller.abort()
-    await expect(run).resolves.toBeUndefined()
+      controller.abort()
+      await expect(run).resolves.toBeUndefined()
+      expect(errorSpy).toHaveBeenCalledOnce()
+      expect(errorSpy).toHaveBeenCalledWith("workspace cleanup convergence query failed:", failure)
+    } finally {
+      errorSpy.mockRestore()
+    }
   })
 
   it("EmptyRegistry_StartupConvergence_DoesNotCallServer", async () => {

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { AgentSideConnection, ClientSideConnection, PROTOCOL_VERSION } from "@agentclientprotocol/sdk"
 import type { Agent, RequestPermissionRequest, RequestPermissionResponse, SessionNotification, Stream } from "@agentclientprotocol/sdk"
 import { acpAgentAction, setAcpProcessFactoryForTest, type AcpProcessHandle } from "../../src/actions/acp-agent.js"
@@ -8,6 +8,7 @@ import { AcpSessionManager, type SharedAcpConnection } from "../../src/runtime/a
 import { ActionRegistry } from "../../src/actions/registry.js"
 import { WorkExecutor } from "../../src/runtime/executor.js"
 import { ServerConnection } from "../../src/server/connection.js"
+import { stringInput } from "../../src/core/json.js"
 import { verifyOnlyWorkspaceManager } from "../support/workspace-mock.js"
 import { setExecutorGitRunnerForTest } from "../../src/runtime/git-probe.js"
 
@@ -16,6 +17,40 @@ afterEach(() => {
   setPromptLoaderRegistryForTest(null)
   setExecutorGitRunnerForTest(null)
 })
+
+type ProviderDefaultModelWarningContext = Pick<ActionContext, "workflowRunId" | "workId" | "stage" | "with">
+
+async function runWithProviderDefaultModelWarning<T>(context: ProviderDefaultModelWarningContext, operation: () => Promise<T>): Promise<T> {
+  const warningSpy = vi.spyOn(console, "warn").mockClear().mockImplementation(() => undefined)
+  try {
+    const result = await operation()
+
+    expect(warningSpy).toHaveBeenCalledTimes(1)
+    expect(warningSpy).toHaveBeenNthCalledWith(
+      1,
+      "mohist acp model not configured; using provider default",
+      providerDefaultModelWarningContext(context),
+    )
+    return result
+  } finally {
+    warningSpy.mockRestore()
+  }
+}
+
+function runDefaultModelAction(context: Parameters<typeof acpAgentAction>[0]) {
+  return runWithProviderDefaultModelWarning(context, () => acpAgentAction(context))
+}
+
+function providerDefaultModelWarningContext(context: ProviderDefaultModelWarningContext) {
+  return {
+    workflowRunId: context.workflowRunId,
+    workId: context.workId,
+    stage: context.stage,
+    sessionName: stringInput(context.with, "session") ?? context.workId,
+    requestedModel: null,
+    requestedModelSource: "none",
+  }
+}
 
 function baseContext(overrides: Partial<ActionContext> = {}): ActionContext {
   return {
@@ -257,7 +292,7 @@ describe("generic (sessionId) transcript axis — issue-345 regression", () => {
       agentSessionId: "session-from-polled-dispatch",
     }
 
-    const result = await executor.execute(polledDispatch, new AbortController().signal)
+    const result = await runWithProviderDefaultModelWarning(polledDispatch, () => executor.execute(polledDispatch, new AbortController().signal))
 
     expect(result.status, result.message ?? undefined).toBe("completed")
     const genericEvents = fixture.serverConnection.calls.filter((entry) => entry.event === "agentSessionRuntimeEvents")
@@ -274,7 +309,7 @@ describe("generic (sessionId) transcript axis — issue-345 regression", () => {
   it("MapsPolledDispatchAgentSessionIdToActionContext_AndGenericAxisEmitsAllTranscriptEvents", async () => {
     const fixture = createTranscriptAxisFixture()
 
-    const result = await acpAgentAction(fixture.context({ with: { prompt: "do the work" } as never }))
+    const result = await runDefaultModelAction(fixture.context({ with: { prompt: "do the work" } as never }))
 
     expect(result.status).toBe("success")
 
@@ -322,8 +357,8 @@ describe("generic (sessionId) transcript axis — issue-345 regression", () => {
   it("GenericAxisPreservesSessionIdAcrossFollowUp_ReusingCachedAcpSession_DeliversAnotherTurnOfEvents", async () => {
     const fixture = createTranscriptAxisFixture()
 
-    const first = await acpAgentAction(fixture.context({ with: { prompt: "first" } as never }))
-    const second = await acpAgentAction(fixture.context({ with: { prompt: "second" } as never }))
+    const first = await runDefaultModelAction(fixture.context({ with: { prompt: "first" } as never }))
+    const second = await runDefaultModelAction(fixture.context({ with: { prompt: "second" } as never }))
 
     expect(first.status).toBe("success")
     expect(second.status).toBe("success")
@@ -351,7 +386,7 @@ describe("generic (sessionId) transcript axis — issue-345 regression", () => {
   it("GenericAxisContextAgentSessionId_EqualsPolledDispatchEnvelope_AndDoesNotCarryWorkflowRunId", async () => {
     const fixture = createTranscriptAxisFixture()
 
-    const result = await acpAgentAction(fixture.context({ with: { prompt: "do the work" } as never }))
+    const result = await runDefaultModelAction(fixture.context({ with: { prompt: "do the work" } as never }))
 
     expect(result.status).toBe("success")
 

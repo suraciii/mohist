@@ -200,43 +200,6 @@ describe("mohist/openspec-artifacts", () => {
   })
 })
 
-function context(workDir: string, withInput: Record<string, unknown>, addTasks: ServerConnection["addTasks"], variables: Record<string, unknown> = {}): ActionContext {
-  return {
-    workflowRunId: "workflow-1",
-    workId: "load-build",
-    workType: "load",
-    stage: "build",
-    title: "Load build tasks",
-    uses: "mohist/openspec-tasks",
-    with: withInput as never,
-    variables: variables as never,
-    workDir,
-    signal: new AbortController().signal,
-    serverConnection: { addTasks } as ServerConnection,
-    writeVars: vi.fn(),
-  }
-}
-
-function archiveContext(workDir: string, changeDir: string, variables: JsonObject = {}, serverConnection?: Partial<ServerConnection>): ActionContext {
-  const signal = new AbortController().signal
-  const patchRunVars = serverConnection?.patchRunVars ?? vi.fn()
-  return {
-    workflowRunId: "workflow-1",
-    workId: "integrate:archive-change.1",
-    workType: "task",
-    stage: "integrate",
-    title: "Archive change",
-    uses: "mohist/archive-change",
-    with: { changeDir } as never,
-    variables: variables as never,
-    workDir,
-    signal,
-    serverConnection: serverConnection as ServerConnection | undefined,
-    writeVars: async (vars) => patchRunVars("workflow-1", vars, signal),
-  }
-}
-
-
 function artifactsContext(workDir: string, changeDir: string, extra: Record<string, unknown> = {}): ActionContext {
   return {
     workflowRunId: "workflow-1",

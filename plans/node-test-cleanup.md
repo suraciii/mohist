@@ -62,8 +62,8 @@ Update table after every gate. Another agent should resume without archaeology.
 
 | Gate | Status | Commit or note |
 |---|---|---|
-| Baseline | TODO | |
-| Runner truth | TODO | |
+| Baseline | DONE | Web 296/4527; Runner 72/1031; fixed shuffle passed; hidden `uploadTaskLog` TypeError reproduced |
+| Runner truth | DONE | Runner production/test typecheck, target retry regression, 73/1036 suite, fixed shuffle seed 20260710, and build passed |
 | Shared state | TODO | |
 | Fake time | TODO | |
 | Browser truth | TODO | |

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { WorkExecutor } from "../src/runtime/executor.js"
 import { ActionRegistry } from "../src/actions/registry.js"
-import type { ActionContext, WorkItem, WorkItemResult } from "../src/core/types.js"
+import type { ActionContext, JsonObject, RenderedWorkItem, WorkItemResult } from "../src/core/types.js"
 import type { ServerConnection, ArtifactUploadResponse } from "../src/server/connection.js"
 import type { CapturedArtifact } from "../src/runtime/artifact-capture.js"
 import { verifyOnlyWorkspaceManager } from "./support/workspace-mock.js"
@@ -61,7 +61,7 @@ afterEach(async () => {
   await rm(workDir, { recursive: true, force: true })
 })
 
-function buildWork(artifacts: unknown, uses = "test/action"): WorkItem {
+function buildWork(artifacts: JsonObject | null, uses = "test/action"): RenderedWorkItem {
   return {
     workflowRunId: "wf-1",
     workId: "work-1",
@@ -70,7 +70,7 @@ function buildWork(artifacts: unknown, uses = "test/action"): WorkItem {
     uses,
     with: {},
     variables: { workspace: { path: workDir, branch: null, changeDir: null } },
-    artifacts: artifacts as WorkItem["artifacts"],
+    artifacts,
   }
 }
 

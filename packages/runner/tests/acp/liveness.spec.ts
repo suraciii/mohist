@@ -133,10 +133,10 @@ describe("mohist/acp-agent cancelAndReturn bounded cleanup", () => {
     const serverConnection = new FakeServerConnection()
 
     const startedAt = Date.now()
-    const result = await runAcpActionUntilSettled(acpAgentAction({
+    const result = await runWithDefaultModelWarning("work-1", () => runAcpActionUntilSettled(acpAgentAction({
       ...baseContext({ prompt: "hanging task", timeout: 100 }),
       serverConnection: serverConnection as unknown as ServerConnection,
-    }))
+    })))
     const elapsed = Date.now() - startedAt
 
     expect(result.status).toBe("failure")
@@ -158,10 +158,10 @@ describe("mohist/acp-agent cancelAndReturn bounded cleanup", () => {
 
     const cleanupBefore = tracked.cleanupCount()
     const startedAt = Date.now()
-    const result = await runAcpActionUntilSettled(acpAgentAction({
+    const result = await runWithDefaultModelWarning("work-1", () => runAcpActionUntilSettled(acpAgentAction({
       ...baseContext({ prompt: "abort task", timeout: 5_000 }, controller.signal),
       serverConnection: serverConnection as unknown as ServerConnection,
-    }))
+    })))
     const elapsed = Date.now() - startedAt
 
     expect(result.status).toBe("failure")
@@ -177,13 +177,13 @@ describe("mohist/acp-agent cancelAndReturn bounded cleanup", () => {
     const shared = createSharedSessionFixture("thought-liveness", { sessionRecord: { acpSessionId: "server-session-1" } })
     shared.agent.cancelHangs = true
 
-    const result = await runAcpActionUntilSettled(acpAgentAction(contextWithOverrides({
+    const result = await runWithDefaultModelWarning("shared-session", () => runAcpActionUntilSettled(acpAgentAction(contextWithOverrides({
       prompt: "long shared task",
       session: "shared-session",
       livenessQuietThresholdMs: 5_000,
       probeTimeoutMs: 5_000,
       timeout: 100,
-    }, undefined, shared.context())))
+    }, undefined, shared.context()))))
 
     expect(result.status).toBe("failure")
     expect(result.message ?? "").toContain("Timed out")
@@ -198,12 +198,12 @@ describe("mohist/acp-agent monitorPrompt prompt_timeout diagnostics", () => {
     const fixture = createFixture("cancel-hangs")
     setAcpProcessFactoryForTest(() => createFakeProcess(fixture.agent))
 
-    const result = await runAcpActionUntilSettled(acpAgentAction(fixture.context({
+    const result = await runWithDefaultModelWarning("work-1", () => runAcpActionUntilSettled(acpAgentAction(fixture.context({
       prompt: "hanging prompt",
       timeout: 100,
       livenessQuietThresholdMs: 5_000,
       probeTimeoutMs: 5_000,
-    })))
+    }))))
 
     expect(result.status).toBe("failure")
     expect(result.message ?? "").toContain("Timed out after")
@@ -236,12 +236,12 @@ describe("mohist/acp-agent monitorPrompt prompt_timeout diagnostics", () => {
     const fixture = createFixture("cancel-hangs")
     setAcpProcessFactoryForTest(() => createFakeProcess(fixture.agent))
 
-    const result = await runAcpActionUntilSettled(acpAgentAction(fixture.context({
+    const result = await runWithDefaultModelWarning("work-1", () => runAcpActionUntilSettled(acpAgentAction(fixture.context({
       prompt: "hanging prompt no log",
       timeout: 100,
       livenessQuietThresholdMs: 5_000,
       probeTimeoutMs: 5_000,
-    })))
+    }))))
 
     expect(result.status).toBe("failure")
     expect(result.message ?? "").toContain("Timed out after")
@@ -270,12 +270,12 @@ describe("mohist/acp-agent monitorPrompt prompt_timeout diagnostics", () => {
     const fixture = createFixture("cancel-hangs")
     setAcpProcessFactoryForTest(() => createFakeProcess(fixture.agent))
 
-    await runAcpActionUntilSettled(acpAgentAction(fixture.context({
+    await runWithDefaultModelWarning("work-1", () => runAcpActionUntilSettled(acpAgentAction(fixture.context({
       prompt: "hanging prompt liveness event",
       timeout: 100,
       livenessQuietThresholdMs: 5_000,
       probeTimeoutMs: 5_000,
-    })))
+    }))))
 
     const livenessEvents = fixture.serverConnection.calls
       .filter((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "session.liveness")
@@ -286,6 +286,29 @@ describe("mohist/acp-agent monitorPrompt prompt_timeout diagnostics", () => {
     expect(failed?.acpSessionId).toBe("fake-session-1")
   })
 })
+
+async function runWithDefaultModelWarning<T>(sessionName: string, operation: () => Promise<T>): Promise<T> {
+  const warningSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined)
+  try {
+    const result = await operation()
+    expect(warningSpy).toHaveBeenCalledTimes(1)
+    expect(warningSpy).toHaveBeenNthCalledWith(
+      1,
+      "mohist acp model not configured; using provider default",
+      {
+        workflowRunId: "workflow-1",
+        workId: "work-1",
+        stage: "build",
+        sessionName,
+        requestedModel: null,
+        requestedModelSource: "none",
+      },
+    )
+    return result
+  } finally {
+    warningSpy.mockRestore()
+  }
+}
 
 function createFixture(scenario: "cancel-hangs") {
   const timeline: Array<{ event: string }> = []

@@ -10,7 +10,7 @@ import { ActionRegistry } from "../src/actions/registry.js"
 import { rebaseAction, setRebaseExistsCheckerForTest, setRebaseGitRunnerForTest } from "../src/actions/rebase.js"
 import { pushAction, setPushGitRunnerForTest } from "../src/actions/push.js"
 import { verifyOnlyWorkspaceManager } from "./support/workspace-mock.js"
-import type { ActionContext, ActionResult, JsonObject, WorkItem } from "../src/core/types.js"
+import type { ActionContext, ActionResult, JsonObject, RenderedWorkItem } from "../src/core/types.js"
 import type { ServerConnection } from "../src/server/connection.js"
 
 const exec = promisify(execFile)
@@ -91,7 +91,7 @@ function buildExecutor(registry: ActionRegistry): WorkExecutor {
   )
 }
 
-function buildWork(overrides: Partial<WorkItem> = {}): WorkItem {
+function buildWork(overrides: Partial<RenderedWorkItem> = {}): RenderedWorkItem {
   return {
     workflowRunId: "wf-112",
     workId: "build:agent.1",

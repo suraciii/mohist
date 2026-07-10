@@ -1,4 +1,4 @@
-import { describe, expect, it, afterEach, beforeEach } from "vitest"
+import { describe, expect, it, afterEach, beforeEach, vi } from "vitest"
 import {
   clearOpencodeModelsCacheForTesting,
   discoverOpencodeModels,
@@ -112,18 +112,26 @@ describe("discoverOpencodeModels", () => {
 
   it("returnsEmptyResultAndDoesNotCacheWhenCommandFails", async () => {
     let callCount = 0
+    const failure = new Error("boom")
     setModelsCommandRunnerForTest(async () => {
       callCount += 1
-      if (callCount === 1) throw new Error("boom")
+      if (callCount === 1) throw failure
       return "openai/gpt-5.5\n" + JSON.stringify({ variants: { low: {} } }) + "\n"
     })
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
 
-    const first = await discoverOpencodeModels(new AbortController().signal)
-    expect(first).toEqual({ models: [], variants: {} })
+    try {
+      const first = await discoverOpencodeModels(new AbortController().signal)
+      expect(first).toEqual({ models: [], variants: {} })
 
-    const second = await discoverOpencodeModels(new AbortController().signal)
-    expect(second.models).toEqual(["openai/gpt-5.5"])
-    expect(second.variants["openai/gpt-5.5"]).toEqual(["low"])
+      const second = await discoverOpencodeModels(new AbortController().signal)
+      expect(second.models).toEqual(["openai/gpt-5.5"])
+      expect(second.variants["openai/gpt-5.5"]).toEqual(["low"])
+      expect(errorSpy).toHaveBeenCalledOnce()
+      expect(errorSpy).toHaveBeenCalledWith("failed to discover opencode models", failure)
+    } finally {
+      errorSpy.mockRestore()
+    }
   })
 
   it("cachesSuccessfulResultsForSubsequentCalls", async () => {

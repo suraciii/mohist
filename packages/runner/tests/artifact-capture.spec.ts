@@ -13,7 +13,7 @@ import {
   uploadCapturedArtifacts,
 } from "../src/runtime/artifact-capture.js"
 import type { ServerConnection, ArtifactUploadResponse } from "../src/server/connection.js"
-import type { WorkItem } from "../src/core/types.js"
+import type { JsonObject, RenderedWorkItem } from "../src/core/types.js"
 
 class FakeServerConnection implements Pick<ServerConnection, "uploadArtifact"> {
   public uploads: CapturedArtifact[] = []
@@ -65,7 +65,7 @@ afterEach(async () => {
   await rm(workDir, { recursive: true, force: true })
 })
 
-function workItem(artifacts: JsonObjectLike | null): WorkItem {
+function workItem(artifacts: JsonObject | null): RenderedWorkItem {
   return {
     workflowRunId: "wf-1",
     workId: "work-1",
@@ -74,13 +74,9 @@ function workItem(artifacts: JsonObjectLike | null): WorkItem {
     uses: "core/process",
     with: null,
     variables: {},
-    workDir: workDir,
-    signal: new AbortController().signal,
     artifacts,
-  } as unknown as WorkItem
+  }
 }
-
-type JsonObjectLike = { files?: Array<{ path?: string } | string> }
 
 describe("declaredArtifactPaths", () => {
   it("declaredFiles_AreReturnedWithDeclaredSource", () => {
@@ -98,7 +94,7 @@ describe("declaredArtifactPaths", () => {
   })
 
   it("nonStringPath_IsIgnored", () => {
-    const work = workItem({ files: [{ path: 42 as unknown as string }, { path: "review.md" }] })
+    const work = workItem({ files: [{ path: 42 }, { path: "review.md" }] })
     expect(declaredArtifactPaths(work)).toEqual([{ path: "review.md", source: "declared" }])
   })
 })

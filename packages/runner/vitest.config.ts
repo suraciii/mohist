@@ -8,6 +8,8 @@ import { defineConfig } from 'vitest/config'
 export default defineConfig({
   test: {
     unstubGlobals: true,
+    unstubEnvs: true,
     clearMocks: true,
+    setupFiles: ['./tests/setup.common.ts'],
   },
 })

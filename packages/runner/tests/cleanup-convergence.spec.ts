@@ -296,13 +296,21 @@ describe("ConvergenceBackstop", () => {
     const registry = await makeRegistry()
     await registry.register({ issueId: "i1", issueNumber: 1, workflowRunId: "wr-1", workspacePath: join(root, "w1") })
 
-    const stub = new StubRunner([new Error("network blip")])
+    const failure = new Error("network blip")
+    const stub = new StubRunner([failure])
     const backstop = new ConvergenceBackstop(registry, stub)
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
 
-    const result = await backstop.runOnce(new AbortController().signal)
+    try {
+      const result = await backstop.runOnce(new AbortController().signal)
 
-    expect(result).toEqual({ queried: 1, transitioned: 0, dropped: 0 })
-    expect(registry.get("wr-1")?.phase).toBe("active")
+      expect(result).toEqual({ queried: 1, transitioned: 0, dropped: 0 })
+      expect(registry.get("wr-1")?.phase).toBe("active")
+      expect(errorSpy).toHaveBeenCalledOnce()
+      expect(errorSpy).toHaveBeenCalledWith("workspace cleanup convergence query failed:", failure)
+    } finally {
+      errorSpy.mockRestore()
+    }
   })
 
   it("RunOnce_OnTerminalStatus_StampsTerminalAt", async () => {

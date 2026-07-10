@@ -8,7 +8,7 @@ import { WorkExecutor } from "../src/runtime/executor.js"
 import { ActionRegistry } from "../src/actions/registry.js"
 import { NETWORK_COMMAND_TIMEOUT_MS } from "../src/actions/git.js"
 import { WorkspaceManager, WorkspaceNetworkTimeoutError } from "../src/runtime/workspace.js"
-import type { ActionContext, ActionResult, WorkItem } from "../src/core/types.js"
+import type { ActionContext, ActionResult, RenderedWorkItem } from "../src/core/types.js"
 import type { ServerConnection } from "../src/server/connection.js"
 
 const exec = promisify(execFile)
@@ -177,7 +177,7 @@ describe("workspace preparation across stages", () => {
   })
 })
 
-function buildWork(repo: string, workflowRunId: string, issueId: string, stage: string, workId: string): WorkItem {
+function buildWork(repo: string, workflowRunId: string, issueId: string, stage: string, workId: string): RenderedWorkItem {
   return {
     workflowRunId,
     workId,
@@ -196,7 +196,7 @@ function buildWork(repo: string, workflowRunId: string, issueId: string, stage: 
   }
 }
 
-function buildAgentJobWork(suppliedPath: string, workflowRunId: string, agentJobId: string): WorkItem {
+function buildAgentJobWork(suppliedPath: string, workflowRunId: string, agentJobId: string): RenderedWorkItem {
   return {
     workflowRunId,
     workId: "agent:job.1",

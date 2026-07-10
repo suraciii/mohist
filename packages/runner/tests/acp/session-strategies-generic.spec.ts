@@ -1,7 +1,8 @@
-import { afterEach, describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { AgentSideConnection, ClientSideConnection, PROTOCOL_VERSION } from "@agentclientprotocol/sdk"
 import type { Agent, RequestPermissionRequest, RequestPermissionResponse, SessionNotification, Stream } from "@agentclientprotocol/sdk"
 import { acpAgentAction, setAcpProcessFactoryForTest, type AcpProcessHandle } from "../../src/actions/acp-agent.js"
+import { stringInput } from "../../src/core/json.js"
 import { setPromptLoaderRegistryForTest } from "../../src/core/prompt.js"
 import type { ActionContext } from "../../src/core/types.js"
 import { AcpSessionManager, type SessionTarget, type SharedAcpConnection } from "../../src/runtime/acp-connection.js"
@@ -11,6 +12,38 @@ afterEach(() => {
   setAcpProcessFactoryForTest(null)
   setPromptLoaderRegistryForTest(null)
 })
+
+async function runWithProviderDefaultModelWarning<T>(context: Parameters<typeof acpAgentAction>[0], operation: () => Promise<T>): Promise<T> {
+  const warningSpy = vi.spyOn(console, "warn").mockClear().mockImplementation(() => undefined)
+  try {
+    const result = await operation()
+
+    expect(warningSpy).toHaveBeenCalledTimes(1)
+    expect(warningSpy).toHaveBeenNthCalledWith(
+      1,
+      "mohist acp model not configured; using provider default",
+      providerDefaultModelWarningContext(context),
+    )
+    return result
+  } finally {
+    warningSpy.mockRestore()
+  }
+}
+
+function runDefaultModelAction(context: Parameters<typeof acpAgentAction>[0]) {
+  return runWithProviderDefaultModelWarning(context, () => acpAgentAction(context))
+}
+
+function providerDefaultModelWarningContext(context: Parameters<typeof acpAgentAction>[0]) {
+  return {
+    workflowRunId: context.workflowRunId,
+    workId: context.workId,
+    stage: context.stage,
+    sessionName: stringInput(context.with, "session") ?? context.workId,
+    requestedModel: null,
+    requestedModelSource: "none",
+  }
+}
 
 function baseContext(overrides: Partial<ActionContext> = {}): ActionContext {
   return {
@@ -193,7 +226,7 @@ describe("runAcpAgentSession — generic session dispatch", () => {
   it("AgentJobWithSessionId_DispatchesToGenericConnectionMethods_NotWorkflowOnes", async () => {
     const fixture = createGenericFixture()
 
-    const result = await acpAgentAction(fixture.context({ with: { prompt: "do the work" } as never }))
+    const result = await runDefaultModelAction(fixture.context({ with: { prompt: "do the work" } as never }))
 
     expect(result.status).toBe("success")
     const events = fixture.serverConnection.calls.map((entry) => entry.event)
@@ -212,7 +245,7 @@ describe("runAcpAgentSession — generic session dispatch", () => {
     fixture.serverConnection.nextGetGenericSession = { acpSessionId: null, workDir: "D:/work" }
     fixture.serverConnection.nextGenericSession = { acpSessionId: undefined, workDir: "D:/work" }
 
-    const result = await acpAgentAction(fixture.context({ with: { prompt: "run minted session" } as never }))
+    const result = await runDefaultModelAction(fixture.context({ with: { prompt: "run minted session" } as never }))
 
     expect(result.status).toBe("success")
     const events = fixture.serverConnection.calls.map((entry) => entry.event)
@@ -225,7 +258,7 @@ describe("runAcpAgentSession — generic session dispatch", () => {
   it("GenericSession_StoresCachedEntryUnderGenericKey", async () => {
     const fixture = createGenericFixture()
 
-    await acpAgentAction(fixture.context({ with: { prompt: "first" } as never }))
+    await runDefaultModelAction(fixture.context({ with: { prompt: "first" } as never }))
 
     const target: SessionTarget = { kind: "generic", projectId: "project-1", sessionId: "session-abc" }
     const expectedKey = fixture.acpSessionManager.key(target)
@@ -238,7 +271,7 @@ describe("runAcpAgentSession — generic session dispatch", () => {
   it("GenericSession_RuntimeEventsIncludeSessionInputAndDoNotCloseAfterSuccessfulTurn", async () => {
     const fixture = createGenericFixture()
 
-    await acpAgentAction(fixture.context({ with: { prompt: "do the work" } as never }))
+    await runDefaultModelAction(fixture.context({ with: { prompt: "do the work" } as never }))
 
     const runtimeEvents = fixture.serverConnection.calls
       .filter((entry) => entry.event === "agentSessionRuntimeEvents")
@@ -250,8 +283,8 @@ describe("runAcpAgentSession — generic session dispatch", () => {
   it("GenericSession_CanFollowUpAfterFirstTurnUsingSameCachedAcpSession", async () => {
     const fixture = createGenericFixture()
 
-    await acpAgentAction(fixture.context({ with: { prompt: "first" } as never }))
-    await acpAgentAction(fixture.context({ with: { prompt: "second" } as never }))
+    await runDefaultModelAction(fixture.context({ with: { prompt: "first" } as never }))
+    await runDefaultModelAction(fixture.context({ with: { prompt: "second" } as never }))
 
     const prompts = fixture.agent.calls.filter((call) => call.event === "prompt")
     expect(prompts).toHaveLength(2)
@@ -263,7 +296,7 @@ describe("runAcpAgentSession — generic session dispatch", () => {
   it("RawAgentJobWithProjectIdAndNoSessionId_StaysEphemeral", async () => {
     const fixture = createGenericFixture()
 
-    const result = await acpAgentAction(fixture.context({ agentSessionId: undefined, with: { prompt: "raw" } as never }))
+    const result = await runDefaultModelAction(fixture.context({ agentSessionId: undefined, with: { prompt: "raw" } as never }))
 
     expect(result.status).toBe("success")
     const events = fixture.serverConnection.calls.map((entry) => entry.event)
@@ -289,7 +322,7 @@ describe("runAcpAgentSession — generic session dispatch", () => {
     const fixture = createGenericFixture()
     fixture.context({ ownerKind: "workflow", agentSessionId: undefined, workflowRunId: "wf-1", with: { session: "build", prompt: "do the work" } as never })
 
-    await acpAgentAction(fixture.context({ ownerKind: "workflow", agentSessionId: undefined, workflowRunId: "wf-1", with: { session: "build", prompt: "do the work" } as never }))
+    await runDefaultModelAction(fixture.context({ ownerKind: "workflow", agentSessionId: undefined, workflowRunId: "wf-1", with: { session: "build", prompt: "do the work" } as never }))
 
     const events = fixture.serverConnection.calls.map((entry) => entry.event)
     expect(events).toContain("getWorkflowAgentSession")
@@ -305,7 +338,7 @@ describe("runAcpAgentSession — generic session dispatch", () => {
   it("GenericSession_AttachBodyCarriesProjectAndSessionId", async () => {
     const fixture = createGenericFixture()
 
-    await acpAgentAction(fixture.context({ with: { prompt: "do the work" } as never }))
+    await runDefaultModelAction(fixture.context({ with: { prompt: "do the work" } as never }))
 
     const attachCall = fixture.serverConnection.calls.find((entry) => entry.event === "attachAgentSession")
     expect(attachCall).toBeTruthy()

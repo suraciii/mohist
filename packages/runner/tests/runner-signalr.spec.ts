@@ -19,11 +19,12 @@ afterEach(async () => {
   setRunnerSignalRExistsCheckerForTest(null)
 })
 
-function findHandler(name: string): (arg: unknown) => Promise<unknown> {
+function findHandler(name: string): (...args: unknown[]) => unknown {
   const conn = builders.at(-1)!.connection
   const call = conn.on.mock.calls.find(([event]) => event === name)
-  if (!call) throw new Error(`handler not registered: ${name}`)
-  return call[1] as (arg: unknown) => Promise<unknown>
+  const handler = call?.[1]
+  if (typeof handler !== "function") throw new Error(`handler not registered: ${name}`)
+  return (...args) => handler(...args)
 }
 
 function runOk(stdout = ""): CommandResult {

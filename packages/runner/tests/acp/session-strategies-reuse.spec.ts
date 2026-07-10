@@ -1,5 +1,6 @@
-import { afterEach, describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { acpAgentAction, setAcpProcessFactoryForTest } from "../../src/actions/acp-agent.js"
+import { stringInput } from "../../src/core/json.js"
 import { setPromptLoaderRegistryForTest } from "../../src/core/prompt.js"
 import {
   contextWithOverrides,
@@ -17,12 +18,44 @@ afterEach(() => {
   resetAcpTestHooks()
 })
 
+async function runWithProviderDefaultModelWarning<T>(context: Parameters<typeof acpAgentAction>[0], operation: () => Promise<T>): Promise<T> {
+  const warningSpy = vi.spyOn(console, "warn").mockClear().mockImplementation(() => undefined)
+  try {
+    const result = await operation()
+
+    expect(warningSpy).toHaveBeenCalledTimes(1)
+    expect(warningSpy).toHaveBeenNthCalledWith(
+      1,
+      "mohist acp model not configured; using provider default",
+      providerDefaultModelWarningContext(context),
+    )
+    return result
+  } finally {
+    warningSpy.mockRestore()
+  }
+}
+
+function runDefaultModelAction(context: Parameters<typeof acpAgentAction>[0]) {
+  return runWithProviderDefaultModelWarning(context, () => acpAgentAction(context))
+}
+
+function providerDefaultModelWarningContext(context: Parameters<typeof acpAgentAction>[0]) {
+  return {
+    workflowRunId: context.workflowRunId,
+    workId: context.workId,
+    stage: context.stage,
+    sessionName: stringInput(context.with, "session") ?? context.workId,
+    requestedModel: null,
+    requestedModelSource: "none",
+  }
+}
+
 describe("mohist/acp-agent existing shared session reuse", () => {
   it("SharedAcpThoughtAndToolUpdatesArrive_LivenessMonitored_DoNotProbeWhileAgentIsActive", async () => {
     useAcpFakeTimers()
     const fixture = createSharedFixture("liveness-non-message")
 
-    const result = await runAcpActionUntilSettled(acpAgentAction(fixture.context({ prompt: "long task", session: "build", livenessQuietThresholdMs: 100, probeTimeoutMs: 500, timeout: 2_000 })))
+    const result = await runAcpActionUntilSettled(runDefaultModelAction(fixture.context({ prompt: "long task", session: "build", livenessQuietThresholdMs: 100, probeTimeoutMs: 500, timeout: 2_000 })))
 
     expect(result.status).toBe("success")
     expect(fixture.agent.calls.filter((entry) => entry.event === "prompt")).toHaveLength(1)
@@ -34,7 +67,7 @@ describe("mohist/acp-agent existing shared session reuse", () => {
   it("NamedWorkflowSessionStartsNewAcpSession_ReportsPhysicalSessionIdToServerWithoutRenaming", async () => {
     const fixture = createFixture("basic")
 
-    const result = await acpAgentAction(fixture.context({
+    const result = await runDefaultModelAction(fixture.context({
       prompt: "review retry",
       session: "check",
     }, undefined, {
@@ -59,7 +92,7 @@ describe("mohist/acp-agent existing shared session reuse", () => {
     useAcpFakeTimers()
     const shared = createSharedSessionFixture("thought-liveness", { sessionRecord: { acpSessionId: "shared-session-1" } })
 
-    const result = await runAcpActionUntilSettled(acpAgentAction(contextWithOverrides({
+    const result = await runAcpActionUntilSettled(runDefaultModelAction(contextWithOverrides({
       prompt: "long shared task",
       session: "shared-session",
       livenessQuietThresholdMs: 50,

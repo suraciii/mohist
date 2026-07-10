@@ -8,7 +8,7 @@ import { WorkExecutor } from "../src/runtime/executor.js"
 import { setCleanupAgentActionForTest, setExecutorLockHolderProbeForTest } from "../src/runtime/worktree-enforcement.js"
 import { setExecutorGitRunnerForTest } from "../src/runtime/git-probe.js"
 import { ActionRegistry } from "../src/actions/registry.js"
-import type { ActionContext, ActionResult, WorkItem } from "../src/core/types.js"
+import type { ActionContext, ActionResult, RenderedWorkItem } from "../src/core/types.js"
 import type { ServerConnection } from "../src/server/connection.js"
 import { verifyOnlyWorkspaceManager } from "./support/workspace-mock.js"
 
@@ -70,7 +70,7 @@ function buildExecutor(registry: ActionRegistry): WorkExecutor {
   )
 }
 
-function buildWork(overrides: Partial<WorkItem> = {}): WorkItem {
+function buildWork(overrides: Partial<RenderedWorkItem> = {}): RenderedWorkItem {
   return {
     workflowRunId: "wf-1",
     workId: "work-branch-1",
@@ -352,7 +352,7 @@ describe("WorkExecutor branch-stability boundary checks", () => {
     // wrong branch.
     const workspaceManager = {
       prepareCalls: 0,
-      async prepare(_work: WorkItem, _signal: AbortSignal) {
+      async prepare(_work: RenderedWorkItem, _signal: AbortSignal) {
         this.prepareCalls += 1
         const current = await readHeadRef()
         if (current !== RUN_BRANCH) {
@@ -501,7 +501,7 @@ describe("WorkExecutor branch-stability boundary checks", () => {
         null,
         plainDir,
       )
-      const work: WorkItem = {
+      const work: RenderedWorkItem = {
         workflowRunId: "wf-1",
         workId: "work-branch-plain",
         workType: "task",
@@ -547,7 +547,7 @@ describe("WorkExecutor branch-stability boundary checks", () => {
       null,
       workDir,
     )
-    const work: WorkItem = {
+    const work: RenderedWorkItem = {
       workflowRunId: "wf-1",
       workId: "work-no-branch",
       workType: "task",

@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   disconnect: vi.fn(),
   poll: vi.fn(),
   report: vi.fn(),
+  uploadTaskLog: vi.fn(),
   fetchConfig: vi.fn(async () => null),
   startSignalR: vi.fn(),
   stopSignalR: vi.fn(),
@@ -28,6 +29,7 @@ const {
   disconnect,
   poll,
   report,
+  uploadTaskLog,
   fetchConfig,
   startSignalR,
   stopSignalR,
@@ -56,6 +58,7 @@ vi.mock("../src/server/connection.js", () => ({
     disconnect = disconnect
     poll = poll
     report = report
+    uploadTaskLog = uploadTaskLog
     fetchConfig = fetchConfig
   },
 }))
@@ -108,6 +111,7 @@ beforeEach(() => {
   })
   acpShutdown.mockResolvedValue(undefined)
   shutdownSharedAcpConnection.mockResolvedValue(undefined)
+  uploadTaskLog.mockResolvedValue({ accepted: 0, truncated: false })
   blockingAction.mockImplementation(async ({ signal }: { signal: AbortSignal }) => new Promise((resolve) => {
     if (signal.aborted) {
       resolve({ status: "failed", message: "aborted" })
@@ -335,8 +339,9 @@ describe("RunnerHost", () => {
     const secondSignalR = new Promise<void>((resolve) => {
       resolveSecondSignalR = resolve
     })
+    const signalRUnavailable = new Error("signalr unavailable")
     startSignalR
-      .mockRejectedValueOnce(new Error("signalr unavailable"))
+      .mockRejectedValueOnce(signalRUnavailable)
       .mockReturnValueOnce(secondSignalR)
     stopSignalR.mockResolvedValue(undefined)
     const controller = new AbortController()
@@ -349,15 +354,30 @@ describe("RunnerHost", () => {
       dispatchLivenessProbeIntervalMs: 60_000,
     })
 
+    const errorSpy = vi.spyOn(console, "error").mockClear().mockImplementation(() => undefined)
     const run = host.run(controller.signal)
-    await vi.waitFor(() => expect(startSignalR).toHaveBeenCalledTimes(2))
-    expect(poll).not.toHaveBeenCalled()
-    expect(disconnect).toHaveBeenCalledWith(expect.any(AbortSignal))
+    try {
+      await vi.waitFor(() => expect(startSignalR).toHaveBeenCalledTimes(2))
+      expect(poll).not.toHaveBeenCalled()
+      expect(disconnect).toHaveBeenCalledWith(expect.any(AbortSignal))
 
-    resolveSecondSignalR()
-    await vi.waitFor(() => expect(poll).toHaveBeenCalled(), { timeout: 10_000 })
-    controller.abort()
-    await expect(run).resolves.toBeUndefined()
+      resolveSecondSignalR()
+      await vi.waitFor(() => expect(poll).toHaveBeenCalled(), { timeout: 10_000 })
+      controller.abort()
+      await expect(run).resolves.toBeUndefined()
+
+      expect(errorSpy).toHaveBeenCalledTimes(1)
+      expect(errorSpy).toHaveBeenNthCalledWith(
+        1,
+        "runner connection failed; retrying in 1ms",
+        signalRUnavailable,
+      )
+    } finally {
+      resolveSecondSignalR()
+      controller.abort()
+      await run.catch(() => undefined)
+      errorSpy.mockRestore()
+    }
   })
 
   it("HeartbeatCarriesCurrentConnectionId_OnHeartbeatTick", async () => {
@@ -389,6 +409,7 @@ describe("RunnerHost", () => {
     ), { timeout: 5_000 })
     controller.abort()
     await expect(run).resolves.toBeUndefined()
+
   })
 
   it("SelfCheckTimer_ProbesAndForceReconnects_OnProbeFailure", async () => {
@@ -412,12 +433,22 @@ describe("RunnerHost", () => {
       dispatchLivenessProbeIntervalMs: 1,
     })
 
+    const warningSpy = vi.spyOn(console, "warn").mockClear().mockImplementation(() => undefined)
     const run = host.run(controller.signal)
-    await vi.waitFor(() => expect(connect).toHaveBeenCalled())
-    await vi.waitFor(() => expect(probeLiveness).toHaveBeenCalled(), { timeout: 5_000 })
-    await vi.waitFor(() => expect(forceReconnect).toHaveBeenCalled(), { timeout: 5_000 })
-    controller.abort()
-    await expect(run).resolves.toBeUndefined()
+    try {
+      await vi.waitFor(() => expect(connect).toHaveBeenCalled())
+      await vi.waitFor(() => expect(probeLiveness).toHaveBeenCalled(), { timeout: 5_000 })
+      await vi.waitFor(() => expect(forceReconnect).toHaveBeenCalled(), { timeout: 5_000 })
+      controller.abort()
+      await expect(run).resolves.toBeUndefined()
+
+      expect(warningSpy).toHaveBeenCalledTimes(1)
+      expect(warningSpy).toHaveBeenNthCalledWith(1, "dispatch liveness probe failed; forcing reconnect")
+    } finally {
+      controller.abort()
+      await run.catch(() => undefined)
+      warningSpy.mockRestore()
+    }
   })
 
   it("SelfCheckTimer_SendsImmediateHeartbeat_WhenManualReconnectReportsNewConnection", async () => {
@@ -445,15 +476,25 @@ describe("RunnerHost", () => {
       dispatchLivenessProbeIntervalMs: 1,
     })
 
+    const warningSpy = vi.spyOn(console, "warn").mockClear().mockImplementation(() => undefined)
     const run = host.run(controller.signal)
-    await vi.waitFor(() => expect(connect).toHaveBeenCalled())
-    await vi.waitFor(() => expect(forceReconnect).toHaveBeenCalled(), { timeout: 5_000 })
-    await vi.waitFor(() => expect(heartbeat).toHaveBeenCalledWith(
-      expect.objectContaining({ connectionId: "conn-AFTER" }),
-      expect.any(AbortSignal),
-    ), { timeout: 5_000 })
-    controller.abort()
-    await expect(run).resolves.toBeUndefined()
+    try {
+      await vi.waitFor(() => expect(connect).toHaveBeenCalled())
+      await vi.waitFor(() => expect(forceReconnect).toHaveBeenCalled(), { timeout: 5_000 })
+      await vi.waitFor(() => expect(heartbeat).toHaveBeenCalledWith(
+        expect.objectContaining({ connectionId: "conn-AFTER" }),
+        expect.any(AbortSignal),
+      ), { timeout: 5_000 })
+      controller.abort()
+      await expect(run).resolves.toBeUndefined()
+
+      expect(warningSpy).toHaveBeenCalledTimes(1)
+      expect(warningSpy).toHaveBeenNthCalledWith(1, "dispatch liveness probe failed; forcing reconnect")
+    } finally {
+      controller.abort()
+      await run.catch(() => undefined)
+      warningSpy.mockRestore()
+    }
   })
 
   it("GenericFollowupResolver_UsesPayloadProjectId_WhenRunnerProjectUnset", async () => {
@@ -734,9 +775,11 @@ describe("RunnerHost", () => {
     heartbeat.mockResolvedValue(undefined)
     disconnect.mockResolvedValue(undefined)
     // First two report attempts fail; the third succeeds.
+    const firstFailure = new Error("first transient")
+    const secondFailure = new Error("second transient")
     report
-      .mockRejectedValueOnce(new Error("transient"))
-      .mockRejectedValueOnce(new Error("transient"))
+      .mockRejectedValueOnce(firstFailure)
+      .mockRejectedValueOnce(secondFailure)
       .mockResolvedValueOnce(undefined)
     startSignalR.mockResolvedValue(undefined)
     stopSignalR.mockResolvedValue(undefined)
@@ -759,14 +802,32 @@ describe("RunnerHost", () => {
       heartbeatIntervalMs: 60_000,
       dispatchLivenessProbeIntervalMs: 60_000,
     })
+    const warningSpy = vi.spyOn(console, "warn").mockClear().mockImplementation(() => undefined)
     const run = host.run(controller.signal)
+    try {
+      // The work is reported at least 3 times (first attempt + 2 retries
+      // driven by the reconciliation loop at a 5s cadence). Allow generous
+      // headroom for the retry cadence.
+      await vi.waitFor(() => expect(report.mock.calls.length).toBeGreaterThanOrEqual(3), { timeout: 30_000 })
+      controller.abort()
+      await expect(run).resolves.toBeUndefined()
 
-    // The work is reported at least 3 times (first attempt + 2 retries
-    // driven by the reconciliation loop at a 5s cadence). Allow generous
-    // headroom for the retry cadence.
-    await vi.waitFor(() => expect(report.mock.calls.length).toBeGreaterThanOrEqual(3), { timeout: 30_000 })
-
-    controller.abort()
-    await expect(run).resolves.toBeUndefined()
+      expect(uploadTaskLog).toHaveBeenCalledTimes(1)
+      expect(warningSpy).toHaveBeenCalledTimes(2)
+      expect(warningSpy).toHaveBeenNthCalledWith(
+        1,
+        "first report for work work-retry failed; will retry",
+        firstFailure,
+      )
+      expect(warningSpy).toHaveBeenNthCalledWith(
+        2,
+        "retry report for work work-retry failed (attempt 2)",
+        secondFailure,
+      )
+    } finally {
+      controller.abort()
+      await run.catch(() => undefined)
+      warningSpy.mockRestore()
+    }
   }, 40_000)
 })

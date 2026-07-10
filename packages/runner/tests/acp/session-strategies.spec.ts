@@ -2,13 +2,13 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { acpAgentAction, setAcpProcessFactoryForTest } from "../../src/actions/acp-agent.js"
+import { acpAgentAction as executeAcpAgentAction, setAcpProcessFactoryForTest } from "../../src/actions/acp-agent.js"
 import {
   PromptLoaderRegistry,
   setPromptLoaderRegistryForTest,
   type PromptLoader,
-  type PromptLoaderContext,
 } from "../../src/core/prompt.js"
+import { stringInput } from "../../src/core/json.js"
 import {
   contextWithOverrides,
   createFixture,
@@ -25,11 +25,76 @@ afterEach(() => {
   resetAcpTestHooks()
 })
 
+async function runWithProviderDefaultModelWarning(context: Parameters<typeof executeAcpAgentAction>[0]) {
+  const warningSpy = vi.spyOn(console, "warn").mockClear().mockImplementation(() => undefined)
+  try {
+    const result = await executeAcpAgentAction(context)
+
+    expect(warningSpy).toHaveBeenCalledTimes(1)
+    expect(warningSpy).toHaveBeenNthCalledWith(
+      1,
+      "mohist acp model not configured; using provider default",
+      providerDefaultModelWarningContext(context),
+    )
+    return result
+  } finally {
+    warningSpy.mockRestore()
+  }
+}
+
+async function runWithRejectedRequestedModel(
+  context: Parameters<typeof executeAcpAgentAction>[0],
+  requestedModel: string,
+  expected: { requestedModelSource: "agent.model"; requestedVariant?: string },
+) {
+  const errorSpy = vi.spyOn(console, "error").mockClear().mockImplementation(() => undefined)
+  const warningSpy = vi.spyOn(console, "warn").mockClear().mockImplementation(() => undefined)
+  try {
+    const result = await executeAcpAgentAction(context)
+
+    expect(errorSpy).toHaveBeenCalledTimes(1)
+    expect(errorSpy).toHaveBeenNthCalledWith(
+      1,
+      "Error handling request",
+      expect.objectContaining({ method: "session/set_model", params: expect.objectContaining({ modelId: requestedModel }) }),
+      expect.objectContaining({ code: -32603, message: "Internal error" }),
+    )
+    expect(warningSpy).toHaveBeenCalledTimes(1)
+    expect(warningSpy).toHaveBeenNthCalledWith(
+      1,
+      "mohist acp set requested model failed; provider default may be used",
+      {
+        ...providerDefaultModelWarningContext(context),
+        requestedModel,
+        requestedModelSource: expected.requestedModelSource,
+        ...(expected.requestedVariant === undefined ? {} : { requestedVariant: expected.requestedVariant }),
+        variantDelivered: false,
+        error: "Internal error",
+      },
+    )
+    return result
+  } finally {
+    warningSpy.mockRestore()
+    errorSpy.mockRestore()
+  }
+}
+
+function providerDefaultModelWarningContext(context: Parameters<typeof executeAcpAgentAction>[0]) {
+  return {
+    workflowRunId: context.workflowRunId,
+    workId: context.workId,
+    stage: context.stage,
+    sessionName: stringInput(context.with, "session") ?? context.workId,
+    requestedModel: null,
+    requestedModelSource: "none",
+  }
+}
+
 describe("mohist/acp-agent new and ephemeral sessions", () => {
   it("ValidAcpAgentWork_ActionRuns_SpawnsAcpAndInitializesSessionBeforePrompt", async () => {
     const fixture = createFixture("basic")
 
-    const result = await acpAgentAction(fixture.context({ prompt: "do the work" }))
+    const result = await runWithProviderDefaultModelWarning(fixture.context({ prompt: "do the work" }))
 
     expect(result.status).toBe("success")
     expect(JSON.parse(result.output ?? "{}").acpSessionId).toBe("fake-session-1")
@@ -39,7 +104,7 @@ describe("mohist/acp-agent new and ephemeral sessions", () => {
   it("ModelConfigured_AcpSessionStarts_SetsSessionConfigModelBeforePrompt", async () => {
     const fixture = createFixture("basic")
 
-    await acpAgentAction(fixture.context({ prompt: "do the work", model: "openai/gpt-4.1" }))
+    await executeAcpAgentAction(fixture.context({ prompt: "do the work", model: "openai/gpt-4.1" }))
 
     expect(fixture.agent.calls.find((entry) => entry.event === "unstable_setSessionModel" && entry.modelId === "openai/gpt-4.1")).toBeTruthy()
     expect(fixture.agent.calls.findIndex((entry) => entry.event === "unstable_setSessionModel")).toBeLessThan(fixture.agent.calls.findIndex((entry) => entry.event === "prompt"))
@@ -48,7 +113,7 @@ describe("mohist/acp-agent new and ephemeral sessions", () => {
   it("SessionConfigModelFails_ModelConfigured_FallsBackToUnstableSetSessionModel", async () => {
     const fixture = createFixture("model-fallback")
 
-    const result = await acpAgentAction(fixture.context({ prompt: "do the work", model: "anthropic/claude" }))
+    const result = await executeAcpAgentAction(fixture.context({ prompt: "do the work", model: "anthropic/claude" }))
 
     expect(result.status).toBe("success")
     expect(fixture.agent.calls.find((entry) => entry.event === "unstable_setSessionModel" && entry.modelId === "anthropic/claude")).toBeTruthy()
@@ -57,7 +122,7 @@ describe("mohist/acp-agent new and ephemeral sessions", () => {
   it("VariantInAgentBlock_AcpSessionStarts_DeliversComposedSlashModelIdBeforePrompt", async () => {
     const fixture = createFixture("basic")
 
-    await acpAgentAction(fixture.context({ prompt: "do the work", agent: { model: "anthropic/claude-sonnet-4-5", variant: "high" } }))
+    await executeAcpAgentAction(fixture.context({ prompt: "do the work", agent: { model: "anthropic/claude-sonnet-4-5", variant: "high" } }))
 
     const setModelCall = fixture.agent.calls.find((entry) => entry.event === "unstable_setSessionModel")
     expect(setModelCall?.modelId).toBe("anthropic/claude-sonnet-4-5/high")
@@ -67,7 +132,7 @@ describe("mohist/acp-agent new and ephemeral sessions", () => {
   it("VariantInTopLevelWith_AcpSessionStarts_DeliversComposedSlashModelId", async () => {
     const fixture = createFixture("basic")
 
-    await acpAgentAction(fixture.context({ prompt: "do the work", model: "anthropic/claude-sonnet-4-5", variant: "max" }))
+    await executeAcpAgentAction(fixture.context({ prompt: "do the work", model: "anthropic/claude-sonnet-4-5", variant: "max" }))
 
     expect(fixture.agent.calls.find((entry) => entry.event === "unstable_setSessionModel" && entry.modelId === "anthropic/claude-sonnet-4-5/max")).toBeTruthy()
   })
@@ -75,7 +140,7 @@ describe("mohist/acp-agent new and ephemeral sessions", () => {
   it("EmptyVariant_AcpSessionStarts_DeliversBareModelIdWithoutTrailingSlash", async () => {
     const fixture = createFixture("basic")
 
-    await acpAgentAction(fixture.context({ prompt: "do the work", agent: { model: "anthropic/claude-sonnet-4-5", variant: "   " } }))
+    await executeAcpAgentAction(fixture.context({ prompt: "do the work", agent: { model: "anthropic/claude-sonnet-4-5", variant: "   " } }))
 
     const setModelCall = fixture.agent.calls.find((entry) => entry.event === "unstable_setSessionModel")
     expect(setModelCall?.modelId).toBe("anthropic/claude-sonnet-4-5")
@@ -85,7 +150,7 @@ describe("mohist/acp-agent new and ephemeral sessions", () => {
   it("NoVariant_AcpSessionStarts_DeliversBareModelId", async () => {
     const fixture = createFixture("basic")
 
-    await acpAgentAction(fixture.context({ prompt: "do the work", model: "minimax-coding-plan/MiniMax-M3" }))
+    await executeAcpAgentAction(fixture.context({ prompt: "do the work", model: "minimax-coding-plan/MiniMax-M3" }))
 
     const setModelCall = fixture.agent.calls.find((entry) => entry.event === "unstable_setSessionModel")
     expect(setModelCall?.modelId).toBe("minimax-coding-plan/MiniMax-M3")
@@ -95,7 +160,11 @@ describe("mohist/acp-agent new and ephemeral sessions", () => {
   it("VariantRejectedByAgent_RunStillSucceedsAgainstProviderDefault", async () => {
     const fixture = createFixture("model-config-fails")
 
-    const result = await acpAgentAction(fixture.context({ prompt: "do the work", agent: { model: "anthropic/claude-sonnet-4-5", variant: "high" } }))
+    const result = await runWithRejectedRequestedModel(
+      fixture.context({ prompt: "do the work", agent: { model: "anthropic/claude-sonnet-4-5", variant: "high" } }),
+      "anthropic/claude-sonnet-4-5/high",
+      { requestedModelSource: "agent.model", requestedVariant: "high" },
+    )
 
     expect(result.status).toBe("success")
     expect(fixture.agent.calls.some((entry) => entry.event === "unstable_setSessionModel" && entry.modelId === "anthropic/claude-sonnet-4-5/high")).toBe(true)
@@ -106,11 +175,11 @@ describe("mohist/acp-agent new and ephemeral sessions", () => {
   it("NewSessionCreatedBeforeModelConfiguration_RunnerReportsPhysicalSessionIdToServer", async () => {
     const fixture = createFixture("model-config-fails")
 
-    const result = await acpAgentAction(fixture.context({
+    const result = await runWithRejectedRequestedModel(fixture.context({
       prompt: "do the work",
       session: "build",
       model: "anthropic/claude",
-    }))
+    }), "anthropic/claude", { requestedModelSource: "agent.model" })
 
     expect(result.status).toBe("success")
     expect(fixture.serverConnection.calls).toContainEqual(expect.objectContaining({
@@ -125,7 +194,7 @@ describe("mohist/acp-agent new and ephemeral sessions", () => {
   it("PermissionRequestHasAllowOption_AgentRequestsPermission_SelectsAllowOption", async () => {
     const fixture = createFixture("permission")
 
-    const result = await acpAgentAction(fixture.context({ prompt: "needs permission" }))
+    const result = await runWithProviderDefaultModelWarning(fixture.context({ prompt: "needs permission" }))
 
     expect(result.status).toBe("success")
     expect(fixture.agent.calls.find((entry) => entry.event === "permissionResponse" && entry.outcome?.optionId === "allow")).toBeTruthy()
@@ -134,7 +203,7 @@ describe("mohist/acp-agent new and ephemeral sessions", () => {
   it("AgentMessageChunkArrives_SessionUpdateHandled_ReturnsAgentTextInOutput", async () => {
     const fixture = createFixture("basic")
 
-    const result = await acpAgentAction(fixture.context({ prompt: "do the work" }))
+    const result = await runWithProviderDefaultModelWarning(fixture.context({ prompt: "do the work" }))
 
     expect(result.status).toBe("success")
     expect(JSON.parse(result.output ?? "{}").text).toBe("hello")
@@ -143,7 +212,7 @@ describe("mohist/acp-agent new and ephemeral sessions", () => {
   it("ToolEventMissingToolNameButHasProviderId_ToolCallUpdateHandled_InfersToolNameAndReusesToolCallId", async () => {
     const fixture = createFixture("tool-weird")
 
-    const result = await acpAgentAction(fixture.context({ prompt: "use tools" }))
+    const result = await runWithProviderDefaultModelWarning(fixture.context({ prompt: "use tools" }))
 
     expect(result.status).toBe("success")
   })
@@ -152,7 +221,7 @@ describe("mohist/acp-agent new and ephemeral sessions", () => {
     useAcpFakeTimers()
     const fixture = createFixture("liveness")
 
-    const result = await runAcpActionUntilSettled(acpAgentAction(fixture.context({ prompt: "long task", livenessQuietThresholdMs: 30, probeTimeoutMs: 500, timeout: 2_000 })))
+    const result = await runAcpActionUntilSettled(runWithProviderDefaultModelWarning(fixture.context({ prompt: "long task", livenessQuietThresholdMs: 30, probeTimeoutMs: 500, timeout: 2_000 })))
 
     expect(result.status).toBe("success")
     expect(fixture.agent.calls.some((entry) => entry.event === "prompt" && entry.promptCount === 2 && entry.text.includes("still alive"))).toBe(true)
@@ -161,7 +230,7 @@ describe("mohist/acp-agent new and ephemeral sessions", () => {
   it("PromptCompletesWithoutSessionActivity_ActionFailsInsteadOfReportingEmptySuccess", async () => {
     const fixture = createFixture("empty-complete")
 
-    const result = await acpAgentAction(fixture.context({ prompt: "do the work" }))
+    const result = await runWithProviderDefaultModelWarning(fixture.context({ prompt: "do the work" }))
 
     expect(result.status).toBe("failure")
     expect(result.message).toContain("without any prompt work activity")
@@ -170,7 +239,7 @@ describe("mohist/acp-agent new and ephemeral sessions", () => {
   it("PromptCompletesWithUsageOnly_ActionFailsInsteadOfReportingEmptySuccess", async () => {
     const fixture = createFixture("usage-only")
 
-    const result = await acpAgentAction(fixture.context({ prompt: "do the work" }))
+    const result = await runWithProviderDefaultModelWarning(fixture.context({ prompt: "do the work" }))
 
     expect(result.status).toBe("failure")
     expect(result.message).toContain("without any prompt work activity")
@@ -181,7 +250,7 @@ describe("mohist/acp-agent new and ephemeral sessions", () => {
     const fixture = createFixture("expectation-repair")
 
     try {
-      const result = await acpAgentAction(fixture.context({
+      const result = await runWithProviderDefaultModelWarning(fixture.context({
         prompt: "review the change",
         session: "check",
         expect: {
@@ -209,7 +278,7 @@ describe("mohist/acp-agent new and ephemeral sessions", () => {
     const fixture = createFixture("basic")
 
     try {
-      const result = await acpAgentAction(fixture.context({
+      const result = await runWithProviderDefaultModelWarning(fixture.context({
         prompt: "review the change",
         expectationRepairLimit: 0,
         expect: {
@@ -235,7 +304,7 @@ describe("mohist/acp-agent new and ephemeral sessions", () => {
     const fixture = createFixture("expectation-repair-usage-only")
 
     try {
-      const result = await acpAgentAction(fixture.context({
+      const result = await runWithProviderDefaultModelWarning(fixture.context({
         prompt: "review the change",
         expect: {
           markers: [
@@ -260,7 +329,7 @@ describe("mohist/acp-agent new and ephemeral sessions", () => {
     const fixture = createFixture("expectation-repair")
 
     try {
-      const result = await acpAgentAction(fixture.context({
+      const result = await runWithProviderDefaultModelWarning(fixture.context({
         prompt: "review the change",
         session: "check",
         expect: {
@@ -290,7 +359,7 @@ describe("mohist/acp-agent new and ephemeral sessions", () => {
     const fixture = createFixture("failif-fail")
 
     try {
-      const result = await acpAgentAction(fixture.context({
+      const result = await runWithProviderDefaultModelWarning(fixture.context({
         prompt: "review the change",
         session: "check",
         expect: {
@@ -321,7 +390,7 @@ describe("mohist/acp-agent new and ephemeral sessions", () => {
     useAcpFakeTimers()
     const fixture = createFixture("quiet-then-done")
 
-    const result = await runAcpActionUntilSettled(acpAgentAction(fixture.context({ prompt: "long silent task", livenessQuietThresholdMs: 30, probeTimeoutMs: 30, timeout: 2_000 })))
+    const result = await runAcpActionUntilSettled(runWithProviderDefaultModelWarning(fixture.context({ prompt: "long silent task", livenessQuietThresholdMs: 30, probeTimeoutMs: 30, timeout: 2_000 })))
 
     expect(result.status).toBe("failure")
     expect(result.message ?? "").toContain("Session liveness probe timed out")
@@ -332,7 +401,7 @@ describe("mohist/acp-agent new and ephemeral sessions", () => {
     useAcpFakeTimers()
     const fixture = createFixture("liveness-non-message")
 
-    const result = await runAcpActionUntilSettled(acpAgentAction(fixture.context({ prompt: "long task", livenessQuietThresholdMs: 30, probeTimeoutMs: 500, timeout: 2_000 })))
+    const result = await runAcpActionUntilSettled(runWithProviderDefaultModelWarning(fixture.context({ prompt: "long task", livenessQuietThresholdMs: 30, probeTimeoutMs: 500, timeout: 2_000 })))
 
     expect(result.status).toBe("success")
     expect(fixture.agent.calls.filter((entry) => entry.event === "prompt")).toHaveLength(1)
@@ -344,7 +413,7 @@ describe("mohist/acp-agent new and ephemeral sessions", () => {
     const controller = new AbortController()
     setTimeout(() => controller.abort(), 50)
 
-    const result = await runAcpActionUntilSettled(acpAgentAction(fixture.context({ prompt: "cancel me", timeout: 500 }, controller.signal)))
+    const result = await runAcpActionUntilSettled(runWithProviderDefaultModelWarning(fixture.context({ prompt: "cancel me", timeout: 500 }, controller.signal)))
 
     expect(result.status).toBe("failure")
     expect(result.message ?? "").toMatch(/stopped by user/i)
@@ -355,7 +424,7 @@ describe("mohist/acp-agent new and ephemeral sessions", () => {
     const fixture = createFixture("basic")
 
     const literal = "Fix the build-stage health failure reported by `git diff --check`.\n\n## Keep this markdown verbatim"
-    const result = await acpAgentAction(fixture.context({ prompt: literal }))
+    const result = await runWithProviderDefaultModelWarning(fixture.context({ prompt: literal }))
 
     expect(result.status).toBe("success")
     const sentText = fixture.agent.calls.find((entry) => entry.event === "prompt")?.text ?? ""
@@ -370,7 +439,7 @@ describe("mohist/acp-agent new and ephemeral sessions", () => {
     const literal = "Resolve exactly this declared prompt."
     const issueTitle = "Distinct issue title that must not reach prompt text"
     const issueBody = "Distinct issue body that must not reach prompt text"
-    const result = await acpAgentAction(fixture.context({ prompt: literal }, undefined, {
+    const result = await runWithProviderDefaultModelWarning(fixture.context({ prompt: literal }, undefined, {
       issueNumber: 138,
       variables: {
         project: { path: "D:/fake/work" },
@@ -393,7 +462,7 @@ describe("mohist/acp-agent new and ephemeral sessions", () => {
     const fixture = createFixture("basic")
 
     const literal = "literal ${{ prompts.xxx }} should stay intact"
-    const result = await acpAgentAction(fixture.context({ prompt: literal }))
+    const result = await runWithProviderDefaultModelWarning(fixture.context({ prompt: literal }))
 
     expect(result.status).toBe("success")
     const sentText = fixture.agent.calls.find((entry) => entry.event === "prompt")?.text ?? ""
@@ -404,7 +473,7 @@ describe("mohist/acp-agent new and ephemeral sessions", () => {
   it("ObjectPrompt_ActionSendsRenderedXmlWithoutMarkdownEnvelope", async () => {
     const fixture = createFixture("basic")
 
-    const result = await acpAgentAction(fixture.context({
+    const result = await runWithProviderDefaultModelWarning(fixture.context({
       prompt: {
         artifact: {
           attrs: { id: "build-task" },
@@ -430,12 +499,12 @@ describe("mohist/acp-agent new and ephemeral sessions", () => {
 
   it("UsesFormPrompt_ActionResolvesThroughRegisteredLoaderBeforeMohistContextWrapper", async () => {
     const fixture = createFixture("basic")
-    const loader = vi.fn<[PromptLoaderContext], ReturnType<PromptLoader>>(async () => "loader produced task prompt")
+    const loader = vi.fn<PromptLoader>(async () => "loader produced task prompt")
     const registry = new PromptLoaderRegistry()
     registry.register("fake/loader", loader)
     setPromptLoaderRegistryForTest(registry)
 
-    const result = await acpAgentAction(fixture.context({
+    const result = await runWithProviderDefaultModelWarning(fixture.context({
       prompt: { uses: "fake/loader", with: { file: "tasks.json", taskId: "T-001" } },
     }))
 
@@ -453,7 +522,7 @@ describe("mohist/acp-agent new and ephemeral sessions", () => {
     }))
     setPromptLoaderRegistryForTest(registry)
 
-    const result = await acpAgentAction(fixture.context({ prompt: { uses: "fake/object-loader" } }))
+    const result = await runWithProviderDefaultModelWarning(fixture.context({ prompt: { uses: "fake/object-loader" } }))
 
     expect(result.status).toBe("success")
     const sentText = fixture.agent.calls.find((entry) => entry.event === "prompt")?.text ?? ""
@@ -468,7 +537,7 @@ describe("mohist/acp-agent new and ephemeral sessions", () => {
 
   it("UsesFormPrompt_LoaderReceivesContextWithWorkflowVariablesWorkDirWorkIdTitleAndStage", async () => {
     const fixture = createFixture("basic")
-    const loader = vi.fn<[PromptLoaderContext], ReturnType<PromptLoader>>(async () => "ok")
+    const loader = vi.fn<PromptLoader>(async () => "ok")
     const registry = new PromptLoaderRegistry()
     registry.register("fake/echo-loader", loader)
     setPromptLoaderRegistryForTest(registry)
@@ -477,7 +546,7 @@ describe("mohist/acp-agent new and ephemeral sessions", () => {
       workflow: { name: "build" },
       project: { path: "D:/fake/work" },
     }
-    await acpAgentAction(fixture.context({
+    await runWithProviderDefaultModelWarning(fixture.context({
       prompt: { uses: "fake/echo-loader", with: { file: "tasks.json", taskId: "T-001" } },
     }, new AbortController().signal, {
       variables: variables as never,
@@ -486,7 +555,7 @@ describe("mohist/acp-agent new and ephemeral sessions", () => {
     }))
 
     expect(loader).toHaveBeenCalledTimes(1)
-    const received = loader.mock.calls[0][0] as PromptLoaderContext
+    const received = loader.mock.calls[0][0]
     expect(received.with).toEqual({ file: "tasks.json", taskId: "T-001" })
     expect(received.variables).toEqual(variables)
     expect(received.workDir).toBe("D:/fake/work")
@@ -497,18 +566,18 @@ describe("mohist/acp-agent new and ephemeral sessions", () => {
 
   it("UsesFormPrompt_LoaderReceivesContextWithNullTitleAndStageWhenAbsent", async () => {
     const fixture = createFixture("basic")
-    const loader = vi.fn<[PromptLoaderContext], ReturnType<PromptLoader>>(async () => "ok")
+    const loader = vi.fn<PromptLoader>(async () => "ok")
     const registry = new PromptLoaderRegistry()
     registry.register("fake/echo-loader", loader)
     setPromptLoaderRegistryForTest(registry)
 
-    await acpAgentAction(fixture.context({ prompt: { uses: "fake/echo-loader" } }, new AbortController().signal, {
+    await runWithProviderDefaultModelWarning(fixture.context({ prompt: { uses: "fake/echo-loader" } }, new AbortController().signal, {
       title: null,
       stage: null,
     }))
 
     expect(loader).toHaveBeenCalledTimes(1)
-    const received = loader.mock.calls[0][0] as PromptLoaderContext
+    const received = loader.mock.calls[0][0]
     expect(received.title).toBeNull()
     expect(received.stage).toBeNull()
   })
@@ -516,7 +585,7 @@ describe("mohist/acp-agent new and ephemeral sessions", () => {
   it("MissingPrompt_ActionFailsWithoutSendingSynthesizedPrompt", async () => {
     const fixture = createFixture("basic")
 
-    const result = await acpAgentAction(fixture.context({
+    const result = await executeAcpAgentAction(fixture.context({
       description: "Requeue runnable workflows on server startup.",
       acceptanceCriteria: ["runner can claim recovered work"],
     }))
@@ -531,7 +600,7 @@ describe("mohist/acp-agent new and ephemeral sessions", () => {
     const fixture = createFixture("basic")
     setPromptLoaderRegistryForTest(new PromptLoaderRegistry())
 
-    const result = await acpAgentAction(fixture.context({ prompt: { uses: "no/such-loader" } }))
+    const result = await executeAcpAgentAction(fixture.context({ prompt: { uses: "no/such-loader" } }))
 
     expect(result.status).toBe("failure")
     expect(result.message ?? "").toContain("Unknown prompt loader: 'no/such-loader'")
@@ -541,7 +610,7 @@ describe("mohist/acp-agent new and ephemeral sessions", () => {
   it("NewSessionReturnsCurrentModelId_RunnerEmitsResolvedModelEvent", async () => {
     const fixture = createFixture("resolved-model")
 
-    const result = await acpAgentAction(fixture.context({ prompt: "do the work" }))
+    const result = await runWithProviderDefaultModelWarning(fixture.context({ prompt: "do the work" }))
 
     expect(result.status).toBe("success")
     const resolvedModelEvent = fixture.serverConnection.calls
@@ -557,7 +626,7 @@ describe("mohist/acp-agent new and ephemeral sessions", () => {
   it("NewSessionLacksCurrentModelId_RunnerDoesNotEmitResolvedModelEvent", async () => {
     const fixture = createFixture("basic")
 
-    const result = await acpAgentAction(fixture.context({ prompt: "do the work" }))
+    const result = await runWithProviderDefaultModelWarning(fixture.context({ prompt: "do the work" }))
 
     expect(result.status).toBe("success")
     expect(fixture.serverConnection.calls.some((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "model.resolved")).toBe(false)
@@ -566,7 +635,7 @@ describe("mohist/acp-agent new and ephemeral sessions", () => {
   it("ConfigOptionUpdateChangesModel_RunnerEmitsResolvedModelEvent", async () => {
     const fixture = createFixture("config-option-update")
 
-    const result = await acpAgentAction(fixture.context({ prompt: "switch the model" }))
+    const result = await runWithProviderDefaultModelWarning(fixture.context({ prompt: "switch the model" }))
 
     expect(result.status).toBe("success")
     const resolvedModelEvent = fixture.serverConnection.calls
@@ -581,7 +650,7 @@ describe("mohist/acp-agent new and ephemeral sessions", () => {
   it("UsageUpdateArrives_RunnerEmitsAgentUsageUpdateAndPreservesLiveness", async () => {
     const fixture = createFixture("usage-update")
 
-    const result = await acpAgentAction(fixture.context({ prompt: "track usage" }))
+    const result = await runWithProviderDefaultModelWarning(fixture.context({ prompt: "track usage" }))
 
     expect(result.status).toBe("success")
     const usageEvent = fixture.serverConnection.calls
@@ -600,7 +669,7 @@ describe("mohist/acp-agent new and ephemeral sessions", () => {
   it("PromptResponseCarriesUsage_RunnerEmitsAgentUsageUpdateAfterCompletion", async () => {
     const fixture = createFixture("prompt-usage")
 
-    const result = await acpAgentAction(fixture.context({ prompt: "report usage" }))
+    const result = await runWithProviderDefaultModelWarning(fixture.context({ prompt: "report usage" }))
 
     expect(result.status).toBe("success")
     const usageEvent = fixture.serverConnection.calls
@@ -627,7 +696,7 @@ describe("mohist/acp-agent new and ephemeral sessions", () => {
     useAcpFakeTimers()
     const fixture = createFixture("probe-timeout")
 
-    const result = await runAcpActionUntilSettled(acpAgentAction(fixture.context({
+    const result = await runAcpActionUntilSettled(runWithProviderDefaultModelWarning(fixture.context({
       prompt: "quiet task",
       session: "timeout-session",
       livenessQuietThresholdMs: 30,
@@ -648,7 +717,7 @@ describe("mohist/acp-agent new and ephemeral sessions", () => {
   it("SuccessfulRun_TerminalEventOmitsFailureCategory", async () => {
     const fixture = createFixture("basic")
 
-    const result = await acpAgentAction(fixture.context({ prompt: "happy path" }))
+    const result = await runWithProviderDefaultModelWarning(fixture.context({ prompt: "happy path" }))
 
     expect(result.status).toBe("success")
     const terminalEvent = fixture.serverConnection.calls
@@ -664,7 +733,7 @@ describe("mohist/acp-agent new and ephemeral sessions", () => {
   it("CompactionConfigNotSpecified_DefaultsApplied_NewSessionReceivesOpencodeCompactionMeta", async () => {
     const fixture = createFixture("basic")
 
-    const result = await acpAgentAction(fixture.context({ prompt: "do the work" }))
+    const result = await runWithProviderDefaultModelWarning(fixture.context({ prompt: "do the work" }))
 
     expect(result.status).toBe("success")
     const newSessionCall = fixture.agent.calls.find((entry) => entry.event === "newSession")
@@ -678,7 +747,7 @@ describe("mohist/acp-agent new and ephemeral sessions", () => {
   it("CompactionConfigExplicitlySet_ForwardedToNewSessionMeta", async () => {
     const fixture = createFixture("basic")
 
-    const result = await acpAgentAction(fixture.context({
+    const result = await runWithProviderDefaultModelWarning(fixture.context({
       prompt: "do the work",
       compaction: { threshold: 0.7, strategy: "summary" },
     }))
@@ -693,7 +762,7 @@ describe("mohist/acp-agent new and ephemeral sessions", () => {
   it("CompactionConfigNestedUnderAgent_ForwardedToNewSessionMeta", async () => {
     const fixture = createFixture("basic")
 
-    const result = await acpAgentAction(fixture.context({
+    const result = await runWithProviderDefaultModelWarning(fixture.context({
       prompt: "do the work",
       agent: { compaction: { threshold: 0.6, strategy: "summary" } },
     }))
@@ -708,7 +777,7 @@ describe("mohist/acp-agent new and ephemeral sessions", () => {
   it("CompactionThresholdOutOfRange_DefaultsToValidRange_Forwarded", async () => {
     const fixture = createFixture("basic")
 
-    const result = await acpAgentAction(fixture.context({
+    const result = await runWithProviderDefaultModelWarning(fixture.context({
       prompt: "do the work",
       compaction: { threshold: 1.5, strategy: "summary" },
     }))
@@ -723,7 +792,7 @@ describe("mohist/acp-agent new and ephemeral sessions", () => {
   it("CompactionStrategyUnsupported_FallsBackToSummary", async () => {
     const fixture = createFixture("basic")
 
-    const result = await acpAgentAction(fixture.context({
+    const result = await runWithProviderDefaultModelWarning(fixture.context({
       prompt: "do the work",
       compaction: { threshold: 0.5, strategy: "unknown" as never },
     }))
@@ -738,7 +807,7 @@ describe("mohist/acp-agent new and ephemeral sessions", () => {
   it("CompactionEventArrives_RunnerEmitsUsageUpdatedEventWithBeforeAfterMetrics", async () => {
     const fixture = createFixture("compaction")
 
-    const result = await acpAgentAction(fixture.context({ prompt: "trigger compaction" }))
+    const result = await runWithProviderDefaultModelWarning(fixture.context({ prompt: "trigger compaction" }))
 
     expect(result.status).toBe("success")
     const usageEvents = fixture.serverConnection.calls
@@ -755,7 +824,7 @@ describe("mohist/acp-agent new and ephemeral sessions", () => {
   it("CompactionEventArrives_RunnerEmitsDedicatedCompactionEvent", async () => {
     const fixture = createFixture("compaction")
 
-    const result = await acpAgentAction(fixture.context({ prompt: "trigger compaction" }))
+    const result = await runWithProviderDefaultModelWarning(fixture.context({ prompt: "trigger compaction" }))
 
     expect(result.status).toBe("success")
     const compactionEvents = fixture.serverConnection.calls
@@ -772,7 +841,7 @@ describe("mohist/acp-agent new and ephemeral sessions", () => {
   it("CompactionEventUpdatesContextWindowSizeInUsageUpdate", async () => {
     const fixture = createFixture("compaction")
 
-    const result = await acpAgentAction(fixture.context({ prompt: "trigger compaction" }))
+    const result = await runWithProviderDefaultModelWarning(fixture.context({ prompt: "trigger compaction" }))
 
     expect(result.status).toBe("success")
     const usageEvents = fixture.serverConnection.calls

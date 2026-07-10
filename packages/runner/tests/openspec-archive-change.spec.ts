@@ -537,7 +537,7 @@ describe("mohist/archive-change", () => {
       return gitFail(`unexpected git call: ${args.join(" ")}`, 1)
     })
 
-    const variables = keySource === "openspecArchiveName"
+    const variables: JsonObject = keySource === "openspecArchiveName"
       ? { openspecArchiveName: unsafePrefix }
       : { "_actions.archiveChange.destination": { "openspec/changes/issue-127": unsafePrefix } }
 
