@@ -584,11 +584,8 @@ describe('SessionPage header and states', () => {
       expect(h1).not.toBeNull()
       expect(h1?.textContent?.trim().length ?? 0).toBeGreaterThan(0)
 
-      // The main view also has a sticky transcript title with the same count.
       const issueLink = screen.getByRole('link', { name: /Issue #123/ })
-      const header = issueLink.closest('.border-b') as HTMLElement | null
-      expect(header).not.toBeNull()
-      await within(header!).findByText('2 turns')
+      await within(issueLink.closest('.border-b') as HTMLElement).findByText('2 turns')
 
       // Issue back-link resolves to the issue page (not a session sub-route).
       expect(issueLink.getAttribute('href')).toBe('/Test%20Project/issues/123')
@@ -632,10 +629,7 @@ describe('SessionPage header and states', () => {
 
       const { unmount } = renderWithQueryClient(<SessionPage />)
       await screen.findByTestId('session-transcript-scroll-container')
-      const mainIssueLink = screen.getByRole('link', { name: /Issue #123/ })
-      const mainHeader = mainIssueLink.closest('.border-b') as HTMLElement | null
-      expect(mainHeader).not.toBeNull()
-      await within(mainHeader!).findByText('1 turn')
+      await within(screen.getByRole('link', { name: /Issue #123/ }).closest('.border-b') as HTMLElement).findByText('1 turn')
       expect(screen.getByText('Build')).toBeInTheDocument()
       const completedBadges = screen.getAllByText('Completed')
       expect(completedBadges.length).toBeGreaterThanOrEqual(1)
