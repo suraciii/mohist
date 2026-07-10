@@ -1,0 +1,372 @@
+using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Time.Testing;
+using Mohist.Server.Agent.Grains;
+using Mohist.Server.Events.Grains;
+using Mohist.Server.Infrastructure.Data;
+using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Data.Runner;
+using Mohist.Server.Infrastructure.Data.Workflow;
+using Mohist.Server.Infrastructure.Events;
+using Mohist.Server.Issue.Domain.Events;
+using Mohist.Server.Issue.Services.WorkflowProfiles;
+using Mohist.Server.Runner.Services;
+using Mohist.Server.Runner.Services.SignalR;
+using Mohist.Server.Sessions.Services;
+using Mohist.Server.SpecTests.Specs.Issue.Profile;
+using Mohist.Server.SpecTests.Support;
+using Mohist.Server.Workflow.Grains;
+using Mohist.Server.Workflow.Services;
+using Mohist.Server.Workflow.Services.Artifacts;
+using Mohist.Server.Workflow.Services.Prompts;
+using Orleans;
+using Orleans.Configuration;
+using Orleans.TestingHost;
+using Xunit;
+
+namespace Mohist.Server.SpecTests.Specs.Events;
+
+/// <summary>
+/// Captures every CloudEvent <see cref="IEventStore.AppendAsync"/> call and
+/// serves the same events back from <see cref="ListUndeliveredAsync"/> as
+/// fresh undelivered rows. Lets spec tests drive the dispatcher's
+/// pull–fan-out–mark cycle without a real EF store — the dispatcher only
+/// needs a controllable <see cref="IEventStore"/> seam.
+/// </summary>
+public sealed class CapturingEventStore : IEventStore
+{
+    private readonly List<UndeliveredEvent> _rows = [];
+    private long _nextId;
+    private readonly object _gate = new();
+
+    public Task AppendAsync(CloudEvent envelope, CancellationToken ct = default)
+    {
+        lock (_gate)
+        {
+            _rows.Add(new UndeliveredEvent(
+                Origin: ResolveOrigin(envelope.Source.ToString()),
+                Id: ++_nextId,
+                Source: envelope.Source.ToString(),
+                EventId: envelope.Id,
+                Type: envelope.Type,
+                Time: envelope.Time,
+                SpecVersion: envelope.SpecVersion,
+                Subject: envelope.Subject,
+                DataContentType: envelope.DataContentType ?? "application/json",
+                Data: envelope.Data ?? System.Text.Json.JsonDocument.Parse("null").RootElement,
+                ExtensionsJson: envelope.Extensions.Count == 0
+                    ? "{}"
+                    : System.Text.Json.JsonSerializer.Serialize(envelope.Extensions, CloudEvent.JsonOptions)));
+        }
+        return Task.CompletedTask;
+    }
+
+    public Task AppendAsync(MohistDbContext db, CloudEvent envelope, CancellationToken ct = default) =>
+        AppendAsync(envelope, ct);
+
+    public Task<IReadOnlyList<StoredCloudEvent>> ListAsync(string workflowRunId, int limit = 200, CancellationToken ct = default) =>
+        Task.FromResult<IReadOnlyList<StoredCloudEvent>>([]);
+
+    public Task<IReadOnlyList<StoredCloudEvent>> ListIssueEventsAsync(string issueId, int limit = 200, CancellationToken ct = default) =>
+        Task.FromResult<IReadOnlyList<StoredCloudEvent>>([]);
+
+    public Task<IReadOnlyList<StoredCloudEvent>> ListEpicEventsAsync(string epicId, int limit = 200, CancellationToken ct = default) =>
+        Task.FromResult<IReadOnlyList<StoredCloudEvent>>([]);
+
+    public Task<IReadOnlyList<StoredCloudEvent>> ListAgentSessionEventsAsync(string sessionId, int limit = 200, CancellationToken ct = default) =>
+        Task.FromResult<IReadOnlyList<StoredCloudEvent>>([]);
+
+    public Task MarkDispatchedAsync(string source, long id, DateTimeOffset dispatchedAt, CancellationToken ct = default)
+    {
+        lock (_gate) { _rows.RemoveAll(r => r.Source == source && r.Id == id); }
+        return Task.CompletedTask;
+    }
+
+    public Task<IReadOnlyList<UndeliveredEvent>> ListUndeliveredAsync(int limit = 100, CancellationToken ct = default)
+    {
+        lock (_gate)
+        {
+            return Task.FromResult<IReadOnlyList<UndeliveredEvent>>(_rows
+                .OrderBy(r => r.Source, StringComparer.Ordinal)
+                .ThenBy(r => r.Id)
+                .Take(limit)
+                .Select(r => r)
+                .ToList());
+        }
+    }
+
+    public int PendingCount
+    {
+        get { lock (_gate) { return _rows.Count; } }
+    }
+
+    private static EventOrigin ResolveOrigin(string source)
+    {
+        if (source.StartsWith("/mohist/workflow-runs/", StringComparison.Ordinal)) return EventOrigin.WorkflowRun;
+        if (source.StartsWith("/mohist/issues/", StringComparison.Ordinal)) return EventOrigin.Issue;
+        if (source.StartsWith("/mohist/epics/", StringComparison.Ordinal)) return EventOrigin.Epic;
+        if (source.StartsWith("/mohist/agent-session/", StringComparison.Ordinal)) return EventOrigin.AgentSession;
+        if (source.StartsWith("/mohist/inbox", StringComparison.Ordinal)) return EventOrigin.WorkflowRun;
+        return EventOrigin.WorkflowRun;
+    }
+}
+
+/// <summary>
+/// Self-contained silo fixture for the dispatcher integration tests.
+/// Wires the production <see cref="EventDispatcherService"/> with
+/// <see cref="CapturingEventStore"/> as the dispatcher's <see cref="IEventStore"/>
+/// and <see cref="NoopDeadLetterStore"/> for the dead-letter sink. Exposes
+/// the dispatcher grain via its fixed key "dispatcher" so specs can drive
+/// deterministic ticks via <see cref="IDispatcherGrain.PulseAsync"/>.
+/// </summary>
+public sealed class DispatcherFixture : IAsyncLifetime
+{
+    public InProcessTestCluster Cluster { get; private set; } = null!;
+    public IGrainFactory Grains => Cluster.Client;
+    public FakeTimeProvider TimeProvider { get; } = new(new DateTimeOffset(2026, 7, 1, 0, 0, 0, TimeSpan.Zero));
+    public CapturingEventStore EventStore { get; } = new();
+    public CapturingEventPublisher EventPublisher { get; } = new();
+    public FakeRunnerWorkspaceClient RunnerWorkspace { get; private set; } = null!;
+    public IReminderTable ReminderTable => Cluster.GetSiloServiceProvider(null).GetRequiredService<IReminderTable>();
+
+    public IDispatcherGrain Dispatcher => Grains.GetGrain<IDispatcherGrain>("dispatcher");
+
+    /// <summary>
+    /// Per-silo call lists shared by the test handlers
+    /// (<see cref="DispatcherClosedGenericHandler"/>,
+    /// <see cref="DispatcherCatchAllHandler"/>,
+    /// <see cref="DispatcherSpecificHandler"/>) via the silo's
+    /// <see cref="IServiceProvider"/>. The handlers resolve the
+    /// fixture instance from DI so they can record invocations here.
+    /// </summary>
+    public List<string> ClosedGenericInvocations { get; } = [];
+    public List<string> CatchAllInvocations { get; } = [];
+    public List<string> SpecificInvocations { get; } = [];
+
+    private SqliteConnection _keeper = null!;
+
+    public async Task InitializeAsync()
+    {
+        var dbName = $"mohist-dispatcher-{Guid.NewGuid():N}";
+        var connectionString = $"Data Source={dbName};Mode=Memory;Cache=Shared";
+        _keeper = new SqliteConnection(connectionString);
+        _keeper.Open();
+
+        var builder = new InProcessTestClusterBuilder();
+        builder.Options.InitialSilosCount = 1;
+        builder.ConfigureSilo((_, siloBuilder) =>
+            ConfigureDispatcherSilo(siloBuilder, connectionString));
+        Cluster = builder.Build();
+        await Cluster.DeployAsync();
+
+        RunnerWorkspace = Cluster.GetSiloServiceProvider(null).GetRequiredService<FakeRunnerWorkspaceClient>();
+        EventPublisher.RegisterSink(EventStore);
+
+        // Touch the dispatcher grain so it activates — this is what
+        // registers the reminder.
+        await Dispatcher.PulseAsync();
+    }
+
+    public Task DisposeAsync()
+    {
+        Cluster?.Dispose();
+        _keeper?.DisposeAsync();
+        return Task.CompletedTask;
+    }
+
+    private void ConfigureDispatcherSilo(ISiloBuilder siloBuilder, string connectionString)
+    {
+        siloBuilder.UseInMemoryReminderService();
+        siloBuilder.Configure<ReminderOptions>(o =>
+            o.MinimumReminderPeriod = TimeSpan.FromMilliseconds(100));
+        siloBuilder.AddMemoryGrainStorageAsDefault();
+        siloBuilder.Services.AddDbContextFactory<MohistDbContext>(o => o.UseSqlite(connectionString));
+        siloBuilder.Services.AddScoped<IWorkflowRunStore, WorkflowRunStore>();
+        siloBuilder.Services.AddScoped<RunnerWorkStore>();
+        siloBuilder.Services.AddScoped<RunnerDefinitionStore>();
+        siloBuilder.Services.AddScoped<WorkflowRunProfileManager>();
+        siloBuilder.Services.AddSingleton<IPromptLoader>(_ => new FakePromptLoader());
+        siloBuilder.Services.AddSingleton<PromptTemplateEngine>();
+        siloBuilder.Services.AddSingleton(WorkflowGrainTestHelpers.CreateEmptyConfigService());
+        siloBuilder.Services.AddScoped<WorkflowProfileManager>();
+        siloBuilder.Services.AddScoped<Mohist.Server.Runner.Services.DispatchService>();
+        siloBuilder.Services.AddScoped<Mohist.Server.Runner.Services.WorkflowReportService>();
+        siloBuilder.Services.AddScoped<WorkflowItemTranslator>();
+        siloBuilder.Services.AddScoped<WorkflowSessionHealthService>();
+        siloBuilder.Services.AddScoped<IssueWorkflowProfileRegistry>();
+        siloBuilder.Services.AddScoped<EffectiveWorkflowProfileResolver>();
+        siloBuilder.Services.AddSingleton<FakeRunnerWorkspaceClient>();
+        siloBuilder.Services.AddSingleton<IRunnerWorkspaceClient>(sp => sp.GetRequiredService<FakeRunnerWorkspaceClient>());
+
+        siloBuilder.Services.RemoveAll<IEventStore>();
+        siloBuilder.Services.AddSingleton<IEventStore>(EventStore);
+        siloBuilder.Services.RemoveAll<IDeadLetterStore>();
+        siloBuilder.Services.AddSingleton<IDeadLetterStore>(new NoopDeadLetterStore());
+
+        siloBuilder.Services.AddCloudEventBus();
+        // Add the fixture as a singleton so the test handlers can resolve
+        // it and record their invocations on the fixture's shared lists.
+        siloBuilder.Services.AddSingleton(this);
+        siloBuilder.Services.AddCloudEventHandlersFromAssembly(typeof(DispatcherFixture).Assembly);
+
+        siloBuilder.Services.AddSingleton<EventDispatcherService>();
+        siloBuilder.Services.AddSingleton<TimeProvider>(System.TimeProvider.System);
+
+        siloBuilder.Services.AddSingleton<ITranscriptEventPublisher, TestNoopTranscriptEventPublisher>();
+        siloBuilder.Services.AddScoped<IWorkflowArtifactBindService, WorkflowArtifactBindService>();
+        siloBuilder.Services.AddScoped<AgentSessionQuery>();
+        siloBuilder.Services.Configure<AgentJobOptions>(opts =>
+        {
+            opts.DispatchBackoffInitial = TimeSpan.FromMilliseconds(50);
+            opts.DispatchBackoffCap = TimeSpan.FromMilliseconds(200);
+            opts.DispatchRetryBound = TimeSpan.FromSeconds(5);
+            opts.JobTimeout = TimeSpan.FromSeconds(10);
+        });
+        siloBuilder.Services.Configure<WorkflowOptions>(_ => { });
+    }
+}
+
+/// <summary>
+/// Minimal <see cref="IEventPublisher"/> that forwards every published
+/// envelope to a single sink (the fixture's <see cref="CapturingEventStore"/>).
+/// Lets spec tests assert that an event published through the bus is
+/// visible to the dispatcher's pull on the next tick.
+/// </summary>
+public sealed class CapturingEventPublisher : IEventPublisher
+{
+    private readonly List<CloudEvent> _published = [];
+    private IEventStore? _sink;
+    private readonly object _gate = new();
+
+    public void RegisterSink(IEventStore sink)
+    {
+        lock (_gate) { _sink = sink; }
+    }
+
+    public IReadOnlyList<CloudEvent> Published
+    {
+        get { lock (_gate) { return _published.ToList(); } }
+    }
+
+    public Task PublishAsync(CloudEvent envelope, CancellationToken ct = default)
+    {
+        lock (_gate)
+        {
+            _published.Add(envelope);
+            return _sink?.AppendAsync(envelope, ct) ?? Task.CompletedTask;
+        }
+    }
+
+    public async Task PublishAsync<TData>(
+        TData data,
+        string type,
+        string source,
+        string? subject = null,
+        IReadOnlyDictionary<string, string>? extensions = null,
+        CancellationToken ct = default)
+    {
+        var dataJson = System.Text.Json.JsonSerializer.SerializeToElement(data, CloudEvent.JsonOptions);
+        var extDict = extensions is null
+            ? null
+            : new Dictionary<string, string>(extensions, StringComparer.Ordinal);
+        var envelope = new CloudEvent(
+            id: Guid.NewGuid().ToString(),
+            source: new Uri(source, UriKind.RelativeOrAbsolute),
+            type: type,
+            time: DateTimeOffset.UtcNow,
+            data: dataJson,
+            subject: subject,
+            extensions: extDict);
+        await PublishAsync(envelope, ct).ConfigureAwait(false);
+    }
+}
+
+/// <summary>
+/// Closed-generic <see cref="ICloudEventHandler{TData}"/> used by the
+/// dispatcher integration specs to assert that the closed-generic
+/// discovery fix lands the handler in the fan-out set. Subscribes to
+/// the same <c>com.mohist.issue.completed</c> type the production
+/// <c>EpicAutoDoneHandler</c> uses; tests publish a matching
+/// <see cref="IssueCompleted"/> event and observe this handler being
+/// invoked via the dispatcher's pull–fan-out cycle.
+/// </summary>
+[Subscription(Type = EventCatalog.ReverseDns.IssueCompleted)]
+public sealed class DispatcherClosedGenericHandler : ICloudEventHandler<IssueCompleted>
+{
+    private readonly DispatcherFixture _fixture;
+
+    public DispatcherClosedGenericHandler(DispatcherFixture fixture) => _fixture = fixture;
+
+    public bool Filter(CloudEvent<IssueCompleted> evt) => true;
+
+    public Task HandleAsync(CloudEvent<IssueCompleted> evt, CancellationToken ct)
+    {
+        lock (_fixture.ClosedGenericInvocations)
+        {
+            _fixture.ClosedGenericInvocations.Add(evt.Id);
+        }
+        return Task.CompletedTask;
+    }
+}
+
+/// <summary>
+/// Catch-all subscription used to assert the wildcard type matcher
+/// ("*") still receives every event the dispatcher pulls. The
+/// production <c>AgentSubscriptionDispatchHandler</c> uses the same
+/// pattern; this test handler is its pure-DI stand-in.
+/// </summary>
+[Subscription(Type = "*")]
+public sealed class DispatcherCatchAllHandler : ICloudEventHandler
+{
+    private readonly DispatcherFixture _fixture;
+
+    public DispatcherCatchAllHandler(DispatcherFixture fixture) => _fixture = fixture;
+
+    public bool Filter(CloudEvent evt) => true;
+
+    public Task HandleAsync(CloudEvent evt, CancellationToken ct)
+    {
+        lock (_fixture.CatchAllInvocations)
+        {
+            _fixture.CatchAllInvocations.Add(evt.Id);
+        }
+        return Task.CompletedTask;
+    }
+}
+
+/// <summary>
+/// Concrete-type subscription used to assert the non-generic path
+/// (a handler implementing <see cref="ICloudEventHandler"/> directly)
+/// also receives the dispatched event alongside the closed-generic
+/// handler when both subscribe to the same type.
+/// </summary>
+[Subscription(Type = EventCatalog.ReverseDns.WorkflowRunCompleted)]
+public sealed class DispatcherSpecificHandler : ICloudEventHandler
+{
+    private readonly DispatcherFixture _fixture;
+
+    public DispatcherSpecificHandler(DispatcherFixture fixture) => _fixture = fixture;
+
+    public bool Filter(CloudEvent evt) => true;
+
+    public Task HandleAsync(CloudEvent evt, CancellationToken ct)
+    {
+        lock (_fixture.SpecificInvocations)
+        {
+            _fixture.SpecificInvocations.Add(evt.Id);
+        }
+        return Task.CompletedTask;
+    }
+}
+
+/// <summary>
+/// Local stand-in for the GrainTestConfig.NoopTranscriptEventPublisher —
+/// the dispatcher fixture doesn't pull in the larger workflow test
+/// infrastructure, so it ships its own transcript sink.
+/// </summary>
+public sealed class TestNoopTranscriptEventPublisher : ITranscriptEventPublisher
+{
+    public Task PublishAsync(TranscriptEnvelope envelope, CancellationToken ct = default) => Task.CompletedTask;
+}

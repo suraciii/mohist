@@ -21,7 +21,7 @@ public sealed class AgentJobGrainFixture : IAsyncLifetime
     public FakeRunnerWorkspaceClient RunnerWorkspace => Cluster.GetSiloServiceProvider(null).GetRequiredService<FakeRunnerWorkspaceClient>();
     public FakeTimeProvider TimeProvider { get; } = new(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
 
-    private readonly InMemoryEventBus _sharedEventBus = new(new RecordingEventStore(), NullLogger<InMemoryEventBus>.Instance);
+    private readonly InMemoryEventBus _sharedEventBus = new(new RecordingEventStore(), System.TimeProvider.System, NullLogger<InMemoryEventBus>.Instance);
     private readonly RecordingEventStore _sharedEventStore = new();
     private SqliteConnection _keeper = null!;
 

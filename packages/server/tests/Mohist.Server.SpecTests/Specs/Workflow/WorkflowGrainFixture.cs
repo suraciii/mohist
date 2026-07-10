@@ -26,6 +26,7 @@ public class WorkflowGrainFixture : IAsyncLifetime
 
     private readonly InMemoryEventBus _sharedEventBus = new(
         new RecordingEventStore(),
+        System.TimeProvider.System,
         NullLogger<InMemoryEventBus>.Instance);
     private readonly RecordingEventStore _sharedEventStore = new();
     private SqliteConnection _keeper = null!;

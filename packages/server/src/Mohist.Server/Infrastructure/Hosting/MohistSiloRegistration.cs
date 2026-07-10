@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using Mohist.Server.Agent.Grains;
+using Mohist.Server.Events.Grains;
 using Mohist.Server.Infrastructure.Data;
 using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Infrastructure.Data.Issue;
@@ -47,11 +48,23 @@ public static class MohistSiloRegistration
             logging.AddConsole();
         });
 
+        // Issue-362: the dispatcher grain registers a ~1s reminder, well
+        // below the runtime's default MinimumReminderPeriod (~1 minute).
+        // Lower the floor to 100ms so a fast cadence is accepted at
+        // registration time; the grain's DispatcherOptions still decides
+        // the actual cadence.
+        silo.Configure<ReminderOptions>(options =>
+        {
+            options.MinimumReminderPeriod = TimeSpan.FromMilliseconds(100);
+        });
+
         // Orleans silo has its own DI container (separate from the web/api one).
         // Handlers are registered there too, since grains need them.
         silo.Services.AddCloudEventBus();
         silo.Services.AddSingleton<IEventStore, EventStore>();
         silo.Services.TryAddSingleton<IDeadLetterStore, DeadLetterStore>();
+        silo.Services.AddSingleton<EventDispatcherService>();
+        silo.Services.Configure<DispatcherOptions>(configuration.GetSection(DispatcherOptions.SectionName));
         silo.Services.AddScoped<InboxStore>();
         silo.Services.AddScoped<IStateStore<DomainIssue>>(sp => sp.GetRequiredService<IIssueStore>());
         silo.Services.AddScoped<IIssueStore, IssueStore>();

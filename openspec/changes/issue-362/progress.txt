@@ -32,3 +32,46 @@ issue-362 — T-001 working memory
 - [x] IDeadLetterStore implemented by DeadLetterStore; NoopDeadLetterStore provided + TryAdd registration
 - [x] WriteAsync persists; QueryAsync ordered + filtered by handler; GetAsync by id
 - [x] Store tests cover write/query/get-by-id; `npm test` green; TreatWarningsAsErrors clean
+issue-362 — T-002 working memory
+
+## Codebase Patterns
+
+- Re-confirmed: per-test fakes are duplicated across UnitTests/Support and SpecTests/Support (FakeEventStore and NoopDeadLetterStore each live in both projects). NoOpEventStore is in both projects too (same name).
+- `DispatcherGrain` and `DispatcherOptions` live under `Events/Grains/` — Events is NOT in the FeatureDirectories allow-list (Agent/Epic/Issue/Project/Runner/Sessions/Workflow), so the archtest's `FeatureDirectories_ShouldOnlyContainDomainGrainsAndServices` rule does NOT apply to it. No new archtest registration needed.
+- Tests use `FakeTimeProvider` for the dispatcher core. The spec-test fixture `DispatcherFixture` exposes `FakeTimeProvider` but the silo registers `TimeProvider.System` — production code uses System, tests inject fakes. Spec grain tests don't try to assert reminder timing (no real silo for reminder registration); they drive ticks via `IDispatcherGrain.PulseAsync` instead.
+
+## Decisions (T-002)
+
+- `EventDispatcherService` is a plain DI singleton (not an interface) injected by `DispatcherGrain`. Tests build it directly with fake store + FakeTimeProvider, so an `IEventDispatcherService` seam is unnecessary for the test surface — the unit specs are the source of truth and they use the concrete class.
+- `DispatcherOptions` lives in `Events/Grains/` next to the grain (the only consumer that binds the section via `IOptions<>`). The service constructor takes `IOptions<DispatcherOptions>` so the section binding lives at the silo registration site (`configuration.GetSection(DispatcherOptions.SectionName)`).
+- `InMemoryEventBus` constructor was widened to require `TimeProvider` (after `IEventStore`). Two constructors stay: parameterless one (for fixtures that wire subscriptions later) and full DI one. Every test fixture that built an `InMemoryEventBus` directly had to pass `TimeProvider.System` (or a `FakeTimeProvider` for unit tests).
+- `DispatcherGrain` registers the reminder in `OnActivateAsync` (idempotent: calls `GetReminder` first to avoid double-registering on reactivation). `ReceiveReminder` filters by name and ignores foreign reminders.
+- `ReminderOptions.MinimumReminderPeriod` lowered to 100ms in BOTH the production silo (`MohistSiloRegistration`) AND the test silo (`GrainTestConfig.ConfigureSilo`). Without this, the in-memory reminder service refuses to register a sub-second period; the production `UseAdoNetReminderService` has the same restriction.
+- `RedeliverAsync(deadLetterId)` is exposed on both `IDispatcherGrain` and `EventDispatcherService`. It loads the DL row, reconstructs an `UndeliveredEvent`, runs through `DispatchOneAsync` with `isRedelivery: true`, and SKIPS the `MarkDispatchedAsync` call so the original event row's `DispatchedAt` is left untouched (the redelivery does not claim the event).
+- Retry is a hand-rolled loop in `InvokeWithRetryAsync` with `DispatcherOptions.HandlerMaxAttempts` cap (default 3). No Polly. No backoff. The cap is configurable so the spec test's `per-handler isolation` scenario can use 2 attempts without overflowing.
+- Per-row `DispatchedAt` is set inside `DispatchOneAsync` only after every matching handler has settled. If `MarkDispatchedAsync` throws (simulated deliver-before-mark crash), the row stays in the fake store and gets re-delivered next tick — the spec test `DispatchAsync_DeliverBeforeMarkCrash_RowStaysUndelivered_AndIsRedeliveredOnNextTick` covers this with a `ThrowOnMark` predicate on `FakeEventStore`.
+
+## Gotchas
+
+- `DispatcherGrain` namespace is `Mohist.Server.Events.Grains`. The `GrainImplementations_ShouldInheritFromGrain` archtest rule picks it up because the type name ends with `Grain` and the namespace matches `Mohist.Server.*.Grains`. Convention-discovered, no explicit registration needed.
+- `Closed-generic scan fix` in `AddCloudEventHandlersFromAssembly` is just the swap of the `typeof(ICloudEventHandler<>).IsAssignableFrom(t)` line to a proper `GetInterfaces().Any(IsCloudEventHandlerInterface)` walk — both `ICloudEventHandler` (non-generic) and `ICloudEventHandler<>` (closed-generic) are now discoverable. The `IsCloudEventHandlerInterface` helper is private static at the bottom of the class. No new types, no new DI lifetime.
+- `IDispatcherGrain` lives in `Mohist.Server.Events.Grains` so its Orleans proxy generator can be discovered by the silo (`IGrainWithStringKey` convention). No explicit grain class registration in DI is needed.
+- `DispatcherFixture` uses `CapturingEventStore` (in the fixture file, not the Support fakes) to track events AND drive the dispatcher's `ListUndeliveredAsync`. It also installs `NoopDeadLetterStore` so `RedeliverAsync` is exercised without EF.
+- The silo registers `EventDispatcherService` as a singleton; `DispatcherGrain` resolves it by constructor injection. `DispatcherOptions` is bound from `Mohist:Dispatcher` configuration section.
+- `InMemoryEventBus` no longer reads `DateTimeOffset.UtcNow` — both constructors take `TimeProvider` and use `_time.GetUtcNow()` in the typed `PublishAsync<TData>` overload. The two existing constructors are unchanged in argument order except for the new `TimeProvider time` parameter between `IEventStore` and `ILogger`.
+
+## Acceptance criteria status
+
+- [x] IDispatcherGrain + DispatcherGrain (fixed key "dispatcher") + persisted reminder
+- [x] EventDispatcherService: IEventStore, IEnumerable<Subscription>, IDeadLetterStore, TimeProvider, ILogger; all timestamps from injected TimeProvider
+- [x] Pulls via ListUndeliveredAsync (UNION ALL), serial (Source, Id), CloudEventTypeMatcher fan-out
+- [x] Per-handler retry with fixed attempt cap, exhaustion writes DL row + sets DispatchedAt
+- [x] Per-handler isolation (sibling handler still gets the event when peer exhausts)
+- [x] Per-row DispatchedAt set only after all matching handlers settled
+- [x] Closed-generic discovery bug fixed (proper ICloudEventHandler<> closed-generic scan)
+- [x] InMemoryEventBus uses injected TimeProvider (no DateTimeOffset.UtcNow)
+- [x] RedeliverAsync(deadLetterId) re-dispatches to all matching handlers, leaves original DispatchedAt untouched
+- [x] EventDispatcherService + IDeadLetterStore→DeadLetterStore (+ NoopDeadLetterStore via TryAdd) + dispatcher grain registered in MohistSiloRegistration
+- [x] Unit tests cover pull→match→invoke→mark; FIFO (Source,Id); retry-then-succeed; exhaustion; per-handler isolation; deliver-before-mark crash recovery; CloudEventTypeMatcher fan-out with closed-generic handler
+- [x] Spec tests cover PulseAsync delivering to closed-generic handler; PulseAsync triggering immediate tick; grain resolves by fixed key; RedeliverAsync no-ops on missing DL
+- [x] Server `npm test` green (2811 spec + 1355 unit + 865 cli + 24 arch = 5055 tests passing, 0 failures); TreatWarningsAsErrors clean

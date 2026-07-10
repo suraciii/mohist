@@ -5,11 +5,13 @@ namespace Mohist.Server.Infrastructure.Events;
 public sealed class InMemoryEventBus : IEventPublisher
 {
     private readonly IEventStore _eventStore;
+    private readonly TimeProvider _time;
     private readonly ILogger<InMemoryEventBus> _log;
 
-    public InMemoryEventBus(IEventStore eventStore, ILogger<InMemoryEventBus> log)
+    public InMemoryEventBus(IEventStore eventStore, TimeProvider time, ILogger<InMemoryEventBus> log)
     {
         _eventStore = eventStore ?? throw new ArgumentNullException(nameof(eventStore));
+        _time = time ?? throw new ArgumentNullException(nameof(time));
         _log = log;
         _subscriptions = [];
     }
@@ -17,9 +19,11 @@ public sealed class InMemoryEventBus : IEventPublisher
     public InMemoryEventBus(
         IEnumerable<Subscription> subscriptions,
         IEventStore eventStore,
+        TimeProvider time,
         ILogger<InMemoryEventBus> log)
     {
         _eventStore = eventStore ?? throw new ArgumentNullException(nameof(eventStore));
+        _time = time ?? throw new ArgumentNullException(nameof(time));
         _subscriptions = subscriptions.ToList();
         _log = log;
 
@@ -71,7 +75,7 @@ public sealed class InMemoryEventBus : IEventPublisher
             id: Guid.NewGuid().ToString(),
             source: new Uri(source, UriKind.RelativeOrAbsolute),
             type: type,
-            time: DateTimeOffset.UtcNow,
+            time: _time.GetUtcNow(),
             data: dataJson,
             subject: subject,
             extensions: extDict);

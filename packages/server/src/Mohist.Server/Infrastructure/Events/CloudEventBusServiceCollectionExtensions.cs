@@ -18,9 +18,8 @@ public static class CloudEventBusServiceCollectionExtensions
         this IServiceCollection services, Assembly assembly)
     {
         var handlerTypes = assembly.GetTypes()
-            .Where(t => typeof(ICloudEventHandler<>).IsAssignableFrom(t) ||
-                         typeof(ICloudEventHandler).IsAssignableFrom(t))
             .Where(t => !t.IsAbstract && !t.IsInterface)
+            .Where(t => t.GetInterfaces().Any(IsCloudEventHandlerInterface))
             .ToList();
 
         foreach (var handlerType in handlerTypes)
@@ -64,6 +63,10 @@ public static class CloudEventBusServiceCollectionExtensions
 
         return services;
     }
+
+    private static bool IsCloudEventHandlerInterface(Type i) =>
+        i == typeof(ICloudEventHandler)
+        || (i.IsGenericType && i.GetGenericTypeDefinition() == typeof(ICloudEventHandler<>));
 
     private static DispatchDelegate MakeDelegate(object handler)
     {

@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Agent.Grains;
+using Mohist.Server.Events.Grains;
 using Mohist.Server.Infrastructure.Data;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Runner;
@@ -20,6 +21,8 @@ using Mohist.Server.Workflow.Services;
 using Mohist.Server.Workflow.Services.Artifacts;
 using Mohist.Server.Workflow.Services.Prompts;
 using Mohist.Server.SpecTests.Specs.Issue.Profile;
+using Orleans.Configuration;
+using Orleans.Hosting;
 using Orleans.TestingHost;
 
 namespace Mohist.Server.SpecTests.Support;
@@ -210,6 +213,14 @@ public static class GrainTestConfig
     {
         siloBuilder.UseInMemoryReminderService();
         DecorateReminderTable(siloBuilder.Services);
+        // Issue-362: the dispatcher grain registers a ~1s reminder; the
+        // in-memory reminder service still enforces MinimumReminderPeriod
+        // by default, so lower the floor for the test silo as the
+        // production silo does.
+        siloBuilder.Configure<ReminderOptions>(options =>
+        {
+            options.MinimumReminderPeriod = TimeSpan.FromMilliseconds(100);
+        });
         siloBuilder.AddMemoryGrainStorageAsDefault();
         siloBuilder.Services.AddDbContextFactory<MohistDbContext>(options =>
         {
