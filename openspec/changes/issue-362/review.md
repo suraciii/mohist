@@ -1,79 +1,59 @@
 # Review Report
 
-## Result: FAIL
+## Result: PASS
 
-## Repaired Items
-
-- [ID: item-1]
-  Severity: info
-  Scope: fixture-cleanup
-  Evidence: `DispatcherFixture.DisposeAsync` called `_keeper?.DisposeAsync()` and dropped the returned `ValueTask` — async disposal was fire-and-forget, risking unclosed connections and ODE. The codebase convention (`MohistDbFixture.cs:154`) uses synchronous `_keeper?.Dispose()`. Changed to `_keeper?.Dispose()`.
-  Verification: `npm test` — all 1031 tests pass (including dispatcher spec tests).
-  Status: resolved
-
-- [ID: item-2]
-  Severity: info
-  Scope: missing-injection
-  Evidence: `DispatcherFixture.ConfigureDispatcherSilo` line 215 registered `siloBuilder.Services.AddSingleton<TimeProvider>(System.TimeProvider.System)` instead of the fixture's own `FakeTimeProvider` field. The `FakeTimeProvider` was declared but never injected, so the silo-level `EventDispatcherService` used wall-clock time. Changed to `siloBuilder.Services.AddSingleton<TimeProvider>(TimeProvider)`.
-  Verification: `npm test` — all 1031 tests pass. Spec-level tests can now control time if needed.
-  Status: resolved
+The post-repair snapshot resolves all three blocking issues from the prior review (dead-letter write propagation, idempotent absorption test, ErrorStack capture). All 5058 tests pass (865 CLI + 1356 unit + 24 arch + 2813 spec), zero build warnings.
 
 ## Blocking Items
 
-- [ID: item-3]
-  Severity: blocking
-  Scope: `EventDispatcherService.cs:237-251` (`DeadLetterAsync`)
-  Evidence: When `_deadLetters.WriteAsync(row, ct)` throws, the exception is caught and logged at line 248-251, but the caller (`DispatchOneAsync`) still proceeds to set `DispatchedAt` via `MarkDispatchedAsync` (line 186-197). The event row is marked delivered as if the handler had succeeded, but the handler's retries exhausted AND the dead-letter row was never persisted — the poison message is silently lost from both the undelivered queue and the dead-letter queue.
-  SuggestedAction: Either re-throw the exception from `DeadLetterAsync` (so the row stays undelivered and is retried on the next tick), or skip the `MarkDispatchedAsync` for this handler (making it per-handler marking, which conflicts with the current one-mark-per-event design). The simplest fix: propagate the dead-letter write failure so `MarkDispatchedAsync` throws too and the row stays undelivered.
-  Verification: Add a unit test where `FakeDeadLetterStore.WriteAsync` throws; assert the row remains undelivered (still in `PendingUndelivered`) and no mark occurs.
-  Status: open
-
-- [ID: item-4]
-  Severity: blocking
-  Scope: `openspec/changes/issue-362/specs/event-dispatch/spec.md` line 78-87 (Crash recovery → idempotent absorption) / `EventDispatcherSpecs.cs:217-243` / issue AC #4
-  Evidence: Issue AC #4 explicitly requires "投递后标记前崩溃 → 重投 → 幂等吸收". The spec says "the handler SHALL absorb the redelivered duplicate idempotently by event id". The test `DispatchAsync_DeliverBeforeMarkCrash_RowStaysUndelivered_AndIsRedeliveredOnNextTick` only asserts the event is re-delivered (call count goes from 1 to 2), but the handler is a simple counter — it never absorbs or differentiates the duplicate. There is no assertion proving the handler identified the duplicate by `EventId` and idempotently no-oped. The self-review (item-2) flagged this as follow-up but it is a blocking acceptance criterion.
-  SuggestedAction: Either (a) implement a handler in the test that records seen `EventId`s and asserts the duplicate is recognized on re-delivery, or (b) add an integration spec where a handler processes twice but produces the result of only one invocation.
-  Verification: A test that tracks each `EventId` seen and asserts the same `EventId` appears twice but the handler's side-effect (e.g., counter, state mutation) only occurs once.
-  Status: open
-
-- [ID: item-5]
-  Severity: blocking
-  Scope: `DeadLetterAsync` at `EventDispatcherService.cs:251`
-  Evidence: The `ErrorStack` property of `DeadLetterRow` is always set to `null`, despite the `DeadLetterRow` type having a declared `ErrorStack` property and the real exception carrying a stack trace. The `ErrorStack` column is also present in the EF migration, model snapshot, and migration spec tests. Operators inspecting dead-letter rows have no stack trace context for diagnosing poison messages.
-  SuggestedAction: Capture `lastError?.ToString()` (which includes the message + stack trace) or `lastError?.StackTrace` in the `ErrorStack` field of the dead-letter row.
-  Verification: `DeadLetterStoreSpecs` should include a row with non-null `ErrorStack`. Unit tests that assert exhaustion should verify the dead-letter row has a non-null `ErrorStack`.
-  Status: open
+_None._
 
 ## Follow-up Items
 
-- [ID: item-6]
+- [ID: item-1]
   Severity: follow-up
-  Scope: `DispatcherFixture` / `DispatcherGrainSpecs`
-  Evidence: The `DispatcherFixture` uses `NoopDeadLetterStore`, and the spec-level tests only exercise `PulseAsync` (immediate tick). There is no silo-integration test that drives the dead-letter flow through the grain — all dead-letter assertions are in pure-DI unit tests (`EventDispatcherSpecs`). This is a coverage gap for the grain → service → dead-letter wiring.
-  SuggestedAction: After item-3 is fixed, add a spec-level test that publishes a poison event, runs a tick, and asserts a dead-letter row is queryable through the silo-configured `IDeadLetterStore`.
+  Scope: `DispatcherGrain.cs:78` (`RegisterOrUpdateReminder`)
+  Evidence: `OnActivateAsync` receives a `CancellationToken ct` but does not propagate it to `RegisterOrUpdateReminder`. The Orleans API accepts an optional `CancellationToken` parameter. If activation is cancelled, the reminder registration still proceeds.
+  SuggestedAction: Pass `ct` to `RegisterOrUpdateReminder(ReminderName, _options.ReminderDueTime, _options.ReminderPeriod)`.
   Status: follow-up
 
-- [ID: item-7]
-  Severity: follow-up
-  Scope: `DispatcherGrain.ReceiveReminder` at `DispatcherGrain.cs:60`
-  Evidence: `ReceiveReminder` passes `CancellationToken.None` to `_dispatcher.DispatchAsync`, which means the dispatch cycle cannot be cancelled during silo shutdown. While this is intentional (at-least-once delivery should finish the current batch), it means shutdown can be blocked until the batch completes — which could be long with high `BatchLimit` or slow handlers.
-  SuggestedAction: Consider using a linked token with a shutdown timeout. Low priority for personal-scale volumes.
-  Status: follow-up
-
-- [ID: item-8]
+- [ID: item-2]
   Severity: follow-up
   Scope: `NoopDeadLetterStore` duplication
-  Evidence: Two identical copies exist: `Mohist.Server.UnitTests.Support.NoopDeadLetterStore` and `Mohist.Server.SpecTests.Support.NoopDeadLetterStore`. The production `MohistSiloRegistration` references `NoopDeadLetterStore` for `TryAdd` but only one is in scope per test project.
-  SuggestedAction: Move the canonical `NoopDeadLetterStore` to a shared test support project, or accept the duplication as intentional per-project isolation.
+  Evidence: Two identical copies exist: `Mohist.Server.UnitTests.Support.NoopDeadLetterStore` and `Mohist.Server.SpecTests.Support.NoopDeadLetterStore`. The test projects follow a pattern of per-project fake duplication (same as `NoopEventStore`), so this is not a defect but a maintenance burden.
+  SuggestedAction: Consider a shared test support project, or accept the duplication as intentional per-project isolation (consistent with existing `NoopEventStore` pattern).
+  Status: follow-up
+
+- [ID: item-3]
+  Severity: follow-up
+  Scope: Reminder-driven delivery test gap
+  Evidence: All spec tests drive ticks via `PulseAsync` (immediate). The `OnActivateAsync_RegistersPersistedReminderWithConfiguredCadence` test verifies reminder registration but does not verify the reminder actually fires and triggers delivery. The design (D1) calls for at most one integration spec asserting the reminder fires.
+  SuggestedAction: Add an integration spec that waits for a real reminder tick (using the in-memory reminder table's fire mechanism) and asserts delivery occurred without an explicit `PulseAsync` call.
   Status: follow-up
 
 ## Pre-existing or Out-of-scope Items
 
-- [ID: item-9]
+- [ID: item-4]
   Severity: info
-  Scope: `event-dispatch` spec line 6 ("三张事件真相表") vs implementation (four tables)
-  Evidence: The issue body says three tables; the implementation covers all four (including `AgentSessionEvents`). The design doc D3 and Open Question #1 document this divergence and resolve it in favor of four tables. `ListUndeliveredAsync` already UNIONs all four. No code diverges from the spec.
-  SuggestedAction: Confirm with the issue author that AgentSession delivery is desired (default is safe per `[Subscription(Type="*")]` contract).
+  Scope: `event-dispatch` spec mentions three truth tables; implementation covers four
+  Evidence: Issue body says three (`WorkflowRunEvents` + `IssueEvents` + `EpicEvents`); the implementation covers all four (including `AgentSessionEvents`). `design.md` D3 documents this and resolves it in favor of four. `ListUndeliveredAsync` already UNIONs all four. No code diverges from specs.
+  SuggestedAction: Confirm with the issue author that AgentSession delivery is desired (safe per `[Subscription(Type="*")]` contract).
   Status: pre-existing
 
-<promise>FAIL</promise>
+- [ID: item-5]
+  Severity: info
+  Scope: `ReceiveReminder` passes `CancellationToken.None`
+  Evidence: `IRemindable.ReceiveReminder` does not accept a `CancellationToken` parameter, so `CancellationToken.None` is the only option. The Orleans reminder API does not provide a shutdown token to `ReceiveReminder`.
+  Status: by-design
+
+## Acceptance Criteria Verification
+
+| AC | Criterion | Evidence |
+|----|-----------|----------|
+| AC1 | Cluster-singleton grain, self-waking, single-query over all tables | `IDispatcherGrain.cs:17` (fixed key "dispatcher"), `DispatcherGrain.cs:18-83` (RegisterOrUpdateReminder + ReceiveReminder), `EventDispatcherService.cs:84` (ListUndeliveredAsync — single UNION), `DispatcherGrainSpecs.cs:96-103` (resolve by fixed key), `DispatcherGrainSpecs.cs:119-133` (reminder registered), `MohistSiloRegistration.cs:66` (singleton registration) |
+| AC2 | Fan-out by type, retry, dead-letter on exhaustion | `EventDispatcherService.cs:144-156` (fan-out loop + DeadLetterAsync), `EventDispatcherService.cs:192-227` (InvokeWithRetryAsync with attempt cap), `EventDispatcherSpecs.cs:138-178` (exhaustion writes DL + marks dispatched + stops retrying), `DispatcherGrainSpecs.cs:138-159` (spec-level poison → dead-letter) |
+| AC3 | Per-row mark; per-stream FIFO, no reorder, no skip | `EventDispatcherService.cs:171-183` (MarkDispatchedAsync after all settled), `EventDispatcherSpecs.cs:76-108` (FIFO test: events enqueued out of order, marked in (Source, Id) order), `FakeEventStore.cs:92-94` (OrderBy Source, Id) |
+| AC4 | At-least-once with crash recovery; handler idempotent absorption | `EventDispatcherSpecs.cs:213-247` (ThrowOnMark → row stays undelivered → re-delivered next tick; IdempotentRecorder proves Handler invoked twice but side effect once) |
+| AC5 | Poison → dead-letter, queryable, manually re-deliverable | `IDeadLetterStore.cs:12-19` (WriteAsync/QueryAsync/GetAsync), `DeadLetterStore.cs:18-57` (Write + Query with handler filter), `DeadLetterStoreSpecs.cs` (write/get/query with and without filter), `EventDispatcherService.cs:107-136` (RedeliverAsync), `EventDispatcherSpecs.cs:389-422` (RedeliverAsync re-dispatches to matching handlers), `DeadLettersMigrationSpecs.cs` (table + indexes verified) |
+
+<promise>PASS</promise>
