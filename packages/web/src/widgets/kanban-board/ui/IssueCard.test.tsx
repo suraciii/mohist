@@ -433,6 +433,179 @@ describe('IssueCard - stage folds into StatusPill instead of stacking', () => {
     expect(pill).toHaveTextContent('Running · Build')
     expect(pill.textContent).not.toMatch(/\d+\/\d+/)
   })
+
+  it('blocked fold: keeps issue-number, title, and priority-chip visible alongside the folded status pill', () => {
+    const issue = makeIssue({
+      priority: 'p1',
+      health: IssueHealth.Blocked,
+      workflowStage: WorkflowStage.Build,
+      workflowStageProgress: { stage: 'build', total: 5, completed: 2, running: 0, failed: 0 },
+      blockedReason: 'CI failure on main',
+    })
+    renderCard(issue)
+
+    expect(screen.getByTestId('status-pill')).toBeInTheDocument()
+    expect(screen.getByTestId('status-pill')).toHaveTextContent('Blocked · Build 2/5')
+    expect(screen.queryByTestId('workflow-stage-badge')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('workflow-stage-progress')).not.toBeInTheDocument()
+    expect(screen.getByTestId('issue-number')).toBeInTheDocument()
+    expect(screen.getByTestId('priority-chip')).toHaveTextContent('P1')
+    const card = screen.getByTestId('issue-card')
+    expect(card.querySelector('h3')).toBeTruthy()
+    expect(card.querySelector('h3')!.textContent).toBe('Implement feature')
+  })
+
+  it('approval-awaiting fold: keeps issue-number, title, and priority-chip visible alongside the folded status pill', () => {
+    const issue = makeIssue({
+      priority: 'p2',
+      health: IssueHealth.Active,
+      workflowStage: WorkflowStage.Plan,
+      workflowStageProgress: { stage: 'plan', total: 5, completed: 2, running: 0, failed: 0 },
+      approvalState: {
+        stage: WorkflowStage.Plan,
+        status: 'awaiting',
+        requestedAt: '2026-01-01T00:00:00Z',
+      },
+    })
+    renderCard(issue)
+
+    expect(screen.getByTestId('status-pill')).toBeInTheDocument()
+    expect(screen.getByTestId('status-pill')).toHaveTextContent('Approval · Plan 2/5')
+    expect(screen.queryByTestId('workflow-stage-badge')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('workflow-stage-progress')).not.toBeInTheDocument()
+    expect(screen.getByTestId('issue-number')).toBeInTheDocument()
+    expect(screen.getByTestId('priority-chip')).toHaveTextContent('P2')
+    const card = screen.getByTestId('issue-card')
+    expect(card.querySelector('h3')!.textContent).toBe('Implement feature')
+  })
+})
+
+describe('IssueCard - six-dimension card-density invariant', () => {
+  function getTitleElement(card: HTMLElement): HTMLElement {
+    const title = card.querySelector('h3')
+    expect(title).toBeTruthy()
+    return title as HTMLElement
+  }
+
+  it('exposes all six dimensions when the card has priority, workflow stage, and stage progress', () => {
+    const issue = makeIssue({
+      priority: 'p2',
+      status: IssueStatus.InProgress,
+      workflowStage: WorkflowStage.Build,
+      workflowStageProgress: { stage: 'build', total: 5, completed: 2, running: 0, failed: 0 },
+    })
+    renderCard(issue)
+
+    const card = screen.getByTestId('issue-card')
+
+    expect(screen.getByTestId('issue-number')).toHaveTextContent('#201')
+
+    const title = getTitleElement(card)
+    expect(title.textContent).toBe('Implement feature')
+
+    expect(screen.getByTestId('priority-chip')).toHaveTextContent('P2')
+
+    expect(screen.queryByTestId('status-pill')).not.toBeInTheDocument()
+    expect(screen.getByTestId('workflow-stage-badge')).toHaveTextContent('Build')
+    expect(screen.getByTestId('workflow-stage-progress')).toHaveTextContent('2/5')
+
+    expect(screen.getByTestId('rerun-button')).toBeInTheDocument()
+  })
+
+  it('exposes all six dimensions for an active issue where the standalone workflow-stage-badge carries the stage and no status pill applies', () => {
+    const issue = makeIssue({
+      priority: 'p2',
+      status: IssueStatus.InProgress,
+      workflowStage: WorkflowStage.Plan,
+      health: IssueHealth.Active,
+    })
+    renderCard(issue)
+
+    const card = screen.getByTestId('issue-card')
+
+    expect(screen.getByTestId('issue-number')).toHaveTextContent('#201')
+    expect(getTitleElement(card).textContent).toBe('Implement feature')
+    expect(screen.getByTestId('priority-chip')).toHaveTextContent('P2')
+
+    expect(screen.queryByTestId('status-pill')).not.toBeInTheDocument()
+    expect(screen.getByTestId('workflow-stage-badge')).toHaveTextContent('Plan')
+  })
+
+  it('clamps the title to a bounded number of lines via WebkitLineClamp', () => {
+    const issue = makeIssue({
+      priority: 'p2',
+      title:
+        'A long title that would otherwise push the card vertically past the column if the card did not clamp it to a bounded number of lines so the column density stays compact for owner scanning',
+    })
+    renderCard(issue)
+
+    const card = screen.getByTestId('issue-card')
+    const title = getTitleElement(card)
+
+    expect((title.style as CSSStyleDeclaration).webkitLineClamp).toBe('2')
+    expect((title.style as CSSStyleDeclaration).webkitBoxOrient).toBe('vertical')
+    expect((title.style as CSSStyleDeclaration).overflow).toBe('hidden')
+    expect((title.style as CSSStyleDeclaration).display).toBe('-webkit-box')
+  })
+
+  it('keeps the title clamped for every card when multiple sibling cards are rendered in a column', () => {
+    const longTitle =
+      'A long title that would otherwise push the card vertically past the column if the card did not clamp it to a bounded number of lines so the column density stays compact for owner scanning'
+
+    const issues: Issue[] = [
+      makeIssue({ number: 201, title: longTitle }),
+      makeIssue({ number: 202, title: longTitle }),
+      makeIssue({ number: 203, title: longTitle }),
+      makeIssue({ number: 204, title: longTitle }),
+    ]
+    const queryClient = new QueryClient()
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <div data-testid="column-mock">
+            {issues.map((issue) => (
+              <IssueCard key={issue.number} issue={issue} agentStatus={mockAgentStatus} />
+            ))}
+          </div>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+
+    const cards = screen.getAllByTestId('issue-card')
+    expect(cards).toHaveLength(4)
+
+    for (const card of cards) {
+      const title = getTitleElement(card)
+      expect((title.style as CSSStyleDeclaration).webkitLineClamp).toBe('2')
+      expect((title.style as CSSStyleDeclaration).webkitBoxOrient).toBe('vertical')
+      expect((title.style as CSSStyleDeclaration).overflow).toBe('hidden')
+      expect((title.style as CSSStyleDeclaration).display).toBe('-webkit-box')
+    }
+
+    const columnTitles = Array.from(
+      screen.getByTestId('column-mock').querySelectorAll('h3'),
+    )
+    expect(columnTitles).toHaveLength(4)
+    for (const t of columnTitles) {
+      expect(t.textContent).toBe(longTitle)
+    }
+  })
+
+  it('preserves the issue-number and priority-chip for non-active cards that fold stage into the status pill', () => {
+    const blocked = makeIssue({
+      number: 211,
+      priority: 'p1',
+      health: IssueHealth.Blocked,
+      workflowStage: WorkflowStage.Build,
+      workflowStageProgress: { stage: 'build', total: 3, completed: 1, running: 0, failed: 0 },
+    })
+    renderCard(blocked)
+
+    expect(screen.getByTestId('issue-number')).toHaveTextContent('#211')
+    expect(screen.getByTestId('priority-chip')).toHaveTextContent('P1')
+    expect(screen.getByTestId('status-pill')).toHaveTextContent('Blocked · Build 1/3')
+    expect(screen.queryByTestId('workflow-stage-badge')).not.toBeInTheDocument()
+  })
 })
 
 describe('IssueCard - per-card text meets WCAG AA contrast', () => {
