@@ -5,33 +5,33 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { toast } from 'sonner'
 import { ProjectProvider } from '../../entities/project'
 import { REVERSE_DNS_EVENT_TYPES } from '../../shared/lib/canonical-event-types'
-import { LiveTaskProvider } from './LiveTaskProvider'
+import {
+  LiveTaskProvider,
+  type EventsConnectionHook,
+  type ViewedIssueHook,
+} from './LiveTaskProvider'
 import { onRebaseEvent, type RebaseEvent } from '../../entities/issue/model/rebase-events'
 import { useLiveTask } from '../../entities/issue/model/live-task'
 import { TEST_PROJECT, makeBaseIssue } from './_liveTaskProviderTestUtils'
 
-const mocks = vi.hoisted(() => ({
-  useEventsConnection: vi.fn(),
-  useAgentStatus: vi.fn(),
-}))
-
-vi.mock('../../shared/api/events-hub', () => ({
-  useEventsConnection: (...args: unknown[]) => mocks.useEventsConnection(...args),
-}))
-
-vi.mock('../../entities/agent', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../../entities/agent')>()),
-  useAgentStatus: () => mocks.useAgentStatus(),
-}))
+let eventsConnectionCalls: Parameters<EventsConnectionHook>[] = []
+const eventsConnectionHook: EventsConnectionHook = (...args) => {
+  eventsConnectionCalls.push(args)
+  return { status: 'disconnected', connection: null, reconnectVersion: 0 }
+}
+const runnerDropNoticeHook = () => {}
+const viewedIssueRef = { current: null as number | null }
+const viewedIssueHook: ViewedIssueHook = () => viewedIssueRef
+let pathname = '/'
 
 beforeEach(() => {
   vi.clearAllMocks()
-  mocks.useAgentStatus.mockReturnValue({
-    data: {
-      running: false,
-      runnerAvailable: true,
-    },
-  })
+  vi.mocked(toast.info).mockClear()
+  vi.mocked(toast.error).mockClear()
+  vi.mocked(toast.success).mockClear()
+  eventsConnectionCalls = []
+  viewedIssueRef.current = null
+  pathname = '/'
 })
 
 /**
@@ -68,13 +68,17 @@ describe('LiveTaskProvider reverse-DNS integration outcome (D2 test-first)', () 
                 children: stateProbe === undefined
                   ? createElement('div', null, 'child')
                   : createElement(StateProbe),
+                eventsConnectionHook,
+                runnerDropNoticeHook,
+                viewedIssueHook,
+                pathnameReader: () => pathname,
               },
             ),
           },
         ),
       ),
     )
-    return mocks.useEventsConnection.mock.calls[0][1] as (eventName: string, data: unknown) => void
+    return eventsConnectionCalls[0][1]
   }
 
   it('clears rebase conflict, dispatches rebase_completed, and invalidates ["issues"] on IssueCompleted + rebase payload', () => {
@@ -321,18 +325,23 @@ describe('LiveTaskProvider notifyRunLifecycleToast (D2 test-first)', () => {
             initialProjects: [TEST_PROJECT],
             children: createElement(
               LiveTaskProvider,
-              { children: createElement('div', null, 'child') },
+              {
+                children: createElement('div', null, 'child'),
+                eventsConnectionHook,
+                runnerDropNoticeHook,
+                viewedIssueHook,
+                pathnameReader: () => pathname,
+              },
             ),
           },
         ),
       ),
     )
-    return mocks.useEventsConnection.mock.calls[0][1] as (eventName: string, data: unknown) => void
+    return eventsConnectionCalls[0][1]
   }
 
   it('fires toast.info("Issue #N needs approval") on WorkflowRunPaused when the issue is not currently viewed', () => {
-    const savedPathname = window.location.pathname
-    window.history.pushState({}, '', '/test-project/issues/other-issue')
+    pathname = '/test-project/issues/other-issue'
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     queryClient.setQueryData(['issues'], [makeIssue('iss-pause', 42)])
     const handleEvent = mountWith(queryClient)
@@ -347,12 +356,10 @@ describe('LiveTaskProvider notifyRunLifecycleToast (D2 test-first)', () => {
     expect(toast.info).toHaveBeenCalledTimes(1)
     expect(toast.info).toHaveBeenCalledWith('Issue #42 needs approval')
     expect(toast.error).not.toHaveBeenCalled()
-    window.history.pushState({}, '', savedPathname)
   })
 
   it('fires toast.error("Issue #N encountered an error") on WorkflowRunFailed when the issue is not currently viewed', () => {
-    const savedPathname = window.location.pathname
-    window.history.pushState({}, '', '/test-project/issues/other-issue')
+    pathname = '/test-project/issues/other-issue'
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     queryClient.setQueryData(['issues'], [makeIssue('iss-err', 51)])
     const handleEvent = mountWith(queryClient)
@@ -367,12 +374,11 @@ describe('LiveTaskProvider notifyRunLifecycleToast (D2 test-first)', () => {
     expect(toast.error).toHaveBeenCalledTimes(1)
     expect(toast.error).toHaveBeenCalledWith('Issue #51 encountered an error')
     expect(toast.info).not.toHaveBeenCalled()
-    window.history.pushState({}, '', savedPathname)
   })
 
   it('suppresses the lifecycle toast when the event\'s issue is the currently-viewed issue', () => {
-    const savedPathname = window.location.pathname
-    window.history.pushState({}, '', '/test-project/issues/77')
+    pathname = '/test-project/issues/77'
+    viewedIssueRef.current = 77
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     queryClient.setQueryData(['issues'], [makeIssue('iss-self-pause', 77)])
     const handleEvent = mountWith(queryClient)
@@ -386,12 +392,10 @@ describe('LiveTaskProvider notifyRunLifecycleToast (D2 test-first)', () => {
 
     expect(toast.info).not.toHaveBeenCalled()
     expect(toast.error).not.toHaveBeenCalled()
-    window.history.pushState({}, '', savedPathname)
   })
 
   it('suppresses the lifecycle toast when findIssueNumber resolves no issue number (issueId not in any cached list)', () => {
-    const savedPathname = window.location.pathname
-    window.history.pushState({}, '', '/test-project/issues/some-page')
+    pathname = '/test-project/issues/some-page'
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     // Seed the cache with only unrelated issues — the lookup by issueId will
     // not find a match, so findIssueNumber returns null and the helper bails.
@@ -406,6 +410,5 @@ describe('LiveTaskProvider notifyRunLifecycleToast (D2 test-first)', () => {
 
     expect(toast.info).not.toHaveBeenCalled()
     expect(toast.error).not.toHaveBeenCalled()
-    window.history.pushState({}, '', savedPathname)
   })
 })

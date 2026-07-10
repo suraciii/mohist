@@ -1,17 +1,11 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import { renderHook } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { ReactNode } from 'react'
 import type { WorkflowRunSession } from '../../../entities/coder-session'
-import { useWorkflowRunSessions } from '../../../entities/coder-session'
 import { useSiblingSessions } from './useSiblingSessions'
 
-const mockedUseWorkflowRunSessions = vi.mocked(useWorkflowRunSessions)
-
-vi.mock('../../../entities/coder-session', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../../../entities/coder-session')>()),
-  useWorkflowRunSessions: vi.fn(),
-}))
+let sessionsData: WorkflowRunSession[] = []
 
 function session(overrides: Partial<WorkflowRunSession>): WorkflowRunSession {
   return {
@@ -44,7 +38,10 @@ function createQueryClient() {
 
 function renderSiblingHook(workflowRunId: string | null | undefined, currentKey?: string | null) {
   const queryClient = createQueryClient()
-  return renderHook(
+  if (workflowRunId) {
+    queryClient.setQueryData(['workflow-runs', workflowRunId, 'sessions'], sessionsData)
+  }
+  const hook = renderHook(
     () => useSiblingSessions(workflowRunId, { currentKey: currentKey ?? null }),
     {
       wrapper: ({ children }: { children: ReactNode }) => (
@@ -52,20 +49,15 @@ function renderSiblingHook(workflowRunId: string | null | undefined, currentKey?
       ),
     },
   )
+  return { ...hook, queryClient }
 }
 
 describe('useSiblingSessions', () => {
   beforeEach(() => {
-    mockedUseWorkflowRunSessions.mockReset()
-  })
-
-  afterEach(() => {
-    vi.clearAllMocks()
+    sessionsData = []
   })
 
   it('returns an empty sibling set when the workflow run has no sessions', () => {
-    mockedUseWorkflowRunSessions.mockReturnValue({ isLoading: false, sessions: [] })
-
     const { result } = renderSiblingHook('wr-empty')
 
     expect(result.current.sessions).toEqual([])
@@ -74,18 +66,14 @@ describe('useSiblingSessions', () => {
     expect(result.current.next).toBeNull()
     expect(result.current.hasPrevious).toBe(false)
     expect(result.current.hasNext).toBe(false)
-    expect(mockedUseWorkflowRunSessions).toHaveBeenCalledWith('wr-empty')
   })
 
   it('sorts siblings by createdAt ascending and exposes them in the canonical order', () => {
-    mockedUseWorkflowRunSessions.mockReturnValue({
-      isLoading: false,
-      sessions: [
+    sessionsData = [
         session({ id: 's-build', sessionName: 'build', createdAt: '2026-06-15T12:00:00.000Z' }),
         session({ id: 's-plan', sessionName: 'plan', createdAt: '2026-06-15T08:00:00.000Z' }),
         session({ id: 's-check', sessionName: 'check', createdAt: '2026-06-15T10:00:00.000Z' }),
-      ],
-    })
+      ]
 
     const { result } = renderSiblingHook('wr-1', 'check')
 
@@ -94,13 +82,10 @@ describe('useSiblingSessions', () => {
   })
 
   it('falls back to sessionName alphabetical order when two sessions share a createdAt', () => {
-    mockedUseWorkflowRunSessions.mockReturnValue({
-      isLoading: false,
-      sessions: [
+    sessionsData = [
         session({ id: 's-zeta', sessionName: 'zeta', createdAt: '2026-06-15T10:00:00.000Z' }),
         session({ id: 's-alpha', sessionName: 'alpha', createdAt: '2026-06-15T10:00:00.000Z' }),
-      ],
-    })
+      ]
 
     const { result } = renderSiblingHook('wr-1', 'alpha')
 
@@ -108,14 +93,11 @@ describe('useSiblingSessions', () => {
   })
 
   it('locates the current session by sessionName and exposes previous + next siblings', () => {
-    mockedUseWorkflowRunSessions.mockReturnValue({
-      isLoading: false,
-      sessions: [
+    sessionsData = [
         session({ id: 's-plan', sessionName: 'plan', createdAt: '2026-06-15T08:00:00.000Z' }),
         session({ id: 's-build', sessionName: 'build', createdAt: '2026-06-15T10:00:00.000Z' }),
         session({ id: 's-check', sessionName: 'check', createdAt: '2026-06-15T12:00:00.000Z' }),
-      ],
-    })
+      ]
 
     const { result } = renderSiblingHook('wr-1', 'build')
 
@@ -129,14 +111,11 @@ describe('useSiblingSessions', () => {
   })
 
   it('returns no previous sibling when the current session is the first in createdAt order', () => {
-    mockedUseWorkflowRunSessions.mockReturnValue({
-      isLoading: false,
-      sessions: [
+    sessionsData = [
         session({ id: 's-plan', sessionName: 'plan', createdAt: '2026-06-15T08:00:00.000Z' }),
         session({ id: 's-build', sessionName: 'build', createdAt: '2026-06-15T10:00:00.000Z' }),
         session({ id: 's-check', sessionName: 'check', createdAt: '2026-06-15T12:00:00.000Z' }),
-      ],
-    })
+      ]
 
     const { result } = renderSiblingHook('wr-1', 'plan')
 
@@ -148,14 +127,11 @@ describe('useSiblingSessions', () => {
   })
 
   it('returns no next sibling when the current session is the last in createdAt order', () => {
-    mockedUseWorkflowRunSessions.mockReturnValue({
-      isLoading: false,
-      sessions: [
+    sessionsData = [
         session({ id: 's-plan', sessionName: 'plan', createdAt: '2026-06-15T08:00:00.000Z' }),
         session({ id: 's-build', sessionName: 'build', createdAt: '2026-06-15T10:00:00.000Z' }),
         session({ id: 's-check', sessionName: 'check', createdAt: '2026-06-15T12:00:00.000Z' }),
-      ],
-    })
+      ]
 
     const { result } = renderSiblingHook('wr-1', 'check')
 
@@ -167,10 +143,7 @@ describe('useSiblingSessions', () => {
   })
 
   it('exposes no previous or next when only one session is in the workflow run', () => {
-    mockedUseWorkflowRunSessions.mockReturnValue({
-      isLoading: false,
-      sessions: [session({ id: 's-only', sessionName: 'only', createdAt: '2026-06-15T10:00:00.000Z' })],
-    })
+    sessionsData = [session({ id: 's-only', sessionName: 'only', createdAt: '2026-06-15T10:00:00.000Z' })]
 
     const { result } = renderSiblingHook('wr-1', 'only')
 
@@ -182,13 +155,10 @@ describe('useSiblingSessions', () => {
   })
 
   it('falls back to id-based lookup when sessionName does not match the current key', () => {
-    mockedUseWorkflowRunSessions.mockReturnValue({
-      isLoading: false,
-      sessions: [
+    sessionsData = [
         session({ id: 's-plan', sessionName: 'plan', createdAt: '2026-06-15T08:00:00.000Z' }),
         session({ id: 's-build', sessionName: 'build', createdAt: '2026-06-15T10:00:00.000Z' }),
-      ],
-    })
+      ]
 
     const { result } = renderSiblingHook('wr-1', 's-plan')
 
@@ -198,13 +168,10 @@ describe('useSiblingSessions', () => {
   })
 
   it('returns currentIndex = -1 when the current key matches no sibling', () => {
-    mockedUseWorkflowRunSessions.mockReturnValue({
-      isLoading: false,
-      sessions: [
+    sessionsData = [
         session({ id: 's-plan', sessionName: 'plan', createdAt: '2026-06-15T08:00:00.000Z' }),
         session({ id: 's-build', sessionName: 'build', createdAt: '2026-06-15T10:00:00.000Z' }),
-      ],
-    })
+      ]
 
     const { result } = renderSiblingHook('wr-1', 'not-in-this-run')
 
@@ -215,21 +182,19 @@ describe('useSiblingSessions', () => {
     expect(result.current.hasNext).toBe(false)
   })
 
-  it('treats null workflowRunId as an empty sibling set without invoking the data hook', () => {
-    mockedUseWorkflowRunSessions.mockReturnValue({ isLoading: false, sessions: [] })
-
-    const { result } = renderSiblingHook(null, 'plan')
+  it('treats null workflowRunId as an empty sibling set without fetching data', () => {
+    const { result, queryClient } = renderSiblingHook(null, 'plan')
 
     expect(result.current.sessions).toEqual([])
     expect(result.current.currentIndex).toBe(-1)
-    expect(mockedUseWorkflowRunSessions).toHaveBeenCalledWith(null)
+    expect(queryClient.getQueryState(['workflow-runs', null, 'sessions'])?.fetchStatus).toBe('idle')
   })
 
-  it('passes the workflowRunId through to useWorkflowRunSessions unchanged', () => {
-    mockedUseWorkflowRunSessions.mockReturnValue({ isLoading: false, sessions: [] })
+  it('uses the workflowRunId-specific session collection', () => {
+    sessionsData = [session({ id: 'specific-session', workflowRunId: 'wr-specific-123' })]
 
-    renderSiblingHook('wr-specific-123', 'plan')
+    const { result } = renderSiblingHook('wr-specific-123', 'plan')
 
-    expect(mockedUseWorkflowRunSessions).toHaveBeenCalledWith('wr-specific-123')
+    expect(result.current.sessions.map((item) => item.id)).toEqual(['specific-session'])
   })
 })

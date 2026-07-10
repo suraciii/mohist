@@ -1,25 +1,79 @@
 // @vitest-environment jsdom
-/**
- * Shared test harness for the EpicDetailPage colocated test files.
- *
- * Vitest hoists `vi.mock()` per-file, so each `*.test.tsx` must declare its own
- * `vi.mock(...)` / `vi.hoisted(...)` blocks (those cannot be imported). This module
- * exports everything ELSE that the page-level + subcomponent test files share:
- *   - fixture builders (`linkedIssue`, `issue`) and shared data (`epic`, `issues`)
- *   - `renderPage()` which mounts <EpicDetailPage/> behind the router + providers
- *   - DOM-query helpers for the page layout regions (action group, mobile header, ...)
- *
- * Hoisted mock objects (`mocks`, `widgetBehavior`, `mockUseNavigate`) live in each
- * test file because the `vi.mock` factories close over them.
- */
-import type { ReactElement } from 'react'
+import { createElement, useEffect, type ReactElement } from 'react'
 import { render, screen, type RenderResult } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { ProjectProvider } from '../../../entities/project'
-import type { LinkedIssue } from '../../../entities/epic'
+import type { EpicDetail, LinkedIssue } from '../../../entities/epic'
 import { IssueHealth, IssueStatus, WorkflowStage } from '../../../entities/issue'
-import { EpicDetailPage } from './EpicDetailPage'
+import { EpicDetailPage, type EpicDetailPageComponents, type EpicDetailPageDependencies } from './EpicDetailPage'
+import {
+  DependencyGraphErrorBoundary,
+  type DependencyGraphWidgetProps,
+} from '../../../widgets/epic-dependency-graph'
+
+export type DependencyGraphTestMode = 'default' | 'empty' | 'error'
+
+function hasCycle(linkedIssues: { number: number; prerequisiteNumbers: number[] }[]): boolean {
+  const prerequisitesByIssue = new Map<number, number[]>()
+  for (const issue of linkedIssues) {
+    prerequisitesByIssue.set(issue.number, issue.prerequisiteNumbers ?? [])
+  }
+  const visited = new Set<number>()
+  const visiting = new Set<number>()
+
+  function visit(issueNumber: number): boolean {
+    if (visiting.has(issueNumber)) return true
+    if (visited.has(issueNumber)) return false
+    visited.add(issueNumber)
+    visiting.add(issueNumber)
+    for (const prerequisite of prerequisitesByIssue.get(issueNumber) ?? []) {
+      if (visit(prerequisite)) return true
+    }
+    visiting.delete(issueNumber)
+    return false
+  }
+
+  for (const issueNumber of prerequisitesByIssue.keys()) {
+    if (visit(issueNumber)) return true
+  }
+  return false
+}
+
+export function createDependencyGraphTestComponents(
+  readMode: () => DependencyGraphTestMode,
+): EpicDetailPageComponents {
+  function DependencyGraphWidget(props: DependencyGraphWidgetProps) {
+    const mode = readMode()
+    const cyclic = hasCycle(props.linkedIssues)
+
+    useEffect(() => {
+      if (mode === 'empty') {
+        props.onRenderabilityChange?.({ renderable: false, reason: 'empty' })
+      } else if (mode === 'default') {
+        props.onRenderabilityChange?.(
+          cyclic
+            ? { renderable: false, reason: 'cyclic' }
+            : { renderable: true, reason: null },
+        )
+      }
+    }, [mode, cyclic, props.onRenderabilityChange])
+
+    if (mode === 'error') {
+      throw new Error('Simulated render error from DependencyGraphWidget')
+    }
+    if (mode !== 'default' || cyclic) return null
+    return createElement('div', {
+      'data-testid': 'epic-dep-graph-canvas',
+      className: 'h-[560px] w-full min-w-[640px] rounded-lg border bg-background',
+    })
+  }
+
+  return {
+    DependencyGraphErrorBoundary,
+    DependencyGraphWidget,
+  }
+}
 
 export function linkedIssue(
   overrides: Pick<LinkedIssue, 'id' | 'number'> & Partial<Omit<LinkedIssue, 'id' | 'number'>>,
@@ -83,15 +137,39 @@ export function LocationProbe() {
   return <div data-testid="current-path">{location.pathname}{location.search}</div>
 }
 
-export function renderPage(): RenderResult & { rerenderPage: () => void } {
+export interface EpicDetailRenderOptions {
+  components?: Partial<EpicDetailPageComponents>
+  dependencies?: Partial<EpicDetailPageDependencies>
+  epic?: EpicDetail
+  issues?: unknown[]
+}
+
+export function renderPage(options: EpicDetailRenderOptions = {}): RenderResult & { rerenderPage: () => void } {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  if (options.epic) {
+    queryClient.setQueryDefaults(['epics', 'proj-1', 'epic-12345678'], { staleTime: Infinity })
+    queryClient.setQueryData(['epics', 'proj-1', 'epic-12345678'], options.epic)
+  }
+  if (options.issues) {
+    const issuesQueryKey = ['issues', { projectId: 'proj-1' }]
+    queryClient.setQueryDefaults(issuesQueryKey, { staleTime: Infinity })
+    queryClient.setQueryData(issuesQueryKey, options.issues)
+  }
   const ui = (): ReactElement => (
     <QueryClientProvider client={queryClient}>
       <ProjectProvider initialProjectId="proj-1">
         <MemoryRouter initialEntries={['/epic/epic-12345678']}>
           <LocationProbe />
           <Routes>
-            <Route path="/epic/:id" element={<EpicDetailPage />} />
+            <Route
+              path="/epic/:id"
+              element={(
+                <EpicDetailPage
+                  components={options.components}
+                  dependencies={options.dependencies}
+                />
+              )}
+            />
             <Route path="/epics" element={<div>Epics</div>} />
             <Route path="/issues/:number" element={<div>Issue</div>} />
           </Routes>

@@ -9,6 +9,19 @@ import type { TimelineEntry } from './model/types'
 
 const MAX_LIVE_EVENTS = 500
 
+export interface EventTimelineHistoryResult {
+  data: StoredCloudEventDto[] | undefined
+  isLoading: boolean
+}
+
+export type EventTimelineHistoryHook = (
+  issueNumber: number,
+  enabled: boolean,
+) => EventTimelineHistoryResult
+
+const useDefaultHistory: EventTimelineHistoryHook = (issueNumber, enabled) =>
+  useIssueEvents(issueNumber, enabled)
+
 function eventData(payload: Record<string, unknown>): Record<string, unknown> {
   return (payload.data && typeof payload.data === 'object'
     ? payload.data
@@ -95,11 +108,12 @@ export function useEventTimeline(
   issueNumber: number,
   issueId: string | null | undefined,
   enabled: boolean = true,
+  historyHook: EventTimelineHistoryHook = useDefaultHistory,
 ): {
   entries: TimelineEntry[]
   isLoading: boolean
 } {
-  const { data: history, isLoading } = useIssueEvents(issueNumber, enabled)
+  const { data: history, isLoading } = historyHook(issueNumber, enabled)
   const [liveTick, setLiveTick] = useState(0)
   const liveRef = useRef<TimelineEntry[]>([])
 

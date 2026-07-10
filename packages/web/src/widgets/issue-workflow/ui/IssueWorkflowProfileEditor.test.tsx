@@ -1,7 +1,11 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { ComponentProps } from 'react'
 import { fireEvent, render, screen, waitFor, within } from '../../../../tests/test-utils'
-import { IssueWorkflowProfileEditor } from './IssueWorkflowProfileEditor'
+import {
+  IssueWorkflowProfileEditor as IssueWorkflowProfileEditorView,
+  type IssueWorkflowProfileEditorHooks,
+} from './IssueWorkflowProfileEditor'
 import type { IssueWorkflowProfileYamlResponse } from '../../../entities/issue'
 
 const refetch = vi.fn()
@@ -43,24 +47,28 @@ const state = {
   deletePending: false,
 }
 
-vi.mock('../../../entities/issue', () => {
-  return {
-    useIssueWorkflowProfileYaml: () => ({
+const testHooks = {
+  useProfile: () => ({
       data: state.data,
       isLoading: state.isLoading,
       error: state.error,
       refetch,
     }),
-    useUpdateIssueWorkflowProfileYaml: () => ({
+  useUpdate: () => ({
       mutate: state.mutate,
       isPending: state.isPending,
     }),
-    useDeleteIssueWorkflowProfileTemplate: () => ({
+  useDelete: () => ({
       mutate: state.deleteMutate,
       isPending: state.deletePending,
     }),
-  }
-})
+} as unknown as IssueWorkflowProfileEditorHooks
+
+function IssueWorkflowProfileEditor(
+  props: Omit<ComponentProps<typeof IssueWorkflowProfileEditorView>, 'hooks'>,
+) {
+  return <IssueWorkflowProfileEditorView {...props} hooks={testHooks} />
+}
 
 describe('IssueWorkflowProfileEditor', () => {
   beforeEach(() => {

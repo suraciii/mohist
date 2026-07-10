@@ -2,7 +2,7 @@
 import '@testing-library/jest-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { cleanup, render, screen } from '@testing-library/react'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { Project } from '../src/entities/project'
 import { ProjectProvider } from '../src/entities/project'
 import { AgentSettingsSection } from '../src/pages/settings/ui/AgentSettingsSection'
@@ -13,88 +13,6 @@ import { SystemSettingsSection } from '../src/pages/settings/ui/SystemSettingsSe
 import { TemplatesSection } from '../src/pages/settings/ui/TemplatesSection'
 import { WorkflowProfilesSection } from '../src/pages/settings/ui/WorkflowProfilesSection'
 import { SidebarProvider } from '../src/shared/ui/components/sidebar'
-
-const useRepositoriesMock = vi.fn()
-const useAddRepositoryMock = vi.fn()
-const useRemoveRepositoryMock = vi.fn()
-const useSetDefaultRepositoryMock = vi.fn()
-const useOpencodeRuntimeMock = vi.fn()
-const useAvailableModelIdsMock = vi.fn()
-const useOpencodeModelMock = vi.fn()
-const useUpdateOpencodeModelMock = vi.fn()
-const useStageModelsMock = vi.fn()
-const useSetStageModelsMock = vi.fn()
-const useAgentRuntimeMock = vi.fn()
-const useConfigMock = vi.fn()
-const useSetAgentRuntimeMock = vi.fn()
-const useLogLevelMock = vi.fn()
-const useSetLogLevelMock = vi.fn()
-const useSystemInfoMock = vi.fn()
-const useSystemUpdateMock = vi.fn()
-const useSystemUpdateStatusMock = vi.fn()
-const useWorkflowProfilesMock = vi.fn()
-const useAllWorkflowProfilesMock = vi.fn()
-const useWorkflowProfileMock = vi.fn()
-const useProjectDefaultWorkflowProfileMock = vi.fn()
-const useDisableWorkflowProfileMock = vi.fn()
-const useEnableWorkflowProfileMock = vi.fn()
-const useProjectTemplatesMock = vi.fn()
-const useSystemTemplatesMock = vi.fn()
-const useDeleteProjectTemplateOverrideMock = vi.fn()
-const useUpsertProjectTemplateOverrideMock = vi.fn()
-const usePreviewProjectTemplateMock = vi.fn()
-const useExtractVariablesMock = vi.fn()
-
-vi.mock('../src/entities/project', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../src/entities/project')>()
-  return {
-    ...actual,
-    useRepositories: (projectId: string | undefined) => useRepositoriesMock(projectId),
-    useAddRepository: () => useAddRepositoryMock(),
-    useRemoveRepository: () => useRemoveRepositoryMock(),
-    useSetDefaultRepository: () => useSetDefaultRepositoryMock(),
-  }
-})
-
-vi.mock('../src/entities/settings', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../src/entities/settings')>()
-  return {
-    ...actual,
-    useOpencodeRuntime: () => useOpencodeRuntimeMock(),
-    useAvailableModelIds: () => useAvailableModelIdsMock(),
-    useOpencodeModel: () => useOpencodeModelMock(),
-    useUpdateOpencodeModel: () => useUpdateOpencodeModelMock(),
-    useStageModels: () => useStageModelsMock(),
-    useSetStageModels: () => useSetStageModelsMock(),
-    useAgentRuntime: () => useAgentRuntimeMock(),
-    useConfig: () => useConfigMock(),
-    useSetAgentRuntime: () => useSetAgentRuntimeMock(),
-    useLogLevel: () => useLogLevelMock(),
-    useSetLogLevel: () => useSetLogLevelMock(),
-    useSystemInfo: () => useSystemInfoMock(),
-    useSystemUpdate: () => useSystemUpdateMock(),
-    useSystemUpdateStatus: () => useSystemUpdateStatusMock(),
-    useWorkflowProfiles: () => useWorkflowProfilesMock(),
-    useAllWorkflowProfiles: () => useAllWorkflowProfilesMock(),
-    useWorkflowProfile: (profileId: string) => useWorkflowProfileMock(profileId),
-    useProjectDefaultWorkflowProfile: () => useProjectDefaultWorkflowProfileMock(),
-    useDisableWorkflowProfile: () => useDisableWorkflowProfileMock(),
-    useEnableWorkflowProfile: () => useEnableWorkflowProfileMock(),
-  }
-})
-
-vi.mock('../src/entities/template', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../src/entities/template')>()
-  return {
-    ...actual,
-    useProjectTemplates: (projectId: string | undefined) => useProjectTemplatesMock(projectId),
-    useSystemTemplates: () => useSystemTemplatesMock(),
-    useDeleteProjectTemplateOverride: (projectId: string | undefined) => useDeleteProjectTemplateOverrideMock(projectId),
-    useUpsertProjectTemplateOverride: (projectId: string) => useUpsertProjectTemplateOverrideMock(projectId),
-    usePreviewProjectTemplate: (projectId: string, key: string) => usePreviewProjectTemplateMock(projectId, key),
-    useExtractVariables: () => useExtractVariablesMock(),
-  }
-})
 
 const project: Project = {
   id: 'proj-selected',
@@ -129,85 +47,84 @@ const sections = [
   ['system', <SystemSettingsSection />],
 ] as const
 
-function arrangeLoadedMocks() {
-  useRepositoriesMock.mockReturnValue({ data: project.repositories, isLoading: false })
-  useAddRepositoryMock.mockReturnValue({ mutate: vi.fn(), isPending: false })
-  useRemoveRepositoryMock.mockReturnValue({ mutate: vi.fn(), isPending: false })
-  useSetDefaultRepositoryMock.mockReturnValue({ mutate: vi.fn(), isPending: false })
-  useOpencodeRuntimeMock.mockReturnValue({ isLoading: false, error: null })
-  useAvailableModelIdsMock.mockReturnValue({ data: ['openai/gpt-5.1', 'anthropic/claude-sonnet-4'], isLoading: false, error: null })
-  useOpencodeModelMock.mockReturnValue({ data: { model: 'openai/gpt-5.1' } })
-  useUpdateOpencodeModelMock.mockReturnValue({ mutate: vi.fn() })
-  useStageModelsMock.mockReturnValue({ data: { stageModels: { check: 'anthropic/claude-sonnet-4' } } })
-  useSetStageModelsMock.mockReturnValue({ mutate: vi.fn() })
-  useAgentRuntimeMock.mockReturnValue({
-    data: { timeout: 600000, stageTimeout: 3600000, taskTimeout: 600000, maxConcurrent: 3, maxGracePeriods: 3, pollInterval: 5000 },
-    isLoading: false,
-    error: null,
-    refetch: vi.fn(),
-  })
-  useConfigMock.mockReturnValue({ data: { agentTimeout: 600000, maxConcurrentAgents: 3, pollInterval: 5000, logLevel: 'info', taskTimeout: 600000, stageTimeout: 3600000, maxGracePeriods: 3 } })
-  useSetAgentRuntimeMock.mockReturnValue({ mutateAsync: vi.fn() })
-  useLogLevelMock.mockReturnValue({ data: { level: 'info' }, isLoading: false, isError: false, error: null })
-  useSetLogLevelMock.mockReturnValue({ mutateAsync: vi.fn() })
-  useSystemInfoMock.mockReturnValue({
-    data: {
-      running: { version: '1.0.0', gitHash: 'abcdef1234567890', startedAt: '2026-06-18T00:00:00Z' },
-      source: { path: '/repo/mohist', branch: 'master', head: 'abcdef1234567890', dirty: false },
-      install: { mode: 'local-source', serviceManager: 'systemd', serverUnit: 'mohist-server', runnerUnit: 'mohist-runner', reason: 'local checkout' },
-      update: { status: 'up-to-date', available: false, reason: 'Already current' },
-      services: { server: 'running', runner: 'running' },
-      paths: { db: '/var/lib/mohist/db.sqlite', config: '~/.mohist/config.jsonc', opencode: '~/.config/opencode', logs: '~/.mohist/logs' },
+const AGENT_RUNTIME = {
+  timeout: 600000,
+  stageTimeout: 3600000,
+  taskTimeout: 600000,
+  maxConcurrent: 3,
+  maxGracePeriods: 3,
+  pollInterval: 5000,
+}
+
+const CONFIG = {
+  agentTimeout: 600000,
+  maxConcurrentAgents: 3,
+  pollInterval: 5000,
+  logLevel: 'info',
+  taskTimeout: 600000,
+  stageTimeout: 3600000,
+  maxGracePeriods: 3,
+}
+
+const SYSTEM_INFO = {
+  running: { version: '1.0.0', gitHash: 'abcdef1234567890', startedAt: '2026-06-18T00:00:00Z' },
+  source: { path: '/repo/mohist', branch: 'master', head: 'abcdef1234567890', dirty: false },
+  install: { mode: 'local-source', serviceManager: 'systemd', serverUnit: 'mohist-server', runnerUnit: 'mohist-runner', reason: 'local checkout' },
+  update: { status: 'up-to-date', available: false, reason: 'Already current' },
+  services: { server: 'running', runner: 'running' },
+  paths: { db: '/var/lib/mohist/db.sqlite', config: '~/.mohist/config.jsonc', opencode: '~/.config/opencode', logs: '~/.mohist/logs' },
+}
+
+const WORKFLOW_PROFILES = [
+  { id: 'mohist/local', displayName: 'Default', description: 'Standard staged workflow.', isDefault: true },
+  { id: 'mohist/quick-fix', displayName: 'Quick Fix', description: 'Short repair workflow.', isDefault: false },
+]
+
+const PROJECT_TEMPLATES = [
+  { key: 'build-plan', displayName: 'Build Plan', description: 'Plan the implementation.', tags: ['plan'], stage: 'plan', body: 'Plan body', source: 'system' },
+  { key: 'review-fix', displayName: 'Review Fix', description: 'Fix review findings.', tags: ['check'], stage: 'check', body: 'Fix body', source: 'project-override' },
+]
+
+function makeQueryClient() {
+  const queryClient = new QueryClient({
+    defaultOptions: {
+      queries: { retry: false, staleTime: Infinity },
+      mutations: { retry: false },
     },
-    isLoading: false,
-    isError: false,
-    error: null,
-    refetch: vi.fn(),
   })
-  useSystemUpdateMock.mockReturnValue({ mutateAsync: vi.fn(), isPending: false })
-  useSystemUpdateStatusMock.mockReturnValue({ data: { hasJob: false, job: null }, refetch: vi.fn() })
-  useWorkflowProfilesMock.mockReturnValue({
-    data: [
-      { id: 'mohist/local', displayName: 'Default', description: 'Standard staged workflow.', isDefault: true },
-      { id: 'mohist/quick-fix', displayName: 'Quick Fix', description: 'Short repair workflow.', isDefault: false },
-    ],
-    isLoading: false,
-    isError: false,
+  queryClient.setQueryData(['repositories', project.id], project.repositories)
+  queryClient.setQueryData(['opencode-runtime'], { mode: 'local', command: 'opencode', model: null, note: '' })
+  queryClient.setQueryData(['opencode-model-ids', project.id], {
+    models: ['openai/gpt-5.1', 'anthropic/claude-sonnet-4'],
+    modelVariants: {},
   })
-  useAllWorkflowProfilesMock.mockReturnValue({
-    data: [
-      { id: 'mohist/local', displayName: 'Default', description: 'Standard staged workflow.', isDefault: true },
-      { id: 'mohist/quick-fix', displayName: 'Quick Fix', description: 'Short repair workflow.', isDefault: false },
-    ],
-    isLoading: false,
-    isError: false,
+  queryClient.setQueryData(['opencode-model', project.id], { model: 'openai/gpt-5.1', variant: null })
+  queryClient.setQueryData(['stage-models', project.id], {
+    stageModels: { check: 'anthropic/claude-sonnet-4' },
+    stageModelVariants: null,
   })
-  useWorkflowProfileMock.mockReturnValue({ data: null, isLoading: false, isError: false })
-  useProjectDefaultWorkflowProfileMock.mockReturnValue({
-    data: { projectId: 'proj-selected', defaultTemplateId: null, disabledWorkflowProfileIds: [] },
-    isLoading: false,
-    isError: false,
+  queryClient.setQueryData(['agent-runtime'], AGENT_RUNTIME)
+  queryClient.setQueryData(['config'], CONFIG)
+  queryClient.setQueryData(['log-level'], { level: CONFIG.logLevel })
+  queryClient.setQueryData(['system-info'], SYSTEM_INFO)
+  queryClient.setQueryData(['system-update-status'], { hasJob: false, job: null })
+  queryClient.setQueryData(['workflow-templates', 'system'], WORKFLOW_PROFILES)
+  queryClient.setQueryData(['workflow-templates', 'system', project.id], WORKFLOW_PROFILES)
+  for (const profile of WORKFLOW_PROFILES) {
+    queryClient.setQueryData(['workflow-profile', profile.id], null)
+  }
+  queryClient.setQueryData(['project-workflow-profile', project.id], {
+    projectId: project.id,
+    defaultTemplateId: null,
+    disabledWorkflowProfileIds: [],
   })
-  useDisableWorkflowProfileMock.mockReturnValue({ mutate: vi.fn() })
-  useEnableWorkflowProfileMock.mockReturnValue({ mutate: vi.fn() })
-  useProjectTemplatesMock.mockReturnValue({
-    data: [
-      { key: 'build-plan', displayName: 'Build Plan', description: 'Plan the implementation.', tags: ['plan'], stage: 'plan', body: 'Plan body', source: 'system' },
-      { key: 'review-fix', displayName: 'Review Fix', description: 'Fix review findings.', tags: ['check'], stage: 'check', body: 'Fix body', source: 'project-override' },
-    ],
-    isLoading: false,
-    isError: false,
-    refetch: vi.fn(),
-  })
-  useSystemTemplatesMock.mockReturnValue({ data: [] })
-  useDeleteProjectTemplateOverrideMock.mockReturnValue({ mutate: vi.fn(), isPending: false })
-  useUpsertProjectTemplateOverrideMock.mockReturnValue({ mutate: vi.fn(), isPending: false })
-  usePreviewProjectTemplateMock.mockReturnValue({ mutate: vi.fn(), data: null, isPending: false, isError: false })
-  useExtractVariablesMock.mockReturnValue({ mutate: vi.fn(), data: { variables: [] } })
+  queryClient.setQueryData(['project-templates', project.id], PROJECT_TEMPLATES)
+  queryClient.setQueryData(['system-templates'], [])
+  return queryClient
 }
 
 function renderEvidenceSection(section: React.ReactElement) {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  const queryClient = makeQueryClient()
   return render(
     <QueryClientProvider client={queryClient}>
       <ProjectProvider initialProjectId={project.id} initialProjects={[project]}>
@@ -314,14 +231,12 @@ describe('settings visual accessibility evidence', () => {
 
   afterEach(() => {
     cleanup()
-    vi.clearAllMocks()
   })
 
   it('generates before/after visual diff snapshots and contrast audit artifacts in memory', () => {
     const auditResults: Record<string, ReturnType<typeof auditContrast>> = {}
 
     for (const [sectionName, section] of sections) {
-      arrangeLoadedMocks()
       const { container } = renderEvidenceSection(section)
       expect(screen.getByRole('heading', { level: 2 })).toBeInTheDocument()
       writeBeforeArtifact(sectionName)

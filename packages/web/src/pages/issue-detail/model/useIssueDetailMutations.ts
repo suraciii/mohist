@@ -1,4 +1,4 @@
-import { useMutation, useQueryClient, type UseMutationResult } from '@tanstack/react-query'
+import { useMutation, useQueryClient, type QueryClient, type UseMutationResult } from '@tanstack/react-query'
 import {
   addComment,
   addPrerequisite,
@@ -47,16 +47,78 @@ export interface IssueDetailMutations {
   deleteCommentMutation: UseMutationResult<{ message: string }, Error, string, unknown>
 }
 
-export function useIssueDetailMutations({
-  issueNumber,
-  projectId,
-  onForceStopSuccess,
-  onStopSuccess,
-  onAddCommentSuccess,
-  onDeleteCommentSuccess,
-  onDeleteCommentError,
-}: UseIssueDetailMutationsOptions): IssueDetailMutations {
-  const queryClient = useQueryClient()
+export interface IssueDetailMutationDependencies {
+  addComment: typeof addComment
+  addPrerequisite: typeof addPrerequisite
+  approveIssue: typeof approveIssue
+  closeIssue: typeof closeIssue
+  deleteComment: typeof deleteComment
+  extractAttachmentIds: typeof extractAttachmentIds
+  forceStopIssue: typeof forceStopIssue
+  invalidateApprovalWait: typeof invalidateApprovalWait
+  removePrerequisite: typeof removePrerequisite
+  reopenIssue: typeof reopenIssue
+  requestChangesIssue: typeof requestChangesIssue
+  rerunIssue: typeof rerunIssue
+  resumeIssue: typeof resumeIssue
+  retryIssue: typeof retryIssue
+  startIssue: typeof startIssue
+  stopIssue: typeof stopIssue
+  updateIssue: typeof updateIssue
+}
+
+const defaultDependencies: IssueDetailMutationDependencies = {
+  addComment,
+  addPrerequisite,
+  approveIssue,
+  closeIssue,
+  deleteComment,
+  extractAttachmentIds,
+  forceStopIssue,
+  invalidateApprovalWait,
+  removePrerequisite,
+  reopenIssue,
+  requestChangesIssue,
+  rerunIssue,
+  resumeIssue,
+  retryIssue,
+  startIssue,
+  stopIssue,
+  updateIssue,
+}
+
+export function createIssueDetailMutationOptions(
+  {
+    issueNumber,
+    projectId,
+    onForceStopSuccess,
+    onStopSuccess,
+    onAddCommentSuccess,
+    onDeleteCommentSuccess,
+    onDeleteCommentError,
+  }: UseIssueDetailMutationsOptions,
+  queryClient: QueryClient,
+  dependencies: IssueDetailMutationDependencies = defaultDependencies,
+) {
+  const {
+    addComment,
+    addPrerequisite,
+    approveIssue,
+    closeIssue,
+    deleteComment,
+    extractAttachmentIds,
+    forceStopIssue,
+    invalidateApprovalWait,
+    removePrerequisite,
+    reopenIssue,
+    requestChangesIssue,
+    rerunIssue,
+    resumeIssue,
+    retryIssue,
+    startIssue,
+    stopIssue,
+    updateIssue,
+  } = dependencies
 
   const invalidateRuntimeQueries = () => {
     queryClient.invalidateQueries({ queryKey: ['issues'] })
@@ -70,7 +132,7 @@ export function useIssueDetailMutations({
     invalidateApprovalWait(queryClient)
   }
 
-  const startMutation = useMutation({
+  const startMutation = {
     mutationFn: () => startIssue(issueNumber, projectId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['issues'] })
@@ -81,116 +143,116 @@ export function useIssueDetailMutations({
         queryClient.invalidateQueries({ queryKey: ['issues'] })
       }
     },
-  })
+  }
 
-  const approveMutation = useMutation({
+  const approveMutation = {
     mutationFn: () => approveIssue(issueNumber, projectId),
     onSuccess: invalidateApprovalQueries,
-  })
+  }
 
-  const sendBackMutation = useMutation({
+  const sendBackMutation = {
     mutationFn: ({ stage, body }: { stage: string; body: string }) => requestChangesIssue(issueNumber, { stage, body }, projectId),
     onSuccess: invalidateApprovalQueries,
-  })
+  }
 
-  const markReadyMutation = useMutation({
+  const markReadyMutation = {
     mutationFn: () => updateIssue(issueNumber, { isDraft: false }, projectId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['issues'] })
       queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
     },
-  })
+  }
 
-  const addPrerequisiteMutation = useMutation({
+  const addPrerequisiteMutation = {
     mutationFn: (prerequisiteNumber: number) => addPrerequisite(issueNumber, prerequisiteNumber, projectId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['issues'] })
       queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
     },
-  })
+  }
 
-  const removePrerequisiteMutation = useMutation({
+  const removePrerequisiteMutation = {
     mutationFn: (prerequisiteNumber: number) => removePrerequisite(issueNumber, prerequisiteNumber, projectId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['issues'] })
       queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
     },
-  })
+  }
 
-  const closeMutation = useMutation({
+  const closeMutation = {
     mutationFn: () => closeIssue(issueNumber, projectId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['issues'] })
     },
-  })
+  }
 
-  const forceStopMutation = useMutation({
+  const forceStopMutation = {
     mutationFn: () => forceStopIssue(issueNumber, projectId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['issues'] })
       queryClient.invalidateQueries({ queryKey: ['agent-status'] })
       onForceStopSuccess?.()
     },
-  })
+  }
 
-  const stopMutation = useMutation({
+  const stopMutation = {
     mutationFn: () => stopIssue(issueNumber, projectId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['issues'] })
       queryClient.invalidateQueries({ queryKey: ['agent-status'] })
       onStopSuccess?.()
     },
-  })
+  }
 
-  const reopenMutation = useMutation({
+  const reopenMutation = {
     mutationFn: () => reopenIssue(issueNumber, projectId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['issues'] })
     },
-  })
+  }
 
-  const resumeMutation = useMutation({
+  const resumeMutation = {
     mutationFn: () => resumeIssue(issueNumber, projectId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['issues'] })
       queryClient.invalidateQueries({ queryKey: ['agent-status'] })
     },
-  })
+  }
 
-  const retryMutation = useMutation({
+  const retryMutation = {
     mutationFn: () => retryIssue(issueNumber, projectId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['issues'] })
       queryClient.invalidateQueries({ queryKey: ['agent-status'] })
     },
-  })
+  }
 
-  const rerunMutation = useMutation({
+  const rerunMutation = {
     mutationFn: () => rerunIssue(issueNumber, projectId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['issues'] })
       queryClient.invalidateQueries({ queryKey: ['agent-status'] })
     },
-  })
+  }
 
-  const addCommentMutation = useMutation({
+  const addCommentMutation = {
     mutationFn: (body: string) => addComment(issueNumber, body, projectId, extractAttachmentIds(body)),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
       onAddCommentSuccess?.()
     },
-  })
+  }
 
-  const deleteCommentMutation = useMutation({
+  const deleteCommentMutation = {
     mutationFn: (commentId: string) => deleteComment(issueNumber, commentId, projectId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
       onDeleteCommentSuccess?.()
     },
-    onError: (err) => {
+    onError: (err: unknown) => {
       onDeleteCommentError?.(err instanceof Error ? err : new Error('Failed to delete comment'))
     },
-  })
+  }
 
   return {
     startMutation,
@@ -208,5 +270,35 @@ export function useIssueDetailMutations({
     rerunMutation,
     addCommentMutation,
     deleteCommentMutation,
+  }
+}
+
+export function useIssueDetailMutations(
+  options: UseIssueDetailMutationsOptions,
+  dependencyOverrides: Partial<IssueDetailMutationDependencies> = {},
+): IssueDetailMutations {
+  const queryClient = useQueryClient()
+  const mutationOptions = createIssueDetailMutationOptions(
+    options,
+    queryClient,
+    { ...defaultDependencies, ...dependencyOverrides },
+  )
+
+  return {
+    startMutation: useMutation(mutationOptions.startMutation),
+    approveMutation: useMutation(mutationOptions.approveMutation),
+    sendBackMutation: useMutation(mutationOptions.sendBackMutation),
+    markReadyMutation: useMutation(mutationOptions.markReadyMutation),
+    addPrerequisiteMutation: useMutation(mutationOptions.addPrerequisiteMutation),
+    removePrerequisiteMutation: useMutation(mutationOptions.removePrerequisiteMutation),
+    closeMutation: useMutation(mutationOptions.closeMutation),
+    forceStopMutation: useMutation(mutationOptions.forceStopMutation),
+    stopMutation: useMutation(mutationOptions.stopMutation),
+    reopenMutation: useMutation(mutationOptions.reopenMutation),
+    resumeMutation: useMutation(mutationOptions.resumeMutation),
+    retryMutation: useMutation(mutationOptions.retryMutation),
+    rerunMutation: useMutation(mutationOptions.rerunMutation),
+    addCommentMutation: useMutation(mutationOptions.addCommentMutation),
+    deleteCommentMutation: useMutation<{ message: string }, Error, string>(mutationOptions.deleteCommentMutation),
   }
 }

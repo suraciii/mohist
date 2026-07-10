@@ -1,9 +1,9 @@
-import { useState } from 'react'
+import { useState, type ComponentType } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { ActivityIcon } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/shared/ui/components/dialog'
 import { useProject } from '../../../entities/project'
-import { EventTimelinePanel } from './EventTimelinePanel'
+import { EventTimelinePanel, type EventTimelinePanelProps } from './EventTimelinePanel'
 
 interface ActivityDialogProps {
   issueNumber: number
@@ -12,6 +12,7 @@ interface ActivityDialogProps {
   triggerLabel?: string
   triggerClassName?: string
   triggerTestId?: string
+  TimelinePanel?: ComponentType<EventTimelinePanelProps>
 }
 
 export function ActivityDialog({
@@ -21,6 +22,7 @@ export function ActivityDialog({
   triggerLabel = 'Activity',
   triggerClassName,
   triggerTestId = 'activity-entry',
+  TimelinePanel = EventTimelinePanel,
 }: ActivityDialogProps) {
   const [open, setOpen] = useState(false)
   const queryClient = useQueryClient()
@@ -59,7 +61,7 @@ export function ActivityDialog({
           </DialogHeader>
           <div className="flex-1 min-h-0 overflow-y-auto">
             {open && (
-              <EventTimelinePanel
+              <TimelinePanel
                 issueNumber={issueNumber}
                 issueId={issueId}
                 workflowStatus={workflowStatus}

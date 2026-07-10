@@ -1,8 +1,8 @@
 /**
  * Shared fixtures for the LiveTaskProvider colocated test files.
  *
- * `vi.mock()` / `vi.hoisted()` are hoisted per-file, so each `*.test.ts`
- * declares its own `mocks` object + `vi.mock(...)` blocks AND the file-local
+ * `vi.mock` / `vi.hoisted` are hoisted per-file, so each `*.test.ts`
+ * declares its own `mocks` object plus mock blocks and the file-local
  * `mountWith()` render helper (which closes over the file-local `mocks`). Those
  * cannot be imported. This module only exports the non-mock fixtures shared
  * across the LiveTaskProvider test files:

@@ -1,7 +1,18 @@
-import { useIssueSessionDataSource } from '../data/useIssueSessionDataSource'
-import { SessionDetailShell } from './SessionDetailShell'
+import {
+  useIssueSessionDataSource,
+  type IssueSessionDataSourceDependencies,
+} from '../data/useIssueSessionDataSource'
+import {
+  SessionDetailShell,
+  type SessionDetailShellComponents,
+} from './SessionDetailShell'
 
-export function SessionPage() {
-  const data = useIssueSessionDataSource()
-  return <SessionDetailShell data={data} />
+export interface SessionPageDependencies {
+  dataSource?: IssueSessionDataSourceDependencies
+  shellComponents?: Partial<SessionDetailShellComponents>
+}
+
+export function SessionPage({ dependencies }: { dependencies?: SessionPageDependencies } = {}) {
+  const data = useIssueSessionDataSource(dependencies?.dataSource)
+  return <SessionDetailShell data={data} components={dependencies?.shellComponents} />
 }

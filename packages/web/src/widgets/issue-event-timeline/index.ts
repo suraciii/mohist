@@ -1,4 +1,5 @@
 export { EventTimelinePanel } from './ui/EventTimelinePanel'
+export type { EventTimelinePanelProps } from './ui/EventTimelinePanel'
 export { ActivityDialog } from './ui/ActivityDialog'
 export { classifyEvent } from './model/classify'
 export { classifySource } from './model/source-tag'

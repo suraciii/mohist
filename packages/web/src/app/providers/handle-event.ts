@@ -34,6 +34,7 @@ export interface HandlerContext {
   setRebaseConflict: SetRebaseConflict
   viewedIssue: number | null
   projectId: string | null
+  pathname?: string
 }
 
 /**
@@ -183,7 +184,7 @@ function inboxHandler(ctx: HandlerContext): void {
   if (
     result.applied
     && isHighAttentionKind(hint.kind)
-    && !shouldSuppressInAppNotice(hint, window.location.pathname, ctx.viewedIssue)
+    && !shouldSuppressInAppNotice(hint, ctx.pathname ?? window.location.pathname, ctx.viewedIssue)
   ) {
     if (hint.kind === 'approval_requested') {
       toast.info(`Issue #${hint.issueNumber} needs approval`)
@@ -298,6 +299,7 @@ export function routeEvent(
       setRebaseConflict: ctx.setRebaseConflict,
       viewedIssue: ctx.viewedIssue,
       projectId: ctx.projectId,
+      pathname: ctx.pathname,
     })
   }
 }

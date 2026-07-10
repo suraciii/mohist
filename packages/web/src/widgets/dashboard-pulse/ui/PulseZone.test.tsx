@@ -4,7 +4,6 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { http, HttpResponse } from 'msw'
 import { ProjectProvider } from '@/entities/project/model/ProjectContext'
 import { IssueHealth, IssueStatus, WorkflowStage, type Issue } from '@/entities/issue'
 import type {
@@ -12,32 +11,51 @@ import type {
   AgentActivity,
   AgentActivitySession,
 } from '@/entities/agent/model/types'
-import { server, useMswServer } from '../../../../tests/support/msw'
+import { sessionToCard, useActivityCards } from '@/widgets/coder-session/model/activity-cards'
 import { TEST_PROJECT } from '../../../../tests/test-utils'
 import { PulseZone } from './PulseZone'
 
-useMswServer()
-
-const ISSUES_PATH = '*/api/projects/:projectId/issues'
-const STATUS_PATH = '*/api/projects/:projectId/agent/status'
-const ACTIVITY_PATH = '*/api/projects/:projectId/agent/activity'
+let _issues: Issue[] = []
+let _agentStatus: AgentStatus
+let _agentActivity: AgentActivity | null = null
 
 function mockIssuesResponse(issues: Issue[]) {
-  server.use(http.get(ISSUES_PATH, () => HttpResponse.json({ success: true, data: issues })))
+  _issues = issues
 }
 
 function mockAgentStatusResponse(data: AgentStatus) {
-  server.use(http.get(STATUS_PATH, () => HttpResponse.json({ success: true, data })))
+  _agentStatus = data
 }
 
 function mockAgentActivityResponse(data: AgentActivity | null) {
-  server.use(
-    http.get(ACTIVITY_PATH, () =>
-      data
-        ? HttpResponse.json({ success: true, data })
-        : HttpResponse.json({ success: true, data: null }),
-    ),
-  )
+  _agentActivity = data
+}
+
+const activityCardsHook = (): ReturnType<typeof useActivityCards> => {
+  const cards = (_agentActivity?.sessions ?? []).map(sessionToCard)
+  const activeCards = cards.filter((card) => card.status === 'active')
+  const recentCards = cards.filter((card) => card.status !== 'active')
+  const activeCardByIssueNumber = new Map<number, (typeof activeCards)[number]>()
+  for (const card of activeCards) {
+    const issueNumber = Number(card.issueNumber)
+    if (Number.isFinite(issueNumber)) activeCardByIssueNumber.set(issueNumber, card)
+  }
+  return {
+    activeCards,
+    activeCardByIssueNumber,
+    recentCards,
+    waitingCards: [],
+    statusCounts: _agentActivity?.summary ?? {
+      active: activeCards.length,
+      waiting: 0,
+      completed: 0,
+      failed: 0,
+      slots: { active: activeCards.length, max: 0 },
+    },
+    slotUsage: _agentActivity?.summary.slots ?? { active: 0, max: 0 },
+    isLoading: false,
+    isError: false,
+  }
 }
 
 function renderZone() {
@@ -46,7 +64,11 @@ function renderZone() {
     <QueryClientProvider client={queryClient}>
       <ProjectProvider initialProjectId={TEST_PROJECT.id} initialProjects={[TEST_PROJECT]}>
         <MemoryRouter initialEntries={['/']}>
-          <PulseZone />
+          <PulseZone
+            issuesOverride={_issues}
+            agentStatusOverride={_agentStatus}
+            activityCardsHook={activityCardsHook}
+          />
         </MemoryRouter>
       </ProjectProvider>
     </QueryClientProvider>,

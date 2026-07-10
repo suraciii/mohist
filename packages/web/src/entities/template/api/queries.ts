@@ -22,25 +22,34 @@ export function useSystemTemplates() {
   })
 }
 
-export function useProjectTemplates(projectId: string | undefined) {
+export type ProjectTemplatesFetcher = typeof getProjectTemplates
+
+export function useProjectTemplates(
+  projectId: string | undefined,
+  fetcher: ProjectTemplatesFetcher = getProjectTemplates,
+) {
   return useQuery({
     queryKey: ['project-templates', projectId],
-    queryFn: () => getProjectTemplates(projectId!),
+    queryFn: () => fetcher(projectId!),
     enabled: !!projectId,
   })
 }
 
-export function useProjectTemplateOverride(projectId: string | undefined, key: string | undefined) {
-  return useQuery<ProjectTemplateOverride>({
+export function projectTemplateOverrideQueryOptions(projectId: string | undefined, key: string | undefined) {
+  return {
     queryKey: ['project-template', projectId, key, 'override'],
     queryFn: () => getProjectTemplateOverride(projectId!, key!),
     enabled: !!projectId && !!key,
-    retry: (failureCount, error) => {
+    retry: (failureCount: number, error: unknown) => {
       const status = (error as { status?: number } | null)?.status
       if (status === 404) return false
       return failureCount < 1
     },
-  })
+  }
+}
+
+export function useProjectTemplateOverride(projectId: string | undefined, key: string | undefined) {
+  return useQuery<ProjectTemplateOverride>(projectTemplateOverrideQueryOptions(projectId, key))
 }
 
 interface UpsertOverrideInput {
@@ -84,9 +93,15 @@ interface PreviewInput {
   variables: Record<string, unknown>
 }
 
-export function usePreviewProjectTemplate(projectId: string | undefined, key: string | undefined) {
+export type ProjectTemplatePreviewer = typeof previewProjectTemplate
+
+export function usePreviewProjectTemplate(
+  projectId: string | undefined,
+  key: string | undefined,
+  previewer: ProjectTemplatePreviewer = previewProjectTemplate,
+) {
   return useMutation<PreviewResponse, Error, PreviewInput>({
-    mutationFn: ({ variables }) => previewProjectTemplate(projectId!, key!, variables),
+    mutationFn: ({ variables }) => previewer(projectId!, key!, variables),
   })
 }
 

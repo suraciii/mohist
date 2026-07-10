@@ -5,11 +5,16 @@ import type { CoderSessionSummary } from './types'
 import { useProject } from '../../project/@x/project-context'
 import { getCoderSessions } from '../api/client'
 
-export function useCoderSessions(issueNumber: number) {
+export type CoderSessionsFetcher = typeof getCoderSessions
+
+export function useCoderSessions(
+  issueNumber: number,
+  fetcher: CoderSessionsFetcher = getCoderSessions,
+) {
   const { projectId } = useProject()
   const { data: sessions = [], isLoading } = useQuery({
     queryKey: ['issues', issueNumber, projectId, 'coder-sessions'],
-    queryFn: () => getCoderSessions(issueNumber, projectId),
+    queryFn: () => fetcher(issueNumber, projectId),
     enabled: issueNumber > 0 && !!projectId,
     staleTime: 30 * 1000,
   })

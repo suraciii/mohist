@@ -1,26 +1,65 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query'
 import { recordedInvokes } from '../../../../tests/support/signalr-fake'
 import { ProjectProvider } from '../../../entities/project'
-import { TaskProgressPanel } from './TaskProgressPanel'
 import {
+  TaskProgressPanel as DefaultTaskProgressPanel,
+  type TaskProgressPanelProps,
+  type TaskProgressTimelineHook,
+} from './TaskProgressPanel'
+import type { TaskLogDataHook } from './TaskLogPanel'
+import {
+  issueWorkflowTaskLogQueryOptions,
   WorkflowStage,
   type WorkflowTimeline,
   type TaskLogLine,
   type TaskLogPage,
 } from '../../../entities/issue'
-import { useIssueWorkflowTaskLog, useWorkflowTimeline } from '../../../entities/issue'
 
-vi.mock('../../../entities/issue', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../../../entities/issue')>()),
-  useWorkflowTimeline: vi.fn(),
-  useIssueWorkflowTaskLog: vi.fn(),
-}))
+type LogResponse = TaskLogPage | 'loading' | 'error' | 'missing'
 
-const mockedUseWorkflowTimeline = vi.mocked(useWorkflowTimeline)
-const mockedUseIssueWorkflowTaskLog = vi.mocked(useIssueWorkflowTaskLog)
+let timelineData: WorkflowTimeline = makeTimeline()
+let logResponse: LogResponse = { lines: [], nextCursor: null, truncated: false }
+let taskLogRequests: Array<{ issueNumber: string; taskId: string; limit: string | null }> = []
+
+const timelineHook: TaskProgressTimelineHook = () => ({ data: timelineData })
+
+const taskLogHook: TaskLogDataHook = ({ issueNumber, taskId, projectId, workflowRunId }) =>
+  useQuery({
+    ...issueWorkflowTaskLogQueryOptions(
+      projectId,
+      issueNumber,
+      taskId,
+      { limit: 5000 },
+      true,
+      workflowRunId,
+    ),
+    queryFn: async () => {
+      taskLogRequests.push({
+        issueNumber: String(issueNumber),
+        taskId,
+        limit: '5000',
+      })
+      if (logResponse === 'loading') return new Promise<never>(() => {})
+      if (logResponse === 'error') throw new Error('log unavailable')
+      if (logResponse === 'missing') return { lines: [], nextCursor: null, truncated: false }
+      return logResponse
+    },
+  })
+
+function TaskProgressPanel(
+  props: Omit<TaskProgressPanelProps, 'timelineHook' | 'taskLogHook'>,
+) {
+  return (
+    <DefaultTaskProgressPanel
+      {...props}
+      timelineHook={timelineHook}
+      taskLogHook={taskLogHook}
+    />
+  )
+}
 
 const projects = [
   {
@@ -113,22 +152,26 @@ function makeRunningTimeline(): WorkflowTimeline {
 
 function setLogPage(page: TaskLogPage | { isLoading: true } | { isError: true } | undefined) {
   if (page === undefined) {
-    mockedUseIssueWorkflowTaskLog.mockReturnValue({ data: undefined, isLoading: false, isError: false } as never)
+    logResponse = 'missing'
     return
   }
   if ('isLoading' in page) {
-    mockedUseIssueWorkflowTaskLog.mockReturnValue({ data: undefined, isLoading: true, isError: false } as never)
+    logResponse = 'loading'
     return
   }
   if ('isError' in page) {
-    mockedUseIssueWorkflowTaskLog.mockReturnValue({ data: undefined, isLoading: false, isError: true } as never)
+    logResponse = 'error'
     return
   }
-  mockedUseIssueWorkflowTaskLog.mockReturnValue({ data: page, isLoading: false, isError: false } as never)
+  logResponse = page
+}
+
+function setWorkflowTimeline(value: { data: WorkflowTimeline }) {
+  timelineData = value.data
 }
 
 async function expandFailedTask(taskTitle: string) {
-  const row = screen.getByText(taskTitle).closest('[class*="rounded-md border"]') as HTMLElement | null
+  const row = (await screen.findByText(taskTitle)).closest('[class*="rounded-md border"]') as HTMLElement | null
   expect(row).not.toBeNull()
   const expandButton = row!.querySelector('button') as HTMLButtonElement | null
   expect(expandButton).not.toBeNull()
@@ -147,31 +190,32 @@ function makeLine(overrides: Partial<TaskLogLine>): TaskLogLine {
 
 function renderWithQueryClient(ui: React.ReactNode) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  return render(<QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>)
-}
-
-function renderWithQueryClientAndProject(ui: React.ReactNode) {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  return render(
+  const rendered = render(
     <QueryClientProvider client={queryClient}>
       <ProjectProvider initialProjects={projects} initialProjectId="proj-1">
         {ui}
       </ProjectProvider>
     </QueryClientProvider>,
   )
+  return { ...rendered, queryClient }
 }
+
+beforeEach(() => {
+  timelineData = makeTimeline()
+  logResponse = { lines: [], nextCursor: null, truncated: false }
+  taskLogRequests = []
+})
 
 describe('TaskProgressPanel — task execution log panel', () => {
   afterEach(() => {
     cleanup()
-    vi.clearAllMocks()
   })
 
   it('allows expanding a running task and subscribes its log panel for live updates', async () => {
-    mockedUseWorkflowTimeline.mockReturnValue({ data: makeRunningTimeline() } as never)
+    setWorkflowTimeline({ data: makeRunningTimeline() })
     setLogPage({ lines: [], nextCursor: null, truncated: false })
 
-    renderWithQueryClientAndProject(<TaskProgressPanel issueNumber={161} currentStage={WorkflowStage.Build} isAgentRunning={true} />)
+    renderWithQueryClient(<TaskProgressPanel issueNumber={161} currentStage={WorkflowStage.Build} isAgentRunning={true} />)
 
     await expandFailedTask('Generate OpenSpec')
 
@@ -182,21 +226,23 @@ describe('TaskProgressPanel — task execution log panel', () => {
   })
 
   it('renders the task log panel inside the expanded region of a failed task', async () => {
-    mockedUseWorkflowTimeline.mockReturnValue({ data: makeTimeline() } as never)
+    setWorkflowTimeline({ data: makeTimeline() })
     setLogPage( { lines: [], nextCursor: null, truncated: false })
 
     renderWithQueryClient(<TaskProgressPanel issueNumber={161} currentStage={WorkflowStage.Build} isAgentRunning={false} />)
 
     await expandFailedTask('Rebase onto master')
 
-    expect(mockedUseIssueWorkflowTaskLog).toHaveBeenCalled()
+    await waitFor(() => {
+      expect(taskLogRequests).toHaveLength(1)
+    })
     await waitFor(() => {
       expect(screen.getByTestId('task-log-panel')).toBeInTheDocument()
     })
   })
 
   it('does NOT alter the existing failure-kind guidance or output rendering', async () => {
-    mockedUseWorkflowTimeline.mockReturnValue({ data: makeTimeline() } as never)
+    setWorkflowTimeline({ data: makeTimeline() })
     setLogPage( { lines: [], nextCursor: null, truncated: false })
 
     renderWithQueryClient(<TaskProgressPanel issueNumber={161} currentStage={WorkflowStage.Build} isAgentRunning={false} />)
@@ -210,7 +256,7 @@ describe('TaskProgressPanel — task execution log panel', () => {
   })
 
   it('renders each line with source label, timestamp, and text', async () => {
-    mockedUseWorkflowTimeline.mockReturnValue({ data: makeTimeline() } as never)
+    setWorkflowTimeline({ data: makeTimeline() })
     setLogPage( {
       lines: [
         makeLine({ seq: 1, timestamp: '2026-07-03T08:00:00.000Z', source: 'workspace-prep', text: 'Cloning repo' }),
@@ -238,7 +284,7 @@ describe('TaskProgressPanel — task execution log panel', () => {
   })
 
   it('exposes the failing command output by scrolling the panel', async () => {
-    mockedUseWorkflowTimeline.mockReturnValue({ data: makeTimeline() } as never)
+    setWorkflowTimeline({ data: makeTimeline() })
     setLogPage( {
       lines: [
         makeLine({ seq: 1, source: 'action:rebase', text: 'Patch failed at 0001 feat: add foo' }),
@@ -269,7 +315,7 @@ describe('TaskProgressPanel — task execution log panel', () => {
     })
 
     try {
-      mockedUseWorkflowTimeline.mockReturnValue({ data: makeTimeline() } as never)
+      setWorkflowTimeline({ data: makeTimeline() })
       setLogPage({
         lines: [
           makeLine({ seq: 4999, source: 'action:rebase', text: 'CONFLICT (content): Merge conflict in src/foo.ts' }),
@@ -295,7 +341,7 @@ describe('TaskProgressPanel — task execution log panel', () => {
   })
 
   it('shows a truncation indicator when the response reports truncated: true', async () => {
-    mockedUseWorkflowTimeline.mockReturnValue({ data: makeTimeline() } as never)
+    setWorkflowTimeline({ data: makeTimeline() })
     setLogPage( {
       lines: [
         makeLine({ seq: 4999, source: 'action:rebase', text: 'CONFLICT (content): Merge conflict in src/foo.ts' }),
@@ -315,7 +361,7 @@ describe('TaskProgressPanel — task execution log panel', () => {
   })
 
   it('does NOT show the truncation indicator when truncated: false', async () => {
-    mockedUseWorkflowTimeline.mockReturnValue({ data: makeTimeline() } as never)
+    setWorkflowTimeline({ data: makeTimeline() })
     setLogPage( {
       lines: [makeLine({ seq: 1, source: 'action:rebase', text: 'ok' })],
       nextCursor: null,
@@ -333,7 +379,7 @@ describe('TaskProgressPanel — task execution log panel', () => {
   })
 
   it('renders a graceful empty state when the task has no captured log', async () => {
-    mockedUseWorkflowTimeline.mockReturnValue({ data: makeTimeline() } as never)
+    setWorkflowTimeline({ data: makeTimeline() })
     setLogPage( { lines: [], nextCursor: null, truncated: false })
 
     renderWithQueryClient(<TaskProgressPanel issueNumber={161} currentStage={WorkflowStage.Build} isAgentRunning={false} />)
@@ -345,7 +391,7 @@ describe('TaskProgressPanel — task execution log panel', () => {
   })
 
   it('renders the log panel for a completed task when expanded', async () => {
-    mockedUseWorkflowTimeline.mockReturnValue({ data: makeTimeline() } as never)
+    setWorkflowTimeline({ data: makeTimeline() })
     setLogPage( {
       lines: [makeLine({ seq: 1, source: 'action:script', text: 'completed task output' })],
       nextCursor: null,
@@ -360,20 +406,28 @@ describe('TaskProgressPanel — task execution log panel', () => {
   })
 
   it('passes the issue-path query inputs with retention limit and workflowRunId', async () => {
-    mockedUseWorkflowTimeline.mockReturnValue({ data: makeTimeline() } as never)
+    setWorkflowTimeline({ data: makeTimeline() })
     setLogPage( { lines: [], nextCursor: null, truncated: false })
 
-    renderWithQueryClient(<TaskProgressPanel issueNumber={161} currentStage={WorkflowStage.Build} isAgentRunning={false} />)
+    const { queryClient } = renderWithQueryClient(<TaskProgressPanel issueNumber={161} currentStage={WorkflowStage.Build} isAgentRunning={false} />)
 
     await expandFailedTask('Rebase onto master')
 
     await waitFor(() => {
-      expect(mockedUseIssueWorkflowTaskLog).toHaveBeenCalledWith(161, 'build-task-1', { limit: 5000 }, true, 'workflow-run-1')
+      expect(taskLogRequests).toEqual([{ issueNumber: '161', taskId: 'build-task-1', limit: '5000' }])
     })
+    expect(queryClient.getQueryState([
+      161,
+      'build-task-1',
+      'proj-1',
+      'workflow-run-1',
+      'workflow-task-log',
+      { limit: 5000 },
+    ])).toBeDefined()
   })
 
   it('keeps the task row title and status icon rendering unchanged when the panel is expanded', async () => {
-    mockedUseWorkflowTimeline.mockReturnValue({ data: makeTimeline() } as never)
+    setWorkflowTimeline({ data: makeTimeline() })
     setLogPage( { lines: [], nextCursor: null, truncated: false })
 
     renderWithQueryClient(<TaskProgressPanel issueNumber={161} currentStage={WorkflowStage.Build} isAgentRunning={false} />)
@@ -388,11 +442,10 @@ describe('TaskProgressPanel — task execution log panel', () => {
 describe('TaskProgressPanel — log query degrades gracefully', () => {
   afterEach(() => {
     cleanup()
-    vi.clearAllMocks()
   })
 
   it('renders empty state when query returns undefined data (e.g. 404 handled in hook)', async () => {
-    mockedUseWorkflowTimeline.mockReturnValue({ data: makeTimeline() } as never)
+    setWorkflowTimeline({ data: makeTimeline() })
     setLogPage( undefined)
 
     renderWithQueryClient(<TaskProgressPanel issueNumber={161} currentStage={WorkflowStage.Build} isAgentRunning={false} />)
@@ -403,7 +456,7 @@ describe('TaskProgressPanel — log query degrades gracefully', () => {
   })
 
   it('renders an "unavailable" placeholder when the query errors with a non-404 status', async () => {
-    mockedUseWorkflowTimeline.mockReturnValue({ data: makeTimeline() } as never)
+    setWorkflowTimeline({ data: makeTimeline() })
     setLogPage( { isError: true })
 
     renderWithQueryClient(<TaskProgressPanel issueNumber={161} currentStage={WorkflowStage.Build} isAgentRunning={false} />)
@@ -414,7 +467,7 @@ describe('TaskProgressPanel — log query degrades gracefully', () => {
   })
 
   it('renders a loading state when the query is in flight', async () => {
-    mockedUseWorkflowTimeline.mockReturnValue({ data: makeTimeline() } as never)
+    setWorkflowTimeline({ data: makeTimeline() })
     setLogPage( { isLoading: true })
 
     renderWithQueryClient(<TaskProgressPanel issueNumber={161} currentStage={WorkflowStage.Build} isAgentRunning={false} />)

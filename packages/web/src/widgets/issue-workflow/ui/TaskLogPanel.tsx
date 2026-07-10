@@ -3,8 +3,14 @@ import { useQueryClient } from '@tanstack/react-query'
 import type { HubConnection } from '@microsoft/signalr'
 import { DiamondIcon } from 'lucide-react'
 import { useProject } from '../../../entities/project'
-import { useIssueWorkflowTaskLog, type TaskLogLine, type TaskLogPage } from '../../../entities/issue'
+import {
+  issueWorkflowTaskLogQueryOptions,
+  useIssueWorkflowTaskLog,
+  type TaskLogLine,
+  type TaskLogPage,
+} from '../../../entities/issue'
 import { useWorkflowRunSessions } from '../../../entities/coder-session'
+import type { WorkflowRunSession } from '../../../entities/coder-session'
 import {
   useEventsConnection,
   subscribeTaskLog,
@@ -22,7 +28,26 @@ import {
   type TimelineRow,
 } from './milestones'
 
-interface TaskLogPanelProps {
+export interface TaskLogDataHookInput {
+  issueNumber: number
+  taskId: string
+  projectId: string | null | undefined
+  workflowRunId: string | null
+}
+
+export interface TaskLogDataResult {
+  data: TaskLogPage | undefined
+  isLoading: boolean
+  isError: boolean
+}
+
+export type TaskLogDataHook = (input: TaskLogDataHookInput) => TaskLogDataResult
+
+export type WorkflowRunSessionsHook = (
+  workflowRunId: string | null | undefined,
+) => { sessions: WorkflowRunSession[]; isLoading: boolean }
+
+export interface TaskLogPanelProps {
   issueNumber: number
   taskId: string
   workflowRunId?: string | null
@@ -30,6 +55,8 @@ interface TaskLogPanelProps {
   sessionName?: string | null
   origin?: { uses?: string } | null
   classification?: string | null
+  taskLogHook?: TaskLogDataHook
+  workflowSessionsHook?: WorkflowRunSessionsHook
 }
 
 const TASK_LOG_RETAINED_LIMIT = 5000
@@ -40,6 +67,15 @@ const TERMINAL_TASK_STATUSES: ReadonlySet<StageTaskStatus> = new Set<StageTaskSt
   'failed',
   'skipped',
 ])
+
+const useDefaultTaskLogData: TaskLogDataHook = ({ issueNumber, taskId, workflowRunId }) =>
+  useIssueWorkflowTaskLog(
+    issueNumber,
+    taskId,
+    { limit: TASK_LOG_RETAINED_LIMIT },
+    true,
+    workflowRunId,
+  )
 
 function formatTimestamp(iso: string): string {
   const parsed = new Date(iso)
@@ -53,16 +89,6 @@ function formatTimestamp(iso: string): string {
 
 function isTerminalStatus(status: StageTaskStatus | null | undefined): boolean {
   return !!status && TERMINAL_TASK_STATUSES.has(status)
-}
-
-function buildTaskLogQueryKey(
-  issueNumber: number,
-  taskId: string,
-  projectId: string,
-  workflowRunId: string | null,
-  params: { limit: number },
-): unknown[] {
-  return [issueNumber, taskId, projectId, workflowRunId, TASK_LOG_QUERY_KEY_NAMESPACE, params]
 }
 
 function isTaskLogEnvelope(value: unknown): value is TaskLogDeltaEnvelopeWire {
@@ -119,16 +145,17 @@ export function TaskLogPanel({
   sessionName,
   origin,
   classification,
+  taskLogHook = useDefaultTaskLogData,
+  workflowSessionsHook = useWorkflowRunSessions,
 }: TaskLogPanelProps) {
   const { projectId } = useProject()
   const queryClient = useQueryClient()
-  const { data, isLoading, isError } = useIssueWorkflowTaskLog(
+  const { data, isLoading, isError } = taskLogHook({
     issueNumber,
     taskId,
-    { limit: TASK_LOG_RETAINED_LIMIT },
-    true,
-    workflowRunId,
-  )
+    projectId,
+    workflowRunId: workflowRunId ?? null,
+  })
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const subscribedRef = useRef(false)
   const subscribedConnectionRef = useRef<HubConnection | null>(null)
@@ -147,7 +174,14 @@ export function TaskLogPanel({
     if (envelope.ownerKind !== 'workflow') return
     if (envelope.ownerId !== workflowRunId) return
     if (!projectId) return
-    const queryKey = buildTaskLogQueryKey(issueNumber, taskId, projectId, workflowRunId ?? null, { limit: TASK_LOG_RETAINED_LIMIT })
+    const queryKey = issueWorkflowTaskLogQueryOptions(
+      projectId,
+      issueNumber,
+      taskId,
+      { limit: TASK_LOG_RETAINED_LIMIT },
+      true,
+      workflowRunId,
+    ).queryKey
     queryClient.setQueryData<TaskLogPage | undefined>(queryKey, (current) => mergeTaskLogDelta(current, envelope))
   }
 
@@ -160,7 +194,7 @@ export function TaskLogPanel({
 
   const isAgentTask = isAcpAgentTask({ origin: origin ?? null, sessionName: sessionName ?? null, classification: classification ?? null })
   const trimmedSessionName = typeof sessionName === 'string' ? sessionName.trim() : ''
-  const { sessions, isLoading: sessionsLoading } = useWorkflowRunSessions(isAgentTask && trimmedSessionName.length > 0 ? workflowRunId ?? null : null)
+  const { sessions, isLoading: sessionsLoading } = workflowSessionsHook(isAgentTask && trimmedSessionName.length > 0 ? workflowRunId ?? null : null)
   const resolvedSession = useMemo(() => {
     if (!isAgentTask || trimmedSessionName.length === 0) return null
     const match = sessions.find((s) => s.sessionName === trimmedSessionName)

@@ -1,40 +1,13 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import App from './App'
-
-const projectMocks = vi.hoisted(() => ({
-  useProjects: vi.fn(),
-}))
-
-const epicMocks = vi.hoisted(() => ({
-  useEpic: vi.fn(),
-}))
-
-const eventMocks = vi.hoisted(() => ({
-  useEventsConnection: vi.fn(),
-}))
-
-const inboxMocks = vi.hoisted(() => ({
-  useInbox: vi.fn(),
-  useMarkInboxItemRead: vi.fn(),
-  useMarkAllInboxRead: vi.fn(),
-  useArchiveInboxItem: vi.fn(),
-}))
-
-const logsMocks = vi.hoisted(() => ({
-  useLogs: vi.fn(),
-}))
-
-const metricsMocks = vi.hoisted(() => ({
-  useCompletionThroughput: vi.fn(),
-  useDeliveryTime: vi.fn(),
-  useQualityMetrics: vi.fn(),
-  useCostRollup: vi.fn(),
-  useStageDuration: vi.fn(),
-}))
+import { BrowserRouter } from 'react-router-dom'
+import { http, HttpResponse } from 'msw'
+import { useMswServer } from '../../tests/support/msw'
+import { ProjectProvider } from '../entities/project'
+import { AppContent } from './App'
 
 const TEST_PROJECT = {
   id: 'test-project',
@@ -44,68 +17,86 @@ const TEST_PROJECT = {
   repositories: [],
 }
 
-vi.mock('../entities/project', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../entities/project')>()
-  return {
-    ...actual,
-    useProjects: projectMocks.useProjects,
-  }
-})
+let logRequests = 0
+let inboxRequests = 0
+let projectsData = [TEST_PROJECT]
 
-vi.mock('../entities/agent', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../entities/agent')>()
-  return {
-    ...actual,
-    useAgentStatus: () => ({
+useMswServer(
+  http.get('*/api/projects', () =>
+    HttpResponse.json({ success: true, data: projectsData }),
+  ),
+  http.get('*/api/projects/:projectId/inbox', () => {
+    inboxRequests++
+    return HttpResponse.json({ success: true, data: [] })
+  }),
+  http.get('*/api/projects/:projectId/agent/status', () =>
+    HttpResponse.json({
+      success: true,
       data: { running: false, activeAgents: [], capacity: { active: 0, max: 8 } },
     }),
-    useCostRollup: metricsMocks.useCostRollup,
-  }
-})
+  ),
+  http.get('*/api/projects/:projectId/agent/cost', () =>
+    HttpResponse.json({
+      success: true,
+      data: {
+        totalCost: { amount: null, currency: null, sampleCount: 0 },
+        todayCost: { amount: null, currency: null, sampleCount: 0 },
+        doneIssuesCount: 0,
+        costPerShip: { amount: null, currency: null, sampleCount: 0 },
+      },
+    }),
+  ),
+  http.get('*/api/projects/:projectId/issues/metrics/completion', () =>
+    HttpResponse.json({ success: true, data: { bucket: 'day', window: null, buckets: [] } }),
+  ),
+  http.get('*/api/projects/:projectId/issues/metrics/delivery-time', () =>
+    HttpResponse.json({ success: true, data: { points: [] } }),
+  ),
+  http.get('*/api/projects/:projectId/issues/metrics/quality', () =>
+    HttpResponse.json({ success: true, data: { window: null } }),
+  ),
+  http.get('*/api/projects/:projectId/issues/metrics/stage-duration', () =>
+    HttpResponse.json({
+      success: true,
+      data: { window: null, stages: [], flowEfficiencyRatio: null, waitBreakout: null },
+    }),
+  ),
+  http.get('*/logs/tail', () => {
+    logRequests++
+    return HttpResponse.json({
+      success: true,
+      data: {
+        lines: [],
+        loading: false,
+        error: null,
+        cursor: null,
+        nextCursor: null,
+        source: null,
+        unavailable: false,
+        expectedLocation: null,
+        reason: null,
+        truncated: false,
+        reset: false,
+      },
+    })
+  }),
+)
 
-vi.mock('../entities/epic', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../entities/epic')>()
-  return {
-    ...actual,
-    useEpic: epicMocks.useEpic,
-  }
-})
-
-vi.mock('../shared/api/events-hub', () => ({
-  useEventsConnection: (...args: unknown[]) => eventMocks.useEventsConnection(...args),
-}))
-
-vi.mock('../entities/inbox', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../entities/inbox')>()
-  return {
-    ...actual,
-    useInbox: inboxMocks.useInbox,
-    useMarkInboxItemRead: inboxMocks.useMarkInboxItemRead,
-    useMarkAllInboxRead: inboxMocks.useMarkAllInboxRead,
-    useArchiveInboxItem: inboxMocks.useArchiveInboxItem,
-  }
-})
-
-vi.mock('../pages/logs/model/useLogs', () => ({
-  useLogs: logsMocks.useLogs,
-}))
-
-vi.mock('../entities/issue', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../entities/issue')>()
-  return {
-    ...actual,
-    useCompletionThroughput: metricsMocks.useCompletionThroughput,
-    useDeliveryTime: metricsMocks.useDeliveryTime,
-    useQualityMetrics: metricsMocks.useQualityMetrics,
-    useStageDuration: metricsMocks.useStageDuration,
-  }
+beforeEach(() => {
+  logRequests = 0
+  inboxRequests = 0
+  projectsData = [TEST_PROJECT]
 })
 
 function renderApp() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <QueryClientProvider client={queryClient}>
-      <App />
+      <ProjectProvider>
+        <BrowserRouter>
+          <AppContent />
+        </BrowserRouter>
+      </ProjectProvider>
     </QueryClientProvider>,
   )
 }
@@ -119,35 +110,6 @@ function getShellContentContainer(): HTMLElement | null {
 describe('App shell bottom spacing for mobile bottom nav', () => {
   beforeEach(() => {
     window.history.replaceState({}, '', '/demo')
-    projectMocks.useProjects.mockReturnValue({
-      data: [TEST_PROJECT],
-      isLoading: false,
-    })
-    epicMocks.useEpic.mockReturnValue({ data: undefined, isLoading: false })
-    eventMocks.useEventsConnection.mockReturnValue({ status: 'disconnected', connection: null })
-    inboxMocks.useInbox.mockReturnValue({ data: [], isLoading: false })
-    inboxMocks.useMarkInboxItemRead.mockReturnValue({ mutate: vi.fn(), isPending: false })
-    inboxMocks.useMarkAllInboxRead.mockReturnValue({ mutate: vi.fn(), isPending: false })
-    inboxMocks.useArchiveInboxItem.mockReturnValue({ mutate: vi.fn(), isPending: false })
-    logsMocks.useLogs.mockReturnValue({
-      entries: [],
-      loading: false,
-      error: null,
-      refresh: vi.fn(),
-      cursor: null,
-      nextCursor: null,
-      source: null,
-      unavailable: false,
-      expectedLocation: null,
-      reason: null,
-      truncated: false,
-      reset: false,
-    })
-    metricsMocks.useCompletionThroughput.mockReturnValue({ data: undefined, isLoading: false })
-    metricsMocks.useDeliveryTime.mockReturnValue({ data: undefined, isLoading: false })
-    metricsMocks.useQualityMetrics.mockReturnValue({ data: undefined, isLoading: false })
-    metricsMocks.useCostRollup.mockReturnValue({ data: undefined, isLoading: false })
-    metricsMocks.useStageDuration.mockReturnValue({ data: undefined, isLoading: false })
   })
 
   afterEach(() => {
@@ -177,75 +139,43 @@ describe('App shell bottom spacing for mobile bottom nav', () => {
     expect(classNames).not.toContain('pb-14')
   })
 
-  it('routes /:projectName/inbox to the project inbox page', () => {
+  it('routes /:projectName/inbox to the project inbox page', async () => {
     window.history.replaceState({}, '', '/demo/inbox')
 
-    const { getByTestId } = renderApp()
+    renderApp()
 
-    expect(getByTestId('inbox-title')).toHaveTextContent('Inbox')
-    expect(inboxMocks.useInbox).toHaveBeenCalled()
+    expect(await screen.findByTestId('inbox-title')).toHaveTextContent('Inbox')
+    await waitFor(() => expect(inboxRequests).toBeGreaterThan(0))
   })
 
-  it('routes /:projectName/insights to the Insights page and keeps the Dashboard unreachable on the same URL', () => {
+  it('routes /:projectName/insights to the Insights page and keeps the Dashboard unreachable on the same URL', async () => {
     window.history.replaceState({}, '', '/demo/insights')
 
-    const { getByTestId, queryByTestId } = renderApp()
+    renderApp()
 
-    expect(getByTestId('insights-title')).toHaveTextContent('Insights')
-    expect(queryByTestId('signal-summary')).not.toBeInTheDocument()
-    expect(queryByTestId('insights-signal-section')).not.toBeInTheDocument()
-    expect(getByTestId('insights-charts')).toBeInTheDocument()
+    expect(await screen.findByTestId('insights-title')).toHaveTextContent('Insights')
+    expect(screen.queryByTestId('signal-summary')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('insights-signal-section')).not.toBeInTheDocument()
+    expect(screen.getByTestId('insights-charts')).toBeInTheDocument()
     // Dashboard content must not appear on the insights route.
-    expect(queryByTestId('dashboard-page')).toBeNull()
+    expect(screen.queryByTestId('dashboard-page')).toBeNull()
   })
 })
 
 describe('App routing split for settings scopes', () => {
-  beforeEach(() => {
-    projectMocks.useProjects.mockReturnValue({
-      data: [TEST_PROJECT],
-      isLoading: false,
-    })
-    epicMocks.useEpic.mockReturnValue({ data: undefined, isLoading: false })
-    eventMocks.useEventsConnection.mockReturnValue({ status: 'disconnected', connection: null })
-    inboxMocks.useInbox.mockReturnValue({ data: [], isLoading: false })
-    inboxMocks.useMarkInboxItemRead.mockReturnValue({ mutate: vi.fn(), isPending: false })
-    inboxMocks.useMarkAllInboxRead.mockReturnValue({ mutate: vi.fn(), isPending: false })
-    inboxMocks.useArchiveInboxItem.mockReturnValue({ mutate: vi.fn(), isPending: false })
-    logsMocks.useLogs.mockReturnValue({
-      entries: [],
-      loading: false,
-      error: null,
-      refresh: vi.fn(),
-      cursor: null,
-      nextCursor: null,
-      source: null,
-      unavailable: false,
-      expectedLocation: null,
-      reason: null,
-      truncated: false,
-      reset: false,
-    })
-    metricsMocks.useCompletionThroughput.mockReturnValue({ data: undefined, isLoading: false })
-    metricsMocks.useDeliveryTime.mockReturnValue({ data: undefined, isLoading: false })
-    metricsMocks.useQualityMetrics.mockReturnValue({ data: undefined, isLoading: false })
-    metricsMocks.useCostRollup.mockReturnValue({ data: undefined, isLoading: false })
-    metricsMocks.useStageDuration.mockReturnValue({ data: undefined, isLoading: false })
-  })
-
   afterEach(() => {
     cleanup()
     window.history.replaceState({}, '', '/')
     window.localStorage.clear()
   })
 
-  it('redirects legacy /:projectName/settings/ai (global section under project scope) to /settings/ai', () => {
+  it('redirects legacy /:projectName/settings/ai (global section under project scope) to /settings/ai', async () => {
     window.history.replaceState({}, '', '/demo/settings/ai')
 
     renderApp()
 
     // After the replace navigation, the URL must be the application-scope URL.
-    expect(window.location.pathname).toBe('/settings/ai')
+    await waitFor(() => expect(window.location.pathname).toBe('/settings/ai'))
   })
 
   it('renders /settings/ai without showing the "No projects yet" gate even when projects exist', () => {
@@ -266,11 +196,11 @@ describe('App routing split for settings scopes', () => {
     expect(window.location.pathname).toBe('/demo/settings/repositories')
   })
 
-  it('redirects legacy /:projectName/settings/agent, /system, /preferences to the application scope', () => {
+  it('redirects legacy /:projectName/settings/agent, /system, /preferences to the application scope', async () => {
     for (const section of ['agent', 'system', 'preferences']) {
       window.history.replaceState({}, '', `/demo/settings/${section}`)
       renderApp()
-      expect(window.location.pathname).toBe(`/settings/${section}`)
+      await waitFor(() => expect(window.location.pathname).toBe(`/settings/${section}`))
       cleanup()
     }
   })
@@ -285,7 +215,7 @@ describe('App routing split for settings scopes', () => {
   })
 
   it('keeps application settings reachable when no project exists (no "No projects yet" prompt)', () => {
-    projectMocks.useProjects.mockReturnValue({ data: [], isLoading: false })
+    projectsData = []
     window.history.replaceState({}, '', '/settings/ai')
 
     const { queryByText } = renderApp()
@@ -294,7 +224,7 @@ describe('App routing split for settings scopes', () => {
   })
 
   it('does not serve project settings from /settings/<project-section> when no project exists', () => {
-    projectMocks.useProjects.mockReturnValue({ data: [], isLoading: false })
+    projectsData = []
     window.history.replaceState({}, '', '/settings/repositories')
 
     const { queryByText, queryByTestId } = renderApp()
@@ -329,8 +259,10 @@ describe('App routing split for settings scopes', () => {
     await waitFor(() => {
       expect(window.location.pathname).toBe('/demo/logs')
     })
-    expect(logsMocks.useLogs).toHaveBeenCalled()
-    expect(screen.getByText('No matching logs')).toBeInTheDocument()
+    await waitFor(() => {
+      expect(logRequests).toBeGreaterThan(0)
+      expect(screen.getByText('No matching logs')).toBeInTheDocument()
+    })
   })
 
   it('renders /settings/<app-section> on the application scope (no project prefix) for every global section', () => {

@@ -7,7 +7,7 @@ import { http, HttpResponse } from 'msw'
 import { ProjectProvider } from '../../../entities/project'
 import type { AgentInfo } from '../../../entities/agent'
 import { server, useMswServer } from '../../../../tests/support/msw'
-import { AgentListPage } from './AgentListPage'
+import { AgentListPage, type AgentListPageComponents } from './AgentListPage'
 
 const AGENTS_PATH = '*/api/projects/:projectId/agents'
 const STATUS_PATH = '*/api/projects/:projectId/agent/status'
@@ -26,10 +26,11 @@ useMswServer(
   ),
 )
 
-vi.mock('../../../widgets/agent-profile-editor/ui/AgentProfileEditor', () => ({
-  AgentProfileEditor: ({ agent, open }: { agent?: AgentInfo | null; open: boolean }) =>
-    open ? <div data-testid="agent-profile-editor" data-mode={agent === null ? 'create' : 'edit'} /> : null,
-}))
+const components: AgentListPageComponents = {
+  AgentProfileEditor: ({ agent, open }) => (
+    open ? <div data-testid="agent-profile-editor" data-mode={agent === null ? 'create' : 'edit'} /> : null
+  ),
+}
 
 function LocationProbe() {
   const location = useLocation()
@@ -50,7 +51,7 @@ function renderPage() {
         repositories: [],
       }]}>
         <MemoryRouter initialEntries={['/agents']}>
-          <AgentListPage />
+          <AgentListPage components={components} />
           <LocationProbe />
         </MemoryRouter>
       </ProjectProvider>

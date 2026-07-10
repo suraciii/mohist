@@ -2,15 +2,29 @@ import { useState, useEffect, useCallback, useMemo } from 'react'
 import { IssueStatus, IssueHealth, WorkflowStage, useWorkflowTimeline } from '../../../entities/issue'
 import type { Issue } from '../../../entities/issue'
 import { StageBar, workflowTimelineToStageStateMap, WORKFLOW_STAGES } from './StageBar'
-import { StepList } from './InlineApproval'
+import { StepList, type StepListDependencies } from './InlineApproval'
 import { SpecialStatePanel, IntegrateFailurePanel } from './failure-panels'
 
-export function WorkflowView({ issue, readOnly: readOnlyProp = false }: { issue: Issue; readOnly?: boolean }) {
+export type WorkflowTimelineHook = (
+  ...args: Parameters<typeof useWorkflowTimeline>
+) => Pick<ReturnType<typeof useWorkflowTimeline>, 'data'>
+
+export function WorkflowView({
+  issue,
+  readOnly: readOnlyProp = false,
+  dependencies,
+  timelineHook = useWorkflowTimeline,
+}: {
+  issue: Issue
+  readOnly?: boolean
+  dependencies?: Partial<StepListDependencies>
+  timelineHook?: WorkflowTimelineHook
+}) {
   const isClosed = issue.status === IssueStatus.Cancelled
   const isCompleted = issue.status === IssueStatus.Done
   const isBacklog = issue.status === IssueStatus.Backlog
   const readOnly = readOnlyProp || isClosed
-  const { data: timeline } = useWorkflowTimeline(issue.number, !isBacklog)
+  const { data: timeline } = timelineHook(issue.number, !isBacklog)
   const stageStateMap = useMemo(() => workflowTimelineToStageStateMap(timeline), [timeline])
 
   const getDefaultStage = useCallback((): WorkflowStage => {
@@ -55,6 +69,7 @@ export function WorkflowView({ issue, readOnly: readOnlyProp = false }: { issue:
           stageStateMap={stageStateMap}
           issue={issue}
           readOnly={readOnly}
+          dependencies={dependencies}
         />
       )}
 

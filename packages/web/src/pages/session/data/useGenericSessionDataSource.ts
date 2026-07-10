@@ -9,6 +9,24 @@ import { buildGenericSessionMetadata } from './buildGenericSessionMetadata'
 import type { SessionCancelOptions, SessionDataSourceResult, StatusKind } from './SessionDataSource'
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
 
+export interface GenericSessionDataSourceDependencies {
+  useSessionTranscript: typeof useSessionTranscript
+  projectTurn: typeof projectTurn
+  useGenericSessionSummary: typeof useGenericSessionSummary
+  useGenericSessionTranscript: typeof useGenericSessionTranscript
+  useGenericFollowup: typeof useGenericFollowup
+  useCancelGenericSession: typeof useCancelGenericSession
+}
+
+const defaultDependencies: GenericSessionDataSourceDependencies = {
+  useSessionTranscript,
+  projectTurn,
+  useGenericSessionSummary,
+  useGenericSessionTranscript,
+  useGenericFollowup,
+  useCancelGenericSession,
+}
+
 function getSessionStatusKind(
   rawStatus: string | undefined,
   lastActivityAt: string | null | undefined,
@@ -28,7 +46,17 @@ function getSessionStatusKind(
   return 'live'
 }
 
-export function useGenericSessionDataSource(): SessionDataSourceResult {
+export function useGenericSessionDataSource(
+  dependencies: GenericSessionDataSourceDependencies = defaultDependencies,
+): SessionDataSourceResult {
+  const {
+    useSessionTranscript: useTranscript,
+    projectTurn: projectTranscriptTurn,
+    useGenericSessionSummary: useSummary,
+    useGenericSessionTranscript: useTranscriptResponse,
+    useGenericFollowup: useFollowup,
+    useCancelGenericSession: useCancel,
+  } = dependencies
   const { sessionId: rawSessionId } = useParams<{ sessionId: string }>()
   const { projectId } = useProject()
   const toProjectPath = useProjectPath()
@@ -37,10 +65,10 @@ export function useGenericSessionDataSource(): SessionDataSourceResult {
 
   useDocumentTitle(`Session — Mohist`)
 
-  const { data: summary, isLoading: summaryLoading, isError: summaryError } = useGenericSessionSummary(sessionId)
-  const { data: transcriptResponse } = useGenericSessionTranscript(sessionId)
-  const genericFollowup = useGenericFollowup()
-  const cancelGeneric = useCancelGenericSession()
+  const { data: summary, isLoading: summaryLoading, isError: summaryError } = useSummary(sessionId)
+  const { data: transcriptResponse } = useTranscriptResponse(sessionId)
+  const genericFollowup = useFollowup()
+  const cancelGeneric = useCancel()
 
   const initialTurns = useMemo<SessionTurn[]>(() => transcriptResponse?.turns ?? [], [transcriptResponse])
 
@@ -80,7 +108,7 @@ export function useGenericSessionDataSource(): SessionDataSourceResult {
     isFinalizing,
     isThinking,
     isStreaming,
-  } = useSessionTranscript({
+  } = useTranscript({
     issueNumber: 0,
     sessionId,
     acpSessionId: sessionId,
@@ -92,7 +120,7 @@ export function useGenericSessionDataSource(): SessionDataSourceResult {
 
   const displayStatusKind: StatusKind = isFinalizing && isRunning ? 'finalizing' : statusKind
 
-  const displayTurns = useMemo(() => turns.map((turn) => projectTurn(turn)), [turns])
+  const displayTurns = useMemo(() => turns.map((turn) => projectTranscriptTurn(turn)), [turns, projectTranscriptTurn])
 
   // Determine back link: if context ref has issueNumber, link to issue; else link to agent profile
   const hasIssueContextRef = summary?.contextRefs?.issueNumber != null

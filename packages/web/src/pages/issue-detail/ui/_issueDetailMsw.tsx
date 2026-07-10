@@ -9,6 +9,8 @@ const PROJECT_DEFAULT = '*/api/projects/:projectId/workflow-profile'
 const SYSTEM_PROFILES = '*/api/workflow-templates/system*'
 const RUN_YAML = '*/api/workflow-runs/:runId/yaml'
 
+let currentIssue: Record<string, unknown> | null = null
+
 export interface IssueDetailFixture {
   issue: Record<string, unknown>
 }
@@ -102,11 +104,17 @@ function issueDetailHandlers({ issue }: IssueDetailFixture) {
 }
 
 export function mountIssueDetail(fixture: IssueDetailFixture) {
+  currentIssue = fixture.issue
   useMswServer(...issueDetailHandlers(fixture))
 }
 
 export function mockIssue(issue: Record<string, unknown>) {
+  currentIssue = issue
   server.use(http.get(ISSUES, () => HttpResponse.json({ success: true, data: issue })))
+}
+
+export function getCurrentIssueFixture() {
+  return currentIssue
 }
 
 export function mockIssueDiff(diff: Record<string, unknown> | null) {

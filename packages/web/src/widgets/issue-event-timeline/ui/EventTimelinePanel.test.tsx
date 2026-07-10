@@ -1,13 +1,20 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { render, screen, fireEvent, within } from '@testing-library/react'
-import { EventTimelinePanel } from './EventTimelinePanel'
+import { beforeEach, describe, expect, it } from 'vitest'
+import { fireEvent, screen, waitFor, within } from '@testing-library/react'
+import { useEffect, type ComponentProps } from 'react'
+import { render } from '../../../../tests/test-utils'
+import { EventTimelinePanel, EventTimelinePanelView } from './EventTimelinePanel'
 import type { TimelineEntry } from '../model/types'
+import type { EventTimelineHistoryHook } from '../useEventTimeline'
 
-vi.mock('../useEventTimeline', () => ({
-  useEventTimeline: vi.fn(),
-}))
+let timeline = { entries: [] as TimelineEntry[], isLoading: false }
+let requestedIssueNumbers: string[] = []
 
-import { useEventTimeline } from '../useEventTimeline'
+const historyHook: EventTimelineHistoryHook = (issueNumber, enabled) => {
+  useEffect(() => {
+    if (enabled) requestedIssueNumbers.push(String(issueNumber))
+  }, [issueNumber, enabled])
+  return { data: [], isLoading: false }
+}
 
 function makeEntry(overrides: Partial<TimelineEntry> = {}): TimelineEntry {
   return {
@@ -25,21 +32,34 @@ function makeEntry(overrides: Partial<TimelineEntry> = {}): TimelineEntry {
   }
 }
 
+function renderTimelineView(
+  props: Partial<ComponentProps<typeof EventTimelinePanelView>> = {},
+) {
+  return render(
+    <EventTimelinePanelView
+      entries={timeline.entries}
+      isLoading={timeline.isLoading}
+      {...props}
+    />,
+  )
+}
+
 beforeEach(() => {
-  vi.mocked(useEventTimeline).mockReturnValue({ entries: [], isLoading: false })
+  timeline = { entries: [], isLoading: false }
+  requestedIssueNumbers = []
 })
 
 describe('EventTimelinePanel', () => {
   it('renders the panel and rows', () => {
-    vi.mocked(useEventTimeline).mockReturnValue({
+    timeline = {
       entries: [
         makeEntry({ id: '1', description: 'Run started', category: 'workflow' }),
         makeEntry({ id: '2', description: 'Stage moved from Plan to Build', category: 'workflow' }),
       ],
       isLoading: false,
-    })
+    }
 
-    render(<EventTimelinePanel issueNumber={42} issueId="issue-42" workflowStatus="running" />)
+    renderTimelineView({ workflowStatus: 'running' })
 
     expect(screen.getByTestId('event-timeline-panel')).toBeInTheDocument()
     expect(screen.getAllByTestId('event-timeline-row')).toHaveLength(2)
@@ -48,44 +68,44 @@ describe('EventTimelinePanel', () => {
   })
 
   it('shows empty state when no events', () => {
-    render(<EventTimelinePanel issueNumber={42} issueId="issue-42" />)
+    renderTimelineView()
 
     expect(screen.getByTestId('timeline-empty-state')).toBeInTheDocument()
     expect(screen.getByText('No activity yet.')).toBeInTheDocument()
   })
 
   it('shows pulsing live badge when workflow is running', () => {
-    vi.mocked(useEventTimeline).mockReturnValue({
+    timeline = {
       entries: [makeEntry()],
       isLoading: false,
-    })
+    }
 
-    render(<EventTimelinePanel issueNumber={42} issueId="issue-42" workflowStatus="running" />)
+    renderTimelineView({ workflowStatus: 'running' })
 
     expect(screen.getByTestId('timeline-live-badge')).toBeInTheDocument()
   })
 
   it('shows de-emphasized live badge when workflow is inactive', () => {
-    vi.mocked(useEventTimeline).mockReturnValue({
+    timeline = {
       entries: [makeEntry()],
       isLoading: false,
-    })
+    }
 
-    render(<EventTimelinePanel issueNumber={42} issueId="issue-42" workflowStatus="completed" />)
+    renderTimelineView({ workflowStatus: 'completed' })
 
     expect(screen.getByTestId('timeline-inactive-badge')).toBeInTheDocument()
   })
 
   it('filters events by category', () => {
-    vi.mocked(useEventTimeline).mockReturnValue({
+    timeline = {
       entries: [
         makeEntry({ id: '1', category: 'workflow', description: 'Run started' }),
         makeEntry({ id: '2', category: 'failure', description: 'Run failed', attention: true }),
       ],
       isLoading: false,
-    })
+    }
 
-    render(<EventTimelinePanel issueNumber={42} issueId="issue-42" />)
+    renderTimelineView()
 
     expect(screen.getAllByTestId('event-timeline-row')).toHaveLength(2)
 
@@ -101,31 +121,31 @@ describe('EventTimelinePanel', () => {
   })
 
   it('shows category counts on chips', () => {
-    vi.mocked(useEventTimeline).mockReturnValue({
+    timeline = {
       entries: [
         makeEntry({ id: '1', category: 'workflow' }),
         makeEntry({ id: '2', category: 'workflow' }),
         makeEntry({ id: '3', category: 'failure', attention: true }),
       ],
       isLoading: false,
-    })
+    }
 
-    render(<EventTimelinePanel issueNumber={42} issueId="issue-42" />)
+    renderTimelineView()
 
     expect(screen.getByTestId('category-filter-workflow')).toHaveTextContent('2')
     expect(screen.getByTestId('category-filter-failure')).toHaveTextContent('1')
   })
 
   it('toggles order between newest-first and chronological', () => {
-    vi.mocked(useEventTimeline).mockReturnValue({
+    timeline = {
       entries: [
         makeEntry({ id: '1', time: '2026-06-18T10:00:00.000Z', description: 'First' }),
         makeEntry({ id: '2', time: '2026-06-18T11:00:00.000Z', description: 'Second' }),
       ],
       isLoading: false,
-    })
+    }
 
-    render(<EventTimelinePanel issueNumber={42} issueId="issue-42" />)
+    renderTimelineView()
 
     const rows = screen.getAllByTestId('event-timeline-row')
     expect(rows[0]).toHaveTextContent('Second')
@@ -139,44 +159,44 @@ describe('EventTimelinePanel', () => {
   })
 
   it('renders source tags on rows', () => {
-    vi.mocked(useEventTimeline).mockReturnValue({
+    timeline = {
       entries: [
         makeEntry({ id: '1', source: 'ISSUE', description: 'Issue labeled bug' }),
         makeEntry({ id: '2', source: 'WORKFLOW', description: 'Run started' }),
       ],
       isLoading: false,
-    })
+    }
 
-    render(<EventTimelinePanel issueNumber={42} issueId="issue-42" />)
+    renderTimelineView()
 
     expect(screen.getByText('ISSUE')).toBeInTheDocument()
     expect(screen.getByText('WORKFLOW')).toBeInTheDocument()
   })
 
   it('renders sticky day separators when feed spans days', () => {
-    vi.mocked(useEventTimeline).mockReturnValue({
+    timeline = {
       entries: [
         makeEntry({ id: '1', time: '2026-06-17T10:00:00.000Z', description: 'Earlier day' }),
         makeEntry({ id: '2', time: '2026-06-18T10:00:00.000Z', description: 'Later day' }),
       ],
       isLoading: false,
-    })
+    }
 
-    render(<EventTimelinePanel issueNumber={42} issueId="issue-42" />)
+    renderTimelineView()
 
     const separators = screen.getAllByText(/Jun (17|18), 2026/)
     expect(separators.length).toBeGreaterThanOrEqual(2)
   })
 
   it('expands failure detail inline', () => {
-    vi.mocked(useEventTimeline).mockReturnValue({
+    timeline = {
       entries: [
         makeEntry({ id: '1', category: 'failure', attention: true, description: 'Run failed', detail: 'compile error' }),
       ],
       isLoading: false,
-    })
+    }
 
-    render(<EventTimelinePanel issueNumber={42} issueId="issue-42" />)
+    renderTimelineView()
 
     expect(screen.queryByTestId('event-detail')).not.toBeInTheDocument()
     fireEvent.click(screen.getByTestId('event-detail-toggle'))
@@ -184,36 +204,44 @@ describe('EventTimelinePanel', () => {
   })
 
   it('expands attention-required detail inline', () => {
-    vi.mocked(useEventTimeline).mockReturnValue({
+    timeline = {
       entries: [
         makeEntry({ id: '1', category: 'approval', attention: true, description: 'Approval requested', detail: 'needs review' }),
       ],
       isLoading: false,
-    })
+    }
 
-    render(<EventTimelinePanel issueNumber={42} issueId="issue-42" />)
+    renderTimelineView()
 
     expect(screen.queryByTestId('event-detail')).not.toBeInTheDocument()
     fireEvent.click(screen.getByTestId('event-detail-toggle'))
     expect(screen.getByTestId('event-detail')).toHaveTextContent('needs review')
   })
 
-  it('forwards enabled=false to useEventTimeline when the panel is mounted in lazy/dialog mode', () => {
-    vi.mocked(useEventTimeline).mockClear()
-    vi.mocked(useEventTimeline).mockReturnValue({ entries: [], isLoading: false })
+  it('does not load history when the panel is mounted disabled in lazy/dialog mode', async () => {
+    render(
+      <EventTimelinePanel
+        issueNumber={42}
+        issueId="issue-42"
+        enabled={false}
+        historyHook={historyHook}
+      />,
+    )
 
-    render(<EventTimelinePanel issueNumber={42} issueId="issue-42" enabled={false} />)
-
-    expect(useEventTimeline).toHaveBeenLastCalledWith(42, 'issue-42', false)
+    await waitFor(() => {
+      expect(screen.getByTestId('timeline-empty-state')).toBeInTheDocument()
+    })
+    expect(requestedIssueNumbers).toEqual([])
   })
 
-  it('forwards enabled=true to useEventTimeline by default', () => {
-    vi.mocked(useEventTimeline).mockClear()
-    vi.mocked(useEventTimeline).mockReturnValue({ entries: [], isLoading: false })
+  it('loads history for the issue by default', async () => {
+    render(
+      <EventTimelinePanel issueNumber={42} issueId="issue-42" historyHook={historyHook} />,
+    )
 
-    render(<EventTimelinePanel issueNumber={42} issueId="issue-42" />)
-
-    expect(useEventTimeline).toHaveBeenLastCalledWith(42, 'issue-42', true)
+    await waitFor(() => {
+      expect(requestedIssueNumbers).toEqual(['42'])
+    })
   })
 
   describe('neutral visual treatment (issue-180 T-002)', () => {
@@ -234,7 +262,7 @@ describe('EventTimelinePanel', () => {
     ]
 
     it('renders regular categories in neutral monochrome with no category badge and no full-row tint', () => {
-      vi.mocked(useEventTimeline).mockReturnValue({
+      timeline = {
         entries: [
           makeEntry({ id: 'wf', category: 'workflow', description: 'Run started' }),
           makeEntry({ id: 'ap', category: 'approval', description: 'Approved' }),
@@ -243,9 +271,9 @@ describe('EventTimelinePanel', () => {
           makeEntry({ id: 'md', category: 'metadata', description: 'Edited' }),
         ],
         isLoading: false,
-      })
+      }
 
-      render(<EventTimelinePanel issueNumber={42} issueId="issue-42" />)
+      renderTimelineView()
 
       const rows = screen.getAllByTestId('event-timeline-row')
       expect(rows).toHaveLength(5)
@@ -265,7 +293,7 @@ describe('EventTimelinePanel', () => {
     })
 
     it('renders failure events with a colored marker accent but no full-row tinted background', () => {
-      vi.mocked(useEventTimeline).mockReturnValue({
+      timeline = {
         entries: [
           makeEntry({
             id: 'fail',
@@ -275,9 +303,9 @@ describe('EventTimelinePanel', () => {
           }),
         ],
         isLoading: false,
-      })
+      }
 
-      render(<EventTimelinePanel issueNumber={42} issueId="issue-42" />)
+      renderTimelineView()
 
       const row = screen.getByTestId('event-timeline-row')
       expect(row.className).not.toContain('bg-red-50')
@@ -288,7 +316,7 @@ describe('EventTimelinePanel', () => {
     })
 
     it('renders attention-required events with a colored marker accent but no full-row tinted background', () => {
-      vi.mocked(useEventTimeline).mockReturnValue({
+      timeline = {
         entries: [
           makeEntry({
             id: 'approval-attention',
@@ -298,9 +326,9 @@ describe('EventTimelinePanel', () => {
           }),
         ],
         isLoading: false,
-      })
+      }
 
-      render(<EventTimelinePanel issueNumber={42} issueId="issue-42" />)
+      renderTimelineView()
 
       const row = screen.getByTestId('event-timeline-row')
       expect(row.getAttribute('data-attention')).toBe('true')
@@ -312,7 +340,7 @@ describe('EventTimelinePanel', () => {
     })
 
     it('uses a neutral light background for expanded failure detail (no bg-gray-900)', () => {
-      vi.mocked(useEventTimeline).mockReturnValue({
+      timeline = {
         entries: [
           makeEntry({
             id: 'fail-detail',
@@ -323,9 +351,9 @@ describe('EventTimelinePanel', () => {
           }),
         ],
         isLoading: false,
-      })
+      }
 
-      render(<EventTimelinePanel issueNumber={42} issueId="issue-42" />)
+      renderTimelineView()
 
       fireEvent.click(screen.getByTestId('event-detail-toggle'))
 
@@ -336,7 +364,7 @@ describe('EventTimelinePanel', () => {
     })
 
     it('keeps expandable event detail controls large enough for mobile touch targets', () => {
-      vi.mocked(useEventTimeline).mockReturnValue({
+      timeline = {
         entries: [
           makeEntry({
             id: 'fail-touch-target',
@@ -347,12 +375,12 @@ describe('EventTimelinePanel', () => {
           }),
         ],
         isLoading: false,
-      })
+      }
 
       Object.defineProperty(window, 'innerWidth', { configurable: true, value: 375 })
       window.dispatchEvent(new Event('resize'))
 
-      render(<EventTimelinePanel issueNumber={42} issueId="issue-42" />)
+      renderTimelineView()
 
       const toggle = screen.getByTestId('event-detail-toggle')
       expect(toggle).toHaveClass('min-h-11')
@@ -360,7 +388,7 @@ describe('EventTimelinePanel', () => {
     })
 
     it('does not apply slide-in-from-top entrance animation to live events', () => {
-      vi.mocked(useEventTimeline).mockReturnValue({
+      timeline = {
         entries: [
           makeEntry({
             id: 'live',
@@ -369,9 +397,9 @@ describe('EventTimelinePanel', () => {
           }),
         ],
         isLoading: false,
-      })
+      }
 
-      render(<EventTimelinePanel issueNumber={42} issueId="issue-42" />)
+      renderTimelineView()
 
       const liveRow = screen.getByTestId('event-timeline-row')
       expect(liveRow.getAttribute('data-live')).toBe('true')
@@ -380,7 +408,7 @@ describe('EventTimelinePanel', () => {
     })
 
     it('keeps category filter chips usable to narrow the list by selected category', () => {
-      vi.mocked(useEventTimeline).mockReturnValue({
+      timeline = {
         entries: [
           makeEntry({ id: 'wf', category: 'workflow', description: 'Run started' }),
           makeEntry({ id: 'ap', category: 'approval', description: 'Approved' }),
@@ -392,9 +420,9 @@ describe('EventTimelinePanel', () => {
           }),
         ],
         isLoading: false,
-      })
+      }
 
-      render(<EventTimelinePanel issueNumber={42} issueId="issue-42" />)
+      renderTimelineView()
 
       expect(screen.getAllByTestId('event-timeline-row')).toHaveLength(3)
 
@@ -411,5 +439,3 @@ describe('EventTimelinePanel', () => {
     })
   })
 })
-
-void useEventTimeline

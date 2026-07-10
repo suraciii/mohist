@@ -54,6 +54,17 @@ export interface SessionRecoveryActionsProps {
    * false (the component renders its own container).
    */
   bare?: boolean
+  clients?: SessionRecoveryActionsClients
+}
+
+export interface SessionRecoveryActionsClients {
+  compact: typeof compactSession
+  reset: typeof resetSession
+}
+
+const defaultClients: SessionRecoveryActionsClients = {
+  compact: compactSession,
+  reset: resetSession,
 }
 
 export function SessionRecoveryActions({
@@ -65,6 +76,7 @@ export function SessionRecoveryActions({
   compactLabel = 'Compact',
   resetLabel = 'Reset',
   bare = false,
+  clients = defaultClients,
 }: SessionRecoveryActionsProps) {
   const { projectId } = useProject()
   const active = isSessionActive(status)
@@ -80,7 +92,7 @@ export function SessionRecoveryActions({
       if (!projectId) {
         return Promise.reject(new ApiError('Project is required', 400))
       }
-      return compactSession(issueNumber, sessionName, projectId)
+      return clients.compact(issueNumber, sessionName, projectId)
     },
     onSuccess: () => {
       setInlineError(null)
@@ -96,7 +108,7 @@ export function SessionRecoveryActions({
       if (!projectId) {
         return Promise.reject(new ApiError('Project is required', 400))
       }
-      return resetSession(issueNumber, sessionName, projectId)
+      return clients.reset(issueNumber, sessionName, projectId)
     },
     onSuccess: () => {
       setResetDialogOpen(false)

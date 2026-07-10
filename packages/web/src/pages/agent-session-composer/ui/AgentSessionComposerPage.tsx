@@ -1,11 +1,11 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useMemo, useState, type ComponentProps, type ComponentType } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { BotIcon, ChevronDownIcon, XIcon, AlertTriangleIcon, SearchIcon } from 'lucide-react'
 import { useAgents, useLaunchAgentSession } from '../../../entities/agent'
 import type { AgentInfo, AgentSessionLaunchContext } from '../../../entities/agent'
 import { useProject, useProjectPath } from '../../../entities/project'
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
-import { AttachmentComposer } from '../../../shared/ui/attachment-composer'
+import { AttachmentComposer as DefaultAttachmentComposer } from '../../../shared/ui/attachment-composer'
 import { Button } from '@/shared/ui/components/button'
 import { Input } from '@/shared/ui/components/input'
 import { Label } from '@/shared/ui/components/label'
@@ -151,15 +151,46 @@ function AgentSelector({
   )
 }
 
-export function AgentSessionComposerPage() {
+export interface AgentSessionComposerPageComponents {
+  AttachmentComposer: ComponentType<ComponentProps<typeof DefaultAttachmentComposer>>
+}
+
+export interface AgentSessionComposerData {
+  agents: AgentInfo[] | undefined
+  agentsLoading: boolean
+  launchMutation: Pick<ReturnType<typeof useLaunchAgentSession>, 'mutate' | 'isPending' | 'error'>
+}
+
+export type AgentSessionComposerDataHook = () => AgentSessionComposerData
+
+const useDefaultData: AgentSessionComposerDataHook = () => {
+  const { data: agents, isLoading: agentsLoading } = useAgents()
+  return {
+    agents,
+    agentsLoading,
+    launchMutation: useLaunchAgentSession(),
+  }
+}
+
+const defaultComponents: AgentSessionComposerPageComponents = {
+  AttachmentComposer: DefaultAttachmentComposer,
+}
+
+export function AgentSessionComposerPage({
+  components,
+  dataHook = useDefaultData,
+}: {
+  components?: Partial<AgentSessionComposerPageComponents>
+  dataHook?: AgentSessionComposerDataHook
+} = {}) {
+  const { AttachmentComposer } = { ...defaultComponents, ...components }
   useDocumentTitle('New Session — Mohist')
   const navigate = useNavigate()
   const toProjectPath = useProjectPath()
   const { projectId } = useProject()
   const [searchParams] = useSearchParams()
 
-  const { data: agents, isLoading: agentsLoading } = useAgents()
-  const launchMutation = useLaunchAgentSession()
+  const { agents, agentsLoading, launchMutation } = dataHook()
 
   const launchableAgents = useMemo(
     () => agents?.filter((a) => a.status !== 'archived') ?? [],

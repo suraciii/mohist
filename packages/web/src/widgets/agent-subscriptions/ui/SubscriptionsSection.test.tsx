@@ -4,10 +4,10 @@ import { act, cleanup, render, screen, fireEvent, waitFor } from '@testing-libra
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
 import { ProjectProvider } from '../../../entities/project'
-import { SubscriptionsSection } from './SubscriptionsSection'
+import { SubscriptionsSection, type SubscriptionOperationsHook } from './SubscriptionsSection'
 import type { AgentInfo, AgentSubscriptionDto } from '../../../entities/agent'
 
-const mocks = vi.hoisted(() => ({
+const mocks = {
   subscriptions: [] as AgentSubscriptionDto[],
   subscriptionsLoading: false,
   listMutateCalls: [] as Array<{ data: unknown; options?: unknown }>,
@@ -18,7 +18,7 @@ const mocks = vi.hoisted(() => ({
   archivePending: false,
   restorePending: false,
   deletePending: false,
-}))
+}
 
 function makeSubscription(overrides: Partial<AgentSubscriptionDto> = {}): AgentSubscriptionDto {
   return {
@@ -61,44 +61,39 @@ function createQueryClient() {
   return new QueryClient({ defaultOptions: { queries: { retry: false } } })
 }
 
-vi.mock('../../../entities/agent', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../entities/agent')>()
-  return {
-    ...actual,
-    formatAgentSubscriptionFilter: actual.formatAgentSubscriptionFilter,
-    useAgentSubscriptions: () => ({
-      data: mocks.subscriptions,
-      isLoading: mocks.subscriptionsLoading,
-    }),
-    useCreateAgentSubscription: () => ({
-      mutate: (data: unknown, options?: unknown) => {
-        mocks.listMutateCalls.push({ data, options })
-        options && (options as { onSuccess?: (created: AgentSubscriptionDto) => void }).onSuccess?.(
-          makeSubscription({ id: 'subs_new', name: (data as { name: string }).name }),
-        )
-      },
-      isPending: mocks.createPending,
-    }),
-    useArchiveAgentSubscription: () => ({
-      mutate: (vars: { subscriptionId: string }, options?: unknown) => {
-        mocks.archiveMutateCalls.push({ vars, options })
-      },
-      isPending: mocks.archivePending,
-    }),
-    useRestoreAgentSubscription: () => ({
-      mutate: (vars: { subscriptionId: string }, options?: unknown) => {
-        mocks.restoreMutateCalls.push({ vars, options })
-      },
-      isPending: mocks.restorePending,
-    }),
-    useDeleteAgentSubscription: () => ({
-      mutate: (vars: { subscriptionId: string }, options?: unknown) => {
-        mocks.deleteMutateCalls.push({ vars, options })
-        options && (options as { onSuccess?: () => void }).onSuccess?.()
-      },
-      isPending: mocks.deletePending,
-    }),
-  }
+const operationsHook: SubscriptionOperationsHook = () => ({
+  subscriptionsQuery: {
+    data: mocks.subscriptions,
+    isLoading: mocks.subscriptionsLoading,
+  },
+  createMutation: {
+    mutate: (data, options) => {
+      mocks.listMutateCalls.push({ data, options })
+      const onSuccess = options?.onSuccess as ((created: AgentSubscriptionDto) => void) | undefined
+      onSuccess?.(makeSubscription({ id: 'subs_new', name: data.name }))
+    },
+    isPending: mocks.createPending,
+  },
+  archiveMutation: {
+    mutate: (vars, options) => {
+      mocks.archiveMutateCalls.push({ vars, options })
+    },
+    isPending: mocks.archivePending,
+  },
+  restoreMutation: {
+    mutate: (vars, options) => {
+      mocks.restoreMutateCalls.push({ vars, options })
+    },
+    isPending: mocks.restorePending,
+  },
+  deleteMutation: {
+    mutate: (vars, options) => {
+      mocks.deleteMutateCalls.push({ vars, options })
+      const onSuccess = options?.onSuccess as (() => void) | undefined
+      onSuccess?.()
+    },
+    isPending: mocks.deletePending,
+  },
 })
 
 function renderSection(agent: AgentInfo = makeAgent()) {
@@ -111,7 +106,7 @@ function renderSection(agent: AgentInfo = makeAgent()) {
         repositories: [],
       }]}>
         <MemoryRouter>
-          <SubscriptionsSection agent={agent} />
+          <SubscriptionsSection agent={agent} operationsHook={operationsHook} />
         </MemoryRouter>
       </ProjectProvider>
     </QueryClientProvider>,

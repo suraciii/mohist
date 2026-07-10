@@ -4,16 +4,12 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
-import { http, HttpResponse } from 'msw'
-import { server, useMswServer } from '../../../../tests/support/msw'
 import { ProjectProvider } from '../../../entities/project'
 import { TEST_PROJECT } from '../../../../tests/test-utils'
 import { setPrefersReducedMotion } from '../../../../tests/setup'
 import type { CompletionTrendResponse } from '../../../entities/issue'
 
-import { ThroughputChart } from './ThroughputChart'
-
-useMswServer()
+import { ThroughputChart, type CompletionThroughputHook } from './ThroughputChart'
 
 type RangeCode = '7d' | '30d' | '90d'
 
@@ -59,24 +55,20 @@ function build30dayData(): CompletionTrendResponse {
   }
 }
 
-const THROUGHPUT_PATH = '*/api/projects/:projectId/issues/metrics/completion'
+let throughputResult: ReturnType<CompletionThroughputHook>
+
+const completionThroughputHook: CompletionThroughputHook = () => throughputResult
 
 function mockThroughputResponse(data: CompletionTrendResponse) {
-  server.use(
-    http.get(THROUGHPUT_PATH, () => HttpResponse.json({ success: true, data })),
-  )
+  throughputResult = { data, isLoading: false, isError: false }
 }
 
 function mockThroughputPending() {
-  server.use(
-    http.get(THROUGHPUT_PATH, () => new Promise(() => {})),
-  )
+  throughputResult = { data: undefined, isLoading: true, isError: false }
 }
 
 function mockThroughputError() {
-  server.use(
-    http.get(THROUGHPUT_PATH, () => HttpResponse.json({ success: false, error: { message: 'boom' } }, { status: 500 })),
-  )
+  throughputResult = { data: undefined, isLoading: false, isError: true }
 }
 
 function renderChart(range: RangeCode = '30d') {
@@ -85,7 +77,7 @@ function renderChart(range: RangeCode = '30d') {
     <QueryClientProvider client={queryClient}>
       <ProjectProvider initialProjectId={TEST_PROJECT.id} initialProjects={[TEST_PROJECT]}>
         <MemoryRouter initialEntries={['/']}>
-          <ThroughputChart range={range} />
+          <ThroughputChart completionThroughputHook={completionThroughputHook} range={range} />
         </MemoryRouter>
       </ProjectProvider>
     </QueryClientProvider>,
@@ -511,7 +503,7 @@ describe('ThroughputChart', () => {
       <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
         <ProjectProvider initialProjectId={TEST_PROJECT.id} initialProjects={[TEST_PROJECT]}>
           <MemoryRouter initialEntries={['/']}>
-            <ThroughputChart range="7d" />
+            <ThroughputChart completionThroughputHook={completionThroughputHook} range="7d" />
           </MemoryRouter>
         </ProjectProvider>
       </QueryClientProvider>,
@@ -524,7 +516,7 @@ describe('ThroughputChart', () => {
       <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
         <ProjectProvider initialProjectId={TEST_PROJECT.id} initialProjects={[TEST_PROJECT]}>
           <MemoryRouter initialEntries={['/']}>
-            <ThroughputChart range="30d" />
+            <ThroughputChart completionThroughputHook={completionThroughputHook} range="30d" />
           </MemoryRouter>
         </ProjectProvider>
       </QueryClientProvider>,
@@ -537,7 +529,7 @@ describe('ThroughputChart', () => {
       <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
         <ProjectProvider initialProjectId={TEST_PROJECT.id} initialProjects={[TEST_PROJECT]}>
           <MemoryRouter initialEntries={['/']}>
-            <ThroughputChart range="90d" />
+            <ThroughputChart completionThroughputHook={completionThroughputHook} range="90d" />
           </MemoryRouter>
         </ProjectProvider>
       </QueryClientProvider>,

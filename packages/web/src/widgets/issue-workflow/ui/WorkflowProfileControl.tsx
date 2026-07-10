@@ -11,6 +11,29 @@ import type { Issue } from '../../../entities/issue'
 interface WorkflowProfileControlProps {
   issue: Issue
   embedded?: boolean
+  dataHook?: WorkflowProfileControlDataHook
+}
+
+interface WorkflowProfileUpdateMutation {
+  mutateAsync: (variables: { issueNumber: number; workflowProfileId: string | null }) => Promise<unknown>
+  isPending: boolean
+}
+
+export interface WorkflowProfileControlData {
+  workflowProfiles: WorkflowProfileInfo[] | undefined
+  workflowProfileYaml: { profileId?: string | null; hasCustomTemplate?: boolean } | null | undefined
+  updateMutation: WorkflowProfileUpdateMutation
+  defaultProfileId: string | null | undefined
+}
+
+export type WorkflowProfileControlDataHook = (issueNumber: number) => WorkflowProfileControlData
+
+const useDefaultData: WorkflowProfileControlDataHook = (issueNumber) => {
+  const { data: workflowProfiles } = useWorkflowProfiles()
+  const { data: workflowProfileYaml } = useIssueWorkflowProfileYaml(issueNumber, true)
+  const updateMutation = useUpdateIssueWorkflowProfile()
+  const { effectiveTemplateId: defaultProfileId } = useEffectiveDefaultWorkflowProfile()
+  return { workflowProfiles, workflowProfileYaml, updateMutation, defaultProfileId }
 }
 
 const SYSTEM_DEFAULT_ID = 'mohist/local'
@@ -19,11 +42,17 @@ function isStartedIssue(issue: Issue): boolean {
   return issue.status !== IssueStatus.Backlog || !!issue.workflowRunId
 }
 
-export function WorkflowProfileControl({ issue, embedded = false }: WorkflowProfileControlProps) {
-  const { data: workflowProfiles } = useWorkflowProfiles()
-  const { data: workflowProfileYaml } = useIssueWorkflowProfileYaml(issue.number, true)
-  const updateMutation = useUpdateIssueWorkflowProfile()
-  const { effectiveTemplateId: defaultProfileId } = useEffectiveDefaultWorkflowProfile()
+export function WorkflowProfileControl({
+  issue,
+  embedded = false,
+  dataHook = useDefaultData,
+}: WorkflowProfileControlProps) {
+  const {
+    workflowProfiles,
+    workflowProfileYaml,
+    updateMutation,
+    defaultProfileId,
+  } = dataHook(issue.number)
 
   const effectiveProfileId = issue.workflowProfileId
     ?? workflowProfileYaml?.profileId

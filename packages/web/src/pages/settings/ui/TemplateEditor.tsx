@@ -26,6 +26,19 @@ export interface TemplateEditorProps {
   projectId: string
   target: TemplateEditorTarget
   onClose: () => void
+  hooks?: TemplateEditorHooks
+}
+
+export interface TemplateEditorHooks {
+  useUpsert: typeof useUpsertProjectTemplateOverride
+  usePreview: typeof usePreviewProjectTemplate
+  useExtract: typeof useExtractVariables
+}
+
+const defaultHooks: TemplateEditorHooks = {
+  useUpsert: useUpsertProjectTemplateOverride,
+  usePreview: usePreviewProjectTemplate,
+  useExtract: useExtractVariables,
 }
 
 interface FormSnapshot {
@@ -131,7 +144,12 @@ function titleByMode(mode: EditorMode, key: string): string {
   }
 }
 
-export function TemplateEditor({ projectId, target, onClose }: TemplateEditorProps) {
+export function TemplateEditor({
+  projectId,
+  target,
+  onClose,
+  hooks = defaultHooks,
+}: TemplateEditorProps) {
   const initial = useMemo(() => buildSnapshot(target), [target])
   const [snapshot, setSnapshot] = useState<FormSnapshot>(initial)
   const [previewVariablesText, setPreviewVariablesText] = useState<string>(DEFAULT_PREVIEW_VARIABLES_JSON)
@@ -140,9 +158,9 @@ export function TemplateEditor({ projectId, target, onClose }: TemplateEditorPro
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const isReadOnly = target.mode === 'preview'
-  const upsert = useUpsertProjectTemplateOverride(projectId)
-  const preview = usePreviewProjectTemplate(projectId, target.template.key)
-  const extract = useExtractVariables()
+  const upsert = hooks.useUpsert(projectId)
+  const preview = hooks.usePreview(projectId, target.template.key)
+  const extract = hooks.useExtract()
   const { mutate: previewTemplate } = preview
   const { mutate: extractVariables, data: extractData } = extract
 

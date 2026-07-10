@@ -22,6 +22,7 @@ export interface PulseZoneProps {
    */
   issuesOverride?: Issue[]
   agentStatusOverride?: AgentStatus
+  activityCardsHook?: typeof useActivityCards
 }
 
 type ActiveRow =
@@ -29,11 +30,15 @@ type ActiveRow =
   | { kind: 'session'; card: SessionCard }
   | { kind: 'agent'; issueNumber: number | null; stage: string | null; key: string }
 
-export function PulseZone({ issuesOverride, agentStatusOverride }: PulseZoneProps = {}) {
+export function PulseZone({
+  issuesOverride,
+  agentStatusOverride,
+  activityCardsHook = useActivityCards,
+}: PulseZoneProps = {}) {
   const { projectId } = useProject()
   const { data: fetchedIssues } = useIssues(projectId ? { projectId } : undefined)
   const { data: fetchedAgentStatus } = useAgentStatus()
-  const { activeCards, activeCardByIssueNumber } = useActivityCards()
+  const { activeCards, activeCardByIssueNumber } = activityCardsHook()
   const toProjectPath = useProjectPath()
   const agentStatus = agentStatusOverride ?? fetchedAgentStatus
 

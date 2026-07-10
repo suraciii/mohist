@@ -2,8 +2,8 @@
 /**
  * Shared test harness for the TaskLogPanel colocated test files.
  *
- * Vitest hoists `vi.mock()` per-file, so each `*.test.tsx` must declare its own
- * `vi.mock(...)` / `vi.hoisted(...)` blocks (those cannot be imported). This module
+ * Vitest hoists module mocks per-file, so each `*.test.tsx` must declare its own
+ * mock and hoisted blocks (those cannot be imported). This module
  * exports everything ELSE that the TaskLogPanel render-test files share:
  *   - fixture builders (`makeLine`, `makePage`, `makeEnvelope`)
  *   - the SignalR fake-connection harness (`FakeConnection`, `makeFakeConnection`,

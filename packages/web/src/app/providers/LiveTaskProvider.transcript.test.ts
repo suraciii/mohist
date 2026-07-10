@@ -4,32 +4,20 @@ import { act, render } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ProjectProvider } from '../../entities/project'
 import { REVERSE_DNS_EVENT_TYPES } from '../../shared/lib/canonical-event-types'
-import { LiveTaskProvider, __testing__ } from './LiveTaskProvider'
+import { LiveTaskProvider, __testing__, type EventsConnectionHook } from './LiveTaskProvider'
 import { dispatchTimelineEvent, onTimelineEvent, type TimelineLiveEvent } from '../../entities/issue/model/timeline-events'
 import { TEST_PROJECT } from './_liveTaskProviderTestUtils'
 
-const mocks = vi.hoisted(() => ({
-  useEventsConnection: vi.fn(),
-  useAgentStatus: vi.fn(),
-}))
-
-vi.mock('../../shared/api/events-hub', () => ({
-  useEventsConnection: (...args: unknown[]) => mocks.useEventsConnection(...args),
-}))
-
-vi.mock('../../entities/agent', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../../entities/agent')>()),
-  useAgentStatus: () => mocks.useAgentStatus(),
-}))
+let eventsConnectionCalls: Parameters<EventsConnectionHook>[] = []
+const eventsConnectionHook: EventsConnectionHook = (...args) => {
+  eventsConnectionCalls.push(args)
+  return { status: 'disconnected', connection: null, reconnectVersion: 0 }
+}
+const runnerDropNoticeHook = () => {}
 
 beforeEach(() => {
   vi.clearAllMocks()
-  mocks.useAgentStatus.mockReturnValue({
-    data: {
-      running: false,
-      runnerAvailable: true,
-    },
-  })
+  eventsConnectionCalls = []
 })
 
 describe('LiveTaskProvider transcript routing', () => {
@@ -199,14 +187,18 @@ describe('LiveTaskProvider timeline forwarding', () => {
             initialProjects: [TEST_PROJECT],
             children: createElement(
               LiveTaskProvider,
-              { children: createElement('div', null, 'child') },
+              {
+                children: createElement('div', null, 'child'),
+                eventsConnectionHook,
+                runnerDropNoticeHook,
+              },
             ),
           },
         ),
       ),
     )
 
-    const handleEvent = mocks.useEventsConnection.mock.calls[0][1] as (eventName: string, data: unknown) => void
+    const handleEvent = eventsConnectionCalls[0][1]
     act(() => {
       handleEvent(REVERSE_DNS_EVENT_TYPES.StageApprovalResolved, {
         issueId: 'issue-1',

@@ -17,6 +17,25 @@ interface Props {
   issueNumber: number
   currentModel?: string | null
   currentStageModels?: Record<string, string> | null
+  dependencies?: IssueModelSelectorDependencies
+}
+
+export interface IssueModelSelectorDependencies {
+  useAvailableModelIds: typeof useAvailableModelIds
+  useModelVariants: typeof useModelVariants
+  useOpencodeModel: typeof useOpencodeModel
+  getIssueWorkflowVariables: typeof getIssueWorkflowVariables
+  patchIssueWorkflowDefinitionVar: typeof patchIssueWorkflowDefinitionVar
+  patchIssueWorkflowStageDefinitionVar: typeof patchIssueWorkflowStageDefinitionVar
+}
+
+const defaultDependencies: IssueModelSelectorDependencies = {
+  useAvailableModelIds,
+  useModelVariants,
+  useOpencodeModel,
+  getIssueWorkflowVariables,
+  patchIssueWorkflowDefinitionVar,
+  patchIssueWorkflowStageDefinitionVar,
 }
 
 function agentModel(vars?: Record<string, unknown> | null): string | null {
@@ -158,7 +177,15 @@ function ModelListItem({
   )
 }
 
-export function IssueModelSelector({ issueNumber, currentModel, currentStageModels }: Props) {
+export function IssueModelSelector({ issueNumber, currentModel, currentStageModels, dependencies = defaultDependencies }: Props) {
+  const {
+    useAvailableModelIds,
+    useModelVariants,
+    useOpencodeModel,
+    getIssueWorkflowVariables,
+    patchIssueWorkflowDefinitionVar,
+    patchIssueWorkflowStageDefinitionVar,
+  } = dependencies
   const queryClient = useQueryClient()
   const { projectId } = useProject()
   const { data: availableModels, isLoading, error } = useAvailableModelIds()

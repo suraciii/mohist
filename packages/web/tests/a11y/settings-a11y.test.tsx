@@ -2,12 +2,14 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { cleanup, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { http, HttpResponse } from 'msw'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import { axe } from 'vitest-axe'
 import type { Project } from '../../src/entities/project'
 import { ProjectProvider } from '../../src/entities/project'
 import { SettingsPage } from '../../src/pages/settings/ui/SettingsPage'
+import { useMswServer } from '../support/msw'
 
 const settingsTabs = [
   'ai',
@@ -29,11 +31,6 @@ const focusableSelector = [
   '[tabindex]:not([tabindex="-1"])',
 ].join(',')
 
-// Data fixtures are declared first so the mock factories below can capture
-// stable references. Each query hook MUST return the same object identity on
-// every render; returning fresh object literals makes any component that lists
-// the hook result in a useEffect dependency array (e.g. AiSettingsSection's
-// useStageModels effect) re-run forever -> infinite render loop -> OOM.
 const projects: Project[] = [
   {
     id: 'proj-a11y',
@@ -47,15 +44,6 @@ const projects: Project[] = [
   },
 ]
 
-const agentRuntime = {
-  timeout: 600000,
-  taskTimeout: 900000,
-  stageTimeout: 1800000,
-  maxConcurrent: 2,
-  maxGracePeriods: 1,
-  pollInterval: 5000,
-}
-
 const config = {
   logLevel: 'INFO',
   agentTimeout: 600,
@@ -67,7 +55,7 @@ const config = {
 }
 
 const workflowProfiles = [
-  { id: 'mohist/local', displayName: 'Default', description: 'Default workflow', isDefault: true },
+  { id: 'mohist/local', name: 'Default', description: 'Default workflow', isDefault: true },
 ]
 
 const workflowProfileDetail = {
@@ -107,82 +95,56 @@ const inboxSubscription = {
   issue_completed: true,
 }
 
-// Stable query-result wrappers (identity is preserved across renders).
-const projectQueries = {
-  list: { data: projects, isLoading: false, error: null },
-  repos: { data: projects[0].repositories, isLoading: false },
-}
-const settingsQueries = {
-  opencodeRuntime: { data: { mode: 'local', command: 'opencode', model: null, note: '' }, isLoading: false, error: null },
-  availableModelIds: { data: { models: ['openai/gpt-4.1', 'anthropic/claude-sonnet-4'], modelVariants: {} }, isLoading: false, error: null },
-  opencodeModel: { data: { model: null, variant: null }, isLoading: false, error: null },
-  stageModels: { data: { stageModels: null, stageModelVariants: null }, isLoading: false, error: null },
-  agentRuntime: { data: agentRuntime, isLoading: false, error: null, refetch: vi.fn() },
-  config: { data: config, isLoading: false, error: null },
-  logLevel: { data: { level: 'INFO' }, isLoading: false, isError: false, error: null },
-  allWorkflowProfiles: { data: workflowProfiles, isLoading: false, isError: false, error: null },
-  workflowProfile: { data: workflowProfileDetail, isLoading: false, isError: false, error: null },
-  projectDefaultWorkflowProfile: { data: { defaultTemplateId: 'mohist/local' }, isLoading: false, isError: false, error: null },
-  systemInfo: { data: systemInfo, isLoading: false, isError: false, error: null, refetch: vi.fn() },
-  systemUpdateStatus: { data: { hasJob: false, job: null }, isLoading: false, error: null, refetch: vi.fn() },
-}
-const mutation = { mutate: vi.fn(), mutateAsync: vi.fn().mockResolvedValue(agentRuntime), isPending: false }
-
-vi.mock('../../src/entities/project/api/queries', () => ({
-  useProjects: () => projectQueries.list,
-  useCreateProject: () => mutation,
-  useDeleteProject: () => mutation,
-  useRepositories: () => projectQueries.repos,
-  useAddRepository: () => mutation,
-  useRemoveRepository: () => mutation,
-  useSetDefaultRepository: () => mutation,
-}))
-
-vi.mock('../../src/entities/settings/api/queries', () => ({
-  useOpencodeRuntime: () => settingsQueries.opencodeRuntime,
-  useAvailableModelIds: () => settingsQueries.availableModelIds,
-  useOpencodeModel: () => settingsQueries.opencodeModel,
-  useUpdateOpencodeModel: () => mutation,
-  useStageModels: () => settingsQueries.stageModels,
-  useSetStageModels: () => mutation,
-  useAgentRuntime: () => settingsQueries.agentRuntime,
-  useConfig: () => settingsQueries.config,
-  useSetAgentRuntime: () => mutation,
-  useLogLevel: () => settingsQueries.logLevel,
-  useSetLogLevel: () => mutation,
-  useAllWorkflowProfiles: () => settingsQueries.allWorkflowProfiles,
-  useWorkflowProfiles: () => settingsQueries.allWorkflowProfiles,
-  useWorkflowProfile: () => settingsQueries.workflowProfile,
-  useProjectDefaultWorkflowProfile: () => settingsQueries.projectDefaultWorkflowProfile,
-  useSetProjectDefaultWorkflowProfile: () => mutation,
-  useClearProjectDefaultWorkflowProfile: () => mutation,
-  useDisableWorkflowProfile: () => mutation,
-  useEnableWorkflowProfile: () => mutation,
-  useSystemInfo: () => settingsQueries.systemInfo,
-  useSystemUpdate: () => mutation,
-  useSystemUpdateStatus: () => settingsQueries.systemUpdateStatus,
-}))
-
-vi.mock('../../src/entities/template', () => ({
-  useProjectTemplates: () => ({ data: templates, isLoading: false, error: null }),
-  useSystemTemplates: () => ({ data: templates, isLoading: false, error: null }),
-  useProjectTemplateOverride: () => ({ data: null, isLoading: false, error: null }),
-  useUpsertProjectTemplateOverride: () => mutation,
-  useDeleteProjectTemplateOverride: () => mutation,
-  usePreviewProjectTemplate: () => mutation,
-}))
-
-vi.mock('../../src/entities/label-catalog/api/queries', () => ({
-  useLabelCatalog: () => ({ data: [], isLoading: false, isError: false, error: null, refetch: vi.fn() }),
-  useCreateLabelDefinition: () => mutation,
-  useUpdateLabelDefinition: () => mutation,
-  useDeleteLabelDefinition: () => mutation,
-}))
-
-vi.mock('../../src/entities/inbox/api/queries', () => ({
-  useInboxSubscription: () => ({ data: inboxSubscription, isLoading: false }),
-  useUpdateInboxSubscription: () => mutation,
-}))
+useMswServer(
+  http.get('*/api/projects/:projectId/repositories', () =>
+    HttpResponse.json({ success: true, data: projects[0].repositories }),
+  ),
+  http.get('*/api/opencode/runtime', () =>
+    HttpResponse.json({ success: true, data: { mode: 'local', command: 'opencode', model: null, note: '' } }),
+  ),
+  http.get('*/api/projects/:projectId/opencode/models', () =>
+    HttpResponse.json({
+      success: true,
+      data: { models: ['openai/gpt-4.1', 'anthropic/claude-sonnet-4'], modelVariants: {} },
+    }),
+  ),
+  http.get('*/api/projects/:projectId/workflow-profile/variables', () =>
+    HttpResponse.json({ success: true, data: { vars: {}, stages: {} } }),
+  ),
+  http.get('*/api/config', () => HttpResponse.json({ success: true, data: config })),
+  http.get('*/api/workflow-templates/system/:profileId', () =>
+    HttpResponse.json({ success: true, data: workflowProfileDetail }),
+  ),
+  http.get('*/api/workflow-templates/system', () =>
+    HttpResponse.json({ success: true, data: workflowProfiles }),
+  ),
+  http.get('*/api/projects/:projectId/workflow-profile', ({ params }) =>
+    HttpResponse.json({
+      success: true,
+      data: {
+        projectId: String(params.projectId),
+        defaultTemplateId: 'mohist/local',
+        disabledWorkflowProfileIds: [],
+      },
+    }),
+  ),
+  http.get('*/api/system/info', () => HttpResponse.json({ success: true, data: systemInfo })),
+  http.get('*/api/system/update/status', () =>
+    HttpResponse.json({ success: true, data: { hasJob: false, job: null } }),
+  ),
+  http.get('*/api/templates/system', () =>
+    HttpResponse.json({ success: true, data: templates.map(({ source: _source, ...template }) => template) }),
+  ),
+  http.get('*/api/projects/:projectId/templates', () =>
+    HttpResponse.json({ success: true, data: templates }),
+  ),
+  http.get('*/api/projects/:projectId/labels/catalog', () =>
+    HttpResponse.json({ success: true, data: [] }),
+  ),
+  http.get('*/api/projects/:projectId/inbox/subscription', () =>
+    HttpResponse.json({ success: true, data: inboxSubscription }),
+  ),
+)
 
 function renderSettingsTab(tab: typeof settingsTabs[number]) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
@@ -202,7 +164,6 @@ function renderSettingsTab(tab: typeof settingsTabs[number]) {
 describe('Settings accessibility structural baseline', () => {
   afterEach(() => {
     cleanup()
-    vi.clearAllMocks()
   })
 
   it.each(settingsTabs)('runs structural axe rules for the %s tab', async (tab) => {

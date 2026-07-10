@@ -8,41 +8,24 @@ import {
 } from 'vitest'
 import { useState } from 'react'
 import { fireEvent, render, screen, waitFor, within } from '../../../../tests/test-utils'
-import { http, HttpResponse } from 'msw'
-import { useMswServer } from '../../../../tests/support/msw'
 import { CreateProjectDialog } from '..'
-import { useProject } from '../../../entities/project'
+import { useProject, type ProjectCreator } from '../../../entities/project'
 
-const createRequests: { method: string; url: string; body: unknown }[] = []
+const createRequests: { name: string }[] = []
 
-const handlers = [
-  http.post('/api/projects', async ({ request }) => {
-    const body = await request.json()
-    createRequests.push({ method: request.method, url: request.url, body })
-    const name = (body as { name: string }).name
-    if (name === 'existing') {
-      return HttpResponse.json(
-        { success: false, error: 'Project name already exists', code: 'conflict' },
-        { status: 409 },
-      )
-    }
-    return HttpResponse.json(
-      {
-        success: true,
-        data: {
-          id: `proj-${name}`,
-          name,
-          createdAt: '2026-06-12T00:00:00.000Z',
-          updatedAt: '2026-06-12T00:00:00.000Z',
-          repositories: [],
-        },
-      },
-      { status: 201 },
-    )
-  }),
-]
-
-useMswServer(...handlers)
+const createProject: ProjectCreator = async (request) => {
+  createRequests.push(request)
+  if (request.name === 'existing') {
+    throw new Error('Project name already exists')
+  }
+  return {
+    id: `proj-${request.name}`,
+    name: request.name,
+    createdAt: '2026-06-12T00:00:00.000Z',
+    updatedAt: '2026-06-12T00:00:00.000Z',
+    repositories: [],
+  }
+}
 
 function ActiveProjectProbe() {
   const { projectId } = useProject()
@@ -54,7 +37,11 @@ function HostDialog() {
   return (
     <>
       <ActiveProjectProbe />
-      <CreateProjectDialog open={open} onClose={() => setOpen(false)} />
+      <CreateProjectDialog
+        open={open}
+        onClose={() => setOpen(false)}
+        projectCreator={createProject}
+      />
     </>
   )
 }
@@ -72,7 +59,7 @@ function openDialog() {
 }
 
 describe('CreateProjectDialog (name-only)', () => {
-  it('submits a name-only POST /api/projects and does not include path or effectivePath', async () => {
+  it('submits only the project name and does not include path or effectivePath', async () => {
     openDialog()
     const dialog = await screen.findByTestId('create-project-dialog')
     expect(dialog).toBeInTheDocument()
@@ -83,10 +70,8 @@ describe('CreateProjectDialog (name-only)', () => {
     fireEvent.click(within(dialog).getByTestId('create-project-submit'))
 
     await waitFor(() => expect(createRequests).toHaveLength(1))
-    expect(createRequests[0].method).toBe('POST')
-    expect(createRequests[0].url).toContain('/api/projects')
-    expect(createRequests[0].body).toEqual({ name: 'my-project' })
-    const body = createRequests[0].body as Record<string, unknown>
+    expect(createRequests[0]).toEqual({ name: 'my-project' })
+    const body = createRequests[0] as Record<string, unknown>
     expect(body).not.toHaveProperty('path')
     expect(body).not.toHaveProperty('effectivePath')
   })
@@ -178,6 +163,6 @@ describe('CreateProjectDialog (name-only)', () => {
     fireEvent.click(within(dialog).getByTestId('create-project-submit'))
 
     await waitFor(() => expect(createRequests).toHaveLength(1))
-    expect(createRequests[0].body).toEqual({ name: 'trimmed-name' })
+    expect(createRequests[0]).toEqual({ name: 'trimmed-name' })
   })
 })

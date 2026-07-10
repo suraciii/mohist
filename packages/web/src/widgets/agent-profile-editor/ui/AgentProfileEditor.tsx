@@ -27,7 +27,22 @@ interface Props {
   open: boolean
   onClose: () => void
   onSaved?: (agent: AgentInfo) => void
+  operationsHook?: AgentProfileEditorOperationsHook
 }
+
+export interface AgentProfileEditorOperations {
+  createAgent: Pick<ReturnType<typeof useCreateAgent>, 'mutate' | 'isPending'>
+  updateAgent: Pick<ReturnType<typeof useUpdateAgent>, 'mutate' | 'isPending'>
+  archiveAgent: Pick<ReturnType<typeof useArchiveAgent>, 'mutate' | 'isPending'>
+}
+
+export type AgentProfileEditorOperationsHook = () => AgentProfileEditorOperations
+
+const useDefaultOperations: AgentProfileEditorOperationsHook = () => ({
+  createAgent: useCreateAgent(),
+  updateAgent: useUpdateAgent(),
+  archiveAgent: useArchiveAgent(),
+})
 
 interface FormErrors {
   name?: string
@@ -35,12 +50,16 @@ interface FormErrors {
   api?: string
 }
 
-export function AgentProfileEditor({ agent, open, onClose, onSaved }: Props) {
+export function AgentProfileEditor({
+  agent,
+  open,
+  onClose,
+  onSaved,
+  operationsHook = useDefaultOperations,
+}: Props) {
   const navigate = useNavigate()
   const toProjectPath = useProjectPath()
-  const createAgent = useCreateAgent()
-  const updateAgent = useUpdateAgent()
-  const archiveAgent = useArchiveAgent()
+  const { createAgent, updateAgent, archiveAgent } = operationsHook()
   const { data: availableModels } = useAvailableModelIds()
   const modelVariantsMap = useModelVariants()
 

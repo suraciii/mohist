@@ -1,15 +1,25 @@
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import { fireEvent, screen, within } from '@testing-library/react'
-import { render } from '../../../../tests/test-utils'
+import type { ReactElement } from 'react'
+import { createQueryClient, render as renderWithProviders } from '../../../../tests/test-utils'
 import { WorkflowSessionsPanel } from './WorkflowSessionsPanel'
-import { useWorkflowRunSessions, type WorkflowRunSession } from '../../../entities/coder-session'
+import type { WorkflowRunSession } from '../../../entities/coder-session'
 
-vi.mock('../../../entities/coder-session', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../../../entities/coder-session')>()),
-  useWorkflowRunSessions: vi.fn(),
-}))
+let sessionsData: WorkflowRunSession[] = []
 
-const mockedUseWorkflowRunSessions = vi.mocked(useWorkflowRunSessions)
+function setWorkflowRunSessions(value: { isLoading: boolean; sessions: WorkflowRunSession[] }) {
+  sessionsData = value.sessions
+}
+
+function render(ui: ReactElement) {
+  const queryClient = createQueryClient()
+  queryClient.setQueryData(['workflow-runs', 'workflow-run-1', 'sessions'], sessionsData)
+  return renderWithProviders(ui, { queryClient })
+}
+
+beforeEach(() => {
+  sessionsData = []
+})
 
 function session(overrides: Partial<WorkflowRunSession> & { usage?: Partial<NonNullable<WorkflowRunSession['usage']>>; eventSummary?: Partial<NonNullable<WorkflowRunSession['eventSummary']>> }): WorkflowRunSession {
   const { usage: usageOverride, eventSummary: eventSummaryOverride, ...rest } = overrides
@@ -46,7 +56,7 @@ function session(overrides: Partial<WorkflowRunSession> & { usage?: Partial<NonN
 
 describe('WorkflowSessionsPanel', () => {
   it('renders every session for the current workflow run with usage summary', () => {
-    mockedUseWorkflowRunSessions.mockReturnValue({
+    setWorkflowRunSessions({
       isLoading: false,
       sessions: [
         session({
@@ -93,7 +103,6 @@ describe('WorkflowSessionsPanel', () => {
 
     render(<WorkflowSessionsPanel issueNumber={55} workflowRunId="workflow-run-1" />)
 
-    expect(mockedUseWorkflowRunSessions).toHaveBeenCalledWith('workflow-run-1')
     expect(screen.getByText('Sessions')).toBeInTheDocument()
     expect(screen.getByText(/3 sessions/)).toBeInTheDocument()
     expect(screen.getByText(/640\.4k processed/)).toBeInTheDocument()
@@ -107,7 +116,7 @@ describe('WorkflowSessionsPanel', () => {
   })
 
   it('does not render without a workflow run id', () => {
-    mockedUseWorkflowRunSessions.mockReturnValue({ isLoading: false, sessions: [] })
+    setWorkflowRunSessions({ isLoading: false, sessions: [] })
 
     const { container } = render(<WorkflowSessionsPanel issueNumber={55} workflowRunId={null} />)
 
@@ -115,7 +124,7 @@ describe('WorkflowSessionsPanel', () => {
   })
 
   it('renders a compact filter/sort control row above the session list', () => {
-    mockedUseWorkflowRunSessions.mockReturnValue({
+    setWorkflowRunSessions({
       isLoading: false,
       sessions: [
         session({ id: 's-plan', sessionName: 'proposal-draft', stage: 'plan', status: 'completed', createdAt: '2026-06-12T10:01:00.000Z' }),
@@ -140,7 +149,7 @@ describe('WorkflowSessionsPanel', () => {
   })
 
   it('filtering by status hides non-matching sessions and surfaces a notice', () => {
-    mockedUseWorkflowRunSessions.mockReturnValue({
+    setWorkflowRunSessions({
       isLoading: false,
       sessions: [
         session({ id: 's-plan', sessionName: 'proposal-draft', stage: 'plan', status: 'completed', createdAt: '2026-06-12T10:01:00.000Z' }),
@@ -161,7 +170,7 @@ describe('WorkflowSessionsPanel', () => {
   })
 
   it('filtering by stage hides non-matching sessions', () => {
-    mockedUseWorkflowRunSessions.mockReturnValue({
+    setWorkflowRunSessions({
       isLoading: false,
       sessions: [
         session({ id: 's-plan', sessionName: 'proposal-draft', stage: 'plan', status: 'completed', createdAt: '2026-06-12T10:01:00.000Z' }),
@@ -179,7 +188,7 @@ describe('WorkflowSessionsPanel', () => {
   })
 
   it('sorting by tokens reorders visible sessions', () => {
-    mockedUseWorkflowRunSessions.mockReturnValue({
+    setWorkflowRunSessions({
       isLoading: false,
       sessions: [
         session({
@@ -224,7 +233,7 @@ describe('WorkflowSessionsPanel', () => {
   })
 
   it('shows an empty-result message when filters hide every session', () => {
-    mockedUseWorkflowRunSessions.mockReturnValue({
+    setWorkflowRunSessions({
       isLoading: false,
       sessions: [
         session({ id: 's-plan', sessionName: 'proposal-draft', stage: 'plan', status: 'completed' }),
@@ -241,7 +250,7 @@ describe('WorkflowSessionsPanel', () => {
   })
 
   it('lets a user select an absent executable stage and shows an empty result', () => {
-    mockedUseWorkflowRunSessions.mockReturnValue({
+    setWorkflowRunSessions({
       isLoading: false,
       sessions: [
         session({ id: 's-plan', sessionName: 'proposal-draft', stage: 'plan', status: 'completed' }),
@@ -264,7 +273,7 @@ describe('WorkflowSessionsPanel', () => {
 
 describe('issue-level usage aggregation', () => {
   it('sums total tokens and groups cost by currency across multiple sessions', () => {
-    mockedUseWorkflowRunSessions.mockReturnValue({
+    setWorkflowRunSessions({
       isLoading: false,
       sessions: [
         session({
@@ -295,7 +304,7 @@ describe('issue-level usage aggregation', () => {
   })
 
   it('omits aggregate totals when no session has usage data', () => {
-    mockedUseWorkflowRunSessions.mockReturnValue({
+    setWorkflowRunSessions({
       isLoading: false,
       sessions: [
         session({ id: 's-plan', sessionName: 'plan', stage: 'plan', status: 'completed', createdAt: '2026-06-12T10:00:00.000Z', usage: undefined }),
@@ -314,7 +323,7 @@ describe('issue-level usage aggregation', () => {
   })
 
   it('excludes non-additive fields from the aggregate total', () => {
-    mockedUseWorkflowRunSessions.mockReturnValue({
+    setWorkflowRunSessions({
       isLoading: false,
       sessions: [
         session({
@@ -353,7 +362,7 @@ describe('issue-level usage aggregation', () => {
 
 describe('WorkflowSessionRow responsive layout', () => {
   it('applies min-w-0 to the row link and header so content can shrink', () => {
-    mockedUseWorkflowRunSessions.mockReturnValue({
+    setWorkflowRunSessions({
       isLoading: false,
       sessions: [
         session({
@@ -379,7 +388,7 @@ describe('WorkflowSessionRow responsive layout', () => {
   })
 
   it('truncates the session name span and lets the model badge wrap to a second line', () => {
-    mockedUseWorkflowRunSessions.mockReturnValue({
+    setWorkflowRunSessions({
       isLoading: false,
       sessions: [
         session({
@@ -413,7 +422,7 @@ describe('WorkflowSessionRow responsive layout', () => {
   })
 
   it('keeps metric chips on a wrapping line and truncates the failure reason', () => {
-    mockedUseWorkflowRunSessions.mockReturnValue({
+    setWorkflowRunSessions({
       isLoading: false,
       sessions: [
         session({
@@ -443,7 +452,7 @@ describe('WorkflowSessionRow responsive layout', () => {
   })
 
   it('does not declare any fixed-width class on the row or its children', () => {
-    mockedUseWorkflowRunSessions.mockReturnValue({
+    setWorkflowRunSessions({
       isLoading: false,
       sessions: [
         session({

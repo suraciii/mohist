@@ -1,18 +1,11 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom'
-import { http, HttpResponse } from 'msw'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, describe, expect, it } from 'vitest'
 import { SidebarProvider } from '../../../shared/ui/components/sidebar'
 import type { SystemInfo } from '../../../entities/settings'
-import { SystemSettingsSection } from './SystemSettingsSection'
-import { server, useMswServer } from '../../../../tests/support/msw'
-
-const SYSTEM_INFO = '*/api/system/info'
-const CONFIG = '*/api/config'
-const SYSTEM_UPDATE_STATUS = '*/api/system/update/status'
+import { SystemSettingsSection, type SystemSettingsDataHook } from './SystemSettingsSection'
 
 const baseSystemInfo: SystemInfo = {
   running: {
@@ -51,32 +44,41 @@ const baseSystemInfo: SystemInfo = {
 }
 
 let systemInfoData: SystemInfo = baseSystemInfo
+let systemInfoError = false
 
-useMswServer(
-  http.get(SYSTEM_INFO, () => HttpResponse.json({ success: true, data: systemInfoData })),
-  http.get(CONFIG, () => HttpResponse.json({ success: true, data: { logLevel: 'INFO' } })),
-  http.get(SYSTEM_UPDATE_STATUS, () => HttpResponse.json({ success: true, data: { hasJob: false, job: null } })),
-)
+const dataHook: SystemSettingsDataHook = () => ({
+  logLevelData: { level: 'INFO' },
+  logLevelLoading: false,
+  logLevelError: false,
+  logLevelErrorValue: null,
+  setLogLevel: async () => undefined,
+  systemInfo: systemInfoError ? undefined : systemInfoData,
+  infoLoading: false,
+  infoError: systemInfoError,
+  infoErrorValue: systemInfoError ? new Error('boom') : null,
+  refetchInfo: async () => undefined,
+  startSystemUpdate: async () => undefined,
+  systemUpdatePending: false,
+  updateStatusEnvelope: { hasJob: false, job: null },
+  refetchUpdateStatus: async () => undefined,
+})
 
 function mockSystemInfo(data: SystemInfo) {
   systemInfoData = data
-  server.use(http.get(SYSTEM_INFO, () => HttpResponse.json({ success: true, data })))
+  systemInfoError = false
 }
 
 function mockSystemInfoError() {
-  server.use(http.get(SYSTEM_INFO, () => HttpResponse.json({ success: false, error: 'boom' }, { status: 500 })))
+  systemInfoError = true
 }
 
 function renderSection() {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
-    <QueryClientProvider client={queryClient}>
-      <MemoryRouter>
-        <SidebarProvider>
-          <SystemSettingsSection />
-        </SidebarProvider>
-      </MemoryRouter>
-    </QueryClientProvider>,
+    <MemoryRouter>
+      <SidebarProvider>
+        <SystemSettingsSection dataHook={dataHook} />
+      </SidebarProvider>
+    </MemoryRouter>,
   )
 }
 

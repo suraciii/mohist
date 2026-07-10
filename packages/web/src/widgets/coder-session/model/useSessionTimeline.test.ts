@@ -992,6 +992,13 @@ describe('useSessionTimeline event-wiring integration', () => {
   })
 
   it('plan_session_update uses the rAF branch when at least 100ms has elapsed since the last flush', async () => {
+    const frameCallbacks: FrameRequestCallback[] = []
+    const requestFrame = vi.fn((callback: FrameRequestCallback) => {
+      frameCallbacks.push(callback)
+      return frameCallbacks.length
+    })
+    vi.stubGlobal('requestAnimationFrame', requestFrame)
+
     const hook = renderTimelineHook()
 
     act(() => {
@@ -1017,9 +1024,12 @@ describe('useSessionTimeline event-wiring integration', () => {
       })
     })
 
-    await act(async () => {
-      vi.advanceTimersByTime(120)
+    act(() => {
+      vi.advanceTimersByTime(100)
     })
+
+    expect(requestFrame).toHaveBeenCalledTimes(1)
+    act(() => frameCallbacks.shift()!(0))
 
     expect(hook.result.current.rounds[0].agentText).toBe('first ')
 
@@ -1040,10 +1050,9 @@ describe('useSessionTimeline event-wiring integration', () => {
     })
 
     expect(hook.result.current.rounds[0].agentText).toBe('first ')
+    expect(requestFrame).toHaveBeenCalledTimes(2)
 
-    await act(async () => {
-      vi.advanceTimersByTime(30)
-    })
+    act(() => frameCallbacks.shift()!(0))
 
     expect(hook.result.current.rounds[0].agentText).toBe('first second')
   })

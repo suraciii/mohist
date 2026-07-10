@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import {
+  beforeEach,
   describe,
   expect,
   it,
@@ -97,6 +98,10 @@ const handlers = [
 ]
 
 useMswServer(...handlers)
+
+beforeEach(() => {
+  server.use(...handlers)
+})
 
 describe('TemplatesSection', () => {
   describe('List view with mixed sources', () => {

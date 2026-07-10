@@ -6,25 +6,18 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ProjectProvider } from '../../project/model/ProjectContext'
 import type { ReactNode } from 'react'
 import type { CoderSessionItem } from '..'
-import { useMswServer } from '../../../../tests/support/msw'
-import { http, HttpResponse } from 'msw'
 import { dispatchAgentEvent } from '../../agent/model/events'
 
 let _coderSessionsData: CoderSessionItem[] = []
 let _coderSessionsResponses: CoderSessionItem[][] = []
 let _neverResolve = false
 
-const SessionsPath = `/api/projects/${TEST_PROJECT.id}/issues/:issueNumber/coder-sessions`
-
-const coderSessionsHandler = vi.fn(() => {
+const coderSessionsFetcher = vi.fn(async () => {
   if (_neverResolve) return new Promise<never>(() => {})
-  const data = _coderSessionsResponses.length > 0
+  return _coderSessionsResponses.length > 0
     ? _coderSessionsResponses.shift()!
     : _coderSessionsData
-  return HttpResponse.json({ success: true, data })
 })
-
-useMswServer(http.get(SessionsPath, coderSessionsHandler))
 
 const queryClients: QueryClient[] = []
 
@@ -108,25 +101,25 @@ describe('useCoderSessions', () => {
     it('uses 30 second staleTime for caching', async () => {
       _coderSessionsData = [makeSession({ id: 's1' }), makeSession({ id: 's2' })]
 
-      const { result } = renderHookWithProviders(() => useCoderSessions(123))
+      const { result } = renderHookWithProviders(() => useCoderSessions(123, coderSessionsFetcher))
 
       await waitFor(() => {
         expect(result.current.sessions.length).toBe(2)
       })
 
-      expect(coderSessionsHandler).toHaveBeenCalledTimes(1)
+      expect(coderSessionsFetcher).toHaveBeenCalledTimes(1)
     })
 
     it('returns cached data when re-rendering within stale window', async () => {
       _coderSessionsData = [makeSession({ id: 's1' })]
 
-      const { result } = renderHookWithProviders(() => useCoderSessions(123))
+      const { result } = renderHookWithProviders(() => useCoderSessions(123, coderSessionsFetcher))
 
       await waitFor(() => {
         expect(result.current.sessions.length).toBe(1)
       })
 
-      expect(coderSessionsHandler).toHaveBeenCalledTimes(1)
+      expect(coderSessionsFetcher).toHaveBeenCalledTimes(1)
     })
   })
 
@@ -134,19 +127,19 @@ describe('useCoderSessions', () => {
     it('uses issue-specific cache key', async () => {
       _coderSessionsData = [makeSession({ id: 's1' })]
 
-      const { result: result1 } = renderHookWithProviders(() => useCoderSessions(123))
+      const { result: result1 } = renderHookWithProviders(() => useCoderSessions(123, coderSessionsFetcher))
 
       await waitFor(() => {
         expect(result1.current.sessions.length).toBe(1)
       })
 
-      const { result: result2 } = renderHookWithProviders(() => useCoderSessions(456))
+      const { result: result2 } = renderHookWithProviders(() => useCoderSessions(456, coderSessionsFetcher))
 
       await waitFor(() => {
         expect(result2.current.sessions.length).toBe(1)
       })
 
-      expect(coderSessionsHandler).toHaveBeenCalledTimes(2)
+      expect(coderSessionsFetcher).toHaveBeenCalledTimes(2)
     })
 
     it('does not share cache between different issues', async () => {
@@ -155,12 +148,12 @@ describe('useCoderSessions', () => {
 
       _coderSessionsResponses = [sessions123, sessions456]
 
-      const { result: result1 } = renderHookWithProviders(() => useCoderSessions(123))
+      const { result: result1 } = renderHookWithProviders(() => useCoderSessions(123, coderSessionsFetcher))
       await waitFor(() => {
         expect(result1.current.sessions[0].title).toBe('Issue 123 Session')
       })
 
-      const { result: result2 } = renderHookWithProviders(() => useCoderSessions(456))
+      const { result: result2 } = renderHookWithProviders(() => useCoderSessions(456, coderSessionsFetcher))
       await waitFor(() => {
         expect(result2.current.sessions[0].title).toBe('Issue 456 Session')
       })
@@ -171,7 +164,7 @@ describe('useCoderSessions', () => {
     it('returns empty sessions array while loading', async () => {
       _neverResolve = true
 
-      const { result } = renderHookWithProviders(() => useCoderSessions(123))
+      const { result } = renderHookWithProviders(() => useCoderSessions(123, coderSessionsFetcher))
 
       expect(result.current.sessions).toEqual([])
       expect(result.current.isLoading).toBe(true)
@@ -180,7 +173,7 @@ describe('useCoderSessions', () => {
     it('returns sessions with isLoading false when loaded', async () => {
       _coderSessionsData = [makeSession({ id: 's1' })]
 
-      const { result } = renderHookWithProviders(() => useCoderSessions(123))
+      const { result } = renderHookWithProviders(() => useCoderSessions(123, coderSessionsFetcher))
 
       await waitFor(() => {
         expect(result.current.sessions.length).toBe(1)
@@ -190,17 +183,17 @@ describe('useCoderSessions', () => {
     })
 
     it('does not fetch when issueNumber is 0', async () => {
-      const { result } = renderHookWithProviders(() => useCoderSessions(0))
+      const { result } = renderHookWithProviders(() => useCoderSessions(0, coderSessionsFetcher))
 
       expect(result.current.sessions).toEqual([])
-      expect(coderSessionsHandler).not.toHaveBeenCalled()
+      expect(coderSessionsFetcher).not.toHaveBeenCalled()
     })
 
     it('does not fetch when issueNumber is negative', async () => {
-      const { result } = renderHookWithProviders(() => useCoderSessions(-1))
+      const { result } = renderHookWithProviders(() => useCoderSessions(-1, coderSessionsFetcher))
 
       expect(result.current.sessions).toEqual([])
-      expect(coderSessionsHandler).not.toHaveBeenCalled()
+      expect(coderSessionsFetcher).not.toHaveBeenCalled()
     })
   })
 })
@@ -248,7 +241,7 @@ describe('useCoderSessions live event handling', () => {
   it('applies usage update to matching session', async () => {
     _coderSessionsData = [makeSession({ id: 'session-1', status: 'running' })]
 
-    const { result } = renderHookWithProviders(() => useCoderSessions(1))
+    const { result } = renderHookWithProviders(() => useCoderSessions(1, coderSessionsFetcher))
 
     await waitFor(() => {
       expect(result.current.sessions.length).toBe(1)
@@ -284,7 +277,7 @@ describe('useCoderSessions live event handling', () => {
   it('ignores usage update for unknown session', async () => {
     _coderSessionsData = [makeSession({ id: 'session-1', status: 'running' })]
 
-    const { result } = renderHookWithProviders(() => useCoderSessions(1))
+    const { result } = renderHookWithProviders(() => useCoderSessions(1, coderSessionsFetcher))
 
     await waitFor(() => {
       expect(result.current.sessions.length).toBe(1)
@@ -309,7 +302,7 @@ describe('useCoderSessions live event handling', () => {
       costCurrency: 'USD',
     })]
 
-    const { result } = renderHookWithProviders(() => useCoderSessions(1))
+    const { result } = renderHookWithProviders(() => useCoderSessions(1, coderSessionsFetcher))
 
     await waitFor(() => {
       expect(result.current.sessions.length).toBe(1)

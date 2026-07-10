@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import * as React from 'react'
 
 import { AttachmentComposer, stripAttachmentReference, type UploadAttachment } from './AttachmentComposer'
@@ -33,10 +33,10 @@ describe('AttachmentComposer', () => {
       contentType: file.type,
       size: file.size,
     }))
-    render(<Harness uploadAttachment={uploadAttachment} />)
+    const { container } = render(<Harness uploadAttachment={uploadAttachment} />)
 
     const file = new File(['log'], 'error.log', { type: 'text/plain' })
-    fireEvent.paste(screen.getByRole('textbox'), { clipboardData: { files: [file] } })
+    fireEvent.paste(within(container).getByRole('textbox'), { clipboardData: { files: [file] } })
 
     await waitFor(() => expect(uploadAttachment).toHaveBeenCalledTimes(1))
     expect(screen.getByTestId('composer-value').textContent).toBe('[error.log](att:att_paste)')
@@ -49,10 +49,10 @@ describe('AttachmentComposer', () => {
       contentType: file.type,
       size: file.size,
     }))
-    render(<Harness uploadAttachment={uploadAttachment} />)
+    const { container } = render(<Harness uploadAttachment={uploadAttachment} />)
 
     const file = new File(['pdf'], 'brief.pdf', { type: 'application/pdf' })
-    const card = screen.getByRole('textbox').parentElement as HTMLElement
+    const card = within(container).getByRole('textbox').parentElement as HTMLElement
     fireEvent.dragOver(card, { dataTransfer: { files: [file] } })
     expect(screen.getByText('Drop files to attach')).toBeTruthy()
     fireEvent.drop(card, { dataTransfer: { files: [file] } })

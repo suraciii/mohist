@@ -4,13 +4,16 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
-import { http, HttpResponse } from 'msw'
-import { server, useMswServer } from '../../../../tests/support/msw'
 import { ProjectProvider } from '../../../entities/project'
 import { RunnersPage } from './RunnersPage'
 import type { RunnerStatusRow } from '../../../entities/runner/model/types'
+import { useRunners } from '../../../entities/runner'
 
-useMswServer()
+let currentRunners: RunnerStatusRow[] = []
+
+const runnersHook: typeof useRunners = () => ({
+  data: currentRunners,
+}) as ReturnType<typeof useRunners>
 
 function makeRow(overrides: Partial<RunnerStatusRow> = {}): RunnerStatusRow {
   return {
@@ -38,12 +41,8 @@ const TEST_PROJECT = {
   repositories: [],
 }
 
-const RUNNERS_PATH = '*/api/projects/:projectId/runners'
-
 function mockRunners(rows: RunnerStatusRow[]) {
-  server.use(
-    http.get(RUNNERS_PATH, () => HttpResponse.json({ success: true, data: { runners: rows } })),
-  )
+  currentRunners = rows
 }
 
 function renderWith({
@@ -60,7 +59,7 @@ function renderWith({
     <QueryClientProvider client={queryClient}>
       <ProjectProvider initialProjectId={initialProjectId} initialProjects={initialProjects}>
         <MemoryRouter>
-          <RunnersPage />
+          <RunnersPage runnersHook={runnersHook} />
         </MemoryRouter>
       </ProjectProvider>
     </QueryClientProvider>,
@@ -69,6 +68,7 @@ function renderWith({
 
 afterEach(() => {
   cleanup()
+  currentRunners = []
 })
 
 describe('RunnersPage', () => {

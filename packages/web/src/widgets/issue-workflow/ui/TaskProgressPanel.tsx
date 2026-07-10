@@ -1,10 +1,10 @@
 import { useState } from 'react'
 import { Button } from '@/shared/ui/components/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/shared/ui/components/card'
-import type { StageTaskState, WorkflowStage } from '../../../entities/issue'
+import type { StageTaskState, WorkflowStage, WorkflowTimeline } from '../../../entities/issue'
 import { useWorkflowTimeline } from '../../../entities/issue'
 import { resolveDeliveryFailureFromMessage, resolveDeliveryFailureFromOutput } from '../../../shared/lib/delivery-failure'
-import { TaskLogPanel } from './TaskLogPanel'
+import { TaskLogPanel, type TaskLogDataHook } from './TaskLogPanel'
 
 function parseTaskOutput(raw: string | null | undefined): unknown {
   if (typeof raw !== 'string') return null
@@ -17,10 +17,17 @@ function parseTaskOutput(raw: string | null | undefined): unknown {
   }
 }
 
-interface TaskProgressPanelProps {
+export type TaskProgressTimelineHook = (
+  issueNumber: number,
+  enabled: boolean,
+) => { data: WorkflowTimeline | null | undefined }
+
+export interface TaskProgressPanelProps {
   issueNumber: number
   currentStage: WorkflowStage
   isAgentRunning: boolean
+  timelineHook?: TaskProgressTimelineHook
+  taskLogHook?: TaskLogDataHook
 }
 
 function StageTaskStatusIcon({ status }: { status: StageTaskState['status'] }) {
@@ -41,7 +48,7 @@ function StageTaskStatusIcon({ status }: { status: StageTaskState['status'] }) {
   return <span className="inline-block h-2 w-2 rounded-full bg-muted-foreground/30 flex-shrink-0" />
 }
 
-function TaskItem({ task, isRunning, issueNumber, workflowRunId }: { task: StageTaskState; isRunning: boolean; issueNumber: number; workflowRunId?: string | null }) {
+function TaskItem({ task, isRunning, issueNumber, workflowRunId, taskLogHook }: { task: StageTaskState; isRunning: boolean; issueNumber: number; workflowRunId?: string | null; taskLogHook?: TaskLogDataHook }) {
   const [expanded, setExpanded] = useState(false)
   const isFailed = task.status === 'failed'
   const canExpand = typeof task.taskId === 'string' && task.taskId.length > 0 && (task.status === 'failed' || task.status === 'completed' || task.status === 'running')
@@ -178,6 +185,7 @@ function TaskItem({ task, isRunning, issueNumber, workflowRunId }: { task: Stage
               sessionName={task.sessionName ?? null}
               origin={task.origin ?? null}
               classification={task.classification ?? null}
+              taskLogHook={taskLogHook}
             />
           )}
         </div>
@@ -231,8 +239,14 @@ function ProgressBar({ completed, failed, total }: { completed: number; failed: 
   )
 }
 
-export function TaskProgressPanel({ issueNumber, currentStage, isAgentRunning }: TaskProgressPanelProps) {
-  const { data: timeline } = useWorkflowTimeline(issueNumber, true)
+export function TaskProgressPanel({
+  issueNumber,
+  currentStage,
+  isAgentRunning,
+  timelineHook = useWorkflowTimeline,
+  taskLogHook,
+}: TaskProgressPanelProps) {
+  const { data: timeline } = timelineHook(issueNumber, true)
 
   const stage = timeline?.stages.find((s) => s.stage === currentStage)
   const tasks: StageTaskState[] = (stage?.tasks ?? []).map((task, index) => ({
@@ -295,7 +309,7 @@ export function TaskProgressPanel({ issueNumber, currentStage, isAgentRunning }:
 
         <div className="space-y-1">
           {tasks.map((task) => (
-            <TaskItem key={task.taskId} task={task} isRunning={isAgentRunning} issueNumber={issueNumber} workflowRunId={timeline?.workflowRunId ?? null} />
+            <TaskItem key={task.taskId} task={task} isRunning={isAgentRunning} issueNumber={issueNumber} workflowRunId={timeline?.workflowRunId ?? null} taskLogHook={taskLogHook} />
           ))}
         </div>
       </CardContent>

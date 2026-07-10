@@ -6,14 +6,14 @@ import { MemoryRouter } from 'react-router-dom'
 import { http, HttpResponse } from 'msw'
 import { ProjectProvider } from '../../../entities/project'
 import type { AgentInfo } from '../../../entities/agent'
-import { AgentProfileEditor } from './AgentProfileEditor'
+import { AgentProfileEditor, type AgentProfileEditorOperationsHook } from './AgentProfileEditor'
 import { useMswServer } from '../../../../tests/support/msw'
 
-const mocks = vi.hoisted(() => ({
+const mocks = {
   createMutation: { mutate: vi.fn(), isPending: false },
   updateMutation: { mutate: vi.fn(), isPending: false },
   archiveMutation: { mutate: vi.fn(), isPending: false },
-}))
+}
 
 useMswServer(
   http.get('*/api/projects/:projectId/opencode/models', () =>
@@ -24,25 +24,11 @@ useMswServer(
   ),
 )
 
-vi.mock('../../../entities/agent', () => ({
-  useCreateAgent: () => mocks.createMutation,
-  useUpdateAgent: () => mocks.updateMutation,
-  useArchiveAgent: () => mocks.archiveMutation,
-  readAgentModelAndVariant: (agent: any) => {
-    if (!agent?.agentConfig) return { model: null, variant: null }
-    const cfg = agent.agentConfig as Record<string, unknown>
-    return { model: cfg.model as string ?? null, variant: cfg.variant as string ?? null }
-  },
-  writeAgentModelAndVariant: (current: any, model: string | null, variant: string | null) => {
-    const base: Record<string, unknown> = current && typeof current === 'object' && !Array.isArray(current) ? { ...current } : {}
-    if (model) base.model = model
-    else { delete base.model; delete base.variant }
-    if (variant) base.variant = variant
-    else delete base.variant
-    if (Object.keys(base).length === 0) return null
-    return base
-  },
-}))
+const operationsHook: AgentProfileEditorOperationsHook = () => ({
+  createAgent: mocks.createMutation,
+  updateAgent: mocks.updateMutation,
+  archiveAgent: mocks.archiveMutation,
+})
 
 
 function createQueryClient() {
@@ -67,6 +53,7 @@ function renderEditor(overrides: Partial<Parameters<typeof AgentProfileEditor>[0
           <AgentProfileEditor
             {...defaultProps}
             {...overrides}
+            operationsHook={operationsHook}
           />
         </MemoryRouter>
       </ProjectProvider>

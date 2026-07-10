@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 
 import { screen, waitFor } from '@testing-library/react'
 
@@ -7,7 +7,6 @@ import { EpicStatus, type EpicDetail } from '../../../entities/epic'
 import { IssueStatus, WorkflowStage, IssueHealth } from '../../../entities/issue'
 
 import { issues, linkedIssue, renderPage } from './_epicDetailPageTestHarness'
-import { mountEpicDetail, mockEpic } from './_epicDetailMsw'
 
 describe('EpicDetailPage current activity listing', () => {
   function makeEpic(overrides: Record<string, unknown> = {}): EpicDetail {
@@ -37,14 +36,8 @@ describe('EpicDetailPage current activity listing', () => {
     } as EpicDetail
   }
 
-  mountEpicDetail(makeEpic(), issues)
-
-  afterEach(() => {
-    mockEpic(makeEpic())
-  })
-
   it('lists concrete in-flight issues with number, title, and health coloring, and offers navigation', async () => {
-    renderPage()
+    renderPage({ epic: makeEpic(), issues })
 
     const list = await screen.findByTestId('current-activity-list')
     expect(list.getAttribute('data-active-count')).toBe('1')
@@ -70,24 +63,25 @@ describe('EpicDetailPage current activity listing', () => {
   })
 
   it('reflects real activity instead of a constant zero for both active and blocked counts', async () => {
-    mockEpic(makeEpic({
-      progress: {
-        deliveredCount: 0,
-        totalIssueCount: 3,
-        blockedIssues: [
-          { id: 'issue-3', number: 3, title: 'Stuck issue', health: 'blocked' },
-        ],
-        activeIssues: [
-          { id: 'issue-1', number: 1, title: 'Active issue', health: 'active' },
-          { id: 'issue-2', number: 2, title: 'Another active issue', health: 'active' },
-        ],
-        nextIssue: null,
-        nextIssueReason: null,
-        readyToMarkDone: false,
-      },
-    }))
-
-    renderPage()
+    renderPage({
+      epic: makeEpic({
+        progress: {
+          deliveredCount: 0,
+          totalIssueCount: 3,
+          blockedIssues: [
+            { id: 'issue-3', number: 3, title: 'Stuck issue', health: 'blocked' },
+          ],
+          activeIssues: [
+            { id: 'issue-1', number: 1, title: 'Active issue', health: 'active' },
+            { id: 'issue-2', number: 2, title: 'Another active issue', health: 'active' },
+          ],
+          nextIssue: null,
+          nextIssueReason: null,
+          readyToMarkDone: false,
+        },
+      }),
+      issues,
+    })
 
     const list = await screen.findByTestId('current-activity-list')
     expect(list.getAttribute('data-active-count')).toBe('2')
@@ -100,22 +94,23 @@ describe('EpicDetailPage current activity listing', () => {
   })
 
   it('shows an empty-state message when no active or blocked issues are in flight', async () => {
-    mockEpic(makeEpic({
-      progress: {
-        deliveredCount: 1,
-        totalIssueCount: 1,
-        blockedIssues: [],
-        activeIssues: [],
-        nextIssue: null,
-        nextIssueReason: null,
-        readyToMarkDone: true,
-      },
-      linkedIssues: [
-        linkedIssue({ id: 'issue-1', number: 1, title: 'Done issue', status: IssueStatus.Done, stage: WorkflowStage.Done, health: IssueHealth.Done, priority: 'p2' }),
-      ],
-    }))
-
-    renderPage()
+    renderPage({
+      epic: makeEpic({
+        progress: {
+          deliveredCount: 1,
+          totalIssueCount: 1,
+          blockedIssues: [],
+          activeIssues: [],
+          nextIssue: null,
+          nextIssueReason: null,
+          readyToMarkDone: true,
+        },
+        linkedIssues: [
+          linkedIssue({ id: 'issue-1', number: 1, title: 'Done issue', status: IssueStatus.Done, stage: WorkflowStage.Done, health: IssueHealth.Done, priority: 'p2' }),
+        ],
+      }),
+      issues,
+    })
 
     await waitFor(() => {
       expect(screen.queryByTestId('current-activity-empty')).not.toBeNull()

@@ -4,28 +4,39 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, useLocation } from 'react-router-dom'
-import { http, HttpResponse } from 'msw'
 import { ProjectProvider } from '../../../entities/project'
-import { server, useMswServer } from '../../../../tests/support/msw'
 import { TEST_PROJECT } from '../../../../tests/test-utils'
-import { ActivityPage } from './ActivityPage'
+import { ActivityPage, type ActivityPageDependencies } from './ActivityPage'
+import { RunnerSummary } from '../../../widgets/runner-status'
+import { deriveRunnerSummary } from '../../../entities/runner'
 import type { RunnerStatusRow } from '../../../entities/runner/model/types'
-import type { AgentActivity } from '../../../entities/agent/model/types'
-
-useMswServer()
 
 const PROJECT_SEGMENT = encodeURIComponent(TEST_PROJECT.name)
-const RUNNERS_PATH = '*/api/projects/:projectId/runners'
-const ACTIVITY_PATH = '*/api/projects/:projectId/agent/activity'
-
-const EMPTY_AGENT_ACTIVITY: AgentActivity = {
-  summary: { active: 0, waiting: 0, completed: 0, failed: 0, slots: { active: 0, max: 0 } },
-  sessions: [],
-  waiting: [],
-}
+let runnerRows: RunnerStatusRow[] = []
 
 function mockRunners(rows: RunnerStatusRow[]) {
-  server.use(http.get(RUNNERS_PATH, () => HttpResponse.json({ success: true, data: { runners: rows } })))
+  runnerRows = rows
+}
+
+const activityPageDependencies: ActivityPageDependencies = {
+  activityCardsHook: () => ({
+    activeCards: [],
+    activeCardByIssueNumber: new Map(),
+    recentCards: [],
+    waitingCards: [],
+    statusCounts: { active: 0, waiting: 0, completed: 0, failed: 0 },
+    slotUsage: { active: 0, max: 0 },
+    isLoading: false,
+    isError: false,
+  }) as never,
+  activityUsageSnapshotHook: () => ({
+    inputTokens: 0,
+    outputTokens: 0,
+    totalTokens: 0,
+    costAmount: 0,
+    costCurrency: null,
+  }),
+  RunnerSummaryBadge: () => <RunnerSummary summary={deriveRunnerSummary(runnerRows)} />,
 }
 
 function makeRow(overrides: Partial<RunnerStatusRow> = {}): RunnerStatusRow {
@@ -72,7 +83,7 @@ function renderWith({
       <ProjectProvider initialProjectId={initialProjectId} initialProjects={initialProjects}>
         <MemoryRouter initialEntries={[initialRoute]}>
           <LocationProbe testId="route-pathname" />
-          <ActivityPage />
+          <ActivityPage dependencies={activityPageDependencies} />
         </MemoryRouter>
       </ProjectProvider>
     </QueryClientProvider>,
@@ -80,8 +91,7 @@ function renderWith({
 }
 
 beforeEach(() => {
-  mockRunners([])
-  server.use(http.get(ACTIVITY_PATH, () => HttpResponse.json({ success: true, data: EMPTY_AGENT_ACTIVITY })))
+  runnerRows = []
 })
 
 afterEach(() => {

@@ -1,16 +1,14 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { QueryClient, QueryClientProvider, useMutation } from '@tanstack/react-query'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
-import { http, HttpResponse } from 'msw'
-import { useMswServer } from '../../../../tests/support/msw'
 import { ProjectProvider } from '../../../entities/project'
-import { GenericSessionPage } from './GenericSessionPage'
+import { GenericSessionPage, type GenericSessionPageDependencies } from './GenericSessionPage'
 
-const mocks = vi.hoisted(() => ({
+const mocks = {
   transcriptTurns: [] as any[],
-}))
+}
 
 let _summaryData: unknown = null
 let _summaryLoading = false
@@ -22,61 +20,51 @@ const _cancelHandler = vi.fn()
 let _blockCancel = false
 let _cancelResolve: (() => void) | null = null
 
-useMswServer(
-  http.get('*/api/projects/:projectId/agent-sessions/:sessionId', () => {
-    if (_summaryLoading) return new Promise(() => {})
-    if (_summaryError) return HttpResponse.json({ success: false, error: 'Not found' }, { status: 500 })
-    return HttpResponse.json({ success: true, data: _summaryData })
-  }),
-  http.get('*/api/projects/:projectId/agent-sessions/:sessionId/transcript', () =>
-    HttpResponse.json({ success: true, data: _transcriptData }),
-  ),
-  http.post('*/api/projects/:projectId/agent-sessions/:sessionId/followup', async ({ request }) => {
-    const body = await request.json()
-    _followupHandler(body)
-    return HttpResponse.json({ success: true, data: { status: 'sent' } })
-  }),
-  http.post('*/api/projects/:projectId/agent-sessions/:sessionId/cancel', ({ params }) => {
-    _cancelHandler(params.sessionId)
-    if (_blockCancel) {
-      return new Promise((resolve) => {
-        _cancelResolve = () => resolve(HttpResponse.json({ success: true, data: { state: 'cancelled' } }))
-      })
-    }
-    return HttpResponse.json({ success: true, data: { state: 'cancelled' } })
-  }),
-  http.get('*/api/projects/:projectId/agents/:agentRef/sessions', () =>
-    HttpResponse.json({ success: true, data: [] }),
-  ),
-)
-
-vi.mock('../../../widgets/session-transcript', () => ({
-  useSessionTranscript: () => ({
-    turns: mocks.transcriptTurns,
-    transcriptVersion: 0,
-    scrollToBottom: vi.fn(),
-    newContentAvailable: false,
-    setIsNearBottom: vi.fn(),
-    isFinalizing: false,
-    isThinking: false,
-    isStreaming: false,
-  }),
-  projectTurn: (turn: any) => turn,
-  SessionTranscriptLayout: () => <div data-testid="session-transcript-layout" />,
-}))
-
-vi.mock('../../../widgets/coder-session', () => ({
-  SessionRecoveryActions: () => <div data-testid="session-recovery-actions" />,
-  SessionFollowupComposer: ({ disabled }: { disabled: boolean }) => (
-    <div data-testid="session-followup-composer" data-disabled={disabled ? 'true' : 'false'} />
-  ),
-}))
-
-vi.mock('../../../widgets/session-health', () => ({
-  ContextHealthBar: () => <div data-testid="context-health-bar" />,
-  ContextHealthIndicator: () => <div data-testid="context-health-indicator" />,
-  CompactionLineageLink: () => <div data-testid="compaction-lineage-link" />,
-}))
+const genericSessionPageDependencies: GenericSessionPageDependencies = {
+  dataSource: {
+    useGenericSessionSummary: () => ({
+      data: _summaryData,
+      isLoading: _summaryLoading,
+      isError: _summaryError,
+    }) as never,
+    useGenericSessionTranscript: () => ({ data: _transcriptData }) as never,
+    useGenericFollowup: () => useMutation({
+      mutationFn: async ({ text }: { sessionId: string; text: string }) => {
+        _followupHandler({ text })
+        return { status: 'sent' }
+      },
+    }) as never,
+    useCancelGenericSession: () => useMutation({
+      mutationFn: ({ sessionId }: { sessionId: string; agentRef?: string }) => {
+        _cancelHandler(sessionId)
+        if (!_blockCancel) return Promise.resolve({ state: 'cancelled' })
+        return new Promise<{ state: string }>((resolve) => {
+          _cancelResolve = () => resolve({ state: 'cancelled' })
+        })
+      },
+    }) as never,
+    useSessionTranscript: () => ({
+      turns: mocks.transcriptTurns,
+      transcriptVersion: 0,
+      scrollToBottom: vi.fn(),
+      newContentAvailable: false,
+      setIsNearBottom: vi.fn(),
+      isFinalizing: false,
+      isThinking: false,
+      isStreaming: false,
+    }) as never,
+    projectTurn: (turn) => turn as never,
+  },
+  shellComponents: {
+    SessionTranscriptLayout: () => <div data-testid="session-transcript-layout" />,
+    SessionRecoveryActions: () => <div data-testid="session-recovery-actions" />,
+    SessionFollowupComposer: ({ disabled }: { disabled?: boolean }) => (
+      <div data-testid="session-followup-composer" data-disabled={disabled ? 'true' : 'false'} />
+    ),
+    ContextHealthBar: () => <div data-testid="context-health-bar" />,
+    CompactionLineageLink: () => <div data-testid="compaction-lineage-link" />,
+  },
+}
 
 
 function createQueryClient() {
@@ -125,7 +113,7 @@ async function renderPage() {
       }]}>
         <MemoryRouter initialEntries={['/agent-sessions/sess-abc']}>
           <Routes>
-            <Route path="/agent-sessions/:sessionId" element={<GenericSessionPage />} />
+            <Route path="/agent-sessions/:sessionId" element={<GenericSessionPage dependencies={genericSessionPageDependencies} />} />
           </Routes>
         </MemoryRouter>
       </ProjectProvider>

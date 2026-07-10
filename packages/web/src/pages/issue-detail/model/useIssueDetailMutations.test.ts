@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { renderHook } from '@testing-library/react'
-import { useIssueDetailMutations } from './useIssueDetailMutations'
+import type { QueryClient } from '@tanstack/react-query'
+import {
+  createIssueDetailMutationOptions,
+  type IssueDetailMutationDependencies,
+  type UseIssueDetailMutationsOptions,
+} from './useIssueDetailMutations'
 
 interface MutationConfig {
   mutationFn: (...args: unknown[]) => unknown
@@ -8,75 +12,53 @@ interface MutationConfig {
   onError?: (...args: unknown[]) => void
 }
 
-const useMutationMock = vi.fn()
-const useQueryClientMock = vi.fn()
 const invalidateQueriesMock = vi.fn()
 
 const apiMocks = {
-  startIssue: vi.fn(),
-  approveIssue: vi.fn(),
-  requestChangesIssue: vi.fn(),
-  updateIssue: vi.fn(),
-  closeIssue: vi.fn(),
-  reopenIssue: vi.fn(),
-  resumeIssue: vi.fn(),
-  retryIssue: vi.fn(),
-  rerunIssue: vi.fn(),
-  forceStopIssue: vi.fn(),
-  stopIssue: vi.fn(),
-  addPrerequisite: vi.fn(),
-  removePrerequisite: vi.fn(),
-  addComment: vi.fn(),
-  deleteComment: vi.fn(),
-  extractAttachmentIds: vi.fn(),
+  startIssue: vi.fn<IssueDetailMutationDependencies['startIssue']>(),
+  approveIssue: vi.fn<IssueDetailMutationDependencies['approveIssue']>(),
+  requestChangesIssue: vi.fn<IssueDetailMutationDependencies['requestChangesIssue']>(),
+  updateIssue: vi.fn<IssueDetailMutationDependencies['updateIssue']>(),
+  closeIssue: vi.fn<IssueDetailMutationDependencies['closeIssue']>(),
+  reopenIssue: vi.fn<IssueDetailMutationDependencies['reopenIssue']>(),
+  resumeIssue: vi.fn<IssueDetailMutationDependencies['resumeIssue']>(),
+  retryIssue: vi.fn<IssueDetailMutationDependencies['retryIssue']>(),
+  rerunIssue: vi.fn<IssueDetailMutationDependencies['rerunIssue']>(),
+  forceStopIssue: vi.fn<IssueDetailMutationDependencies['forceStopIssue']>(),
+  stopIssue: vi.fn<IssueDetailMutationDependencies['stopIssue']>(),
+  addPrerequisite: vi.fn<IssueDetailMutationDependencies['addPrerequisite']>(),
+  removePrerequisite: vi.fn<IssueDetailMutationDependencies['removePrerequisite']>(),
+  addComment: vi.fn<IssueDetailMutationDependencies['addComment']>(),
+  deleteComment: vi.fn<IssueDetailMutationDependencies['deleteComment']>(),
+  extractAttachmentIds: vi.fn<IssueDetailMutationDependencies['extractAttachmentIds']>(),
+  invalidateApprovalWait: vi.fn<IssueDetailMutationDependencies['invalidateApprovalWait']>(),
 }
 
-vi.mock('@tanstack/react-query', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@tanstack/react-query')>()),
-  useMutation: (...args: unknown[]) => useMutationMock(...args),
-  useQueryClient: () => useQueryClientMock(),
-}))
+let mutationConfigs: ReturnType<typeof createIssueDetailMutationOptions>
 
-vi.mock('../../../entities/issue', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../entities/issue')>()
-  return {
-    ...actual,
-    addComment: (...args: unknown[]) => apiMocks.addComment(...args),
-    addPrerequisite: (...args: unknown[]) => apiMocks.addPrerequisite(...args),
-    approveIssue: (...args: unknown[]) => apiMocks.approveIssue(...args),
-    closeIssue: (...args: unknown[]) => apiMocks.closeIssue(...args),
-    deleteComment: (...args: unknown[]) => apiMocks.deleteComment(...args),
-    extractAttachmentIds: (...args: unknown[]) => apiMocks.extractAttachmentIds(...args),
-    forceStopIssue: (...args: unknown[]) => apiMocks.forceStopIssue(...args),
-    removePrerequisite: (...args: unknown[]) => apiMocks.removePrerequisite(...args),
-    requestChangesIssue: (...args: unknown[]) => apiMocks.requestChangesIssue(...args),
-    reopenIssue: (...args: unknown[]) => apiMocks.reopenIssue(...args),
-    rerunIssue: (...args: unknown[]) => apiMocks.rerunIssue(...args),
-    resumeIssue: (...args: unknown[]) => apiMocks.resumeIssue(...args),
-    retryIssue: (...args: unknown[]) => apiMocks.retryIssue(...args),
-    startIssue: (...args: unknown[]) => apiMocks.startIssue(...args),
-    stopIssue: (...args: unknown[]) => apiMocks.stopIssue(...args),
-    updateIssue: (...args: unknown[]) => apiMocks.updateIssue(...args),
-  }
-})
+const queryClient = {
+  invalidateQueries: invalidateQueriesMock,
+} as unknown as QueryClient
 
 beforeEach(() => {
-  useMutationMock.mockReset()
-  useQueryClientMock.mockReset()
   invalidateQueriesMock.mockReset()
   for (const fn of Object.values(apiMocks)) fn.mockReset()
   invalidateQueriesMock.mockResolvedValue(undefined)
-  useQueryClientMock.mockReturnValue({ invalidateQueries: invalidateQueriesMock })
-  // Each call returns its config object so we can call onSuccess/onError later
-  useMutationMock.mockImplementation((config: MutationConfig) => config)
   apiMocks.extractAttachmentIds.mockImplementation((body: string) => [`att:${body.split('att:')[1] ?? ''}`])
+  apiMocks.invalidateApprovalWait.mockImplementation((client) => {
+    client.invalidateQueries({ queryKey: ['issues', 'metrics', 'approval-wait'] })
+  })
 })
 
 function getMutationConfigs(): MutationConfig[] {
-  return useMutationMock.mock.calls.map((call) => call[0] as MutationConfig)
+  return Object.values(mutationConfigs) as MutationConfig[]
 }
 
 const expectedMutationCount = 15
+
+function arrange(options: UseIssueDetailMutationsOptions) {
+  mutationConfigs = createIssueDetailMutationOptions(options, queryClient, apiMocks)
+}
 
 function findMutationByApiCall(apiMock: ReturnType<typeof vi.fn>): MutationConfig {
   // Call every mutationFn with no args; the one that ultimately invokes
@@ -108,12 +90,12 @@ function findMutationByApiCallWithArg(apiMock: ReturnType<typeof vi.fn>, arg: un
 
 describe('useIssueDetailMutations', () => {
   it('registers exactly 15 useMutation calls', () => {
-    renderHook(() => useIssueDetailMutations({ issueNumber: 42, projectId: 'proj-1' }))
-    expect(useMutationMock).toHaveBeenCalledTimes(expectedMutationCount)
+    arrange({ issueNumber: 42, projectId: 'proj-1' })
+    expect(getMutationConfigs()).toHaveLength(expectedMutationCount)
   })
 
   it('start: invalidates ["issues"] + ["agent-status"] on success, and ["issues"] on "waiting for" error', () => {
-    renderHook(() => useIssueDetailMutations({ issueNumber: 7, projectId: 'proj-x' }))
+    arrange({ issueNumber: 7, projectId: 'proj-x' })
     const start = findMutationByApiCall(apiMocks.startIssue)
 
     expect(apiMocks.startIssue).toHaveBeenCalledWith(7, 'proj-x')
@@ -134,7 +116,7 @@ describe('useIssueDetailMutations', () => {
   })
 
   it('markReady: invalidates ["issues"] + ["issues", issueNumber] on success', () => {
-    renderHook(() => useIssueDetailMutations({ issueNumber: 7, projectId: 'proj-x' }))
+    arrange({ issueNumber: 7, projectId: 'proj-x' })
     const markReady = findMutationByApiCall(apiMocks.updateIssue)
 
     expect(apiMocks.updateIssue).toHaveBeenCalledWith(7, { isDraft: false }, 'proj-x')
@@ -146,7 +128,7 @@ describe('useIssueDetailMutations', () => {
   })
 
   it('approve / send-back: call approval APIs and invalidate runtime plus approval wait queries', () => {
-    renderHook(() => useIssueDetailMutations({ issueNumber: 7, projectId: 'proj-x' }))
+    arrange({ issueNumber: 7, projectId: 'proj-x' })
 
     const approve = findMutationByApiCall(apiMocks.approveIssue)
     expect(apiMocks.approveIssue).toHaveBeenCalledWith(7, 'proj-x')
@@ -179,7 +161,7 @@ describe('useIssueDetailMutations', () => {
   })
 
   it('addPrerequisite: passes the prerequisite number and invalidates ["issues"] + ["issues", issueNumber] on success', () => {
-    renderHook(() => useIssueDetailMutations({ issueNumber: 7, projectId: 'proj-x' }))
+    arrange({ issueNumber: 7, projectId: 'proj-x' })
     const add = findMutationByApiCallWithArg(apiMocks.addPrerequisite, 99)
 
     expect(apiMocks.addPrerequisite).toHaveBeenCalledWith(7, 99, 'proj-x')
@@ -191,7 +173,7 @@ describe('useIssueDetailMutations', () => {
   })
 
   it('removePrerequisite: passes the prerequisite number and invalidates ["issues"] + ["issues", issueNumber] on success', () => {
-    renderHook(() => useIssueDetailMutations({ issueNumber: 7, projectId: 'proj-x' }))
+    arrange({ issueNumber: 7, projectId: 'proj-x' })
     const remove = findMutationByApiCallWithArg(apiMocks.removePrerequisite, 99)
 
     expect(apiMocks.removePrerequisite).toHaveBeenCalledWith(7, 99, 'proj-x')
@@ -203,7 +185,7 @@ describe('useIssueDetailMutations', () => {
   })
 
   it('close: invalidates ["issues"] only on success', () => {
-    renderHook(() => useIssueDetailMutations({ issueNumber: 7, projectId: 'proj-x' }))
+    arrange({ issueNumber: 7, projectId: 'proj-x' })
     const close = findMutationByApiCall(apiMocks.closeIssue)
 
     expect(apiMocks.closeIssue).toHaveBeenCalledWith(7, 'proj-x')
@@ -215,7 +197,7 @@ describe('useIssueDetailMutations', () => {
   })
 
   it('reopen: invalidates ["issues"] only on success', () => {
-    renderHook(() => useIssueDetailMutations({ issueNumber: 7, projectId: 'proj-x' }))
+    arrange({ issueNumber: 7, projectId: 'proj-x' })
     const reopen = findMutationByApiCall(apiMocks.reopenIssue)
 
     expect(apiMocks.reopenIssue).toHaveBeenCalledWith(7, 'proj-x')
@@ -227,7 +209,7 @@ describe('useIssueDetailMutations', () => {
   })
 
   it('resume / retry / rerun: each invalidate ["issues"] + ["agent-status"] on success', () => {
-    renderHook(() => useIssueDetailMutations({ issueNumber: 7, projectId: 'proj-x' }))
+    arrange({ issueNumber: 7, projectId: 'proj-x' })
 
     for (const apiFn of [apiMocks.resumeIssue, apiMocks.retryIssue, apiMocks.rerunIssue]) {
       invalidateQueriesMock.mockClear()
@@ -242,11 +224,11 @@ describe('useIssueDetailMutations', () => {
 
   it('forceStop: invalidates ["issues"] + ["agent-status"] on success, then fires onForceStopSuccess callback', () => {
     const onForceStopSuccess = vi.fn()
-    renderHook(() => useIssueDetailMutations({
+    arrange({
       issueNumber: 7,
       projectId: 'proj-x',
       onForceStopSuccess,
-    }))
+    })
     const forceStop = findMutationByApiCall(apiMocks.forceStopIssue)
 
     expect(apiMocks.forceStopIssue).toHaveBeenCalledWith(7, 'proj-x')
@@ -259,7 +241,7 @@ describe('useIssueDetailMutations', () => {
   })
 
   it('forceStop: succeeds without onForceStopSuccess callback (no TypeError)', () => {
-    renderHook(() => useIssueDetailMutations({ issueNumber: 7, projectId: 'proj-x' }))
+    arrange({ issueNumber: 7, projectId: 'proj-x' })
     const forceStop = findMutationByApiCall(apiMocks.forceStopIssue)
     invalidateQueriesMock.mockClear()
     expect(() => forceStop.onSuccess?.()).not.toThrow()
@@ -269,11 +251,11 @@ describe('useIssueDetailMutations', () => {
 
   it('stop: invalidates ["issues"] + ["agent-status"] on success, then fires onStopSuccess callback', () => {
     const onStopSuccess = vi.fn()
-    renderHook(() => useIssueDetailMutations({
+    arrange({
       issueNumber: 7,
       projectId: 'proj-x',
       onStopSuccess,
-    }))
+    })
     const stop = findMutationByApiCall(apiMocks.stopIssue)
 
     expect(apiMocks.stopIssue).toHaveBeenCalledWith(7, 'proj-x')
@@ -287,11 +269,11 @@ describe('useIssueDetailMutations', () => {
 
   it('addComment: passes the body + extracted attachment ids, invalidates ["issues", issueNumber] on success, then fires onAddCommentSuccess', () => {
     const onAddCommentSuccess = vi.fn()
-    renderHook(() => useIssueDetailMutations({
+    arrange({
       issueNumber: 7,
       projectId: 'proj-x',
       onAddCommentSuccess,
-    }))
+    })
     const addComment = findMutationByApiCallWithArg(apiMocks.addComment, 'look at att:abc-123')
 
     expect(apiMocks.extractAttachmentIds).toHaveBeenCalledWith('look at att:abc-123')
@@ -306,11 +288,11 @@ describe('useIssueDetailMutations', () => {
 
   it('deleteComment: passes the comment id, invalidates ["issues", issueNumber] on success, then fires onDeleteCommentSuccess', () => {
     const onDeleteCommentSuccess = vi.fn()
-    renderHook(() => useIssueDetailMutations({
+    arrange({
       issueNumber: 7,
       projectId: 'proj-x',
       onDeleteCommentSuccess,
-    }))
+    })
     const deleteComment = findMutationByApiCallWithArg(apiMocks.deleteComment, 'comment-99')
 
     expect(apiMocks.deleteComment).toHaveBeenCalledWith(7, 'comment-99', 'proj-x')
@@ -324,11 +306,11 @@ describe('useIssueDetailMutations', () => {
 
   it('deleteComment: on error fires onDeleteCommentError with an Error instance carrying the message', () => {
     const onDeleteCommentError = vi.fn()
-    renderHook(() => useIssueDetailMutations({
+    arrange({
       issueNumber: 7,
       projectId: 'proj-x',
       onDeleteCommentError,
-    }))
+    })
     const deleteComment = findMutationByApiCallWithArg(apiMocks.deleteComment, 'comment-99')
 
     deleteComment.onError?.(new Error('boom'))
@@ -346,7 +328,7 @@ describe('useIssueDetailMutations', () => {
   })
 
   it('deleteComment: on error does NOT invalidate the issues query (cache invalidation lives only in onSuccess)', () => {
-    renderHook(() => useIssueDetailMutations({ issueNumber: 7, projectId: 'proj-x' }))
+    arrange({ issueNumber: 7, projectId: 'proj-x' })
     const deleteComment = findMutationByApiCallWithArg(apiMocks.deleteComment, 'comment-99')
 
     invalidateQueriesMock.mockClear()
@@ -355,7 +337,7 @@ describe('useIssueDetailMutations', () => {
   })
 
   it('mutations accept undefined projectId without TypeError on success', () => {
-    renderHook(() => useIssueDetailMutations({ issueNumber: 7, projectId: undefined }))
+    arrange({ issueNumber: 7, projectId: undefined })
     expect(() => {
       for (const config of getMutationConfigs()) {
         invalidateQueriesMock.mockClear()

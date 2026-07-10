@@ -1,32 +1,49 @@
-import { afterAll, afterEach, beforeAll } from 'vitest'
+import { beforeEach } from 'vitest'
 import { setupServer } from 'msw/node'
 
-export const server = setupServer()
+interface MswState {
+  server: ReturnType<typeof setupServer>
+  listening: boolean
+  installedFetch: typeof fetch | null
+}
 
-let _patchedOriginalFetch: typeof fetch | null = null
+const testGlobal = globalThis as typeof globalThis & {
+  __mohistWebMswState?: MswState
+}
 
-export function absolutizeRelativeFetchUrls() {
-  if (typeof window !== 'undefined') return
-  if (_patchedOriginalFetch) return
-  _patchedOriginalFetch = globalThis.fetch.bind(globalThis)
+// setup 与 inline project 可能在同一 worker 内重复求值，状态必须挂在全局。
+const state = testGlobal.__mohistWebMswState ??= {
+  server: setupServer(),
+  listening: false,
+  installedFetch: null,
+}
+
+export const server = state.server
+
+function absolutizeRelativeFetchUrls() {
+  const interceptedFetch = globalThis.fetch.bind(globalThis)
+  const baseUrl = typeof window === 'undefined' ? 'http://localhost' : window.location.href
   globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
     if (typeof input === 'string' && input.startsWith('/')) {
-      return _patchedOriginalFetch!(new URL(input, 'http://localhost'), init)
+      return interceptedFetch(new URL(input, baseUrl), init)
     }
-    return _patchedOriginalFetch!(input, init)
+    return interceptedFetch(input, init)
   }) as typeof fetch
 }
 
+export function ensureMswServerListening() {
+  if (state.listening && globalThis.fetch === state.installedFetch) return
+  if (state.listening) server.close()
+
+  server.listen({ onUnhandledRequest: 'error' })
+  absolutizeRelativeFetchUrls()
+  state.installedFetch = globalThis.fetch
+  state.listening = true
+}
+
 export function useMswServer(...handlers: Parameters<typeof server.use>) {
-  beforeAll(() => {
-    server.resetHandlers()
+  beforeEach(() => {
+    ensureMswServerListening()
     server.use(...handlers)
-  })
-  afterEach(() => {
-    server.resetHandlers()
-    server.use(...handlers)
-  })
-  afterAll(() => {
-    server.resetHandlers()
   })
 }

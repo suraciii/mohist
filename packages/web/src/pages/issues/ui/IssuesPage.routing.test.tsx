@@ -1,33 +1,29 @@
 // @vitest-environment jsdom
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import { http, HttpResponse } from 'msw'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Outlet, Route, Routes } from 'react-router-dom'
 import { ProjectProvider } from '../../../entities/project'
 import { useMswServer } from '../../../../tests/support/msw'
+import { IssuesPage, type IssuesPageComponents } from './IssuesPage'
 
-const mocks = vi.hoisted(() => ({
+const mocks = {
   detailRenderCount: 0,
   boardRenderCount: 0,
-}))
+}
 
-vi.mock('../../../widgets/kanban-board/ui/KanbanBoard', () => ({
+const components: IssuesPageComponents = {
   KanbanBoard: () => {
     mocks.boardRenderCount += 1
     return <div data-testid="kanban-board-stub">KanbanBoard</div>
   },
-}))
+}
 
-vi.mock('../../issue-detail/ui/IssueDetailPage', () => ({
-  IssueDetailPage: () => {
-    mocks.detailRenderCount += 1
-    return <div data-testid="issue-detail-stub">IssueDetailPage</div>
-  },
-}))
-
-import { IssuesPage } from './IssuesPage'
-import { IssueDetailPage } from '../../issue-detail/ui/IssueDetailPage'
+function IssueDetailRouteSentinel() {
+  mocks.detailRenderCount += 1
+  return <div data-testid="issue-detail-stub">IssueDetailPage</div>
+}
 
 const TEST_PROJECT = {
   id: 'test-project',
@@ -57,8 +53,8 @@ function renderRoute(path: string) {
         <MemoryRouter initialEntries={[path]}>
           <Routes>
             <Route path="/:projectName" element={<Outlet />}>
-              <Route path="issues" element={<IssuesPage />} />
-              <Route path="issues/:number" element={<IssueDetailPage />} />
+              <Route path="issues" element={<IssuesPage components={components} />} />
+              <Route path="issues/:number" element={<IssueDetailRouteSentinel />} />
             </Route>
           </Routes>
         </MemoryRouter>

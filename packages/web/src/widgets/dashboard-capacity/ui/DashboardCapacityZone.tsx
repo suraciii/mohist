@@ -11,6 +11,7 @@ export interface DashboardCapacityZoneProps {
    * on the default `useAgentStatus()` pull.
    */
   agentStatusOverride?: AgentStatus
+  agentStatusHook?: typeof useAgentStatus
 }
 
 /**
@@ -24,8 +25,11 @@ export interface DashboardCapacityZoneProps {
  * `max === 0`. There is no reserved fixed-height box, so an absent
  * capacity level is not visible on the page at all.
  */
-export function DashboardCapacityZone({ agentStatusOverride }: DashboardCapacityZoneProps = {}) {
-  const { data: fetchedStatus } = useAgentStatus()
+export function DashboardCapacityZone({
+  agentStatusOverride,
+  agentStatusHook = useAgentStatus,
+}: DashboardCapacityZoneProps = {}) {
+  const { data: fetchedStatus } = agentStatusHook()
   const agentStatus = agentStatusOverride ?? fetchedStatus
   const toProjectPath = useProjectPath()
 

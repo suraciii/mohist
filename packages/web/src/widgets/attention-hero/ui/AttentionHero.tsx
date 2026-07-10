@@ -68,21 +68,50 @@ export interface AttentionHeroProps {
   issues?: Issue[]
   agentStatus?: AgentStatus
   approvalWait?: ApprovalWaitMetricsResponse
+  dataHook?: AttentionHeroDataHook
+  approveIssueFn?: typeof approveIssue
+  resumeIssueFn?: typeof resumeIssue
 }
 
-export function AttentionHero(props: AttentionHeroProps = {}) {
+export interface AttentionHeroData {
+  issues: Issue[] | undefined
+  agentStatus: AgentStatus | undefined
+  approvalWait: ApprovalWaitMetricsResponse | null | undefined
+  issuesResolved: boolean
+}
+
+export type AttentionHeroDataHook = () => AttentionHeroData
+
+const useDefaultData: AttentionHeroDataHook = () => {
+  const { projectId } = useProject()
+  const issuesQuery = useIssues(projectId ? { projectId } : undefined)
+  const agentStatusQuery = useAgentStatus()
+  const approvalWaitQuery = useApprovalWait()
+  return {
+    issues: issuesQuery.data,
+    agentStatus: agentStatusQuery.data,
+    approvalWait: approvalWaitQuery.data,
+    issuesResolved: issuesQuery.data !== undefined,
+  }
+}
+
+export function AttentionHero({
+  issues: issuesOverride,
+  agentStatus: agentStatusOverride,
+  approvalWait: approvalWaitOverride,
+  dataHook = useDefaultData,
+  approveIssueFn = approveIssue,
+  resumeIssueFn = resumeIssue,
+}: AttentionHeroProps = {}) {
   const queryClient = useQueryClient()
   const { projectId } = useProject()
   const toProjectPath = useProjectPath()
 
-  const issuesQuery = useIssues(projectId ? { projectId } : undefined)
-  const agentStatusQuery = useAgentStatus()
-  const approvalWaitQuery = useApprovalWait()
-
-  const issues = props.issues ?? issuesQuery.data
-  const agentStatus = props.agentStatus ?? agentStatusQuery.data
-  const approvalWait = props.approvalWait ?? approvalWaitQuery.data
-  const issuesResolved = props.issues !== undefined || issuesQuery.data !== undefined
+  const data = dataHook()
+  const issues = issuesOverride ?? data.issues
+  const agentStatus = agentStatusOverride ?? data.agentStatus
+  const approvalWait = approvalWaitOverride ?? data.approvalWait ?? undefined
+  const issuesResolved = issuesOverride !== undefined || data.issuesResolved
 
   const items = useMemo(
     () => deriveAttentionItems(issues ?? [], agentStatus ?? defaultAgentStatus),
@@ -92,7 +121,7 @@ export function AttentionHero(props: AttentionHeroProps = {}) {
   const hasAttention = items.length > 0
 
   const approveMutation = useMutation({
-    mutationFn: (issueNumber: number) => approveIssue(issueNumber, projectId),
+    mutationFn: (issueNumber: number) => approveIssueFn(issueNumber, projectId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['issues'] })
       queryClient.invalidateQueries({ queryKey: ['agent-status'] })
@@ -101,7 +130,7 @@ export function AttentionHero(props: AttentionHeroProps = {}) {
   })
 
   const resumeMutation = useMutation({
-    mutationFn: (issueNumber: number) => resumeIssue(issueNumber, projectId),
+    mutationFn: (issueNumber: number) => resumeIssueFn(issueNumber, projectId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['issues'] })
       queryClient.invalidateQueries({ queryKey: ['agent-status'] })

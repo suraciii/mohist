@@ -2,11 +2,6 @@
 import '@testing-library/jest-dom'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { MemoryRouter } from 'react-router-dom'
-import { http, HttpResponse } from 'msw'
-import { useMswServer } from '../../../../tests/support/msw'
-import { ProjectProvider } from '../../../entities/project'
 import type {
   CompletionTrendResponse,
   DeliveryTimeMetricsResponse,
@@ -14,8 +9,37 @@ import type {
   StageDurationMetricsResponse,
 } from '../../../entities/issue'
 import type { AgentUsageTimeseriesDto } from '../../../entities/agent'
+import type { InsightsRange } from '../model/insights-range'
+import {
+  ThroughputChart as RealThroughputChart,
+  type CompletionThroughputHook,
+} from '../panels/ThroughputChart'
+import {
+  CompletionTrend as RealCompletionTrend,
+  type CompletionTrendHook,
+} from '../panels/CompletionTrend'
+import {
+  CycleTimeChart as RealCycleTimeChart,
+  type DeliveryTimeHook,
+} from '../panels/CycleTimeChart'
+import {
+  StageDurationChart as RealStageDurationChart,
+  type StageDurationHook,
+} from '../panels/StageDurationChart'
+import {
+  QualityPanel as RealQualityPanel,
+  type QualityMetricsDataHook,
+} from '../panels/QualityPanel'
+import {
+  FtrTrendChart as RealFtrTrendChart,
+  type QualityMetricsTrendHook,
+} from '../panels/FtrTrendChart'
+import {
+  CostTrendChart as RealCostTrendChart,
+  type AgentUsageHook,
+} from '../panels/CostTrendChart'
 
-import { InsightsCharts } from './InsightsCharts'
+import { InsightsCharts, type InsightsChartsComponents } from './InsightsCharts'
 
 let _completionDay: CompletionTrendResponse
 let _completionWeek: CompletionTrendResponse
@@ -24,58 +48,75 @@ let _stageDuration: StageDurationMetricsResponse
 let _quality: QualityMetricsResponse
 let _agentUsage: AgentUsageTimeseriesDto
 
-let _capturedUrls: string[]
+type PanelName = keyof InsightsChartsComponents
 
-const COMPLETION_PATH = '*/api/projects/:projectId/issues/metrics/completion'
-const DELIVERY_TIME_PATH = '*/api/projects/:projectId/issues/metrics/delivery-time'
-const STAGE_DURATION_PATH = '*/api/projects/:projectId/issues/metrics/stage-duration'
-const QUALITY_PATH = '*/api/projects/:projectId/issues/metrics/quality'
-const USAGE_PATH = '*/api/projects/:projectId/agent/usage'
+let _hookCalls: Array<{ panel: PanelName; range: InsightsRange | undefined }>
 
-useMswServer(
-  http.get(COMPLETION_PATH, ({ request }) => {
-    _capturedUrls.push(request.url)
-    const bucket = new URL(request.url).searchParams.get('bucket')
-    const data = bucket === 'week' ? _completionWeek : _completionDay
-    return HttpResponse.json({ success: true, data })
-  }),
-  http.get(DELIVERY_TIME_PATH, ({ request }) => {
-    _capturedUrls.push(request.url)
-    return HttpResponse.json({ success: true, data: _delivery })
-  }),
-  http.get(STAGE_DURATION_PATH, ({ request }) => {
-    _capturedUrls.push(request.url)
-    return HttpResponse.json({ success: true, data: _stageDuration })
-  }),
-  http.get(QUALITY_PATH, ({ request }) => {
-    _capturedUrls.push(request.url)
-    return HttpResponse.json({ success: true, data: _quality })
-  }),
-  http.get(USAGE_PATH, ({ request }) => {
-    _capturedUrls.push(request.url)
-    return HttpResponse.json({ success: true, data: _agentUsage })
-  }),
-)
+function recordHookCall(panel: PanelName, range: InsightsRange | undefined) {
+  _hookCalls.push({ panel, range })
+}
 
-const TEST_PROJECT = {
-  id: 'proj-1',
-  name: 'demo',
-  createdAt: '2024-01-01T00:00:00Z',
-  updatedAt: '2024-01-01T00:00:00Z',
-  repositories: [],
+const completionThroughputHook: CompletionThroughputHook = (range) => {
+  recordHookCall('ThroughputChart', range)
+  return { data: _completionDay, isLoading: false, isError: false }
+}
+
+const completionTrendHook: CompletionTrendHook = (range) => {
+  recordHookCall('CompletionTrend', range)
+  return { data: _completionWeek, isLoading: false, isError: false }
+}
+
+const deliveryTimeHook: DeliveryTimeHook = (range) => {
+  recordHookCall('CycleTimeChart', range)
+  return { data: _delivery, isLoading: false, isError: false }
+}
+
+const stageDurationHook: StageDurationHook = (range) => {
+  recordHookCall('StageDurationChart', range)
+  return { data: _stageDuration, isLoading: false, isError: false }
+}
+
+const qualityPanelHook: QualityMetricsDataHook = (range) => {
+  recordHookCall('QualityPanel', range)
+  return { data: _quality }
+}
+
+const ftrTrendHook: QualityMetricsTrendHook = (range) => {
+  recordHookCall('FtrTrendChart', range)
+  return { data: _quality, isLoading: false, isError: false }
+}
+
+const agentUsageHook: AgentUsageHook = (range) => {
+  recordHookCall('CostTrendChart', range)
+  return { data: _agentUsage, isLoading: false, isError: false }
+}
+
+const TEST_COMPONENTS: InsightsChartsComponents = {
+  ThroughputChart: ({ range }) => (
+    <RealThroughputChart range={range} completionThroughputHook={completionThroughputHook} />
+  ),
+  CompletionTrend: ({ range }) => (
+    <RealCompletionTrend range={range} completionTrendHook={completionTrendHook} />
+  ),
+  CycleTimeChart: ({ range }) => (
+    <RealCycleTimeChart range={range} deliveryTimeHook={deliveryTimeHook} />
+  ),
+  StageDurationChart: ({ range }) => (
+    <RealStageDurationChart range={range} stageDurationHook={stageDurationHook} />
+  ),
+  QualityPanel: ({ range }) => (
+    <RealQualityPanel range={range} qualityMetricsHook={qualityPanelHook} />
+  ),
+  FtrTrendChart: ({ range }) => (
+    <RealFtrTrendChart range={range} qualityMetricsHook={ftrTrendHook} />
+  ),
+  CostTrendChart: ({ range }) => (
+    <RealCostTrendChart range={range} agentUsageHook={agentUsageHook} />
+  ),
 }
 
 function renderCharts() {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  return render(
-    <QueryClientProvider client={queryClient}>
-      <ProjectProvider initialProjectId="proj-1" initialProjects={[TEST_PROJECT]}>
-        <MemoryRouter initialEntries={['/demo/insights']}>
-          <InsightsCharts range="30d" />
-        </MemoryRouter>
-      </ProjectProvider>
-    </QueryClientProvider>,
-  )
+  return render(<InsightsCharts range="30d" components={TEST_COMPONENTS} />)
 }
 
 function buildThroughput(): CompletionTrendResponse {
@@ -178,7 +219,7 @@ function buildAgentUsage(): AgentUsageTimeseriesDto {
 }
 
 beforeEach(() => {
-  _capturedUrls = []
+  _hookCalls = []
   _completionDay = buildThroughput()
   _completionWeek = buildCompletionTrend()
   _delivery = buildDeliveryTime()
@@ -364,58 +405,56 @@ describe('InsightsCharts time-window annotations', () => {
 
 describe('InsightsCharts range forwarding to panel hooks', () => {
   function renderChartsWithRange(range: '7d' | '30d' | '90d') {
-    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-    return render(
-      <QueryClientProvider client={queryClient}>
-        <ProjectProvider initialProjectId="proj-1" initialProjects={[TEST_PROJECT]}>
-          <MemoryRouter initialEntries={['/demo/insights']}>
-            <InsightsCharts range={range} />
-          </MemoryRouter>
-        </ProjectProvider>
-      </QueryClientProvider>,
-    )
+    return render(<InsightsCharts range={range} components={TEST_COMPONENTS} />)
   }
 
   it('forwards the range to every chart panel hook', async () => {
     renderChartsWithRange('7d')
 
     await waitFor(() => {
-      expect(_capturedUrls.length).toBeGreaterThan(0)
+      expect(new Set(_hookCalls.map(({ panel }) => panel))).toEqual(
+        new Set<PanelName>([
+          'ThroughputChart',
+          'CompletionTrend',
+          'CycleTimeChart',
+          'StageDurationChart',
+          'QualityPanel',
+          'FtrTrendChart',
+          'CostTrendChart',
+        ]),
+      )
     })
 
-    const completionUrls = _capturedUrls.filter((u) => u.includes('/issues/metrics/completion'))
-    expect(completionUrls.length).toBe(2)
-    expect(completionUrls.some((u) => u.includes('bucket=day') && u.includes('range=7d'))).toBe(true)
-    expect(completionUrls.some((u) => u.includes('bucket=week') && u.includes('range=7d'))).toBe(true)
-    expect(_capturedUrls.some((u) => u.includes('/issues/metrics/delivery-time') && u.includes('range=7d'))).toBe(true)
-    expect(_capturedUrls.some((u) => u.includes('/issues/metrics/stage-duration') && u.includes('range=7d'))).toBe(true)
-    expect(_capturedUrls.some((u) => u.includes('/issues/metrics/quality') && u.includes('range=7d'))).toBe(true)
-    expect(_capturedUrls.some((u) => u.includes('/agent/usage') && u.includes('range=7d'))).toBe(true)
+    expect(_hookCalls.every(({ range }) => range === '7d')).toBe(true)
   })
 
   it('re-applies the new range when the prop changes from 30d to 90d', async () => {
     const { rerender } = renderChartsWithRange('30d')
 
     await waitFor(() => {
-      expect(_capturedUrls.filter((u) => u.includes('range=30d')).length).toBeGreaterThan(0)
+      expect(_hookCalls.some(({ range }) => range === '30d')).toBe(true)
     })
 
-    _capturedUrls = []
+    _hookCalls = []
 
-    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     rerender(
-      <QueryClientProvider client={queryClient}>
-        <ProjectProvider initialProjectId="proj-1" initialProjects={[TEST_PROJECT]}>
-          <MemoryRouter initialEntries={['/demo/insights']}>
-            <InsightsCharts range="90d" />
-          </MemoryRouter>
-        </ProjectProvider>
-      </QueryClientProvider>,
+      <InsightsCharts range="90d" components={TEST_COMPONENTS} />,
     )
 
     await waitFor(() => {
-      expect(_capturedUrls.filter((u) => u.includes('range=90d')).length).toBeGreaterThan(0)
+      expect(new Set(_hookCalls.map(({ panel }) => panel))).toEqual(
+        new Set<PanelName>([
+          'ThroughputChart',
+          'CompletionTrend',
+          'CycleTimeChart',
+          'StageDurationChart',
+          'QualityPanel',
+          'FtrTrendChart',
+          'CostTrendChart',
+        ]),
+      )
     })
+    expect(_hookCalls.every(({ range }) => range === '90d')).toBe(true)
   })
 
   it('reflects the selected range on every retained chart window indicator', async () => {
@@ -470,16 +509,7 @@ describe('InsightsCharts range forwarding to panel hooks', () => {
     }
 
     function renderWithRange(range: '7d' | '30d' | '90d') {
-      const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-      return render(
-        <QueryClientProvider client={queryClient}>
-          <ProjectProvider initialProjectId="proj-1" initialProjects={[TEST_PROJECT]}>
-            <MemoryRouter initialEntries={['/demo/insights']}>
-              <InsightsCharts range={range} />
-            </MemoryRouter>
-          </ProjectProvider>
-        </QueryClientProvider>,
-      )
+      return render(<InsightsCharts range={range} components={TEST_COMPONENTS} />)
     }
 
     setupRange('7d')
@@ -497,15 +527,8 @@ describe('InsightsCharts range forwarding to panel hooks', () => {
     })
 
     setupRange('90d')
-    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     rerender(
-      <QueryClientProvider client={queryClient}>
-        <ProjectProvider initialProjectId="proj-1" initialProjects={[TEST_PROJECT]}>
-          <MemoryRouter initialEntries={['/demo/insights']}>
-            <InsightsCharts range="90d" />
-          </MemoryRouter>
-        </ProjectProvider>
-      </QueryClientProvider>,
+      <InsightsCharts range="90d" components={TEST_COMPONENTS} />,
     )
 
     await waitFor(() => {

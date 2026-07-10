@@ -1,11 +1,9 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
-import { http, HttpResponse } from 'msw'
 import { TEST_PROJECT, baseRender, screen, waitFor } from './test-utils'
-import { SessionPage } from '../src/pages/session/ui/SessionPage'
+import { SessionPage, type SessionPageDependencies } from '../src/pages/session/ui/SessionPage'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ProjectProvider } from '../src/entities/project/model/ProjectContext'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
-import { useMswServer } from '../tests/support/msw'
 import React from 'react'
 import type {
   AgentSessionMetadata,
@@ -15,10 +13,6 @@ import type {
 
 const ISSUE = 42
 const SESSION = 'T-003.1'
-const ISSUES = `*/api/projects/:projectId/issues/${ISSUE}`
-const SESSION_META = `*/api/projects/:projectId/issues/${ISSUE}/sessions/${SESSION}`
-const SESSION_TRANSCRIPT = `*/api/projects/:projectId/issues/${ISSUE}/sessions/${SESSION}/transcript`
-const CODER_SESSIONS = `*/api/projects/:projectId/issues/${ISSUE}/coder-sessions`
 
 let issueData: unknown = null
 let sessionsData: unknown[] = []
@@ -26,19 +20,32 @@ let sessionsLoading = false
 let metadata: AgentSessionMetadata | null = null
 let transcript: AgentSessionTranscriptResponse = { turns: [], partCount: 0, lastActivityAt: null }
 
-function sessionHandlers() {
-  return [
-    http.get(ISSUES, () => HttpResponse.json({ success: true, data: issueData })),
-    http.get(CODER_SESSIONS, () => {
-      if (sessionsLoading) return new Promise(() => {})
-      return HttpResponse.json({ success: true, data: sessionsData })
+const sessionPageDependencies: SessionPageDependencies = {
+  dataSource: {
+    useSessionTranscript: () => ({
+      turns: transcript.turns,
+      transcriptVersion: 0,
+      scrollToBottom: vi.fn(),
+      newContentAvailable: false,
+      setIsNearBottom: vi.fn(),
+      isFinalizing: false,
+      isThinking: false,
+      isStreaming: false,
+    }) as never,
+    useIssue: () => ({ data: issueData }) as never,
+    useCoderSessions: () => ({ sessions: sessionsData, isLoading: sessionsLoading }) as never,
+    useSiblingSessions: () => ({
+      sessions: [],
+      currentIndex: -1,
+      previous: null,
+      next: null,
+      hasPrevious: false,
+      hasNext: false,
     }),
-    http.get(SESSION_META, () => HttpResponse.json({ success: true, data: metadata })),
-    http.get(SESSION_TRANSCRIPT, () => HttpResponse.json({ success: true, data: transcript })),
-  ]
+    getAgentSessionMetadata: async () => metadata as never,
+    getAgentSessionTranscript: async () => transcript,
+  },
 }
-
-useMswServer(...sessionHandlers())
 
 const originalScrollTo = Element.prototype.scrollTo
 const queryClients: QueryClient[] = []
@@ -164,7 +171,7 @@ describe('T-003: SessionPage followup composer integration', () => {
       lastActivityAt: '2024-01-01T10:00:01.000Z',
     }
 
-    renderWithQueryClient(<SessionPage />)
+    renderWithQueryClient(<SessionPage dependencies={sessionPageDependencies} />)
 
     await waitFor(() => {
       expect(screen.getByTestId('session-followup-composer')).toBeInTheDocument()
@@ -187,7 +194,7 @@ describe('T-003: SessionPage followup composer integration', () => {
       lastActivityAt: '2024-01-01T11:00:00.000Z',
     }
 
-    renderWithQueryClient(<SessionPage />)
+    renderWithQueryClient(<SessionPage dependencies={sessionPageDependencies} />)
 
     await waitFor(() => {
       expect(screen.getByTestId('session-followup-composer')).toBeInTheDocument()
@@ -211,7 +218,7 @@ describe('T-003: SessionPage followup composer integration', () => {
       lastActivityAt: '2024-01-01T11:00:00.000Z',
     }
 
-    renderWithQueryClient(<SessionPage />)
+    renderWithQueryClient(<SessionPage dependencies={sessionPageDependencies} />)
 
     await waitFor(() => {
       expect(screen.getByTestId('session-followup-composer')).toBeInTheDocument()
@@ -234,7 +241,7 @@ describe('T-003: SessionPage followup composer integration', () => {
     })
     transcript = { turns: [], partCount: 0, lastActivityAt: null }
 
-    renderWithQueryClient(<SessionPage />)
+    renderWithQueryClient(<SessionPage dependencies={sessionPageDependencies} />)
 
     await waitFor(() => {
       expect(screen.getByTestId('session-followup-composer')).toBeInTheDocument()

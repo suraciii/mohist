@@ -50,6 +50,8 @@ export default defineConfig({
     environment: 'jsdom',
     setupFiles: ['./tests/setup.ts'],
     globals: true,
+    // 根配置与 inline projects 必须一致，确保 setup 和测试共享同一组进程级单例。
+    isolate: false,
     testTimeout: 10_000,
     hookTimeout: 10_000,
     // mock/stub 的恢复交给机器而不是各文件的自觉——isolate:false 终局下
@@ -85,6 +87,7 @@ export default defineConfig({
         extends: true,
         test: {
           name: 'node',
+          isolate: false,
           environment: 'node',
           include: ['src/**/*.test.ts'],
           exclude: domDependentTestFiles,
@@ -94,6 +97,7 @@ export default defineConfig({
         extends: true,
         test: {
           name: 'jsdom',
+          isolate: false,
           include: [
             'src/**/*.test.tsx',
             'tests/**/*.spec.tsx',

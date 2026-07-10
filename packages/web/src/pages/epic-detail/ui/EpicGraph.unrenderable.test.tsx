@@ -1,14 +1,18 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react'
+import { useEffect } from 'react'
 import { http, HttpResponse } from 'msw'
-import { EpicStatus } from '../../../entities/epic'
-import { issues, linkedIssue, renderPage } from './_epicDetailPageTestHarness'
+import { EpicStatus, type EpicDetail } from '../../../entities/epic'
+import type { DependencyGraphWidgetProps } from '../../../widgets/epic-dependency-graph/ui/DependencyGraphWidget'
+import { DependencyGraphErrorBoundary } from '../../../widgets/epic-dependency-graph/ui/DependencyGraphErrorBoundary'
+import { issues, linkedIssue, renderPage as renderEpicDetailPage } from './_epicDetailPageTestHarness'
+import type { EpicDetailPageComponents } from './EpicDetailPage'
 import { useMswServer } from '../../../../tests/support/msw'
 
-const widgetBehavior = vi.hoisted(() => ({
+const widgetBehavior = {
   mode: 'default' as 'default' | 'empty' | 'error',
-}))
+}
 
 let _epicData: unknown = null
 let _issuesData: unknown[] = []
@@ -74,57 +78,62 @@ useMswServer(
   }),
 )
 
-vi.mock('../../../widgets/epic-dependency-graph', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../widgets/epic-dependency-graph')>()
-  const { useEffect: useEffectMock, createElement } = await import('react')
-  function hasCycle(issues: { number: number; prerequisiteNumbers: number[] }[]): boolean {
-    const adj = new Map<number, number[]>()
-    for (const i of issues) adj.set(i.number, i.prerequisiteNumbers ?? [])
-    const visited = new Set<number>()
-    const stack = new Set<number>()
-    function dfs(n: number): boolean {
-      if (stack.has(n)) return true
-      if (visited.has(n)) return false
-      visited.add(n); stack.add(n)
-      for (const d of adj.get(n) ?? []) if (dfs(d)) return true
-      stack.delete(n)
-      return false
-    }
-    for (const n of adj.keys()) if (dfs(n)) return true
+function hasCycle(linkedIssues: { number: number; prerequisiteNumbers: number[] }[]): boolean {
+  const adj = new Map<number, number[]>()
+  for (const issue of linkedIssues) adj.set(issue.number, issue.prerequisiteNumbers ?? [])
+  const visited = new Set<number>()
+  const stack = new Set<number>()
+  function dfs(n: number): boolean {
+    if (stack.has(n)) return true
+    if (visited.has(n)) return false
+    visited.add(n)
+    stack.add(n)
+    for (const dependency of adj.get(n) ?? []) if (dfs(dependency)) return true
+    stack.delete(n)
     return false
   }
-  return {
-    ...actual,
-    DependencyGraphWidget: (props: {
-      linkedIssues: Parameters<typeof actual.DependencyGraphWidget>[0]['linkedIssues']
-      onRenderabilityChange?: (state: { renderable: boolean; reason: 'renderable' | 'cyclic' | 'empty' | null }) => void
-    }) => {
-      const mode = widgetBehavior.mode
-      useEffectMock(() => {
-        if (mode === 'empty') {
-          props.onRenderabilityChange?.({ renderable: false, reason: 'empty' })
-        } else if (mode === 'default') {
-          if (hasCycle(props.linkedIssues as { number: number; prerequisiteNumbers: number[] }[])) {
-            props.onRenderabilityChange?.({ renderable: false, reason: 'cyclic' })
-          } else {
-            props.onRenderabilityChange?.({ renderable: true, reason: null })
-          }
-        }
-      }, [mode])
-      if (mode === 'error') {
-        throw new Error('Simulated render error from DependencyGraphWidget')
+  for (const issueNumber of adj.keys()) if (dfs(issueNumber)) return true
+  return false
+}
+
+function TestDependencyGraphWidget(props: DependencyGraphWidgetProps) {
+  const mode = widgetBehavior.mode
+  useEffect(() => {
+    if (mode === 'empty') {
+      props.onRenderabilityChange?.({ renderable: false, reason: 'empty' })
+    } else if (mode === 'default') {
+      if (hasCycle(props.linkedIssues)) {
+        props.onRenderabilityChange?.({ renderable: false, reason: 'cyclic' })
+      } else {
+        props.onRenderabilityChange?.({ renderable: true, reason: null })
       }
-      if (mode === 'default') {
-        if (hasCycle(props.linkedIssues as { number: number; prerequisiteNumbers: number[] }[])) return null
-        return createElement('div', {
-          'data-testid': 'epic-dep-graph-canvas',
-          className: 'h-[560px] w-full min-w-[640px] rounded-lg border bg-background',
-        })
-      }
-      return null
-    },
+    }
+  }, [mode, props.linkedIssues, props.onRenderabilityChange])
+  if (mode === 'error') {
+    throw new Error('Simulated render error from DependencyGraphWidget')
   }
-})
+  if (mode === 'default' && !hasCycle(props.linkedIssues)) {
+    return (
+      <div
+        data-testid="epic-dep-graph-canvas"
+        className="h-[560px] w-full min-w-[640px] rounded-lg border bg-background"
+      />
+    )
+  }
+  return null
+}
+
+const graphComponents: EpicDetailPageComponents = {
+  DependencyGraphErrorBoundary,
+  DependencyGraphWidget: TestDependencyGraphWidget,
+}
+
+function renderPage() {
+  return renderEpicDetailPage({
+    components: graphComponents,
+    epic: _epicData as EpicDetail,
+  })
+}
 
 function makeEpicWithLinkedIssues(linkedIssues: unknown[]) {
   return {

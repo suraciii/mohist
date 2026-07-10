@@ -11,6 +11,19 @@ import type { IssueWorkflowProfileYamlResponse } from '../../../entities/issue'
 interface IssueWorkflowProfileEditorProps {
   issueNumber: number
   embedded?: boolean
+  hooks?: IssueWorkflowProfileEditorHooks
+}
+
+export interface IssueWorkflowProfileEditorHooks {
+  useProfile: typeof useIssueWorkflowProfileYaml
+  useUpdate: typeof useUpdateIssueWorkflowProfileYaml
+  useDelete: typeof useDeleteIssueWorkflowProfileTemplate
+}
+
+const defaultHooks: IssueWorkflowProfileEditorHooks = {
+  useProfile: useIssueWorkflowProfileYaml,
+  useUpdate: useUpdateIssueWorkflowProfileYaml,
+  useDelete: useDeleteIssueWorkflowProfileTemplate,
 }
 
 interface ValidationError {
@@ -26,7 +39,7 @@ const templateSourceLabel: Record<'system' | 'project' | 'custom', string> = {
   custom: 'Custom',
 }
 
-export function IssueWorkflowProfileEditor({ issueNumber, embedded = false }: IssueWorkflowProfileEditorProps) {
+export function IssueWorkflowProfileEditor({ issueNumber, embedded = false, hooks = defaultHooks }: IssueWorkflowProfileEditorProps) {
   const [draftYaml, setDraftYaml] = useState('')
   const [serverYaml, setServerYaml] = useState<string | null>(null)
   const [validationErrors, setValidationErrors] = useState<ValidationError[]>([])
@@ -34,9 +47,9 @@ export function IssueWorkflowProfileEditor({ issueNumber, embedded = false }: Is
   const [revertError, setRevertError] = useState<string | null>(null)
   const [mode, setMode] = useState<EditorMode>('view')
 
-  const { data, isLoading, error: fetchError, refetch } = useIssueWorkflowProfileYaml(issueNumber, true)
-  const updateMutation = useUpdateIssueWorkflowProfileYaml()
-  const deleteMutation = useDeleteIssueWorkflowProfileTemplate()
+  const { data, isLoading, error: fetchError, refetch } = hooks.useProfile(issueNumber, true)
+  const updateMutation = hooks.useUpdate()
+  const deleteMutation = hooks.useDelete()
 
   useEffect(() => {
     if (data?.yaml !== undefined && data.yaml !== null) {

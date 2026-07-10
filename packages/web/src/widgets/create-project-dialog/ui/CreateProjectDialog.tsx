@@ -9,17 +9,19 @@ import { Button } from '@/shared/ui/components/button'
 import { Input } from '@/shared/ui/components/input'
 import { Label } from '@/shared/ui/components/label'
 import { useCreateProject, useProject } from '../../../entities/project'
+import type { ProjectCreator } from '../../../entities/project'
 
 interface Props {
   open: boolean
   onClose: () => void
+  projectCreator?: ProjectCreator
 }
 
-export function CreateProjectDialog({ open, onClose }: Props) {
+export function CreateProjectDialog({ open, onClose, projectCreator }: Props) {
   const [name, setName] = useState('')
   const { setProjectId } = useProject()
 
-  const createProject = useCreateProject()
+  const createProject = useCreateProject(projectCreator)
 
   const isConflict =
     createProject.isError &&

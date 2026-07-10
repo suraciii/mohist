@@ -1,0 +1,37 @@
+name: Weekly web test shuffle
+
+on:
+  schedule:
+    - cron: '17 3 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  web-test-shuffle:
+    name: Web tests (shuffled)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run shuffled web tests
+        shell: bash
+        run: |
+          seed="$(date +%s)"
+          echo "Vitest shuffle seed: ${seed}"
+          echo "Reproduce: TZ=UTC npm run test:run -w packages/web -- --sequence.shuffle --sequence.seed=${seed}"
+          TZ=UTC npm run test:run -w packages/web -- --sequence.shuffle --sequence.seed="${seed}"

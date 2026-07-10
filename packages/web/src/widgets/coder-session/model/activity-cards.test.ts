@@ -1,13 +1,58 @@
-import { describe, it, expect, vi } from 'vitest'
-import { renderHook } from '@testing-library/react'
+import { beforeEach, describe, expect, it } from 'vitest'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { renderHook, waitFor } from '@testing-library/react'
+import { createElement, type ReactNode } from 'react'
+import { http, HttpResponse } from 'msw'
 import { sessionToCard, useActivityCards } from './activity-cards'
-import type { AgentActivitySession } from '../../../entities/agent'
+import type { AgentActivity, AgentActivitySession } from '../../../entities/agent'
+import { ProjectProvider } from '../../../entities/project'
+import { useMswServer } from '../../../../tests/support/msw'
 
-const useAgentActivityMock = vi.fn()
+const PROJECT_ID = 'project-1'
+const ACTIVITY_PATH = '*/api/projects/:projectId/agent/activity'
 
-vi.mock('../../../entities/agent', () => ({
-  useAgentActivity: (...args: unknown[]) => useAgentActivityMock(...args),
-}))
+let activityResponse: AgentActivity | 'never' | 'error'
+
+useMswServer(
+  http.get(ACTIVITY_PATH, () => {
+    if (activityResponse === 'never') return new Promise<never>(() => {})
+    if (activityResponse === 'error') return new HttpResponse(null, { status: 500 })
+    return HttpResponse.json({ success: true, data: activityResponse })
+  }),
+)
+
+function makeActivity(sessions: AgentActivitySession[] = []): AgentActivity {
+  const active = sessions.filter((session) => session.status === 'active').length
+  return {
+    summary: {
+      active,
+      waiting: 0,
+      completed: sessions.filter((session) => session.status === 'completed').length,
+      failed: sessions.filter((session) => session.status === 'failed').length,
+      slots: { active, max: 8 },
+    },
+    sessions,
+    waiting: [],
+  }
+}
+
+function renderActivityCards(data?: AgentActivity) {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false, gcTime: 0 } },
+  })
+  if (data) {
+    queryClient.setQueryData(['agent-activity', undefined, PROJECT_ID], data)
+  }
+
+  const wrapper = ({ children }: { children: ReactNode }) =>
+    createElement(
+      QueryClientProvider,
+      { client: queryClient },
+      createElement(ProjectProvider, { initialProjectId: PROJECT_ID, children }),
+    )
+
+  return renderHook(() => useActivityCards(), { wrapper })
+}
 
 function makeSession(overrides: Partial<AgentActivitySession> = {}): AgentActivitySession {
   return {
@@ -116,22 +161,14 @@ describe('sessionToCard', () => {
 
 describe('useActivityCards — activeCardByIssueNumber', () => {
   beforeEach(() => {
-    useAgentActivityMock.mockReset()
+    activityResponse = makeActivity()
   })
 
   it('indexes active sessions by numeric issue number for O(1) join from Pulse zone', () => {
-    useAgentActivityMock.mockReturnValue({
-      data: {
-        summary: { active: 2, waiting: 0, completed: 0, failed: 0, slots: { active: 2, max: 8 } },
-        sessions: [
-          makeSession({ sessionId: 'a-12', issueNumber: 12, status: 'active' }),
-          makeSession({ sessionId: 'a-99', issueNumber: 99, status: 'active' }),
-        ],
-        waiting: [],
-      },
-    })
-
-    const { result } = renderHook(() => useActivityCards())
+    const { result } = renderActivityCards(makeActivity([
+      makeSession({ sessionId: 'a-12', issueNumber: 12, status: 'active' }),
+      makeSession({ sessionId: 'a-99', issueNumber: 99, status: 'active' }),
+    ]))
 
     expect(result.current.activeCardByIssueNumber.size).toBe(2)
     expect(result.current.activeCardByIssueNumber.get(12)?.sessionId).toBe('a-12')
@@ -140,19 +177,11 @@ describe('useActivityCards — activeCardByIssueNumber', () => {
   })
 
   it('does NOT index non-active sessions (completed, failed, etc.)', () => {
-    useAgentActivityMock.mockReturnValue({
-      data: {
-        summary: { active: 1, waiting: 0, completed: 1, failed: 1, slots: { active: 1, max: 8 } },
-        sessions: [
-          makeSession({ sessionId: 'a-active', issueNumber: 12, status: 'active' }),
-          makeSession({ sessionId: 'a-completed', issueNumber: 13, status: 'completed' }),
-          makeSession({ sessionId: 'a-failed', issueNumber: 14, status: 'failed' }),
-        ],
-        waiting: [],
-      },
-    })
-
-    const { result } = renderHook(() => useActivityCards())
+    const { result } = renderActivityCards(makeActivity([
+      makeSession({ sessionId: 'a-active', issueNumber: 12, status: 'active' }),
+      makeSession({ sessionId: 'a-completed', issueNumber: 13, status: 'completed' }),
+      makeSession({ sessionId: 'a-failed', issueNumber: 14, status: 'failed' }),
+    ]))
 
     expect(result.current.activeCardByIssueNumber.size).toBe(1)
     expect(result.current.activeCardByIssueNumber.get(12)?.sessionId).toBe('a-active')
@@ -161,40 +190,37 @@ describe('useActivityCards — activeCardByIssueNumber', () => {
   })
 
   it('returns an empty map when the activity feed has no sessions', () => {
-    useAgentActivityMock.mockReturnValue({ data: undefined })
-
-    const { result } = renderHook(() => useActivityCards())
+    const { result } = renderActivityCards(makeActivity())
 
     expect(result.current.activeCardByIssueNumber).toBeInstanceOf(Map)
     expect(result.current.activeCardByIssueNumber.size).toBe(0)
   })
 
-  it('preserves the activity feed loading and error state for page-level gates', () => {
-    useAgentActivityMock.mockReturnValue({
-      data: undefined,
-      isLoading: true,
-      isError: true,
-    })
+  it('preserves the activity feed loading state for page-level gates', () => {
+    activityResponse = 'never'
 
-    const { result } = renderHook(() => useActivityCards())
+    const { result } = renderActivityCards()
 
     expect(result.current.isLoading).toBe(true)
-    expect(result.current.isError).toBe(true)
+    expect(result.current.isError).toBe(false)
+  })
+
+  it('preserves the activity feed error state for page-level gates', async () => {
+    activityResponse = 'error'
+
+    const { result } = renderActivityCards()
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false)
+      expect(result.current.isError).toBe(true)
+    })
   })
 
   it('keeps only one active session per issue number when duplicates exist', () => {
-    useAgentActivityMock.mockReturnValue({
-      data: {
-        summary: { active: 2, waiting: 0, completed: 0, failed: 0, slots: { active: 2, max: 8 } },
-        sessions: [
-          makeSession({ sessionId: 'first-12', issueNumber: 12, status: 'active' }),
-          makeSession({ sessionId: 'second-12', issueNumber: 12, status: 'active' }),
-        ],
-        waiting: [],
-      },
-    })
-
-    const { result } = renderHook(() => useActivityCards())
+    const { result } = renderActivityCards(makeActivity([
+      makeSession({ sessionId: 'first-12', issueNumber: 12, status: 'active' }),
+      makeSession({ sessionId: 'second-12', issueNumber: 12, status: 'active' }),
+    ]))
 
     expect(result.current.activeCardByIssueNumber.size).toBe(1)
     expect(result.current.activeCardByIssueNumber.get(12)).toBeDefined()

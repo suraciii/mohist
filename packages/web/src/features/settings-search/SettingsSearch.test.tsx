@@ -153,6 +153,12 @@ function renderSettingsSearchWithProject(initialEntry = '/settings/ai') {
   )
 }
 
+function openSettingsSearch() {
+  const handler = getShortcutHandler('settings-search')
+  if (!handler) throw new Error('SettingsSearch shortcut handler was not registered')
+  act(() => handler())
+}
+
 afterEach(() => {
   cleanup()
   window.localStorage.clear()
@@ -359,7 +365,7 @@ describe('SettingsSearch search filtering', () => {
     const user = userEvent.setup()
     renderSettingsSearch('/settings/agent')
 
-    await user.keyboard('{Meta>}k{/Meta}')
+    openSettingsSearch()
     await waitFor(() => {
       expect(screen.getByTestId('settings-search-input')).toBeInTheDocument()
     })
@@ -392,7 +398,7 @@ describe('SettingsSearch search filtering', () => {
     const user = userEvent.setup()
     renderSettingsSearch('/settings/agent')
 
-    await user.keyboard('{Meta>}k{/Meta}')
+    openSettingsSearch()
     await waitFor(() => {
       expect(screen.getByTestId('settings-search-input')).toBeInTheDocument()
     })
@@ -431,7 +437,7 @@ describe('SettingsSearch search filtering', () => {
     const user = userEvent.setup()
     renderSettingsSearch('/settings/agent')
 
-    await user.keyboard('{Meta>}k{/Meta}')
+    openSettingsSearch()
     await waitFor(() => {
       expect(screen.getByTestId('settings-search-input')).toBeInTheDocument()
     })
@@ -450,7 +456,7 @@ describe('SettingsSearch activation (Enter)', () => {
     const user = userEvent.setup()
     renderSettingsSearchWithProject('/settings/ai')
 
-    await user.keyboard('{Meta>}k{/Meta}')
+    openSettingsSearch()
     await waitFor(() => {
       expect(screen.getByTestId('settings-search-input')).toBeInTheDocument()
     })
@@ -483,7 +489,7 @@ describe('SettingsSearch activation (Enter)', () => {
     const user = userEvent.setup()
     renderSettingsSearchWithProject('/settings/ai')
 
-    await user.keyboard('{Meta>}k{/Meta}')
+    openSettingsSearch()
     await waitFor(() => {
       expect(screen.getByTestId('settings-search-input')).toBeInTheDocument()
     })
@@ -505,7 +511,7 @@ describe('SettingsSearch activation (Enter)', () => {
     const user = userEvent.setup()
     renderSettingsSearchWithLocationSpy('/settings/agent')
 
-    await user.keyboard('{Meta>}k{/Meta}')
+    openSettingsSearch()
     await waitFor(() => {
       expect(screen.getByTestId('settings-search-input')).toBeInTheDocument()
     })
@@ -526,7 +532,7 @@ describe('SettingsSearch activation (Enter)', () => {
     const user = userEvent.setup()
     renderSettingsSearchWithProject('/settings/ai')
 
-    await user.keyboard('{Meta>}k{/Meta}')
+    openSettingsSearch()
     await waitFor(() => {
       expect(screen.getByTestId('settings-search-input')).toBeInTheDocument()
     })
@@ -551,7 +557,7 @@ describe('SettingsSearch activation (Enter)', () => {
     const user = userEvent.setup()
     renderSettingsSearchWithProject('/settings/ai')
 
-    await user.keyboard('{Meta>}k{/Meta}')
+    openSettingsSearch()
     await waitFor(() => {
       expect(screen.getByTestId('settings-search-input')).toBeInTheDocument()
     })
@@ -574,7 +580,7 @@ describe('SettingsSearch scope-aware navigation', () => {
     const user = userEvent.setup()
     renderSettingsSearchWithProject('/settings/agent')
 
-    await user.keyboard('{Meta>}k{/Meta}')
+    openSettingsSearch()
     await waitFor(() => {
       expect(screen.getByTestId('settings-search-input')).toBeInTheDocument()
     })
@@ -595,9 +601,7 @@ describe('SettingsSearch scope-aware navigation', () => {
     const user = userEvent.setup()
     renderSettingsSearchWithProject('/settings/ai')
 
-    act(() => {
-      getShortcutHandler('settings-search')?.()
-    })
+    openSettingsSearch()
     await waitFor(() => {
       expect(screen.getByTestId('settings-search-input')).toBeInTheDocument()
     })
@@ -618,7 +622,7 @@ describe('SettingsSearch scope-aware navigation', () => {
     const user = userEvent.setup()
     renderSettingsSearchWithProject('/settings/ai')
 
-    await user.keyboard('{Meta>}k{/Meta}')
+    openSettingsSearch()
     await waitFor(() => {
       expect(screen.getByTestId('settings-search-input')).toBeInTheDocument()
     })
@@ -637,7 +641,7 @@ describe('SettingsSearch scope-aware navigation', () => {
     const user = userEvent.setup()
     renderSettingsSearchWithProject('/settings/ai')
 
-    await user.keyboard('{Meta>}k{/Meta}')
+    openSettingsSearch()
     await waitFor(() => {
       expect(screen.getByTestId('settings-search-input')).toBeInTheDocument()
     })
@@ -658,7 +662,7 @@ describe('SettingsSearch scope-aware navigation', () => {
     const user = userEvent.setup()
     renderSettingsSearchWithLocationSpy('/settings/ai')
 
-    await user.keyboard('{Meta>}k{/Meta}')
+    openSettingsSearch()
     await waitFor(() => {
       expect(screen.getByTestId('settings-search-input')).toBeInTheDocument()
     })
@@ -680,7 +684,7 @@ describe('SettingsSearch dismissal (Esc / overlay)', () => {
     const user = userEvent.setup()
     renderSettingsSearchWithLocationSpy('/settings/ai')
 
-    await user.keyboard('{Meta>}k{/Meta}')
+    openSettingsSearch()
     await waitFor(() => {
       expect(screen.getByTestId('settings-search-input')).toBeInTheDocument()
     })
@@ -698,9 +702,7 @@ describe('SettingsSearch dismissal (Esc / overlay)', () => {
     const user = userEvent.setup()
     renderSettingsSearchWithLocationSpy('/settings/agent')
 
-    act(() => {
-      getShortcutHandler('settings-search')?.()
-    })
+    openSettingsSearch()
     await waitFor(() => {
       expect(screen.getByTestId('settings-search-input')).toBeInTheDocument()
     })
@@ -719,10 +721,9 @@ describe('SettingsSearch dismissal (Esc / overlay)', () => {
 describe('SettingsSearch uses the existing cmdk primitives (no new infrastructure)', () => {
   it('renders CommandDialog with CommandInput, CommandList, CommandEmpty, CommandGroup, and CommandItem', async () => {
     arrangeAiLoaded()
-    const user = userEvent.setup()
     renderSettingsSearch('/settings/agent')
 
-    await user.keyboard('{Meta>}k{/Meta}')
+    openSettingsSearch()
 
     await waitFor(() => {
       expect(screen.getByTestId('settings-search-input')).toBeInTheDocument()

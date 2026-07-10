@@ -77,8 +77,18 @@ function Sparkline({ completedCounts, summary }: SparklineProps) {
   )
 }
 
-export function CompletionTrend({ range }: { range: InsightsRange }) {
-  const { data, isLoading, isError } = useCompletionTrend(range)
+export type CompletionTrendHook = (
+  range?: InsightsRange,
+) => Pick<ReturnType<typeof useCompletionTrend>, 'data' | 'isLoading' | 'isError'>
+
+export function CompletionTrend({
+  range,
+  completionTrendHook = useCompletionTrend,
+}: {
+  range: InsightsRange
+  completionTrendHook?: CompletionTrendHook
+}) {
+  const { data, isLoading, isError } = completionTrendHook(range)
 
   const buckets = data?.buckets ?? []
   const completedCounts = buckets.map((bucket) => bucket.completed)

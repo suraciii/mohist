@@ -1,14 +1,12 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
-import { http, HttpResponse } from 'msw'
 import { ProjectProvider } from '../../../entities/project'
 import { SidebarProvider } from '@/shared/ui/components/sidebar'
-import { server, useMswServer } from '../../../../tests/support/msw'
-import { Header } from './Header'
+import { Header, type HeaderDataHooks } from './Header'
 
 const TEST_PROJECT = {
   id: 'test-project',
@@ -18,16 +16,14 @@ const TEST_PROJECT = {
   repositories: [],
 }
 
-const AGENT_STATUS_PATH = `*/api/projects/${TEST_PROJECT.id}/agent/status`
+let currentEpic: { id: string; number: number | null; title: string; description: string; priority: string; status: string; createdAt: string; updatedAt: string } | undefined
+let epicLoading = true
 
-useMswServer(
-  http.get(AGENT_STATUS_PATH, () =>
-    HttpResponse.json({
-      success: true,
-      data: { running: false, activeAgents: [], capacity: { active: 0, max: 8 } },
-    }),
-  ),
-)
+const dataHooks: HeaderDataHooks = {
+  epicHook: () => ({ data: currentEpic, isLoading: epicLoading }) as never,
+  agentHook: () => ({ data: undefined }) as never,
+  agentStatusHook: () => ({ data: { running: false } }) as never,
+}
 
 function renderHeader(initialRoute: string) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -36,7 +32,7 @@ function renderHeader(initialRoute: string) {
       <ProjectProvider initialProjectId={TEST_PROJECT.id} initialProjects={[TEST_PROJECT]}>
         <MemoryRouter initialEntries={[initialRoute]}>
           <SidebarProvider>
-            <Header onCreateIssue={vi.fn()} />
+            <Header onCreateIssue={vi.fn()} dataHooks={dataHooks} />
           </SidebarProvider>
         </MemoryRouter>
       </ProjectProvider>
@@ -52,7 +48,7 @@ function renderHeaderWithRoute(initialRoute: string, routePath: string) {
         <MemoryRouter initialEntries={[initialRoute]}>
           <SidebarProvider>
             <Routes>
-              <Route path={routePath} element={<Header onCreateIssue={vi.fn()} />} />
+              <Route path={routePath} element={<Header onCreateIssue={vi.fn()} dataHooks={dataHooks} />} />
             </Routes>
           </SidebarProvider>
         </MemoryRouter>
@@ -62,14 +58,16 @@ function renderHeaderWithRoute(initialRoute: string, routePath: string) {
 }
 
 function mockEpic(epic: { id: string; number: number | null; title: string; description: string; priority: string; status: string; createdAt: string; updatedAt: string } | null) {
-  server.use(
-    http.get(`*/api/projects/${TEST_PROJECT.id}/epics/*`, () =>
-      HttpResponse.json({ success: true, data: epic }),
-    ),
-  )
+  currentEpic = epic ?? undefined
+  epicLoading = false
 }
 
 describe('Header', () => {
+  beforeEach(() => {
+    currentEpic = undefined
+    epicLoading = true
+  })
+
   afterEach(() => {
     cleanup()
   })

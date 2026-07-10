@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { __testing__ } from '../src/app/providers/LiveTaskProvider'
+import { __testing__, type EventsConnectionHook } from '../src/app/providers/LiveTaskProvider'
 import { dispatchRebaseEvent, onRebaseEvent } from '../src/entities/issue/model/rebase-events'
 import { LiveTaskProvider } from '../src/app/providers/LiveTaskProvider'
 import { RuntimeToastHost } from '../src/shared/ui/toast'
@@ -10,12 +10,10 @@ import { ProjectProvider } from '../src/entities/project'
 import { useLiveTask } from '../src/entities/issue'
 import { onAgentEvent } from '../src/entities/agent'
 
-const eventsHub = vi.hoisted(() => ({
-  useEventsConnection: vi.fn(),
-}))
-
-vi.mock('../src/shared/api/events-hub', () => ({
-  useEventsConnection: eventsHub.useEventsConnection,
+const eventsConnectionHook = vi.fn<EventsConnectionHook>(() => ({
+  status: 'connected',
+  connection: null,
+  reconnectVersion: 0,
 }))
 
 const { unwrapEnvelope, unwrapTranscriptEnvelope, routeTranscriptEventName } = __testing__
@@ -118,7 +116,7 @@ function rtlRender(ui: React.ReactElement) {
 
 describe('LiveTaskProvider transcript routing', () => {
   beforeEach(() => {
-    eventsHub.useEventsConnection.mockClear()
+    eventsConnectionHook.mockClear()
     vi.mocked(toast.info).mockClear()
   })
 
@@ -162,7 +160,7 @@ describe('LiveTaskProvider transcript routing', () => {
       <QueryClientProvider client={queryClient}>
         <ProjectProvider initialProjectId="project-1">
           <RuntimeToastHost>
-            <LiveTaskProvider>
+            <LiveTaskProvider eventsConnectionHook={eventsConnectionHook}>
               <LiveTaskProbe />
             </LiveTaskProvider>
           </RuntimeToastHost>
@@ -170,7 +168,7 @@ describe('LiveTaskProvider transcript routing', () => {
       </QueryClientProvider>,
     )
 
-    const connectionCall = eventsHub.useEventsConnection.mock.calls[0]
+    const connectionCall = eventsConnectionHook.mock.calls[0]
     expect(connectionCall).toBeDefined()
     const onTranscriptEvent = connectionCall[2] as (envelope: unknown) => void
 
@@ -202,7 +200,7 @@ describe('LiveTaskProvider transcript routing', () => {
       <QueryClientProvider client={queryClient}>
         <ProjectProvider initialProjectId="project-1">
           <RuntimeToastHost>
-            <LiveTaskProvider>
+            <LiveTaskProvider eventsConnectionHook={eventsConnectionHook}>
               <LiveTaskProbe />
             </LiveTaskProvider>
           </RuntimeToastHost>
@@ -210,7 +208,7 @@ describe('LiveTaskProvider transcript routing', () => {
       </QueryClientProvider>,
     )
 
-    const connectionCall = eventsHub.useEventsConnection.mock.calls[0]
+    const connectionCall = eventsConnectionHook.mock.calls[0]
     const onTranscriptEvent = connectionCall[2] as (envelope: unknown) => void
     const payload = {
       issueId: 'issue-1',
@@ -256,7 +254,7 @@ describe('LiveTaskProvider transcript routing', () => {
       <QueryClientProvider client={queryClient}>
         <ProjectProvider initialProjectId="project-1">
           <RuntimeToastHost>
-            <LiveTaskProvider>
+            <LiveTaskProvider eventsConnectionHook={eventsConnectionHook}>
               <LiveTaskProbe />
             </LiveTaskProvider>
           </RuntimeToastHost>
@@ -264,7 +262,7 @@ describe('LiveTaskProvider transcript routing', () => {
       </QueryClientProvider>,
     )
 
-    const connectionCall = eventsHub.useEventsConnection.mock.calls[0]
+    const connectionCall = eventsConnectionHook.mock.calls[0]
     const onTranscriptEvent = connectionCall[2] as (envelope: unknown) => void
     const payload = {
       issueId: 'issue-1',
@@ -308,7 +306,7 @@ describe('LiveTaskProvider transcript routing', () => {
       <QueryClientProvider client={queryClient}>
         <ProjectProvider initialProjectId="project-1">
           <RuntimeToastHost>
-            <LiveTaskProvider>
+            <LiveTaskProvider eventsConnectionHook={eventsConnectionHook}>
               <LiveTaskProbe />
             </LiveTaskProvider>
           </RuntimeToastHost>
@@ -316,7 +314,7 @@ describe('LiveTaskProvider transcript routing', () => {
       </QueryClientProvider>,
     )
 
-    const connectionCall = eventsHub.useEventsConnection.mock.calls[0]
+    const connectionCall = eventsConnectionHook.mock.calls[0]
     const onEvent = connectionCall[1] as (eventName: string, envelope: unknown) => void
 
     onEvent('approval_requested', { issueId: 'issue-1', projectId: 'project-1', stage: 'review' })
@@ -334,7 +332,7 @@ describe('LiveTaskProvider transcript routing', () => {
       <QueryClientProvider client={queryClient}>
         <ProjectProvider initialProjectId="project-1">
           <RuntimeToastHost>
-            <LiveTaskProvider>
+            <LiveTaskProvider eventsConnectionHook={eventsConnectionHook}>
               <LiveTaskProbe />
             </LiveTaskProvider>
           </RuntimeToastHost>
@@ -342,7 +340,7 @@ describe('LiveTaskProvider transcript routing', () => {
       </QueryClientProvider>,
     )
 
-    const connectionCall = eventsHub.useEventsConnection.mock.calls[0]
+    const connectionCall = eventsConnectionHook.mock.calls[0]
     const onEvent = connectionCall[1] as (eventName: string, envelope: unknown) => void
 
     onEvent('com.mohist.workflow.stage.approval-requested', {
@@ -368,7 +366,7 @@ describe('LiveTaskProvider transcript routing', () => {
       <QueryClientProvider client={queryClient}>
         <ProjectProvider initialProjectId="project-1">
           <RuntimeToastHost>
-            <LiveTaskProvider>
+            <LiveTaskProvider eventsConnectionHook={eventsConnectionHook}>
               <LiveTaskProbe />
             </LiveTaskProvider>
           </RuntimeToastHost>
@@ -376,7 +374,7 @@ describe('LiveTaskProvider transcript routing', () => {
       </QueryClientProvider>,
     )
 
-    const connectionCall = eventsHub.useEventsConnection.mock.calls[0]
+    const connectionCall = eventsConnectionHook.mock.calls[0]
     const onEvent = connectionCall[1] as (eventName: string, envelope: unknown) => void
 
     onEvent('com.mohist.issue.completed', {
@@ -400,7 +398,7 @@ describe('LiveTaskProvider transcript routing', () => {
       <QueryClientProvider client={queryClient}>
         <ProjectProvider initialProjectId="project-1">
           <RuntimeToastHost>
-            <LiveTaskProvider>
+            <LiveTaskProvider eventsConnectionHook={eventsConnectionHook}>
               <LiveTaskProbe />
             </LiveTaskProvider>
           </RuntimeToastHost>
@@ -408,7 +406,7 @@ describe('LiveTaskProvider transcript routing', () => {
       </QueryClientProvider>,
     )
 
-    const connectionCall = eventsHub.useEventsConnection.mock.calls[0]
+    const connectionCall = eventsConnectionHook.mock.calls[0]
     const onEvent = connectionCall[1] as (eventName: string, envelope: unknown) => void
 
     onEvent('com.mohist.workflow.run.failed', {
@@ -433,7 +431,7 @@ describe('LiveTaskProvider transcript routing', () => {
       <QueryClientProvider client={queryClient}>
         <ProjectProvider initialProjectId="project-1">
           <RuntimeToastHost>
-            <LiveTaskProvider>
+            <LiveTaskProvider eventsConnectionHook={eventsConnectionHook}>
               <LiveTaskProbe />
             </LiveTaskProvider>
           </RuntimeToastHost>
@@ -441,7 +439,7 @@ describe('LiveTaskProvider transcript routing', () => {
       </QueryClientProvider>,
     )
 
-    const connectionCall = eventsHub.useEventsConnection.mock.calls[0]
+    const connectionCall = eventsConnectionHook.mock.calls[0]
     const onEvent = connectionCall[1] as (eventName: string, envelope: unknown) => void
 
     onEvent('com.mohist.issue.completed', {
@@ -465,7 +463,7 @@ describe('LiveTaskProvider transcript routing', () => {
       <QueryClientProvider client={queryClient}>
         <ProjectProvider initialProjectId="project-1">
           <RuntimeToastHost>
-            <LiveTaskProvider>
+            <LiveTaskProvider eventsConnectionHook={eventsConnectionHook}>
               <LiveTaskProbe />
             </LiveTaskProvider>
           </RuntimeToastHost>
@@ -473,7 +471,7 @@ describe('LiveTaskProvider transcript routing', () => {
       </QueryClientProvider>,
     )
 
-    const connectionCall = eventsHub.useEventsConnection.mock.calls[0]
+    const connectionCall = eventsConnectionHook.mock.calls[0]
     const onEvent = connectionCall[1] as (eventName: string, envelope: unknown) => void
 
     onEvent('com.mohist.workflow.stage.failed', {

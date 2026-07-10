@@ -18,6 +18,7 @@ interface EditEpicDialogProps {
   open: boolean
   onClose: () => void
   epic: EpicDetail
+  updateHook?: typeof useUpdateEpic
 }
 
 const PRIORITIES: { value: EpicPriority; label: string }[] = [
@@ -28,11 +29,16 @@ const PRIORITIES: { value: EpicPriority; label: string }[] = [
   { value: 'p4', label: 'P4 - Nice to have' },
 ]
 
-export function EditEpicDialog({ open, onClose, epic }: EditEpicDialogProps) {
+export function EditEpicDialog({
+  open,
+  onClose,
+  epic,
+  updateHook = useUpdateEpic,
+}: EditEpicDialogProps) {
   const [title, setTitle] = useState(epic.title)
   const [description, setDescription] = useState(epic.description)
   const [priority, setPriority] = useState<EpicPriority>((epic.priority as EpicPriority) || 'p2')
-  const updateEpic = useUpdateEpic()
+  const updateEpic = updateHook()
 
   useEffect(() => {
     if (open) {

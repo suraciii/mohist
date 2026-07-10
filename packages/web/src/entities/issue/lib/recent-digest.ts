@@ -62,12 +62,22 @@ export interface UseRecentDigestResult extends RecentDigest {
   isLoading: boolean
 }
 
-export function useRecentDigest(): UseRecentDigestResult {
+export interface RecentDigestHooks {
+  useIssues: typeof useIssues
+  useArchivedIssues: typeof useArchivedIssues
+}
+
+const defaultHooks: RecentDigestHooks = {
+  useIssues,
+  useArchivedIssues,
+}
+
+export function useRecentDigest(hooks: RecentDigestHooks = defaultHooks): UseRecentDigestResult {
   const { projectId } = useProject()
   const enabled = !!projectId
 
-  const issuesQuery = useIssues(projectId ? { projectId } : undefined)
-  const archivedQuery = useArchivedIssues(projectId ? { projectId } : undefined)
+  const issuesQuery = hooks.useIssues(projectId ? { projectId } : undefined)
+  const archivedQuery = hooks.useArchivedIssues(projectId ? { projectId } : undefined)
 
   const data = useMemo(
     () => deriveRecentDigest(issuesQuery.data ?? [], archivedQuery.data ?? []),

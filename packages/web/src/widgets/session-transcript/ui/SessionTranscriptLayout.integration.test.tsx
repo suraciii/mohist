@@ -32,12 +32,14 @@ function makeTurn(overrides: {
 
 describe('SessionTranscriptLayout TOC + toolbar + responsive integration', () => {
   let scrollIntoViewSpy: ReturnType<typeof vi.spyOn>
+  const scrollContainerCleanups = new Set<() => void>()
 
   beforeEach(() => {
     scrollIntoViewSpy = vi.spyOn(Element.prototype, 'scrollIntoView').mockImplementation(() => {})
   })
 
   afterEach(() => {
+    for (const dispose of [...scrollContainerCleanups]) dispose()
     scrollIntoViewSpy.mockRestore()
   })
 
@@ -401,14 +403,21 @@ describe('SessionTranscriptLayout TOC + toolbar + responsive integration', () =>
         rectMap.set(el, makeRect(turnTops[i] ?? 1000 * (i + 1), 200))
       })
 
+      let mounted = true
+      const unmount = () => {
+        if (!mounted) return
+        mounted = false
+        view.unmount()
+        scrollContainer.remove()
+        scrollContainerCleanups.delete(unmount)
+      }
+      scrollContainerCleanups.add(unmount)
+
       return {
         scrollContainer,
         scrollContainerRef,
         turnRefs,
-        unmount: () => {
-          view.unmount()
-          scrollContainer.remove()
-        },
+        unmount,
       }
     }
 

@@ -6,7 +6,6 @@ import { screen } from '@testing-library/react'
 import { EpicStatus, type EpicDetail } from '../../../entities/epic'
 
 import { issues, linkedIssue, renderPage, getActionGroup, getMobileHeaderContainer, getEpicDetailPageContainer, getTitleBlock } from './_epicDetailPageTestHarness'
-import { mountEpicDetail, mockEpic } from './_epicDetailMsw'
 
 describe('EpicDetailPage mobile layout structural contract', () => {
   const LONG_CHINESE_TITLE =
@@ -40,14 +39,18 @@ describe('EpicDetailPage mobile layout structural contract', () => {
     } as EpicDetail
   }
 
-  mountEpicDetail(makeEpic(), issues)
+  let currentEpic = makeEpic()
+
+  function mockEpic(epic: EpicDetail) {
+    currentEpic = epic
+  }
 
   afterEach(() => {
     mockEpic(makeEpic())
   })
 
   async function renderPageReady() {
-    renderPage()
+    renderPage({ epic: currentEpic, issues })
     await screen.findByTestId('epic-number')
   }
 

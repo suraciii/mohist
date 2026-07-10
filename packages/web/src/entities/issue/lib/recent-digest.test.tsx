@@ -1,20 +1,18 @@
 // @vitest-environment jsdom
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import { renderHook } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { ReactNode } from 'react'
 import { ProjectProvider } from '../../project'
 import { IssueStatus, IssueHealth, type Issue } from '../model/types'
+import {
+  DIGEST_TOP_N,
+  deriveRecentDigest,
+  useRecentDigest,
+  type RecentDigestHooks,
+} from './recent-digest'
 
-const useIssuesMock = vi.fn()
-const useArchivedIssuesMock = vi.fn()
-
-vi.mock('../api/queries', () => ({
-  useIssues: (...args: unknown[]) => useIssuesMock(...args),
-  useArchivedIssues: (...args: unknown[]) => useArchivedIssuesMock(...args),
-}))
-
-import { DIGEST_TOP_N, deriveRecentDigest, useRecentDigest } from './recent-digest'
+let nextIssueId = 1
 
 function makeIssue(overrides: {
   status: 'backlog' | 'in_progress' | 'done' | 'cancelled'
@@ -27,7 +25,7 @@ function makeIssue(overrides: {
   title?: string
 }): Issue {
   return {
-    id: overrides.id ?? `id-${Math.random().toString(36).slice(2)}`,
+    id: overrides.id ?? `issue-${nextIssueId++}`,
     number: overrides.number ?? 1,
     title: overrides.title ?? 'title',
     status: overrides.status as IssueStatus,
@@ -45,10 +43,15 @@ function makeIssue(overrides: {
 }
 
 function makeWrapper(projectId: string | null = 'proj-1') {
-  const queryClient = new QueryClient()
+  const queryClient = new QueryClient({
+    defaultOptions: {
+      queries: { retry: false, gcTime: 0, staleTime: Number.POSITIVE_INFINITY },
+    },
+  })
   const projects = projectId
     ? [{ id: projectId, name: projectId, createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z', repositories: [] }]
     : []
+
   return ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={queryClient}>
       <ProjectProvider initialProjectId={projectId} initialProjects={projects}>
@@ -56,6 +59,35 @@ function makeWrapper(projectId: string | null = 'proj-1') {
       </ProjectProvider>
     </QueryClientProvider>
   )
+}
+
+beforeEach(() => {
+  nextIssueId = 1
+})
+
+function makeDigestHooks({
+  issues,
+  archivedIssues,
+  issuesLoading = false,
+  archivedIssuesLoading = false,
+  requestedProjectIds,
+}: {
+  issues?: Issue[]
+  archivedIssues?: Issue[]
+  issuesLoading?: boolean
+  archivedIssuesLoading?: boolean
+  requestedProjectIds?: Array<string | undefined>
+} = {}): RecentDigestHooks {
+  return {
+    useIssues: (params) => {
+      requestedProjectIds?.push(params?.projectId)
+      return { data: issues, isLoading: issuesLoading } as never
+    },
+    useArchivedIssues: (params) => {
+      requestedProjectIds?.push(params?.projectId)
+      return { data: archivedIssues, isLoading: archivedIssuesLoading } as never
+    },
+  }
 }
 
 const NOW = new Date('2026-06-19T12:00:00.000Z').getTime()
@@ -334,8 +366,7 @@ describe('deriveRecentDigest', () => {
 
 describe('useRecentDigest', () => {
   it('returns { completed, failed, archived, isLoading } shape derived from useIssues and useArchivedIssues', () => {
-    useIssuesMock.mockReturnValue({
-      data: [
+    const issues = [
         makeIssue({ status: 'done', createdAt: daysAgo(2), updatedAt: daysAgo(1), number: 1 }),
         makeIssue({
           status: 'cancelled',
@@ -343,11 +374,8 @@ describe('useRecentDigest', () => {
           updatedAt: daysAgo(2),
           number: 2,
         }),
-      ],
-      isLoading: false,
-    })
-    useArchivedIssuesMock.mockReturnValue({
-      data: [
+      ]
+    const archivedIssues = [
         makeIssue({
           status: 'done',
           createdAt: daysAgo(10),
@@ -355,11 +383,11 @@ describe('useRecentDigest', () => {
           archivedAt: daysAgo(1),
           number: 3,
         }),
-      ],
-      isLoading: false,
-    })
+      ]
 
-    const { result } = renderHook(() => useRecentDigest(), { wrapper: makeWrapper() })
+    const { result } = renderHook(() => useRecentDigest(makeDigestHooks({ issues, archivedIssues })), {
+      wrapper: makeWrapper('proj-1'),
+    })
 
     expect(result.current.completed.map((i) => i.number)).toEqual([1])
     expect(result.current.failed.map((i) => i.number)).toEqual([2])
@@ -368,10 +396,10 @@ describe('useRecentDigest', () => {
   })
 
   it('reports isLoading=true while either query is loading (and project is set)', () => {
-    useIssuesMock.mockReturnValue({ data: undefined, isLoading: true })
-    useArchivedIssuesMock.mockReturnValue({ data: [], isLoading: false })
-
-    const { result } = renderHook(() => useRecentDigest(), { wrapper: makeWrapper() })
+    const { result } = renderHook(
+      () => useRecentDigest(makeDigestHooks({ issuesLoading: true, archivedIssues: [] })),
+      { wrapper: makeWrapper() },
+    )
 
     expect(result.current.isLoading).toBe(true)
     expect(result.current.completed).toEqual([])
@@ -379,11 +407,13 @@ describe('useRecentDigest', () => {
     expect(result.current.archived).toEqual([])
   })
 
-  it('returns empty arrays and isLoading=false when both queries have undefined data', () => {
-    useIssuesMock.mockReturnValue({ data: undefined, isLoading: false })
-    useArchivedIssuesMock.mockReturnValue({ data: undefined, isLoading: false })
-
-    const { result } = renderHook(() => useRecentDigest(), { wrapper: makeWrapper() })
+  it('returns empty arrays and isLoading=false when both query results are empty', () => {
+    const { result } = renderHook(() => useRecentDigest(makeDigestHooks({
+      issues: [],
+      archivedIssues: [],
+    })), {
+      wrapper: makeWrapper('proj-1'),
+    })
 
     expect(result.current).toEqual({
       completed: [],
@@ -393,32 +423,41 @@ describe('useRecentDigest', () => {
     })
   })
 
-  it('calls useIssues and useArchivedIssues with explicit { projectId } from useProject', () => {
-    useIssuesMock.mockReturnValue({ data: [], isLoading: false })
-    useArchivedIssuesMock.mockReturnValue({ data: [], isLoading: false })
+  it('loads both issue collections from the selected project', () => {
+    const requestedProjectIds: Array<string | undefined> = []
 
-    renderHook(() => useRecentDigest(), { wrapper: makeWrapper('proj-42') })
+    renderHook(() => useRecentDigest(makeDigestHooks({ requestedProjectIds })), {
+      wrapper: makeWrapper('proj-42'),
+    })
 
-    expect(useIssuesMock).toHaveBeenLastCalledWith({ projectId: 'proj-42' })
-    expect(useArchivedIssuesMock).toHaveBeenLastCalledWith({ projectId: 'proj-42' })
+    expect(requestedProjectIds).toEqual(['proj-42', 'proj-42'])
   })
 
-  it('does not call the queries with a projectId when no project is selected', () => {
-    useIssuesMock.mockReturnValue({ data: undefined, isLoading: false })
-    useArchivedIssuesMock.mockReturnValue({ data: undefined, isLoading: false })
+  it('passes no project scope to either issue collection when no project is selected', () => {
+    const requestedProjectIds: Array<string | undefined> = []
+    const { result } = renderHook(
+      () => useRecentDigest(makeDigestHooks({ requestedProjectIds })),
+      { wrapper: makeWrapper(null) },
+    )
 
-    renderHook(() => useRecentDigest(), { wrapper: makeWrapper(null) })
-
-    expect(useIssuesMock).toHaveBeenLastCalledWith(undefined)
-    expect(useArchivedIssuesMock).toHaveBeenLastCalledWith(undefined)
+    expect(requestedProjectIds).toEqual([undefined, undefined])
+    expect(result.current).toEqual({
+      completed: [],
+      failed: [],
+      archived: [],
+      isLoading: false,
+    })
   })
 
-  it('reports isLoading=false when no project is selected even if a query says isLoading', () => {
-    useIssuesMock.mockReturnValue({ data: undefined, isLoading: true })
-    useArchivedIssuesMock.mockReturnValue({ data: undefined, isLoading: true })
-
-    const { result } = renderHook(() => useRecentDigest(), { wrapper: makeWrapper(null) })
+  it('reports isLoading=false when no project is selected', () => {
+    const requestedProjectIds: Array<string | undefined> = []
+    const { result } = renderHook(() => useRecentDigest(makeDigestHooks({
+      issuesLoading: true,
+      archivedIssuesLoading: true,
+      requestedProjectIds,
+    })), { wrapper: makeWrapper(null) })
 
     expect(result.current.isLoading).toBe(false)
+    expect(requestedProjectIds).toEqual([undefined, undefined])
   })
 })

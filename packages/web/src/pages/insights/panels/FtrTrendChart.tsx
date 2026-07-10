@@ -65,8 +65,18 @@ function hasTrendData(data: { trend?: QualityTrendDto } | undefined): boolean {
   return trend.points.some((p) => p.sampleCount > 0)
 }
 
-export function FtrTrendChart({ range }: { range: InsightsRange }) {
-  const { data, isLoading, isError } = useQualityMetrics(range)
+export type QualityMetricsTrendHook = (
+  range?: InsightsRange,
+) => Pick<ReturnType<typeof useQualityMetrics>, 'data' | 'isLoading' | 'isError'>
+
+export function FtrTrendChart({
+  range,
+  qualityMetricsHook = useQualityMetrics,
+}: {
+  range: InsightsRange
+  qualityMetricsHook?: QualityMetricsTrendHook
+}) {
+  const { data, isLoading, isError } = qualityMetricsHook(range)
   const [showRework, setShowRework] = useState(false)
 
   const trend = data?.trend

@@ -1,8 +1,11 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, screen } from '@testing-library/react'
+import { useMutation } from '@tanstack/react-query'
 import { http, HttpResponse } from 'msw'
-import { issues, linkedIssue, renderPage } from './_epicDetailPageTestHarness'
+import type { EpicDetail } from '../../../entities/epic'
+import { issues, linkedIssue, renderPage as renderEpicDetailPage } from './_epicDetailPageTestHarness'
+import type { RemoveEpicIssueHook } from './EpicDetailPage'
 import { useMswServer } from '../../../../tests/support/msw'
 
 /**
@@ -16,6 +19,22 @@ let _epicData: unknown = null
 let _issuesData: unknown[] = []
 const _removeIssueHandler = vi.fn()
 let _blockRemove = false
+
+const removeEpicIssueHook: RemoveEpicIssueHook = () =>
+  useMutation<{ epicId: string; issueId: string }, Error, { epicId: string; issueId: string }>({
+    mutationFn: async ({ epicId, issueId }) => {
+      _removeIssueHandler(issueId)
+      if (_blockRemove) return new Promise(() => {})
+      return { epicId, issueId }
+    },
+  })
+
+function renderPage() {
+  return renderEpicDetailPage({
+    epic: _epicData as EpicDetail,
+    dependencies: { removeEpicIssueHook },
+  })
+}
 
 useMswServer(
   http.get('*/api/projects/:projectId/epics/:epicId', () =>

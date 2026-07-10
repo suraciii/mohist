@@ -2,12 +2,19 @@ import { useState } from 'react'
 import { FileIcon, FolderIcon } from 'lucide-react'
 import { Button } from '@/shared/ui/components/button'
 import { ArtifactContentViewer } from './ArtifactContentViewer'
+import type { ArtifactContentHook } from './ArtifactContentViewer'
 import { useIssueWorkflowArtifacts, type WorkflowArtifact, type WorkflowArtifactDirectory } from '../../../entities/issue'
 
 interface LatestArtifactsPanelProps {
   issueNumber: number
   workflowRunId?: string | null
+  artifactsHook?: LatestArtifactsHook
+  contentHook?: ArtifactContentHook
 }
+
+export type LatestArtifactsHook = (
+  ...args: Parameters<typeof useIssueWorkflowArtifacts>
+) => Pick<ReturnType<typeof useIssueWorkflowArtifacts>, 'data' | 'isLoading' | 'error'>
 
 function isDirectoryArtifact(artifact: WorkflowArtifact | WorkflowArtifactDirectory): artifact is WorkflowArtifactDirectory {
   return artifact.kind === 'directory'
@@ -41,8 +48,13 @@ function ArtifactItem({
   )
 }
 
-export function LatestArtifactsPanel({ issueNumber, workflowRunId }: LatestArtifactsPanelProps) {
-  const { data: artifacts, isLoading, error } = useIssueWorkflowArtifacts(issueNumber, {}, !!workflowRunId)
+export function LatestArtifactsPanel({
+  issueNumber,
+  workflowRunId,
+  artifactsHook = useIssueWorkflowArtifacts,
+  contentHook,
+}: LatestArtifactsPanelProps) {
+  const { data: artifacts, isLoading, error } = artifactsHook(issueNumber, {}, !!workflowRunId)
   const [selectedArtifactId, setSelectedArtifactId] = useState<string | null>(null)
 
   const selectedArtifact = artifacts?.find((a) => a.artifactId === selectedArtifactId)
@@ -85,6 +97,7 @@ export function LatestArtifactsPanel({ issueNumber, workflowRunId }: LatestArtif
           path={selectedArtifact.path}
           size={selectedArtifact.size}
           open={selectedArtifactId !== null}
+          contentHook={contentHook}
           onOpenChange={(open) => {
             if (!open) setSelectedArtifactId(null)
           }}

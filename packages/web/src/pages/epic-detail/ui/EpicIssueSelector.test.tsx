@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react'
 import { http, HttpResponse } from 'msw'
 import { IssueHealth, IssueStatus, WorkflowStage } from '../../../entities/issue'
+import type { EpicDetail } from '../../../entities/epic'
 
 import { epic, linkedIssue, renderPage } from './_epicDetailPageTestHarness'
 import { useMswServer } from '../../../../tests/support/msw'
@@ -13,14 +14,8 @@ let _issuesData: unknown[] = []
 const _addIssueHandler = vi.fn()
 
 useMswServer(
-  http.get('*/api/projects/:projectId/epics/:epicId', () =>
-    HttpResponse.json({ success: true, data: _epicData }),
-  ),
   http.get('*/api/projects/:projectId/epics/:epicId/events', () =>
     HttpResponse.json({ success: true, data: [] }),
-  ),
-  http.get('*/api/projects/:projectId/issues', () =>
-    HttpResponse.json({ success: true, data: _issuesData }),
   ),
   http.post('*/api/projects/:projectId/epics/:epicId/issues', async ({ request }) => {
     const body = (await request.json()) as { issueId: string }
@@ -64,6 +59,10 @@ const searchIssues = [
   { id: 'issue-3', number: 3, title: 'Candidate issue', status: 'in_progress' as const, isDraft: false, canStart: true, blocker: null },
 ]
 
+function renderSearchPage() {
+  return renderPage({ epic: _epicData as EpicDetail, issues: _issuesData })
+}
+
 describe('EpicDetailPage searchable Add Issue', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -76,7 +75,7 @@ describe('EpicDetailPage searchable Add Issue', () => {
   })
 
   it('filters candidates by issue number or title when search text is typed', async () => {
-    renderPage()
+    renderSearchPage()
 
     await screen.findByTestId('epic-issue-selector-trigger')
     fireEvent.click(screen.getByTestId('epic-issue-selector-trigger'))
@@ -101,7 +100,7 @@ describe('EpicDetailPage searchable Add Issue', () => {
   })
 
   it('disables closed, archived, and non-startable candidates with inline reasons', async () => {
-    renderPage()
+    renderSearchPage()
 
     await screen.findByTestId('epic-issue-selector-trigger')
     fireEvent.click(screen.getByTestId('epic-issue-selector-trigger'))
@@ -134,7 +133,7 @@ describe('EpicDetailPage searchable Add Issue', () => {
   })
 
   it('disables the submit button when no candidate is selected', async () => {
-    renderPage()
+    renderSearchPage()
 
     await screen.findByTestId('epic-issue-selector-trigger')
     expect(screen.getByRole('button', { name: 'Add Issue' })).toBeDisabled()
@@ -150,7 +149,7 @@ describe('EpicDetailPage searchable Add Issue', () => {
       { id: 'issue-closed', number: 5, title: 'Closed candidate', status: 'done' as const },
     ]
 
-    renderPage()
+    renderSearchPage()
 
     const trigger = await screen.findByTestId('epic-issue-selector-trigger')
     expect(trigger).toBeDisabled()

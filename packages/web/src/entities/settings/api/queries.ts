@@ -295,10 +295,15 @@ export function useAllWorkflowProfiles() {
   })
 }
 
-export function useWorkflowProfile(id: string | null) {
+export type WorkflowProfileFetcher = typeof getWorkflowProfile
+
+export function useWorkflowProfile(
+  id: string | null,
+  fetcher: WorkflowProfileFetcher = getWorkflowProfile,
+) {
   return useQuery<WorkflowProfileDetail>({
     queryKey: ['workflow-profile', id],
-    queryFn: () => getWorkflowProfile(id!),
+    queryFn: () => fetcher(id!),
     enabled: !!id,
   })
 }

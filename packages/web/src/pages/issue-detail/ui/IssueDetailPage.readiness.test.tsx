@@ -6,13 +6,11 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { ProjectProvider } from '../../../entities/project'
 import type { Project } from '../../../entities/project'
+import type { Issue } from '../../../entities/issue'
 import { IssueDetailPage } from './IssueDetailPage'
-import { mockIssue, mockUpdateIssue, mountIssueDetail } from './_issueDetailMsw'
+import { getCurrentIssueFixture, mockIssue, mountIssueDetail } from './_issueDetailMsw'
 
-const updateIssueHandler = vi.fn(({ request }: { request: Request }) => {
-  void request
-  return Response.json({ success: true, data: { isDraft: false } })
-})
+const updateIssue = vi.fn(async () => makeIssue({ isDraft: false }) as Issue)
 
 const projects: Project[] = [
   {
@@ -46,23 +44,28 @@ function makeIssue(overrides: Record<string, unknown> = {}) {
 
 mountIssueDetail({ issue: makeIssue() })
 
-beforeEach(() => {
-  mockUpdateIssue(updateIssueHandler)
-})
+beforeEach(() => updateIssue.mockClear())
 
 afterEach(() => {
   cleanup()
-  updateIssueHandler.mockClear()
 })
 
 function renderPage() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  const issue = getCurrentIssueFixture()
+  if (issue) {
+    queryClient.setQueryDefaults(['issues', 201, 'proj-1'], { staleTime: Infinity })
+    queryClient.setQueryData(['issues', 201, 'proj-1'], issue)
+  }
   return render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={['/issues/201']}>
         <ProjectProvider initialProjects={projects} initialProjectId="proj-1">
           <Routes>
-            <Route path="/issues/:number" element={<IssueDetailPage />} />
+            <Route
+              path="/issues/:number"
+              element={<IssueDetailPage mutationDependencies={{ updateIssue }} />}
+            />
           </Routes>
         </ProjectProvider>
       </MemoryRouter>
@@ -138,10 +141,8 @@ describe('IssueDetailPage - draft indicator and Start control', () => {
 
     await waitFor(() => expect(screen.getByTestId('mark-ready-button')).toBeInTheDocument())
     screen.getByTestId('mark-ready-button').click()
-    await waitFor(() => expect(updateIssueHandler).toHaveBeenCalledTimes(1))
-    const callUrl = new URL(updateIssueHandler.mock.calls[0]![0].request.url)
-    expect(callUrl.pathname).toContain('/issues/201')
-    expect(await updateIssueHandler.mock.calls[0]![0].request.clone().json()).toEqual({ isDraft: false })
+    await waitFor(() => expect(updateIssue).toHaveBeenCalledTimes(1))
+    expect(updateIssue).toHaveBeenCalledWith(201, { isDraft: false }, 'proj-1')
   })
 })
 

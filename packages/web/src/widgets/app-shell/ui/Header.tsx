@@ -24,16 +24,28 @@ function formatEpicTitle(
   return 'Epic'
 }
 
-function usePageTitle(): string {
+export interface HeaderDataHooks {
+  epicHook: typeof useEpic
+  agentHook: typeof useAgent
+  agentStatusHook: typeof useAgentStatus
+}
+
+const defaultDataHooks: HeaderDataHooks = {
+  epicHook: useEpic,
+  agentHook: useAgent,
+  agentStatusHook: useAgentStatus,
+}
+
+function usePageTitle(dataHooks: HeaderDataHooks): string {
   const location = useLocation()
   const params = useParams<{ number?: string; id?: string; section?: string; agentId?: string }>()
   const segments = location.pathname.split('/').filter(Boolean)
   const firstSegment = segments[0] ?? ''
   const section = segments.length > 1 ? `/${segments.slice(1).join('/')}` : '/'
   const epicIdSegment = findEpicIdSegment(location.pathname)
-  const { data: epic, isLoading: epicLoading } = useEpic(epicIdSegment ?? '')
+  const { data: epic, isLoading: epicLoading } = dataHooks.epicHook(epicIdSegment ?? '')
   const agentId = params.agentId ?? (segments[0] === 'agents' ? segments[1] : undefined)
-  const { data: agent } = useAgent(agentId ?? '')
+  const { data: agent } = dataHooks.agentHook(agentId ?? '')
 
   if (firstSegment === 'issues') {
     return segments.length > 1 ? `Issue #${params.number ?? segments[1]}` : 'Issues'
@@ -87,11 +99,18 @@ function useIsSettingsRoute(): boolean {
   return segments.includes('settings')
 }
 
-export function Header({ onCreateIssue }: { onCreateIssue: () => void }) {
+export function Header({
+  onCreateIssue,
+  dataHooks,
+}: {
+  onCreateIssue: () => void
+  dataHooks?: Partial<HeaderDataHooks>
+}) {
+  const resolvedDataHooks = { ...defaultDataHooks, ...dataHooks }
   const { isMobile } = useSidebar()
-  const title = usePageTitle()
+  const title = usePageTitle(resolvedDataHooks)
   const isSettingsRoute = useIsSettingsRoute()
-  const { data: agentStatus } = useAgentStatus()
+  const { data: agentStatus } = resolvedDataHooks.agentStatusHook()
   const running = agentStatus?.running ?? false
 
   return (

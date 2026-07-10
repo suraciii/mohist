@@ -146,12 +146,16 @@ function NoProjectState() {
   )
 }
 
-export function RunnersPage() {
+export function RunnersPage({
+  runnersHook = useRunners,
+}: {
+  runnersHook?: typeof useRunners
+} = {}) {
   useDocumentTitle('Runners — Mohist')
 
   const { projectId } = useProject()
   const [scope, setScope] = useState<ScopeFilter>('all')
-  const { data: rows = [] } = useRunners()
+  const { data: rows = [] } = runnersHook()
 
   const filteredRows = useMemo(() => filterByScope(rows, scope), [rows, scope])
 

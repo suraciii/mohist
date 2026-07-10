@@ -2,10 +2,11 @@
 import '@testing-library/jest-dom'
 import { render, screen } from '../../../../tests/test-utils'
 import userEvent from '@testing-library/user-event'
-import { http, HttpResponse } from 'msw'
-import { afterEach, describe, expect, it } from 'vitest'
-import { server, useMswServer } from '../../../../tests/support/msw'
-import { InboxSubscriptionSection } from './InboxSubscriptionSection'
+import { describe, expect, it } from 'vitest'
+import {
+  InboxSubscriptionSection,
+  type InboxSubscriptionSectionDataHook,
+} from './InboxSubscriptionSection'
 import type { InboxSubscription } from '../../../entities/inbox'
 
 const ALL_ENABLED: InboxSubscription = {
@@ -15,32 +16,26 @@ const ALL_ENABLED: InboxSubscription = {
   issue_completed: true,
 }
 
-let _subscriptionData: InboxSubscription = { ...ALL_ENABLED }
-let _loading = false
-const updateCaptures: Array<Record<string, boolean>> = []
-
-useMswServer(
-  http.get('/api/projects/:projectId/inbox/subscription', () => {
-    if (_loading) return new Promise(() => {})
-    return HttpResponse.json({ success: true, data: _subscriptionData })
-  }),
-  http.put('/api/projects/:projectId/inbox/subscription', async ({ request }) => {
-    const body = await request.json() as Record<string, boolean>
-    updateCaptures.push(body)
-    _subscriptionData = body as unknown as InboxSubscription
-    return HttpResponse.json({ success: true, data: body })
-  }),
-)
-
-afterEach(() => {
-  _subscriptionData = { ...ALL_ENABLED }
-  _loading = false
-  updateCaptures.length = 0
-})
+function renderSection({
+  subscription = ALL_ENABLED,
+  isLoading = false,
+  updateSubscription = () => {},
+}: {
+  subscription?: InboxSubscription
+  isLoading?: boolean
+  updateSubscription?: (subscription: InboxSubscription) => void
+} = {}) {
+  const dataHook: InboxSubscriptionSectionDataHook = () => ({
+    subscription,
+    isLoading,
+    updateSubscription,
+  })
+  return render(<InboxSubscriptionSection dataHook={dataHook} />)
+}
 
 describe('InboxSubscriptionSection', () => {
   it('renders exactly four toggles with product-facing labels', async () => {
-    render(<InboxSubscriptionSection />)
+    renderSection()
 
     expect(await screen.findByText('Workflow failed')).toBeInTheDocument()
     expect(screen.getByText('Approval requested')).toBeInTheDocument()
@@ -52,7 +47,7 @@ describe('InboxSubscriptionSection', () => {
   })
 
   it('does not display raw event or CloudEvent type names', async () => {
-    render(<InboxSubscriptionSection />)
+    renderSection()
 
     await screen.findByText('Workflow failed')
 
@@ -74,7 +69,7 @@ describe('InboxSubscriptionSection', () => {
   })
 
   it('shows all toggles as checked when subscription data has all enabled (no stored preferences)', async () => {
-    render(<InboxSubscriptionSection />)
+    renderSection()
 
     await screen.findByText('Workflow failed')
 
@@ -85,19 +80,14 @@ describe('InboxSubscriptionSection', () => {
   })
 
   it('shows toggles reflecting persisted state when some are disabled', async () => {
-    _subscriptionData = {
-      workflow_failed: false,
-      approval_requested: true,
-      issue_started: false,
-      issue_completed: true,
-    }
-    server.use(
-      http.get('/api/projects/:projectId/inbox/subscription', () =>
-        HttpResponse.json({ success: true, data: _subscriptionData }),
-      ),
-    )
-
-    render(<InboxSubscriptionSection />)
+    renderSection({
+      subscription: {
+        workflow_failed: false,
+        approval_requested: true,
+        issue_started: false,
+        issue_completed: true,
+      },
+    })
 
     await screen.findByText('Workflow failed')
 
@@ -110,7 +100,8 @@ describe('InboxSubscriptionSection', () => {
 
   it('calls update mutation with the full subscription when a toggle is changed', async () => {
     const user = userEvent.setup()
-    render(<InboxSubscriptionSection />)
+    const updateCaptures: InboxSubscription[] = []
+    renderSection({ updateSubscription: (subscription) => updateCaptures.push(subscription) })
 
     await screen.findByText('Workflow failed')
 
@@ -128,7 +119,8 @@ describe('InboxSubscriptionSection', () => {
 
   it('preserves earlier rapid toggle changes in later whole-object mutations', async () => {
     const user = userEvent.setup()
-    render(<InboxSubscriptionSection />)
+    const updateCaptures: InboxSubscription[] = []
+    renderSection({ updateSubscription: (subscription) => updateCaptures.push(subscription) })
 
     await screen.findByText('Workflow failed')
 
@@ -146,16 +138,14 @@ describe('InboxSubscriptionSection', () => {
   })
 
   it('shows loading state when subscription is loading', () => {
-    _loading = true
-
-    render(<InboxSubscriptionSection />)
+    renderSection({ isLoading: true })
 
     expect(screen.getByText('Loading subscription preferences...')).toBeInTheDocument()
     expect(screen.queryByRole('switch')).toBeNull()
   })
 
   it('each toggle has an accessible name satisfying aria-toggle-field-name', async () => {
-    render(<InboxSubscriptionSection />)
+    renderSection()
 
     await screen.findByText('Workflow failed')
 
@@ -170,7 +160,7 @@ describe('InboxSubscriptionSection', () => {
   })
 
   it('uses outcome-oriented settings copy', async () => {
-    render(<InboxSubscriptionSection />)
+    renderSection()
 
     expect(await screen.findByText('Inbox')).toBeInTheDocument()
     expect(screen.getByText('Workflow updates')).toBeInTheDocument()

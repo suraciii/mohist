@@ -2,29 +2,21 @@
 import '@testing-library/jest-dom'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { http, HttpResponse } from 'msw'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { QueryClient, QueryClientProvider, useMutation } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
 import { ProjectProvider } from '../../../entities/project'
 import { EditEpicDialog } from './EditEpicDialog'
-import type { EpicDetail, EpicStatus } from '../../../entities/epic'
+import type { EpicDetail, EpicPriority, EpicStatus } from '../../../entities/epic'
 import { EPIC_DESCRIPTION_TEMPLATE } from '@/shared/lib/epic-description-template'
-import { useMswServer } from '../../../../tests/support/msw'
 
-let _updateResponse: EpicDetail | null = null
+const updateHandler = vi.fn(async ({ id, data }: {
+  id: string
+  data: { title: string; description: string; priority: EpicPriority }
+}) => makeEpic({ id, ...data }))
 
-const updateHandler = vi.fn(async (info: { request: Request }) => {
-  const body = await info.request.clone().json()
-  void body
-  if (_updateResponse) {
-    return HttpResponse.json({ success: true, data: _updateResponse })
-  }
-  return HttpResponse.json({ success: true, data: makeEpic() })
-})
-
-useMswServer(
-  http.patch('*/api/projects/:projectId/epics/:id', updateHandler),
-)
+const updateHook = () => useMutation({
+  mutationFn: (variables: Parameters<typeof updateHandler>[0]) => updateHandler(variables),
+}) as never
 
 const project = {
   id: 'proj-edit',
@@ -71,7 +63,7 @@ function renderDialog(props: { open?: boolean; onClose?: () => void; epic?: Epic
     <QueryClientProvider client={queryClient}>
       <ProjectProvider initialProjects={[project]} initialProjectId={project.id}>
         <MemoryRouter>
-          <EditEpicDialog open={open} onClose={onClose} epic={epic} />
+          <EditEpicDialog open={open} onClose={onClose} epic={epic} updateHook={updateHook} />
         </MemoryRouter>
       </ProjectProvider>
     </QueryClientProvider>,
@@ -145,7 +137,7 @@ describe('EditEpicDialog verbatim load', () => {
       >
         <ProjectProvider initialProjects={[project]} initialProjectId={project.id}>
           <MemoryRouter>
-            <EditEpicDialog open={true} onClose={() => {}} epic={first} />
+            <EditEpicDialog open={true} onClose={() => {}} epic={first} updateHook={updateHook} />
           </MemoryRouter>
         </ProjectProvider>
       </QueryClientProvider>,
@@ -161,7 +153,7 @@ describe('EditEpicDialog verbatim load', () => {
       >
         <ProjectProvider initialProjects={[project]} initialProjectId={project.id}>
           <MemoryRouter>
-            <EditEpicDialog open={true} onClose={() => {}} epic={second} />
+            <EditEpicDialog open={true} onClose={() => {}} epic={second} updateHook={updateHook} />
           </MemoryRouter>
         </ProjectProvider>
       </QueryClientProvider>,
@@ -179,10 +171,8 @@ describe('EditEpicDialog save preserves content', () => {
     fireEvent.click(screen.getByTestId('edit-epic-submit'))
 
     await waitFor(() => expect(updateHandler).toHaveBeenCalledTimes(1))
-    const call = updateHandler.mock.calls[0]![0]
-    const url = new URL(call.request.url)
-    expect(url.pathname).toContain('/epics/epic-edit-1')
-    const body = await call.request.clone().json()
+    const { id, data: body } = updateHandler.mock.calls[0]![0]
+    expect(id).toBe('epic-edit-1')
     expect(body.description).toBe(existing)
     expect(body.description).not.toContain('## Goal')
     expect(body.description).not.toContain('## Background')
@@ -197,8 +187,7 @@ describe('EditEpicDialog save preserves content', () => {
     fireEvent.click(screen.getByTestId('edit-epic-submit'))
 
     await waitFor(() => expect(updateHandler).toHaveBeenCalledTimes(1))
-    const call = updateHandler.mock.calls[0]![0]
-    const body = await call.request.clone().json()
+    const body = updateHandler.mock.calls[0]![0].data
     expect(body).not.toHaveProperty('goal')
     expect(body).not.toHaveProperty('background')
     expect(body).not.toHaveProperty('nonGoals')
@@ -214,8 +203,7 @@ describe('EditEpicDialog save preserves content', () => {
     fireEvent.click(screen.getByTestId('edit-epic-submit'))
 
     await waitFor(() => expect(updateHandler).toHaveBeenCalledTimes(1))
-    const call = updateHandler.mock.calls[0]![0]
-    const body = await call.request.clone().json()
+    const body = updateHandler.mock.calls[0]![0].data
     expect(body.description).toBe('Edited body without any scaffolding.')
   })
 
@@ -290,8 +278,7 @@ describe('EditEpicDialog opt-in Insert template', () => {
     fireEvent.click(screen.getByTestId('edit-epic-submit'))
 
     await waitFor(() => expect(updateHandler).toHaveBeenCalledTimes(1))
-    const call = updateHandler.mock.calls[0]![0]
-    const body = await call.request.clone().json()
+    const body = updateHandler.mock.calls[0]![0].data
     expect(body.description).toBe(existing)
     expect(body.description).not.toContain('## Goal')
   })
@@ -343,15 +330,12 @@ describe('EditEpicDialog mobile-safe layout', () => {
 describe('EditEpicDialog error handling', () => {
   it('does not close the dialog when the mutation handler reports a failure', async () => {
     const onClose = vi.fn()
-    updateHandler.mockImplementationOnce(async (info: { request: Request }) => {
-      void await info.request.clone().json()
-      return HttpResponse.json({ success: false, error: 'Server unavailable' }, { status: 500 })
-    })
+    updateHandler.mockRejectedValueOnce(new Error('Server unavailable'))
     renderDialog({ onClose })
 
     fireEvent.click(screen.getByTestId('edit-epic-submit'))
 
-    await waitFor(() => expect(screen.queryByTestId('edit-epic-cancel')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByTestId('edit-epic-error')).toHaveTextContent('Server unavailable'))
     expect(onClose).not.toHaveBeenCalled()
   })
 })

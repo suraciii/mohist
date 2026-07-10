@@ -9,6 +9,7 @@ interface WorkspacePanelProps {
   issueNumber: number
   isAgentRunning: boolean
   isDone?: boolean
+  workspaceStatusHook?: typeof useWorkspaceStatus
 }
 
 type RebaseResult = {
@@ -31,10 +32,15 @@ const STEP_LABELS: Record<RebaseStep, string> = {
   verifying: 'Verifying build...',
 }
 
-export function WorkspacePanel({ issueNumber, isAgentRunning, isDone }: WorkspacePanelProps) {
+export function WorkspacePanel({
+  issueNumber,
+  isAgentRunning,
+  isDone,
+  workspaceStatusHook = useWorkspaceStatus,
+}: WorkspacePanelProps) {
   const queryClient = useQueryClient()
   const { projectId } = useProject()
-  const { data: status, isLoading } = useWorkspaceStatus(issueNumber, true)
+  const { data: status, isLoading } = workspaceStatusHook(issueNumber, true)
   const { rebaseConflict } = useLiveTask()
   const [rebaseResult, setRebaseResult] = useState<RebaseResult | null>(null)
   const [cleanupResult, setCleanupResult] = useState<CleanupResult | null>(null)

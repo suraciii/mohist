@@ -1,6 +1,6 @@
 import { CardSection } from '@/shared/ui/components/card-section'
 import { IssueModelSelector } from '../../../../features/select-issue-model'
-import { IssuePrerequisitePicker } from '../../../../features/prerequisite-picker'
+import { IssuePrerequisitePicker, type IssuePrerequisitePickerProps } from '../../../../features/prerequisite-picker'
 import type { Issue, IssueStartBlocker } from '../../../../entities/issue'
 import type { IssueDetailMutations } from '../../model/useIssueDetailMutations'
 
@@ -19,9 +19,16 @@ export interface IssueConfigurationCardProps {
     'addPrerequisiteMutation' | 'removePrerequisiteMutation'
   >
   unframed?: boolean
+  prerequisitePickerIssuesHook?: IssuePrerequisitePickerProps['issuesHook']
 }
 
-export function IssueConfigurationCard({ issue, projectId, mutations, unframed = false }: IssueConfigurationCardProps) {
+export function IssueConfigurationCard({
+  issue,
+  projectId,
+  mutations,
+  unframed = false,
+  prerequisitePickerIssuesHook,
+}: IssueConfigurationCardProps) {
   const { addPrerequisiteMutation, removePrerequisiteMutation } = mutations
   const prerequisiteNumbers = issue.prerequisites?.map(p => p.number) ?? []
   const blocker: IssueStartBlocker | null = issue.blocker ?? null
@@ -42,6 +49,7 @@ export function IssueConfigurationCard({ issue, projectId, mutations, unframed =
             canStart={issue.canStart}
             blocker={blocker}
             disabled={addPrerequisiteMutation.isPending || removePrerequisiteMutation.isPending}
+            issuesHook={prerequisitePickerIssuesHook}
             onAdd={(n) => addPrerequisiteMutation.mutateAsync(n).then(() => undefined)}
             onRemove={(n) => removePrerequisiteMutation.mutateAsync(n).then(() => undefined)}
             errorMessage={

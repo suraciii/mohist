@@ -1,15 +1,15 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from 'vitest'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { http, HttpResponse } from 'msw'
-import { useMswServer } from '../../../../tests/support/msw'
 import { renderHook, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
-import { useWorkflowProfile } from './queries'
+import { request } from '../../../shared/api/client'
+import { getWorkflowProfile } from './client'
+import { useWorkflowProfile, type WorkflowProfileFetcher } from './queries'
 
 interface CapturedRequest {
-  method: string
-  url: string
+  path: string
+  init?: RequestInit
 }
 
 const PROFILE_DETAIL = {
@@ -36,7 +36,7 @@ function createQueryClient() {
 
 function renderUseWorkflowProfile(id: string | null) {
   const queryClient = createQueryClient()
-  return renderHook(() => useWorkflowProfile(id), {
+  return renderHook(() => useWorkflowProfile(id, workflowProfileFetcher), {
     wrapper: ({ children }: { children: ReactNode }) => (
       <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
     ),
@@ -45,12 +45,12 @@ function renderUseWorkflowProfile(id: string | null) {
 
 let requests: CapturedRequest[] = []
 
-useMswServer(
-  http.get('/api/workflow-templates/system/mohist/local', ({ request }) => {
-    requests.push({ method: request.method, url: request.url })
-    return HttpResponse.json({ success: true, data: PROFILE_DETAIL })
-  }),
-)
+const requester: typeof request = async <T,>(path: string, init?: RequestInit) => {
+  requests.push({ path, init })
+  return PROFILE_DETAIL as T
+}
+
+const workflowProfileFetcher: WorkflowProfileFetcher = (id) => getWorkflowProfile(id, requester)
 
 afterEach(() => {
   for (const qc of queryClients) qc.clear()
@@ -67,10 +67,10 @@ describe('getWorkflowProfile (workflow profile detail URL)', () => {
     })
 
     expect(requests).toHaveLength(1)
-    expect(requests[0].method).toBe('GET')
-    expect(requests[0].url).toContain('/api/workflow-templates/system/mohist/local')
-    expect(requests[0].url).not.toContain('%2F')
-    expect(requests[0].url).not.toContain('mohist%2Fdefault')
+    expect(requests[0].init).toBeUndefined()
+    expect(requests[0].path).toBe('/workflow-templates/system/mohist/local')
+    expect(requests[0].path).not.toContain('%2F')
+    expect(requests[0].path).not.toContain('mohist%2Fdefault')
   })
 
   it('returns the profile detail payload', async () => {
