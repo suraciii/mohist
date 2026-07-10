@@ -281,7 +281,7 @@ describe('Mobile board navigation non-overlap', () => {
         makeIssue({
           number: 611,
           status: IssueStatus.InProgress,
-          health: IssueHealth.Interrupted,
+          health: IssueHealth.Active,
           title: 'Interrupted work',
         }),
       ]
@@ -312,13 +312,13 @@ describe('Mobile board navigation non-overlap', () => {
         makeIssue({
           number: 811,
           status: IssueStatus.InProgress,
-          health: IssueHealth.Interrupted,
+          health: IssueHealth.Active,
           title: 'Interrupted one',
         }),
         makeIssue({
           number: 812,
           status: IssueStatus.InProgress,
-          health: IssueHealth.Interrupted,
+          health: IssueHealth.Active,
           title: 'Interrupted two',
         }),
       ]
@@ -346,7 +346,7 @@ describe('Mobile board navigation non-overlap', () => {
         makeIssue({
           number: 911,
           status: IssueStatus.InProgress,
-          health: IssueHealth.Interrupted,
+          health: IssueHealth.Active,
           title: 'Interrupted work',
         }),
       ]
@@ -364,7 +364,7 @@ describe('Mobile board navigation non-overlap', () => {
         makeIssue({
           number: 1011,
           status: IssueStatus.InProgress,
-          health: IssueHealth.Interrupted,
+          health: IssueHealth.Active,
           title: 'Clickable rerun',
         }),
       ]
