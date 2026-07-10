@@ -5,6 +5,7 @@ import { IssueStatus } from '../../../entities/issue'
 import { issueAttachmentContentPath } from '../../../entities/issue'
 import { useIssue, useIssueDiff, useIssueCommits, useWorkflowTimeline } from '../../../entities/issue'
 import { useAgentStatus } from '../../../entities/agent'
+import { useWorkflowRunSessions } from '../../../entities/coder-session'
 import { EditIssueDialog } from '../../../features/edit-issue'
 import { WorkflowConvergencePanel } from '../../../widgets/issue-workflow'
 import { NotFoundPage } from '../../not-found/ui/NotFoundPage'
@@ -23,6 +24,7 @@ import {
   type IssueDetailMutationDependencies,
 } from '../model/useIssueDetailMutations'
 import { deriveRuntimeDecision } from '../../../widgets/issue-workflow/model/derive-runtime-decision'
+import { buildExecutionSignal } from '../model/buildExecutionSignal'
 import { ArchivedPill, DraftPill, PriorityChip, RuntimeSummaryPill } from './pills'
 import { StatusHeadline } from './StatusHeadline'
 import { WorkflowYamlDialog } from './WorkflowYamlDialog'
@@ -103,6 +105,14 @@ export function IssueDetailPage({
   const activeAgents = agentStatus?.activeAgents ?? []
   const isAgentRunningOnThis = activeAgents.some(a => a.issueNumber === issueNumber)
 
+  const workflowRunId = issue?.workflowRunId ?? null
+  const { sessions: workflowSessions } = useWorkflowRunSessions(workflowRunId)
+  const activeSession = workflowSessions.find((session) => (
+    session.status === 'active'
+    || session.status === 'running'
+    || session.status === 'probing'
+  ))
+
   useDocumentTitle(`Issue #${issueNumber} — Mohist`, isAgentRunningOnThis)
 
   const { data: commitsData } = useIssueCommits(issueNumber)
@@ -152,6 +162,18 @@ export function IssueDetailPage({
     agentStatus: agentStatus ?? null,
     issueNumber,
     hasActiveAgent: isAgentRunningOnThis,
+  })
+
+  const executionSignal = buildExecutionSignal({
+    activeSession: activeSession
+      ? {
+          sessionName: activeSession.sessionName,
+          transcriptPath: toProjectPath(`/issues/${issueNumber}/workflow/sessions/${encodeURIComponent(activeSession.sessionName)}`),
+        }
+      : null,
+    agentStatus: agentStatus ?? null,
+    blocker: issue.blocker,
+    summary: decision.summary,
   })
   const comments = [...(issue.comments ?? [])].sort(
     (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
@@ -298,6 +320,7 @@ export function IssueDetailPage({
                     issueNumber,
                     workflowRunId: issue.workflowRunId ?? null,
                   }}
+                  executionSignal={executionSignal}
                   mutations={{
                     approveMutation,
                     sendBackMutation,

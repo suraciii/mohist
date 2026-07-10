@@ -83,7 +83,7 @@ export interface RuntimeDecisionInput {
 
 const APPROVAL_FAILURE_OVERRIDE_SUMMARY: RuntimeSummary = 'failed'
 
-function buildWaitReason(input: RuntimeDecisionInput): string | null {
+export function buildWaitReason(input: RuntimeDecisionInput): string | null {
   const blocker = input.issue?.blocker
   if (blocker?.kind === 'draft') {
     return 'Issue is still a draft. Mark it ready before starting.'

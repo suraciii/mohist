@@ -34,3 +34,41 @@
 ### Gotchas
 - When clicking a compact evidence item, the test must mock the artifact content endpoint (`/workflow/artifacts/:artifactId/content`) or MSW will reject the unhandled request. Added this in the spec.
 - The `ArtifactOpener` early-returns null when no artifacts exist, so the surface-level evidence wrapper is no longer needed (the ArtifactOpener now owns its own wrapper in compact mode).
+## T-002 (Compact runner/session execution signal)
+
+### Codebase patterns discovered
+- `useWorkflowRunSessions` in `entities/coder-session/model/useWorkflowRunSessions.ts` already powers the full `WorkflowSessionsPanel`. Query key `['workflow-runs', workflowRunId, 'sessions']` is the same on both call sites, so calling the hook from the page-level (in addition to the panel) does not double-fetch — TanStack Query dedupes. The page hook call returns the same `sessions` array the panel renders.
+- An "active" coder session in this codebase is any session with `status === 'active' | 'running' | 'probing'` (matches `useCoderSessions.ts:44,103,127` and `useGenericSessionDataSource.ts:82` patterns). `completed | failed | cancelled` are terminal.
+- `buildWaitReason` in `widgets/issue-workflow/model/derive-runtime-decision.ts:92` is the single source of truth for runtime wait reasons (draft, waiting-for, runner-unavailable, capacity-full). Exporting it (now `export function buildWaitReason`) lets `IssueDetailPage` reuse the same text for the compact execution signal so the in-surface runner reason and the existing `runtime-wait-reason` stay byte-for-byte consistent.
+- `toProjectPath` (already in scope from `useProjectPath`) is the path-builder the full `WorkflowSessionsPanel` uses for transcript links (e.g. `/issues/{n}/workflow/sessions/{name}`). Reusing it keeps the compact link consistent with the full panel.
+
+### Type & wiring design
+- `ExecutionSignal` lives on the surface as three named exports: `ActiveSessionCue` (`{ sessionName, transcriptPath }`), `RunnerGatingReason` (`{ reason, kind: 'runner-unavailable' | 'capacity-full' }`), and `ExecutionSignal` (`{ activeSession?, runnerGating? }`). The surface accepts `executionSignal?: ExecutionSignal | null` and renders nothing when the prop is omitted or both fields are falsy — non-applicable states render identically to before.
+- The page-level helper `buildExecutionSignal` lives at `pages/issue-detail/model/buildExecutionSignal.ts`. It derives the runner-gating reason by calling `buildWaitReason` directly so the text matches the `runtime-wait-reason` exactly; the helper also checks `summary === 'queued'` to suppress the signal on non-decision-relevant summaries and excludes draft/waiting-for blockers (which would otherwise take precedence in `buildWaitReason`).
+- `deriveRuntimeDecision` and `RuntimeDecision` are NOT extended with session detail — that would mix adjudication with execution-plane evidence (per design D3). The execution signal is purely page-computed and passed down.
+
+### IssueDetailPage wiring
+- `IssueDetailPage` now calls `useWorkflowRunSessions(workflowRunId)` alongside the existing hooks and finds the first session with status `'active' | 'running' | 'probing'`. The active session name + transcript path are passed into `buildExecutionSignal` along with `agentStatus`, the issue `blocker`, and `decision.summary`.
+- The signal is passed to `RuntimeDecisionSurface` only on desktop (consistent with how the surface is gated by `!isNarrowViewport`); on narrow viewports, the existing `MobileActionBar` continues to carry the primary action.
+- `_issueDetailMsw.tsx` adds `mockWorkflowRunSessions([...])` so tests can mount the page with a session list without re-stubbing the route.
+
+### Surface slot rendering
+- The signal renders as a single inline row with two optional spans: session cue (icon + "Session:" label + monospace session name + Link to transcript) and runner reason (icon-less "Runner:" label + reason text). When both apply, both render together; when only one applies, only that one renders; when neither applies, the row is omitted entirely.
+- The signal sits between `runtime-drift-note` and the optional evidence slot — order in the section: rationale → next action → wait-reason → drift-note → execution-signal → evidence → actions.
+
+### Test coverage
+- Added 9 new `RuntimeDecisionSurface` tests in `widgets/issue-workflow/ui/RuntimeDecisionSurface.test.tsx` covering: active session alone; runner-unavailable alone; capacity-full alone; both together; omitted when prop absent; omitted when both fields null; omitted for queued without gating; external `runnerMessage` text override; signal co-located with action buttons inside the surface.
+- Added 10 new tests in `pages/issue-detail/model/buildExecutionSignal.test.ts` covering the helper directly: null when no session + no gating; session-only; runner-unavailable; default fallback message; capacity-full; zero-max placeholder; draft blocker; waiting-for blocker; non-queued summary; both together.
+- Added 12 new tests in `pages/issue-detail/ui/IssueDetailPage.execution-signal.test.tsx` covering end-to-end placement inside the status-header tier for active session, full WorkflowSessionsPanel still in reading-flow, normal running omits signal, runner-unavailable matches wait-reason text, capacity-full matches wait-reason text, external runnerMessage, done path omits signal, waiting-for blocker suppresses runner signal, capacity-gating consistency (Start disabled, reason matches), Start enabled + no signal when capacity available, normal running + completed sessions omits signal, done omits signal.
+- All 4579 web tests + 1031 runner tests pass; typecheck clean.
+
+### Decisions made
+- Runner-gating is gated to `summary === 'queued'` (the only summary where the runner state "gates a decision"). Showing the runner reason during, e.g., `approval-required` would be misleading — the runner state doesn't block that approval.
+- The helper accepts `blocker: unknown` (rather than the full `IssueStartBlocker` type) so it stays decoupled from the `Issue` model and the type imports stay small. The helper explicitly checks the blocker kinds it cares about (`draft`, `waiting-for`) and lets `buildWaitReason` handle the rest.
+- The compact signal sits BETWEEN `runtime-drift-note` and the evidence slot, so both signals are visible in the same context (decision rationale → wait reason → drift note → execution signal → evidence → actions).
+- The session cue uses the `ActivityIcon` (same icon the WorkflowSessionsPanel uses for live sessions) so the visual language is consistent across the page.
+
+### Gotchas
+- `useWorkflowRunSessions(workflowRunId)` must be called BEFORE the conditional `if (isLoading || !issue) return ...` early return, otherwise the hook order would violate the Rules of Hooks. The hook handles `null` workflowRunId correctly via `enabled: !!workflowRunId`.
+- The "Project 1" project name in tests becomes URL-encoded as `Project%201` in the transcript link (because `toProjectPath` uses the project's display name, not the id). Tests assert the path with a regex `toMatch(/\/issues\/401\/workflow\/sessions\/review-repair$/)` rather than an exact match.
+- The runner span renders a "Runner:" label prefix, so `runner.textContent` is `"Runner:<reason>"` while `runtime-wait-reason.textContent` is `"Waiting on: <reason>"`. The consistency test strips both prefixes and compares the reason substring — that's what the acceptance criterion requires (matches the text produced by buildWaitReason).

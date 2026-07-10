@@ -161,6 +161,14 @@ export function mockAgentStatus(status: Record<string, unknown>) {
   server.use(http.get(AGENT_STATUS, () => HttpResponse.json({ success: true, data: status })))
 }
 
+export function mockWorkflowRunSessions(sessions: Array<Record<string, unknown>>) {
+  server.use(
+    http.get('*/api/workflow-runs/:runId/sessions', () =>
+      HttpResponse.json({ success: true, data: sessions }),
+    ),
+  )
+}
+
 export function mockUpdateIssue(handler: (info: { request: Request }) => Promise<Response> | Response) {
   server.use(http.patch(ISSUES, handler as any))
 }

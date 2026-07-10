@@ -2,10 +2,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { RuntimeDecisionSurface, type RuntimeDecisionSurfaceMutations } from './RuntimeDecisionSurface'
-import type { DecisionEvidence } from './RuntimeDecisionSurface'
+import type { DecisionEvidence, ExecutionSignal } from './RuntimeDecisionSurface'
 import type { RuntimeDecision } from '../model/derive-runtime-decision'
 import type { WorkflowArtifact, WorkflowArtifactDirectory } from '../../../entities/issue'
 import type { ArtifactContentHook, ArtifactOpenerArtifactsHook } from './ArtifactOpener'
+import { render as renderWithRouter } from '../../../../tests/test-utils'
 
 function mutation<TMutation extends { mutate: unknown; isPending: boolean; error: Error | null } = RuntimeDecisionSurfaceMutations['startMutation']>(overrides: Partial<TMutation> = {}): TMutation {
   return {
@@ -481,5 +482,209 @@ describe('RuntimeDecisionSurface decision-adjacent evidence slot', () => {
 
     const surface = screen.getByTestId('runtime-decision-surface')
     expect(within(surface).queryByTestId('runtime-evidence')).toBeNull()
+  })
+})
+
+describe('RuntimeDecisionSurface executionSignal slot', () => {
+  afterEach(() => {
+    cleanup()
+    vi.clearAllMocks()
+  })
+
+  it('renders a compact session signal inside the surface when an active session is provided', () => {
+    const executionSignal: ExecutionSignal = {
+      activeSession: {
+        sessionName: 'review-repair',
+        transcriptPath: '/test-project/issues/14/workflow/sessions/review-repair',
+      },
+    }
+
+    renderWithRouter(
+      <RuntimeDecisionSurface
+        decision={decision({ summary: 'running' })}
+        mutations={mutations()}
+        executionSignal={executionSignal}
+      />,
+    )
+
+    const surface = screen.getByTestId('runtime-decision-surface')
+    const signal = within(surface).getByTestId('runtime-execution-signal')
+    expect(signal).toBeInTheDocument()
+
+    const sessionSpan = within(signal).getByTestId('runtime-execution-signal-session')
+    expect(sessionSpan.dataset.sessionName).toBe('review-repair')
+    const link = within(sessionSpan).getByTestId('runtime-execution-signal-session-link')
+    expect(link).toHaveAttribute('href', '/test-project/issues/14/workflow/sessions/review-repair')
+    expect(link).toHaveTextContent('review-repair')
+
+    expect(within(signal).queryByTestId('runtime-execution-signal-runner')).toBeNull()
+  })
+
+  it('renders the runner-unavailable reason inside the surface when the runner gates the decision', () => {
+    const executionSignal: ExecutionSignal = {
+      runnerGating: {
+        kind: 'runner-unavailable',
+        reason: 'No runner is connected. Start a runner before this issue can run.',
+      },
+    }
+
+    renderWithRouter(
+      <RuntimeDecisionSurface
+        decision={decision({
+          summary: 'queued',
+          waitReason: 'No runner is connected. Start a runner before this issue can run.',
+          primary: null,
+          actions: [],
+        })}
+        mutations={mutations()}
+        executionSignal={executionSignal}
+      />,
+    )
+
+    const surface = screen.getByTestId('runtime-decision-surface')
+    const signal = within(surface).getByTestId('runtime-execution-signal')
+    const runner = within(signal).getByTestId('runtime-execution-signal-runner')
+    expect(runner.dataset.gatingKind).toBe('runner-unavailable')
+    expect(runner).toHaveTextContent('No runner is connected.')
+
+    expect(within(signal).queryByTestId('runtime-execution-signal-session')).toBeNull()
+  })
+
+  it('renders the capacity-full reason inside the surface when runner capacity is full', () => {
+    const executionSignal: ExecutionSignal = {
+      runnerGating: {
+        kind: 'capacity-full',
+        reason: 'Runner capacity is full (2/2).',
+      },
+    }
+
+    renderWithRouter(
+      <RuntimeDecisionSurface
+        decision={decision({
+          summary: 'queued',
+          waitReason: 'Runner capacity is full (2/2).',
+          primary: null,
+          actions: [],
+        })}
+        mutations={mutations()}
+        executionSignal={executionSignal}
+      />,
+    )
+
+    const surface = screen.getByTestId('runtime-decision-surface')
+    const signal = within(surface).getByTestId('runtime-execution-signal')
+    const runner = within(signal).getByTestId('runtime-execution-signal-runner')
+    expect(runner.dataset.gatingKind).toBe('capacity-full')
+    expect(runner).toHaveTextContent('Runner capacity is full (2/2).')
+  })
+
+  it('renders both session and runner-gating signals together when both apply', () => {
+    const executionSignal: ExecutionSignal = {
+      activeSession: {
+        sessionName: 'build-task',
+        transcriptPath: '/test-project/issues/14/workflow/sessions/build-task',
+      },
+      runnerGating: {
+        kind: 'capacity-full',
+        reason: 'Runner capacity is full (4/4).',
+      },
+    }
+
+    renderWithRouter(
+      <RuntimeDecisionSurface
+        decision={decision({ summary: 'running' })}
+        mutations={mutations()}
+        executionSignal={executionSignal}
+      />,
+    )
+
+    const surface = screen.getByTestId('runtime-decision-surface')
+    const signal = within(surface).getByTestId('runtime-execution-signal')
+    expect(within(signal).getByTestId('runtime-execution-signal-session')).toBeInTheDocument()
+    expect(within(signal).getByTestId('runtime-execution-signal-runner')).toBeInTheDocument()
+  })
+
+  it('omits the execution signal when the prop is omitted', () => {
+    renderWithRouter(
+      <RuntimeDecisionSurface
+        decision={decision({ summary: 'running' })}
+        mutations={mutations()}
+      />,
+    )
+
+    const surface = screen.getByTestId('runtime-decision-surface')
+    expect(within(surface).queryByTestId('runtime-execution-signal')).toBeNull()
+  })
+
+  it('omits the execution signal when executionSignal has no activeSession and no runnerGating', () => {
+    renderWithRouter(
+      <RuntimeDecisionSurface
+        decision={decision({ summary: 'running' })}
+        mutations={mutations()}
+        executionSignal={{ activeSession: null, runnerGating: null }}
+      />,
+    )
+
+    const surface = screen.getByTestId('runtime-decision-surface')
+    expect(within(surface).queryByTestId('runtime-execution-signal')).toBeNull()
+  })
+
+  it('omits the execution signal for backlog/done paths when no session is active and runner is not gating', () => {
+    renderWithRouter(
+      <RuntimeDecisionSurface
+        decision={decision({ summary: 'queued', waitReason: null, primary: null, actions: [] })}
+        mutations={mutations()}
+      />,
+    )
+
+    const surface = screen.getByTestId('runtime-decision-surface')
+    expect(within(surface).queryByTestId('runtime-execution-signal')).toBeNull()
+  })
+
+  it('uses an external runnerMessage when supplied as the runner-unavailable reason', () => {
+    const executionSignal: ExecutionSignal = {
+      runnerGating: {
+        kind: 'runner-unavailable',
+        reason: 'Runner has been offline for 12 minutes. Restart it from the runner settings.',
+      },
+    }
+
+    renderWithRouter(
+      <RuntimeDecisionSurface
+        decision={decision({
+          summary: 'queued',
+          waitReason: 'Runner has been offline for 12 minutes. Restart it from the runner settings.',
+          primary: null,
+          actions: [],
+        })}
+        mutations={mutations()}
+        executionSignal={executionSignal}
+      />,
+    )
+
+    const surface = screen.getByTestId('runtime-decision-surface')
+    const runner = within(surface).getByTestId('runtime-execution-signal-runner')
+    expect(runner).toHaveTextContent('Runner has been offline for 12 minutes.')
+  })
+
+  it('renders the session link inside the runtime-decision-surface section, alongside other surface content', () => {
+    const executionSignal: ExecutionSignal = {
+      activeSession: {
+        sessionName: 'check-recovery',
+        transcriptPath: '/test-project/issues/14/workflow/sessions/check-recovery',
+      },
+    }
+
+    renderWithRouter(
+      <RuntimeDecisionSurface
+        decision={decision({ summary: 'running' })}
+        mutations={mutations()}
+        executionSignal={executionSignal}
+      />,
+    )
+
+    const surface = screen.getByTestId('runtime-decision-surface')
+    expect(surface.contains(screen.getByTestId('runtime-execution-signal'))).toBe(true)
+    expect(surface.contains(screen.getByTestId('runtime-action-stop'))).toBe(true)
   })
 })

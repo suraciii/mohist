@@ -16,7 +16,7 @@ export { WorkflowSessionsPanel } from './ui/WorkflowSessionsPanel'
 export { RuntimeDecisionSurface } from './ui/RuntimeDecisionSurface'
 export type { RuntimeDecisionSurfaceProps } from './ui/RuntimeDecisionSurface'
 export type { RuntimeDecisionSurfaceMutations } from './ui/RuntimeDecisionSurface'
-export type { DecisionEvidence } from './ui/RuntimeDecisionSurface'
+export type { DecisionEvidence, ExecutionSignal, ActiveSessionCue, RunnerGatingReason } from './ui/RuntimeDecisionSurface'
 export { getStopConsequenceCopy, invokeAction } from './runtime-action-handlers'
 export type { InvokeActionParams, InvokeActionCallbacks, StopConsequenceCopy } from './runtime-action-handlers'
 export { WorkflowRunStatusPill } from './ui/WorkflowRunStatusPill'
@@ -26,6 +26,7 @@ export { WorkflowView } from './ui/WorkflowView'
 export { IssueWorkflowProfileEditor } from './ui/IssueWorkflowProfileEditor'
 export { WorkflowProfileControl } from './ui/WorkflowProfileControl'
 export {
+  buildWaitReason,
   deriveRuntimeDecision,
 } from './model/derive-runtime-decision'
 export type {
