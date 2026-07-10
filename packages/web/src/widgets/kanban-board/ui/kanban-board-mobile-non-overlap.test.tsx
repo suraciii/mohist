@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
@@ -66,13 +66,6 @@ function findCommonAncestor(a: Element, b: Element): Element {
 }
 
 describe('Mobile board navigation non-overlap', () => {
-  beforeEach(() => {
-    Object.defineProperty(window, 'location', {
-      value: { search: '', pathname: '/' },
-      writable: true,
-    })
-  })
-
   afterEach(() => {
     cleanup()
     vi.clearAllMocks()

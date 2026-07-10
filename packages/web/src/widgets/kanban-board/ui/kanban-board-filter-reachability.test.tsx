@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
@@ -73,13 +73,6 @@ function findCommonAncestor(a: Element, b: Element): Element {
 }
 
 describe('First-screen filter/search/sort reachability', () => {
-  beforeEach(() => {
-    Object.defineProperty(window, 'location', {
-      value: { search: '', pathname: '/' },
-      writable: true,
-    })
-  })
-
   afterEach(() => {
     cleanup()
     vi.clearAllMocks()
