@@ -39,7 +39,7 @@ mo project status   # 查看当前 project
 |---|---|
 | `status` | backlog / in-progress / done / cancelled |
 | `workflowStage` | plan / build / check / integrate / done（workflow 内位置） |
-| `health` | active / paused / blocked / interrupted / cancelled / done（运行健康度） |
+| `health` | active / paused / blocked / cancelled / done（运行健康度） |
 | `approvalState` | 当前是否停在审批点，等待 approve / reject 决策 |
 
 详见 [Issue 管理](issues.md)。

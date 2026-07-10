@@ -451,7 +451,7 @@ export function AgentSettingsSection() {
           {FIELDS.filter((field) => field.group === 'recovery').map(renderField)}
         </div>
         <p className="text-xs text-muted-foreground">
-          Number of times an external coder agent can fail and be retried before the issue is marked as interrupted.
+          Number of times an external coder agent can fail and be retried before the issue is marked as blocked.
         </p>
       </div>
 

@@ -1,18 +1,16 @@
 import { useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { AlertTriangleIcon, CheckCircle2Icon, GaugeIcon, PlayIcon, ShieldOffIcon } from 'lucide-react'
+import { AlertTriangleIcon, CheckCircle2Icon, GaugeIcon, ShieldOffIcon } from 'lucide-react'
 import {
   approveIssue,
   deriveAttentionItems,
   invalidateApprovalWait,
   isIssueAttentionItem,
-  resumeIssue,
   useApprovalWait,
   useIssues,
   type ApprovalWaitMetricsResponse,
   type AttentionItem,
-  type IssueAttentionItem,
   type Issue,
 } from '../../../entities/issue'
 import { formatDuration } from '@/shared/lib/format-duration'
@@ -48,10 +46,6 @@ function isApprovalItem(item: AttentionItem): boolean {
   return item.kind === 'approval-needed'
 }
 
-function isResumableItem(item: AttentionItem): item is IssueAttentionItem {
-  return isIssueAttentionItem(item) && !isApprovalItem(item)
-}
-
 function attentionTreatment(item: AttentionItem): AttentionTreatment {
   return item.kind === 'approval-needed' || item.kind === 'runner-capacity-limited'
     ? warningTreatment
@@ -70,7 +64,6 @@ export interface AttentionHeroProps {
   approvalWait?: ApprovalWaitMetricsResponse
   dataHook?: AttentionHeroDataHook
   approveIssueFn?: typeof approveIssue
-  resumeIssueFn?: typeof resumeIssue
 }
 
 export interface AttentionHeroData {
@@ -101,7 +94,6 @@ export function AttentionHero({
   approvalWait: approvalWaitOverride,
   dataHook = useDefaultData,
   approveIssueFn = approveIssue,
-  resumeIssueFn = resumeIssue,
 }: AttentionHeroProps = {}) {
   const queryClient = useQueryClient()
   const { projectId } = useProject()
@@ -129,14 +121,6 @@ export function AttentionHero({
     },
   })
 
-  const resumeMutation = useMutation({
-    mutationFn: (issueNumber: number) => resumeIssueFn(issueNumber, projectId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['issues'] })
-      queryClient.invalidateQueries({ queryKey: ['agent-status'] })
-    },
-  })
-
   if (!issuesResolved && items.length === 0) {
     return <LoadingState />
   }
@@ -145,7 +129,7 @@ export function AttentionHero({
     return <AllClearState approvalWait={approvalWait} />
   }
 
-  const isPending = approveMutation.isPending || resumeMutation.isPending
+  const isPending = approveMutation.isPending
   const heroTreatment = attentionSummaryTreatment(items)
 
   return (
@@ -179,7 +163,6 @@ export function AttentionHero({
             item={item}
             isPending={isPending}
             onApprove={(n) => approveMutation.mutate(n)}
-            onResume={(n) => resumeMutation.mutate(n)}
             toProjectPath={toProjectPath}
           />
         ))}
@@ -205,7 +188,6 @@ interface AttentionItemRowProps {
   item: AttentionItem
   isPending: boolean
   onApprove: (issueNumber: number) => void
-  onResume: (issueNumber: number) => void
   toProjectPath: (path: string) => string
 }
 
@@ -213,7 +195,6 @@ function AttentionItemRow({
   item,
   isPending,
   onApprove,
-  onResume,
   toProjectPath,
 }: AttentionItemRowProps) {
   if (!isIssueAttentionItem(item)) {
@@ -221,7 +202,6 @@ function AttentionItemRow({
   }
 
   const showApprove = isApprovalItem(item)
-  const showResume = isResumableItem(item)
   const treatment = attentionTreatment(item)
 
   return (
@@ -267,22 +247,6 @@ function AttentionItemRow({
           >
             <CheckCircle2Icon className="size-3" />
             Approve
-          </button>
-        )}
-        {showResume && (
-          <button
-            type="button"
-            data-testid="attention-item-resume"
-            data-action="resume"
-            disabled={isPending}
-            onClick={() => onResume(item.issueNumber)}
-            className={cn(
-              'inline-flex items-center gap-1 rounded-md bg-foreground/90 px-2 py-1 text-xs font-medium text-background',
-              'hover:bg-foreground disabled:opacity-50 disabled:pointer-events-none',
-            )}
-          >
-            <PlayIcon className="size-3" />
-            Resume
           </button>
         )}
       </div>

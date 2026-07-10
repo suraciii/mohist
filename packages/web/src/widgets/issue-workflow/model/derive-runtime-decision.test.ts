@@ -213,7 +213,7 @@ describe('deriveRuntimeDecision', () => {
     expect(decision.waitReason).toContain('#98')
   })
 
-  it('returns queued when the runner is unavailable', () => {
+  it('keeps backlog Start enabled when the runner is unavailable', () => {
     const decision = deriveRuntimeDecision({
       issue: baseIssue({
         status: IssueStatus.Backlog,
@@ -229,6 +229,9 @@ describe('deriveRuntimeDecision', () => {
     })
 
     expect(decision.summary).toBe('queued')
+    expect(decision.primary?.kind).toBe('start')
+    expect(decision.primary?.enabled).toBe(true)
+    expect(decision.waitReason).toBeNull()
   })
 
   it('returns queued with Start as the primary action for a ready backlog issue', () => {
@@ -283,40 +286,6 @@ describe('deriveRuntimeDecision', () => {
 
     expect(decision.summary).toBe('blocked')
     expect(decision.blockedReason).toContain('Convergence blocked')
-  })
-
-  it('returns blocked when the recovery projection reports interrupted', () => {
-    const decision = deriveRuntimeDecision({
-      issue: baseIssue({
-        health: IssueHealth.Interrupted,
-        workflowStage: WorkflowStage.Build,
-        recovery: {
-          currentWorkItem: null,
-          latestAttemptState: 'interrupted',
-          workflowSummaryState: 'waiting-for-recovery',
-          allowedActions: ['resume', 'rerun'],
-        },
-      }),
-    })
-
-    expect(decision.summary).toBe('blocked')
-    expect(decision.actions.find((a) => a.kind === 'resume')?.enabled).toBe(true)
-  })
-
-  it('returns blocked when issue health is Interrupted without recovery or convergence payloads', () => {
-    const decision = deriveRuntimeDecision({
-      issue: baseIssue({
-        health: IssueHealth.Interrupted,
-        workflowStatus: 'interrupted',
-        workflowStage: WorkflowStage.Build,
-        recovery: null,
-        convergence: null,
-      }),
-    })
-
-    expect(decision.summary).toBe('blocked')
-    expect(decision.rationale).toBe('The workflow was interrupted. Resume or rerun to continue.')
-    expect(decision.blockedReason).toBe('The workflow was interrupted. Resume or rerun to continue.')
   })
 
   it('returns blocked when convergence has unresolved items', () => {
@@ -514,10 +483,10 @@ describe('deriveRuntimeDecision', () => {
       const decision = deriveRuntimeDecision({
         issue: baseIssue({
           workflowStage: WorkflowStage.Build,
-          health: IssueHealth.Interrupted,
+          health: IssueHealth.Blocked,
           recovery: {
             currentWorkItem: null,
-            latestAttemptState: 'interrupted',
+            latestAttemptState: 'failed',
             workflowSummaryState: 'waiting-for-recovery',
             allowedActions: ['resume'],
           },
@@ -594,7 +563,7 @@ describe('deriveRuntimeDecision', () => {
       expect(decision.actions.find((a) => a.kind === 'approve')?.reason).toBeTruthy()
     })
 
-    it('does not infer actions from issue status alone (no recovery projection)', () => {
+    it('does not infer blocked recovery actions without a projection', () => {
       const decision = deriveRuntimeDecision({
         issue: baseIssue({
           status: IssueStatus.InProgress,
@@ -618,14 +587,14 @@ describe('deriveRuntimeDecision', () => {
       })
 
       const actionKinds = decision.actions.map((a) => a.kind)
-      for (const kind of ['retry', 'resume', 'rerun', 'start'] as const) {
+      for (const kind of ['retry', 'resume', 'rerun', 'stop'] as const) {
         const found = decision.actions.find((a) => a.kind === kind)
         expect(found, `expected an action entry for ${kind}`).toBeDefined()
         expect(found?.enabled, `expected ${kind} to be disabled when no projection allows it`).toBe(false)
       }
       expect(actionKinds).not.toContain('approve')
       expect(actionKinds).not.toContain('send-back')
-      expect(actionKinds).not.toContain('stop')
+      expect(actionKinds).not.toContain('start')
     })
 
     it('exposes Start new workflow (not Stop) when a failed workflow offers start', () => {
@@ -687,10 +656,10 @@ describe('deriveRuntimeDecision', () => {
       const decision = deriveRuntimeDecision({
         issue: baseIssue({
           workflowStage: WorkflowStage.Build,
-          health: IssueHealth.Interrupted,
+          health: IssueHealth.Blocked,
           recovery: {
             currentWorkItem: null,
-            latestAttemptState: 'interrupted',
+            latestAttemptState: 'failed',
             workflowSummaryState: 'waiting-for-recovery',
             allowedActions: ['rerun'],
           },

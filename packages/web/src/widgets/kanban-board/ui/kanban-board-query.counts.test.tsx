@@ -195,20 +195,20 @@ describe('Needs attention summary - user-action wording', () => {
     expect(screen.getByTestId('attention-link-181')).toHaveAttribute('data-family', 'warning')
   })
 
-  it('renders attention summary item with user-action label for interrupted issue', () => {
-    const interruptedIssue = makeIssue({
+  it('renders attention summary item with user-action label for blocked issue', () => {
+    const blockedIssue = makeIssue({
       number: 17,
       title: 'Resume available',
       status: IssueStatus.InProgress,
-      health: IssueHealth.Interrupted,
+      health: IssueHealth.Blocked,
     })
 
-    renderBoard([interruptedIssue], mockAgentStatus)
+    renderBoard([blockedIssue], mockAgentStatus)
 
     const summary = screen.getByTestId('needs-attention-summary')
     expect(summary).toBeTruthy()
     expect(within(summary as HTMLElement).getByText(/Needs attention/i)).toBeInTheDocument()
-    expect(within(summary as HTMLElement).getByText(/Interrupted/i)).toBeInTheDocument()
+    expect(within(summary as HTMLElement).getByText(/Needs action/i)).toBeInTheDocument()
     expect(within(summary as HTMLElement).getByText(/#17/i)).toBeInTheDocument()
   })
 
@@ -251,23 +251,6 @@ describe('Needs attention summary - user-action wording', () => {
     expect(within(summary as HTMLElement).getByText(/#207/i)).toBeInTheDocument()
   })
 
-  it('renders integration failed label for interrupted integrate issue', () => {
-    const failedIssue = makeIssue({
-      number: 208,
-      title: 'integration interrupted',
-      status: IssueStatus.InProgress,
-      workflowStage: WorkflowStage.Integrate,
-      health: IssueHealth.Interrupted,
-    })
-
-    renderBoard([failedIssue], mockAgentStatus)
-
-    const summary = screen.getByTestId('needs-attention-summary')
-    expect(summary).toBeTruthy()
-    expect(within(summary as HTMLElement).getByText(/Integration failed/i)).toBeInTheDocument()
-    expect(within(summary as HTMLElement).queryByText(/Needs action/i)).not.toBeInTheDocument()
-    expect(within(summary as HTMLElement).getByText(/#208/i)).toBeInTheDocument()
-  })
 
   it('does not render attention summary item for completed workflow', () => {
     const doneUnmergedIssue = makeIssue({

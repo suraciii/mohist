@@ -19,7 +19,6 @@ const eventsConnectionHook: EventsConnectionHook = (...args) => {
   eventsConnectionCalls.push(args)
   return { status: 'disconnected', connection: null, reconnectVersion: 0 }
 }
-const runnerDropNoticeHook = () => {}
 const viewedIssueRef = { current: null as number | null }
 const viewedIssueHook: ViewedIssueHook = () => viewedIssueRef
 let pathname = '/'
@@ -69,7 +68,6 @@ describe('LiveTaskProvider reverse-DNS integration outcome (D2 test-first)', () 
                   ? createElement('div', null, 'child')
                   : createElement(StateProbe),
                 eventsConnectionHook,
-                runnerDropNoticeHook,
                 viewedIssueHook,
                 pathnameReader: () => pathname,
               },
@@ -328,7 +326,6 @@ describe('LiveTaskProvider notifyRunLifecycleToast (D2 test-first)', () => {
               {
                 children: createElement('div', null, 'child'),
                 eventsConnectionHook,
-                runnerDropNoticeHook,
                 viewedIssueHook,
                 pathnameReader: () => pathname,
               },

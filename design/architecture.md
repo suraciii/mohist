@@ -23,7 +23,7 @@ User Project
 | observe & act | Web UI + API | Runner |
 | state authority | Server | Runner |
 | decide workflow | Server | Runner |
-| register/heartbeat/lease | Server | Web / CLI |
+| register/presence/capacity | Server | Web / CLI |
 | workspace prep/clean | Runner | Server |
 | run shell/process/agent | Runner | Server |
 | git side effects | Runner | Server |

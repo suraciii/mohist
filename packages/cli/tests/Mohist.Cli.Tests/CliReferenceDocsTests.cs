@@ -170,7 +170,7 @@ public class CliReferenceDocsTests
 
         Assert.Contains("永久停止（stop）", doc);
         Assert.Contains("terminal，不能 resume", doc);
-        Assert.Contains("可恢复中断（force-stop）", doc);
+        Assert.Contains("可恢复暂停（force-stop）", doc);
         Assert.DoesNotContain("状态保留，可 resume", doc);
         Assert.DoesNotContain("软暂停（stop）", doc);
     }

@@ -16,7 +16,7 @@ Autonomous work pipeline. Advance, schedule, dispatch, approve, repair, resume. 
 | Project Space | environment, isolation, config | project, repository, variable, default branch, prompt |
 | Agent | what intelligence executes work | Agent, AgentJob, AgentJobInput, WorkResult |
 | Session | execution record, compression, query, audit | AgentSession, Transcript, Context, Usage, Lineage |
-| Runner | execution resource health and lease | resource, heartbeat, lease, registration |
+| Runner | execution resource availability and capacity | resource, presence, registration, capacity |
 | Skill·Explore | refine vague needs into bounded issues | — |
 
 Epic is Issue granularity (organizing facet), not a separate subdomain.
@@ -45,7 +45,7 @@ DDD patterns: Customer/Supplier (C/S), Conformist (C), ACL, OHS, Published Langu
 | 4 | Project Space | Issue | SK | ProjectId, repo ref |
 | 5 | Issue | Skill·Explore | OHS+PL | issue body/template |
 | 6 | Agent | runner process | C | agent definition |
-| 7 | Runner | runner process | PL | heartbeat/lease |
+| 7 | Runner | runner process | PL | registration, poll presence |
 | 8 | Server | Web | OHS+PL | API DTO |
 | 9 | Server | CLI | OHS+PL | API DTO |
 | 10 | Generic | Issue etc. | SK/PL | labels, user identity |
@@ -72,7 +72,7 @@ Session               ← horizontal leaf; consumed by many, depends on none
 - Issue → Workflow only. Workflow never knows "issue."
 - Runner depends on Agent. Agent is leaf (only one-way coupling to Session for cleanup).
 - Session is horizontal leaf. Model evolves independently. No reverse dependencies.
-- runner process is infrastructure: conforms to Workflow + Agent contracts, registers heartbeat with Runner.
+- runner process is infrastructure: conforms to Workflow + Agent contracts, registers with Runner and proves presence by polling.
 - ProjectId is shared identity, not a Workflow model dependency.
 - Artifact belongs to Workflow, not independent.
 
@@ -85,6 +85,6 @@ Session               ← horizontal leaf; consumed by many, depends on none
 | repo binding, isolation, execution config, prompt library | Project Space |
 | agent definition, job dispatch, report validation | Agent |
 | execution recording, transcript, context, usage, query | Session |
-| resource registration, heartbeat, lease | Runner |
+| resource registration, presence, capacity | Runner |
 | cross-domain read report assembly | AgentOps |
 | labels, users, system info | Generic |

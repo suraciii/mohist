@@ -174,7 +174,7 @@ Web UI 上 issue 详情页有 "Add Prerequisite" 区。
 ## 中断、停止与关闭
 
 ```bash
-# 可恢复中断（force-stop）—— 终止运行中的 agent session，后续用 resume 接着跑
+# 可恢复暂停（force-stop）—— 终止运行中的 agent session，后续用 resume 接着跑
 mo issue force-stop 42
 
 # 永久停止（stop）—— terminal，不能 resume
@@ -189,7 +189,7 @@ mo issue reopen 42
 
 | 操作 | 适用场景 | 后果 |
 |---|---|---|
-| `force-stop` | 暂时中断、agent 卡住、想保留恢复入口 | 终止运行中的 agent，issue 进入可 `resume` 的 interrupted 路径 |
+| `force-stop` | 暂时停止、agent 卡住、想保留恢复入口 | 终止运行中的 agent，workflow 进入可 `resume` 的 paused 状态 |
 | `stop` | 确定不再继续这次 workflow | 永久停止 workflow run，terminal，不能 resume |
 | `close` | 这个 issue 不做了 | 进入 closed 终态，可 reopen |
 | `reopen` | 误关了，或想再做 | 回到 backlog |
@@ -201,7 +201,7 @@ mo issue reopen 42
 | 场景 | 命令 |
 |---|---|
 | Issue blocked，想重试当前阶段 | `mo issue retry 42` |
-| Issue interrupted（进程崩了），从断点继续 | `mo issue resume 42` |
+| Issue paused，继续当前 workflow | `mo issue resume 42` |
 | 想完全重做当前阶段（丢弃产物） | `mo issue rerun 42` |
 | 想从指定阶段重做（丢弃该阶段及之后产物） | `mo issue rerun 42 --from-stage build` |
 | Base branch drift 了，rebase issue 分支 | `mo issue rebase 42` |

@@ -24,7 +24,6 @@ let _issues: Issue[] | undefined
 let _agentStatus: AgentStatus | undefined
 let _approvalWait: ApprovalWaitMetricsResponse | null
 const _approveHandler = vi.fn()
-const _resumeHandler = vi.fn()
 
 const dataHook: AttentionHeroDataHook = () => ({
   issues: _issues,
@@ -38,20 +37,14 @@ const approveIssueFn: NonNullable<AttentionHeroProps['approveIssueFn']> = async 
   return { issue: makeIssue({ number: issueNumber }), context: null, message: 'approved' }
 }
 
-const resumeIssueFn: NonNullable<AttentionHeroProps['resumeIssueFn']> = async (issueNumber, projectId) => {
-  _resumeHandler(issueNumber, projectId)
-  return { issue: makeIssue({ number: issueNumber }), message: 'resumed' }
-}
-
 function AttentionHero(
-  props: Omit<AttentionHeroProps, 'dataHook' | 'approveIssueFn' | 'resumeIssueFn'>,
+  props: Omit<AttentionHeroProps, 'dataHook' | 'approveIssueFn'>,
 ) {
   return (
     <DefaultAttentionHero
       {...props}
       dataHook={dataHook}
       approveIssueFn={approveIssueFn}
-      resumeIssueFn={resumeIssueFn}
     />
   )
 }
@@ -317,7 +310,7 @@ describe('AttentionHero - per-item actions', () => {
     expect(screen.queryByTestId('attention-item-approve')).not.toBeInTheDocument()
   })
 
-  it('Resume action is offered for Interrupted, Needs action, and Integration failed items', async () => {
+  it('blocked items offer Open without guessing a recovery action', async () => {
     _issues = [
       makeIssue({
         id: 'integrate-1',
@@ -325,13 +318,6 @@ describe('AttentionHero - per-item actions', () => {
         title: 'Integration failure',
         workflowStage: WorkflowStage.Integrate,
         health: IssueHealth.Blocked,
-      }),
-      makeIssue({
-        id: 'interrupted-1',
-        number: 32,
-        title: 'Interrupted issue',
-        workflowStage: WorkflowStage.Build,
-        health: IssueHealth.Interrupted,
       }),
       makeIssue({
         id: 'blocked-1',
@@ -346,33 +332,9 @@ describe('AttentionHero - per-item actions', () => {
     renderHero()
 
     await waitFor(() => {
-      const resumeButtons = screen.getAllByTestId('attention-item-resume')
-      expect(resumeButtons).toHaveLength(3)
-      resumeButtons.forEach((btn) => {
-        expect(btn).toHaveAttribute('data-action', 'resume')
-      })
+      expect(screen.getAllByTestId('attention-item-link')).toHaveLength(2)
     })
-  })
-
-  it('Resume click invokes resumeIssue(issueNumber, projectId)', async () => {
-    _issues = [
-      makeIssue({
-        id: 'interrupted-1',
-        number: 40,
-        title: 'Interrupted build',
-        workflowStage: WorkflowStage.Build,
-        health: IssueHealth.Interrupted,
-      }),
-    ]
-
-    renderHero()
-
-    const resumeBtn = await screen.findByTestId('attention-item-resume')
-    fireEvent.click(resumeBtn)
-
-    await waitFor(() => {
-      expect(_resumeHandler).toHaveBeenCalledWith(40, 'proj-1')
-    })
+    expect(screen.queryByTestId('attention-item-resume')).not.toBeInTheDocument()
   })
 
   it('invalidateQueries is called for issues and agent-status on Approve success', async () => {
@@ -392,32 +354,6 @@ describe('AttentionHero - per-item actions', () => {
 
     const approveBtn = await screen.findByTestId('attention-item-approve')
     fireEvent.click(approveBtn)
-
-    await waitFor(() => {
-      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['issues'] })
-      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['agent-status'] })
-    })
-  })
-
-  it('invalidateQueries is called for issues and agent-status on Resume success', async () => {
-    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-    const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
-
-    _issues = [
-      makeIssue({
-        id: 'blocked-1',
-        number: 60,
-        title: 'Resume me',
-        workflowStage: WorkflowStage.Build,
-        health: IssueHealth.Blocked,
-        blockedReason: 'x',
-      }),
-    ]
-
-    renderHeroWithClient(queryClient)
-
-    const resumeBtn = await screen.findByTestId('attention-item-resume')
-    fireEvent.click(resumeBtn)
 
     await waitFor(() => {
       expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['issues'] })
@@ -454,7 +390,7 @@ describe('AttentionHero - per-item actions', () => {
         number: 22,
         title: 'b',
         workflowStage: WorkflowStage.Build,
-        health: IssueHealth.Interrupted,
+        health: IssueHealth.Blocked,
       }),
     ]
 
@@ -470,8 +406,12 @@ describe('AttentionHero - per-item actions', () => {
 })
 
 describe('AttentionHero - runner-down entry', () => {
-  it('renders a Runner-down entry when runnerAvailable is false', async () => {
-    _issues = []
+  it('renders a Runner-down entry when an active workflow is affected', async () => {
+    _issues = [makeIssue({
+      status: IssueStatus.InProgress,
+      health: IssueHealth.Active,
+      workflowStage: WorkflowStage.Build,
+    })]
     _agentStatus = makeAgentStatus({
       runnerAvailable: false,
       runnerMessage: 'Embedded runner is offline',
@@ -495,6 +435,8 @@ describe('AttentionHero - runner-down entry', () => {
         id: 'awaiting-1',
         number: 88,
         title: 'Pending approval',
+        status: IssueStatus.InProgress,
+        health: IssueHealth.Active,
         approvalState: { status: 'awaiting', requestedAt: '2026-06-18T00:00:00.000Z' },
       }),
     ]
@@ -508,22 +450,23 @@ describe('AttentionHero - runner-down entry', () => {
     })
   })
 
-  it('renders Runner-down entry even when deriveAttentionItems returns an empty list', async () => {
+  it('does not render Runner-down entry when no workflow is affected', async () => {
     _issues = []
     _agentStatus = makeAgentStatus({ runnerAvailable: false, runnerMessage: 'down' })
 
     renderHero()
 
-    await waitFor(() => {
-      expect(screen.getByTestId('runner-down-entry')).toBeInTheDocument()
-    })
-
+    await screen.findByText('All clear')
     expect(screen.queryByTestId('attention-item')).not.toBeInTheDocument()
-    expect(screen.queryByText('All clear')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('runner-down-entry')).not.toBeInTheDocument()
   })
 
   it('renders Runner-down entry with the default message when runnerMessage is null', async () => {
-    _issues = []
+    _issues = [makeIssue({
+      status: IssueStatus.InProgress,
+      health: IssueHealth.Active,
+      workflowStage: WorkflowStage.Build,
+    })]
     _agentStatus = makeAgentStatus({ runnerAvailable: false, runnerMessage: null })
 
     renderHero()
@@ -536,7 +479,11 @@ describe('AttentionHero - runner-down entry', () => {
   })
 
   it('renders Runner-down entry with default message when runnerMessage is undefined', async () => {
-    _issues = []
+    _issues = [makeIssue({
+      status: IssueStatus.InProgress,
+      health: IssueHealth.Active,
+      workflowStage: WorkflowStage.Build,
+    })]
     const status = { ...makeAgentStatus({ runnerAvailable: false }) }
     delete (status as Partial<AgentStatus>).runnerMessage
     _agentStatus = status
@@ -673,7 +620,7 @@ describe('AttentionHero - runner-capacity-limited entry', () => {
     expect(screen.queryByTestId('runner-capacity-entry')).not.toBeInTheDocument()
   })
 
-  it('surfaces runner-unavailable (not capacity-limited) when runnerAvailable is false even at capacity', async () => {
+  it('surfaces no infrastructure attention when runner is unavailable but no workflow is affected', async () => {
     _issues = []
     _agentStatus = makeAgentStatus({
       runnerAvailable: false,
@@ -682,10 +629,8 @@ describe('AttentionHero - runner-capacity-limited entry', () => {
 
     renderHero()
 
-    await waitFor(() => {
-      expect(screen.getByTestId('runner-down-entry')).toBeInTheDocument()
-    })
-
+    await screen.findByText('All clear')
+    expect(screen.queryByTestId('runner-down-entry')).not.toBeInTheDocument()
     expect(screen.queryByTestId('runner-capacity-entry')).not.toBeInTheDocument()
   })
 })
@@ -802,7 +747,7 @@ describe('AttentionHero - all-clear state', () => {
 })
 
 describe('AttentionHero - passive surface', () => {
-  it('does not mutate workflow state on render (no approve/resume call without click)', async () => {
+  it('does not approve on render without a click', async () => {
     _issues = [
       makeIssue({
         id: 'awaiting-1',
@@ -819,7 +764,6 @@ describe('AttentionHero - passive surface', () => {
     })
 
     expect(_approveHandler).not.toHaveBeenCalled()
-    expect(_resumeHandler).not.toHaveBeenCalled()
   })
 })
 

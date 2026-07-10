@@ -8,13 +8,13 @@ Fields grouped by update lifecycle. Never by "who reported".
 |---|---|---|---|
 | persistent | control plane | rare, single-field | never |
 | event-increment | agent-job push/report | add/remove | runner offline |
-| snapshot-replace | each poll / register-unregister | overwrite | next poll |
+| snapshot-replace | register / successful poll / unregister | overwrite | next successful poll |
 
 ```
 Runner
   runnerId                       identity
   slots                          persistent; control plane owns
-  lastSeen                       snapshot; poll = heartbeat; timeout = offline
+  lastSeen                       snapshot; register establishes, successful poll renews
   info: RunnerInfo|null          register fills it; heartbeat-repair refreshes; unregister clears
   agentJobWorks: [RunnerWork]    event-increment; push ledger for agent jobs (no run to rerender)
 ```
@@ -23,7 +23,7 @@ No workflow work ledger. Workflow work truth lives in the run (store: `WHERE Sta
 
 ```
 RunnerInfo
-  state: online|offline          derived from lastSeen freshness
+  state: online|offline          register establishes; successful-poll freshness maintains
   hostname, buildGitHash
   capabilities, coderModels, coderModelVariants
 ```
@@ -39,11 +39,11 @@ RunnerInfo
 ## Behaviors
 
 ```
-Register(info)                  state=online, fills info, writes registry
+Register(info)                  state=online, lastSeen=now, fills info, writes registry
 Unregister()                    state=offline, clears info & agentJobWorks,
                                 closeout → FAILED("runner-lost") to owners
-TouchPresence()                 lastSeen=now; no registry write
-HeartbeatRepair(info)           refreshes info; writes registry
+TouchPresence()                 successful poll: lastSeen=now; restores online registry state
+HeartbeatRepair(info)           refreshes info only; never refreshes presence
 AssignAgentJob(work)            agentJobWorks.add
 DequeueAssignedAgentJob()       next pending → Running
 ReportAgentJobResult(id,w,r)    agentJobWorks.remove → AgentJobGrain
@@ -68,3 +68,9 @@ activeWorks merged from:
 | agent-job work | push; AssignAgentJob places it; poll dequeues |
 | presence | poll = heartbeat (TouchPresence) |
 | info | register/unregister/heartbeat-repair; never per-poll |
+
+## Runner process contract
+
+The runner process has one process-critical reconciliation loop. It owns poll cadence and bounded retries for unacknowledged reports. Transport failures do not end the loop. If the loop exits unexpectedly, the process exits; auxiliary heartbeat or SignalR loops must not keep a non-polling runner alive.
+
+The reported set (`inFlight ∪ awaitingAck`) belongs to the process lifetime and survives connection recovery. A work lost with the runner is reported to its owner as `FAILED("runner-lost")`. The owner decides the WorkflowRun transition; Runner has no `Interrupted` workflow status.

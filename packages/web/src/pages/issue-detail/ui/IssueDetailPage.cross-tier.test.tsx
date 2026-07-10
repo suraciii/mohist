@@ -282,11 +282,11 @@ describe('T-004: cross-tier verification — convergence path', () => {
   })
 })
 
-describe('T-004: cross-tier verification — interrupted health path', () => {
-  it('reports an interrupted-health projection as blocked via the header without a standalone card', async () => {
+describe('T-004: cross-tier verification — blocked health path', () => {
+  it('reports a blocked projection via the header without a standalone recovery card', async () => {
     mockIssue(baseIssue({
-      workflowStatus: 'interrupted',
-      health: 'interrupted',
+      workflowStatus: 'failed',
+      health: 'blocked',
       recovery: null,
       convergence: null,
     }))
@@ -296,10 +296,9 @@ describe('T-004: cross-tier verification — interrupted health path', () => {
     const headline = await waitFor(() => screen.getByTestId('status-headline'))
     expect(headline.dataset.summary).toBe('blocked')
     expect(headline.textContent ?? '').toMatch(/Blocked/i)
-    expect(screen.getByTestId('runtime-rationale').textContent ?? '').toContain('The workflow was interrupted. Resume or rerun to continue.')
+    expect(screen.getByTestId('runtime-rationale').textContent ?? '').toContain('The workflow is blocked and needs an action to continue.')
 
     expect(screen.queryByTestId('reference-rail-convergence')).toBeNull()
-    expect(screen.queryByTestId('workflow-interrupted-card')).toBeNull()
 
     const readingFlow = screen.getByTestId('reading-flow')
     expect(readingFlow.contains(screen.getByTestId('runtime-decision-surface'))).toBe(false)
@@ -484,7 +483,6 @@ describe('T-004: cross-tier verification — no duplication / no orphan', () => 
     const detailsHeading = screen.getByTestId('reference-rail-details-toggle')
     expect(referenceRail.contains(detailsHeading)).toBe(true)
 
-    expect(screen.queryByTestId('workflow-interrupted-card')).toBeNull()
 
     const allRuntimeActions = page.querySelectorAll('[data-testid^="runtime-action-"]')
     for (const action of Array.from(allRuntimeActions)) {
@@ -527,10 +525,10 @@ describe('T-004: cross-tier verification — three-tier weight hierarchy holds o
       },
     },
     {
-      name: 'blocked interrupted',
+      name: 'blocked recovery',
       overrides: {
-        workflowStatus: 'interrupted',
-        health: 'interrupted',
+        workflowStatus: 'failed',
+        health: 'blocked',
         recovery: null,
         convergence: null,
       },

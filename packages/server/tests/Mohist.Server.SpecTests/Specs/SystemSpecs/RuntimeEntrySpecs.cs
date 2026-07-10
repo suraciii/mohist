@@ -138,7 +138,7 @@ public class RuntimeEntrySpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
-    public async Task AgentStatus_WhenRunnerUnregisteredThenHeartbeats_ReportsRunnerAvailable()
+    public async Task AgentStatus_WhenRunnerUnregistered_HeartbeatRefreshesInfoButPollRestoresPresence()
     {
         var projectName = $"runtime-presence-repair-{Guid.NewGuid():N}";
         var project = await _fixture.Client.PostDataAsync<ProjectDto>("/api/projects", new { name = projectName, path = Directory.GetCurrentDirectory(), baseBranch = "main" });
@@ -162,9 +162,13 @@ public class RuntimeEntrySpecs
 
             await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/heartbeat", new { capabilities = Array.Empty<string>(), hostname = "test-host", projectId = project.Id });
             var runnersAfterHeartbeat = await registry.ListRunnersAsync();
+            Assert.Empty(runnersAfterHeartbeat);
 
-            Assert.True(runnersAfterHeartbeat.Count > 0);
-            Assert.Contains(runnersAfterHeartbeat, r => r.RunnerId == runnerId);
+            using var poll = await _fixture.Client.PostAsync($"/api/runner/{runnerId}/poll", content: null);
+            Assert.True(poll.IsSuccessStatusCode);
+
+            var runnersAfterPoll = await registry.ListRunnersAsync();
+            Assert.Contains(runnersAfterPoll, r => r.RunnerId == runnerId);
         }
         finally
         {

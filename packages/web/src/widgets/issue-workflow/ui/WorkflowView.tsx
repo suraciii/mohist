@@ -59,7 +59,7 @@ export function WorkflowView({
         readOnly={readOnly}
       />
 
-      {!readOnly && (isBacklog || issue.health === IssueHealth.Blocked || issue.health === IssueHealth.Interrupted) && (
+      {!readOnly && (isBacklog || issue.health === IssueHealth.Blocked) && (
         <SpecialStatePanel issue={issue} issueNumber={issue.number} />
       )}
 
@@ -73,7 +73,7 @@ export function WorkflowView({
         />
       )}
 
-      {!readOnly && issue.workflowStage === WorkflowStage.Integrate && (issue.health === IssueHealth.Blocked || issue.health === IssueHealth.Interrupted) && (
+      {!readOnly && issue.workflowStage === WorkflowStage.Integrate && issue.health === IssueHealth.Blocked && (
         <IntegrateFailurePanel issue={issue} />
       )}
 

@@ -205,6 +205,93 @@ describe("RunnerHost", () => {
     await expect(run).resolves.toBeUndefined()
   })
 
+  it("WorkerPool_PollFailure_RetriesWithoutRestartingRunner", async () => {
+    vi.clearAllMocks()
+    getConnectionId.mockReturnValue("conn-1")
+    probeLiveness.mockResolvedValue(true)
+    forceReconnect.mockResolvedValue(undefined)
+    connect.mockResolvedValue(undefined)
+    heartbeat.mockResolvedValue(undefined)
+    disconnect.mockResolvedValue(undefined)
+    startSignalR.mockResolvedValue(undefined)
+    stopSignalR.mockResolvedValue(undefined)
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined)
+    const controller = new AbortController()
+    poll
+      .mockRejectedValueOnce(new Error("server unavailable"))
+      .mockImplementationOnce(async () => {
+        controller.abort()
+        return []
+      })
+    const host = new RunnerHost({
+      serverUrl: "http://localhost:3456",
+      runnerId: "runner-test",
+      projectId: "project-1",
+      runnerRoot: "/tmp/mohist-runner-test",
+      pollIntervalMs: 1,
+      heartbeatIntervalMs: 60_000,
+      dispatchLivenessProbeIntervalMs: 60_000,
+    })
+
+    try {
+      const run = host.run(controller.signal)
+      await vi.waitFor(() => expect(poll).toHaveBeenCalledTimes(2), { timeout: 5_000 })
+      await expect(run).resolves.toBeUndefined()
+
+      expect(connect).toHaveBeenCalledTimes(1)
+      expect(startSignalR).toHaveBeenCalledTimes(1)
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining("runner poll failed; retrying"),
+        expect.any(Error),
+      )
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  it("WorkerPool_PollTimeout_AbortsAttemptAndContinuesPolling", async () => {
+    vi.useFakeTimers()
+    vi.clearAllMocks()
+    getConnectionId.mockReturnValue("conn-1")
+    probeLiveness.mockResolvedValue(true)
+    forceReconnect.mockResolvedValue(undefined)
+    connect.mockResolvedValue(undefined)
+    heartbeat.mockResolvedValue(undefined)
+    disconnect.mockResolvedValue(undefined)
+    startSignalR.mockResolvedValue(undefined)
+    stopSignalR.mockResolvedValue(undefined)
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined)
+    const controller = new AbortController()
+    poll
+      .mockImplementationOnce((signal: AbortSignal) => new Promise((_, reject) => {
+        signal.addEventListener("abort", () => reject(signal.reason), { once: true })
+      }))
+      .mockImplementationOnce(async () => {
+        controller.abort()
+        return []
+      })
+    const host = new RunnerHost({
+      serverUrl: "http://localhost:3456",
+      runnerId: "runner-test",
+      projectId: "project-1",
+      runnerRoot: "/tmp/mohist-runner-test",
+      pollIntervalMs: 1,
+      heartbeatIntervalMs: 60_000,
+      dispatchLivenessProbeIntervalMs: 60_000,
+    })
+
+    try {
+      const run = host.run(controller.signal)
+      await vi.waitFor(() => expect(poll).toHaveBeenCalledTimes(1))
+      await vi.advanceTimersByTimeAsync(10_002)
+      await vi.waitFor(() => expect(poll).toHaveBeenCalledTimes(2))
+      await expect(run).resolves.toBeUndefined()
+    } finally {
+      warn.mockRestore()
+      vi.useRealTimers()
+    }
+  })
+
   it("RunnerShutdown_UnregistersRunner", async () => {
     vi.clearAllMocks()
     getConnectionId.mockReturnValue("conn-1")
@@ -675,7 +762,7 @@ describe("RunnerHost", () => {
     const run = host.run(controller.signal)
 
     // The work is reported at least 3 times (first attempt + 2 retries
-    // driven by the awaitingAck loop at a 5s cadence). Allow generous
+    // driven by the reconciliation loop at a 5s cadence). Allow generous
     // headroom for the retry cadence.
     await vi.waitFor(() => expect(report.mock.calls.length).toBeGreaterThanOrEqual(3), { timeout: 30_000 })
 

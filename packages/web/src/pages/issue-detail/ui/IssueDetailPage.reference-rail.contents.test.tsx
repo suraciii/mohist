@@ -58,7 +58,7 @@ describe('IssueDetailPage reference-rail — metadata and configuration only', (
       blockedReason: 'Blocked by runtime execution.',
       recovery: {
         ...DEFAULT_RECOVERY,
-        latestAttemptState: 'interrupted',
+        latestAttemptState: 'failed',
         allowedActions: ['stop', 'retry', 'resume', 'rerun'],
       },
     }))

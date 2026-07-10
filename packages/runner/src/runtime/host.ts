@@ -40,8 +40,10 @@ interface InFlightEntry {
 interface AwaitingAckEntry {
   /** The result to (re-)report until the owner acks (Accepted or Stale). */
   result: WorkItemResult
-  /** Monotonic attempt count, drives exponential backoff. */
+  /** Monotonic attempt count for diagnostics. */
   attempts: number
+  /** Earliest wall-clock time for the next bounded report attempt. */
+  retryAt: number | null
 }
 
 /**
@@ -171,33 +173,26 @@ export class RunnerHost {
       } catch (error) {
         console.error("failed to load workspace registry; starting empty:", error)
       }
-      while (!signal.aborted) {
-        await this.connectRunner(signal)
-        await this.initializeSharedConnection(signal)
-        // Startup convergence: pick up any terminal events the runner
-        // missed while it was offline (e.g. completed while the previous
-        // process was down). Runs once per connect cycle, immediately
-        // after SignalR is up so the push channel is available in
-        // parallel.
-        await this.runConvergenceOnce(signal)
-        const heartbeat = setInterval(() => void this.connection.heartbeat(this.registrationState(), signal).catch((error) => console.error(error)), this.options.heartbeatIntervalMs)
-        const selfCheck = setInterval(() => void this.runSelfCheck(signal), this.options.dispatchLivenessProbeIntervalMs)
-        const convergenceTimer = setInterval(() => void this.runConvergenceOnce(signal), this.cleanupConvergenceIntervalMs)
-        const cleanupTimer = setInterval(() => void this.runCleanupOnce(signal), this.cleanupLoopIntervalMs)
-        try {
-          await this.runWorkerPool(signal)
-        } catch (error) {
-          if (signal.aborted) break
-          console.error(`runner connection lost; reconnecting in ${this.options.pollIntervalMs}ms`, error)
-          await delay(this.options.pollIntervalMs, signal)
-        } finally {
-          clearInterval(heartbeat)
-          clearInterval(selfCheck)
-          clearInterval(convergenceTimer)
-          clearInterval(cleanupTimer)
-          await this.shutdownSharedConnection()
-          await this.shutdownConnection()
-        }
+      await this.connectRunner(signal)
+      await this.initializeSharedConnection(signal)
+      // Startup convergence: pick up any terminal events the runner
+      // missed while it was offline (e.g. completed while the previous
+      // process was down). Runs immediately after SignalR is up so the
+      // push channel is available in parallel.
+      await this.runConvergenceOnce(signal)
+      const heartbeat = setInterval(() => void this.connection.heartbeat(this.registrationState(), signal).catch((error) => console.error(error)), this.options.heartbeatIntervalMs)
+      const selfCheck = setInterval(() => void this.runSelfCheck(signal), this.options.dispatchLivenessProbeIntervalMs)
+      const convergenceTimer = setInterval(() => void this.runConvergenceOnce(signal), this.cleanupConvergenceIntervalMs)
+      const cleanupTimer = setInterval(() => void this.runCleanupOnce(signal), this.cleanupLoopIntervalMs)
+      try {
+        await this.runWorkerPool(signal)
+      } finally {
+        clearInterval(heartbeat)
+        clearInterval(selfCheck)
+        clearInterval(convergenceTimer)
+        clearInterval(cleanupTimer)
+        await this.shutdownSharedConnection()
+        await this.shutdownConnection()
       }
     } finally {
       this.activeSignal = null
@@ -297,49 +292,59 @@ export class RunnerHost {
 
   private async runWorkerPool(signal: AbortSignal) {
     // The reported set (inFlight ∪ awaitingAck) is process-lifetime state
-    // declared on the host instance, so it survives poll exceptions and
-    // reconnects. The awaitingAck retry loop runs alongside the poll loop
-    // for the pool's whole lifetime; both are torn down together.
-    const retryLoop = this.runAwaitingAckRetryLoop(signal)
-
-    try {
-      while (!signal.aborted) {
-        // A single poll may return multiple dispatches (repair + new claims).
-        // Execute each concurrently, skipping re-deliveries the process
-        // already holds.
-        const works = await this.connection.poll(signal, this.pollReport())
-
-        for (const work of works) {
-          if (signal.aborted) break
-          const key = workKey(work)
-          // Re-delivery is the normal recovery path under at-least-once:
-          // skip a work the process already holds (inFlight or awaitingAck)
-          // rather than execute it twice. The server may re-dispatch a
-          // Running work it thinks we lost; if we still have it, we know
-          // better.
-          if (this.inFlight.has(key) || this.awaitingAck.has(key)) continue
-
-          const done = this.executeAndTransition(work, signal, key)
-          this.inFlight.set(key, { done })
-        }
-
+    // declared on the host instance, so it survives poll exceptions. Polling
+    // and report retries share this one process-critical reconciliation loop;
+    // no sibling lifetime task can prevent a failed poll from being retried.
+    while (!signal.aborted) {
+      let works: RenderedWorkItem[]
+      try {
+        works = await this.pollOnce(signal)
+      } catch (error) {
         if (signal.aborted) break
-        // Pace the next round. With nothing in flight, sleep one interval
-        // before re-polling; with in-flight work, race the interval against
-        // any work settling so a freed slot re-polls promptly. The interval
-        // timer is owned here (rather than via `delay`) so that once the race
-        // settles, the timer is cleared and its promise resolved — no pending
-        // promise lingers to reject on a later abort and leak as unhandled.
-        await raceInterval(this.options.pollIntervalMs, signal, [
-          ...[...this.inFlight.values()].map((e) => e.done),
-        ])
+        console.warn(`runner poll failed; retrying in ${this.options.pollIntervalMs}ms`, error)
+        await raceInterval(this.options.pollIntervalMs, signal, [])
+        continue
       }
 
-      // Drain in-flight executions on abort so the awaitingAck set is
-      // populated for any final best-effort drain.
-      await Promise.allSettled([...this.inFlight.values()].map((e) => e.done))
+      // A single poll may return multiple dispatches (repair + new claims).
+      // Execute each concurrently, skipping re-deliveries the process
+      // already holds.
+      for (const work of works) {
+        if (signal.aborted) break
+        const key = workKey(work)
+        // Re-delivery is the normal recovery path under at-least-once:
+        // skip a work the process already holds (inFlight or awaitingAck)
+        // rather than execute it twice. The server may re-dispatch a
+        // Running work it thinks we lost; if we still have it, we know
+        // better.
+        if (this.inFlight.has(key) || this.awaitingAck.has(key)) continue
+
+        const done = this.executeAndTransition(work, signal, key)
+        this.inFlight.set(key, { done })
+      }
+
+      await this.retryDueReports()
+
+      if (signal.aborted) break
+      // Pace the next round. With nothing in flight, sleep one interval
+      // before re-polling; with in-flight work, race the interval against
+      // any work settling so a freed slot re-polls promptly.
+      await raceInterval(this.options.pollIntervalMs, signal, [
+        ...[...this.inFlight.values()].map((e) => e.done),
+      ])
+    }
+
+    // Drain in-flight executions on abort so completed work can finish its
+    // bounded first report attempt before process shutdown.
+    await Promise.allSettled([...this.inFlight.values()].map((e) => e.done))
+  }
+
+  private async pollOnce(signal: AbortSignal): Promise<RenderedWorkItem[]> {
+    const bounded = boundedSignal(signal, POLL_TIMEOUT_MS)
+    try {
+      return await this.connection.poll(bounded.signal, this.pollReport())
     } finally {
-      await retryLoop
+      bounded.dispose()
     }
   }
 
@@ -360,7 +365,8 @@ export class RunnerHost {
    * Executes a work item to completion and transitions it through the
    * reported-set lifecycle: inFlight (executing) → awaitingAck (result
    * ready, not yet acked). The first report attempt is made here; a
-   * transport failure leaves the entry in awaitingAck for the retry loop.
+   * transport failure leaves the entry in awaitingAck for the reconciliation
+   * loop to retry.
    * `signal` is the run-lifetime signal; reporting uses a fresh signal so
    * a host teardown (SIGINT) still reaches the owner instead of aborting.
    */
@@ -379,15 +385,15 @@ export class RunnerHost {
     }
 
     // Move to awaitingAck regardless of outcome. A transport failure on
-    // the first attempt is retried by the retry loop; the result is the
+    // the first attempt is retried by the reconciliation loop; the result is the
     // final verdict (success or the failure captured above).
     this.inFlight.delete(key)
-    this.awaitingAck.set(key, { work, entry: { result, attempts: 0 } })
+    this.awaitingAck.set(key, { work, entry: { result, attempts: 0, retryAt: null } })
 
     try {
       await this.reportOnce(key)
     } catch (error) {
-      // First attempt failed; the retry loop owns subsequent attempts.
+      this.scheduleReportRetry(key)
       console.warn(`first report for work ${work.workId} failed; will retry`, error)
     }
   }
@@ -395,7 +401,7 @@ export class RunnerHost {
   /**
    * Reports a single awaitingAck entry. On ack (any non-throwing response
    * from the owner — Accepted or Stale are both acks), removes the entry.
-   * Throws on transport failure so the caller (retry loop) can schedule
+   * Throws on transport failure so the caller can schedule
    * the next attempt.
    */
   private async reportOnce(key: string): Promise<void> {
@@ -416,35 +422,25 @@ export class RunnerHost {
     this.awaitingAck.delete(key)
   }
 
-  /**
-   * Periodically retries awaitingAck entries whose report transport has
-   * failed. Runs for the lifetime of the worker pool. The loop cadence is
-   * the retry interval — every tick re-attempts every outstanding entry.
-   * Fake-timer-friendly: the loop is driven by this delay, not a wall-clock
-   * deadline, so tests can drive it deterministically.
-   */
-  private async runAwaitingAckRetryLoop(signal: AbortSignal): Promise<void> {
-    while (!signal.aborted) {
-      // Wait one retry interval, or resolve promptly on abort (the loop then
-      // exits via the `while` condition). Resolving rather than rejecting
-      // keeps this loop's promise settled cleanly — a rejecting delay would
-      // propagate out and only be caught by `runWorkerPool`'s `finally` on a
-      // later tick, surfacing as an async-handled rejection during shutdown.
-      await raceInterval(AWAITING_ACK_RETRY_INTERVAL_MS, signal, [])
-      if (signal.aborted) break
-      // Snapshot keys to avoid mutation-during-iteration when reportOnce
-      // deletes a successful entry.
-      for (const key of [...this.awaitingAck.keys()]) {
-        if (signal.aborted) break
-        const held = this.awaitingAck.get(key)
-        if (!held) continue
-        try {
-          await this.reportOnce(key)
-        } catch (error) {
-          console.warn(`retry report for work ${held.work.workId} failed (attempt ${held.entry.attempts})`, error)
-        }
+  private scheduleReportRetry(key: string): void {
+    const held = this.awaitingAck.get(key)
+    if (held) held.entry.retryAt = Date.now() + AWAITING_ACK_RETRY_INTERVAL_MS
+  }
+
+  private async retryDueReports(): Promise<void> {
+    const now = Date.now()
+    const due = [...this.awaitingAck.entries()]
+      .filter(([, held]) => held.entry.retryAt !== null && held.entry.retryAt <= now)
+
+    await Promise.all(due.map(async ([key, held]) => {
+      held.entry.retryAt = null
+      try {
+        await this.reportOnce(key)
+      } catch (error) {
+        this.scheduleReportRetry(key)
+        console.warn(`retry report for work ${held.work.workId} failed (attempt ${held.entry.attempts})`, error)
       }
-    }
+    }))
   }
 
   private async shutdownConnection() {
@@ -673,18 +669,18 @@ export class RunnerHost {
 
 /**
  * Timeout for a single report HTTP attempt. A report that does not
- * complete within this window is aborted and retried by the awaitingAck
+ * complete within this window is aborted and retried by the reconciliation
  * loop. Long enough to absorb a slow owner under load, short enough that
  * a wedged connection is retried rather than hung.
  */
 const REPORT_TIMEOUT_MS = 10_000
 
+/** Maximum time a single poll request may wait before the loop retries. */
+const POLL_TIMEOUT_MS = 10_000
+
 /**
- * Polling interval for the awaitingAck retry loop. Each tick re-attempts
- * every awaitingAck entry whose report transport previously failed. The
- * loop cadence is the bound on how long a failed report waits before its
- * next attempt. Fake-timer-friendly: driven by this delay, not a wall-clock
- * deadline.
+ * Minimum delay before the reconciliation loop re-attempts an awaitingAck
+ * entry whose report transport previously failed.
  */
 const AWAITING_ACK_RETRY_INTERVAL_MS = 5_000
 
@@ -852,4 +848,22 @@ function raceInterval(ms: number, signal: AbortSignal, racers: Promise<unknown>[
     signal.addEventListener("abort", onAbort, { once: true })
     for (const r of racers) r.then(done, done)
   })
+}
+
+function boundedSignal(parent: AbortSignal, timeoutMs: number): { signal: AbortSignal; dispose: () => void } {
+  const controller = new AbortController()
+  const abortFromParent = () => controller.abort(parent.reason)
+  if (parent.aborted) abortFromParent()
+  else parent.addEventListener("abort", abortFromParent, { once: true })
+
+  const timeout = setTimeout(() => controller.abort(new Error(`request timed out after ${timeoutMs}ms`)), timeoutMs)
+  timeout.unref?.()
+
+  return {
+    signal: controller.signal,
+    dispose: () => {
+      clearTimeout(timeout)
+      parent.removeEventListener("abort", abortFromParent)
+    },
+  }
 }

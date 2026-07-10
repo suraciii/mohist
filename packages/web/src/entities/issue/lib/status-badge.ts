@@ -8,8 +8,6 @@ export function statusBadge(health: IssueHealth): string {
       return 'text-amber-700 bg-amber-50'
     case IssueHealth.Blocked:
       return 'text-red-700 bg-red-50'
-    case IssueHealth.Interrupted:
-      return 'text-orange-700 bg-orange-50'
     default:
       return 'text-gray-700 bg-gray-50'
   }
@@ -23,8 +21,6 @@ export function statusLabel(health: IssueHealth): string {
       return 'Paused'
     case IssueHealth.Blocked:
       return 'Needs Action'
-    case IssueHealth.Interrupted:
-      return 'Interrupted'
     case IssueHealth.Cancelled:
       return 'Cancelled'
     case IssueHealth.Done:

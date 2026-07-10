@@ -13,7 +13,6 @@ const eventsConnectionHook: EventsConnectionHook = (...args) => {
   eventsConnectionCalls.push(args)
   return { status: 'disconnected', connection: null, reconnectVersion: 0 }
 }
-const runnerDropNoticeHook = () => {}
 const viewedIssueRef = { current: null as number | null }
 const viewedIssueHook = () => viewedIssueRef
 let pathname = '/'
@@ -42,7 +41,6 @@ describe('LiveTaskProvider inbox hint (invalidation only)', () => {
               {
                 children: createElement('div', null, 'child'),
                 eventsConnectionHook,
-                runnerDropNoticeHook,
                 viewedIssueHook,
                 pathnameReader,
               },
@@ -194,7 +192,6 @@ describe('LiveTaskProvider high-attention inbox notice', () => {
               {
                 children: createElement('div', null, 'child'),
                 eventsConnectionHook,
-                runnerDropNoticeHook,
                 viewedIssueHook,
                 pathnameReader,
               },

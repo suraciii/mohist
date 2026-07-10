@@ -195,7 +195,7 @@ public class RunnerBindingSpecs : WorkflowGrainSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
-    public async Task Poll_WhenRegistryEntryMissing_RemainsPresenceOnlyAndDoesNotReRegister()
+    public async Task Poll_WhenRegistryEntryMissing_DoesNotWriteRegistryEveryPoll()
     {
         await ClearGlobalRunnerRegistryAsync();
         await ClearBacklogAsync();
