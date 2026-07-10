@@ -163,8 +163,8 @@ describe('PreferencesSection', () => {
   })
 
   it('every shortcut id declared in SHORTCUTS can be resolved to a registered handler', () => {
-    // Mount the component, then simulate T-004 (the settings search dialog)
-    // registering the missing handler. After both are in place every id
+    // Mount the component, then register the settings search handler.
+    // After both handlers are in place every id
     // must resolve — this is the "no fake shortcuts" guard the spec calls
     // for.
     renderPreferences()

@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { CleanupLoopResult } from "../src/runtime/cleanup-loop.js"
 import type { CleanupPolicy } from "../src/core/types.js"
 
-// Idle-system cleanup scenario (issue-359): when `poll` is continuously
+// Idle-system cleanup scenario: when `poll` is continuously
 // returning 204 (no work dispatched), the runner's cleanup-loop tick
 // must still drive eviction by fetching config from the dedicated
 // `/config` channel. This spec exercises the host's

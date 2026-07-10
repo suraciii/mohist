@@ -77,8 +77,8 @@ describe("isTerminalWorkflowStatus", () => {
   })
 
   it("IsCaseSensitiveLowercaseNotRecognized", () => {
-    // Server sends the canonical enum name verbatim (per T-001
-    // contract). Lowercase is a wire contract violation; the runner
+    // Server sends the canonical enum name verbatim. Lowercase is a wire
+    // contract violation; the runner
     // treats it as unknown / non-terminal.
     expect(isTerminalWorkflowStatus("completed")).toBe(false)
     expect(isTerminalWorkflowStatus("STOPPED")).toBe(false)

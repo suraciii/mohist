@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { RunnerHost } from "../src/runtime/host.js"
 import { defaultWorkspaceRegistryFilePath } from "../src/runtime/workspace-registry.js"
 
-// Lifecycle coverage for the convergence backstop wiring (T-003):
+// Lifecycle coverage for the convergence backstop wiring:
 //   - On startup (after the first SignalR connect) the runner fires a
 //     single convergence pass against the server.
 //   - On SignalR reconnect (onReconnected callback) the runner fires

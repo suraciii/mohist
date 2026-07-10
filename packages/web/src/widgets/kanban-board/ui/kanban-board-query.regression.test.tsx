@@ -202,7 +202,7 @@ describe('KanbanBoard Homepage Regression Coverage', () => {
       ]
       renderBoard(<KanbanBoard issues={issues} agentStatus={mockAgentStatus} />)
 
-      // Default sort: priority — Backlog column should render p0 (#2) first.
+      // Default priority sorting puts the highest-priority Backlog card first.
       const backlogColumn = screen.getByTestId('stage-column-backlog')
       const inProgressColumn = screen.getByTestId('stage-column-in_progress')
       const defaultBacklogCards = within(backlogColumn).getAllByTestId('issue-card')
@@ -416,8 +416,8 @@ describe('KanbanBoard Homepage Regression Coverage', () => {
       expect(within(doneColumn).getByText('2 more')).toBeInTheDocument()
       expect(within(doneColumn).queryByText('Show less')).not.toBeInTheDocument()
 
-      // The five most recently updated cards are visible (#107..#103);
-      // the older two (#101, #102) are hidden behind the collapse toggle.
+      // The five most recently updated cards are visible; the older two are
+      // hidden behind the collapse toggle.
       expect(within(doneColumn).getByText('#107')).toBeInTheDocument()
       expect(within(doneColumn).getByText('#103')).toBeInTheDocument()
       expect(within(doneColumn).queryByText('#101')).not.toBeInTheDocument()

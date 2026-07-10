@@ -8,7 +8,7 @@ import {
 } from "../src/server/runner-signalr.js"
 import { WorkspaceRegistry, defaultWorkspaceRegistryFilePath } from "../src/runtime/workspace-registry.js"
 
-// End-to-end coverage of T-003: the server's ReceiveWorkflowRunStatus
+// End-to-end coverage of the server's ReceiveWorkflowRunStatus
 // SignalR method transitions the matching active registry entry to
 // eligible and stamps terminalAt (idempotent — already-eligible entries
 // are not re-stamped). Non-terminal statuses leave the entry active.

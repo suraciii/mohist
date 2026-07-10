@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import { ServerConnection } from "../src/server/connection.js"
 
 // Coverage for the dedicated runner config channel
-// `GET /api/runner/{runnerId}/config` introduced by issue-359. The
+// `GET /api/runner/{runnerId}/config`. The
 // runner fetches the config on every cleanup-loop tick instead of
 // reading a cached value from the work dispatch envelope.
 //
