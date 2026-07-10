@@ -2,7 +2,6 @@
   "packages/runner/tests/merge-github-pr.spec.ts": 1120,
   "packages/runner/tests/openspec-archive-change.spec.ts": 907,
   "packages/runner/tests/rebase.spec.ts": 906,
-  "packages/runner/tests/runner-signalr.spec.ts": 2181,
   "packages/web/src/app/App.test.tsx": 385,
   "packages/web/src/app/providers/LiveTaskProvider.inbox.dom.test.ts": 389,
   "packages/web/src/app/providers/LiveTaskProvider.lifecycle.dom.test.ts": 414,
