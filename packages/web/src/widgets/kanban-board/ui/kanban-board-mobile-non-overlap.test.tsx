@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import '@testing-library/jest-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, within } from '@testing-library/react'
@@ -5,7 +6,9 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
 import { IssueStatus, IssueHealth, WorkflowStage } from '../../../entities/issue'
 import { makeIssue, makeIssues, mockAgentStatus } from './_kanbanBoardQueryTestUtils'
+
 import { KanbanBoard } from './KanbanBoard'
+
 function renderBoard(issues = makeIssues(3, { status: IssueStatus.Backlog })) {
   const queryClient = new QueryClient()
   return render(
@@ -16,6 +19,7 @@ function renderBoard(issues = makeIssues(3, { status: IssueStatus.Backlog })) {
     </QueryClientProvider>,
   )
 }
+
 function getMobileBoardContainer(): HTMLElement {
   const container = document.querySelector<HTMLElement>('.md\\:hidden.flex.flex-col')
   if (!container) {
@@ -23,6 +27,7 @@ function getMobileBoardContainer(): HTMLElement {
   }
   return container
 }
+
 function getMobileStageTabsStrip(): HTMLElement {
   const mobile = getMobileBoardContainer()
   const firstTab = within(mobile).getByTestId('mobile-stage-tab-backlog')
@@ -32,6 +37,7 @@ function getMobileStageTabsStrip(): HTMLElement {
   }
   return strip as HTMLElement
 }
+
 function getMobileCardList(): HTMLElement {
   const mobile = getMobileBoardContainer()
   const cards = within(mobile).getAllByTestId('issue-card')
@@ -269,15 +275,14 @@ describe('Mobile board navigation non-overlap', () => {
     })
   })
 
-  describe('Primary board action (rerun / resume) is reachable on a mobile card', () => {
-    it('renders the rerun-button inside the mobile card list for an interrupted card', () => {
+  describe('Primary board rerun action is reachable on a mobile card', () => {
+    it('renders the rerun-button inside the mobile card list for an inactive workflow card', () => {
       const issues = [
         makeIssue({
           number: 611,
           status: IssueStatus.InProgress,
-          health: IssueHealth.Active,
           workflowStage: WorkflowStage.Build,
-          title: 'Interrupted work',
+          title: 'Rerunnable work',
         }),
       ]
       renderBoard(issues)
@@ -291,7 +296,6 @@ describe('Mobile board navigation non-overlap', () => {
         makeIssue({
           number: 711,
           status: IssueStatus.Backlog,
-          health: IssueHealth.Active,
           workflowStage: WorkflowStage.Plan,
           title: 'Rerunnable work',
         }),
@@ -307,16 +311,14 @@ describe('Mobile board navigation non-overlap', () => {
         makeIssue({
           number: 811,
           status: IssueStatus.InProgress,
-          health: IssueHealth.Active,
           workflowStage: WorkflowStage.Build,
-          title: 'Interrupted one',
+          title: 'Rerunnable one',
         }),
         makeIssue({
           number: 812,
           status: IssueStatus.InProgress,
-          health: IssueHealth.Active,
           workflowStage: WorkflowStage.Build,
-          title: 'Interrupted two',
+          title: 'Rerunnable two',
         }),
       ]
       renderBoard(issues)
@@ -343,9 +345,8 @@ describe('Mobile board navigation non-overlap', () => {
         makeIssue({
           number: 911,
           status: IssueStatus.InProgress,
-          health: IssueHealth.Active,
           workflowStage: WorkflowStage.Build,
-          title: 'Interrupted work',
+          title: 'Rerunnable work',
         }),
       ]
       renderBoard(issues)
@@ -362,7 +363,6 @@ describe('Mobile board navigation non-overlap', () => {
         makeIssue({
           number: 1011,
           status: IssueStatus.InProgress,
-          health: IssueHealth.Active,
           workflowStage: WorkflowStage.Build,
           title: 'Clickable rerun',
         }),
