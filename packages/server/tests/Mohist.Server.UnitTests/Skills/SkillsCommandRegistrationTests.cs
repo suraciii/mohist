@@ -4,6 +4,7 @@ using Xunit;
 
 namespace Mohist.Server.UnitTests.Skills;
 
+[Collection("ConsoleOutput")]
 public sealed class SkillsCommandRegistrationTests
 {
     [Fact]

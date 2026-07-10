@@ -8,6 +8,7 @@ using Xunit;
 
 namespace Mohist.Server.UnitTests.SystemSpecs;
 
+[Collection("ConsoleOutput")]
 public class MohistConfigurationExtensionsTests : IDisposable
 {
     private readonly List<string> _tempFiles = [];
@@ -155,7 +156,7 @@ public class MohistConfigurationExtensionsTests : IDisposable
     private sealed class TestHostEnvironment(string environmentName) : IHostEnvironment
     {
         public string EnvironmentName { get; set; } = environmentName;
-        public string ApplicationName { get; set; } = "Mohist.Server.SpecTests";
+        public string ApplicationName { get; set; } = "Mohist.Server.UnitTests";
         public string ContentRootPath { get; set; } = Directory.GetCurrentDirectory();
         public IFileProvider ContentRootFileProvider { get; set; } = new NullFileProvider();
     }
