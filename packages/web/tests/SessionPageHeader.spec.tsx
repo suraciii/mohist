@@ -85,12 +85,14 @@ function renderWithQueryClient(_ui: ReactElement) {
   return renderPageWithQueryClient(<SessionPage />, route)
 }
 
-Object.defineProperty(navigator, 'clipboard', {
-  value: { writeText: vi.fn().mockResolvedValue(undefined) },
-  configurable: true,
-})
+const originalClipboardDescriptor = Object.getOwnPropertyDescriptor(navigator, 'clipboard')
+const clipboard = { writeText: vi.fn().mockResolvedValue(undefined) }
 
 beforeEach(() => {
+  Object.defineProperty(navigator, 'clipboard', {
+    value: clipboard,
+    configurable: true,
+  })
   vi.clearAllMocks()
   sessionApiCalls = []
   sessionPageMocks.sessions = []
@@ -111,6 +113,11 @@ afterEach(() => {
   Element.prototype.scrollTo = originalScrollTo
   for (const queryClient of queryClients) queryClient.clear()
   queryClients.length = 0
+  if (originalClipboardDescriptor) {
+    Object.defineProperty(navigator, 'clipboard', originalClipboardDescriptor)
+  } else {
+    Reflect.deleteProperty(navigator, 'clipboard')
+  }
 })
 
 describe('SessionPage header and states', () => {

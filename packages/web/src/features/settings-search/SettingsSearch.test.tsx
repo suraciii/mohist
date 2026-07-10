@@ -234,11 +234,10 @@ describe('groupEntriesByTab', () => {
 describe('SettingsSearch ⌘K shortcut is settings-page-scoped', () => {
   it('opens the dialog when ⌘K is pressed on the Settings page', async () => {
     arrangeAiLoaded()
-    const user = userEvent.setup()
     renderSettingsSearch('/settings/agent')
 
     expect(screen.queryByTestId('settings-search-input')).not.toBeInTheDocument()
-    await user.keyboard('{Meta>}k{/Meta}')
+    fireEvent.keyDown(window, { key: 'k', metaKey: true })
 
     await waitFor(() => {
       expect(screen.getByTestId('settings-search-input')).toBeInTheDocument()
@@ -247,10 +246,9 @@ describe('SettingsSearch ⌘K shortcut is settings-page-scoped', () => {
 
   it('opens the dialog when Ctrl+K is pressed on a non-macOS-like Settings page', async () => {
     arrangeAiLoaded()
-    const user = userEvent.setup()
     renderSettingsSearch('/settings/ai')
 
-    await user.keyboard('{Control>}k{/Control}')
+    fireEvent.keyDown(window, { key: 'k', ctrlKey: true })
 
     await waitFor(() => {
       expect(screen.getByTestId('settings-search-input')).toBeInTheDocument()
@@ -259,7 +257,6 @@ describe('SettingsSearch ⌘K shortcut is settings-page-scoped', () => {
 
   it('does not fire ⌘K while the Settings page is not mounted', async () => {
     arrangeAiLoaded()
-    const user = userEvent.setup()
     // Render on a non-settings route — the route component above will not
     // mount SettingsSearch, so the listener is never registered.
     render(
@@ -275,7 +272,7 @@ describe('SettingsSearch ⌘K shortcut is settings-page-scoped', () => {
       </QueryClientProvider>,
     )
 
-    await user.keyboard('{Meta>}k{/Meta}')
+    fireEvent.keyDown(window, { key: 'k', metaKey: true })
 
     expect(screen.queryByTestId('settings-search-input')).not.toBeInTheDocument()
     expect(getShortcutHandler('settings-search')).toBeUndefined()
@@ -305,10 +302,9 @@ describe('SettingsSearch ⌘K shortcut is settings-page-scoped', () => {
 
   it('does not re-open the dialog when ⌘K is pressed while the dialog is already open', async () => {
     arrangeAiLoaded()
-    const user = userEvent.setup()
     renderSettingsSearch('/settings/agent')
 
-    await user.keyboard('{Meta>}k{/Meta}')
+    fireEvent.keyDown(window, { key: 'k', metaKey: true })
     await waitFor(() => {
       expect(screen.getByTestId('settings-search-input')).toBeInTheDocument()
     })

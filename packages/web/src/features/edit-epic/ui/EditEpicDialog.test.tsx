@@ -70,6 +70,9 @@ function renderDialog(props: { open?: boolean; onClose?: () => void; epic?: Epic
   )
 }
 
+const originalScrollWidthDescriptor = Object.getOwnPropertyDescriptor(document.documentElement, 'scrollWidth')
+const originalClientWidthDescriptor = Object.getOwnPropertyDescriptor(document.documentElement, 'clientWidth')
+
 function stubWidth(width: number) {
   Object.defineProperty(document.documentElement, 'scrollWidth', {
     configurable: true,
@@ -84,6 +87,16 @@ function stubWidth(width: number) {
 afterEach(() => {
   cleanup()
   vi.clearAllMocks()
+  if (originalScrollWidthDescriptor) {
+    Object.defineProperty(document.documentElement, 'scrollWidth', originalScrollWidthDescriptor)
+  } else {
+    Reflect.deleteProperty(document.documentElement, 'scrollWidth')
+  }
+  if (originalClientWidthDescriptor) {
+    Object.defineProperty(document.documentElement, 'clientWidth', originalClientWidthDescriptor)
+  } else {
+    Reflect.deleteProperty(document.documentElement, 'clientWidth')
+  }
 })
 
 describe('EditEpicDialog verbatim load', () => {

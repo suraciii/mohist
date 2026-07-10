@@ -13,6 +13,8 @@ import { makeIssue, makeIssues, mockAgentStatus } from './_kanbanBoardQueryTestU
 const TEST_PROJECT = { id: 'test-project', name: 'test', createdAt: '2025-01-01T00:00:00Z', updatedAt: '2025-01-01T00:00:00Z', repositories: [] }
 
 let _runners: unknown[] = []
+let previousUrl = ''
+let previousHistoryState: unknown
 
 const runnerSummaryHook: typeof useRunnerSummary = () => {
   const rows = _runners as ReturnType<typeof useRunnerSummary>['rows']
@@ -45,20 +47,20 @@ function renderBoard(issues: unknown[], agentStatus: unknown) {
   )
 }
 
+beforeEach(() => {
+  previousUrl = window.location.href
+  previousHistoryState = window.history.state
+  window.history.replaceState(null, '', '/')
+  _runners = [{ id: 'r-default', kind: 'external', hostname: 'h', scope: { type: 'global' }, status: 'idle', capabilities: [], coderModels: [], coderModelCount: 0, connectionState: 'connected', activeWorks: [] }]
+})
+
+afterEach(() => {
+  cleanup()
+  window.history.replaceState(previousHistoryState, '', previousUrl)
+  vi.clearAllMocks()
+})
+
 describe('KanbanBoard Component - Filtered Stage Counts', () => {
-  beforeEach(() => {
-    _runners = [{ id: 'r-default', kind: 'external', hostname: 'h', scope: { type: 'global' }, status: 'idle', capabilities: [], coderModels: [], coderModelCount: 0, connectionState: 'connected', activeWorks: [] }]
-    Object.defineProperty(window, 'location', {
-      value: { search: '', pathname: '/', href: 'http://localhost/', origin: 'http://localhost' },
-      writable: true,
-    })
-  })
-
-  afterEach(() => {
-    cleanup()
-    vi.clearAllMocks()
-  })
-
   it('renders all columns with unfiltered issues', () => {
     const issues = [
       makeIssue({ number: 1, status: IssueStatus.Backlog }),
@@ -141,10 +143,7 @@ describe('KanbanBoard Component - Filtered Stage Counts', () => {
       makeIssue({ number: 4, status: IssueStatus.Backlog, priority: 'p0' }),
     ]
 
-    Object.defineProperty(window, 'location', {
-      value: { search: 'priorities=p0', pathname: '/', href: 'http://localhost/', origin: 'http://localhost' },
-      writable: true,
-    })
+    window.history.replaceState(null, '', '/?priorities=p0')
 
     renderBoard(issues, mockAgentStatus)
 
@@ -156,19 +155,6 @@ describe('KanbanBoard Component - Filtered Stage Counts', () => {
 })
 
 describe('Needs attention summary - user-action wording', () => {
-  beforeEach(() => {
-    _runners = [{ id: 'r-default', kind: 'external', hostname: 'h', scope: { type: 'global' }, status: 'idle', capabilities: [], coderModels: [], coderModelCount: 0, connectionState: 'connected', activeWorks: [] }]
-    Object.defineProperty(window, 'location', {
-      value: { search: '', pathname: '/', href: 'http://localhost/', origin: 'http://localhost' },
-      writable: true,
-    })
-  })
-
-  afterEach(() => {
-    cleanup()
-    vi.clearAllMocks()
-  })
-
   it('renders attention summary item with user-action label for approval awaiting issue', () => {
     const approvalAwaitingIssue = makeIssue({
       number: 180,

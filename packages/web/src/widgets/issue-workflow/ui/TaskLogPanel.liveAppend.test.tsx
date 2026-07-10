@@ -25,6 +25,7 @@ import {
 } from './_taskLogPanelTestUtils'
 
 const _taskLogPageRef: { current: TaskLogPage | undefined } = { current: undefined }
+const queryClients = new Set<TestHarness['queryClient']>()
 
 const taskLogHook: TaskLogDataHook = ({ issueNumber, taskId, projectId, workflowRunId }) =>
   useQuery({
@@ -45,6 +46,7 @@ function TaskLogPanel(props: Omit<TaskLogPanelProps, 'taskLogHook'>) {
 
 function buildTaskLogHarness(initialPage: TaskLogPage | undefined): TestHarness {
   const queryClient = newQueryClient()
+  queryClients.add(queryClient)
   _taskLogPageRef.current = initialPage
   return {
     queryClient,
@@ -66,6 +68,8 @@ describe('TaskLogPanel — live append (Phase 2 T-004)', () => {
 
   afterEach(() => {
     cleanup()
+    for (const queryClient of queryClients) queryClient.clear()
+    queryClients.clear()
   })
 
   it('renders Phase 1 line-by-line output (non-regression)', async () => {
@@ -79,9 +83,8 @@ describe('TaskLogPanel — live append (Phase 2 T-004)', () => {
       harness,
     )
 
-    await screen.findByTestId('task-log-panel')
-    expect(screen.getByText('Cloning repo')).toBeInTheDocument()
-    expect(screen.getByText('CONFLICT')).toBeInTheDocument()
+    expect(await screen.findByText('Cloning repo')).toBeInTheDocument()
+    expect(await screen.findByText('CONFLICT')).toBeInTheDocument()
   })
 
   it('calls SubscribeTaskLogAsync when the task is running, the panel is rendered, and the connection is ready', async () => {
