@@ -9,9 +9,9 @@ namespace Mohist.Cli.Tests;
 public class CliIssueUpdatePatchBodySpecs
 {
     private static (RecordingHttpHandler Handler, HttpClient Http, StringWriter Output, StringWriter Error, FakeFileSystem Fs, FakeCommandExecutor Executor)
-        CreateHarness(string? activeProjectId = "proj_abc", string? projectResponseBody = null)
+        CreateIssueUpdateSetup(string? activeProjectId = "proj_abc", string? projectResponseBody = null)
     {
-        return CliTestHarness.Create(async (req, _) =>
+        return CliTestFactory.Create(async (req, _) =>
         {
             var path = req.RequestUri?.AbsolutePath ?? "";
             if (path.EndsWith("/labels", StringComparison.Ordinal))
@@ -46,7 +46,7 @@ public class CliIssueUpdatePatchBodySpecs
     [Fact]
     public async Task IssueUpdate_BodyFile_WithoutLabel_OmitsLabelsFromPatchBody()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateIssueUpdateSetup();
         fs.AddFile("/tmp/body.md", "Updated body content");
 
         var exitCode = await MohistCliCommands.RunAsync(
@@ -66,7 +66,7 @@ public class CliIssueUpdatePatchBodySpecs
     [Fact]
     public async Task IssueUpdate_BodyInline_WithoutLabel_OmitsLabelsFromPatchBody()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateIssueUpdateSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["issue", "update", "1", "--body", "Inline body"], output, error, fs, executor);
@@ -82,7 +82,7 @@ public class CliIssueUpdatePatchBodySpecs
     [Fact]
     public async Task IssueUpdate_LabelOnly_PatchBodyOnlyContainsLabels()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateIssueUpdateSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["issue", "update", "1", "-l", "stream=backend", "-l", "module=auth"], output, error, fs, executor);
@@ -106,7 +106,7 @@ public class CliIssueUpdatePatchBodySpecs
         {
             ["stream"] = "frontend",
         });
-        var (handler, http, output, error, fs, executor) = CreateHarness(projectResponseBody: currentJson);
+        var (handler, http, output, error, fs, executor) = CreateIssueUpdateSetup(projectResponseBody: currentJson);
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["issue", "update", "1", "-l", "stream=backend"], output, error, fs, executor);
@@ -122,7 +122,7 @@ public class CliIssueUpdatePatchBodySpecs
     [Fact]
     public async Task IssueUpdate_NoOptionalFlags_SendsPatchWithNoOptionalFieldKeys()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateIssueUpdateSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["issue", "update", "1"], output, error, fs, executor);
@@ -140,7 +140,7 @@ public class CliIssueUpdatePatchBodySpecs
     [Fact]
     public async Task IssueUpdate_BodyAndBodyFile_ConflictExitsWithCodeOne()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateIssueUpdateSetup();
         fs.AddFile("/tmp/body.md", "From file");
 
         var exitCode = await MohistCliCommands.RunAsync(
@@ -156,7 +156,7 @@ public class CliIssueUpdatePatchBodySpecs
     [Fact]
     public async Task IssueUpdate_BodyAndBodyStdin_ConflictExitsWithCodeOne()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateIssueUpdateSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
@@ -172,7 +172,7 @@ public class CliIssueUpdatePatchBodySpecs
     [Fact]
     public async Task IssueUpdate_BodyFileAndBodyStdin_ConflictExitsWithCodeOne()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateIssueUpdateSetup();
         fs.AddFile("/tmp/body.md", "From file");
 
         var exitCode = await MohistCliCommands.RunAsync(
@@ -189,7 +189,7 @@ public class CliIssueUpdatePatchBodySpecs
     [Fact]
     public async Task IssueUpdate_TitleOnly_PatchBodyOnlyContainsTitle()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateIssueUpdateSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["issue", "update", "1", "--title", "New title"], output, error, fs, executor);
@@ -206,7 +206,7 @@ public class CliIssueUpdatePatchBodySpecs
     [Fact]
     public async Task IssueUpdate_PriorityOnly_PatchBodyOnlyContainsPriority()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateIssueUpdateSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["issue", "update", "1", "--priority", "p1"], output, error, fs, executor);
@@ -223,7 +223,7 @@ public class CliIssueUpdatePatchBodySpecs
     [Fact]
     public async Task IssueUpdate_ReadyFlag_PatchBodyContainsIsDraftFalse()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateIssueUpdateSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["issue", "update", "1", "--ready"], output, error, fs, executor);
@@ -238,7 +238,7 @@ public class CliIssueUpdatePatchBodySpecs
     [Fact]
     public async Task IssueUpdate_DraftFlag_PatchBodyContainsIsDraftTrue()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateIssueUpdateSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["issue", "update", "1", "--draft"], output, error, fs, executor);
@@ -253,7 +253,7 @@ public class CliIssueUpdatePatchBodySpecs
     [Fact]
     public async Task IssueUpdate_NoDraftFlag_PatchBodyOmitsIsDraft()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateIssueUpdateSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["issue", "update", "1", "--title", "X"], output, error, fs, executor);

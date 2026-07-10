@@ -4,7 +4,7 @@ import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react'
 import { useMutation } from '@tanstack/react-query'
 import { http, HttpResponse } from 'msw'
 import type { EpicDetail } from '../../../entities/epic'
-import { issues, linkedIssue, renderPage as renderEpicDetailPage } from './_epicDetailPageTestHarness'
+import { issues, linkedIssue, renderPage as renderEpicDetailPage } from './_epicDetailPageTestUtils'
 import type { RemoveEpicIssueHook } from './EpicDetailPage'
 import { useMswServer } from '../../../../tests/support/msw'
 

@@ -22,7 +22,7 @@ public class CliProjectWorkflowProfileSpecs
     [Fact]
     public async Task ProfileList_DescribedWithProject_SendsProjectQueryParam()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Get && req.RequestUri?.PathAndQuery == "/api/workflow-profiles?project=proj_abc")
             {
@@ -50,7 +50,7 @@ public class CliProjectWorkflowProfileSpecs
     [Fact]
     public async Task ProfileList_DescribedWithProjectIdAlias_SendsProjectQueryParam()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Get && req.RequestUri?.PathAndQuery == "/api/workflow-profiles?project=proj_abc")
             {
@@ -76,7 +76,7 @@ public class CliProjectWorkflowProfileSpecs
     [Fact]
     public async Task ProfileList_DescribedWithActiveProject_SendsProjectQueryParam()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Get && req.RequestUri?.PathAndQuery == "/api/workflow-profiles?project=proj_abc")
             {
@@ -113,7 +113,7 @@ public class CliProjectWorkflowProfileSpecs
     [Fact]
     public async Task ProfileList_Described_RendersIdDisplayNameAndDescriptionWithoutSuitableForLine()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Get && req.RequestUri?.PathAndQuery == "/api/workflow-profiles?project=proj_abc")
             {
@@ -143,7 +143,7 @@ public class CliProjectWorkflowProfileSpecs
     [Fact]
     public async Task ProfileList_DescribedNoProjectResolvable_FallsBackToUnfilteredWithStderrNote()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Get && req.RequestUri?.PathAndQuery == "/api/workflow-profiles")
             {
@@ -171,7 +171,7 @@ public class CliProjectWorkflowProfileSpecs
     [Fact]
     public async Task ProfileList_DescribedWithConflictingProjectFlags_ReturnsOneAndDoesNotRequestDiscovery()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync();
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
@@ -187,7 +187,7 @@ public class CliProjectWorkflowProfileSpecs
     [Fact]
     public async Task ProfileList_PlainWithProject_SendsProjectQueryParam()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Get && req.RequestUri?.PathAndQuery == "/api/workflow-templates/system?project=proj_abc")
             {
@@ -217,7 +217,7 @@ public class CliProjectWorkflowProfileSpecs
     [Fact]
     public async Task ProfileList_PlainJson_UsesSharedOutputOption()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Get && req.RequestUri?.PathAndQuery == "/api/workflow-templates/system?project=proj_abc")
             {
@@ -245,7 +245,7 @@ public class CliProjectWorkflowProfileSpecs
     [Fact]
     public async Task ProfileList_JsonFlagIsNotACompatibilityAlias()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync();
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
@@ -260,7 +260,7 @@ public class CliProjectWorkflowProfileSpecs
     [Fact]
     public async Task ProfileList_PlainWithActiveProject_SendsProjectQueryParam()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Get && req.RequestUri?.PathAndQuery == "/api/workflow-templates/system?project=proj_abc")
             {
@@ -286,7 +286,7 @@ public class CliProjectWorkflowProfileSpecs
     [Fact]
     public async Task ProfileList_PlainWithConflictingProjectFlags_ReturnsOneAndDoesNotRequestDiscovery()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync();
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
@@ -301,7 +301,7 @@ public class CliProjectWorkflowProfileSpecs
     [Fact]
     public async Task ProfileList_DescribedWithMissingProject_ReturnsNotFoundAndPrintsError()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Get && req.RequestUri?.PathAndQuery == "/api/workflow-profiles?project=missing-project")
             {
@@ -330,7 +330,7 @@ public class CliProjectWorkflowProfileSpecs
     [Fact]
     public async Task ProfileList_HelpMentionsDescribedOptionAndOmitsSuitableForWording()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync();
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
@@ -346,7 +346,7 @@ public class CliProjectWorkflowProfileSpecs
     [Fact]
     public async Task Workflow_NoLongerExposesProfileListSubcommand()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync();
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
@@ -360,7 +360,7 @@ public class CliProjectWorkflowProfileSpecs
     [Fact]
     public async Task ProfileEnable_PostsProfileIdToEnableEndpoint()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Post
                 && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/workflow-profile/enable")
@@ -385,7 +385,7 @@ public class CliProjectWorkflowProfileSpecs
     [Fact]
     public async Task ProfileDisable_PostsProfileIdToDisableEndpoint()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Post
                 && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/workflow-profile/disable")
@@ -410,7 +410,7 @@ public class CliProjectWorkflowProfileSpecs
     [Fact]
     public async Task ProfileEnable_MissingProfileId_FailsLocallyWithoutHttp()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync();
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
@@ -425,7 +425,7 @@ public class CliProjectWorkflowProfileSpecs
     [Fact]
     public async Task ProfileDisable_MissingProfileId_FailsLocallyWithoutHttp()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync();
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
@@ -440,7 +440,7 @@ public class CliProjectWorkflowProfileSpecs
     [Fact]
     public async Task ProfileEnable_HonorsProjectIdFlag()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Post
                 && req.RequestUri?.PathAndQuery == "/api/projects/proj_xyz/workflow-profile/enable")
@@ -463,7 +463,7 @@ public class CliProjectWorkflowProfileSpecs
     [Fact]
     public async Task ProfileDisable_HonorsProjectFlag()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Post
                 && req.RequestUri?.PathAndQuery == "/api/projects/proj_xyz/workflow-profile/disable")
@@ -486,7 +486,7 @@ public class CliProjectWorkflowProfileSpecs
     [Fact]
     public async Task ProfileEnable_UnknownProfileServerError_SurfacesCodeAndMessage()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Post)
             {
@@ -511,7 +511,7 @@ public class CliProjectWorkflowProfileSpecs
     [Fact]
     public async Task ProfileDisable_UnknownProfileServerError_SurfacesCodeAndMessage()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Post)
             {
@@ -536,7 +536,7 @@ public class CliProjectWorkflowProfileSpecs
     [Fact]
     public async Task ProfileDisable_LastEnabledProfileServerError_SurfacesCodeAndMessage()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Post)
             {
@@ -566,7 +566,7 @@ public class CliProjectWorkflowProfileSpecs
     [Fact]
     public async Task ProfileEnable_NoProjectResolvable_FailsLocallyWithoutHttp()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(activeProjectId: null);
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(activeProjectId: null);
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
@@ -581,7 +581,7 @@ public class CliProjectWorkflowProfileSpecs
     [Fact]
     public async Task ProfileEnable_ConflictingProjectFlags_FailsLocallyWithoutHttp()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync();
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
@@ -596,7 +596,7 @@ public class CliProjectWorkflowProfileSpecs
     [Fact]
     public async Task Profile_HelpAdvertisesEnableAndDisableSubcommands()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync();
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,

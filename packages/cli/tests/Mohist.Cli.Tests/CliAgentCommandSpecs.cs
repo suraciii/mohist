@@ -316,7 +316,7 @@ public class CliAgentCommandSpecs
     [Fact]
     public async Task AgentArchive_DeleteAlias_ProducesIdenticalRequestAndOutput()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.Create(
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create(
             (request, _) => Task.FromResult(RecordingHttpHandler.Json(new
             {
                 success = true,
@@ -355,7 +355,7 @@ public class CliAgentCommandSpecs
     [Fact]
     public async Task AgentArchive_AliasDelete_HonorsProjectIdFlag()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.Create(
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create(
             (_, _) => Task.FromResult(RecordingHttpHandler.Json(new
             {
                 success = true,

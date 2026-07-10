@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 /**
- * Shared fixtures + harness for the kanban-board-query colocated component test files.
+ * Shared fixtures + render helpers for the kanban-board-query colocated component test files.
  *
  * Module mocks and hoisted values are scoped per-file, so each `*.test.tsx` declares
  * its own mock blocks (those cannot be imported). This module exports the

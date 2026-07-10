@@ -1,6 +1,6 @@
 namespace Mohist.Cli.Tests.Support;
 
-public static class CliTestHarness
+public static class CliTestFactory
 {
     public const string BaseAddress = "http://localhost:3456";
 
@@ -31,8 +31,8 @@ public static class CliTestHarness
     /// <summary>
     /// Internal overload that also surfaces a <see cref="FakeServiceInstaller"/>
     /// so install/update specs can assert which installer methods (if any)
-    /// the dispatched command path invoked. Public-facing harnesses strip
-    /// the installer before returning.
+    /// the dispatched command path invoked. The standard factory methods
+    /// omit the installer from their return values.
     /// </summary>
     internal static (RecordingHttpHandler Handler, HttpClient Http, StringWriter Output, StringWriter Error, FakeFileSystem Fs, FakeCommandExecutor Executor, FakeServiceInstaller Installer)
         CreateInternal(

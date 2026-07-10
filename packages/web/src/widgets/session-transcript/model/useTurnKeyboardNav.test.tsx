@@ -30,13 +30,13 @@ interface SetupResult {
   unmount: () => void
 }
 
-const harnessCleanups = new Set<() => void>()
+const mountedViewCleanups = new Set<() => void>()
 
 function dispatchPageKeyDown(key: string, init: KeyboardEventInit = {}) {
   fireEvent.keyDown(window, { key, ...init })
 }
 
-function setupHarness(options: SetupOptions): SetupResult {
+function renderKeyboardNavigation(options: SetupOptions): SetupResult {
   const container = document.createElement('div')
   document.body.appendChild(container)
   const turnRefs = new Map<number, HTMLDivElement>()
@@ -57,7 +57,7 @@ function setupHarness(options: SetupOptions): SetupResult {
 
   const scrollContainerRef = { current: container }
 
-  function Harness() {
+  function KeyboardNavigationProbe() {
     useTurnKeyboardNav({
       scrollContainerRef,
       turnRefs,
@@ -66,16 +66,16 @@ function setupHarness(options: SetupOptions): SetupResult {
     return null
   }
 
-  const view = render(<Harness />)
+  const view = render(<KeyboardNavigationProbe />)
   let mounted = true
   const unmount = () => {
     if (!mounted) return
     mounted = false
     view.unmount()
     container.remove()
-    harnessCleanups.delete(unmount)
+    mountedViewCleanups.delete(unmount)
   }
-  harnessCleanups.add(unmount)
+  mountedViewCleanups.add(unmount)
 
   return {
     container,
@@ -95,7 +95,7 @@ describe('useTurnKeyboardNav', () => {
   })
 
   afterEach(() => {
-    for (const dispose of [...harnessCleanups]) dispose()
+    for (const dispose of [...mountedViewCleanups]) dispose()
     scrollIntoViewSpy.mockRestore()
     vi.restoreAllMocks()
     if (document.activeElement instanceof HTMLElement) {
@@ -105,7 +105,7 @@ describe('useTurnKeyboardNav', () => {
 
   describe('j moves to the next turn', () => {
     it('scrolls to ref K+1 when current turn is K=1 (only turn 1 above threshold)', () => {
-      const { turnRefs } = setupHarness({
+      const { turnRefs } = renderKeyboardNavigation({
         turnCount: 3,
         containerTop: 0,
         turnTops: [50, 1100, 2100],
@@ -118,7 +118,7 @@ describe('useTurnKeyboardNav', () => {
     })
 
     it('scrolls to ref K+1 when current turn is K=2 (turns 1-2 above threshold)', () => {
-      const { turnRefs } = setupHarness({
+      const { turnRefs } = renderKeyboardNavigation({
         turnCount: 3,
         containerTop: 0,
         turnTops: [-500, 50, 1100],
@@ -131,7 +131,7 @@ describe('useTurnKeyboardNav', () => {
     })
 
     it('calls scrollIntoView({ block: "start" }) on the target ref', () => {
-      setupHarness({
+      renderKeyboardNavigation({
         turnCount: 2,
         containerTop: 0,
         turnTops: [50, 1100],
@@ -146,7 +146,7 @@ describe('useTurnKeyboardNav', () => {
 
   describe('k moves to the previous turn', () => {
     it('scrolls to ref K-1 when current turn is K=2', () => {
-      const { turnRefs } = setupHarness({
+      const { turnRefs } = renderKeyboardNavigation({
         turnCount: 3,
         containerTop: 0,
         turnTops: [-500, 50, 1100],
@@ -159,7 +159,7 @@ describe('useTurnKeyboardNav', () => {
     })
 
     it('scrolls to ref K-1 when current turn is K=3 (all turns above threshold)', () => {
-      const { turnRefs } = setupHarness({
+      const { turnRefs } = renderKeyboardNavigation({
         turnCount: 3,
         containerTop: 0,
         turnTops: [-1500, -500, 50],
@@ -174,7 +174,7 @@ describe('useTurnKeyboardNav', () => {
 
   describe('boundary clamping (no-op at ends)', () => {
     it('j at the last turn is a no-op (does not scroll past the last turn)', () => {
-      setupHarness({
+      renderKeyboardNavigation({
         turnCount: 3,
         containerTop: 0,
         turnTops: [-1500, -500, 50],
@@ -186,7 +186,7 @@ describe('useTurnKeyboardNav', () => {
     })
 
     it('k at the first turn is a no-op (does not scroll before the first turn)', () => {
-      setupHarness({
+      renderKeyboardNavigation({
         turnCount: 3,
         containerTop: 0,
         turnTops: [50, 1100, 2100],
@@ -200,7 +200,7 @@ describe('useTurnKeyboardNav', () => {
 
   describe('g and G move to transcript boundaries', () => {
     it('g (no shift) scrolls to the first turn regardless of current position', () => {
-      const { turnRefs } = setupHarness({
+      const { turnRefs } = renderKeyboardNavigation({
         turnCount: 3,
         containerTop: 0,
         turnTops: [-1500, -500, 50],
@@ -213,7 +213,7 @@ describe('useTurnKeyboardNav', () => {
     })
 
     it('G (uppercase) scrolls to the last turn', () => {
-      const { turnRefs } = setupHarness({
+      const { turnRefs } = renderKeyboardNavigation({
         turnCount: 3,
         containerTop: 0,
         turnTops: [50, 1100, 2100],
@@ -226,7 +226,7 @@ describe('useTurnKeyboardNav', () => {
     })
 
     it('shift+g (key=g with shiftKey=true) scrolls to the last turn', () => {
-      const { turnRefs } = setupHarness({
+      const { turnRefs } = renderKeyboardNavigation({
         turnCount: 3,
         containerTop: 0,
         turnTops: [50, 1100, 2100],
@@ -239,7 +239,7 @@ describe('useTurnKeyboardNav', () => {
     })
 
     it('g and G both target the same turn when there is only one turn', () => {
-      const { turnRefs } = setupHarness({
+      const { turnRefs } = renderKeyboardNavigation({
         turnCount: 1,
         containerTop: 0,
         turnTops: [50],
@@ -255,7 +255,7 @@ describe('useTurnKeyboardNav', () => {
 
   describe('focus deferral', () => {
     it('does not navigate when a textarea is focused (j)', () => {
-      const { container } = setupHarness({
+      const { container } = renderKeyboardNavigation({
         turnCount: 3,
         containerTop: 0,
         turnTops: [50, 1100, 2100],
@@ -272,7 +272,7 @@ describe('useTurnKeyboardNav', () => {
     })
 
     it('does not navigate when an input is focused (k)', () => {
-      const { container } = setupHarness({
+      const { container } = renderKeyboardNavigation({
         turnCount: 3,
         containerTop: 0,
         turnTops: [-500, 50, 1100],
@@ -289,7 +289,7 @@ describe('useTurnKeyboardNav', () => {
     })
 
     it('does not navigate when a select is focused (g)', () => {
-      const { container } = setupHarness({
+      const { container } = renderKeyboardNavigation({
         turnCount: 3,
         containerTop: 0,
         turnTops: [50, 1100, 2100],
@@ -306,7 +306,7 @@ describe('useTurnKeyboardNav', () => {
     })
 
     it('does not navigate when a [contenteditable] element is focused (G)', () => {
-      const { container } = setupHarness({
+      const { container } = renderKeyboardNavigation({
         turnCount: 3,
         containerTop: 0,
         turnTops: [50, 1100, 2100],
@@ -325,7 +325,7 @@ describe('useTurnKeyboardNav', () => {
     })
 
     it('does not navigate when a [contenteditable] element without an explicit true value is focused', () => {
-      const { container } = setupHarness({
+      const { container } = renderKeyboardNavigation({
         turnCount: 3,
         containerTop: 0,
         turnTops: [50, 1100, 2100],
@@ -344,7 +344,7 @@ describe('useTurnKeyboardNav', () => {
     })
 
     it('does not navigate when a [data-composer-input] element is focused (j)', () => {
-      const { container } = setupHarness({
+      const { container } = renderKeyboardNavigation({
         turnCount: 3,
         containerTop: 0,
         turnTops: [50, 1100, 2100],
@@ -363,7 +363,7 @@ describe('useTurnKeyboardNav', () => {
     })
 
     it('does not navigate when an editable nested inside a sibling is focused', () => {
-      const { container } = setupHarness({
+      const { container } = renderKeyboardNavigation({
         turnCount: 3,
         containerTop: 0,
         turnTops: [50, 1100, 2100],
@@ -382,7 +382,7 @@ describe('useTurnKeyboardNav', () => {
     })
 
     it('navigates once focus is cleared from the editable', () => {
-      const { container, turnRefs } = setupHarness({
+      const { container, turnRefs } = renderKeyboardNavigation({
         turnCount: 3,
         containerTop: 0,
         turnTops: [50, 1100, 2100],
@@ -408,7 +408,7 @@ describe('useTurnKeyboardNav', () => {
 
   describe('modifier-key suppression', () => {
     it('does not navigate when metaKey is held (j)', () => {
-      setupHarness({
+      renderKeyboardNavigation({
         turnCount: 3,
         containerTop: 0,
         turnTops: [50, 1100, 2100],
@@ -419,7 +419,7 @@ describe('useTurnKeyboardNav', () => {
     })
 
     it('does not navigate when ctrlKey is held (k)', () => {
-      setupHarness({
+      renderKeyboardNavigation({
         turnCount: 3,
         containerTop: 0,
         turnTops: [-500, 50, 1100],
@@ -430,7 +430,7 @@ describe('useTurnKeyboardNav', () => {
     })
 
     it('does not navigate when altKey is held (g)', () => {
-      setupHarness({
+      renderKeyboardNavigation({
         turnCount: 3,
         containerTop: 0,
         turnTops: [50, 1100, 2100],
@@ -441,7 +441,7 @@ describe('useTurnKeyboardNav', () => {
     })
 
     it('does not navigate when altKey+shift is held on G', () => {
-      setupHarness({
+      renderKeyboardNavigation({
         turnCount: 3,
         containerTop: 0,
         turnTops: [50, 1100, 2100],
@@ -454,7 +454,7 @@ describe('useTurnKeyboardNav', () => {
 
   describe('current-turn derivation uses getBoundingClientRect on demand', () => {
     it('derives currentIndex as 0 when no turn is above the threshold', () => {
-      const { turnRefs } = setupHarness({
+      const { turnRefs } = renderKeyboardNavigation({
         turnCount: 3,
         containerTop: 0,
         turnTops: [500, 1500, 2500],
@@ -466,7 +466,7 @@ describe('useTurnKeyboardNav', () => {
     })
 
     it('derives currentIndex as the LAST turn whose top is at or above the threshold (j scrolls to next)', () => {
-      const { turnRefs } = setupHarness({
+      const { turnRefs } = renderKeyboardNavigation({
         turnCount: 5,
         containerTop: 0,
         turnTops: [-500, -300, 100, 1500, 2500],
@@ -478,7 +478,7 @@ describe('useTurnKeyboardNav', () => {
     })
 
     it('honors the scroll container offset (containerTop > 0)', () => {
-      const { turnRefs } = setupHarness({
+      const { turnRefs } = renderKeyboardNavigation({
         turnCount: 3,
         containerTop: 200,
         turnTops: [180, 290, 1500],
@@ -492,7 +492,7 @@ describe('useTurnKeyboardNav', () => {
 
   describe('listener lifecycle', () => {
     it('detaches the listener on unmount', () => {
-      const { unmount } = setupHarness({
+      const { unmount } = renderKeyboardNavigation({
         turnCount: 3,
         containerTop: 0,
         turnTops: [50, 1100, 2100],
@@ -510,7 +510,7 @@ describe('useTurnKeyboardNav', () => {
 
   describe('edge cases', () => {
     it('is a no-op when turnCount is 0', () => {
-      setupHarness({
+      renderKeyboardNavigation({
         turnCount: 0,
         containerTop: 0,
         turnTops: [],
@@ -524,7 +524,7 @@ describe('useTurnKeyboardNav', () => {
     })
 
     it('is a no-op on unrelated keys', () => {
-      setupHarness({
+      renderKeyboardNavigation({
         turnCount: 3,
         containerTop: 0,
         turnTops: [50, 1100, 2100],
@@ -553,7 +553,7 @@ describe('useTurnKeyboardNav', () => {
 
       const ref = { current: null as HTMLDivElement | null }
 
-      function Harness() {
+      function KeyboardNavigationProbe() {
         useTurnKeyboardNav({
           scrollContainerRef: ref,
           turnRefs,
@@ -562,7 +562,7 @@ describe('useTurnKeyboardNav', () => {
         return null
       }
 
-      render(<Harness />)
+      render(<KeyboardNavigationProbe />)
 
       act(() => {
         fireEvent.keyDown(window, { key: 'g' })

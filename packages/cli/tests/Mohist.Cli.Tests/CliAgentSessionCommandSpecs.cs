@@ -12,7 +12,7 @@ public class CliAgentSessionCommandSpecs
     private static (HttpClient http, RecordingHttpHandler handler, StringWriter output, StringWriter error, FakeFileSystem fileSystem, FakeCommandExecutor executor) SetupEnv(
         Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> responder)
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.Create(responder, ActiveProjectId);
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create(responder, ActiveProjectId);
         return (http, handler, output, error, fs, executor);
     }
 

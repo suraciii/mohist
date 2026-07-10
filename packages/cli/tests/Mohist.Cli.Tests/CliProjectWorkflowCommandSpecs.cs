@@ -41,7 +41,7 @@ public class CliProjectWorkflowCommandSpecs
     [Fact]
     public async Task WorkflowHelp_ListsProfileTemplateAndConfigSubgroups()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync();
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync();
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["project", "workflow", "--help"], output, error, fs, executor);
 
@@ -55,7 +55,7 @@ public class CliProjectWorkflowCommandSpecs
     [Fact]
     public async Task TemplateHelp_ListsFiveVerbs()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync();
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync();
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["project", "workflow", "template", "--help"], output, error, fs, executor);
 
@@ -71,7 +71,7 @@ public class CliProjectWorkflowCommandSpecs
     [Fact]
     public async Task TemplateList_TableMode_SendsGetAndRendersTable()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Get && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/workflow-templates")
             {
@@ -105,7 +105,7 @@ public class CliProjectWorkflowCommandSpecs
     [Fact]
     public async Task TemplateList_JsonMode_EmitsRawPayload()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Get)
             {
@@ -130,7 +130,7 @@ public class CliProjectWorkflowCommandSpecs
     [Fact]
     public async Task TemplateCreate_InlineYaml_SendsPostWithYamlBody()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Post && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/workflow-templates")
             {
@@ -157,7 +157,7 @@ public class CliProjectWorkflowCommandSpecs
     [Fact]
     public async Task TemplateCreate_FromFile_ReadsFileAndSendsContent()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Post && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/workflow-templates")
             {
@@ -183,7 +183,7 @@ public class CliProjectWorkflowCommandSpecs
     [Fact]
     public async Task TemplateCreate_TableMode_RendersCreatedTemplate()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Post)
             {
@@ -209,7 +209,7 @@ public class CliProjectWorkflowCommandSpecs
     [Fact]
     public async Task TemplateCreate_JsonMode_EmitsRawPayload()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Post)
             {
@@ -234,7 +234,7 @@ public class CliProjectWorkflowCommandSpecs
     [Fact]
     public async Task TemplateCreate_ServerError_SurfacesErrorAndExitsNonZero()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Post)
             {
@@ -256,7 +256,7 @@ public class CliProjectWorkflowCommandSpecs
     [Fact]
     public async Task TemplateShow_SendsGetWithTemplateIdAndRenders()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Get && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/workflow-templates/tpl_abc")
             {
@@ -285,7 +285,7 @@ public class CliProjectWorkflowCommandSpecs
     [Fact]
     public async Task TemplateShow_NonexistentTemplate_Returns404()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Get)
             {
@@ -307,7 +307,7 @@ public class CliProjectWorkflowCommandSpecs
     [Fact]
     public async Task TemplateUpdate_InlineYaml_SendsPutWithYamlBody()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Put && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/workflow-templates/tpl_abc")
             {
@@ -333,7 +333,7 @@ public class CliProjectWorkflowCommandSpecs
     [Fact]
     public async Task TemplateUpdate_FromFile_ReadsFileAndSendsContent()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Put && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/workflow-templates/tpl_abc")
             {
@@ -359,7 +359,7 @@ public class CliProjectWorkflowCommandSpecs
     [Fact]
     public async Task TemplateUpdate_NonexistentTemplate_Returns404()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Put)
             {
@@ -381,7 +381,7 @@ public class CliProjectWorkflowCommandSpecs
     [Fact]
     public async Task TemplateDelete_SendsDeleteAndReturnsSuccess()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Delete && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/workflow-templates/tpl_abc")
             {
@@ -401,7 +401,7 @@ public class CliProjectWorkflowCommandSpecs
     [Fact]
     public async Task TemplateDelete_NonexistentTemplate_Returns404()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Delete)
             {
@@ -423,7 +423,7 @@ public class CliProjectWorkflowCommandSpecs
     [Fact]
     public async Task TemplateList_AcceptsProjectAndProjectIdAlias()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Get)
                 return RecordingHttpHandler.Json(new { success = true, data = new[] { new { projectId = "proj_abc", templateId = "tpl_a" } } });
@@ -446,7 +446,7 @@ public class CliProjectWorkflowCommandSpecs
     [Fact]
     public async Task TemplateCreate_InvalidOutputMode_PrintsErrorAndExitsOne()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync();
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["project", "workflow", "template", "create", "--yaml", "x", "-o", "yaml"], output, error, fs, executor);
@@ -464,7 +464,7 @@ public class CliProjectWorkflowCommandSpecs
     [Fact]
     public async Task ConfigHelp_ListsFourVerbs()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync();
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync();
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["project", "workflow", "config", "--help"], output, error, fs, executor);
 
@@ -480,7 +480,7 @@ public class CliProjectWorkflowCommandSpecs
     public async Task ConfigGet_TableMode_SendsGetAndRendersDefaultTemplateVariablesPrompts()
     {
         var getCount = 0;
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Get && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/workflow-profile")
             {
@@ -552,7 +552,7 @@ public class CliProjectWorkflowCommandSpecs
     public async Task ConfigGet_JsonMode_EmitsRawPayload()
     {
         var getCount = 0;
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Get && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/workflow-profile")
             {
@@ -598,7 +598,7 @@ public class CliProjectWorkflowCommandSpecs
     [Fact]
     public async Task ConfigGet_EmptySuccessBodyOnProfile_PrintsReasonAndExitsOne()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Get && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/workflow-profile")
                 return EmptyResponse(HttpStatusCode.NoContent, "No Content");
@@ -618,7 +618,7 @@ public class CliProjectWorkflowCommandSpecs
     [Fact]
     public async Task ConfigSet_DefaultTemplate_SendsPut()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Put && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/workflow-profile/default-template")
             {
@@ -638,7 +638,7 @@ public class CliProjectWorkflowCommandSpecs
     [Fact]
     public async Task ConfigSet_VarAndStageVar_SendsPatchOnly()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Patch && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/workflow-profile/variables")
             {
@@ -659,7 +659,7 @@ public class CliProjectWorkflowCommandSpecs
     [Fact]
     public async Task ConfigSet_VarAndStageVar_PatchBodyHasCorrectShape()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Patch && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/workflow-profile/variables")
             {
@@ -682,7 +682,7 @@ public class CliProjectWorkflowCommandSpecs
     [Fact]
     public async Task ConfigSet_VarsFile_SendsPutVariables()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Put && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/workflow-profile/variables")
             {
@@ -704,7 +704,7 @@ public class CliProjectWorkflowCommandSpecs
     [Fact]
     public async Task ConfigSet_VarsFileAndVar_MutuallyExclusive()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync();
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["project", "workflow", "config", "set", "--vars-file", "/vars.json", "--var", "foo=bar"], output, error, fs, executor);
@@ -717,7 +717,7 @@ public class CliProjectWorkflowCommandSpecs
     [Fact]
     public async Task ConfigSet_VarsFileAndStageVar_MutuallyExclusive()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync();
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["project", "workflow", "config", "set", "--vars-file", "/vars.json", "--stage-var", "plan.baz=qux"], output, error, fs, executor);
@@ -730,7 +730,7 @@ public class CliProjectWorkflowCommandSpecs
     [Fact]
     public async Task ConfigSet_NoFlags_ExitsNonZero()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync();
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["project", "workflow", "config", "set"], output, error, fs, executor);
@@ -743,7 +743,7 @@ public class CliProjectWorkflowCommandSpecs
     [Fact]
     public async Task ConfigSet_PromptInline_SendsPut()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Put && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/workflow-profile/prompts/greeting")
             {
@@ -765,7 +765,7 @@ public class CliProjectWorkflowCommandSpecs
     [Fact]
     public async Task ConfigSet_PromptFromFile_SendsPutWithFileContent()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Put && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/workflow-profile/prompts/greeting")
             {
@@ -788,7 +788,7 @@ public class CliProjectWorkflowCommandSpecs
     public async Task ConfigSet_Composite_SendsMultipleRequests()
     {
         var callCount = 0;
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             callCount++;
             if (req.Method == HttpMethod.Put && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/workflow-profile/default-template")
@@ -810,7 +810,7 @@ public class CliProjectWorkflowCommandSpecs
     [Fact]
     public async Task ConfigClear_DefaultTemplate_SendsDelete()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Delete && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/workflow-profile/default-template")
             {
@@ -831,7 +831,7 @@ public class CliProjectWorkflowCommandSpecs
     [Fact]
     public async Task ConfigClear_Var_SendsPatchWithNull()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Patch && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/workflow-profile/variables")
             {
@@ -853,7 +853,7 @@ public class CliProjectWorkflowCommandSpecs
     [Fact]
     public async Task ConfigClear_Prompt_SendsDelete()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Delete && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/workflow-profile/prompts/greeting")
             {
@@ -873,7 +873,7 @@ public class CliProjectWorkflowCommandSpecs
     [Fact]
     public async Task ConfigClear_NoFlags_ExitsNonZero()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync();
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["project", "workflow", "config", "clear"], output, error, fs, executor);
@@ -887,7 +887,7 @@ public class CliProjectWorkflowCommandSpecs
     public async Task ConfigClear_Composite_SendsMultipleRequests()
     {
         var callCount = 0;
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             callCount++;
             if (req.Method == HttpMethod.Delete && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/workflow-profile/default-template")
@@ -909,7 +909,7 @@ public class CliProjectWorkflowCommandSpecs
     [Fact]
     public async Task ConfigPreview_SendsPostAndPrintsRendered()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Post && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/workflow-profile/prompts/plan_prompt/preview")
             {
@@ -935,7 +935,7 @@ public class CliProjectWorkflowCommandSpecs
     [Fact]
     public async Task ConfigPreview_EmptyKey_ExitsNonZero()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync();
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["project", "workflow", "config", "preview", ""], output, error, fs, executor);

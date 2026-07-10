@@ -11,7 +11,7 @@ public class MohistCliApiSendAsyncSpecs
         Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>>? responder = null,
         string? activeProjectId = "proj_abc")
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.Create(responder, activeProjectId);
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create(responder, activeProjectId);
         var api = new MohistCliApi(http, output, error, fs, executor);
         return (api, handler);
     }

@@ -5,7 +5,7 @@ import { screen } from '@testing-library/react'
 
 import { EpicStatus, type EpicDetail } from '../../../entities/epic'
 
-import { issues, linkedIssue, renderPage, getActionGroup, getMobileHeaderContainer, getEpicDetailPageContainer, getTitleBlock } from './_epicDetailPageTestHarness'
+import { issues, linkedIssue, renderPage, getActionGroup, getMobileHeaderContainer, getEpicDetailPageContainer, getTitleBlock } from './_epicDetailPageTestUtils'
 
 describe('EpicDetailPage mobile layout structural contract', () => {
   const LONG_CHINESE_TITLE =

@@ -13,7 +13,7 @@ public class CliIssueSessionSpecs
         Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> responder,
         string? activeProjectId = ActiveProjectId)
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.Create(responder, activeProjectId);
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create(responder, activeProjectId);
         return (http, handler, output, error, fs, executor);
     }
 

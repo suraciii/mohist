@@ -9,7 +9,7 @@ public class MohistCliApiPreludeTests
     private static (MohistCliApi Api, StringWriter Output, StringWriter Error) CreateApi(
         string? activeProjectId = "proj_abc")
     {
-        var (_, http, output, error, fs, executor) = CliTestHarness.Create(activeProjectId: activeProjectId);
+        var (_, http, output, error, fs, executor) = CliTestFactory.Create(activeProjectId: activeProjectId);
         var api = new MohistCliApi(http, output, error, fs, executor);
         return (api, output, error);
     }
@@ -156,7 +156,7 @@ public class MohistCliApiPreludeTests
     [Fact]
     public async Task ResolveProject_NeitherBlankActive_WritesNoActiveMessageAndExitsOne()
     {
-        var (_, http, _, error, fs, executor) = CliTestHarness.Create(activeProjectId: null);
+        var (_, http, _, error, fs, executor) = CliTestFactory.Create(activeProjectId: null);
         fs.AddFile(CliStatePath(), "{\"activeProjectId\":\"  \"}");
         var api = new MohistCliApi(http, new StringWriter(), error, fs, executor);
 
@@ -170,7 +170,7 @@ public class MohistCliApiPreludeTests
     [Fact]
     public async Task ResolveProject_NeitherUnreadableActive_WritesNoActiveMessageAndExitsOne()
     {
-        var (_, http, _, error, fs, executor) = CliTestHarness.Create(activeProjectId: null);
+        var (_, http, _, error, fs, executor) = CliTestFactory.Create(activeProjectId: null);
         fs.AddFile(CliStatePath(), "not valid json {{{");
         var api = new MohistCliApi(http, new StringWriter(), error, fs, executor);
 

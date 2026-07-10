@@ -27,7 +27,7 @@ function Wrapper({
   return <div data-testid="transcript">{text}</div>
 }
 
-function renderHookHarness(events: SessionTurn[], isRunning = true) {
+function renderSessionTranscript(events: SessionTurn[], isRunning = true) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const result = render(
     <QueryClientProvider client={queryClient}>
@@ -72,7 +72,7 @@ function persistedEvent(text: string): SessionTurn {
 describe('useSessionTranscript', () => {
   it('does not let running persisted refetch overwrite live transcript tail', () => {
     const initial = [persistedEvent('persisted')]
-    const { rerenderWith } = renderHookHarness(initial)
+    const { rerenderWith } = renderSessionTranscript(initial)
     expect(screen.getByTestId('transcript').textContent).toBe('persisted')
 
     act(() => {
@@ -91,7 +91,7 @@ describe('useSessionTranscript', () => {
 
   it('accepts persisted transcript once the session is no longer running', () => {
     const initial = [persistedEvent('persisted')]
-    const { rerenderWith } = renderHookHarness(initial)
+    const { rerenderWith } = renderSessionTranscript(initial)
 
     act(() => {
       dispatchAgentEvent('message.delta', {

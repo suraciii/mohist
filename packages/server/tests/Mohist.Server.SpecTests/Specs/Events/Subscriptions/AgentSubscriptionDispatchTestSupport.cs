@@ -16,12 +16,12 @@ using Xunit;
 namespace Mohist.Server.SpecTests.Specs.Events.Subscriptions;
 
 /// <summary>
-/// Test harness for <see cref="AgentSubscriptionDispatchHandler"/>. Each
+/// Test support for <see cref="AgentSubscriptionDispatchHandler"/>. Each
 /// test stands up an in-memory SQLite with the AgentSubscription table
 /// materialised (no full EF Migrate() needed — the dispatch handler only
 /// reads/writes AgentSubscription rows + Agent rows + AgentJob launches,
 /// the latter going through the recording <see cref="RecordingAgentLauncher"/>
-/// stub). The harness owns a fresh <see cref="RecordingAgentLauncher"/>
+/// stub). Each <see cref="Build"/> call creates a fresh <see cref="RecordingAgentLauncher"/>
 /// instance per test so the test can assert on captured launch calls.
 /// </summary>
 internal static class AgentSubscriptionDispatchTestSupport

@@ -10,7 +10,7 @@ public class CliIssueRejectAndStopSpecs
     [Fact]
     public async Task IssueReject_SuccessPath_SendsPostWithMessageAndPrintsConfirmation()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Post)
             {
@@ -45,7 +45,7 @@ public class CliIssueRejectAndStopSpecs
     [Fact]
     public async Task IssueReject_MissingMessage_PrintsValidationErrorAndExitsWithCodeOne()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync();
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["issue", "reject", "42"], output, error, fs, executor);
@@ -59,7 +59,7 @@ public class CliIssueRejectAndStopSpecs
     [Fact]
     public async Task IssueReject_EmptyMessage_PrintsValidationErrorAndExitsWithCodeOne()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync();
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["issue", "reject", "42", "--message", "   "], output, error, fs, executor);
@@ -73,7 +73,7 @@ public class CliIssueRejectAndStopSpecs
     [Fact]
     public async Task IssueReject_AcceptsProjectIdFlag()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Post)
             {
@@ -99,7 +99,7 @@ public class CliIssueRejectAndStopSpecs
     [Fact]
     public async Task IssueStop_SuccessPath_SendsPostAndPrintsConfirmation()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Post)
             {
@@ -128,7 +128,7 @@ public class CliIssueRejectAndStopSpecs
     [Fact]
     public async Task IssueStop_HelpExplainsTerminalAndDistinguishesFromForceStop()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync();
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["issue", "stop", "--help"], output, error, fs, executor);
@@ -144,7 +144,7 @@ public class CliIssueRejectAndStopSpecs
     [Fact]
     public async Task IssueStop_AcceptsProjectIdFlag()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Post)
             {

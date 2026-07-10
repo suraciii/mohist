@@ -164,8 +164,8 @@ public class TransactionalEventAppendSpecs : IAsyncLifetime
     public async Task SaveAsync_RunWithoutIssueAnnotation_DoesNotStampIssueIdExtension()
     {
         // A WorkflowRun that is not bound to an issue (e.g. a workflow
-        // started by the harness or by an ad-hoc API call without an
-        // issue context) must NOT stamp a phantom issueid — the
+        // started by an ad-hoc API call without an issue context) must
+        // NOT stamp a phantom issueid — the
         // extension is conditional on the annotation being present.
         var store = new WorkflowRunStore(_dbFactory, _eventStore);
         var run = new WorkflowRun

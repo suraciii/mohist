@@ -6,7 +6,7 @@
 import { describe, expect, it } from 'vitest'
 import { screen } from '@testing-library/react'
 import type { EpicDetail } from '../../../entities/epic'
-import { renderPage } from './_epicDetailPageTestHarness'
+import { renderPage } from './_epicDetailPageTestUtils'
 
 const epic = {
   id: 'epic-12345678',

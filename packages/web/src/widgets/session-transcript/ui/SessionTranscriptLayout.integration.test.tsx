@@ -151,7 +151,7 @@ describe('SessionTranscriptLayout TOC + toolbar + responsive integration', () =>
         makeTurn({ id: 'b' }),
       ]
 
-      function Harness() {
+      function AppendableTranscript() {
         const [turns, setTurns] = useState<DisplayTurn[]>(initialTurns)
         return (
           <div>
@@ -161,7 +161,7 @@ describe('SessionTranscriptLayout TOC + toolbar + responsive integration', () =>
         )
       }
 
-      const { getByTestId } = render(<Harness />)
+      const { getByTestId } = render(<AppendableTranscript />)
 
       const listBefore = document.querySelector('[data-turn-toc-list]')
       const beforeItems = listBefore?.querySelectorAll('[data-turn-toc-entry]') ?? []
@@ -181,7 +181,7 @@ describe('SessionTranscriptLayout TOC + toolbar + responsive integration', () =>
     })
 
     it('does not introduce any new TOC rail above the existing one on re-render', () => {
-      function Harness() {
+      function AppendableTranscript() {
         const [turns, setTurns] = useState<DisplayTurn[]>([makeTurn({ id: 'a' })])
         return (
           <div>
@@ -191,7 +191,7 @@ describe('SessionTranscriptLayout TOC + toolbar + responsive integration', () =>
         )
       }
 
-      const { getByTestId } = render(<Harness />)
+      const { getByTestId } = render(<AppendableTranscript />)
       const railsBefore = document.querySelectorAll('[data-turn-toc-rail]').length
 
       fireEvent.click(getByTestId('append'))

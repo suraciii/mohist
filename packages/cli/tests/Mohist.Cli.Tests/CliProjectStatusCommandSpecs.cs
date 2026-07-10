@@ -25,7 +25,7 @@ public class CliProjectStatusCommandSpecs
     [Fact]
     public async Task Project_Help_ListsStatusAlongsideOtherVerbs()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.Create();
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["project", "--help"], output, error, fs, executor);
@@ -46,7 +46,7 @@ public class CliProjectStatusCommandSpecs
     [Fact]
     public async Task ProjectStatus_Help_AdvertisesNoProjectArgument()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.Create();
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["project", "status", "--help"], output, error, fs, executor);
@@ -63,7 +63,7 @@ public class CliProjectStatusCommandSpecs
     [Fact]
     public async Task ProjectStatus_Help_AdvertisesNoProjectRefFlags()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.Create();
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["project", "status", "--help"], output, error, fs, executor);
@@ -80,7 +80,7 @@ public class CliProjectStatusCommandSpecs
     [Fact]
     public async Task ProjectStatus_HitsStatusEndpointAndRendersResponse()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.Create(
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create(
             (_, _) => Task.FromResult(RecordingHttpHandler.Json(new
             {
                 success = true,
@@ -105,7 +105,7 @@ public class CliProjectStatusCommandSpecs
     [Fact]
     public async Task ProjectStatus_ServerUnreachable_EmitsLegacyGuidanceAndExitsNonZero()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.Create(
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create(
             (_, _) => throw new HttpRequestException("connection refused"),
             activeProjectId: null);
 
@@ -130,7 +130,7 @@ public class CliProjectStatusCommandSpecs
     [Fact]
     public async Task LegacyRootStatus_NoLongerResolvesAndExitsNonZero()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.Create();
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["status"], output, error, fs, executor);

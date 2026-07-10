@@ -12,7 +12,7 @@ public class CliWorkflowControlSpecs
     [Fact]
     public async Task WorkflowHelp_ExposesControlVerbsAndNoRerunFromStageSubcommand()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync();
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["workflow", "--help"], output, error, fs, executor);
@@ -30,7 +30,7 @@ public class CliWorkflowControlSpecs
     [Fact]
     public async Task Approve_SendsPostToRunScopedEndpoint_WithoutProjectOrIssue()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Post && req.RequestUri?.PathAndQuery == $"/api/workflow-runs/{WrId}/approve")
                 return RecordingHttpHandler.Json(new { success = true, data = new { } });
@@ -48,7 +48,7 @@ public class CliWorkflowControlSpecs
     [Fact]
     public async Task Approve_DoesNotReverseResolveToIssueEndpoint()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Post && req.RequestUri?.PathAndQuery == $"/api/workflow-runs/{WrId}/approve")
                 return RecordingHttpHandler.Json(new { success = true, data = new { } });
@@ -65,7 +65,7 @@ public class CliWorkflowControlSpecs
     [Fact]
     public async Task Approve_ServerNotActive_PrintsMessageAndCodeToStderr()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Post)
                 return RecordingHttpHandler.JsonError(
@@ -87,7 +87,7 @@ public class CliWorkflowControlSpecs
     [Fact]
     public async Task Reject_MissingMessage_PrintsValidationErrorAndMakesNoRequest()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync();
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["workflow", "reject", WrId], output, error, fs, executor);
@@ -100,7 +100,7 @@ public class CliWorkflowControlSpecs
     [Fact]
     public async Task Reject_WhitespaceMessage_PrintsValidationErrorAndMakesNoRequest()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync();
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["workflow", "reject", WrId, "--message", "   "], output, error, fs, executor);
@@ -113,7 +113,7 @@ public class CliWorkflowControlSpecs
     [Fact]
     public async Task Reject_WithMessage_ForwardsReasonInBody()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Post && req.RequestUri?.PathAndQuery == $"/api/workflow-runs/{WrId}/reject")
                 return RecordingHttpHandler.Json(new { success = true, data = new { } });
@@ -134,7 +134,7 @@ public class CliWorkflowControlSpecs
     [Fact]
     public async Task Reject_ServerError_SurfacesMessageAndCode()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Post)
                 return RecordingHttpHandler.JsonError(
@@ -156,7 +156,7 @@ public class CliWorkflowControlSpecs
     [Fact]
     public async Task Retry_OnFailedRun_SendsPostToRetryEndpoint()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Post && req.RequestUri?.PathAndQuery == $"/api/workflow-runs/{WrId}/retry")
                 return RecordingHttpHandler.Json(new { success = true, data = new { } });
@@ -174,7 +174,7 @@ public class CliWorkflowControlSpecs
     [Fact]
     public async Task Rerun_NoFlag_PostsToRerunEndpoint()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Post && req.RequestUri?.PathAndQuery == $"/api/workflow-runs/{WrId}/rerun")
                 return RecordingHttpHandler.Json(new { success = true, data = new { } });
@@ -195,7 +195,7 @@ public class CliWorkflowControlSpecs
     [Fact]
     public async Task Rerun_WithFromStage_PostsToRerunFromStageEndpoint()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Post && req.RequestUri?.PathAndQuery == $"/api/workflow-runs/{WrId}/rerun-from-stage")
                 return RecordingHttpHandler.Json(new { success = true, data = new { } });
@@ -215,7 +215,7 @@ public class CliWorkflowControlSpecs
     [Fact]
     public async Task Rerun_BlankFromStage_RejectsLocallyAndMakesNoRequest()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync();
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["workflow", "rerun", WrId, "--from-stage", "   "], output, error, fs, executor);
@@ -231,7 +231,7 @@ public class CliWorkflowControlSpecs
     [InlineData("active_work_in_range", "Stage 'build' has active work in range")]
     public async Task Rerun_FromStage_StructuredErrors_AreSurfacedVerbatim(string code, string message)
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Post)
             {
@@ -255,7 +255,7 @@ public class CliWorkflowControlSpecs
     [Fact]
     public async Task Resume_AfterPause_PostsToResumeEndpoint()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Post && req.RequestUri?.PathAndQuery == $"/api/workflow-runs/{WrId}/resume")
                 return RecordingHttpHandler.Json(new { success = true, data = new { } });
@@ -273,7 +273,7 @@ public class CliWorkflowControlSpecs
     [Fact]
     public async Task Resume_AfterStop_ServerRejectsAsNotActive()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Post)
                 return RecordingHttpHandler.JsonError(
@@ -293,7 +293,7 @@ public class CliWorkflowControlSpecs
     [Fact]
     public async Task Pause_SendsPostToPauseEndpoint()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Post && req.RequestUri?.PathAndQuery == $"/api/workflow-runs/{WrId}/pause")
                 return RecordingHttpHandler.Json(new { success = true, data = new { } });
@@ -311,7 +311,7 @@ public class CliWorkflowControlSpecs
     [Fact]
     public async Task Stop_SendsPostToStopEndpoint()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Post && req.RequestUri?.PathAndQuery == $"/api/workflow-runs/{WrId}/stop")
                 return RecordingHttpHandler.Json(new { success = true, data = new { } });
@@ -329,7 +329,7 @@ public class CliWorkflowControlSpecs
     [Fact]
     public async Task Stop_HelpExplainsTerminalPauseAndForceStop()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync();
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["workflow", "stop", "--help"], output, error, fs, executor);
@@ -345,7 +345,7 @@ public class CliWorkflowControlSpecs
     [Fact]
     public async Task Pause_HelpExplainsResumability()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync();
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["workflow", "pause", "--help"], output, error, fs, executor);
@@ -364,7 +364,7 @@ public class CliWorkflowControlSpecs
     [InlineData("stop")]
     public async Task ActiveOnly_AndRetry_Verbs_DoNotResolveProject(string verb)
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Post)
                 return RecordingHttpHandler.Json(new { success = true, data = new { } });
@@ -382,7 +382,7 @@ public class CliWorkflowControlSpecs
     [Fact]
     public async Task Approve_OutputJson_EmitsRawJsonPayload()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Post)
                 return RecordingHttpHandler.Json(new
@@ -405,7 +405,7 @@ public class CliWorkflowControlSpecs
     [Fact]
     public async Task Approve_DryRun_PrintsIntendedRequestAndMakesNoHttpCall()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync();
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["workflow", "approve", WrId, "--dry-run"], output, error, fs, executor);
@@ -420,7 +420,7 @@ public class CliWorkflowControlSpecs
     [Fact]
     public async Task Reject_DryRun_PrintsIntendedRequestWithMessage()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync();
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["workflow", "reject", WrId, "--message", "nope", "--dry-run"], output, error, fs, executor);
@@ -435,7 +435,7 @@ public class CliWorkflowControlSpecs
     [Fact]
     public async Task Rerun_DryRun_NoFlag_PrintsRerunPath()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync();
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["workflow", "rerun", WrId, "--dry-run"], output, error, fs, executor);
@@ -450,7 +450,7 @@ public class CliWorkflowControlSpecs
     [Fact]
     public async Task Rerun_DryRun_WithFromStage_PrintsRerunFromStagePath()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync();
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["workflow", "rerun", WrId, "--from-stage", "build", "--dry-run"], output, error, fs, executor);
@@ -466,7 +466,7 @@ public class CliWorkflowControlSpecs
     [Fact]
     public async Task Approve_NotFound_PrintsErrorAndExitsWithFour()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Post)
                 return RecordingHttpHandler.JsonError(
@@ -490,7 +490,7 @@ public class CliWorkflowControlSpecs
     [Fact]
     public async Task IssueApprove_Regression_StillHitsIssueScopedEndpoint()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Post && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/issues/42/approve")
                 return RecordingHttpHandler.Json(new { success = true, data = new { } });
@@ -508,7 +508,7 @@ public class CliWorkflowControlSpecs
     [Fact]
     public async Task IssueRerunFromStage_Regression_StillHitsIssueScopedEndpoint()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Post && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/issues/42/rerun-from-stage")
                 return RecordingHttpHandler.Json(new { success = true, data = new { } });
@@ -528,7 +528,7 @@ public class CliWorkflowControlSpecs
     [Fact]
     public async Task IssueReject_Regression_StillHitsIssueScopedEndpoint()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Post && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/issues/42/reject")
                 return RecordingHttpHandler.Json(new { success = true, data = new { } });
@@ -546,7 +546,7 @@ public class CliWorkflowControlSpecs
     [Fact]
     public async Task IssueForceStop_Regression_StillHitsIssueScopedEndpoint()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Post && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/issues/42/force-stop")
                 return RecordingHttpHandler.Json(new { success = true, data = new { } });
@@ -564,7 +564,7 @@ public class CliWorkflowControlSpecs
     [Fact]
     public async Task WorkflowList_IsNoLongerExposed()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync();
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["workflow", "list"], output, error, fs, executor);

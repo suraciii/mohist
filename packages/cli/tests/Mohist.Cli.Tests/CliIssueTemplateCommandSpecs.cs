@@ -38,7 +38,7 @@ public class CliIssueTemplateCommandSpecs
     };
 
     private static (RecordingHttpHandler Handler, HttpClient Http, StringWriter Output, StringWriter Error, FakeFileSystem Fs, FakeCommandExecutor Executor)
-        CreateHarness(string? activeProjectId = "proj_abc", Func<HttpRequestMessage, HttpResponseMessage>? responder = null)
+        CreateIssueTemplateSetup(string? activeProjectId = "proj_abc", Func<HttpRequestMessage, HttpResponseMessage>? responder = null)
     {
         var defaultResponder = new Func<HttpRequestMessage, HttpResponseMessage>(req =>
         {
@@ -94,7 +94,7 @@ public class CliIssueTemplateCommandSpecs
             }
             return RecordingHttpHandler.Json(new { success = true, data = new { } });
         });
-        return CliTestHarness.Create(
+        return CliTestFactory.Create(
             (req, _) => Task.FromResult(responder is null ? defaultResponder(req) : responder(req)),
             activeProjectId);
     }
@@ -102,7 +102,7 @@ public class CliIssueTemplateCommandSpecs
     [Fact]
     public async Task TemplateList_HitsIssueTemplatesListEndpoint()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateIssueTemplateSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["issue", "template", "list"], output, error, fs, executor);
@@ -116,7 +116,7 @@ public class CliIssueTemplateCommandSpecs
     [Fact]
     public async Task TemplateList_WithLsAlias_HitsSameEndpoint()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateIssueTemplateSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["issue", "template", "ls"], output, error, fs, executor);
@@ -130,7 +130,7 @@ public class CliIssueTemplateCommandSpecs
     [Fact]
     public async Task TemplateList_NoActiveProject_ExitsWithError()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness(activeProjectId: null);
+        var (handler, http, output, error, fs, executor) = CreateIssueTemplateSetup(activeProjectId: null);
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["issue", "template", "list"], output, error, fs, executor);
@@ -143,7 +143,7 @@ public class CliIssueTemplateCommandSpecs
     [Fact]
     public async Task TemplateList_WithExplicitProject_ResolvesProject()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateIssueTemplateSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["issue", "template", "list", "--project", "proj_xyz"], output, error, fs, executor);
@@ -156,7 +156,7 @@ public class CliIssueTemplateCommandSpecs
     [Fact]
     public async Task TemplateList_Table_RendersNameAndDescription()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateIssueTemplateSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["issue", "template", "list", "-o", "table"], output, error, fs, executor);
@@ -176,7 +176,7 @@ public class CliIssueTemplateCommandSpecs
     [Fact]
     public async Task TemplateList_Json_PassesThroughServerEnvelope()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateIssueTemplateSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["issue", "template", "list"], output, error, fs, executor);
@@ -247,7 +247,7 @@ public class CliIssueTemplateCommandSpecs
     [Fact]
     public async Task TemplateGet_FeatureTemplate_HitsFeaturePath()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateIssueTemplateSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["issue", "template", "get", "feature"], output, error, fs, executor);
@@ -262,7 +262,7 @@ public class CliIssueTemplateCommandSpecs
     [Fact]
     public async Task TemplateGet_LegacyAlias_HitsMohistDefaultPath()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateIssueTemplateSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["issue", "template", "get", "mohist/default"], output, error, fs, executor);
@@ -312,7 +312,7 @@ public class CliIssueTemplateCommandSpecs
     [Fact]
     public async Task TemplateGet_NoActiveProject_ExitsWithError()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness(activeProjectId: null);
+        var (handler, http, output, error, fs, executor) = CreateIssueTemplateSetup(activeProjectId: null);
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["issue", "template", "get", "feature"], output, error, fs, executor);
@@ -325,7 +325,7 @@ public class CliIssueTemplateCommandSpecs
     [Fact]
     public async Task TemplateGet_Table_DisplaysMetadataAndBody()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateIssueTemplateSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["issue", "template", "get", "feature", "-o", "table"], output, error, fs, executor);
@@ -350,7 +350,7 @@ public class CliIssueTemplateCommandSpecs
     [Fact]
     public async Task TemplateGet_PrintsAllFiveSectionTitlesInOrder()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateIssueTemplateSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["issue", "template", "get", "feature", "-o", "table"], output, error, fs, executor);
@@ -372,7 +372,7 @@ public class CliIssueTemplateCommandSpecs
     [Fact]
     public async Task TemplateGet_FeatureAndLegacyAlias_RenderIdentically()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateIssueTemplateSetup();
 
         var exitCode1 = await MohistCliCommands.RunAsync(
             http, ["issue", "template", "get", "feature", "-o", "table"], output, error, fs, executor);
@@ -418,7 +418,7 @@ public class CliIssueTemplateCommandSpecs
     [Fact]
     public async Task TemplateGet_Json_PassesThroughServerEnvelope()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateIssueTemplateSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["issue", "template", "get", "feature"], output, error, fs, executor);
@@ -460,7 +460,7 @@ public class CliIssueTemplateCommandSpecs
     [Fact]
     public async Task TemplateList_InvalidOutputMode_ReturnsExitCodeOne()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateIssueTemplateSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["issue", "template", "list", "-o", "yaml"], output, error, fs, executor);

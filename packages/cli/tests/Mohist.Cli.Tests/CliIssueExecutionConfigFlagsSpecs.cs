@@ -9,9 +9,9 @@ namespace Mohist.Cli.Tests;
 public class CliIssueExecutionConfigFlagsSpecs
 {
     private static (RecordingHttpHandler Handler, HttpClient Http, StringWriter Output, StringWriter Error, FakeFileSystem Fs, FakeCommandExecutor Executor)
-        CreateHarness(string? activeProjectId = "proj_abc")
+        CreateIssueCommandSetup(string? activeProjectId = "proj_abc")
     {
-        return CliTestHarness.Create(async (req, _) =>
+        return CliTestFactory.Create(async (req, _) =>
         {
             if (req.Method == HttpMethod.Post)
             {
@@ -60,7 +60,7 @@ public class CliIssueExecutionConfigFlagsSpecs
     [Fact]
     public async Task IssueCreate_RepositoryFlag_IsSentInPostBody()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateIssueCommandSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["issue", "create", "My issue", "--body", "Hello", "--repository", "feature-repo"], output, error, fs, executor);
@@ -76,7 +76,7 @@ public class CliIssueExecutionConfigFlagsSpecs
     [Fact]
     public async Task IssueCreate_NoRepositoryFlag_OmitsRepositoryNameFromPostBody()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateIssueCommandSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["issue", "create", "My issue", "--body", "Hello"], output, error, fs, executor);
@@ -90,7 +90,7 @@ public class CliIssueExecutionConfigFlagsSpecs
     [Fact]
     public async Task IssueCreate_StageModelsInlineJson_IsSentInPostBody()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateIssueCommandSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
@@ -108,7 +108,7 @@ public class CliIssueExecutionConfigFlagsSpecs
     [Fact]
     public async Task IssueCreate_StageModelsFromFile_IsReadAndSentAsParsedJson()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateIssueCommandSetup();
         fs.AddFile("/tmp/models.json", "{\"plan\":\"anthropic/claude-sonnet\",\"check\":\"openai/gpt-5\"}");
 
         var exitCode = await MohistCliCommands.RunAsync(
@@ -127,7 +127,7 @@ public class CliIssueExecutionConfigFlagsSpecs
     [Fact]
     public async Task IssueCreate_StageModelVariantsFromFile_IsReadAndSentAsParsedJson()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateIssueCommandSetup();
         fs.AddFile("/tmp/variants.json", "{\"plan\":\"max\",\"check\":\"high\"}");
 
         var exitCode = await MohistCliCommands.RunAsync(
@@ -146,7 +146,7 @@ public class CliIssueExecutionConfigFlagsSpecs
     [Fact]
     public async Task IssueCreate_StageModelsInvalidJson_ExitsWithCodeOne()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateIssueCommandSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["issue", "create", "My issue", "--body", "Hello", "--stage-models", "not-json"],
@@ -161,7 +161,7 @@ public class CliIssueExecutionConfigFlagsSpecs
     [Fact]
     public async Task IssueCreate_StageModelsFileMissing_ExitsWithCodeOne()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateIssueCommandSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["issue", "create", "My issue", "--body", "Hello", "--stage-models", "@/tmp/does-not-exist.json"],
@@ -176,7 +176,7 @@ public class CliIssueExecutionConfigFlagsSpecs
     [Fact]
     public async Task IssueCreate_NoStageModelFlags_OmitsFieldsFromPostBody()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateIssueCommandSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["issue", "create", "My issue", "--body", "Hello"], output, error, fs, executor);
@@ -191,7 +191,7 @@ public class CliIssueExecutionConfigFlagsSpecs
     [Fact]
     public async Task IssueUpdate_StageModelsInlineJson_IsSentInPatchBody()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateIssueCommandSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
@@ -212,7 +212,7 @@ public class CliIssueExecutionConfigFlagsSpecs
     [Fact]
     public async Task IssueUpdate_StageModelVariantsFromFile_IsReadAndSentAsParsedJson()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateIssueCommandSetup();
         fs.AddFile("/tmp/variants.json", "{\"plan\":\"max\",\"check\":\"high\"}");
 
         var exitCode = await MohistCliCommands.RunAsync(
@@ -232,7 +232,7 @@ public class CliIssueExecutionConfigFlagsSpecs
     [Fact]
     public async Task IssueUpdate_RepositoryFlag_ExitsWithCodeOneAndClearError()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateIssueCommandSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["issue", "update", "1", "--repository", "other-repo"], output, error, fs, executor);
@@ -247,7 +247,7 @@ public class CliIssueExecutionConfigFlagsSpecs
     [Fact]
     public async Task IssueUpdate_StageModelsInvalidJson_ExitsWithCodeOne()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateIssueCommandSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["issue", "update", "1", "--stage-models", "not-json"],
@@ -262,7 +262,7 @@ public class CliIssueExecutionConfigFlagsSpecs
     [Fact]
     public async Task IssueUpdate_StageModelsWithoutFileFlag_OmitsFieldFromPatchBody()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateIssueCommandSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["issue", "update", "1", "--title", "X"], output, error, fs, executor);
@@ -277,7 +277,7 @@ public class CliIssueExecutionConfigFlagsSpecs
     [Fact]
     public async Task IssueCreate_AllExecutionConfigFlags_AreSentInPostBody()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateIssueCommandSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,

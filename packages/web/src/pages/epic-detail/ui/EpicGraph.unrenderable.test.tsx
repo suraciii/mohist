@@ -6,7 +6,7 @@ import { http, HttpResponse } from 'msw'
 import { EpicStatus, type EpicDetail } from '../../../entities/epic'
 import type { DependencyGraphWidgetProps } from '../../../widgets/epic-dependency-graph/ui/DependencyGraphWidget'
 import { DependencyGraphErrorBoundary } from '../../../widgets/epic-dependency-graph/ui/DependencyGraphErrorBoundary'
-import { issues, linkedIssue, renderPage as renderEpicDetailPage } from './_epicDetailPageTestHarness'
+import { issues, linkedIssue, renderPage as renderEpicDetailPage } from './_epicDetailPageTestUtils'
 import type { EpicDetailPageComponents } from './EpicDetailPage'
 import { useMswServer } from '../../../../tests/support/msw'
 

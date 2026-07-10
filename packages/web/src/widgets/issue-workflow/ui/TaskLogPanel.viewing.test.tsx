@@ -23,8 +23,8 @@ import {
   projects,
   readBlobText,
   recordedInvokes,
-  renderWithHarness,
-  type TestHarness,
+  renderWithTaskLogProviders,
+  type TaskLogTestState,
 } from './_taskLogPanelTestUtils'
 
 const _taskLogPageRef: { current: TaskLogPage | undefined } = { current: undefined }
@@ -51,7 +51,7 @@ function TaskLogPanel(props: Omit<TaskLogPanelProps, 'taskLogHook'>) {
   return <DefaultTaskLogPanel {...props} taskLogHook={taskLogHook} />
 }
 
-function buildMswHarness(initialPage: TaskLogPage | undefined): TestHarness {
+function createTaskLogTestState(initialPage: TaskLogPage | undefined): TaskLogTestState {
   const queryClient = newQueryClient()
   _taskLogPageRef.current = initialPage
   return {
@@ -79,16 +79,16 @@ describe('TaskLogPanel — viewing enhancement (Phase 3a T-001)', () => {
   })
 
   it('renders one chip per distinct source in lexicographic order with no absent-source chips', async () => {
-    const harness = buildMswHarness(makePage([
+    const testState = createTaskLogTestState(makePage([
       makeLine({ seq: 1, source: 'cleanup', text: 'rm -rf tmp' }),
       makeLine({ seq: 2, source: 'workspace-prep', text: 'cloning' }),
       makeLine({ seq: 3, source: 'action:rebase', text: 'rebasing' }),
       makeLine({ seq: 4, source: 'branch-check', text: 'on master' }),
     ]))
 
-    renderWithHarness(
+    renderWithTaskLogProviders(
       <TaskLogPanel issueNumber={161} taskId="build-task-1" workflowRunId="wr-1" taskStatus="failed" />,
-      harness,
+      testState,
     )
 
     await screen.findByTestId('task-log-panel')
@@ -103,22 +103,22 @@ describe('TaskLogPanel — viewing enhancement (Phase 3a T-001)', () => {
   })
 
   it('narrows visible lines in real time as the user types a keyword (case-insensitive)', async () => {
-    const harness = buildMswHarness(makePage([
+    const testState = createTaskLogTestState(makePage([
       makeLine({ seq: 1, source: 'workspace-prep', text: 'Cloning repo' }),
       makeLine({ seq: 2, source: 'action:rebase', text: 'CONFLICT (content)' }),
       makeLine({ seq: 3, source: 'action:rebase', text: 'Patch failed' }),
     ]))
 
     const user = userEvent.setup()
-    renderWithHarness(
+    renderWithTaskLogProviders(
       <TaskLogPanel issueNumber={161} taskId="build-task-1" workflowRunId="wr-1" taskStatus="failed" />,
-      harness,
+      testState,
     )
 
     await screen.findByTestId('task-log-panel')
     await screen.findByText('Cloning repo')
 
-    const fetchSpy = vi.spyOn(harness.queryClient, 'fetchQuery')
+    const fetchSpy = vi.spyOn(testState.queryClient, 'fetchQuery')
     const input = await screen.findByTestId('task-log-search-input')
     await user.type(input, 'CONFLICT')
 
@@ -131,15 +131,15 @@ describe('TaskLogPanel — viewing enhancement (Phase 3a T-001)', () => {
   })
 
   it('searches source as well as text (case-insensitive)', async () => {
-    const harness = buildMswHarness(makePage([
+    const testState = createTaskLogTestState(makePage([
       makeLine({ seq: 1, source: 'action:rebase', text: 'starting' }),
       makeLine({ seq: 2, source: 'branch-check', text: 'on master' }),
     ]))
 
     const user = userEvent.setup()
-    renderWithHarness(
+    renderWithTaskLogProviders(
       <TaskLogPanel issueNumber={161} taskId="build-task-1" workflowRunId="wr-1" taskStatus="failed" />,
-      harness,
+      testState,
     )
 
     await screen.findByTestId('task-log-panel')
@@ -154,16 +154,16 @@ describe('TaskLogPanel — viewing enhancement (Phase 3a T-001)', () => {
   })
 
   it('toggling a source chip hides only its lines while keeping other sources visible (opt-out semantics)', async () => {
-    const harness = buildMswHarness(makePage([
+    const testState = createTaskLogTestState(makePage([
       makeLine({ seq: 1, source: 'action:rebase', text: 'rebasing' }),
       makeLine({ seq: 2, source: 'branch-check', text: 'on master' }),
       makeLine({ seq: 3, source: 'cleanup', text: 'rm tmp' }),
     ]))
 
     const user = userEvent.setup()
-    renderWithHarness(
+    renderWithTaskLogProviders(
       <TaskLogPanel issueNumber={161} taskId="build-task-1" workflowRunId="wr-1" taskStatus="failed" />,
-      harness,
+      testState,
     )
 
     await screen.findByTestId('task-log-panel')
@@ -179,13 +179,13 @@ describe('TaskLogPanel — viewing enhancement (Phase 3a T-001)', () => {
   })
 
   it('newly-arrived source from a live delta remains visible by default (opt-out set)', async () => {
-    const harness = buildMswHarness(makePage([
+    const testState = createTaskLogTestState(makePage([
       makeLine({ seq: 1, source: 'workspace-prep', text: 'cloning' }),
     ]))
 
-    renderWithHarness(
+    renderWithTaskLogProviders(
       <TaskLogPanel issueNumber={161} taskId="build-task-1" workflowRunId="wr-1" taskStatus="running" />,
-      harness,
+      testState,
     )
 
     await screen.findByTestId('task-log-panel')
@@ -211,16 +211,16 @@ describe('TaskLogPanel — viewing enhancement (Phase 3a T-001)', () => {
   })
 
   it('composes search AND source filter so a line must pass both', async () => {
-    const harness = buildMswHarness(makePage([
+    const testState = createTaskLogTestState(makePage([
       makeLine({ seq: 1, source: 'action:rebase', text: 'CONFLICT (content)' }),
       makeLine({ seq: 2, source: 'action:rebase', text: 'rebasing' }),
       makeLine({ seq: 3, source: 'cleanup', text: 'CONFLICT during cleanup' }),
     ]))
 
     const user = userEvent.setup()
-    renderWithHarness(
+    renderWithTaskLogProviders(
       <TaskLogPanel issueNumber={161} taskId="build-task-1" workflowRunId="wr-1" taskStatus="failed" />,
-      harness,
+      testState,
     )
 
     await screen.findByTestId('task-log-panel')
@@ -236,16 +236,16 @@ describe('TaskLogPanel — viewing enhancement (Phase 3a T-001)', () => {
   })
 
   it('exports the currently filtered view as a .txt Blob with the convention filename (filter applied)', async () => {
-    const harness = buildMswHarness(makePage([
+    const testState = createTaskLogTestState(makePage([
       makeLine({ seq: 1, source: 'workspace-prep', text: 'cloning' }),
       makeLine({ seq: 2, source: 'action:rebase', text: 'rebasing-1' }),
       makeLine({ seq: 3, source: 'action:rebase', text: 'rebasing-2' }),
     ]))
 
     const user = userEvent.setup()
-    renderWithHarness(
+    renderWithTaskLogProviders(
       <TaskLogPanel issueNumber={161} taskId="build-task-1" workflowRunId="wr-1" taskStatus="failed" />,
-      harness,
+      testState,
     )
 
     await screen.findByTestId('task-log-panel')
@@ -257,7 +257,7 @@ describe('TaskLogPanel — viewing enhancement (Phase 3a T-001)', () => {
     })
 
     const capture = installDownloadSpy()
-    const fetchSpy = vi.spyOn(harness.queryClient, 'fetchQuery')
+    const fetchSpy = vi.spyOn(testState.queryClient, 'fetchQuery')
 
     const download = await screen.findByTestId('task-log-download-button')
     await user.click(download)
@@ -275,14 +275,14 @@ describe('TaskLogPanel — viewing enhancement (Phase 3a T-001)', () => {
   })
 
   it('preserves colon-containing task ids in the download filename', async () => {
-    const harness = buildMswHarness(makePage([
+    const testState = createTaskLogTestState(makePage([
       makeLine({ seq: 1, source: 'workspace-prep', text: 'line-1' }),
     ]))
 
     const user = userEvent.setup()
-    renderWithHarness(
+    renderWithTaskLogProviders(
       <TaskLogPanel issueNumber={161} taskId="integrate:prepare" workflowRunId="wr-1" taskStatus="failed" />,
-      harness,
+      testState,
     )
 
     await screen.findByTestId('task-log-panel')
@@ -298,16 +298,16 @@ describe('TaskLogPanel — viewing enhancement (Phase 3a T-001)', () => {
   })
 
   it('exports the full loaded log when no filter is active', async () => {
-    const harness = buildMswHarness(makePage([
+    const testState = createTaskLogTestState(makePage([
       makeLine({ seq: 1, source: 'workspace-prep', text: 'line-1' }),
       makeLine({ seq: 2, source: 'action:rebase', text: 'line-2' }),
       makeLine({ seq: 3, source: 'cleanup', text: 'line-3' }),
     ]))
 
     const user = userEvent.setup()
-    renderWithHarness(
+    renderWithTaskLogProviders(
       <TaskLogPanel issueNumber={161} taskId="build-task-1" workflowRunId="wr-1" taskStatus="failed" />,
-      harness,
+      testState,
     )
 
     await screen.findByTestId('task-log-panel')
@@ -326,14 +326,14 @@ describe('TaskLogPanel — viewing enhancement (Phase 3a T-001)', () => {
   })
 
   it('disables the download button when the filtered set is empty', async () => {
-    const harness = buildMswHarness(makePage([
+    const testState = createTaskLogTestState(makePage([
       makeLine({ seq: 1, source: 'workspace-prep', text: 'cloning' }),
     ]))
 
     const user = userEvent.setup()
-    renderWithHarness(
+    renderWithTaskLogProviders(
       <TaskLogPanel issueNumber={161} taskId="build-task-1" workflowRunId="wr-1" taskStatus="failed" />,
-      harness,
+      testState,
     )
 
     await screen.findByTestId('task-log-panel')
@@ -345,14 +345,14 @@ describe('TaskLogPanel — viewing enhancement (Phase 3a T-001)', () => {
   })
 
   it('opens with the default state: empty search input, every source chip enabled, every loaded line visible', async () => {
-    const harness = buildMswHarness(makePage([
+    const testState = createTaskLogTestState(makePage([
       makeLine({ seq: 1, source: 'workspace-prep', text: 'line-1' }),
       makeLine({ seq: 2, source: 'action:rebase', text: 'line-2' }),
     ]))
 
-    renderWithHarness(
+    renderWithTaskLogProviders(
       <TaskLogPanel issueNumber={161} taskId="build-task-1" workflowRunId="wr-1" taskStatus="failed" />,
-      harness,
+      testState,
     )
 
     await screen.findByTestId('task-log-panel')
@@ -372,14 +372,14 @@ describe('TaskLogPanel — viewing enhancement (Phase 3a T-001)', () => {
   })
 
   it('renders the no-search-match boundary when search yields zero results', async () => {
-    const harness = buildMswHarness(makePage([
+    const testState = createTaskLogTestState(makePage([
       makeLine({ seq: 1, source: 'workspace-prep', text: 'cloning' }),
     ]))
 
     const user = userEvent.setup()
-    renderWithHarness(
+    renderWithTaskLogProviders(
       <TaskLogPanel issueNumber={161} taskId="build-task-1" workflowRunId="wr-1" taskStatus="failed" />,
-      harness,
+      testState,
     )
 
     await screen.findByTestId('task-log-panel')
@@ -391,15 +391,15 @@ describe('TaskLogPanel — viewing enhancement (Phase 3a T-001)', () => {
   })
 
   it('renders the no-source-filter boundary when all sources are disabled and search is empty', async () => {
-    const harness = buildMswHarness(makePage([
+    const testState = createTaskLogTestState(makePage([
       makeLine({ seq: 1, source: 'workspace-prep', text: 'cloning' }),
       makeLine({ seq: 2, source: 'cleanup', text: 'rm tmp' }),
     ]))
 
     const user = userEvent.setup()
-    renderWithHarness(
+    renderWithTaskLogProviders(
       <TaskLogPanel issueNumber={161} taskId="build-task-1" workflowRunId="wr-1" taskStatus="failed" />,
-      harness,
+      testState,
     )
 
     await screen.findByTestId('task-log-panel')
@@ -412,14 +412,14 @@ describe('TaskLogPanel — viewing enhancement (Phase 3a T-001)', () => {
   })
 
   it('prefers the no-search-match boundary when search and source filters both yield zero rows', async () => {
-    const harness = buildMswHarness(makePage([
+    const testState = createTaskLogTestState(makePage([
       makeLine({ seq: 1, source: 'workspace-prep', text: 'cloning' }),
     ]))
 
     const user = userEvent.setup()
-    renderWithHarness(
+    renderWithTaskLogProviders(
       <TaskLogPanel issueNumber={161} taskId="build-task-1" workflowRunId="wr-1" taskStatus="failed" />,
-      harness,
+      testState,
     )
 
     await screen.findByTestId('task-log-panel')
@@ -459,13 +459,13 @@ describe('TaskLogPanel — viewing enhancement (Phase 3a T-001)', () => {
   })
 
   it('does not force-scroll on a new line while the user is paused away from the bottom', async () => {
-    const harness = buildMswHarness(makePage([
+    const testState = createTaskLogTestState(makePage([
       makeLine({ seq: 1, source: 'workspace-prep', text: 'line-1' }),
     ]))
 
-    renderWithHarness(
+    renderWithTaskLogProviders(
       <TaskLogPanel issueNumber={161} taskId="build-task-1" workflowRunId="wr-1" taskStatus="running" />,
-      harness,
+      testState,
     )
 
     await screen.findByTestId('task-log-panel')
@@ -495,15 +495,15 @@ describe('TaskLogPanel — viewing enhancement (Phase 3a T-001)', () => {
   })
 
   it('does not force-scroll when a filter change hides lines while the user is paused away from the bottom', async () => {
-    const harness = buildMswHarness(makePage([
+    const testState = createTaskLogTestState(makePage([
       makeLine({ seq: 1, source: 'workspace-prep', text: 'needle line' }),
       makeLine({ seq: 2, source: 'cleanup', text: 'other line' }),
     ]))
 
     const user = userEvent.setup()
-    renderWithHarness(
+    renderWithTaskLogProviders(
       <TaskLogPanel issueNumber={161} taskId="build-task-1" workflowRunId="wr-1" taskStatus="failed" />,
-      harness,
+      testState,
     )
 
     await screen.findByTestId('task-log-panel')
@@ -527,15 +527,15 @@ describe('TaskLogPanel — viewing enhancement (Phase 3a T-001)', () => {
   })
 
   it('resumes auto-follow near the bottom and follows the next visible-line change', async () => {
-    const harness = buildMswHarness(makePage([
+    const testState = createTaskLogTestState(makePage([
       makeLine({ seq: 1, source: 'workspace-prep', text: 'alpha line' }),
       makeLine({ seq: 2, source: 'cleanup', text: 'beta line' }),
     ]))
 
     const user = userEvent.setup()
-    renderWithHarness(
+    renderWithTaskLogProviders(
       <TaskLogPanel issueNumber={161} taskId="build-task-1" workflowRunId="wr-1" taskStatus="failed" />,
-      harness,
+      testState,
     )
 
     await screen.findByTestId('task-log-panel')
@@ -567,13 +567,13 @@ describe('TaskLogPanel — viewing enhancement (Phase 3a T-001)', () => {
   })
 
   it('live-append during a running task still appends in seq order when no filter is active (non-regression)', async () => {
-    const harness = buildMswHarness(makePage([
+    const testState = createTaskLogTestState(makePage([
       makeLine({ seq: 1, source: 'workspace-prep', text: 'line-1' }),
     ]))
 
-    renderWithHarness(
+    renderWithTaskLogProviders(
       <TaskLogPanel issueNumber={161} taskId="build-task-1" workflowRunId="wr-1" taskStatus="running" />,
-      harness,
+      testState,
     )
 
     await screen.findByTestId('task-log-panel')

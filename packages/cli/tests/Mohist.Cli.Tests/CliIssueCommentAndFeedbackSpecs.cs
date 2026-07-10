@@ -10,7 +10,7 @@ public class CliIssueCommentAndFeedbackSpecs
     [Fact]
     public async Task IssueCommentAdd_SuccessPath_SendsPostWithBodyAndPrintsNewCommentId()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Post)
             {
@@ -41,7 +41,7 @@ public class CliIssueCommentAndFeedbackSpecs
     [Fact]
     public async Task IssueCommentAdd_FromFile_ReadsFileAndSendsContentsAsBody()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Post)
             {
@@ -67,7 +67,7 @@ public class CliIssueCommentAndFeedbackSpecs
     [Fact]
     public async Task IssueCommentAdd_MissingBody_PrintsValidationErrorAndExitsWithCodeOne()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync();
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["issue", "comment", "add", "42"], output, error, fs, executor);
@@ -81,7 +81,7 @@ public class CliIssueCommentAndFeedbackSpecs
     [Fact]
     public async Task IssueComment_HelpListsAddSubcommand()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync();
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["issue", "comment", "--help"], output, error, fs, executor);
@@ -94,7 +94,7 @@ public class CliIssueCommentAndFeedbackSpecs
     [Fact]
     public async Task IssueCommentAdd_AcceptsProjectIdFlag()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Post)
             {
@@ -120,7 +120,7 @@ public class CliIssueCommentAndFeedbackSpecs
     [Fact]
     public async Task IssueCommentAdd_JsonOutput_PrintsJsonEnvelope()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Post)
             {
@@ -148,7 +148,7 @@ public class CliIssueCommentAndFeedbackSpecs
     [Fact]
     public async Task IssueFeedbackCreate_SuccessPath_SendsPostWithStageAndBodyAndPrintsNewId()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Post)
             {
@@ -183,7 +183,7 @@ public class CliIssueCommentAndFeedbackSpecs
     [Fact]
     public async Task IssueFeedbackCreate_FromFile_ReadsFileAndSendsContentsAsBody()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Post)
             {
@@ -212,7 +212,7 @@ public class CliIssueCommentAndFeedbackSpecs
     [Fact]
     public async Task IssueFeedbackCreate_MissingStage_PrintsValidationErrorAndExitsWithCodeOne()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync();
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
@@ -229,7 +229,7 @@ public class CliIssueCommentAndFeedbackSpecs
     [Fact]
     public async Task IssueFeedbackCreate_MissingBody_PrintsValidationErrorAndExitsWithCodeOne()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync();
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
@@ -245,7 +245,7 @@ public class CliIssueCommentAndFeedbackSpecs
     [Fact]
     public async Task IssueFeedback_HelpListsCreateAlongsideListAndShow()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync();
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["issue", "feedback", "--help"], output, error, fs, executor);
@@ -260,7 +260,7 @@ public class CliIssueCommentAndFeedbackSpecs
     [Fact]
     public async Task IssueFeedbackCreate_AcceptsProjectIdFlag()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Post)
             {
@@ -286,7 +286,7 @@ public class CliIssueCommentAndFeedbackSpecs
     [Fact]
     public async Task IssueFeedbackCreate_JsonOutput_PrintsJsonEnvelope()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Post)
             {

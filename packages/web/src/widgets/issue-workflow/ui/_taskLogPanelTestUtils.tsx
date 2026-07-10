@@ -1,24 +1,12 @@
 // @vitest-environment jsdom
 /**
- * Shared test harness for the TaskLogPanel colocated test files.
- *
- * Vitest hoists module mocks per-file, so each `*.test.tsx` must declare its own
- * mock and hoisted blocks (those cannot be imported). This module
- * exports everything ELSE that the TaskLogPanel render-test files share:
- *   - fixture builders (`makeLine`, `makePage`, `makeEnvelope`)
- *   - the SignalR fake-connection harness (`FakeConnection`, `makeFakeConnection`,
- *     `mockConnectionBuilder`) plus the shared registries `fakeConnections` and
- *     `recordedInvokes`
- *   - the page-test harness (`buildHarness`, `renderWithHarness`,
- *     `flushAndGetLastConnection`), `projects`, and `sessionFixture`
- *   - the download/export spy (`installDownloadSpy`, `readBlobText`)
- *
- * NOTE: `fakeConnections` and `recordedInvokes` are module-level singletons shared
- * across a single test file's imports; each test file resets them in `beforeEach`.
+ * Shared fixtures, fake connections, providers, and export helpers for the
+ * colocated TaskLogPanel tests. Module mocks remain in each test file because
+ * Vitest hoists them per file.
  */
 import type { ReactNode } from 'react'
 import { act, render, waitFor } from '@testing-library/react'
-import { expect, vi, type Mock } from 'vitest'
+import { expect, vi } from 'vitest'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ProjectProvider } from '../../../entities/project'
 import type { TaskLogLine, TaskLogPage } from '../../../entities/issue'
@@ -105,37 +93,19 @@ export const projects = [
   },
 ]
 
-export interface TestHarness {
+export interface TaskLogTestState {
   queryClient: QueryClient
   page: { current: TaskLogPage | undefined }
   setPage: (next: TaskLogPage | undefined) => void
-}
-
-export function buildHarness(
-  initialPage: TaskLogPage | undefined,
-  mockedGetIssueWorkflowTaskLog: Mock,
-): TestHarness {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  const page = { current: initialPage }
-  mockedGetIssueWorkflowTaskLog.mockImplementation(async () => {
-    return page.current ?? { lines: [], nextCursor: null, truncated: false }
-  })
-  return {
-    queryClient,
-    page,
-    setPage(next) {
-      page.current = next
-    },
-  }
 }
 
 export function newQueryClient(): QueryClient {
   return new QueryClient({ defaultOptions: { queries: { retry: false } } })
 }
 
-export function renderWithHarness(ui: ReactNode, harness: TestHarness) {
+export function renderWithTaskLogProviders(ui: ReactNode, testState: TaskLogTestState) {
   return render(
-    <QueryClientProvider client={harness.queryClient}>
+    <QueryClientProvider client={testState.queryClient}>
       <ProjectProvider initialProjects={projects} initialProjectId="proj-1">
         {ui}
       </ProjectProvider>

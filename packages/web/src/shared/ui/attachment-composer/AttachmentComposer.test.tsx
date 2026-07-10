@@ -16,7 +16,7 @@ describe('AttachmentComposer', () => {
       onProgress(100)
       return { id: 'att_image', fileName: file.name, contentType: file.type, size: file.size }
     })
-    render(<Harness uploadAttachment={uploadAttachment} />)
+    render(<ControlledAttachmentComposer uploadAttachment={uploadAttachment} />)
 
     const file = new File(['image'], 'screen.png', { type: 'image/png' })
     fireEvent.change(screen.getByLabelText('Choose attachment files'), { target: { files: [file] } })
@@ -33,7 +33,7 @@ describe('AttachmentComposer', () => {
       contentType: file.type,
       size: file.size,
     }))
-    const { container } = render(<Harness uploadAttachment={uploadAttachment} />)
+    const { container } = render(<ControlledAttachmentComposer uploadAttachment={uploadAttachment} />)
 
     const file = new File(['log'], 'error.log', { type: 'text/plain' })
     fireEvent.paste(within(container).getByRole('textbox'), { clipboardData: { files: [file] } })
@@ -49,7 +49,7 @@ describe('AttachmentComposer', () => {
       contentType: file.type,
       size: file.size,
     }))
-    const { container } = render(<Harness uploadAttachment={uploadAttachment} />)
+    const { container } = render(<ControlledAttachmentComposer uploadAttachment={uploadAttachment} />)
 
     const file = new File(['pdf'], 'brief.pdf', { type: 'application/pdf' })
     const card = within(container).getByRole('textbox').parentElement as HTMLElement
@@ -71,7 +71,7 @@ describe('AttachmentComposer', () => {
       contentType: file.type,
       size: file.size,
     }))
-    render(<Harness uploadAttachment={uploadAttachment} />)
+    render(<ControlledAttachmentComposer uploadAttachment={uploadAttachment} />)
 
     fireEvent.change(screen.getByLabelText('Choose attachment files'), {
       target: {
@@ -100,7 +100,7 @@ describe('AttachmentComposer', () => {
         deferred.resolve = resolve
       }).then(() => ({ id: 'att_progress', fileName: file.name, contentType: file.type, size: file.size }))
     })
-    render(<Harness uploadAttachment={uploadAttachment} />)
+    render(<ControlledAttachmentComposer uploadAttachment={uploadAttachment} />)
 
     fireEvent.change(screen.getByLabelText('Choose attachment files'), {
       target: { files: [new File(['abc'], 'slow.txt', { type: 'text/plain' })] },
@@ -119,7 +119,7 @@ describe('AttachmentComposer', () => {
       contentType: file.type,
       size: file.size,
     }))
-    render(<Harness uploadAttachment={uploadAttachment} initialValue="Before " />)
+    render(<ControlledAttachmentComposer uploadAttachment={uploadAttachment} initialValue="Before " />)
 
     fireEvent.change(screen.getByLabelText('Choose attachment files'), {
       target: { files: [new File(['abc'], 'notes.txt', { type: 'text/plain' })] },
@@ -137,7 +137,7 @@ describe('stripAttachmentReference', () => {
   })
 })
 
-function Harness({ uploadAttachment, initialValue = '' }: { uploadAttachment: UploadAttachment; initialValue?: string }) {
+function ControlledAttachmentComposer({ uploadAttachment, initialValue = '' }: { uploadAttachment: UploadAttachment; initialValue?: string }) {
   const [value, setValue] = React.useState(initialValue)
   return (
     <>

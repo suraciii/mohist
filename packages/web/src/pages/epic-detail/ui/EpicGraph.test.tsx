@@ -8,7 +8,7 @@ import {
   issues,
   linkedIssue,
   renderPage as renderEpicDetailPage,
-} from './_epicDetailPageTestHarness'
+} from './_epicDetailPageTestUtils'
 import type { RemoveEpicIssueHook } from './EpicDetailPage'
 
 const widgetBehavior = {

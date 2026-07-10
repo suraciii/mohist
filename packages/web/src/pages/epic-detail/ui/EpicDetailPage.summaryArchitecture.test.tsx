@@ -6,7 +6,7 @@ import { cleanup, fireEvent, screen } from '@testing-library/react'
 import { EpicStatus, type EpicDetail } from '../../../entities/epic'
 import { IssueStatus, WorkflowStage, IssueHealth } from '../../../entities/issue'
 
-import { issues, linkedIssue, renderPage, getActionGroup } from './_epicDetailPageTestHarness'
+import { issues, linkedIssue, renderPage, getActionGroup } from './_epicDetailPageTestUtils'
 import { mountEpicDetail, mockEpic } from './_epicDetailMsw'
 
 describe('EpicDetailPage summary-first information architecture (T-002)', () => {

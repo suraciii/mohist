@@ -40,9 +40,9 @@ public sealed class ConfigHotReloadSpecs : IDisposable
               },
             }
             """);
-        using var harness = BuildServices();
+        using var fixture = CreateOptionsFixture();
 
-        Assert.Equal(initialBudget, harness.ReadSnapshot().StorageBudgetBytes);
+        Assert.Equal(initialBudget, fixture.ReadSnapshot().StorageBudgetBytes);
 
         await WriteConfigAsync($$"""
             {
@@ -53,9 +53,9 @@ public sealed class ConfigHotReloadSpecs : IDisposable
               },
             }
             """);
-        harness.Reload();
+        fixture.Reload();
 
-        Assert.Equal(updatedBudget, harness.ReadSnapshot().StorageBudgetBytes);
+        Assert.Equal(updatedBudget, fixture.ReadSnapshot().StorageBudgetBytes);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]
@@ -67,16 +67,16 @@ public sealed class ConfigHotReloadSpecs : IDisposable
         await WriteConfigAsync("""
             { "Mohist": { "WorkspaceCleanup": { "RetentionDays": 7 } } }
             """);
-        using var harness = BuildServices();
+        using var fixture = CreateOptionsFixture();
 
-        Assert.Equal(7, harness.ReadSnapshot().RetentionDays);
+        Assert.Equal(7, fixture.ReadSnapshot().RetentionDays);
 
         await WriteConfigAsync("""
             { "Mohist": { "WorkspaceCleanup": { "RetentionDays": 30 } } }
             """);
-        harness.Reload();
+        fixture.Reload();
 
-        Assert.Equal(30, harness.ReadSnapshot().RetentionDays);
+        Assert.Equal(30, fixture.ReadSnapshot().RetentionDays);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]
@@ -86,16 +86,16 @@ public sealed class ConfigHotReloadSpecs : IDisposable
     public async Task CleanupPolicyOptionsSnapshot_UnconfiguredSource_YieldsAllNullPolicyFields()
     {
         await WriteConfigAsync("{}");
-        using var harness = BuildServices();
+        using var fixture = CreateOptionsFixture();
 
-        var options = harness.ReadSnapshot();
+        var options = fixture.ReadSnapshot();
 
         Assert.Null(options.RetentionDays);
         Assert.Null(options.StorageBudgetBytes);
         Assert.Null(options.StorageTargetWatermarkBytes);
     }
 
-    private OptionsHarness BuildServices()
+    private ReloadableOptionsFixture CreateOptionsFixture()
     {
         var configuration = new ConfigurationBuilder()
             // The production AddMohistConfigFile wiring uses reloadOnChange:
@@ -109,15 +109,15 @@ public sealed class ConfigHotReloadSpecs : IDisposable
         services.AddOptions();
         services.Configure<CleanupPolicyOptions>(
             configuration.GetSection(CleanupPolicyOptions.SectionName));
-        return new OptionsHarness(configuration, services.BuildServiceProvider());
+        return new ReloadableOptionsFixture(configuration, services.BuildServiceProvider());
     }
 
-    private sealed class OptionsHarness : IDisposable
+    private sealed class ReloadableOptionsFixture : IDisposable
     {
         private readonly IConfigurationRoot _configuration;
         private readonly ServiceProvider _services;
 
-        public OptionsHarness(IConfigurationRoot configuration, ServiceProvider services)
+        public ReloadableOptionsFixture(IConfigurationRoot configuration, ServiceProvider services)
         {
             _configuration = configuration;
             _services = services;

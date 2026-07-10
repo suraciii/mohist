@@ -20,7 +20,7 @@ public class CliInstallUpdateSingleEntryTests
     [Fact]
     public async Task LegacyServerInstall_FailsToResolveAndTriggersNoInstallerCall()
     {
-        var (handler, http, output, error, fs, executor, installer) = CliTestHarness.CreateInternal();
+        var (handler, http, output, error, fs, executor, installer) = CliTestFactory.CreateInternal();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["server", "install"], output, error, fs, executor,
@@ -34,7 +34,7 @@ public class CliInstallUpdateSingleEntryTests
     [Fact]
     public async Task LegacyServerUpdate_FailsToResolveAndTriggersNoUpdaterCall()
     {
-        var (handler, http, output, error, fs, executor, installer) = CliTestHarness.CreateInternal();
+        var (handler, http, output, error, fs, executor, installer) = CliTestFactory.CreateInternal();
         var updater = new FakeSourceCodeUpdater();
 
         var exitCode = await MohistCliCommands.RunAsync(
@@ -48,7 +48,7 @@ public class CliInstallUpdateSingleEntryTests
     [Fact]
     public async Task LegacyRunnerInstall_FailsToResolveAndTriggersNoInstallerCall()
     {
-        var (handler, http, output, error, fs, executor, installer) = CliTestHarness.CreateInternal();
+        var (handler, http, output, error, fs, executor, installer) = CliTestFactory.CreateInternal();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["runner", "install"], output, error, fs, executor,
@@ -65,7 +65,7 @@ public class CliInstallUpdateSingleEntryTests
         // `mo runner update` was never a registered path. After this change
         // it still isn't; the explicit guard prevents a future "symmetry"
         // change from silently reintroducing it.
-        var (handler, http, output, error, fs, executor, installer) = CliTestHarness.CreateInternal();
+        var (handler, http, output, error, fs, executor, installer) = CliTestFactory.CreateInternal();
         var updater = new FakeSourceCodeUpdater();
 
         var exitCode = await MohistCliCommands.RunAsync(
@@ -79,7 +79,7 @@ public class CliInstallUpdateSingleEntryTests
     [Fact]
     public async Task VerbRootInstallServer_StillInvokesInstallServerAsync()
     {
-        var (handler, http, output, error, fs, executor, installer) = CliTestHarness.CreateInternal();
+        var (handler, http, output, error, fs, executor, installer) = CliTestFactory.CreateInternal();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
@@ -98,7 +98,7 @@ public class CliInstallUpdateSingleEntryTests
     [Fact]
     public async Task VerbRootInstallServer_DefaultsAreUnchanged()
     {
-        var (handler, http, output, error, fs, executor, installer) = CliTestHarness.CreateInternal();
+        var (handler, http, output, error, fs, executor, installer) = CliTestFactory.CreateInternal();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["install", "server"], output, error, fs, executor,
@@ -117,7 +117,7 @@ public class CliInstallUpdateSingleEntryTests
     [Fact]
     public async Task VerbRootInstallRunner_StillInvokesInstallRunnerAsync()
     {
-        var (handler, http, output, error, fs, executor, installer) = CliTestHarness.CreateInternal();
+        var (handler, http, output, error, fs, executor, installer) = CliTestFactory.CreateInternal();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
@@ -137,7 +137,7 @@ public class CliInstallUpdateSingleEntryTests
     [Fact]
     public async Task VerbRootInstallRunner_DefaultsAreUnchanged()
     {
-        var (handler, http, output, error, fs, executor, installer) = CliTestHarness.CreateInternal();
+        var (handler, http, output, error, fs, executor, installer) = CliTestFactory.CreateInternal();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["install", "runner"], output, error, fs, executor,
@@ -155,7 +155,7 @@ public class CliInstallUpdateSingleEntryTests
     [Fact]
     public async Task VerbRootUpdate_InvokesUpdateAllAsync()
     {
-        var (handler, http, output, error, fs, executor, installer) = CliTestHarness.CreateInternal();
+        var (handler, http, output, error, fs, executor, installer) = CliTestFactory.CreateInternal();
         var updater = new FakeSourceCodeUpdater();
 
         var exitCode = await MohistCliCommands.RunAsync(
@@ -169,7 +169,7 @@ public class CliInstallUpdateSingleEntryTests
     [Fact]
     public async Task VerbRootUpdateCli_InvokesUpdateCliAsync()
     {
-        var (handler, http, output, error, fs, executor, installer) = CliTestHarness.CreateInternal();
+        var (handler, http, output, error, fs, executor, installer) = CliTestFactory.CreateInternal();
         var updater = new FakeSourceCodeUpdater();
 
         var exitCode = await MohistCliCommands.RunAsync(
@@ -183,7 +183,7 @@ public class CliInstallUpdateSingleEntryTests
     [Fact]
     public async Task VerbRootUpdateServer_InvokesUpdateServerAsync()
     {
-        var (handler, http, output, error, fs, executor, installer) = CliTestHarness.CreateInternal();
+        var (handler, http, output, error, fs, executor, installer) = CliTestFactory.CreateInternal();
         var updater = new FakeSourceCodeUpdater();
 
         var exitCode = await MohistCliCommands.RunAsync(
@@ -197,7 +197,7 @@ public class CliInstallUpdateSingleEntryTests
     [Fact]
     public async Task VerbRootUpdateRunner_InvokesUpdateRunnerAsync()
     {
-        var (handler, http, output, error, fs, executor, installer) = CliTestHarness.CreateInternal();
+        var (handler, http, output, error, fs, executor, installer) = CliTestFactory.CreateInternal();
         var updater = new FakeSourceCodeUpdater();
 
         var exitCode = await MohistCliCommands.RunAsync(
@@ -211,7 +211,7 @@ public class CliInstallUpdateSingleEntryTests
     [Fact]
     public async Task ServerHelp_DoesNotAdvertiseInstallOrUpdate()
     {
-        var (handler, http, output, error, fs, executor, installer) = CliTestHarness.CreateInternal();
+        var (handler, http, output, error, fs, executor, installer) = CliTestFactory.CreateInternal();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["server", "--help"], output, error, fs, executor,
@@ -231,7 +231,7 @@ public class CliInstallUpdateSingleEntryTests
     [Fact]
     public async Task RunnerHelp_DoesNotAdvertiseInstallOrUpdate()
     {
-        var (handler, http, output, error, fs, executor, installer) = CliTestHarness.CreateInternal();
+        var (handler, http, output, error, fs, executor, installer) = CliTestFactory.CreateInternal();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["runner", "--help"], output, error, fs, executor,
@@ -250,7 +250,7 @@ public class CliInstallUpdateSingleEntryTests
     {
         // Sanity check: deleting `install`/`update` from the server group
         // must not break any other subcommand.
-        var (handler, http, output, error, fs, executor, installer) = CliTestHarness.CreateInternal();
+        var (handler, http, output, error, fs, executor, installer) = CliTestFactory.CreateInternal();
 
         foreach (var sub in new[] { "start", "stop", "restart", "status", "logs", "health", "uninstall", "info" })
         {
@@ -264,7 +264,7 @@ public class CliInstallUpdateSingleEntryTests
     [Fact]
     public async Task SurvivingRunnerSubcommands_StillResolve()
     {
-        var (handler, http, output, error, fs, executor, installer) = CliTestHarness.CreateInternal();
+        var (handler, http, output, error, fs, executor, installer) = CliTestFactory.CreateInternal();
         var env = new EnvironmentAbstractions.TestHelpers.MockEnvironmentVariableProvider(addExistingEnvironmentVariables: false);
 
         foreach (var sub in new[] { "start", "stop", "restart", "service-status", "logs", "uninstall", "list", "status" })

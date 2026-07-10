@@ -9,16 +9,16 @@ namespace Mohist.Cli.Tests;
 public class CliIssueWorkflowConfigSpecs
 {
     private static (RecordingHttpHandler Handler, HttpClient Http, StringWriter Output, StringWriter Error, FakeFileSystem Fs, FakeCommandExecutor Executor)
-        CreateHarness(Func<HttpRequestMessage, HttpResponseMessage>? responder = null)
+        CreateWorkflowConfigSetup(Func<HttpRequestMessage, HttpResponseMessage>? responder = null)
     {
-        return CliTestHarness.Create(
+        return CliTestFactory.Create(
             responder is null ? null : (Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>>)((req, _) => Task.FromResult(responder(req))));
     }
 
     private static (RecordingHttpHandler Handler, HttpClient Http, StringWriter Output, StringWriter Error, FakeFileSystem Fs, FakeCommandExecutor Executor)
-        CreateAsyncHarness(Func<HttpRequestMessage, Task<HttpResponseMessage>>? responder = null)
+        CreateAsyncWorkflowConfigSetup(Func<HttpRequestMessage, Task<HttpResponseMessage>>? responder = null)
     {
-        return CliTestHarness.Create(
+        return CliTestFactory.Create(
             responder is null ? null : (Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>>)((req, _) => responder(req)));
     }
 
@@ -72,7 +72,7 @@ public class CliIssueWorkflowConfigSpecs
     [Fact]
     public async Task ConfigHelp_ListsFourSubcommands()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateWorkflowConfigSetup();
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["issue", "workflow", "config", "--help"], output, error, fs, executor);
 
@@ -87,7 +87,7 @@ public class CliIssueWorkflowConfigSpecs
     [Fact]
     public async Task ConfigGet_TableMode_SendsGetRequestAndRendersThreeSections()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness(req =>
+        var (handler, http, output, error, fs, executor) = CreateWorkflowConfigSetup(req =>
         {
             if (req.Method == HttpMethod.Get && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/issues/42/workflow-profile")
             {
@@ -128,7 +128,7 @@ public class CliIssueWorkflowConfigSpecs
     [Fact]
     public async Task ConfigGet_TableMode_FetchesProfileThenPrompts()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness(req =>
+        var (handler, http, output, error, fs, executor) = CreateWorkflowConfigSetup(req =>
         {
             if (req.Method == HttpMethod.Get && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/issues/42/workflow-profile")
             {
@@ -158,7 +158,7 @@ public class CliIssueWorkflowConfigSpecs
     [Fact]
     public async Task ConfigGet_JsonMode_EmitsProfileWithPrompts()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness(req =>
+        var (handler, http, output, error, fs, executor) = CreateWorkflowConfigSetup(req =>
         {
             if (req.Method == HttpMethod.Get && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/issues/42/workflow-profile")
                 return RecordingHttpHandler.Json(new { success = true, data = SampleProfile(includePrompts: false) });
@@ -195,7 +195,7 @@ public class CliIssueWorkflowConfigSpecs
     [Fact]
     public async Task ConfigGet_AcceptsProjectAndProjectIdAlias()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness(req =>
+        var (handler, http, output, error, fs, executor) = CreateWorkflowConfigSetup(req =>
         {
             if (req.Method == HttpMethod.Get)
                 return RecordingHttpHandler.Json(new { success = true, data = SampleProfile() });
@@ -218,7 +218,7 @@ public class CliIssueWorkflowConfigSpecs
     [Fact]
     public async Task ConfigGet_InvalidOutputMode_PrintsErrorAndExitsOne()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateWorkflowConfigSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["issue", "workflow", "config", "get", "42", "-o", "yaml"], output, error, fs, executor);
@@ -232,7 +232,7 @@ public class CliIssueWorkflowConfigSpecs
     [Fact]
     public async Task ConfigGet_ServerError_SurfacesErrorAndExitsNonZero()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness(req =>
+        var (handler, http, output, error, fs, executor) = CreateWorkflowConfigSetup(req =>
         {
             if (req.Method == HttpMethod.Get)
             {
@@ -254,7 +254,7 @@ public class CliIssueWorkflowConfigSpecs
     [Fact]
     public async Task ConfigGet_TableMode_ServerErrorOnProfile_SurfacesErrorAndExitsNonZero()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness(req =>
+        var (handler, http, output, error, fs, executor) = CreateWorkflowConfigSetup(req =>
         {
             if (req.Method == HttpMethod.Get && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/issues/42/workflow-profile")
             {
@@ -278,7 +278,7 @@ public class CliIssueWorkflowConfigSpecs
     [Fact]
     public async Task ConfigGet_TableMode_ServerErrorOnPrompts_SurfacesErrorAndExitsNonZero()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness(req =>
+        var (handler, http, output, error, fs, executor) = CreateWorkflowConfigSetup(req =>
         {
             if (req.Method == HttpMethod.Get && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/issues/42/workflow-profile")
                 return RecordingHttpHandler.Json(new { success = true, data = SampleProfile(includePrompts: false) });
@@ -303,7 +303,7 @@ public class CliIssueWorkflowConfigSpecs
     [Fact]
     public async Task ConfigPreview_TableMode_SendsPostAndPrintsRenderedText()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness(req =>
+        var (handler, http, output, error, fs, executor) = CreateWorkflowConfigSetup(req =>
         {
             if (req.Method == HttpMethod.Post && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/issues/42/workflow-profile/prompts/plan_prompt/preview")
             {
@@ -333,7 +333,7 @@ public class CliIssueWorkflowConfigSpecs
     [Fact]
     public async Task ConfigPreview_JsonMode_EmitsRawPayload()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness(req =>
+        var (handler, http, output, error, fs, executor) = CreateWorkflowConfigSetup(req =>
         {
             if (req.Method == HttpMethod.Post)
             {
@@ -363,7 +363,7 @@ public class CliIssueWorkflowConfigSpecs
     [Fact]
     public async Task ConfigPreview_AcceptsProjectAndProjectIdAlias()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness(req =>
+        var (handler, http, output, error, fs, executor) = CreateWorkflowConfigSetup(req =>
         {
             if (req.Method == HttpMethod.Post)
                 return RecordingHttpHandler.Json(new
@@ -390,7 +390,7 @@ public class CliIssueWorkflowConfigSpecs
     [Fact]
     public async Task ConfigPreview_PromptKeyIsUrlEscaped()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness(req =>
+        var (handler, http, output, error, fs, executor) = CreateWorkflowConfigSetup(req =>
         {
             if (req.Method == HttpMethod.Post)
                 return RecordingHttpHandler.Json(new
@@ -412,7 +412,7 @@ public class CliIssueWorkflowConfigSpecs
     [Fact]
     public async Task ConfigPreview_PromptKeyContainingSlash_IsRejectedBeforeRequest()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateWorkflowConfigSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["issue", "workflow", "config", "preview", "42", "bad/key"], output, error, fs, executor);
@@ -425,7 +425,7 @@ public class CliIssueWorkflowConfigSpecs
     [Fact]
     public async Task ConfigPreview_ServerError_SurfacesErrorAndExitsNonZero()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness(req =>
+        var (handler, http, output, error, fs, executor) = CreateWorkflowConfigSetup(req =>
         {
             if (req.Method == HttpMethod.Post)
             {
@@ -447,7 +447,7 @@ public class CliIssueWorkflowConfigSpecs
     [Fact]
     public async Task ConfigSet_NoFlags_MakesNoRequestAndExitsNonZero()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateWorkflowConfigSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["issue", "workflow", "config", "set", "42"], output, error, fs, executor);
@@ -461,7 +461,7 @@ public class CliIssueWorkflowConfigSpecs
     [Fact]
     public async Task ConfigSet_TemplateAtFile_ReadsFileAndPutsTemplate()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness(req =>
+        var (handler, http, output, error, fs, executor) = CreateWorkflowConfigSetup(req =>
         {
             if (req.Method == HttpMethod.Put && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/issues/42/workflow-profile/template")
             {
@@ -485,7 +485,7 @@ public class CliIssueWorkflowConfigSpecs
     [Fact]
     public async Task ConfigSet_TemplateInline_PutsYamlAsBody()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness(req =>
+        var (handler, http, output, error, fs, executor) = CreateWorkflowConfigSetup(req =>
         {
             if (req.Method == HttpMethod.Put && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/issues/42/workflow-profile/template")
             {
@@ -506,7 +506,7 @@ public class CliIssueWorkflowConfigSpecs
     [Fact]
     public async Task ConfigSet_VarAndStageVar_PatchMergesIntoSingleBody()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness(req =>
+        var (handler, http, output, error, fs, executor) = CreateWorkflowConfigSetup(req =>
         {
             if (req.Method == HttpMethod.Patch && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/issues/42/workflow-profile/variables")
             {
@@ -546,7 +546,7 @@ public class CliIssueWorkflowConfigSpecs
     [Fact]
     public async Task ConfigSet_OnlyVar_OmitsStagesSection()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness(req =>
+        var (handler, http, output, error, fs, executor) = CreateWorkflowConfigSetup(req =>
         {
             if (req.Method == HttpMethod.Patch && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/issues/42/workflow-profile/variables")
                 return RecordingHttpHandler.Json(new { success = true, data = new { } });
@@ -566,7 +566,7 @@ public class CliIssueWorkflowConfigSpecs
     [Fact]
     public async Task ConfigSet_OnlyStageVar_OmitsVarsSection()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness(req =>
+        var (handler, http, output, error, fs, executor) = CreateWorkflowConfigSetup(req =>
         {
             if (req.Method == HttpMethod.Patch && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/issues/42/workflow-profile/variables")
                 return RecordingHttpHandler.Json(new { success = true, data = new { } });
@@ -589,7 +589,7 @@ public class CliIssueWorkflowConfigSpecs
     [Fact]
     public async Task ConfigSet_Var_TableMode_RendersVariableBundle()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness(req =>
+        var (handler, http, output, error, fs, executor) = CreateWorkflowConfigSetup(req =>
         {
             if (req.Method == HttpMethod.Patch && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/issues/42/workflow-profile/variables")
             {
@@ -625,7 +625,7 @@ public class CliIssueWorkflowConfigSpecs
     [Fact]
     public async Task ConfigSetAndClear_StageVar_UseSameServerShape()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness(req =>
+        var (handler, http, output, error, fs, executor) = CreateWorkflowConfigSetup(req =>
         {
             if (req.Method == HttpMethod.Patch && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/issues/42/workflow-profile/variables")
                 return RecordingHttpHandler.Json(new { success = true, data = new { } });
@@ -655,7 +655,7 @@ public class CliIssueWorkflowConfigSpecs
     [Fact]
     public async Task ConfigSet_PromptInline_PutsBody()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness(req =>
+        var (handler, http, output, error, fs, executor) = CreateWorkflowConfigSetup(req =>
         {
             if (req.Method == HttpMethod.Put && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/issues/42/workflow-profile/prompts/greeting")
             {
@@ -677,7 +677,7 @@ public class CliIssueWorkflowConfigSpecs
     [Fact]
     public async Task ConfigSet_PromptInline_TableMode_RendersPromptResponse()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness(req =>
+        var (handler, http, output, error, fs, executor) = CreateWorkflowConfigSetup(req =>
         {
             if (req.Method == HttpMethod.Put && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/issues/42/workflow-profile/prompts/greeting")
                 return RecordingHttpHandler.Json(new { success = true, data = new { key = "greeting", body = "You are..." } });
@@ -696,7 +696,7 @@ public class CliIssueWorkflowConfigSpecs
     [Fact]
     public async Task ConfigSet_PromptInline_JsonMode_EmitsPromptResponseJson()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness(req =>
+        var (handler, http, output, error, fs, executor) = CreateWorkflowConfigSetup(req =>
         {
             if (req.Method == HttpMethod.Put && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/issues/42/workflow-profile/prompts/greeting")
                 return RecordingHttpHandler.Json(new { success = true, data = new { key = "greeting", body = "You are..." } });
@@ -716,7 +716,7 @@ public class CliIssueWorkflowConfigSpecs
     [Fact]
     public async Task ConfigSet_PromptAtFile_ReadsFileAndPutsBody()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness(req =>
+        var (handler, http, output, error, fs, executor) = CreateWorkflowConfigSetup(req =>
         {
             if (req.Method == HttpMethod.Put && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/issues/42/workflow-profile/prompts/greeting")
             {
@@ -738,7 +738,7 @@ public class CliIssueWorkflowConfigSpecs
     [Fact]
     public async Task ConfigSet_PromptKey_IsUrlEscaped()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness(req =>
+        var (handler, http, output, error, fs, executor) = CreateWorkflowConfigSetup(req =>
         {
             if (req.Method == HttpMethod.Put)
                 return RecordingHttpHandler.Json(new { success = true, data = new { } });
@@ -756,7 +756,7 @@ public class CliIssueWorkflowConfigSpecs
     [Fact]
     public async Task ConfigSet_PromptKeyContainingSlash_IsRejectedBeforeRequest()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateWorkflowConfigSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["issue", "workflow", "config", "set", "42", "--prompt", "bad/key=hi"], output, error, fs, executor);
@@ -769,7 +769,7 @@ public class CliIssueWorkflowConfigSpecs
     [Fact]
     public async Task ConfigSet_VarWithInvalidPromptKey_MakesNoRequest()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateWorkflowConfigSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
@@ -784,7 +784,7 @@ public class CliIssueWorkflowConfigSpecs
     [Fact]
     public async Task ConfigSet_TemplateAndVarWithMissingPromptFile_MakesNoRequest()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateWorkflowConfigSetup();
         fs.AddFile("/wf.yaml", "name: workflow\n");
 
         var exitCode = await MohistCliCommands.RunAsync(
@@ -800,7 +800,7 @@ public class CliIssueWorkflowConfigSpecs
     [Fact]
     public async Task ConfigSet_Composite_IssuesAllThreeRequests()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness(req =>
+        var (handler, http, output, error, fs, executor) = CreateWorkflowConfigSetup(req =>
         {
             if (req.Method == HttpMethod.Put || req.Method == HttpMethod.Patch)
                 return RecordingHttpHandler.Json(new { success = true, data = new { } });
@@ -829,7 +829,7 @@ public class CliIssueWorkflowConfigSpecs
     [Fact]
     public async Task ConfigSet_MalformedVarNoEquals_PrintsErrorAndExitsNonZero()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateWorkflowConfigSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["issue", "workflow", "config", "set", "42", "--var", "novalue"], output, error, fs, executor);
@@ -842,7 +842,7 @@ public class CliIssueWorkflowConfigSpecs
     [Fact]
     public async Task ConfigSet_MalformedStageVarNoDot_PrintsErrorAndExitsNonZero()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateWorkflowConfigSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["issue", "workflow", "config", "set", "42", "--stage-var", "no-dot"], output, error, fs, executor);
@@ -855,7 +855,7 @@ public class CliIssueWorkflowConfigSpecs
     [Fact]
     public async Task ConfigSet_MalformedPromptNoEquals_PrintsErrorAndExitsNonZero()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateWorkflowConfigSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["issue", "workflow", "config", "set", "42", "--prompt", "novalue"], output, error, fs, executor);
@@ -868,7 +868,7 @@ public class CliIssueWorkflowConfigSpecs
     [Fact]
     public async Task ConfigSet_TemplateAtFileMissing_PrintsErrorAndExitsNonZero()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateWorkflowConfigSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["issue", "workflow", "config", "set", "42", "--template", "@/missing.yaml"], output, error, fs, executor);
@@ -881,7 +881,7 @@ public class CliIssueWorkflowConfigSpecs
     [Fact]
     public async Task ConfigSet_ServerRejectsTemplate_SurfacesErrorAndExitsNonZero()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness(req =>
+        var (handler, http, output, error, fs, executor) = CreateWorkflowConfigSetup(req =>
         {
             if (req.Method == HttpMethod.Put && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/issues/42/workflow-profile/template")
             {
@@ -903,7 +903,7 @@ public class CliIssueWorkflowConfigSpecs
     [Fact]
     public async Task ConfigSet_InvalidOutputMode_PrintsErrorAndExitsNonZero()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateWorkflowConfigSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["issue", "workflow", "config", "set", "42", "--template", "x", "-o", "yaml"], output, error, fs, executor);
@@ -917,7 +917,7 @@ public class CliIssueWorkflowConfigSpecs
     [Fact]
     public async Task ConfigClear_NoFlags_MakesNoRequestAndExitsNonZero()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateWorkflowConfigSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["issue", "workflow", "config", "clear", "42"], output, error, fs, executor);
@@ -930,7 +930,7 @@ public class CliIssueWorkflowConfigSpecs
     [Fact]
     public async Task ConfigClear_Template_DeletesTemplateOverride()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness(req =>
+        var (handler, http, output, error, fs, executor) = CreateWorkflowConfigSetup(req =>
         {
             if (req.Method == HttpMethod.Delete && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/issues/42/workflow-profile/template")
             {
@@ -951,7 +951,7 @@ public class CliIssueWorkflowConfigSpecs
     [Fact]
     public async Task ConfigClear_Var_PatchesVariableToJsonNull()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness(req =>
+        var (handler, http, output, error, fs, executor) = CreateWorkflowConfigSetup(req =>
         {
             if (req.Method == HttpMethod.Patch && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/issues/42/workflow-profile/variables")
             {
@@ -975,7 +975,7 @@ public class CliIssueWorkflowConfigSpecs
     [Fact]
     public async Task ConfigClear_StageVar_PatchesStageVariableToJsonNull()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness(req =>
+        var (handler, http, output, error, fs, executor) = CreateWorkflowConfigSetup(req =>
         {
             if (req.Method == HttpMethod.Patch && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/issues/42/workflow-profile/variables")
                 return RecordingHttpHandler.Json(new { success = true, data = new { } });
@@ -998,7 +998,7 @@ public class CliIssueWorkflowConfigSpecs
     [Fact]
     public async Task ConfigClear_TopLevelAndStageVars_MergeIntoSinglePatch()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness(req =>
+        var (handler, http, output, error, fs, executor) = CreateWorkflowConfigSetup(req =>
         {
             if (req.Method == HttpMethod.Patch && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/issues/42/workflow-profile/variables")
                 return RecordingHttpHandler.Json(new { success = true, data = new { } });
@@ -1026,7 +1026,7 @@ public class CliIssueWorkflowConfigSpecs
         var capturedBodies = new List<string>();
         var storedVars = new Dictionary<string, object?>(StringComparer.Ordinal) { ["foo"] = "bar", ["other"] = "kept" };
 
-        var (handler, http, output, error, fs, executor) = CreateAsyncHarness(async req =>
+        var (handler, http, output, error, fs, executor) = CreateAsyncWorkflowConfigSetup(async req =>
         {
             if (req.Method == HttpMethod.Patch && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/issues/42/workflow-profile/variables")
             {
@@ -1065,7 +1065,7 @@ public class CliIssueWorkflowConfigSpecs
     [Fact]
     public async Task ConfigClear_Var_TableMode_RendersVariableBundle()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness(req =>
+        var (handler, http, output, error, fs, executor) = CreateWorkflowConfigSetup(req =>
         {
             if (req.Method == HttpMethod.Patch && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/issues/42/workflow-profile/variables")
             {
@@ -1097,7 +1097,7 @@ public class CliIssueWorkflowConfigSpecs
     [Fact]
     public async Task ConfigClear_Prompt_DeletesPrompt()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness(req =>
+        var (handler, http, output, error, fs, executor) = CreateWorkflowConfigSetup(req =>
         {
             if (req.Method == HttpMethod.Delete && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/issues/42/workflow-profile/prompts/greeting")
             {
@@ -1118,7 +1118,7 @@ public class CliIssueWorkflowConfigSpecs
     [Fact]
     public async Task ConfigClear_Prompt_TableMode_RendersDeletedPrompt()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness(req =>
+        var (handler, http, output, error, fs, executor) = CreateWorkflowConfigSetup(req =>
         {
             if (req.Method == HttpMethod.Delete && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/issues/42/workflow-profile/prompts/greeting")
                 return RecordingHttpHandler.Json(new { success = true });
@@ -1137,7 +1137,7 @@ public class CliIssueWorkflowConfigSpecs
     [Fact]
     public async Task ConfigClear_Prompt_JsonMode_EmitsDeletedPromptJson()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness(req =>
+        var (handler, http, output, error, fs, executor) = CreateWorkflowConfigSetup(req =>
         {
             if (req.Method == HttpMethod.Delete && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/issues/42/workflow-profile/prompts/greeting")
                 return RecordingHttpHandler.Json(new { success = true });
@@ -1158,7 +1158,7 @@ public class CliIssueWorkflowConfigSpecs
     [Fact]
     public async Task ConfigClear_PromptKey_IsUrlEscaped()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness(req =>
+        var (handler, http, output, error, fs, executor) = CreateWorkflowConfigSetup(req =>
         {
             if (req.Method == HttpMethod.Delete)
                 return RecordingHttpHandler.Json(new { success = true, data = new { } });
@@ -1176,7 +1176,7 @@ public class CliIssueWorkflowConfigSpecs
     [Fact]
     public async Task ConfigClear_PromptKeyContainingSlash_IsRejectedBeforeRequest()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateWorkflowConfigSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["issue", "workflow", "config", "clear", "42", "--prompt", "bad/key"], output, error, fs, executor);
@@ -1189,7 +1189,7 @@ public class CliIssueWorkflowConfigSpecs
     [Fact]
     public async Task ConfigClear_VarWithInvalidPromptKey_MakesNoRequest()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateWorkflowConfigSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
@@ -1204,7 +1204,7 @@ public class CliIssueWorkflowConfigSpecs
     [Fact]
     public async Task ConfigClear_TemplateWithInvalidPromptKey_MakesNoRequest()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateWorkflowConfigSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
@@ -1219,7 +1219,7 @@ public class CliIssueWorkflowConfigSpecs
     [Fact]
     public async Task ConfigClear_VarAndPrompt_IssuesBothAndLeavesOthersIntact()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness(req =>
+        var (handler, http, output, error, fs, executor) = CreateWorkflowConfigSetup(req =>
         {
             if (req.Method == HttpMethod.Patch || req.Method == HttpMethod.Delete)
                 return RecordingHttpHandler.Json(new { success = true, data = new { } });
@@ -1248,7 +1248,7 @@ public class CliIssueWorkflowConfigSpecs
     [Fact]
     public async Task ConfigClear_VarAndTemplate_IssuesBoth()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness(req =>
+        var (handler, http, output, error, fs, executor) = CreateWorkflowConfigSetup(req =>
         {
             if (req.Method == HttpMethod.Patch || req.Method == HttpMethod.Delete)
                 return RecordingHttpHandler.Json(new { success = true, data = new { } });
@@ -1273,7 +1273,7 @@ public class CliIssueWorkflowConfigSpecs
     [Fact]
     public async Task ConfigClear_MultipleVars_MergeIntoSinglePatchWithAllKeysSetToNull()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness(req =>
+        var (handler, http, output, error, fs, executor) = CreateWorkflowConfigSetup(req =>
         {
             if (req.Method == HttpMethod.Patch && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/issues/42/workflow-profile/variables")
             {
@@ -1310,7 +1310,7 @@ public class CliIssueWorkflowConfigSpecs
     [Fact]
     public async Task ConfigClear_Var_OnlyAffectsVars_OtherEndpointsUnchanged()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness(req =>
+        var (handler, http, output, error, fs, executor) = CreateWorkflowConfigSetup(req =>
         {
             if (req.Method == HttpMethod.Patch)
                 return RecordingHttpHandler.Json(new { success = true, data = new { } });
@@ -1332,7 +1332,7 @@ public class CliIssueWorkflowConfigSpecs
     [Fact]
     public async Task ConfigClear_EmptyVarKey_PrintsErrorAndExitsNonZero()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateWorkflowConfigSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["issue", "workflow", "config", "clear", "42", "--var", "  "], output, error, fs, executor);
@@ -1345,7 +1345,7 @@ public class CliIssueWorkflowConfigSpecs
     [Fact]
     public async Task ConfigClear_EmptyPromptKey_PrintsErrorAndExitsNonZero()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateWorkflowConfigSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["issue", "workflow", "config", "clear", "42", "--prompt", ""], output, error, fs, executor);
@@ -1358,7 +1358,7 @@ public class CliIssueWorkflowConfigSpecs
     [Fact]
     public async Task ConfigClear_ServerRejectsVarPatch_SurfacesErrorAndExitsNonZero()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness(req =>
+        var (handler, http, output, error, fs, executor) = CreateWorkflowConfigSetup(req =>
         {
             if (req.Method == HttpMethod.Patch)
             {
@@ -1380,7 +1380,7 @@ public class CliIssueWorkflowConfigSpecs
     [Fact]
     public async Task ConfigClear_ServerRejectsTemplateDelete_SurfacesErrorAndExitsNonZero()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness(req =>
+        var (handler, http, output, error, fs, executor) = CreateWorkflowConfigSetup(req =>
         {
             if (req.Method == HttpMethod.Delete)
             {
@@ -1402,7 +1402,7 @@ public class CliIssueWorkflowConfigSpecs
     [Fact]
     public async Task ConfigClear_InvalidOutputMode_PrintsErrorAndExitsNonZero()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateWorkflowConfigSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,

@@ -74,7 +74,7 @@ public class CliWorkflowReadsSpecs
     // /{runId}/yaml. Both `get` and its `show` alias share the handler, so we
     // intentionally capture the requests per scenario.
     private static (RecordingHttpHandler Handler, HttpClient Http, StringWriter Output, StringWriter Error, FakeFileSystem Fs, FakeCommandExecutor Executor)
-        CreateHarness() => CliTestHarness.CreateSync();
+        CreateWorkflowReadSetup() => CliTestFactory.CreateSync();
 
     private static void RunUnderBothNames(
         RecordingHttpHandler handler,
@@ -122,7 +122,7 @@ public class CliWorkflowReadsSpecs
     [Fact]
     public async Task WorkflowHelp_ExposesReadVerbsAndNoYamlSubcommand()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateWorkflowReadSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["workflow", "--help"], output, error, fs, executor);
@@ -153,7 +153,7 @@ public class CliWorkflowReadsSpecs
     [Fact]
     public async Task WorkflowHelp_DoesNotExposeSingleSessionSubActions()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateWorkflowReadSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["workflow", "--help"], output, error, fs, executor);
@@ -176,7 +176,7 @@ public class CliWorkflowReadsSpecs
     [Fact]
     public async Task Get_IsTheCanonicalSingleResourceRead_HitsBareGetEndpointAndReturnsDetailPayload()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Get && req.RequestUri?.PathAndQuery == $"/api/workflow-runs/{WrId}")
                 return RecordingHttpHandler.Json(new { success = true, data = SampleDetail() });
@@ -198,7 +198,7 @@ public class CliWorkflowReadsSpecs
     [Fact]
     public async Task Get_DoesNotReverseResolveToIssueEndpoint()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Get && req.RequestUri?.PathAndQuery == $"/api/workflow-runs/{WrId}")
                 return RecordingHttpHandler.Json(new { success = true, data = SampleDetail() });
@@ -215,7 +215,7 @@ public class CliWorkflowReadsSpecs
     [Fact]
     public async Task Get_Table_Default_RendersSummaryIncludingStatusStageApprovalAndIssue()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Get && req.RequestUri?.PathAndQuery == $"/api/workflow-runs/{WrId}")
                 return RecordingHttpHandler.Json(new { success = true, data = SampleDetail() });
@@ -243,7 +243,7 @@ public class CliWorkflowReadsSpecs
     public async Task Get_Yaml_HitsYamlSubresourceEndpointAndPrintsDefinition()
     {
         var yamlBody = "name: mohist/local\nstages:\n  - id: plan\n  - id: build";
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Get && req.RequestUri?.PathAndQuery == $"/api/workflow-runs/{WrId}/yaml")
                 return RecordingHttpHandler.Json(new { success = true, data = new { workflowRunId = WrId, yaml = yamlBody } });
@@ -263,7 +263,7 @@ public class CliWorkflowReadsSpecs
     [Fact]
     public async Task Get_Yaml_DoesNotHitBareGetEndpoint()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Get && req.RequestUri?.PathAndQuery == $"/api/workflow-runs/{WrId}/yaml")
                 return RecordingHttpHandler.Json(new { success = true, data = new { workflowRunId = WrId, yaml = "name: mohist/local\n" } });
@@ -281,7 +281,7 @@ public class CliWorkflowReadsSpecs
     [Fact]
     public async Task GetHelp_DocumentsYamlOutputFormat()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateWorkflowReadSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["workflow", "get", "--help"], output, error, fs, executor);
@@ -295,7 +295,7 @@ public class CliWorkflowReadsSpecs
     [Fact]
     public async Task Get_Yaml_OnMissingRun_SurfacesServerErrorToStderr()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Get)
                 return RecordingHttpHandler.JsonError(
@@ -317,7 +317,7 @@ public class CliWorkflowReadsSpecs
     [Fact]
     public async Task Get_MissingRunId_FailsLocallyWithoutHttp()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateWorkflowReadSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["workflow", "get"], output, error, fs, executor);
@@ -335,7 +335,7 @@ public class CliWorkflowReadsSpecs
     [Fact]
     public async Task Show_IsAliasOfGet_BareJson_ProducesIdenticalRequestsOutputAndExit()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Get && req.RequestUri?.PathAndQuery == $"/api/workflow-runs/{WrId}")
                 return RecordingHttpHandler.Json(new { success = true, data = SampleDetail() });
@@ -353,7 +353,7 @@ public class CliWorkflowReadsSpecs
     [Fact]
     public async Task Show_IsAliasOfGet_BareTable_ProducesIdenticalRequestsOutputAndExit()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Get && req.RequestUri?.PathAndQuery == $"/api/workflow-runs/{WrId}")
                 return RecordingHttpHandler.Json(new { success = true, data = SampleDetail() });
@@ -373,7 +373,7 @@ public class CliWorkflowReadsSpecs
     public async Task Show_IsAliasOfGet_Yaml_HitsYamlSubresource_ProducesIdenticalRequestsOutputAndExit()
     {
         var yamlBody = "name: mohist/local\nstages:\n  - id: plan\n  - id: build";
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Get && req.RequestUri?.PathAndQuery == $"/api/workflow-runs/{WrId}/yaml")
                 return RecordingHttpHandler.Json(new { success = true, data = new { workflowRunId = WrId, yaml = yamlBody } });
@@ -398,7 +398,7 @@ public class CliWorkflowReadsSpecs
     public async Task Show_Help_DocumentsYamlOutputFormat()
     {
         // The `show` alias surfaces the same help block as `get`.
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateWorkflowReadSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["workflow", "show", "--help"], output, error, fs, executor);
@@ -412,7 +412,7 @@ public class CliWorkflowReadsSpecs
     [Fact]
     public async Task Status_IsNotARegisteredSubcommand()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateWorkflowReadSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["workflow", "status", WrId], output, error, fs, executor);
@@ -426,7 +426,7 @@ public class CliWorkflowReadsSpecs
     [Fact]
     public async Task Status_IsNotAdvertisedInWorkflowHelp()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateWorkflowReadSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["workflow", "--help"], output, error, fs, executor);
@@ -447,7 +447,7 @@ public class CliWorkflowReadsSpecs
     [Fact]
     public async Task Variables_HitsEffectiveSubresourceWithoutKeyOrStage()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Get && req.RequestUri?.PathAndQuery == $"/api/workflow-runs/{WrId}/variables/effective")
                 return RecordingHttpHandler.Json(new
@@ -473,7 +473,7 @@ public class CliWorkflowReadsSpecs
     [Fact]
     public async Task Variables_WithStage_AppendsStageQueryParam()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Get && req.RequestUri?.PathAndQuery == $"/api/workflow-runs/{WrId}/variables/effective?stage=plan")
                 return RecordingHttpHandler.Json(new { success = true, data = new Dictionary<string, object>() });
@@ -491,7 +491,7 @@ public class CliWorkflowReadsSpecs
     [Fact]
     public async Task Variables_WithKey_AppendsKeyPathToSubresource()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Get && req.RequestUri?.PathAndQuery == $"/api/workflow-runs/{WrId}/variables/effective/some.nested.key")
                 return RecordingHttpHandler.Json(new { success = true, data = "the-value" });
@@ -511,7 +511,7 @@ public class CliWorkflowReadsSpecs
     [Fact]
     public async Task Variables_WithKeyAndStage_AppendsKeyPathAndStageQueryParam()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Get && req.RequestUri?.PathAndQuery == $"/api/workflow-runs/{WrId}/variables/effective/some.nested.key?stage=plan")
                 return RecordingHttpHandler.Json(new { success = true, data = "scoped-value" });
@@ -529,7 +529,7 @@ public class CliWorkflowReadsSpecs
     [Fact]
     public async Task Events_HitsRunScopedEventsEndpoint()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Get && req.RequestUri?.PathAndQuery == $"/api/workflow-runs/{WrId}/events")
                 return RecordingHttpHandler.Json(new
@@ -566,7 +566,7 @@ public class CliWorkflowReadsSpecs
     [Fact]
     public async Task Events_WithLimit_AppendsLimitQueryParam()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Get && req.RequestUri?.PathAndQuery == $"/api/workflow-runs/{WrId}/events?limit=50")
                 return RecordingHttpHandler.Json(new { success = true, data = Array.Empty<object>() });
@@ -584,7 +584,7 @@ public class CliWorkflowReadsSpecs
     [Fact]
     public async Task ListSessions_HitsRunScopedSessionsEndpoint()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Get && req.RequestUri?.PathAndQuery == $"/api/workflow-runs/{WrId}/sessions")
                 return RecordingHttpHandler.Json(new
@@ -618,7 +618,7 @@ public class CliWorkflowReadsSpecs
     [Fact]
     public async Task ListSessions_DoesNotExposeSingleSessionSubActions()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateWorkflowReadSetup();
 
         foreach (var verb in new[] { "get", "transcript", "compact", "reset", "followup" })
         {
@@ -638,7 +638,7 @@ public class CliWorkflowReadsSpecs
         // every read verb resolves the run solely from the workflowRunId and
         // issues its GET. The status subcommand is gone and not exercised
         // here.
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(responder: null, activeProjectId: null);
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(responder: null, activeProjectId: null);
         handler.SetResponder((req, _) =>
         {
             if (req.Method == HttpMethod.Get
@@ -674,7 +674,7 @@ public class CliWorkflowReadsSpecs
     [Fact]
     public async Task Get_UnknownRunId_PrintsServerErrorToStderrAndExitsNonZero()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Get && req.RequestUri?.PathAndQuery == $"/api/workflow-runs/{WrId}")
                 return RecordingHttpHandler.JsonError(
@@ -696,7 +696,7 @@ public class CliWorkflowReadsSpecs
     [Fact]
     public async Task Show_UnknownRunId_PrintsServerErrorToStderrAndExitsNonZero()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Get && req.RequestUri?.PathAndQuery == $"/api/workflow-runs/{WrId}")
                 return RecordingHttpHandler.JsonError(
@@ -717,7 +717,7 @@ public class CliWorkflowReadsSpecs
     [Fact]
     public async Task Variables_UnknownRunId_PrintsServerErrorToStderrAndExitsNonZero()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Get)
                 return RecordingHttpHandler.JsonError(
@@ -737,7 +737,7 @@ public class CliWorkflowReadsSpecs
     [Fact]
     public async Task Events_UnknownRunId_PrintsServerErrorToStderrAndExitsNonZero()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Get)
                 return RecordingHttpHandler.JsonError(
@@ -757,7 +757,7 @@ public class CliWorkflowReadsSpecs
     [Fact]
     public async Task ListSessions_UnknownRunId_PrintsServerErrorToStderrAndExitsNonZero()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Get)
                 return RecordingHttpHandler.JsonError(
@@ -777,7 +777,7 @@ public class CliWorkflowReadsSpecs
     [Fact]
     public async Task Get_InvalidOutputFormat_FailsBeforeHttp()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateWorkflowReadSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["workflow", "get", WrId, "-o", "xml"], output, error, fs, executor);

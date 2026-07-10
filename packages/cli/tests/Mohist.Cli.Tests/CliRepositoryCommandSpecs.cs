@@ -28,7 +28,7 @@ public class CliRepositoryCommandSpecs
             Func<HttpRequestMessage, HttpResponseMessage>? responder = null,
             string? activeProjectId = ActiveProjectId)
     {
-        return CliTestHarness.CreateSync(req =>
+        return CliTestFactory.CreateSync(req =>
         {
             var response = responder?.Invoke(req);
             return response ?? RecordingHttpHandler.Json(new { success = true, data = new { } });

@@ -22,7 +22,7 @@ public class CliRootCommandShapeTests
     [Fact]
     public async Task Root_Help_ListsResourceGroupsAndInfoOnly_NoBareVerbs()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.Create();
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["--help"], output, error, fs, executor);
@@ -76,7 +76,7 @@ public class CliRootCommandShapeTests
         // resource group. This pins the test surface so a future
         // refactor that drops one of these (e.g. `workflow`) is caught
         // here rather than in some unrelated test.
-        var (handler, http, output, error, fs, executor) = CliTestHarness.Create();
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["--help"], output, error, fs, executor);
@@ -115,7 +115,7 @@ public class CliRootCommandShapeTests
     [Fact]
     public async Task LegacyRootStatus_FailsToResolveAndExitsNonZero()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.Create();
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["status"], output, error, fs, executor);
@@ -130,7 +130,7 @@ public class CliRootCommandShapeTests
     [Fact]
     public async Task LegacyRootLogs_FailsToResolveAndExitsNonZero()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.Create();
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["logs"], output, error, fs, executor);
@@ -142,7 +142,7 @@ public class CliRootCommandShapeTests
     [Fact]
     public async Task LegacyRootUse_FailsToResolveAndExitsNonZero()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.Create();
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["use", "my-app"], output, error, fs, executor);
@@ -154,7 +154,7 @@ public class CliRootCommandShapeTests
     [Fact]
     public async Task LegacyRootNotify_FailsToResolveAndExitsNonZero()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.Create();
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["notify", "setup"], output, error, fs, executor);
@@ -168,7 +168,7 @@ public class CliRootCommandShapeTests
     [Fact]
     public async Task LegacySystemInfo_FailsToResolveAndExitsNonZero()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.Create();
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["system", "info"], output, error, fs, executor);
@@ -186,7 +186,7 @@ public class CliRootCommandShapeTests
         // the assertion fragile against cosmetic wording changes; the
         // exit code, the `mo info` path resolving, and the renderer
         // section anchors are the durable signal.
-        var (handler, http, output, error, fs, executor) = CliTestHarness.Create();
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["info"], output, error, fs, executor);
@@ -211,7 +211,7 @@ public class CliRootCommandShapeTests
         // (skills, git remote, opencode, env, OS, capacity, disk). This
         // is one of the two alternate invocations the spec calls out
         // (`mo info --verbose` / `mo info --json`).
-        var (handler, http, output, error, fs, executor) = CliTestHarness.Create();
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["info", "--verbose"], output, error, fs, executor);
@@ -229,7 +229,7 @@ public class CliRootCommandShapeTests
         // `--json` produces a single machine-readable JSON object with
         // the documented top-level keys. Spec calls this out as the
         // second alternate invocation.
-        var (handler, http, output, error, fs, executor) = CliTestHarness.Create();
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["info", "--json"], output, error, fs, executor);
