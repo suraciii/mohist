@@ -26,9 +26,7 @@ public class DispatcherGrainSpecs
     public DispatcherGrainSpecs(DispatcherFixture fixture)
     {
         _fixture = fixture;
-        _fixture.ClosedGenericInvocations.Clear();
-        _fixture.CatchAllInvocations.Clear();
-        _fixture.SpecificInvocations.Clear();
+        _fixture.ResetInvocationRecords();
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]
@@ -145,16 +143,20 @@ public class DispatcherGrainSpecs
         var initialSilo = initialContext.Address.SiloAddress
             ?? throw new InvalidOperationException("Dispatcher activation has no silo address");
 
+        var beforeTick = _fixture.WaitForSpecificInvocationAsync("evt_reminder_before");
         await PublishWorkflowCompletedAsync("evt_reminder_before", "issue_reminder_before");
-        await FireReminderAsync();
+        _fixture.TimeProvider.Advance(TimeSpan.FromHours(1));
+        await beforeTick;
         Assert.Contains("evt_reminder_before", _fixture.SpecificInvocations);
 
         var hostingSilo = _fixture.Cluster.GetSiloForAddress(initialSilo);
         Assert.NotNull(hostingSilo);
         await _fixture.Cluster.KillSiloAsync(hostingSilo);
 
+        var afterTick = _fixture.WaitForSpecificInvocationAsync("evt_reminder_after");
         await PublishWorkflowCompletedAsync("evt_reminder_after", "issue_reminder_after");
-        await FireReminderAsync();
+        _fixture.TimeProvider.Advance(TimeSpan.FromHours(1));
+        await afterTick;
 
         Assert.Contains("evt_reminder_after", _fixture.SpecificInvocations);
         Assert.Equal(0, _fixture.EventStore.PendingCount);
@@ -187,11 +189,6 @@ public class DispatcherGrainSpecs
         Assert.Contains("InvalidOperationException", dl.ErrorStack);
         Assert.Equal(0, _fixture.EventStore.PendingCount);
     }
-
-    private Task FireReminderAsync() =>
-        _fixture.Dispatcher.ReceiveReminder(
-            DispatcherGrain.ReminderName,
-            new TickStatus(EventTime.UtcDateTime, TimeSpan.FromSeconds(1), EventTime.UtcDateTime));
 
     private Task PublishWorkflowCompletedAsync(string eventId, string issueId) =>
         _fixture.EventPublisher.PublishAsync(new CloudEvent(

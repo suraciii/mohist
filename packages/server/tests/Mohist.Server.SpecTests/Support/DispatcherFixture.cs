@@ -289,6 +289,8 @@ public sealed class DispatcherFixture : IAsyncLifetime
     public List<string> ClosedGenericInvocations { get; } = [];
     public List<string> CatchAllInvocations { get; } = [];
     public List<string> SpecificInvocations { get; } = [];
+    private readonly Dictionary<string, TaskCompletionSource> _specificDeliverySignals = new(StringComparer.Ordinal);
+    private readonly object _specificDeliverySignalsGate = new();
 
     private SqliteConnection _keeper = null!;
 
@@ -315,6 +317,34 @@ public sealed class DispatcherFixture : IAsyncLifetime
         EventPublisher.RegisterSink(EventStore);
 
         await Dispatcher.EnsureStartedAsync();
+    }
+
+    public void ResetInvocationRecords()
+    {
+        lock (ClosedGenericInvocations)
+            ClosedGenericInvocations.Clear();
+        lock (CatchAllInvocations)
+            CatchAllInvocations.Clear();
+        lock (SpecificInvocations)
+            SpecificInvocations.Clear();
+        lock (_specificDeliverySignalsGate)
+            _specificDeliverySignals.Clear();
+    }
+
+    public Task WaitForSpecificInvocationAsync(string eventId)
+    {
+        lock (_specificDeliverySignalsGate)
+        {
+            return GetSpecificDeliverySignal(eventId).Task;
+        }
+    }
+
+    public void RecordSpecificInvocation(string eventId)
+    {
+        lock (SpecificInvocations)
+            SpecificInvocations.Add(eventId);
+        lock (_specificDeliverySignalsGate)
+            GetSpecificDeliverySignal(eventId).TrySetResult();
     }
 
     public Task DisposeAsync()
@@ -380,6 +410,11 @@ public sealed class DispatcherFixture : IAsyncLifetime
         siloBuilder.Services.AddSingleton<IAgentJobDispatchObserver>(NoopAgentJobDispatchObserver.Instance);
         siloBuilder.Services.Configure<WorkflowOptions>(_ => { });
     }
+
+    private TaskCompletionSource GetSpecificDeliverySignal(string eventId) =>
+        _specificDeliverySignals.TryGetValue(eventId, out var signal)
+            ? signal
+            : _specificDeliverySignals[eventId] = new(TaskCreationOptions.RunContinuationsAsynchronously);
 }
 
 /// <summary>
@@ -507,10 +542,7 @@ public sealed class DispatcherSpecificHandler : ICloudEventHandler
 
     public Task HandleAsync(CloudEvent evt, CancellationToken ct)
     {
-        lock (_fixture.SpecificInvocations)
-        {
-            _fixture.SpecificInvocations.Add(evt.Id);
-        }
+        _fixture.RecordSpecificInvocation(evt.Id);
         return Task.CompletedTask;
     }
 }
