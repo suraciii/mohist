@@ -461,6 +461,23 @@ public class AgentJobGrainSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
+    public async Task SubmitAsync_IdenticalSecondCallAfterRunning_IsIdempotent()
+    {
+        var (_, projectId) = await RegisterAgentJobRunnerAsync($"agent-job-idempotent-runner-{Guid.NewGuid():N}");
+        var job = JobGrain($"agent-job-idempotent-{Guid.NewGuid():N}");
+        var input = MakeInput("same", projectId, "/tmp/agent-job-idempotent");
+
+        await job.SubmitAsync(input);
+        await WaitForStatusAsync(job, AgentJobStatus.Running, TimeSpan.FromSeconds(5));
+
+        await job.SubmitAsync(input with { });
+
+        Assert.Equal(AgentJobStatus.Running, await job.GetStatusAsync());
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
+    [Fact]
     public async Task SubmitAsync_NoEligibleRunner_IncrementsDispatchAttemptsAcrossRetries()
     {
         await ClearGlobalRunnerRegistryAsync();

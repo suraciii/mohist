@@ -145,6 +145,7 @@ internal static class AgentSubscriptionDispatchTestSupport
     public sealed class RecordingAgentLauncher : IAgentLauncher
     {
         public List<RecordedLaunch> Calls { get; } = new();
+        public Exception? Failure { get; set; }
 
         public Task<AgentLaunchResult> LaunchAsync(
             AgentInfo agent,
@@ -154,6 +155,8 @@ internal static class AgentSubscriptionDispatchTestSupport
             CancellationToken ct = default)
         {
             Calls.Add(new RecordedLaunch(agent, prompt, context, triggerLabels));
+            if (Failure is not null)
+                return Task.FromException<AgentLaunchResult>(Failure);
             return Task.FromResult(new AgentLaunchResult(
                 SessionId: $"session_{Calls.Count:D3}",
                 AgentId: agent.Id,

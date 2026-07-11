@@ -177,6 +177,15 @@ public sealed class CapturingDeadLetterStore : IDeadLetterStore
         }
     }
 
+    public Task DeleteAsync(long deadLetterId, CancellationToken ct = default)
+    {
+        lock (_gate)
+        {
+            _rows.RemoveAll(row => row.DeadLetterId == deadLetterId);
+        }
+        return Task.CompletedTask;
+    }
+
     public IReadOnlyList<DeadLetterRow> Written
     {
         get { lock (_gate) { return _rows.ToList(); } }

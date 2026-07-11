@@ -1,4 +1,3 @@
-using System.Linq.Expressions;
 using System.Reflection;
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
@@ -86,23 +85,13 @@ public static class CloudEventBusServiceCollectionExtensions
             return (DispatchDelegate)genericMethod.Invoke(null, null)!;
         }
 
-        var handleMethod = handlerType.GetMethod(
-            "HandleAsync",
-            new[] { typeof(CloudEvent), typeof(CancellationToken) })
-            ?? throw new InvalidOperationException(
-                $"Dynamic handler {handlerType.Name} must have HandleAsync(CloudEvent, CancellationToken) method");
-
-        var handlerParam = Expression.Parameter(typeof(object), "handler");
-        var evtParam = Expression.Parameter(typeof(CloudEvent), "evt");
-        var ctParam = Expression.Parameter(typeof(CancellationToken), "ct");
-
-        var call = Expression.Call(
-            Expression.Convert(handlerParam, handlerType),
-            handleMethod,
-            evtParam, ctParam);
-
-        return Expression.Lambda<DispatchDelegate>(
-            call, handlerParam, evtParam, ctParam).Compile();
+        return (instance, evt, ct) =>
+        {
+            var typedHandler = (ICloudEventHandler)instance;
+            return typedHandler.Filter(evt)
+                ? typedHandler.HandleAsync(evt, ct)
+                : Task.CompletedTask;
+        };
     }
 
     private static DispatchDelegate MakeTypedDelegate<TData>() where TData : class

@@ -46,7 +46,7 @@ public sealed class InMemoryEventBus : IEventPublisher
     /// Adds a subscription after construction. Used by test fixtures that
     /// build the bus empty and then wire the same handlers the production
     /// pipeline registers via <c>AddCloudEventHandlersFromAssembly</c>.
-    /// Subscriptions are retained for the future dispatcher but are not
+    /// Subscriptions are retained for the durable dispatcher but are not
     /// invoked by <see cref="PublishAsync"/>; the publish path is write-only
     /// and delegates to <see cref="IEventStore.AppendAsync(CloudEvent, CancellationToken)"/>.
     /// </summary>

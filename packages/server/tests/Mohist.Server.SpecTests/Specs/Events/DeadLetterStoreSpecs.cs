@@ -144,6 +144,18 @@ public class DeadLetterStoreSpecs : IAsyncLifetime
     }
 
     [Fact]
+    public async Task DeleteAsync_RemovesResolvedRow()
+    {
+        var row = BuildRow(origin: "Issue", deadLetteredAt: FirstTime);
+        await _store.WriteAsync(row);
+
+        await _store.DeleteAsync(row.DeadLetterId);
+
+        Assert.Null(await _store.GetAsync(row.DeadLetterId));
+        Assert.Empty(await _store.QueryAsync(failingHandler: null, limit: 100));
+    }
+
+    [Fact]
     public void NoopDeadLetterStore_IsUsableFake()
     {
         IDeadLetterStore fake = new NoopDeadLetterStore();

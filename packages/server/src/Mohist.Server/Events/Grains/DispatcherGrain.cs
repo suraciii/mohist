@@ -17,34 +17,35 @@ namespace Mohist.Server.Events.Grains;
 /// </summary>
 public sealed class DispatcherGrain : Grain, IDispatcherGrain, IRemindable
 {
-    internal const string FixedKey = "dispatcher";
-    internal const string ReminderName = "dispatcher-tick";
+    public const string FixedKey = "dispatcher";
+    public const string ReminderName = "dispatcher-tick";
 
     private readonly EventDispatcherService _dispatcher;
-    private readonly TimeProvider _time;
     private readonly DispatcherOptions _options;
     private readonly ILogger<DispatcherGrain> _log;
-    private IGrainReminder? _reminder;
 
     public DispatcherGrain(
         EventDispatcherService dispatcher,
-        TimeProvider time,
         IOptions<DispatcherOptions> options,
         ILogger<DispatcherGrain> log)
     {
         _dispatcher = dispatcher;
-        _time = time;
         _options = options.Value;
         _log = log;
     }
 
     public override async Task OnActivateAsync(CancellationToken ct)
     {
-        await EnsureReminderAsync(ct);
+        await this.RegisterOrUpdateReminder(
+            ReminderName,
+            _options.ReminderDueTime,
+            _options.ReminderPeriod);
         _log.LogInformation(
             "Dispatcher grain activated (key={Key}); reminder cadence ~{Period}",
             this.GetPrimaryKeyString(), _options.ReminderPeriod);
     }
+
+    public Task EnsureStartedAsync() => Task.CompletedTask;
 
     public Task ReceiveReminder(string reminderName, TickStatus status)
     {
@@ -60,24 +61,6 @@ public sealed class DispatcherGrain : Grain, IDispatcherGrain, IRemindable
     public Task PulseAsync(CancellationToken ct = default) =>
         _dispatcher.DispatchAsync(ct);
 
-    public Task RedeliverAsync(long deadLetterId, CancellationToken ct = default) =>
+    public Task<DeadLetterRedeliveryResult> RedeliverAsync(long deadLetterId, CancellationToken ct = default) =>
         _dispatcher.RedeliverAsync(deadLetterId, ct);
-
-    private async Task EnsureReminderAsync(CancellationToken ct)
-    {
-        if (_reminder is not null)
-            return;
-
-        var existing = await this.GetReminder(ReminderName);
-        if (existing is not null)
-        {
-            _reminder = existing;
-            return;
-        }
-
-        _reminder = await this.RegisterOrUpdateReminder(
-            ReminderName,
-            _options.ReminderDueTime,
-            _options.ReminderPeriod);
-    }
 }

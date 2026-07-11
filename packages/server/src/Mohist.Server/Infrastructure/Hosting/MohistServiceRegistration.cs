@@ -80,9 +80,9 @@ public static class MohistServiceRegistration
         services.AddScoped<IAgentSessionTranscriptStore, AgentSessionTranscriptStore>();
         services.AddSingleton<Mohist.Server.Workflow.Services.Prompts.IPromptLoader, Mohist.Server.Workflow.Services.Prompts.FilePromptLoader>();
         services.AddSingleton<IEventStore, EventStore>();
+        services.TryAddSingleton<IDeadLetterStore, DeadLetterStore>();
         services.Configure<HermesNotificationOptions>(configuration.GetSection(HermesNotificationOptions.SectionName));
         services.AddSingleton<HermesIssueNotificationRenderer>();
-        services.AddSingleton<IHermesIssueNotificationDispatcher, BackgroundHermesIssueNotificationDispatcher>();
         services.AddHttpClient<IHermesWebhookClient, HermesWebhookClient>();
         services.AddCloudEventBus();
         services.AddCloudEventHandlersFromAssembly(typeof(MohistServiceRegistration).Assembly);
@@ -90,6 +90,7 @@ public static class MohistServiceRegistration
         services.AddSingleton<ITranscriptEventPublisher, SignalRTranscriptEventPublisher>();
         services.AddSingleton<ITaskLogDeltaPublisher, SignalRTaskLogDeltaPublisher>();
         services.AddHostedService<AttachmentCleanupService>();
+        services.AddHostedService<DispatcherActivationService>();
         services.AddHostedService<EpicReconciliationService>();
         services.TryAddSingleton<IProcessStartTimeProvider, ProcessStartTimeProvider>();
         services.AddHostedService<SystemUpdateRecoveryService>();

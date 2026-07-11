@@ -14,6 +14,13 @@ The event dispatcher SHALL run as a single cluster-wide active notifier, realize
 - **THEN** the persisted reminder SHALL reactivate the dispatcher on another silo
 - **AND** undelivered event rows SHALL continue to be delivered on the reminder cadence
 
+#### Scenario: Fresh host starts without a producer ping
+
+- **WHEN** the host starts with a fresh reminder table
+- **THEN** it SHALL activate the fixed-key dispatcher grain
+- **AND** the dispatcher SHALL register its persisted reminder before startup completes
+- **AND** delivery SHALL begin without any producer calling `Pulse()`
+
 ### Requirement: Single-query pull of all undelivered event rows
 
 On each tick, the dispatcher SHALL run a single query that pulls every undelivered event row (`DispatchedAt IS NULL`) across all event truth tables — WorkflowRun, Issue, Epic, and AgentSession. The query SHALL order the rows by `(Source, Id)` so that each stream (`Source`) is seen in per-source `Id` order.
@@ -55,6 +62,12 @@ Delivery SHALL be at-least-once. The dispatcher SHALL process undelivered rows s
 - **THEN** the dispatcher SHALL deliver them in that `Id` order
 - **AND** SHALL NOT deliver `Id` 3 before `Id` 1 has been delivered
 
+#### Scenario: Mark failure stops progress for the tick
+
+- **WHEN** delivery of per-source `Id` 1 succeeds but persisting its `DispatchedAt` fails
+- **THEN** the tick SHALL fail before delivering `Id` 2 from the same source
+- **AND** the next tick SHALL retry `Id` 1 first
+
 ### Requirement: Per-row delivery mark applied only after delivery
 
 The dispatcher SHALL set `DispatchedAt` on an event row only after that row has been delivered (or routed to the dead-letter table). Marking SHALL be per row, so the progress marker is exact to the delivered event.
@@ -75,6 +88,13 @@ The dispatcher SHALL retry transient handler failures before treating a message 
 - **THEN** the event SHALL be considered delivered for that handler
 - **AND** the row SHALL be marked dispatched once all matching handlers have settled
 
+#### Scenario: Production handler failure reaches the dispatcher
+
+- **WHEN** a required handler side effect fails
+- **THEN** its returned Task SHALL fail
+- **AND** the dispatcher SHALL retry or dead-letter that handler outcome
+- **AND** the handler SHALL NOT hide the failure by logging-and-returning or detached work
+
 ### Requirement: Crash recovery via re-delivery, independent of any external signal
 
 Correctness SHALL NOT depend on any external signal or best-effort ping. If the dispatcher crashes after delivering an event but before setting `DispatchedAt`, the row SHALL remain undelivered and SHALL be re-delivered on restart. Handlers SHALL absorb the redelivered duplicate idempotently by event id.
@@ -85,6 +105,12 @@ Correctness SHALL NOT depend on any external signal or best-effort ping. If the 
 - **THEN** the row SHALL remain `DispatchedAt IS NULL`
 - **AND** the next tick SHALL re-deliver the same event
 - **AND** the handler SHALL absorb the duplicate idempotently by event id
+
+#### Scenario: Agent launch duplicate is absorbed by stable identity
+
+- **WHEN** an Agent subscription event is delivered successfully and then re-delivered before its row is marked
+- **THEN** the same AgentSession and AgentJob identities SHALL be reused
+- **AND** no second Agent launch SHALL be minted for that event/subscription pair
 
 #### Scenario: Correctness holds without any ping
 

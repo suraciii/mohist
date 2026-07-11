@@ -16,4 +16,6 @@ public interface IDeadLetterStore
     Task<IReadOnlyList<DeadLetterRow>> QueryAsync(string? failingHandler, int limit, CancellationToken ct = default);
 
     Task<DeadLetterRow?> GetAsync(long deadLetterId, CancellationToken ct = default);
+
+    Task DeleteAsync(long deadLetterId, CancellationToken ct = default);
 }

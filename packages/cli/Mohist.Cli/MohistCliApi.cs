@@ -810,6 +810,8 @@ internal sealed class MohistCliApi
         WorkflowRunDetail,
         WorkflowRunVariables,
         WorkflowRunEvents,
+        DeadLetterList,
+        DeadLetterRedelivery,
     }
 
     internal static TableShape ParseTableShape(string? shape)

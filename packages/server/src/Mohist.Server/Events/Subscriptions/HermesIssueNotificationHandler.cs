@@ -1,6 +1,5 @@
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Mohist.Server.Infrastructure.Data;
 using Mohist.Server.Infrastructure.Data.Workflow;
@@ -24,81 +23,40 @@ public sealed class HermesIssueNotificationHandler : ICloudEventHandler
     private readonly IOptionsMonitor<HermesNotificationOptions> _options;
     private readonly HermesIssueNotificationRenderer _renderer;
     private readonly IHermesWebhookClient _client;
-    private readonly IHermesIssueNotificationDispatcher _dispatcher;
-    private readonly ILogger<HermesIssueNotificationHandler> _log;
 
     public HermesIssueNotificationHandler(
         IServiceScopeFactory scopeFactory,
         IOptionsMonitor<HermesNotificationOptions> options,
         HermesIssueNotificationRenderer renderer,
-        IHermesWebhookClient client,
-        IHermesIssueNotificationDispatcher dispatcher,
-        ILogger<HermesIssueNotificationHandler> log)
+        IHermesWebhookClient client)
     {
         _scopeFactory = scopeFactory;
         _options = options;
         _renderer = renderer;
         _client = client;
-        _dispatcher = dispatcher;
-        _log = log;
     }
 
     public bool Filter(CloudEvent evt) => evt is not null && TryResolveNotificationType(evt.Type, out _);
 
-    public Task HandleAsync(CloudEvent evt, CancellationToken ct)
+    public async Task HandleAsync(CloudEvent evt, CancellationToken ct)
     {
-        try
-        {
-            var options = _options.CurrentValue;
-            if (!options.IsWebhookConfigured || !TryResolveNotificationType(evt.Type, out var notificationType))
-                return Task.CompletedTask;
+        var options = _options.CurrentValue;
+        if (!options.IsWebhookConfigured || !TryResolveNotificationType(evt.Type, out var notificationType))
+            return;
 
-            if (!options.IsEnabled(notificationType))
-                return Task.CompletedTask;
+        if (!options.IsEnabled(notificationType))
+            return;
 
-            ct.ThrowIfCancellationRequested();
-
-            _dispatcher.Dispatch(backgroundCt => DeliverAsync(evt, notificationType, backgroundCt));
-            return Task.CompletedTask;
-        }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _log.LogWarning(ex,
-                "Hermes issue notification dispatch failed for event {EventType} {EventId}",
-                evt.Type,
-                evt.Id);
-            return Task.CompletedTask;
-        }
+        await DeliverAsync(evt, notificationType, ct).ConfigureAwait(false);
     }
 
     private async Task DeliverAsync(CloudEvent evt, string notificationType, CancellationToken ct)
     {
-        try
-        {
-            var draft = await BuildDraftAsync(evt, notificationType, ct).ConfigureAwait(false);
-            if (draft is null)
-                return;
+        var draft = await BuildDraftAsync(evt, notificationType, ct).ConfigureAwait(false);
+        if (draft is null)
+            return;
 
-            await _client.SendAsync(_renderer.Render(draft), ct).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
-        {
-            _log.LogDebug(
-                "Hermes issue notification delivery canceled for event {EventType} {EventId}",
-                evt.Type,
-                evt.Id);
-        }
-        catch (Exception ex)
-        {
-            _log.LogWarning(ex,
-                "Hermes issue notification delivery failed for event {EventType} {EventId}",
-                evt.Type,
-                evt.Id);
-        }
+        await _client.SendAsync(_renderer.Render(draft), ct).ConfigureAwait(false);
     }
 
     private async Task<HermesIssueNotificationDraft?> BuildDraftAsync(
@@ -194,28 +152,18 @@ public sealed class HermesIssueNotificationHandler : ICloudEventHandler
 
     private async Task<DomainIssue?> ResolveIssueAsync(ResolvedIdentity resolved, IStateStore<DomainIssue> issueStore)
     {
-        try
-        {
-            var issue = await issueStore.LoadAsync(resolved.IssueId).ConfigureAwait(false);
-            if (issue is null)
-                return null;
+        var issue = await issueStore.LoadAsync(resolved.IssueId).ConfigureAwait(false);
+        if (issue is null)
+            return null;
 
-            if (!string.Equals(issue.ProjectId, resolved.ProjectId, StringComparison.Ordinal)
-                || issue.Number != resolved.IssueNumber
-                || string.IsNullOrWhiteSpace(issue.Title))
-            {
-                return null;
-            }
-
-            return issue;
-        }
-        catch (Exception ex)
+        if (!string.Equals(issue.ProjectId, resolved.ProjectId, StringComparison.Ordinal)
+            || issue.Number != resolved.IssueNumber
+            || string.IsNullOrWhiteSpace(issue.Title))
         {
-            _log.LogDebug(ex,
-                "Hermes notification skipped: failed to load issue {IssueId}",
-                resolved.IssueId);
             return null;
         }
+
+        return issue;
     }
 
     private static T? DeserializeData<T>(CloudEvent evt) where T : class =>

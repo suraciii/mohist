@@ -201,6 +201,14 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
 
     public Task SubmitAsync(AgentJobInput input)
     {
+        if (_input is not null)
+        {
+            if (EquivalentInput(_input, input))
+                return Task.CompletedTask;
+            throw new InvalidOperationException(
+                $"AgentJob '{Key}' cannot accept a different submission after it has started");
+        }
+
         if (_status != AgentJobStatus.Pending)
             throw new InvalidOperationException(
                 $"AgentJob '{Key}' cannot be re-submitted; current status is {_status}");
@@ -214,6 +222,24 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         _dispatchAttempts = 0;
         _ = TryDispatchAsync();
         return Task.CompletedTask;
+    }
+
+    private static bool EquivalentInput(AgentJobInput left, AgentJobInput right) =>
+        string.Equals(left.Prompt, right.Prompt, StringComparison.Ordinal)
+        && string.Equals(left.Model, right.Model, StringComparison.Ordinal)
+        && string.Equals(left.WorkspacePath, right.WorkspacePath, StringComparison.Ordinal)
+        && string.Equals(left.ProjectId, right.ProjectId, StringComparison.Ordinal)
+        && string.Equals(left.Uses, right.Uses, StringComparison.Ordinal)
+        && string.Equals(left.AgentId, right.AgentId, StringComparison.Ordinal)
+        && string.Equals(left.AgentInstructions, right.AgentInstructions, StringComparison.Ordinal)
+        && string.Equals(left.AgentSessionId, right.AgentSessionId, StringComparison.Ordinal)
+        && JsonEquals(left.AgentConfig, right.AgentConfig);
+
+    private static bool JsonEquals(JsonElement? left, JsonElement? right)
+    {
+        if (left is null || right is null)
+            return left is null && right is null;
+        return string.Equals(left.Value.GetRawText(), right.Value.GetRawText(), StringComparison.Ordinal);
     }
 
     public async Task CheckTimeoutsAsync()

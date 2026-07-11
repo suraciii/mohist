@@ -29,18 +29,8 @@ namespace Mohist.Server.Events.Subscriptions;
 /// unchanged).
 /// </para>
 /// <para>
-/// The handler is dormant until the dispatcher (step 3 of the event-bus
-/// v2 roadmap) lands. <see cref="InMemoryEventBus.PublishAsync"/> no longer
-/// invokes handlers synchronously, so this handler is currently triggered
-/// only by tests and by the future replay/dispatcher infrastructure. The
-/// registration is kept intact so the dispatcher can wire it without code
-/// changes.
-/// </para>
-/// <para>
-/// Handler exceptions are swallowed and logged so a dispatch/handling
-/// failure never propagates into the workflow-run commit that recorded
-/// the event. The event row remains durable for replay/backfill;
-/// idempotency is inherited from
+/// Handler failures propagate to the durable dispatcher, which owns retry
+/// and dead-letter policy. Idempotency is inherited from
 /// <see cref="IIssueGrain.CompleteWorkAsync"/> via its
 /// <c>Status == InProgress</c> and <c>workflowRunId</c> match guards.
 /// </para>
@@ -83,16 +73,7 @@ public sealed class IssueWorkflowCompletionHandler : ICloudEventHandler
             return;
         }
 
-        try
-        {
-            var grain = _grains.GetGrain<IIssueGrain>(GrainKey.Issue(issueId));
-            await grain.CompleteWorkAsync(workflowRunId).ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            _log.LogWarning(ex,
-                "Workflow-run completed handler: CompleteWorkAsync failed for issue {IssueId} ({WorkflowRunId}); issue is not transitioned by this subscription",
-                issueId, workflowRunId);
-        }
+        var grain = _grains.GetGrain<IIssueGrain>(GrainKey.Issue(issueId));
+        await grain.CompleteWorkAsync(workflowRunId).ConfigureAwait(false);
     }
 }

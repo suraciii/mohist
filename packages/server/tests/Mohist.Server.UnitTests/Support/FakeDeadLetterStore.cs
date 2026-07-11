@@ -73,6 +73,15 @@ public sealed class FakeDeadLetterStore : IDeadLetterStore
         }
     }
 
+    public Task DeleteAsync(long deadLetterId, CancellationToken ct = default)
+    {
+        lock (_gate)
+        {
+            _rows.RemoveAll(row => row.DeadLetterId == deadLetterId);
+        }
+        return Task.CompletedTask;
+    }
+
     public IReadOnlyList<DeadLetterRow> Written
     {
         get

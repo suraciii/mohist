@@ -20,16 +20,16 @@ _None._
 - [ID: item-2]
   Severity: follow-up
   Scope: alignment
-  Evidence: Issue AC #4 asks for test coverage of "投递后标记前崩溃 → 重投 → **幂等吸收**". The `event-dispatch` spec correctly encodes the idempotent-absorption requirement ("the handler SHALL absorb the redelivered duplicate idempotently by event id"). `tasks.json` T-002 acceptance lists "deliver-before-mark crash → row stays undelivered → re-delivered on next tick" but does not explicitly call out asserting the handler absorbs the duplicate by event id. The dispatcher's responsibility (re-deliver) is covered; idempotent absorption is a handler-side property best asserted in an integration spec.
-  SuggestedAction: When implementing T-002's spec/integration tests, include an assertion that a re-delivered duplicate is absorbed idempotently by the handler (e.g. a handler that no-ops on a seen EventId), not just that the row is re-delivered.
-  Status: follow-up
+  Evidence: The initial plan review identified that Issue AC #4 required both re-delivery and handler-side idempotent absorption, while the original task wording only named the dispatcher half.
+  Resolution: Added deliver-before-mark idempotent absorption coverage and stable Agent session/job identities, including identical AgentJob submission semantics.
+  Status: resolved
 
 - [ID: item-3]
   Severity: follow-up
   Scope: consistency
-  Evidence: The issue body says "三张事件真相表" (`WorkflowRunEvents` + `IssueEvents` + `EpicEvents`); specs/proposal enumerate four (adding `AgentSessionEvents`). `design.md` D3/Open-Question #1 documents this divergence and resolves it sensibly (follow the specs; table-agnostic dispatcher; consistent with `AgentSubscriptionDispatchHandler [Subscription(Type="*")]`). `ListUndeliveredAsync` (`EventStore.cs:220`) already UNIONs all four, so no code diverges from the specs. This is a faithful interpretation of intent, not a defect — recorded only so the issue author can confirm the 4-table reading per Open Question #1.
-  SuggestedAction: Confirm with the issue author that AgentSession event delivery is desired (default is safe per the `[Subscription(Type="*")]` contract).
-  Status: follow-up
+  Evidence: The issue body says "三张事件真相表" (`WorkflowRunEvents` + `IssueEvents` + `EpicEvents`); specs/proposal enumerate four (adding `AgentSessionEvents`). `design.md` D3 documents the chosen four-table interpretation, consistent with the existing table-agnostic query and wildcard Agent subscription contract.
+  Resolution: Followed the product specs and the existing table-agnostic four-way `ListUndeliveredAsync` contract; AgentSession events remain included.
+  Status: resolved
 
 ## Review Notes
 

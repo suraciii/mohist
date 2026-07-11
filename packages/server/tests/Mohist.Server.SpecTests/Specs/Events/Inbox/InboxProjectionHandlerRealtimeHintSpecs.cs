@@ -16,7 +16,7 @@ namespace Mohist.Server.SpecTests.Specs.Events.Inbox;
 /// "Server emits a project-scoped realtime hint strictly after an inbox
 /// item is persisted": exactly one hint per non-duplicate insert, no
 /// hint on deduplicated inserts, no hint on insert failure, identity-only
-/// payload, projectid extension stamped, and publish failure swallowed.
+/// payload, projectid extension stamped, and publish failure propagation.
 /// Shared DB / scope / event-builder helpers live in
 /// <see cref="InboxProjectionTestSupport"/>.
 /// </summary>
@@ -92,7 +92,7 @@ public class InboxProjectionHandlerRealtimeHintSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
-    public async Task FailedInsert_PublishesNoHint()
+    public async Task FailedInsert_PropagatesAndPublishesNoHint()
     {
         await using var database = InboxProjectionTestSupport.CreateDatabase();
         await InboxProjectionTestSupport.SeedIssueAsync(database,
@@ -102,10 +102,8 @@ public class InboxProjectionHandlerRealtimeHintSpecs
             title: "Issue 1");
 
         var publisher = new CapturingEventPublisher();
-        // Replace the DI DbContextFactory with one that throws on
-        // CreateDbContextAsync so InboxStore.InsertAsync fails before it
-        // can persist a row — this exercises the "no hint before
-        // persistence" ordering invariant.
+        // The first context reads the subscription; the second is the
+        // InboxStore insert and fails before persistence.
         var handler = InboxProjectionTestSupport.CreateHandler(
             database,
             publisher,
@@ -113,7 +111,8 @@ public class InboxProjectionHandlerRealtimeHintSpecs
             {
                 var existing = services.Single(d => d.ServiceType == typeof(IDbContextFactory<MohistDbContext>));
                 services.Remove(existing);
-                services.AddSingleton<IDbContextFactory<MohistDbContext>>(new ThrowingDbContextFactory());
+                services.AddSingleton<IDbContextFactory<MohistDbContext>>(
+                    new FailOnSecondAsyncContextFactory(database.Factory));
             });
         var evt = InboxProjectionTestSupport.BuildIssueEvent(
             type: EventCatalog.ReverseDns.IssueWorkStarted,
@@ -122,8 +121,10 @@ public class InboxProjectionHandlerRealtimeHintSpecs
             issueNumber: 1,
             eventId: "evt-insert-fails");
 
-        await handler.HandleAsync(evt, CancellationToken.None);
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            handler.HandleAsync(evt, CancellationToken.None));
 
+        Assert.Equal("simulated insert failure", error.Message);
         Assert.Empty(publisher.Published);
         Assert.Empty(await InboxProjectionTestSupport.GetInboxAsync(database, "proj_a"));
     }
@@ -202,7 +203,7 @@ public class InboxProjectionHandlerRealtimeHintSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
-    public async Task Hint_PublishException_SwallowedAndDoesNotBreakProjection()
+    public async Task Hint_PublishException_PropagatesAfterProjectionIsPersisted()
     {
         await using var database = InboxProjectionTestSupport.CreateDatabase();
         await InboxProjectionTestSupport.SeedIssueAsync(database,
@@ -222,9 +223,8 @@ public class InboxProjectionHandlerRealtimeHintSpecs
             issueNumber: 1,
             eventId: "evt-publish-fails");
 
-        // The handler must swallow the publish failure; the source-event
-        // projection (the inbox row) must still be created.
-        await handler.HandleAsync(evt, CancellationToken.None);
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            handler.HandleAsync(evt, CancellationToken.None));
 
         var row = Assert.Single(await InboxProjectionTestSupport.GetInboxAsync(database, "proj_a"));
         Assert.Equal("evt-publish-fails", row.SourceEventId);
@@ -400,14 +400,23 @@ public class InboxProjectionHandlerRealtimeHintSpecs
             throw new InvalidOperationException("simulated hint-publish failure");
     }
 
-    private sealed class ThrowingDbContextFactory : IDbContextFactory<MohistDbContext>
+    private sealed class FailOnSecondAsyncContextFactory : IDbContextFactory<MohistDbContext>
     {
-        public DbContextOptions<MohistDbContext> Options => throw new NotSupportedException();
+        private readonly IDbContextFactory<MohistDbContext> _inner;
+        private int _asyncCalls;
 
-        public MohistDbContext CreateDbContext() =>
-            throw new InvalidOperationException("simulated insert failure");
+        public FailOnSecondAsyncContextFactory(IDbContextFactory<MohistDbContext> inner)
+        {
+            _inner = inner;
+        }
 
-        public Task<MohistDbContext> CreateDbContextAsync(CancellationToken ct = default) =>
-            throw new InvalidOperationException("simulated insert failure");
+        public MohistDbContext CreateDbContext() => _inner.CreateDbContext();
+
+        public Task<MohistDbContext> CreateDbContextAsync(CancellationToken ct = default)
+        {
+            if (Interlocked.Increment(ref _asyncCalls) == 2)
+                return Task.FromException<MohistDbContext>(new InvalidOperationException("simulated insert failure"));
+            return _inner.CreateDbContextAsync(ct);
+        }
     }
 }

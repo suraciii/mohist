@@ -12,4 +12,6 @@ public sealed class NoopDeadLetterStore : IDeadLetterStore
 
     public Task<DeadLetterRow?> GetAsync(long deadLetterId, CancellationToken ct = default) =>
         Task.FromResult<DeadLetterRow?>(null);
+
+    public Task DeleteAsync(long deadLetterId, CancellationToken ct = default) => Task.CompletedTask;
 }

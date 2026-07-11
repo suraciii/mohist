@@ -230,7 +230,8 @@ public class EventDispatcherSpecs
         events.Enqueue(FakeEventStore.Build(IssueCompleted, "/mohist/issues/issue_1", id: 1, eventId: "evt_crash"));
         events.ThrowOnMark = _ => true;
 
-        await dispatcher.DispatchAsync(CancellationToken.None);
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            dispatcher.DispatchAsync(CancellationToken.None));
 
         Assert.Equal(new[] { "evt_crash" }, seenEventIds);
         Assert.Equal(1, uniqueDeliveries);
@@ -244,6 +245,36 @@ public class EventDispatcherSpecs
         Assert.Equal(1, uniqueDeliveries);
         Assert.Single(events.Marked);
         Assert.Empty(events.PendingUndelivered);
+    }
+
+    [Fact]
+    public async Task DispatchAsync_MarkFailure_StopsBeforeNextEventInSameStream()
+    {
+        var time = new FakeTimeProvider(StartTime);
+        var events = new FakeEventStore();
+        var dlq = new FakeDeadLetterStore();
+        var seen = new List<string>();
+        var sub = new Subscription(
+            IssueCompleted,
+            new Recorder(evt => seen.Add(evt.Id)),
+            DispatchDynamic);
+        var dispatcher = BuildDispatcher(events, dlq, [sub], time);
+
+        events.Enqueue(FakeEventStore.Build(IssueCompleted, "/mohist/issues/issue_1", id: 1, eventId: "evt_1"));
+        events.Enqueue(FakeEventStore.Build(IssueCompleted, "/mohist/issues/issue_1", id: 2, eventId: "evt_2"));
+        events.ThrowOnMark = evt => evt.Id == 1;
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            dispatcher.DispatchAsync(CancellationToken.None));
+
+        Assert.Equal(["evt_1"], seen);
+        Assert.Equal([1L, 2L], events.PendingUndelivered.Select(evt => evt.Id));
+
+        events.ThrowOnMark = null;
+        await dispatcher.DispatchAsync(CancellationToken.None);
+
+        Assert.Equal(["evt_1", "evt_1", "evt_2"], seen);
+        Assert.Equal([1L, 2L], events.Marked.Select(mark => mark.Id));
     }
 
     [Fact]
@@ -413,12 +444,16 @@ public class EventDispatcherSpecs
 
         // Operator triggers redelivery — fresh dispatch from the DL row,
         // not from the (now marked) original event row.
-        await dispatcher.RedeliverAsync(dl.DeadLetterId, CancellationToken.None);
+        var result = await dispatcher.RedeliverAsync(dl.DeadLetterId, CancellationToken.None);
 
         Assert.Equal(4, attempt);
+        Assert.True(result.Found);
+        Assert.True(result.Delivered);
+        Assert.Equal(1, result.Attempts);
         // The original event row's DispatchedAt is left untouched on a
         // redelivery so the dispatcher does not double-claim it.
         Assert.Single(events.Marked);
+        Assert.Empty(dlq.Written);
     }
 
     [Fact]
@@ -430,9 +465,50 @@ public class EventDispatcherSpecs
         var sub = new Subscription(IssueCompleted, new Recorder(_ => { }), DispatchDynamic);
         var dispatcher = BuildDispatcher(events, dlq, [sub], time);
 
-        await dispatcher.RedeliverAsync(deadLetterId: 999, CancellationToken.None);
+        var result = await dispatcher.RedeliverAsync(deadLetterId: 999, CancellationToken.None);
 
+        Assert.False(result.Found);
+        Assert.False(result.Delivered);
         Assert.Empty(events.Marked);
+        Assert.Empty(dlq.Written);
+    }
+
+    [Fact]
+    public async Task RedeliverAsync_RetriesOnlyRecordedFailingHandler()
+    {
+        var time = new FakeTimeProvider(StartTime);
+        var events = new FakeEventStore();
+        var dlq = new FakeDeadLetterStore();
+        var goodCalls = 0;
+        var badCalls = 0;
+        var badStillFails = true;
+        var good = new Subscription(
+            IssueCompleted,
+            new Recorder(_ => goodCalls++),
+            DispatchDynamic);
+        var bad = new Subscription(
+            IssueCompleted,
+            new FlakyRecorder(() =>
+            {
+                badCalls++;
+                if (badStillFails)
+                    throw new InvalidOperationException("poison");
+            }),
+            DispatchDynamic);
+        var dispatcher = BuildDispatcher(events, dlq, [good, bad], time, handlerMaxAttempts: 2);
+
+        events.Enqueue(FakeEventStore.Build(IssueCompleted, "/mohist/issues/issue_1", id: 1, eventId: "evt_redeliver_one"));
+        await dispatcher.DispatchAsync(CancellationToken.None);
+        var deadLetter = Assert.Single(dlq.Written);
+        Assert.Equal(1, goodCalls);
+        Assert.Equal(2, badCalls);
+
+        badStillFails = false;
+        var result = await dispatcher.RedeliverAsync(deadLetter.DeadLetterId, CancellationToken.None);
+
+        Assert.True(result.Delivered);
+        Assert.Equal(1, goodCalls);
+        Assert.Equal(3, badCalls);
         Assert.Empty(dlq.Written);
     }
 

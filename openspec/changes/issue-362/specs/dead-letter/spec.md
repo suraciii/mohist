@@ -37,4 +37,17 @@ A dead-lettered event SHALL be manually re-deliverable on operator action, so a 
 #### Scenario: Operator requests re-delivery
 
 - **WHEN** an operator requests re-delivery of a dead-lettered event
-- **THEN** the event SHALL be re-dispatched to its matching handlers
+- **THEN** the event SHALL be re-dispatched only to the failing handler recorded by that dead-letter row
+- **AND** already-successful sibling handlers SHALL NOT be invoked again
+- **AND** a successful re-delivery SHALL remove the resolved dead-letter row
+
+### Requirement: Dead-letter recovery has an operator surface
+
+Dead-letter query and re-delivery SHALL be available through the server API and the `mo` CLI; internal store or grain methods alone do not satisfy the operator contract.
+
+#### Scenario: Operator lists and re-delivers through mo
+
+- **WHEN** an operator runs `mo event dead-letter list`
+- **THEN** unresolved dead-letter rows SHALL be displayed and MAY be filtered by failing handler
+- **WHEN** the operator runs `mo event dead-letter redeliver <id>`
+- **THEN** the corresponding API recovery operation SHALL run and report whether delivery succeeded

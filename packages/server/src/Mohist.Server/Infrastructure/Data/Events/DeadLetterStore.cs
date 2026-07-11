@@ -56,6 +56,14 @@ public sealed class DeadLetterStore : IDeadLetterStore
         return row is null ? null : ToRow(row);
     }
 
+    public async Task DeleteAsync(long deadLetterId, CancellationToken ct = default)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        await db.DeadLetters
+            .Where(row => row.DeadLetterId == deadLetterId)
+            .ExecuteDeleteAsync(ct);
+    }
+
     private static DeadLetterRow ToRow(DeadLetterSqlRow row) =>
         new()
         {

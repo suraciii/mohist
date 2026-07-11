@@ -419,6 +419,34 @@ public class AgentSubscriptionDispatchHandlerSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
+    public async Task HandleAsync_LaunchFailure_PropagatesToDispatcher()
+    {
+        var (recorder, scope) = Build();
+        await using var _ = scope;
+        await SeedProjectAsync(scope, "proj_a");
+        await SeedAgentAsync(scope, "proj_a", "agent_a", "agent-a");
+        await SeedSubscriptionAsync(scope, "proj_a", "agent_a",
+            id: "subs_failure", name: "watcher",
+            filterType: "com.mohist.issue.*", priority: 5);
+        recorder.Failure = new InvalidOperationException("launch unavailable");
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            scope.Handler.HandleAsync(new CloudEvent(
+                id: "evt_failure",
+                source: new Uri("/mohist/issues/issue_x", UriKind.Relative),
+                type: EventCatalog.ReverseDns.IssueWorkStarted,
+                time: DateTimeOffset.UnixEpoch,
+                data: null,
+                extensions: new Dictionary<string, string> { ["projectid"] = "proj_a" }),
+                CancellationToken.None));
+
+        Assert.Equal("launch unavailable", error.Message);
+        Assert.Single(recorder.Calls);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
+    [Fact]
     public async Task HandleAsync_RenderedPromptReplacesVariablesBeforeLaunch()
     {
         var (recorder, scope) = Build();

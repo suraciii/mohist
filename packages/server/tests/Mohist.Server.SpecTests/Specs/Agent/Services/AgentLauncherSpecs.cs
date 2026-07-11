@@ -98,6 +98,34 @@ public class AgentLauncherSpecs
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
+    [Fact]
+    public async Task Launch_RepeatedTrigger_ReusesStableSession()
+    {
+        var projectId = await CreateProjectAsync("launcher-trigger-idempotent");
+        var agent = await CreateAgentAsync(projectId, "trigger-idempotent-agent");
+        var labels = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            [GenericAgentSessionMetadata.TriggerEventId] = "evt_repeat",
+            [GenericAgentSessionMetadata.TriggerSubscriptionId] = "sub_repeat",
+        };
+
+        AgentLaunchResult first;
+        AgentLaunchResult second;
+        await using (var scope = _fixture.Services.CreateAsyncScope())
+        {
+            var launcher = scope.ServiceProvider.GetRequiredService<IAgentLauncher>();
+            var context = new AgentLaunchContext(ProjectId: projectId, WorkspacePath: null);
+            first = await launcher.LaunchAsync(agent, "review once", context, labels);
+            second = await launcher.LaunchAsync(agent, "review once", context, labels);
+        }
+
+        Assert.Equal(first.SessionId, second.SessionId);
+        Assert.StartsWith("agent-session-", first.SessionId, StringComparison.Ordinal);
+        Assert.Equal(1, await CountSessionsAsync(projectId));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task Launch_WithoutTriggerLabels_ProducesNoTriggerMetadataLabels()

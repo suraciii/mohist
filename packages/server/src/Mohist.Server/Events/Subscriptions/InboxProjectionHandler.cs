@@ -45,12 +45,9 @@ namespace Mohist.Server.Events.Subscriptions;
 /// the source plus event id index dedupes replays at the store level,
 /// so this handler does not need its own dedup bookkeeping.
 ///
-/// Exceptions are logged and swallowed. The handler is currently dormant
-/// because <see cref="InMemoryEventBus"/> no longer dispatches handlers
-/// synchronously; the inbox-hint publish path is also inactive until the
-/// dispatcher (step 3 of the event-bus v2 roadmap) lands. The spec
-/// requirement that projection must never block workflow / issue execution
-/// remains unchanged.
+/// Required projection and hint-publish failures propagate to the durable
+/// dispatcher so its retry and dead-letter policy can observe them. Missing,
+/// disabled, or mismatched domain data remains an intentional no-op.
 ///
 /// <para>
 /// <b>Realtime hint</b>. On a successful, non-duplicate
@@ -59,8 +56,8 @@ namespace Mohist.Server.Events.Subscriptions;
 /// <see cref="InboxItemPersistedHint"/> identity payload and an
 /// <c>extensions["projectid"]</c> stamp so the dispatcher can route it
 /// project-scoped. The publish is awaited inline <i>after</i> the insert
-/// returns and inherits <see cref="HandleAsync"/>'s swallow-and-log
-/// guard, so a publish failure cannot break the source-event projection.
+/// returns. A publish failure propagates so the source event is retried; the
+/// source-event key makes the already-inserted inbox row idempotent.
 /// </para>
 /// </summary>
 [Subscription(Type =
@@ -85,30 +82,7 @@ public sealed class InboxProjectionHandler : ICloudEventHandler
 
     public bool Filter(CloudEvent evt) => evt is not null && TryResolve(evt.Type, out _);
 
-    public async Task HandleAsync(CloudEvent evt, CancellationToken ct)
-    {
-        try
-        {
-            await ProjectAsync(evt, ct).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            // The publish path only appends an event row and does not invoke
-            // this handler; dispatch is a future dispatcher's job. Until that
-            // dispatcher lands, this handler is exercised only by replay/test
-            // paths. Either way a projection failure must never break the
-            // source event: source-of-truth events are durable in the event
-            // store, so a future replay/backfill keyed on SourceEventId would
-            // re-create the missed item without duplicates.
-            _log.LogWarning(ex,
-                "Inbox projection handler failed for event {EventType} {EventId}",
-                evt.Type, evt.Id);
-        }
-    }
+    public Task HandleAsync(CloudEvent evt, CancellationToken ct) => ProjectAsync(evt, ct);
 
     private async Task ProjectAsync(CloudEvent evt, CancellationToken ct)
     {
@@ -242,38 +216,29 @@ public sealed class InboxProjectionHandler : ICloudEventHandler
 
     private async Task<DomainIssue?> ResolveIssueAsync(ResolvedIdentity resolved, IStateStore<DomainIssue> issueStore)
     {
-        try
+        var issue = await issueStore.LoadAsync(resolved.IssueId).ConfigureAwait(false);
+        if (issue is null)
+            return null;
+
+        if (!string.Equals(issue.ProjectId, resolved.ProjectId, StringComparison.Ordinal)
+            || issue.Number != resolved.IssueNumber)
         {
-            var issue = await issueStore.LoadAsync(resolved.IssueId).ConfigureAwait(false);
-            if (issue is null)
-                return null;
-
-            if (!string.Equals(issue.ProjectId, resolved.ProjectId, StringComparison.Ordinal)
-                || issue.Number != resolved.IssueNumber)
-            {
-                _log.LogDebug(
-                    "Inbox projection skipped: event identity project {EventProjectId} issue {IssueId} number {EventIssueNumber} disagrees with loaded issue project {IssueProjectId} number {IssueNumber}",
-                    resolved.ProjectId,
-                    resolved.IssueId,
-                    resolved.IssueNumber,
-                    issue.ProjectId,
-                    issue.Number);
-                return null;
-            }
-
-            if (!string.IsNullOrWhiteSpace(issue.Title))
-                return issue;
-
             _log.LogDebug(
-                "Inbox projection skipped: issue {IssueId} has no title snapshot",
-                resolved.IssueId);
+                "Inbox projection skipped: event identity project {EventProjectId} issue {IssueId} number {EventIssueNumber} disagrees with loaded issue project {IssueProjectId} number {IssueNumber}",
+                resolved.ProjectId,
+                resolved.IssueId,
+                resolved.IssueNumber,
+                issue.ProjectId,
+                issue.Number);
+            return null;
         }
-        catch (Exception ex)
-        {
-            _log.LogDebug(ex,
-                "Inbox projection: failed to load issue {IssueId} for title snapshot",
-                resolved.IssueId);
-        }
+
+        if (!string.IsNullOrWhiteSpace(issue.Title))
+            return issue;
+
+        _log.LogDebug(
+            "Inbox projection skipped: issue {IssueId} has no title snapshot",
+            resolved.IssueId);
         return null;
     }
 

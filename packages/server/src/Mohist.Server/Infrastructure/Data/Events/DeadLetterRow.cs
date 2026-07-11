@@ -4,7 +4,7 @@ namespace Mohist.Server.Infrastructure.Data.Events;
 
 /// <summary>
 /// Persisted record of a poison event whose handler retries exhausted.
-/// One row per dead-lettered event; the original event row remains in its
+/// One row per failed handler delivery; the original event row remains in its
 /// truth table (WorkflowRunEvents / IssueEvents / EpicEvents /
 /// AgentSessionEvents) with its <c>DispatchedAt</c> set so the dispatcher
 /// stops retrying it. Dead-letter rows are queryable for operator

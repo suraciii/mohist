@@ -110,7 +110,10 @@ public class DispatcherGrainSpecs
         // The silo uses a Noop dead-letter store; re-delivery is a
         // no-op. Verifies the grain method resolves and the
         // dispatcher doesn't throw on a missing DL row.
-        await _fixture.Dispatcher.RedeliverAsync(deadLetterId: 999_999);
+        var result = await _fixture.Dispatcher.RedeliverAsync(deadLetterId: 999_999);
+
+        Assert.False(result.Found);
+        Assert.False(result.Delivered);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]

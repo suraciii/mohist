@@ -302,7 +302,7 @@ public class IssueWorkflowCompletionHandlerSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
-    public async Task HandleAsync_GrainThrows_HandlerSwallowsAndLogsWarning()
+    public async Task HandleAsync_GrainThrows_PropagatesToDispatcher()
     {
         await using var database = CreateDatabase();
 
@@ -312,8 +312,8 @@ public class IssueWorkflowCompletionHandlerSpecs
 
         var evt = BuildCompletedEvent(workflowRunId: "wr_completed", issueId: "issue_1");
 
-        // Must not throw — the publish path relies on this.
-        await handler.HandleAsync(evt, CancellationToken.None);
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            handler.HandleAsync(evt, CancellationToken.None));
 
         Assert.Equal(1, grains.CallCount);
     }

@@ -16,6 +16,8 @@ namespace Mohist.Server.Events.Grains;
 /// </summary>
 public interface IDispatcherGrain : IGrainWithStringKey, IRemindable
 {
+    Task EnsureStartedAsync();
+
     /// <summary>
     /// Best-effort immediate dispatch tick. Producers call this after
     /// committing an event row to nudge latency down (e.g. ~24h → ~1s);
@@ -27,9 +29,16 @@ public interface IDispatcherGrain : IGrainWithStringKey, IRemindable
     /// <summary>
     /// Loads the dead-letter row identified by
     /// <paramref name="deadLetterId"/> and re-dispatches the original
-    /// event to every matching subscription handler as a fresh
-    /// delivery. Used as the manual operator recovery path for
-    /// poison messages whose retries exhausted.
+    /// event to the failing handler recorded on that row. Used as the
+    /// manual operator recovery path for poison messages whose retries
+    /// exhausted.
     /// </summary>
-    Task RedeliverAsync(long deadLetterId, CancellationToken ct = default);
+    Task<DeadLetterRedeliveryResult> RedeliverAsync(long deadLetterId, CancellationToken ct = default);
 }
+
+[GenerateSerializer]
+public sealed record DeadLetterRedeliveryResult(
+    [property: Id(0)] bool Found,
+    [property: Id(1)] bool Delivered,
+    [property: Id(2)] int Attempts,
+    [property: Id(3)] string? Error);

@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Sessions.Domain;
@@ -66,13 +68,28 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
                 nameof(prompt));
         }
 
-        var sessionId = _sessions.NewSessionId();
+        var triggerIdentity = BuildTriggerIdentity(context.ProjectId, triggerLabels);
+        if (triggerIdentity is not null)
+        {
+            var lookupLabels = new Dictionary<string, string>(triggerLabels!, StringComparer.Ordinal)
+            {
+                [AgentSessionQueryMetadataKeys.ProjectId] = context.ProjectId,
+            };
+            var existingSessionId = await _sessions.ResolveByLabelsAsync(lookupLabels, ct).ConfigureAwait(false);
+            if (existingSessionId is not null)
+            {
+                return new AgentLaunchResult(
+                    SessionId: existingSessionId,
+                    AgentId: agent.Id,
+                    AgentName: agent.Name);
+            }
+        }
+
+        var sessionId = triggerIdentity is null
+            ? _sessions.NewSessionId()
+            : StableId("agent-session", triggerIdentity);
         var sessionContext = BuildContext(context, agent);
         var metadata = GenericAgentSessionMetadata.Metadata(sessionContext);
-        if (triggerLabels is not null)
-        {
-            metadata = WithTriggerLabels(metadata, triggerLabels);
-        }
 
         var sessionGrain = _sessions.GetGrain(sessionId);
         await sessionGrain.OpenAsync(
@@ -82,7 +99,9 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
                 WorkDir: context.WorkspacePath,
                 Metadata: metadata));
 
-        var jobKey = $"agent-job-launch-{Guid.NewGuid():N}";
+        var jobKey = triggerIdentity is null
+            ? $"agent-job-launch-{Guid.NewGuid():N}"
+            : StableId("agent-job-trigger", triggerIdentity);
         var jobGrain = _grains.GetGrain<IAgentJobGrain>(jobKey);
         await jobGrain.SubmitAsync(
             new AgentJobInput(
@@ -95,6 +114,16 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
                 AgentInstructions: string.IsNullOrWhiteSpace(agent.Instructions) ? null : agent.Instructions,
                 AgentConfig: agent.AgentConfig?.Clone(),
                 AgentSessionId: sessionId));
+
+        if (triggerIdentity is not null)
+        {
+            await sessionGrain.OpenAsync(
+                new OpenAgentSessionCommand(
+                    RunnerId: string.Empty,
+                    AgentRuntime: "opencode",
+                    WorkDir: context.WorkspacePath,
+                    Metadata: WithTriggerLabels(metadata, triggerLabels!)));
+        }
 
         return new AgentLaunchResult(
             SessionId: sessionId,
@@ -112,6 +141,32 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
             Repository: context.Repository,
             WorkspacePath: context.WorkspacePath,
             Title: context.Title);
+
+    private static string? BuildTriggerIdentity(
+        string projectId,
+        IReadOnlyDictionary<string, string>? triggerLabels)
+    {
+        if (triggerLabels is null || triggerLabels.Count == 0)
+            return null;
+
+        if (!triggerLabels.TryGetValue(GenericAgentSessionMetadata.TriggerEventId, out var eventId)
+            || string.IsNullOrWhiteSpace(eventId)
+            || !triggerLabels.TryGetValue(GenericAgentSessionMetadata.TriggerSubscriptionId, out var subscriptionId)
+            || string.IsNullOrWhiteSpace(subscriptionId))
+        {
+            throw new ArgumentException(
+                "Trigger labels must include non-empty event and subscription ids.",
+                nameof(triggerLabels));
+        }
+
+        return $"{projectId}\n{eventId}\n{subscriptionId}";
+    }
+
+    private static string StableId(string prefix, string identity)
+    {
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(identity));
+        return $"{prefix}-{Convert.ToHexString(hash.AsSpan(0, 16)).ToLowerInvariant()}";
+    }
 
     /// <summary>
     /// Returns a new <see cref="AgentSessionMetadata"/> carrying

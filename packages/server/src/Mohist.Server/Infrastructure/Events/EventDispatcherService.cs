@@ -99,12 +99,12 @@ public sealed class EventDispatcherService
     /// <summary>
     /// Loads the dead-letter row identified by
     /// <paramref name="deadLetterId"/> and re-dispatches the original
-    /// event to every matching subscription handler as a fresh
-    /// delivery. The dead-letter row is the operator's record of *who*
-    /// failed; re-dispatch targets all matching handlers, not just
-    /// the failing one. Returns silently if the row does not exist.
+    /// event only to the failing handler recorded on that row. Already
+    /// successful sibling handlers are not repeated. A successful retry
+    /// deletes the resolved row; a failed retry leaves it available for
+    /// later operator recovery.
     /// </summary>
-    public async Task RedeliverAsync(long deadLetterId, CancellationToken ct)
+    public async Task<DeadLetterRedeliveryResult> RedeliverAsync(long deadLetterId, CancellationToken ct)
     {
         var row = await _deadLetters.GetAsync(deadLetterId, ct).ConfigureAwait(false);
         if (row is null)
@@ -112,14 +112,14 @@ public sealed class EventDispatcherService
             _log.LogDebug(
                 "Dispatcher RedeliverAsync skipped: dead-letter {Id} not found",
                 deadLetterId);
-            return;
+            return new DeadLetterRedeliveryResult(false, false, 0, "Dead-letter row not found");
         }
 
         _log.LogInformation(
             "Dispatcher re-dispatching dead-letter {Id} (origin={Origin} id={EventId} type={Type})",
             row.DeadLetterId, row.Origin, row.EventId, row.Type);
 
-        var undelivered = new UndeliveredEvent(
+        var evt = new UndeliveredEvent(
             Origin: ParseOrigin(row.Origin),
             Id: row.Id,
             Source: row.Source,
@@ -132,14 +132,31 @@ public sealed class EventDispatcherService
             Data: row.Data,
             ExtensionsJson: row.ExtensionsJson);
 
-        await DispatchOneAsync(undelivered, ct, isRedelivery: true).ConfigureAwait(false);
+        var envelope = ReconstructEnvelope(evt);
+        var subscription = _subscriptions.FirstOrDefault(sub =>
+            string.Equals(HandlerName(sub), row.FailingHandler, StringComparison.Ordinal)
+            && CloudEventTypeMatcher.Matches(sub.Type, envelope.Type));
+        if (subscription is null)
+        {
+            return new DeadLetterRedeliveryResult(
+                true,
+                false,
+                0,
+                $"Handler '{row.FailingHandler}' is not registered for event type '{row.Type}'");
+        }
+
+        var (outcome, error, attempts, _) = await InvokeWithRetryAsync(subscription, envelope, ct).ConfigureAwait(false);
+        if (outcome == HandlerOutcome.Exhausted)
+            return new DeadLetterRedeliveryResult(true, false, attempts, error);
+
+        await _deadLetters.DeleteAsync(deadLetterId, ct).ConfigureAwait(false);
+        return new DeadLetterRedeliveryResult(true, true, attempts, null);
     }
 
-    private async Task DispatchOneAsync(UndeliveredEvent evt, CancellationToken ct, bool isRedelivery = false)
+    private async Task DispatchOneAsync(UndeliveredEvent evt, CancellationToken ct)
     {
         var envelope = ReconstructEnvelope(evt);
         var anyMatched = false;
-        var anyFailed = false;
 
         foreach (var sub in _subscriptions)
         {
@@ -151,7 +168,6 @@ public sealed class EventDispatcherService
             if (settled == HandlerOutcome.Delivered)
                 continue;
 
-            anyFailed = true;
             await DeadLetterAsync(evt, sub, error, attemptCount, errorStack, ct).ConfigureAwait(false);
         }
 
@@ -162,30 +178,18 @@ public sealed class EventDispatcherService
                 envelope.Type, envelope.Id, evt.Origin, evt.Id);
         }
 
-        // Per-row mark after every matching handler has settled
-        // (succeeded or dead-lettered). Re-delivery skips the mark so the
-        // original event row's DispatchedAt stays untouched — the
-        // redelivery does not claim the event.
-        if (!isRedelivery)
+        try
         {
-            try
-            {
-                await _events
-                    .MarkDispatchedAsync(evt.Source, evt.Id, _time.GetUtcNow(), ct)
-                    .ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                _log.LogError(ex,
-                    "Dispatcher: failed to mark {Origin}/{Id} as dispatched; row will be re-delivered next tick",
-                    evt.Origin, evt.Id);
-            }
+            await _events
+                .MarkDispatchedAsync(evt.Source, evt.Id, _time.GetUtcNow(), ct)
+                .ConfigureAwait(false);
         }
-        else if (anyFailed)
+        catch (Exception ex)
         {
-            _log.LogWarning(
-                "Dispatcher: re-delivered dead-letter {Id} still has failing handlers; original event row left untouched",
-                evt.Id);
+            _log.LogError(ex,
+                "Dispatcher: failed to mark {Origin}/{Id} as dispatched; stopping the tick to preserve FIFO",
+                evt.Origin, evt.Id);
+            throw;
         }
     }
 
@@ -297,6 +301,9 @@ public sealed class EventDispatcherService
         nameof(EventOrigin.AgentSession) => EventOrigin.AgentSession,
         _ => throw new InvalidOperationException($"Unknown event origin '{text}'."),
     };
+
+    private static string HandlerName(Subscription subscription) =>
+        subscription.Handler.GetType().FullName ?? subscription.Handler.GetType().Name;
 
     private enum HandlerOutcome
     {

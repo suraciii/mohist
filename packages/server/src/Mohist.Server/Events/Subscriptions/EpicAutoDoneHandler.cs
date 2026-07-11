@@ -64,7 +64,7 @@ public sealed class EpicCancelledReconcileHandler : ICloudEventHandler<IssueCanc
 /// wiring. Both <see cref="EpicAutoDoneHandler"/> (completed) and
 /// <see cref="EpicCancelledReconcileHandler"/> (cancelled) funnel here so the
 /// CloudEvent <c>projectid</c>/<c>issueid</c> extension parsing, epic
-/// lookup, and exception swallowing stay in one place. Kept
+/// lookup, and grain dispatch stay in one place. Kept
 /// package-internal (no <c>public</c> modifier) because this is a
 /// wiring concern that should not be consumed outside this folder.
 /// </summary>
@@ -111,16 +111,7 @@ internal sealed class EpicReconcileDispatcher
             return;
         }
 
-        try
-        {
-            var grain = _grains.GetGrain<IEpicGrain>($"{projectId}:{epicId}");
-            await grain.ReconcileAfterTerminalAsync().ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            _log.LogWarning(ex,
-                "Epic reconcile-on-terminal handler failed for project {ProjectId} epic {EpicId} issue {IssueId} ({EvtType}); relying on reconciliation sweep",
-                projectId, epicId, issueId, evtType);
-        }
+        var grain = _grains.GetGrain<IEpicGrain>($"{projectId}:{epicId}");
+        await grain.ReconcileAfterTerminalAsync().ConfigureAwait(false);
     }
 }

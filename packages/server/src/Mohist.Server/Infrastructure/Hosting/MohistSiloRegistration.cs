@@ -71,7 +71,6 @@ public static class MohistSiloRegistration
         silo.Services.AddScoped<IWorkflowRunStore, WorkflowRunStore>();
         silo.Services.Configure<HermesNotificationOptions>(configuration.GetSection(HermesNotificationOptions.SectionName));
         silo.Services.AddSingleton<HermesIssueNotificationRenderer>();
-        silo.Services.AddSingleton<IHermesIssueNotificationDispatcher, BackgroundHermesIssueNotificationDispatcher>();
         silo.Services.AddHttpClient<IHermesWebhookClient, HermesWebhookClient>();
         silo.Services.AddCloudEventHandlersFromAssembly(typeof(MohistSiloRegistration).Assembly);
         silo.Services.Configure<AgentJobOptions>(configuration.GetSection(AgentJobOptions.SectionName));

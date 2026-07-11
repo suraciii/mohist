@@ -28,14 +28,14 @@ Constraints: no broker, no per-stream grain, no Orleans.Streaming (converged in 
 **Non-Goals** (carry over from the issue):
 - No parallel sharding (single dispatcher; future pure-additive via `hash(Source)%N`).
 - No UI real-time channel extraction (EventBridge stays; landing step 4).
-- No handler convergence (removing their internal try/catch, hardening idempotency — landing step 5). Handlers keep swallowing today; the dispatcher aggregates per-handler outcomes on top.
+- No broad handler convergence beyond the reactions reactivated by this dispatcher. Those handlers must expose real Task outcomes and the Agent launch path must absorb duplicate event delivery; unrelated best-effort channels remain out of scope.
 - No broker, no outbox table.
 
 ## Decisions
 
 ### D1 — Dispatcher = cluster-singleton grain (thin shell) over a pure DI fan-out service
 
-`IDispatcherGrain : IGrainWithStringKey, IRemindable`, fixed key `"dispatcher"`. Orleans placement gives exactly one cluster-wide activation → the sole notifier; the persisted reminder self-heals across silo crash. The grain body is a one-line delegator: `ReceiveReminder` and `PulseAsync` both call `fanOutService.DispatchAsync(ct)`.
+`IDispatcherGrain : IGrainWithStringKey, IRemindable`, fixed key `"dispatcher"`. Orleans placement gives exactly one cluster-wide activation for that key → the sole notifier; the persisted reminder self-heals across silo crash. `DispatcherActivationService` calls `EnsureStartedAsync` during host startup so a fresh database gets its first reminder without relying on a producer ping. The grain remains a thin shell: `ReceiveReminder` and `PulseAsync` call `fanOutService.DispatchAsync(ct)`.
 
 The actual logic — pull → match → invoke → retry → dead-letter → mark — lives in an `EventDispatcherService` (plain singleton in the silo container) with `IEventStore`, `IEnumerable<Subscription>`, `IDeadLetterStore`, `ILogger`, `TimeProvider` injected. This is the explicit directive of `eventbus-v2.md:178-189` and makes the core unit-testable without a silo (`MohistDbFixture` provides the real service graph minus the silo; pure unit tests use a fake `IEventStore` + `IDeadLetterStore` + `FakeTimeProvider`).
 
@@ -46,6 +46,8 @@ The actual logic — pull → match → invoke → retry → dead-letter → mar
 ### D2 — Self-wake on a persisted reminder (~1s); `PulseAsync` is best-effort only
 
 On activation the grain registers a reminder via `RegisterOrUpdateReminder("dispatcher-tick", dueTime: ~1s, period: ~1s)` — the first such call in the codebase. `ReceiveReminder` runs one pull–fan-out–mark cycle. `IDispatcherGrain.PulseAsync(ct)` runs the same cycle once, immediately, for producers that want a latency optimization (~24h → ~1s). Correctness never depends on `PulseAsync`; if every ping is lost, the next reminder tick still delivers everything.
+
+Registration alone does not activate an Orleans grain. The host therefore starts `DispatcherActivationService` after the silo is available; its only responsibility is to call the fixed-key grain's `EnsureStartedAsync`. Startup fails visibly if the sole notifier cannot register its reminder instead of leaving the process healthy-but-inert.
 
 - **Alternative: grain timer** (`RegisterGrainTimer`, as `RunnerGrain:139` does). Rejected for the sole notifier: timers are **not persisted** and do **not** reactivate on another silo after crash — the dispatcher must self-heal. Reminder it is.
 - **Alternative: external scheduler / cron.** Rejected: reintroduces a single point of failure and an external dependency.
@@ -58,7 +60,7 @@ Each tick calls `IEventStore.ListUndeliveredAsync(limit)` — already a single 4
 
 ### D4 — Per-stream FIFO via serial `(Source, Id)` processing; per-row mark after delivery
 
-Process the returned batch serially in the `ListUndeliveredAsync` order (`Source, Id`). For each event: fan out (D5), then `MarkDispatchedAsync(source, id, _time.GetUtcNow())`. Because the batch is globally sorted by `Source` then per-source `Id`, and a row is only marked after its delivery, no higher `Id` in a stream is ever delivered before a lower one → **per-stream FIFO, no reorder, no skip**.
+Process the returned batch serially in the `ListUndeliveredAsync` order (`Source, Id`). For each event: fan out (D5), then `MarkDispatchedAsync(source, id, _time.GetUtcNow())`. A mark failure aborts the tick and propagates to the reminder/Pulse caller. Continuing would allow a higher `Id` from the same source to run before the lower row is durably marked, then re-deliver the lower row on the next tick and violate FIFO. Because the batch is globally sorted and failures stop progress, no higher `Id` in a stream is delivered before a lower one settles → **per-stream FIFO, no reorder, no skip**.
 
 - **Alternative: per-stream cursor / `DeliveryOffsets` table.** Rejected (`eventbus-v2.md:75-77`): a cursor advanced before handlers finish degrades to at-most-once on crash. Per-row `DispatchedAt` is both simplest and correct.
 - **Fairness note** (`eventbus-v2.md:142`): `ORDER BY Source, Id` drains one stream before the next; a chatty stream could starve others. Personal-scale event volume makes this a non-issue now; a future "oldest-per-stream round-robin" is pure-additive and out of scope.
@@ -66,6 +68,8 @@ Process the returned batch serially in the `ListUndeliveredAsync` order (`Source
 ### D5 — Per-type fan-out including closed-generic handlers; per-handler retry isolation
 
 For each undelivered event, iterate the registered `IEnumerable<Subscription>`; for each whose `CloudEventTypeMatcher.Matches(sub.Type, evt.Type)` is true, invoke its `DispatchDelegate`. Each matching handler is retried **independently** — one handler's transient failure or exhaustion never affects a sibling's delivery of the same event (spec: "per-handler isolation"). The event row is marked dispatched once all matching handlers have settled (succeeded or dead-lettered).
+
+The returned `Task` is the sole delivery outcome contract. A handler may return normally for an intentional no-op, but it must propagate an exception when its required side effect fails; it must not log-and-swallow or detach work that determines success. This moves retry/dead-letter policy into one authority (the dispatcher) and removes the old synchronous-publish rationale for swallowing failures.
 
 Fixing the closed-generic discovery bug (D8) is what puts `EpicAutoDoneHandler`/`EpicCancelledReconcileHandler` into this set.
 
@@ -87,12 +91,12 @@ Decision: implement a minimal per-handler retry loop with a **fixed attempt cap*
 Re-introduce the layer deleted in `ba50c2089`, modeled on its historical shape:
 - `DeadLetterRow` (`Infrastructure/Data/Events/DeadLetterRow.cs`): `DeadLetterId` (PK, `long`), a snapshot of the event (source/id/eventId/type/data/extensions), `FailingHandler`, `Error`/`Reason`, `AttemptCount`, `DeadLetteredAt` (`DateTimeOffset`).
 - `DbSet<DeadLetterRow> DeadLetters` in `MohistDbContext`; key `DeadLetterId`; indexes on `DeadLetteredAt` and `(FailingHandler, DeadLetteredAt)` (matches the queryable-by-handler requirement).
-- `IDeadLetterStore` with `WriteAsync(row)`, `QueryAsync(handlerFilter?)`, plus `NoopDeadLetterStore` test fake.
+- `IDeadLetterStore` with `WriteAsync(row)`, `QueryAsync(handlerFilter?)`, `GetAsync(id)`, and `DeleteAsync(id)`, plus `NoopDeadLetterStore` test fake.
 - EF migration creating the `DeadLetters` table.
 
-Flow on exhaustion (per handler): write a `DeadLetterRow` (failing handler + error + attempt count), then the dispatcher sets `DispatchedAt` on the **original event row** so it stops retrying that event on subsequent ticks. Because exhaustion is tracked per handler (D5), a sibling handler that succeeded does **not** get dead-lettered; only the failing handler's outcome is recorded. A dead-lettered event is manually re-deliverable (operator action re-dispatches it to its matching handlers), satisfying the spec.
+Flow on exhaustion (per handler): write a `DeadLetterRow` (failing handler + error + attempt count), then the dispatcher sets `DispatchedAt` on the **original event row** so it stops retrying that event on subsequent ticks. Because exhaustion is tracked per handler (D5), a sibling handler that succeeded does **not** get dead-lettered; only the failing handler's outcome is recorded.
 
-> Re-delivery semantics (interpretation): "re-deliver" re-dispatches to **all matching handlers** (fresh dispatch), not just the one that failed — the dead-letter row is an operator-facing record of *who* failed, not a per-handler work queue. See Open Questions.
+Manual re-delivery targets the recorded `FailingHandler` only. Replaying every matching handler would repeat already-successful side effects and contradict per-handler isolation. A successful re-delivery deletes the dead-letter row; a failed re-delivery keeps it unresolved. `GET /api/events/dead-letters` and `POST /api/events/dead-letters/{id}/redeliver`, surfaced by `mo event dead-letter list|redeliver`, form the operator boundary.
 
 ### D8 — Fix closed-generic handler discovery in the reflection scan
 
@@ -108,27 +112,31 @@ At `CloudEventBusServiceCollectionExtensions.cs:20-24`, replace the dead `typeof
 
 Register in the **silo** container (the dispatcher is a grain and must resolve its dependencies from the silo graph, not the web container): `EventDispatcherService` (singleton), `IDeadLetterStore` → `DeadLetterStore` (+ `NoopDeadLetterStore` as the test fake via `TryAdd`), and the grain implementation. `AddCloudEventHandlersFromAssembly` (already called at `:62`) feeds `IEnumerable<Subscription>` to the service.
 
+### D11 — Agent event launches use stable session/job identities
+
+`AgentSubscriptionDispatchHandler` passes the trigger event/subscription labels it already owns. `AgentLauncher` derives stable AgentSession and AgentJob grain keys from `(projectId, triggerEventId, triggerSubscriptionId)` for subscription-driven launches; manual launches keep random identities. The launcher opens the stable session, submits the stable job idempotently, then persists the trigger labels before returning. A completed handler invocation can therefore be repeated after deliver-before-mark failure without minting another session or job.
+
 ## Risks / Trade-offs
 
-- **[First live reminder in the codebase]** → Mitigation: reminder service is already configured (`UseAdoNetReminderService`); in spec tests, assert reminder registration + drive a tick via `PulseAsync` (the pure-DI path) rather than asserting real reminder timing, and add one integration spec (`MohistIntegrationFixture`, real silo) that the reminder actually fires. Keep reminder cadence configurable.
+- **[First live reminder in the codebase]** → Mitigation: reminder service is already configured (`UseAdoNetReminderService`); assert grain registration and fresh-host activation against the real reminder table, then drive deterministic delivery through `PulseAsync` rather than waiting on wall-clock reminder timing. Keep reminder cadence configurable.
 - **[Polly absence vs. proposal claim]** → Mitigation: hand-rolled retry (D6); record the decision here so reviewers don't expect Polly. If timed backoff is later required, it lands as a single seam swap.
 - **[Single dispatcher = throughput ceiling]** → Mitigation: `LIMIT N` per tick caps work; no sharding is a Non-Goal. The `hash(Source)%N` extension is modeled and pure-additive (`eventbus-v2.md:155-161`).
-- **[Deliver-before-mark crash → re-delivery → duplicate]** → Mitigation: this is by design (at-least-once); handlers must absorb duplicates by `EventId` (spec). `IssueGrain.CompleteWorkAsync` is already state-check idempotent. Landing step 5 hardens the rest.
+- **[Deliver-before-mark crash → re-delivery]** → Mitigation: domain reactions are already state-check/idempotent; inbox insertion is keyed by source event; Agent subscription launches use stable session/job identities (D11). The test suite exercises real production idempotency rather than a recorder-only fake.
 - **[Starvation under a chatty stream]** → Mitigation: out of scope this issue (personal-scale volume); future round-robin is documented. No data model change needed.
 - **[Reminder table in tests]** → Orleans ADO.NET reminder table is bootstrapped by Orleans scripts, not EF migrations; verify the test DB template (`MigratedSqliteTemplate`) has the reminder schema, or assert delivery via `PulseAsync` only.
-- **[Existing handlers still swallow internally]** → Mitigation: that is landing step 5 (Non-Goal here). The dispatcher's per-handler aggregation is additive and correct regardless of whether handlers swallow.
+- **[Handler failure visibility]** → Mitigation: required side effects are awaited and exceptions propagate to the dispatcher. Best-effort behavior is expressed as an intentional successful no-op, not an invisible failed Task.
 
 ## Migration Plan
 
 - **DB:** one new EF migration creating the `DeadLetters` table + indexes. No data migration of existing event rows — `DispatchedAt` already exists on all four tables (from prior issues), and producers only append. DeadLetters starts empty.
-- **Code:** add the grain, service, store, row type; fix the reflection scan; inject `TimeProvider`. The 8 handlers are unchanged and reactivate automatically once the dispatcher ticks.
-- **Deploy:** start the silo → the singleton activates → registers the reminder → begins ticking. Event rows left `DispatchedAt IS NULL` from the dormant window are picked up on the first tick (that is the point — they were never lost, only unnotified).
+- **Code:** add the grain, activation service, dispatch service, store, row type, operator API/CLI; fix the reflection scan; inject `TimeProvider`; make subscription Tasks report real completion; make Agent launch identities stable for event triggers.
+- **Deploy:** start the host → `DispatcherActivationService` activates the fixed-key grain → the grain registers its reminder → ticking begins. Event rows left `DispatchedAt IS NULL` from the dormant window are picked up on the first tick.
 - **Rollback:** stop the silo / disable the grain registration. Producers keep appending (they only append). Undelivered rows accumulate but are never lost; redeploying resumes from where the tables are. Dropping the `DeadLetters` table is safe (it only held poison records) but unnecessary to roll back.
 
 ## Open Questions
 
 1. **3 vs 4 truth tables (issue body vs specs).** Issue body says three; specs/proposal say four (incl. `AgentSessionEvents`). Implementation is table-agnostic and already covers all four via `ListUndeliveredAsync`. **Proposed resolution: follow the specs (all four delivered); confirm with the issue author that AgentSession delivery is desired** — it is consistent with the `AgentSubscriptionDispatchHandler` `[Subscription(Type="*")]` contract, so the default is safe.
 2. **Retry policy specifics.** Attempt cap value, and whether any (time-source-driven) backoff is wanted in v1. Current decision: fixed cap, no backoff. Confirm acceptable.
-3. **Dead-letter re-delivery scope.** Re-dispatch to **all matching handlers** (fresh dispatch) vs. only the handler that failed. Current interpretation: all matching (the DLQ row records *who* failed for operator visibility). Confirm.
+3. **Dead-letter re-delivery scope.** Resolved: retry only the recorded failing handler and delete the row after success; already-successful sibling handlers are not repeated.
 4. **Producer `Pulse` wiring scope.** The grain exposes `PulseAsync`; whether to wire producers (via `IGrainFactory`) to call it after commit is in this issue or a follow-up. Current read: expose the entry point here; wiring all producers is best-effort and can follow up. Confirm.
 5. **Reminder cadence / `LIMIT`.** Exact reminder period (~1s) and per-tick `LIMIT N` default. Current: configurable, ~1s / 100. Confirm.
