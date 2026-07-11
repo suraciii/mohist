@@ -1198,6 +1198,7 @@ function validateBudgetRecords(records, baseline, scope) {
   const violations = []
 
   for (const record of records) {
+    if (budgetScopeForRepositoryPath(record.relativePath) !== scope) continue
     if (record.lines <= record.budget) continue
     const allowedLines = baseline.get(record.relativePath)
     if (allowedLines === undefined) {
@@ -2055,11 +2056,18 @@ function assertSelfTest(condition, message) {
 function runBudgetSelfTest() {
   const legacyTestPath = 'packages/web/src/legacy-file.test.tsx'
   const renamedTestPath = 'packages/web/src/renamed-file.test.tsx'
+  const runnerSpecPath = 'packages/runner/tests/foreign-file.spec.ts'
   const legacyRecord = {
     filePath: resolve(repositoryRoot, legacyTestPath),
     relativePath: legacyTestPath,
     budget: testFileLineBudgets.test,
     lines: testFileLineBudgets.test + 1,
+  }
+  const runnerRecord = {
+    filePath: resolve(repositoryRoot, runnerSpecPath),
+    relativePath: runnerSpecPath,
+    budget: testFileLineBudgets.spec,
+    lines: testFileLineBudgets.spec + 1,
   }
   const baseline = new Map([[legacyTestPath, legacyRecord.lines]])
 
@@ -2071,6 +2079,10 @@ function runBudgetSelfTest() {
   assertSelfTest(
     validateBudgetRecords([legacyRecord], baseline, 'web').length === 0,
     'did not accept an unchanged grandfathered offender',
+  )
+  assertSelfTest(
+    validateBudgetRecords([legacyRecord, runnerRecord], baseline, 'web').length === 0,
+    'checked a file-size budget outside the selected scope',
   )
 
   const raisedAllowance = baselineRegressionViolations(
