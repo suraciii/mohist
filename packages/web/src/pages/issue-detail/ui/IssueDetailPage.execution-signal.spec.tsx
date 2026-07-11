@@ -1,4 +1,3 @@
-// @vitest-environment jsdom
 import '@testing-library/jest-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
@@ -7,6 +6,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { ProjectProvider } from '../../../entities/project'
 import type { Project } from '../../../entities/project'
 import { IssueDetailPage } from './IssueDetailPage'
+import { setScopedValue } from '../../../../tests/support/scoped-property'
 import {
   mockAgentStatus,
   mockIssue,
@@ -36,7 +36,7 @@ function mockMatchMedia(narrow: boolean) {
     onchange: null,
   }
   vi.stubGlobal('matchMedia', vi.fn(() => mql))
-  Object.defineProperty(window, 'innerWidth', { configurable: true, value: narrow ? 375 : 1280 })
+  setScopedValue(window, 'innerWidth', narrow ? 375 : 1280)
 }
 
 function renderPage() {
@@ -105,7 +105,7 @@ mountIssueDetail({ issue: baseIssue() })
 
 beforeEach(() => {
   mockMatchMedia(false)
-  Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1280 })
+  setScopedValue(window, 'innerWidth', 1280)
   window.dispatchEvent(new Event('resize'))
 })
 
@@ -114,7 +114,7 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-describe('T-002: control-region execution signal — active session', () => {
+describe('Execution signal: active session', () => {
   it('renders a compact session signal inside the surface when a coder session is active', async () => {
     mockIssue(baseIssue({
       status: 'in_progress',
@@ -194,7 +194,7 @@ describe('T-002: control-region execution signal — active session', () => {
   })
 })
 
-describe('T-002: control-region execution signal — runner gating', () => {
+describe('Execution signal: runner gating', () => {
   it('surfaces the runner-unavailable reason inside the surface when no runner is connected', async () => {
     mockIssue(baseIssue({
       status: 'backlog',
@@ -335,7 +335,7 @@ describe('T-002: control-region execution signal — runner gating', () => {
   })
 })
 
-describe('T-002: control-region execution signal — capacity-gating consistency (no regression)', () => {
+describe('Execution signal: capacity gating consistency', () => {
   it('disables Start when capacity is full and matches the runtime-wait-reason text', async () => {
     mockIssue(baseIssue({
       status: 'backlog',
@@ -389,7 +389,7 @@ describe('T-002: control-region execution signal — capacity-gating consistency
   })
 })
 
-describe('T-002: control-region execution signal — done and running paths omit signal', () => {
+describe('Execution signal: terminal and running omissions', () => {
   it('does not render the execution signal during a normal running decision', async () => {
     mockIssue(baseIssue({
       status: 'in_progress',

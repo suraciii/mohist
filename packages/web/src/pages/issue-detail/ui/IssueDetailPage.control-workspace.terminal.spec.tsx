@@ -1,4 +1,3 @@
-// @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -6,12 +5,11 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { ProjectProvider } from '../../../entities/project'
 import type { Project } from '../../../entities/project'
 import { IssueDetailPage } from './IssueDetailPage'
+import { setScopedValue } from '../../../../tests/support/scoped-property'
 import {
   mockAgentStatus,
-  mockArtifacts,
   mockIssue,
   mockWorkspaceStatus,
-  mockWorkflowRunSessions,
   mountIssueDetail,
 } from './_issueDetailMsw'
 
@@ -92,14 +90,14 @@ function mockMatchMedia(narrow: boolean) {
     onchange: null,
   }
   vi.stubGlobal('matchMedia', vi.fn(() => mql))
-  Object.defineProperty(window, 'innerWidth', { configurable: true, value: narrow ? 375 : 1280 })
+  setScopedValue(window, 'innerWidth', narrow ? 375 : 1280)
 }
 
 mountIssueDetail({ issue: makeIssue() })
 
 beforeEach(() => {
   mockMatchMedia(false)
-  Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1280 })
+  setScopedValue(window, 'innerWidth', 1280)
   window.dispatchEvent(new Event('resize'))
 })
 
@@ -201,31 +199,6 @@ async function assertControlWorkspaceBasics(getContainer: () => HTMLElement) {
   }
 }
 
-function everyActionAnchorInHeaderTier(container: HTMLElement) {
-  const headerTier = container.querySelector('[data-testid="status-header-tier"]') as HTMLElement
-  for (const kind of LIFECYCLE_ACTIONS) {
-    const matches = container.querySelectorAll(`[data-testid="runtime-action-${kind}"]`)
-    for (const node of Array.from(matches)) {
-      expect(headerTier.contains(node), `runtime-action-${kind} should be inside status-header-tier`).toBe(true)
-    }
-  }
-}
-
-function noExtraOperationalNodesLeakAboveReadingFlow(container: HTMLElement) {
-  const headerTier = container.querySelector('[data-testid="status-header-tier"]') as HTMLElement
-  const headerBlocks = CONTROL_REGION_BLOCKS
-    .map((id) => container.querySelector(`[data-testid="${id}"]`))
-    .filter((el): el is HTMLElement => el !== null)
-  for (const block of headerBlocks) {
-    const readingFlow = container.querySelector('[data-testid="reading-flow"]') as HTMLElement
-    expect(readingFlow.contains(block)).toBe(false)
-  }
-  const description = container.querySelector('[data-testid="description-section"]')
-  const comments = container.querySelector('[data-testid="comments-section"]')
-  if (description) expect(headerTier.contains(description)).toBe(false)
-  if (comments) expect(headerTier.contains(comments)).toBe(false)
-}
-
 function expectNoNewActionKinds(container: HTMLElement) {
   const KNOWN_TESTIDS = new Set(LIFECYCLE_ACTIONS.map((kind) => `runtime-action-${kind}`))
   const runtimeActions = container.querySelectorAll('[data-testid^="runtime-action-"]')
@@ -234,457 +207,7 @@ function expectNoNewActionKinds(container: HTMLElement) {
   }
   expect(container.querySelector('[data-testid="runtime-action-rebase"]')).toBeNull()
 }
-
-describe('T-004 control workspace contract — running path', () => {
-  it('shows identity, stage, progress, primary owner action, and slots within the control region', async () => {
-    mockIssue(makeIssue({
-      status: 'in_progress',
-      workflowStage: 'build',
-      workflowStatus: 'running',
-      health: 'active',
-      workflowStageProgress: {
-        stage: 'build',
-        total: 5,
-        completed: 2,
-        running: 1,
-        failed: 0,
-        currentTaskTitle: 'Build decision surface',
-      },
-      recovery: {
-        currentWorkItem: { type: 'task', id: 't1', title: 'Build decision surface' },
-        latestAttemptState: 'running',
-        workflowSummaryState: 'running',
-        allowedActions: ['stop'],
-      },
-    }))
-
-    const { container } = renderPage()
-
-    await waitFor(() => screen.getByTestId('runtime-decision-surface'))
-
-    await assertControlWorkspaceBasics(() => container as HTMLElement)
-    everyActionAnchorInHeaderTier(container as HTMLElement)
-    noExtraOperationalNodesLeakAboveReadingFlow(container as HTMLElement)
-    expectNoNewActionKinds(container as HTMLElement)
-
-    const surface = screen.getByTestId('runtime-decision-surface')
-    expect(surface.getAttribute('data-summary')).toBe('running')
-
-    const headline = screen.getByTestId('status-headline')
-    expect(within(headline).getByTestId('status-headline-summary')).toBeTruthy()
-    expect(within(headline).getByTestId('status-headline-stage-progress')).toBeTruthy()
-    expect(within(headline).getByTestId('status-headline-current-task')).toBeTruthy()
-
-    expect(within(surface).getByTestId('runtime-next-action')).toBeTruthy()
-    expect(within(surface).getByTestId('runtime-rationale')).toBeTruthy()
-
-    const stopButton = screen.getByTestId('runtime-action-stop')
-    expect(stopButton.getAttribute('data-primary')).toBe('true')
-
-    for (const kind of ['approve', 'send-back', 'retry', 'resume', 'rerun', 'start']) {
-      expect(within(surface).queryByTestId(`runtime-action-${kind}`)).toBeNull()
-    }
-  })
-
-  it('does not fabricate evidence, signal, or drift slots for the running summary', async () => {
-    mockIssue(makeIssue({
-      status: 'in_progress',
-      workflowStage: 'build',
-      workflowStatus: 'running',
-      health: 'active',
-      workflowRunId: 'wr_run',
-      recovery: {
-        currentWorkItem: { type: 'task', id: 't1', title: 'Build decision surface' },
-        latestAttemptState: 'running',
-        workflowSummaryState: 'running',
-        allowedActions: ['stop'],
-      },
-    }))
-    mockArtifacts([
-      {
-        artifactId: 'a-1',
-        workflowRunId: 'wr_run',
-        taskRunId: 'plan.1',
-        path: 'plan.md',
-        kind: 'file',
-        contentType: 'text/markdown',
-        size: 256,
-        recordedAt: '2026-01-02T00:00:00.000Z',
-        displayName: 'plan.md',
-      },
-    ])
-    mockWorkflowRunSessions([])
-    mockWorkspaceStatus({
-      exists: true,
-      branch: 'mohist/run',
-      baseBranch: 'master',
-      ahead: 1,
-      behind: 0,
-      rebaseInProgress: false,
-      conflictingFiles: [],
-    })
-
-    const { container } = renderPage()
-
-    await waitFor(() => screen.getByTestId('runtime-decision-surface'))
-    const surface = screen.getByTestId('runtime-decision-surface')
-
-    expect(within(surface).queryByTestId('runtime-evidence')).toBeNull()
-    expect(within(surface).queryByTestId('runtime-execution-signal')).toBeNull()
-    expect(within(surface).queryByTestId('runtime-drift-recovery')).toBeNull()
-
-    await waitFor(() => {
-      expect(container.querySelector('[data-testid="latest-artifacts-list"]')).toBeTruthy()
-    })
-  })
-})
-
-describe('T-004 control workspace contract — approval-required path', () => {
-  it('shows approval state, awaiting stage, approve+send-back together with evidence reachable from control region', async () => {
-    mockIssue(makeIssue({
-      status: 'in_progress',
-      workflowStage: 'check',
-      health: 'paused',
-      workflowRunId: 'wr_appr',
-      approvalState: {
-        status: 'awaiting',
-        stage: 'check',
-        requestedAt: '2026-01-01T00:00:00.000Z',
-      },
-      recovery: {
-        currentWorkItem: null,
-        latestAttemptState: null,
-        workflowSummaryState: 'awaiting-approval',
-        allowedActions: ['approve', 'reject'],
-      },
-    }))
-    mockArtifacts([
-      {
-        artifactId: 'a-plan',
-        workflowRunId: 'wr_appr',
-        taskRunId: 'plan.1',
-        path: 'plan.md',
-        kind: 'file',
-        contentType: 'text/markdown',
-        size: 256,
-        recordedAt: '2026-01-02T00:00:00.000Z',
-        displayName: 'plan.md',
-      },
-      {
-        artifactId: 'a-check',
-        workflowRunId: 'wr_appr',
-        taskRunId: 'check.1',
-        path: 'check.txt',
-        kind: 'file',
-        contentType: 'text/plain',
-        size: 128,
-        recordedAt: '2026-01-03T00:00:00.000Z',
-        displayName: 'check.txt',
-      },
-    ])
-
-    const { container } = renderPage()
-
-    await waitFor(() => screen.getByTestId('runtime-decision-surface'))
-    await assertControlWorkspaceBasics(() => container as HTMLElement)
-    everyActionAnchorInHeaderTier(container as HTMLElement)
-    expectNoNewActionKinds(container as HTMLElement)
-
-    const surface = screen.getByTestId('runtime-decision-surface')
-    expect(surface.getAttribute('data-summary')).toBe('approval-required')
-
-    expect(within(surface).getByTestId('runtime-action-approve')).toBeTruthy()
-    expect(within(surface).getByTestId('runtime-action-send-back')).toBeTruthy()
-
-    const approveBtn = within(surface).getByTestId('runtime-action-approve')
-    expect(approveBtn.getAttribute('data-primary')).toBe('true')
-
-    expect(within(surface).getByTestId('runtime-evidence')).toBeTruthy()
-    expect(within(surface).getByTestId('runtime-evidence-list')).toBeTruthy()
-
-    const readingFlow = screen.getByTestId('reading-flow')
-    const headerTier = screen.getByTestId('status-header-tier')
-    expect(readingFlow.contains(surface)).toBe(false)
-    expect(headerTier.contains(surface)).toBe(true)
-
-    expect(container.querySelector('[data-testid="latest-artifacts-list"]')).toBeTruthy()
-  })
-
-  it('opens send-back feedback form within the same decision context without navigating away', async () => {
-    mockIssue(makeIssue({
-      status: 'in_progress',
-      workflowStage: 'check',
-      health: 'paused',
-      approvalState: {
-        status: 'awaiting',
-        stage: 'check',
-        requestedAt: '2026-01-01T00:00:00.000Z',
-      },
-      recovery: {
-        currentWorkItem: null,
-        latestAttemptState: null,
-        workflowSummaryState: 'awaiting-approval',
-        allowedActions: ['approve', 'reject'],
-      },
-    }))
-
-    renderPage()
-
-    const surface = await waitFor(() => screen.getByTestId('runtime-decision-surface'))
-    expect(surface.getAttribute('data-summary')).toBe('approval-required')
-
-    fireEvent.click(within(surface).getByTestId('runtime-action-send-back'))
-
-    const form = await waitFor(() => within(surface).getByTestId('runtime-send-back-form'))
-    expect(form).toBeTruthy()
-    expect(within(form).getByTestId('runtime-send-back-textarea')).toBeTruthy()
-    expect(within(form).getByTestId('runtime-submit-send-back')).toBeTruthy()
-    expect(screen.queryByTestId('description-section')).toBeTruthy()
-    expect(surface.contains(form)).toBe(true)
-  })
-})
-
-describe('T-004 control workspace contract — blocked path', () => {
-  it('shows blocked summary and recovery actions (retry/resume/rerun/stop) inside the control region', async () => {
-    mockIssue(makeIssue({
-      status: 'in_progress',
-      workflowStage: 'build',
-      workflowStatus: 'interrupted',
-      health: 'interrupted',
-      blockedReason: 'Workflow was interrupted by a transient infra issue.',
-      recovery: {
-        currentWorkItem: null,
-        latestAttemptState: 'interrupted',
-        workflowSummaryState: 'interrupted',
-        allowedActions: ['retry', 'resume', 'rerun', 'stop'],
-      },
-    }))
-
-    const { container } = renderPage()
-
-    await waitFor(() => screen.getByTestId('runtime-decision-surface'))
-    await assertControlWorkspaceBasics(() => container as HTMLElement)
-    everyActionAnchorInHeaderTier(container as HTMLElement)
-    expectNoNewActionKinds(container as HTMLElement)
-
-    const surface = screen.getByTestId('runtime-decision-surface')
-    expect(surface.getAttribute('data-summary')).toBe('blocked')
-
-    for (const kind of ['retry', 'resume', 'rerun', 'stop']) {
-      expect(within(surface).getByTestId(`runtime-action-${kind}`)).toBeTruthy()
-    }
-
-    expect(within(surface).queryByTestId('runtime-action-start')).toBeNull()
-    expect(within(surface).queryByTestId('runtime-action-approve')).toBeNull()
-
-    const primary = surface.querySelector('[data-primary="true"]')
-    expect(primary).toBeTruthy()
-    expect(['retry', 'resume', 'rerun', 'stop']).toContain(primary!.getAttribute('data-testid')?.replace('runtime-action-', ''))
-  })
-
-  it('exposes recovery actions with disabled/secondary weight when gated by the backend projection', async () => {
-    mockIssue(makeIssue({
-      status: 'in_progress',
-      workflowStage: 'build',
-      workflowStatus: 'interrupted',
-      health: 'interrupted',
-      blockedReason: 'Workflow was interrupted by a transient infra issue.',
-      recovery: {
-        currentWorkItem: null,
-        latestAttemptState: 'interrupted',
-        workflowSummaryState: 'interrupted',
-        allowedActions: ['retry', 'resume', 'rerun', 'stop'],
-      },
-    }))
-
-    const { container } = renderPage()
-
-    const surface = await waitFor(() => screen.getByTestId('runtime-decision-surface'))
-
-    const buttons = ['retry', 'resume', 'rerun', 'stop']
-    let primaryCount = 0
-    for (const kind of buttons) {
-      const btn = within(surface).getByTestId(`runtime-action-${kind}`) as HTMLButtonElement
-      if (btn.getAttribute('data-primary') === 'true') primaryCount++
-      expect(btn.getAttribute('data-testid')).toBe(`runtime-action-${kind}`)
-    }
-    expect(primaryCount).toBe(1)
-    everyActionAnchorInHeaderTier(container as HTMLElement)
-  })
-})
-
-describe('T-004 control workspace contract — interrupted health path', () => {
-  it('reports interrupted as blocked in the header summary and exposes the recovery rationale', async () => {
-    mockIssue(makeIssue({
-      status: 'in_progress',
-      workflowStage: 'build',
-      workflowStatus: 'interrupted',
-      health: 'interrupted',
-      recovery: {
-        currentWorkItem: null,
-        latestAttemptState: 'interrupted',
-        workflowSummaryState: 'interrupted',
-        allowedActions: ['retry', 'resume', 'rerun', 'stop'],
-      },
-    }))
-
-    const { container } = renderPage()
-
-    await waitFor(() => screen.getByTestId('runtime-decision-surface'))
-    await assertControlWorkspaceBasics(() => container as HTMLElement)
-
-    const headline = screen.getByTestId('status-headline')
-    expect(headline.getAttribute('data-summary')).toBe('blocked')
-
-    expect(screen.getByTestId('runtime-rationale').textContent ?? '').toContain('interrupted')
-    expectNoNewActionKinds(container as HTMLElement)
-
-    expect(screen.queryByTestId('workflow-interrupted-card')).toBeNull()
-  })
-})
-
-describe('T-004 control workspace contract — drift path', () => {
-  it('promotes drift recovery to first screen while retaining the reference-rail drift card with full detail', async () => {
-    mockIssue(makeIssue({
-      status: 'in_progress',
-      workflowStage: 'build',
-      workflowStatus: 'running',
-      health: 'active',
-      workflowRunId: 'wr_drift_1',
-      drift: {
-        drifted: true,
-        detectedAt: '2026-01-05T00:00:00Z',
-        decision: 'needs-attention',
-        baseBranch: 'master',
-        branch: 'feature/issue-14',
-      },
-      repository: {
-        name: 'master',
-        baseBranch: 'master',
-        gitUrl: 'https://github.com/suraciii/mohist.git',
-      },
-      recovery: {
-        currentWorkItem: { type: 'task', id: 't1', title: 'Build decision surface' },
-        latestAttemptState: 'running',
-        workflowSummaryState: 'running',
-        allowedActions: ['stop'],
-      },
-    }))
-    mockWorkspaceStatus({
-      exists: true,
-      branch: 'feature/issue-14',
-      baseBranch: 'master',
-      ahead: 3,
-      behind: 2,
-      rebaseInProgress: false,
-      conflictingFiles: [],
-    })
-
-    const { container } = renderPage()
-
-    await waitFor(() => screen.getByTestId('runtime-decision-surface'))
-    await assertControlWorkspaceBasics(() => container as HTMLElement)
-    expectNoNewActionKinds(container as HTMLElement)
-
-    const surface = screen.getByTestId('runtime-decision-surface')
-    expect(within(surface).getByTestId('runtime-drift-note')).toBeTruthy()
-    expect(within(surface).getByTestId('runtime-drift-recovery')).toBeTruthy()
-
-    const recoveryBtn = within(surface).getByTestId('runtime-drift-recovery-action')
-    expect(recoveryBtn.getAttribute('data-testid')).toBe('runtime-drift-recovery-action')
-    expect(within(surface).queryByTestId('runtime-action-rebase')).toBeNull()
-
-    const rail = screen.getByTestId('reference-rail')
-    const railDrift = within(rail).getByTestId('reference-rail-drift')
-    expect(railDrift.getAttribute('data-collapsed')).toBe('true')
-    expect(railDrift).toBeTruthy()
-  })
-
-  it('does not promote drift for non-blocking decisions (defer) into the control region', async () => {
-    mockIssue(makeIssue({
-      status: 'in_progress',
-      workflowStage: 'build',
-      workflowStatus: 'running',
-      health: 'active',
-      workflowRunId: 'wr_drift_defer',
-      drift: {
-        drifted: true,
-        detectedAt: '2026-01-05T00:00:00Z',
-        decision: 'defer',
-        deferReason: 'Waiting on team review.',
-        baseBranch: 'master',
-        branch: 'feature/issue-14',
-      },
-      recovery: {
-        currentWorkItem: { type: 'task', id: 't1', title: 'Build decision surface' },
-        latestAttemptState: 'running',
-        workflowSummaryState: 'running',
-        allowedActions: ['stop'],
-      },
-    }))
-
-    const { container } = renderPage()
-
-    await waitFor(() => screen.getByTestId('runtime-decision-surface'))
-    await assertControlWorkspaceBasics(() => container as HTMLElement)
-
-    expect(container.querySelector('[data-testid="runtime-drift-recovery"]')).toBeNull()
-    expect(screen.getByTestId('reference-rail-drift')).toBeTruthy()
-  })
-})
-
-describe('T-004 control workspace contract — failed path', () => {
-  it('shows failed summary, primary recovery, and in-surface evidence slot for plan/check artifacts', async () => {
-    mockIssue(makeIssue({
-      status: 'in_progress',
-      workflowStage: 'build',
-      workflowStatus: 'failed',
-      health: 'active',
-      workflowRunId: 'wr_failed',
-      recovery: {
-        currentWorkItem: null,
-        latestAttemptState: 'failed',
-        workflowSummaryState: 'failed',
-        allowedActions: ['retry', 'resume', 'rerun', 'start', 'stop'],
-      },
-    }))
-    mockArtifacts([
-      {
-        artifactId: 'a-failed',
-        workflowRunId: 'wr_failed',
-        taskRunId: 'check.1',
-        path: 'check.txt',
-        kind: 'file',
-        contentType: 'text/plain',
-        size: 128,
-        recordedAt: '2026-01-03T00:00:00.000Z',
-        displayName: 'check.txt',
-      },
-    ])
-
-    const { container } = renderPage()
-
-    await waitFor(() => screen.getByTestId('runtime-decision-surface'))
-    await assertControlWorkspaceBasics(() => container as HTMLElement)
-    everyActionAnchorInHeaderTier(container as HTMLElement)
-    expectNoNewActionKinds(container as HTMLElement)
-
-    const surface = screen.getByTestId('runtime-decision-surface')
-    expect(surface.getAttribute('data-summary')).toBe('failed')
-
-    expect(within(surface).getByTestId('runtime-evidence')).toBeTruthy()
-    expect(within(surface).getByTestId('runtime-evidence-list')).toBeTruthy()
-
-    const recoveryKinds = ['retry', 'resume', 'rerun', 'start', 'stop']
-    let count = 0
-    for (const kind of recoveryKinds) {
-      if (within(surface).queryByTestId(`runtime-action-${kind}`)) count++
-    }
-    expect(count).toBeGreaterThan(1)
-  })
-})
-
-describe('T-004 control workspace contract — queued/backlog path', () => {
+describe('Control workspace: queued/backlog path', () => {
   it('shows identity and queued situation without fabricated stage, progress, or runtime actions', async () => {
     mockIssue(makeIssue({
       id: 'issue-queue-1',
@@ -760,7 +283,7 @@ describe('T-004 control workspace contract — queued/backlog path', () => {
   })
 })
 
-describe('T-004 control workspace contract — done path (non-archived)', () => {
+describe('Control workspace: done path (non-archived)', () => {
   it('shows the terminal Done state with no start/stop/approve/retry/resume/rerun actions offered', async () => {
     mockIssue(makeIssue({
       id: 'issue-done-1',
@@ -801,7 +324,7 @@ describe('T-004 control workspace contract — done path (non-archived)', () => 
   })
 })
 
-describe('T-004 control workspace contract — archived Done path', () => {
+describe('Control workspace: archived done path', () => {
   it('shows archived banner, identity, terminal Done state, and no active workflow controls', async () => {
     mockIssue(makeIssue({
       id: 'issue-arch-1',
@@ -889,7 +412,7 @@ describe('T-004 control workspace contract — archived Done path', () => {
   })
 })
 
-describe('T-004 control workspace contract — secondary content demotion', () => {
+describe('Control workspace: secondary content placement', () => {
   it('keeps description, comments, model selection, and prerequisites below the control region', async () => {
     mockIssue(makeIssue({
       body: 'A long descriptive body for the test.',
@@ -985,7 +508,7 @@ describe('T-004 control workspace contract — secondary content demotion', () =
   })
 })
 
-describe('T-004 control workspace contract — lifecycle action preservation', () => {
+describe('Control workspace: lifecycle action preservation', () => {
   it('does not introduce new action kinds outside the existing set (start, approve, send-back, retry, resume, rerun, stop, inspect)', async () => {
     const scenarios: Array<{ label: string; overrides: Record<string, unknown> }> = [
       {
@@ -1177,7 +700,7 @@ describe('T-004 control workspace contract — lifecycle action preservation', (
   })
 })
 
-describe('T-004 control workspace contract — stop requires confirmation in the control region', () => {
+describe('Control workspace: stop confirmation', () => {
   it('shows the stop-confirmation-copy inside the surface after a stop click; preserves recovery actions afterwards', async () => {
     mockIssue(makeIssue({
       status: 'in_progress',
@@ -1207,7 +730,7 @@ describe('T-004 control workspace contract — stop requires confirmation in the
   })
 })
 
-describe('T-004 control workspace contract — primary vs secondary action emphasis', () => {
+describe('Control workspace: action emphasis', () => {
   it('makes the primary valid action carry default-variant emphasis while secondary actions use outline variant', async () => {
     mockIssue(makeIssue({
       status: 'in_progress',

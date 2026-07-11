@@ -13,7 +13,6 @@ import {
 } from '../../../entities/issue'
 import type { AgentStatus } from '../../../entities/agent'
 import { useMswServer } from '../../../../tests/support/msw'
-
 let _projects: unknown[] = []
 let _agentStatus: AgentStatus
 let _agentStatusLoading = false
@@ -23,9 +22,7 @@ const EMPTY_APPROVAL_WAIT = { window: { from: '', to: '' }, sampleCount: 0, aver
 let _approvalWait: unknown = EMPTY_APPROVAL_WAIT
 let _issuesData: unknown[] = []
 let _issuesLoading = false
-
 const _createProjectTracker = vi.fn()
-
 useMswServer(
   http.get('*/api/projects', () =>
     HttpResponse.json({ success: true, data: _projects }),
@@ -57,9 +54,7 @@ useMswServer(
     HttpResponse.json({ success: true, data: _approvalWait }),
   ),
 )
-
 import { DashboardPage } from './DashboardPage'
-
 const NO_AGENT_ACTIVITY: any = {
   activeCards: [] as unknown[],
   activeCardByIssueNumber: new Map<number, unknown>(),
@@ -70,10 +65,8 @@ const NO_AGENT_ACTIVITY: any = {
   isLoading: false,
   isError: false,
 }
-
 let _activityCardsMock: any = { ...NO_AGENT_ACTIVITY, activeCardByIssueNumber: new Map() }
 const queryClients = new Set<QueryClient>()
-
 function makeActiveCard(overrides: Record<string, unknown> = {}) {
   return {
     issueId: 'session-only-issue',
@@ -106,7 +99,6 @@ function makeActiveCard(overrides: Record<string, unknown> = {}) {
     ...overrides,
   }
 }
-
 function makeIssue(overrides: Partial<Issue> = {}): Issue {
   return {
     id: overrides.id ?? `issue-${Math.random().toString(36).slice(2, 8)}`,

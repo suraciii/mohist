@@ -85,6 +85,7 @@ export default defineConfig({
           include: [
             'src/**/*.test.tsx',
             'src/**/*.dom.test.ts',
+            'src/**/*.spec.tsx',
             'tests/**/*.spec.tsx',
           ],
         },

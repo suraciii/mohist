@@ -911,7 +911,7 @@ export function scanSourceFile(filePath, sourceText = readFileSync(filePath, 'ut
     violations.push(createViolationAtPosition(filePath, sourceFile, position, {
       rule: vitestEnvironmentDirectiveRule,
       description: 'uses a per-file Vitest environment directive',
-      fix: 'Use the .test.ts, .dom.test.ts, or .test.tsx suffix to select the test environment.',
+      fix: 'Use the .test.ts, .dom.test.ts, .test.tsx, or .spec.tsx suffix to select the test environment.',
     }))
   }
 
@@ -928,7 +928,7 @@ export function scanSourceFile(filePath, sourceText = readFileSync(filePath, 'ut
       violations.push(createViolation(filePath, sourceFile, node, {
         rule: webDomInPlainTestRule,
         description: 'uses a DOM global from an ordinary .test.ts file',
-        fix: 'Rename the file to .dom.test.ts or .test.tsx, then use the matching test environment.',
+        fix: 'Rename the file to .dom.test.ts, .test.tsx, or .spec.tsx, then use the matching test environment.',
       }))
     }
 
@@ -936,7 +936,7 @@ export function scanSourceFile(filePath, sourceText = readFileSync(filePath, 'ut
       violations.push(createViolation(filePath, sourceFile, node, {
         rule: webDomInPlainTestRule,
         description: 'imports @testing-library/react from an ordinary .test.ts file',
-        fix: 'Rename the file to .dom.test.ts or .test.tsx, then use the matching test environment.',
+        fix: 'Rename the file to .dom.test.ts, .test.tsx, or .spec.tsx, then use the matching test environment.',
       }))
     }
 
@@ -1028,7 +1028,7 @@ function isExcludedWebFile(relativePath) {
 
 function isActiveWebVitestFile(relativePath) {
   if (isExcludedWebFile(relativePath)) return false
-  if (relativePath.startsWith('src/')) return /\.test\.tsx?$/.test(relativePath)
+  if (relativePath.startsWith('src/')) return /\.(?:test|spec)\.tsx?$/.test(relativePath)
   if (!relativePath.startsWith('tests/')) return false
   if (relativePath.startsWith('tests/e2e/')) return false
   return /\.spec\.tsx$/.test(relativePath)
@@ -2188,6 +2188,7 @@ function runSelfTest() {
   const { files, violations } = checkWebTestBoundaries(fixtureWebRoot)
   const relativeFiles = files.map((filePath) => relative(fixtureWebRoot, filePath).replaceAll('\\', '/'))
   const expectedFiles = [
+    'src/active.spec.tsx',
     'src/allowed-local.test.tsx',
     'src/direct-assignment.test.tsx',
     'src/environment-directive.test.tsx',

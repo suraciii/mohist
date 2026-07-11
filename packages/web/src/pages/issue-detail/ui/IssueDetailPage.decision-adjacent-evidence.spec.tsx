@@ -1,4 +1,3 @@
-// @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -6,6 +5,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { ProjectProvider } from '../../../entities/project'
 import type { Project } from '../../../entities/project'
 import { IssueDetailPage } from './IssueDetailPage'
+import { setScopedValue } from '../../../../tests/support/scoped-property'
 import {
   mockArtifacts,
   mockIssue,
@@ -35,7 +35,7 @@ function mockMatchMedia(narrow: boolean) {
     onchange: null,
   }
   vi.stubGlobal('matchMedia', vi.fn(() => mql))
-  Object.defineProperty(window, 'innerWidth', { configurable: true, value: narrow ? 375 : 1280 })
+  setScopedValue(window, 'innerWidth', narrow ? 375 : 1280)
 }
 
 function renderPage() {
@@ -80,7 +80,7 @@ mountIssueDetail({ issue: baseIssue() })
 
 beforeEach(() => {
   mockMatchMedia(false)
-  Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1280 })
+  setScopedValue(window, 'innerWidth', 1280)
   window.dispatchEvent(new Event('resize'))
 })
 
@@ -131,7 +131,7 @@ function makeCheckLogArtifact(): Record<string, unknown> {
   }
 }
 
-describe('T-001: control-region artifact reachability — approval decision', () => {
+describe('Decision evidence: approval decision', () => {
   it('shows a compact plan/check evidence block inside the surface during an approval decision', async () => {
     mockIssue(baseIssue({
       workflowStage: 'check',
@@ -327,7 +327,7 @@ describe('T-001: control-region artifact reachability — approval decision', ()
   })
 })
 
-describe('T-001: control-region artifact reachability — blocked/failed recovery decision', () => {
+describe('Decision evidence: blocked and failed recovery', () => {
   it('shows the compact evidence block during a blocked decision', async () => {
     mockIssue(baseIssue({
       status: 'in_progress',
@@ -433,7 +433,7 @@ describe('T-001: control-region artifact reachability — blocked/failed recover
   })
 })
 
-describe('T-001: byte-for-byte render of LatestArtifactsPanel in reading-flow', () => {
+describe('Decision evidence: reading-flow artifacts', () => {
   it('keeps the same latest-artifacts-list testid and full card chrome in the reading flow', async () => {
     mockIssue(baseIssue({
       workflowStage: 'check',

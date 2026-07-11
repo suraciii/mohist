@@ -1,4 +1,3 @@
-// @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -6,6 +5,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { ProjectProvider } from '../../../entities/project'
 import type { Project } from '../../../entities/project'
 import { IssueDetailPage } from './IssueDetailPage'
+import { setScopedValue } from '../../../../tests/support/scoped-property'
 import {
   mockIssue,
   mockWorkspaceStatus,
@@ -35,7 +35,7 @@ function mockMatchMedia(narrow: boolean) {
     onchange: null,
   }
   vi.stubGlobal('matchMedia', vi.fn(() => mql))
-  Object.defineProperty(window, 'innerWidth', { configurable: true, value: narrow ? 375 : 1280 })
+  setScopedValue(window, 'innerWidth', narrow ? 375 : 1280)
 }
 
 function renderPage() {
@@ -85,7 +85,7 @@ mountIssueDetail({ issue: baseIssue() })
 
 beforeEach(() => {
   mockMatchMedia(false)
-  Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1280 })
+  setScopedValue(window, 'innerWidth', 1280)
   window.dispatchEvent(new Event('resize'))
 })
 
@@ -94,7 +94,7 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-describe('T-003: drift recovery reachable from first-screen control region', () => {
+describe('Drift recovery in the control region', () => {
   it('renders the in-surface drift-recovery block when base drift requires attention', async () => {
     mockIssue(baseIssue({
       status: 'in_progress',
