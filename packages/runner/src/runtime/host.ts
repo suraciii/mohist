@@ -296,13 +296,15 @@ export class RunnerHost {
     // and report retries share this one process-critical reconciliation loop;
     // no sibling lifetime task can prevent a failed poll from being retried.
     while (!signal.aborted) {
+      await this.retryDueReports()
+
       let works: RenderedWorkItem[]
       try {
         works = await this.pollOnce(signal)
       } catch (error) {
         if (signal.aborted) break
         console.warn(`runner poll failed; retrying in ${this.options.pollIntervalMs}ms`, error)
-        await raceInterval(this.options.pollIntervalMs, signal, [])
+        await raceInterval(this.nextReconciliationInterval(), signal, [])
         continue
       }
 
@@ -323,13 +325,13 @@ export class RunnerHost {
         this.inFlight.set(key, { done })
       }
 
-      await this.retryDueReports()
-
       if (signal.aborted) break
       // Pace the next round. With nothing in flight, sleep one interval
       // before re-polling; with in-flight work, race the interval against
-      // any work settling so a freed slot re-polls promptly.
-      await raceInterval(this.options.pollIntervalMs, signal, [
+      // any work settling so a freed slot re-polls promptly. A failed report
+      // also bounds the wait: report retries must not inherit a long poll
+      // interval.
+      await raceInterval(this.nextReconciliationInterval(), signal, [
         ...[...this.inFlight.values()].map((e) => e.done),
       ])
     }
@@ -441,6 +443,17 @@ export class RunnerHost {
         console.warn(`retry report for work ${held.work.workId} failed (attempt ${held.entry.attempts})`, error)
       }
     }))
+  }
+
+  private nextReconciliationInterval(): number {
+    let earliestRetryAt: number | null = null
+    for (const { entry } of this.awaitingAck.values()) {
+      if (entry.retryAt !== null && (earliestRetryAt === null || entry.retryAt < earliestRetryAt)) {
+        earliestRetryAt = entry.retryAt
+      }
+    }
+    if (earliestRetryAt === null) return this.options.pollIntervalMs
+    return Math.min(this.options.pollIntervalMs, Math.max(0, earliestRetryAt - Date.now()))
   }
 
   private async shutdownConnection() {
