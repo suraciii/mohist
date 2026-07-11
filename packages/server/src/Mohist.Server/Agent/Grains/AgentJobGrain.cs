@@ -254,6 +254,18 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         await TryDispatchAsync();
     }
 
+    public async Task EnsureSubmittedAsync(AgentJobInput input)
+    {
+        if (State.Input is not null)
+        {
+            if (!IsTerminal && State.Status == AgentJobStatus.Pending)
+                await TryDispatchAsync();
+            return;
+        }
+
+        await SubmitAsync(input);
+    }
+
     private static bool EquivalentInput(AgentJobInput left, AgentJobInput right) =>
         string.Equals(left.Prompt, right.Prompt, StringComparison.Ordinal)
         && string.Equals(left.Model, right.Model, StringComparison.Ordinal)
@@ -267,9 +279,13 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
 
     private static bool JsonEquals(JsonElement? left, JsonElement? right)
     {
-        if (left is null || right is null)
-            return left is null && right is null;
-        return string.Equals(left.Value.GetRawText(), right.Value.GetRawText(), StringComparison.Ordinal);
+        var leftJson = left is { ValueKind: not JsonValueKind.Undefined } leftElement
+            ? leftElement.GetRawText()
+            : null;
+        var rightJson = right is { ValueKind: not JsonValueKind.Undefined } rightElement
+            ? rightElement.GetRawText()
+            : null;
+        return string.Equals(leftJson, rightJson, StringComparison.Ordinal);
     }
 
     public async Task CheckTimeoutsAsync()

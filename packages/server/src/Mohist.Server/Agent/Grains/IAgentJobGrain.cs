@@ -11,6 +11,7 @@ public interface IAgentJobGrain : IGrainWithStringKey
     Task<string?> GetCurrentWorkIdAsync();
     Task AssignRunnerAsync(string runnerId, string workId);
     Task SubmitAsync(AgentJobInput input);
+    Task EnsureSubmittedAsync(AgentJobInput input);
     Task CheckTimeoutsAsync();
     Task<AgentJobTerminalResult> GetTerminalResultAsync();
     Task<AgentJobRuntimeSnapshot> GetRuntimeSnapshotAsync();

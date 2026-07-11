@@ -58,8 +58,6 @@ public static class MohistSiloRegistration
             options.MinimumReminderPeriod = TimeSpan.FromMilliseconds(100);
         });
 
-        // Orleans silo has its own DI container (separate from the web/api one).
-        // Handlers are registered there too, since grains need them.
         silo.Services.AddCloudEventBus();
         silo.Services.AddSingleton<IEventStore, EventStore>();
         silo.Services.TryAddSingleton<IDeadLetterStore, DeadLetterStore>();

@@ -86,17 +86,20 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
             ? $"agent-job-launch-{Guid.NewGuid():N}"
             : StableId("agent-job-trigger", triggerIdentity);
         var jobGrain = _grains.GetGrain<IAgentJobGrain>(jobKey);
-        await jobGrain.SubmitAsync(
-            new AgentJobInput(
-                Prompt: trimmedPrompt,
-                Model: null,
-                WorkspacePath: context.WorkspacePath,
-                ProjectId: context.ProjectId,
-                Uses: "mohist/acp-agent",
-                AgentId: agent.Id,
-                AgentInstructions: string.IsNullOrWhiteSpace(agent.Instructions) ? null : agent.Instructions,
-                AgentConfig: agent.AgentConfig?.Clone(),
-                AgentSessionId: sessionId));
+        var jobInput = new AgentJobInput(
+            Prompt: trimmedPrompt,
+            Model: null,
+            WorkspacePath: context.WorkspacePath,
+            ProjectId: context.ProjectId,
+            Uses: "mohist/acp-agent",
+            AgentId: agent.Id,
+            AgentInstructions: string.IsNullOrWhiteSpace(agent.Instructions) ? null : agent.Instructions,
+            AgentConfig: agent.AgentConfig?.Clone(),
+            AgentSessionId: sessionId);
+        if (triggerIdentity is null)
+            await jobGrain.SubmitAsync(jobInput);
+        else
+            await jobGrain.EnsureSubmittedAsync(jobInput);
 
         if (triggerIdentity is not null)
         {

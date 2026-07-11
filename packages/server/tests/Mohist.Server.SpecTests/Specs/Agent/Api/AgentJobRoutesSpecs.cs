@@ -214,6 +214,7 @@ internal sealed class TerminalAgentJobGrain : IAgentJobGrain
     public Task<string?> GetCurrentWorkIdAsync() => Task.FromResult<string?>(null);
     public Task AssignRunnerAsync(string runnerId, string workId) => Task.CompletedTask;
     public Task SubmitAsync(AgentJobInput input) => Task.CompletedTask;
+    public Task EnsureSubmittedAsync(AgentJobInput input) => Task.CompletedTask;
     public Task CheckTimeoutsAsync() => Task.CompletedTask;
     public Task<AgentJobTerminalResult> GetTerminalResultAsync() => Task.FromResult(_result);
     public Task<AgentJobRuntimeSnapshot> GetRuntimeSnapshotAsync() => Task.FromResult(new AgentJobRuntimeSnapshot(_result.Status, null, null, _result.FailureReason));
@@ -235,6 +236,7 @@ internal sealed class PendingAgentJobGrain : IAgentJobGrain
         SubmitCount++;
         return Task.CompletedTask;
     }
+    public Task EnsureSubmittedAsync(AgentJobInput input) => SubmitAsync(input);
     public Task CheckTimeoutsAsync() => Task.CompletedTask;
     public Task<AgentJobTerminalResult> GetTerminalResultAsync() => Task.FromResult(new AgentJobTerminalResult(_failureReason is null ? AgentJobStatus.Pending : AgentJobStatus.Failed, _failureReason, null, null, _failureReason, null));
     public Task<AgentJobRuntimeSnapshot> GetRuntimeSnapshotAsync() => Task.FromResult(new AgentJobRuntimeSnapshot(_failureReason is null ? AgentJobStatus.Pending : AgentJobStatus.Failed, null, null, _failureReason));

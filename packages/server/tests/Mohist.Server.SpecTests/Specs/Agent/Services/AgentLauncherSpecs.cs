@@ -1,14 +1,22 @@
+using System.Security.Cryptography;
+using System.Text;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
+using Mohist.Server.Agent.Grains;
 using Mohist.Server.Agent.Services;
 using Mohist.Server.Agent.Domain;
+using Mohist.Server.Events.Grains;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Data.Events;
+using Mohist.Server.Infrastructure.Events;
+using Mohist.Server.Runner.Grains;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Sessions.Services;
 using Mohist.Server.SpecTests.Support;
 using Orleans;
+using Orleans.Core.Internal;
 using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Agent.Services;
@@ -122,6 +130,128 @@ public class AgentLauncherSpecs
         Assert.Equal(first.SessionId, second.SessionId);
         Assert.StartsWith("agent-session-", first.SessionId, StringComparison.Ordinal);
         Assert.Equal(1, await CountSessionsAsync(projectId));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
+    [Fact]
+    public async Task Launch_TriggerReplayAfterJobDeactivation_ReusesDurableWork()
+    {
+        var projectId = await CreateProjectAsync("launcher-trigger-replay");
+        var agent = await CreateAgentAsync(projectId, "trigger-replay-agent");
+        var eventId = "evt_trigger_replay";
+        var subscriptionId = "sub_trigger_replay";
+        var labels = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            [GenericAgentSessionMetadata.TriggerEventId] = eventId,
+            [GenericAgentSessionMetadata.TriggerSubscriptionId] = subscriptionId,
+        };
+        var runnerId = $"launcher-trigger-runner-{Guid.NewGuid():N}";
+        var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
+        await runner.RegisterAsync(new RunnerInfo(
+            runnerId,
+            ["spec/*"],
+            "launcher-trigger-host",
+            projectId));
+
+        try
+        {
+            AgentLaunchResult first;
+            await using (var scope = _fixture.Services.CreateAsyncScope())
+            {
+                var launcher = scope.ServiceProvider.GetRequiredService<IAgentLauncher>();
+                first = await launcher.LaunchAsync(
+                    agent,
+                    "resume this trigger",
+                    new AgentLaunchContext(ProjectId: projectId, WorkspacePath: null),
+                    labels);
+            }
+
+            var jobKey = TriggerJobKey(projectId, eventId, subscriptionId);
+            var job = _fixture.Grains.GetGrain<IAgentJobGrain>(jobKey);
+            var before = await job.GetRuntimeSnapshotAsync();
+            Assert.Equal(AgentJobStatus.Running, before.Status);
+            Assert.Equal(runnerId, before.RunnerId);
+            Assert.False(string.IsNullOrWhiteSpace(before.CurrentWorkId));
+
+            await job.AsReference<IGrainManagementExtension>().DeactivateOnIdle();
+
+            AgentLaunchResult replay;
+            await using (var scope = _fixture.Services.CreateAsyncScope())
+            {
+                var launcher = scope.ServiceProvider.GetRequiredService<IAgentLauncher>();
+                replay = await launcher.LaunchAsync(
+                    agent,
+                    "resume this trigger",
+                    new AgentLaunchContext(ProjectId: projectId, WorkspacePath: null),
+                    labels);
+            }
+
+            var after = await job.GetRuntimeSnapshotAsync();
+            Assert.Equal(first.SessionId, replay.SessionId);
+            Assert.Equal(before.CurrentWorkId, after.CurrentWorkId);
+            var runnerState = await runner.GetRuntimeStateAsync();
+            var work = Assert.Single(runnerState.ActiveWorks, item => item.OwnerId == jobKey);
+            Assert.Equal(before.CurrentWorkId, work.WorkId);
+        }
+        finally
+        {
+            await _fixture.Grains
+                .GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global)
+                .UnregisterAsync(runnerId);
+        }
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
+    [Fact]
+    public async Task DispatcherDelivery_ResolvesSiloScopedAgentLaunchServices()
+    {
+        var projectId = await CreateProjectAsync("launcher-dispatcher-scope");
+        var agent = await CreateAgentAsync(projectId, "dispatcher-scope-agent");
+        var eventId = $"evt_dispatcher_scope_{Guid.NewGuid():N}";
+        var subscriptionId = $"sub_dispatcher_scope_{Guid.NewGuid():N}";
+
+        await using (var scope = _fixture.Services.CreateAsyncScope())
+        {
+            var subscriptions = scope.ServiceProvider.GetRequiredService<AgentSubscriptionStore>();
+            await subscriptions.CreateAsync(new AgentSubscription
+            {
+                Id = subscriptionId,
+                ProjectId = projectId,
+                AgentId = agent.Id,
+                Name = subscriptionId,
+                Filter = new SubscriptionFilter { Type = "test.agent.launch" },
+                ResponsePrompt = "handle the event",
+                Status = SubscriptionStatus.Active,
+            });
+        }
+
+        await _fixture.Services.GetRequiredService<IEventStore>().AppendAsync(new CloudEvent(
+            id: eventId,
+            source: new Uri($"/mohist/issues/issue_{Guid.NewGuid():N}", UriKind.Relative),
+            type: "test.agent.launch",
+            time: new DateTimeOffset(2026, 7, 11, 0, 0, 0, TimeSpan.Zero),
+            data: null,
+            extensions: new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["projectid"] = projectId,
+            }));
+
+        await _fixture.Grains
+            .GetGrain<IDispatcherGrain>(DispatcherGrain.FixedKey)
+            .PulseAsync();
+
+        await using var readScope = _fixture.Services.CreateAsyncScope();
+        var sessions = await readScope.ServiceProvider
+            .GetRequiredService<AgentSessionQuery>()
+            .ListByLabelsAsync(new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [GenericAgentSessionMetadata.TriggerEventId] = eventId,
+                [GenericAgentSessionMetadata.TriggerSubscriptionId] = subscriptionId,
+            });
+        var session = Assert.Single(sessions);
+        Assert.Equal(agent.Id, session.Session.Metadata.Label(GenericAgentSessionMetadata.AgentId));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -269,6 +399,13 @@ public class AgentLauncherSpecs
                 [AgentSessionQueryMetadataKeys.SourceKind] = "agent-launch",
             });
         return records.Count;
+    }
+
+    private static string TriggerJobKey(string projectId, string eventId, string subscriptionId)
+    {
+        var identity = $"{projectId}\n{eventId}\n{subscriptionId}";
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(identity));
+        return $"agent-job-trigger-{Convert.ToHexString(hash.AsSpan(0, 16)).ToLowerInvariant()}";
     }
 
     private async Task<AgentSessionRecord?> LoadSessionByIdAsync(string sessionId)
