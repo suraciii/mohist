@@ -25,7 +25,7 @@
 - [ID: item-4]
   Severity: test-gap
   Scope: reminder self-healing
-  Resolution: The dispatcher fixture now has two silos and activates with `EnsureStartedAsync`, not `PulseAsync`. A deterministic test calls the reminder callback, kills the hosting silo, calls the callback again through the fixed key, and proves delivery resumes on the other silo in 53ms.
+  Resolution: The dispatcher fixture now has two silos backed by one shared reminder table. A deterministic test advances the injected `FakeTimeProvider` to fire a real reminder without `PulseAsync` or direct callback invocation, kills the hosting silo, waits for membership convergence and persisted reminder reload, then proves the next real tick delivers on the surviving silo. The fixture restores a second silo afterward and every signal has a bounded failure timeout.
   Status: resolved
 
 - [ID: item-5]
@@ -52,14 +52,28 @@
   Resolution: `UndeliveredEvent.Origin` now flows through `IEventStore.MarkDispatchedAsync` and atomic dead-letter settlement, so the persisted table is authoritative. Custom/future CloudEvent sources that use the WorkflowRun fallback can be delivered and marked instead of failing after their handlers run. A real SQLite regression covers append → list undelivered → mark for a non-Mohist source URI.
   Status: resolved
 
+- [ID: item-9]
+  Severity: warning
+  Scope: undelivered-query index metadata
+  Resolution: The existing `AddEventDeliveryDispatchedAt` migration already created filtered indexes for WorkflowRun, Issue, and Epic event scans, so deployed databases were covered. `MohistDbContext`, the issue migrations' target models, and the latest snapshot now declare the same `(Source, Id, DispatchedAt)` indexes and filters. A migration spec pins both EF metadata and the migrated SQLite schema.
+  Status: resolved
+
+- [ID: item-10]
+  Severity: test-flake
+  Scope: process-global console capture
+  Resolution: The two unit-test classes that replace `Console.Out` / `Console.Error` now share a non-parallel xUnit collection, preventing one test from restoring the process-global writers while the other is capturing them.
+  Status: resolved
+
 ## Verification
 
 - Dispatcher/Hermes unit slice: 30 passed.
 - AgentJob persistence + AgentLauncher specs: 30 passed.
 - Dead-letter, reminder/failover, API, Agent, and Epic focused server specs: 81 passed.
 - Origin-aware settlement regression slices: 42 server specs and 36 server unit tests passed.
-- Architecture tests: 24 passed, 3 pre-existing skips.
-- Full rebased `npm test`: CLI 870; server unit 1361; server spec 2835 with 9 skips; Web 4596; Runner 1007; Node test-boundary checks passed.
+- Repaired dispatcher suite: 7 passed in three consecutive runs; the failover test uses real reminder ticks and shared persistence.
+- Event-delivery index model + migration regression: 1 passed.
+- Console-capture slice: 9 passed in five consecutive runs.
+- Full CI-equivalent validation: CLI 870; server unit 1361; architecture 24 with 3 pre-existing skips; server spec 2836 with 9 pre-existing skips; Web 4596; Runner 1007; Node test-boundary checks passed.
 - `git diff --check` and `tasks.json` JSON validation pass.
 
 ## Follow-up Items

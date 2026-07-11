@@ -146,22 +146,34 @@ public class DispatcherGrainSpecs
         var beforeTick = _fixture.WaitForSpecificInvocationAsync("evt_reminder_before");
         await PublishWorkflowCompletedAsync("evt_reminder_before", "issue_reminder_before");
         _fixture.TimeProvider.Advance(TimeSpan.FromHours(1));
-        await beforeTick;
+        await AwaitSignalAsync(beforeTick, "dispatcher reminder delivery for evt_reminder_before");
         Assert.Contains("evt_reminder_before", _fixture.SpecificInvocations);
 
         var hostingSilo = _fixture.Cluster.GetSiloForAddress(initialSilo);
         Assert.NotNull(hostingSilo);
+        var reminderReloaded = _fixture.ReminderTable.PrepareRangeReadSignal();
         await _fixture.Cluster.KillSiloAsync(hostingSilo);
+        try
+        {
+            await _fixture.Cluster.WaitForLivenessToStabilizeAsync(didKill: true);
+            _fixture.TimeProvider.Advance(TimeSpan.FromHours(1));
+            await AwaitSignalAsync(reminderReloaded, "dispatcher reminder reload after silo loss");
 
-        var afterTick = _fixture.WaitForSpecificInvocationAsync("evt_reminder_after");
-        await PublishWorkflowCompletedAsync("evt_reminder_after", "issue_reminder_after");
-        _fixture.TimeProvider.Advance(TimeSpan.FromHours(1));
-        await afterTick;
+            var afterTick = _fixture.WaitForSpecificInvocationAsync("evt_reminder_after");
+            await PublishWorkflowCompletedAsync("evt_reminder_after", "issue_reminder_after");
+            _fixture.TimeProvider.Advance(TimeSpan.FromHours(1));
+            await AwaitSignalAsync(afterTick, "dispatcher reminder delivery for evt_reminder_after");
 
-        Assert.Contains("evt_reminder_after", _fixture.SpecificInvocations);
-        Assert.Equal(0, _fixture.EventStore.PendingCount);
-        Assert.True(_fixture.Cluster.TryGetGrainContext(dispatcherId, out var recoveredContext));
-        Assert.NotEqual(initialSilo, recoveredContext.Address.SiloAddress);
+            Assert.Contains("evt_reminder_after", _fixture.SpecificInvocations);
+            Assert.Equal(0, _fixture.EventStore.PendingCount);
+            Assert.True(_fixture.Cluster.TryGetGrainContext(dispatcherId, out var recoveredContext));
+            Assert.NotEqual(initialSilo, recoveredContext.Address.SiloAddress);
+        }
+        finally
+        {
+            await _fixture.Cluster.StartAdditionalSiloAsync();
+            await _fixture.Cluster.WaitForLivenessToStabilizeAsync();
+        }
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]
@@ -197,6 +209,18 @@ public class DispatcherGrainSpecs
             type: EventCatalog.ReverseDns.WorkflowRunCompleted,
             time: EventTime,
             data: null));
+
+    private static async Task AwaitSignalAsync(Task signal, string description)
+    {
+        try
+        {
+            await signal.WaitAsync(TimeSpan.FromSeconds(10));
+        }
+        catch (TimeoutException)
+        {
+            Assert.Fail($"Timed out waiting for {description}.");
+        }
+    }
 }
 
 /// <summary>

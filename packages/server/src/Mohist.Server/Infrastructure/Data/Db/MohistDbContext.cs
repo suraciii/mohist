@@ -125,6 +125,9 @@ public class MohistDbContext : DbContext
                 .IsRequired();
             entity.Property(e => e.DispatchedAt);
             entity.HasIndex(nameof(WorkflowRunEventRow.Type), nameof(WorkflowRunEventRow.Source), nameof(WorkflowRunEventRow.Id));
+            entity.HasIndex(e => new { e.Source, e.Id, e.DispatchedAt })
+                .HasFilter("\"DispatchedAt\" IS NULL")
+                .HasDatabaseName("IX_WorkflowRunEvents_Source_Id_DispatchedAt");
         });
 
         modelBuilder.Entity<AgentSessionRow>(entity =>
@@ -394,6 +397,9 @@ public class MohistDbContext : DbContext
                 .IsRequired();
             entity.Property(e => e.DispatchedAt);
             entity.HasIndex(nameof(IssueEventRow.Type), nameof(IssueEventRow.Source), nameof(IssueEventRow.Id));
+            entity.HasIndex(e => new { e.Source, e.Id, e.DispatchedAt })
+                .HasFilter("\"DispatchedAt\" IS NULL")
+                .HasDatabaseName("IX_IssueEvents_Source_Id_DispatchedAt");
         });
 
         modelBuilder.Entity<EpicEventRow>(entity =>
@@ -433,6 +439,9 @@ public class MohistDbContext : DbContext
                 .IsRequired();
             entity.Property(e => e.DispatchedAt);
             entity.HasIndex(nameof(EpicEventRow.Type), nameof(EpicEventRow.Source), nameof(EpicEventRow.Id));
+            entity.HasIndex(e => new { e.Source, e.Id, e.DispatchedAt })
+                .HasFilter("\"DispatchedAt\" IS NULL")
+                .HasDatabaseName("IX_EpicEvents_Source_Id_DispatchedAt");
         });
 
         modelBuilder.Entity<AgentSessionEventRow>(entity =>

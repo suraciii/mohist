@@ -274,7 +274,7 @@ public sealed class DispatcherFixture : IAsyncLifetime
     public CapturingEventPublisher EventPublisher { get; } = new();
     public CapturingDeadLetterStore DeadLetterStore { get; }
     public FakeRunnerWorkspaceClient RunnerWorkspace { get; private set; } = null!;
-    public IReminderTable ReminderTable => Cluster.GetSiloServiceProvider(null).GetRequiredService<IReminderTable>();
+    public SharedReminderTable ReminderTable { get; } = new();
 
     public IDispatcherGrain Dispatcher => Grains.GetGrain<IDispatcherGrain>("dispatcher");
 
@@ -308,10 +308,13 @@ public sealed class DispatcherFixture : IAsyncLifetime
 
         var builder = new InProcessTestClusterBuilder();
         builder.Options.InitialSilosCount = 2;
+        builder.ConfigureClient(clientBuilder =>
+            clientBuilder.Services.Configure<ClusterMembershipOptions>(ConfigureTestClusterMembership));
         builder.ConfigureSilo((_, siloBuilder) =>
             ConfigureDispatcherSilo(siloBuilder, connectionString));
         Cluster = builder.Build();
         await Cluster.DeployAsync();
+        await Cluster.WaitForLivenessToStabilizeAsync();
 
         RunnerWorkspace = Cluster.GetSiloServiceProvider(null).GetRequiredService<FakeRunnerWorkspaceClient>();
         EventPublisher.RegisterSink(EventStore);
@@ -357,6 +360,9 @@ public sealed class DispatcherFixture : IAsyncLifetime
     private void ConfigureDispatcherSilo(ISiloBuilder siloBuilder, string connectionString)
     {
         siloBuilder.UseInMemoryReminderService();
+        siloBuilder.Services.RemoveAll<IReminderTable>();
+        siloBuilder.Services.AddSingleton<IReminderTable>(ReminderTable);
+        siloBuilder.Configure<ClusterMembershipOptions>(ConfigureTestClusterMembership);
         siloBuilder.Configure<ReminderOptions>(o =>
             o.MinimumReminderPeriod = TimeSpan.FromMilliseconds(100));
         siloBuilder.AddMemoryGrainStorageAsDefault();
@@ -409,6 +415,17 @@ public sealed class DispatcherFixture : IAsyncLifetime
         });
         siloBuilder.Services.AddSingleton<IAgentJobDispatchObserver>(NoopAgentJobDispatchObserver.Instance);
         siloBuilder.Services.Configure<WorkflowOptions>(_ => { });
+    }
+
+    private static void ConfigureTestClusterMembership(ClusterMembershipOptions options)
+    {
+        options.ProbeTimeout = TimeSpan.FromMilliseconds(100);
+        options.TableRefreshTimeout = TimeSpan.FromMilliseconds(100);
+        options.DeathVoteExpirationTimeout = TimeSpan.FromSeconds(1);
+        options.NumProbedSilos = 1;
+        options.NumMissedProbesLimit = 1;
+        options.NumVotesForDeathDeclaration = 1;
+        options.UseLivenessGossip = false;
     }
 
     private TaskCompletionSource GetSpecificDeliverySignal(string eventId) =>
@@ -464,7 +481,7 @@ public sealed class CapturingEventPublisher : IEventPublisher
             id: Guid.NewGuid().ToString(),
             source: new Uri(source, UriKind.RelativeOrAbsolute),
             type: type,
-            time: DateTimeOffset.UtcNow,
+            time: DateTimeOffset.UnixEpoch,
             data: dataJson,
             subject: subject,
             extensions: extDict);

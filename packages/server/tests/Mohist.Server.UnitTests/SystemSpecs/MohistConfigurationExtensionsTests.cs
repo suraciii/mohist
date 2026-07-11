@@ -8,6 +8,7 @@ using Xunit;
 
 namespace Mohist.Server.UnitTests.SystemSpecs;
 
+[Collection("ConsoleCapture")]
 public class MohistConfigurationExtensionsTests : IDisposable
 {
     private readonly List<string> _tempFiles = [];
