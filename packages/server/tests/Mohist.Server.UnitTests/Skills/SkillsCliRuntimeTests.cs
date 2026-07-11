@@ -64,7 +64,7 @@ public sealed class SkillsCliRuntimeTests
         using var stderr = new StringWriter();
 
         var exitCode = await MohistCliCommands.RunAsync(
-            new HttpClient
+            new HttpClient(new RejectingHttpHandler())
             {
                 BaseAddress = new Uri(environment.GetEnvironmentVariable("MOHIST_SERVER_URL") ?? "http://localhost:3456"),
                 Timeout = TimeSpan.FromSeconds(30),
@@ -73,7 +73,7 @@ public sealed class SkillsCliRuntimeTests
             stdout,
             stderr,
             files,
-            new SystemCommandExecutor(),
+            new RejectingCommandExecutor(),
             environment);
 
         return (exitCode, stdout.ToString(), stderr.ToString());
@@ -85,4 +85,20 @@ public sealed class SkillsCliRuntimeTests
         "mohist-explore" => "把模糊的产品想法提炼成清晰的、有边界的 Mohist issue 需求文档。当用户带着一句话、一个模糊念头或未沉淀的改进意图，需要探索当前产品形态和技术实现，最终产出一份用户视角、产品视角、领域视角三段协作的 PRD 时使用。触发词包括 \"提炼需求\"、\"写 PRD\"、\"沉淀 issue\"、\"需求文档\"、\"探索\"、\"完善 issue\"。",
         _ => throw new ArgumentOutOfRangeException(nameof(name), name, null),
     };
+
+    private sealed class RejectingCommandExecutor : ICommandExecutor
+    {
+        public Task<(int ExitCode, string Stdout, string Stderr)> ExecuteAsync(
+            string fileName,
+            string[] args,
+            string? workingDirectory = null,
+            CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException($"Unexpected command: {fileName}");
+    }
+
+    private sealed class RejectingHttpHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            throw new InvalidOperationException($"Unexpected HTTP request: {request.RequestUri}");
+    }
 }

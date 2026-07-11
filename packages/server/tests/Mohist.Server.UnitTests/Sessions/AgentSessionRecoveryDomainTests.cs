@@ -114,7 +114,7 @@ public class AgentSessionRecoveryDomainTests
             }
         };
 
-        var events = session.RebindRuntimeSession("acp-keep", null, null, DateTime.UtcNow);
+        var events = session.RebindRuntimeSession("acp-keep", null, null, DateTime.UnixEpoch);
 
         Assert.Empty(events);
         Assert.Single(session.Status.RuntimeSessionLineage!);
@@ -227,7 +227,7 @@ public class AgentSessionRecoveryDomainTests
             AgentRuntimeSessionId = "acp-keep"
         };
 
-        var events = session.RebindRuntimeSession("acp-keep", null, null, DateTime.UtcNow);
+        var events = session.RebindRuntimeSession("acp-keep", null, null, DateTime.UnixEpoch);
 
         Assert.Equal("acp-keep", session.Status.AgentRuntimeSessionId);
         Assert.Empty(events);
@@ -276,7 +276,7 @@ public class AgentSessionRecoveryDomainTests
             contextWindowSize: null,
             strategy: "reset",
             summary: null,
-            now: DateTime.UtcNow);
+            now: DateTime.UnixEpoch);
 
         Assert.Equal(42_000, session.Status.UsageSummary!.ContextWindowUsed);
         Assert.Equal(100_000, session.Status.UsageSummary!.ContextWindowSize);
@@ -335,7 +335,7 @@ public class AgentSessionRecoveryDomainTests
             contextUsagePercent: 88d,
             contextWindowUsed: 88_000,
             contextWindowSize: 100_000,
-            now: DateTime.UtcNow);
+            now: DateTime.UnixEpoch);
 
         var exhaustion = Assert.IsType<AgentSessionContextExhausted>(Assert.Single(events).Value);
         Assert.Equal("context_exhaustion_suspected", exhaustion.FailureCategory);
@@ -354,7 +354,7 @@ public class AgentSessionRecoveryDomainTests
             contextUsagePercent: null,
             contextWindowUsed: null,
             contextWindowSize: null,
-            now: DateTime.UtcNow);
+            now: DateTime.UnixEpoch);
 
         var exhaustion = Assert.IsType<AgentSessionContextExhausted>(Assert.Single(events).Value);
         Assert.Null(exhaustion.FailureCategory);
@@ -388,7 +388,7 @@ public class AgentSessionRecoveryDomainTests
     public void RecordContextHealthUpdate_AcceptsGreenAndYellow()
     {
         var session = CreateSession();
-        var now = DateTime.UtcNow;
+        var now = DateTime.UnixEpoch;
 
         var green = session.RecordContextHealthUpdate("green", 30d, 30_000, 100_000, now);
         var yellow = session.RecordContextHealthUpdate("yellow", 70d, 70_000, 100_000, now);

@@ -2434,9 +2434,9 @@ public class UpdateTests
                     stage = l.Stage,
                     message = l.Message,
                 }),
-                createdAt = DateTimeOffset.UtcNow,
-                updatedAt = DateTimeOffset.UtcNow,
-                completedAt = DateTimeOffset.UtcNow,
+                createdAt = DateTimeOffset.UnixEpoch,
+                updatedAt = DateTimeOffset.UnixEpoch,
+                completedAt = DateTimeOffset.UnixEpoch,
             };
             return JsonSerializer.Serialize(response, JsonOptions);
         }

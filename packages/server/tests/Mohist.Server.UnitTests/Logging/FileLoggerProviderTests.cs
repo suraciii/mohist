@@ -1,9 +1,11 @@
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Infrastructure;
+using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Logging;
 using Xunit;
 using EnvironmentAbstractions.TestHelpers;
@@ -12,6 +14,26 @@ namespace Mohist.Server.UnitTests.Logging;
 
 public class FileLoggerProviderTests
 {
+    [Fact]
+    public void AddFileLogger_RegistersOneProviderSharedWithILoggerProvider()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<TimeProvider>(new FakeTimeProvider());
+        services.AddSingleton<ILogPathResolver>(_ => CreateResolver("/logs"));
+        services.AddLogging(builder => builder.AddFileLogger());
+        services.AddMohistServerCore(new ConfigurationBuilder().Build());
+
+        Assert.Single(services, descriptor => descriptor.ServiceType == typeof(FileLoggerProvider));
+
+        using var provider = services.BuildServiceProvider();
+        var concrete = provider.GetRequiredService<FileLoggerProvider>();
+        var loggingProvider = provider.GetServices<ILoggerProvider>()
+            .OfType<FileLoggerProvider>()
+            .Single();
+
+        Assert.Same(concrete, loggingProvider);
+    }
+
     [Fact]
     public void WriteRecord_AppendsJsonObjectWithLevelTimeServiceMessageToFile()
     {

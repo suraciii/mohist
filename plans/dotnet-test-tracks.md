@@ -264,11 +264,11 @@ ComponentSpecs/IntegrationSpecs，原则互相冲突。当前新计划也错误�
 |---|---|---|
 | `AgentCostRollupApiSpecs`、`AgentUsageTimeseriesApiSpecs` | investigate as Spec | `docs/` 没有覆盖不代表不是 Spec；检查 endpoint contract、DTO、真实 consumer 和 executable behavior，逐项确认产品区别 |
 | `AgentUsageReporterSpecs` | reclassify to Unit candidate | 直接验证 reporter 方法与计算实现；仍须确认是否保护独立技术不变量 |
-| `AgentActivityFeedAssemblerSpecs` | reclassify to Unit candidate | 直接验证 projection service；仍须检查与 API/product coverage 的重复 |
-| `AgentLauncherSpecs` | reclassify to Unit candidate | 直接验证 service orchestration 与 grain 调用 |
+| `AgentActivitySpecs` | retain as code-only Spec | AgentOps activity feed 是产品读模型；检查 card/summary 是否与 route spec 保护不同风险 |
+| `AgentSubscriptionLaunchVisibilitySpecs` / `AgentLauncherTests` | split Spec and Unit | 订阅来源可追溯是产品承诺；参数 guard 是直接技术契约 |
 | `RunnerWorkflowTerminalStatusHandlerSpecs` | delete candidate | 没有驱动 handler，且 router Unit coverage 已存在 |
 | `IssueWorkflowLifecycleSpecs` | investigate as Spec | complete/cancel/start/rerun 看似产品行为；当前 direct grain driver 不决定类型，先找到具体产品规格并检查可观察结果 |
-| `IssueRepositoryReferenceSpecs.State_RoundTrip...` | reclassify to Unit candidate | 内部 persistence/serialization shape；只在该 shape 是必要技术契约时保留 |
+| `IssueRepositoryReferenceSpecs` | delete candidate | 创建、配置变更和 repository problem 已分别由 repository API、resolution regression 和 resolver Unit 覆盖；内部 JSON shape 不单独构成产品规格 |
 | `IntegrationFixtureSchemaSpecs` | value investigation | 只验证测试基础设施和 migration-shaped schema；若真实 migration/consumer tests 已覆盖该风险，应删除而不是搬家 |
 | `ArchitectureRules` | rule-by-rule Arch audit | 逐条确认架构依据；ratchet 仅用于有意保留的既有债务 |
 | `CliIssueCommandSpecs`、`CliWorkflowReadsSpecs` | Spec candidates | 用户命令、输出和错误看似产品契约；逐方法匹配文档或 command/help/output 等代码契约 |
@@ -552,11 +552,11 @@ library，不匹配该规则。
 
 ## Done criteria
 
-- [ ] `design/testing.md` 只定义 Spec、Unit、Arch 三种测试；
-- [ ] runtime mechanism、E2E/a11y 和 TestSupport 明确不是 test kind；
-- [ ] Server 只有 SpecTests、UnitTests、ArchTests 三个 test projects；
-- [ ] CLI 只有 SpecTests、UnitTests 两个 test projects；
-- [ ] ComponentSpecs、IntegrationSpecs 和 generic `Mohist.Cli.Tests` 已删除；
+- [x] `design/testing.md` 只定义 Spec、Unit、Arch 三种测试；
+- [x] runtime mechanism、E2E/a11y 和 TestSupport 明确不是 test kind；
+- [x] Server 只有 SpecTests、UnitTests、ArchTests 三个 test projects；
+- [x] CLI 只有 SpecTests、UnitTests 两个 test projects；
+- [x] ComponentSpecs、IntegrationSpecs 和 generic `Mohist.Cli.Tests` 已删除；
 - [ ] 每个保留的 test method 或同契约方法组都有权威来源、独有风险和价值结论；
 - [ ] 每个 Spec method 能说明产品承诺，记录精确的文档或代码契约证据，使用产品语言并
       断言产品结果；
@@ -565,18 +565,21 @@ library，不匹配该规则。
 - [ ] 每个 Unit method 有明确且有价值的技术契约，不冒充产品规格或镜像实现细节；
 - [ ] 每个 Arch rule 有设计来源、明确架构质量、当前通过且没有 skip；
 - [ ] ratchet 只用于有依据的既有架构债务，并有单调收紧策略和退出条件；
-- [ ] TestSupport projects 不含 test SDK、xUnit、fixture、collection、host 或 test class；
-- [ ] 没有 test-project reference、linked test source 或 generic shared fixture；
-- [ ] 每个删除的 test 有 owner 或明确无价值理由；
+- [x] TestSupport projects 不含 test SDK、xUnit、fixture、collection、host 或 test class；
+- [x] 没有 test-project reference、linked test source 或 generic shared fixture；
+- [x] 五个 test project 不直接访问墙钟或 `TimeProvider.System`；
+- [ ] 没有测试直接访问真实网络、进程、git、shell、agent binary、DB file、系统服务、环境变量或
+      用户 HOME；隔离的 temp directory 只用于其本身是 subject 或 fake backing store 的测试；
+- [x] 每个删除的 test 有 owner 或明确无价值理由；
 - [ ] 没有重复、过时、不可达、fixture self-test、mock mirror 或未驱动命名 subject 的
       已知低价值测试；
-- [ ] normalized discovery 无意外丢失或重复；
-- [ ] no new skip；ArchTests skip 为零；
-- [ ] custom orderer、traits、数字 shard 仍为零；
-- [ ] 五个 test projects 与 full solution 全绿；
-- [ ] 固定四核中位数不比 baseline 慢 10%；
-- [ ] `git diff --check` 为空；
-- [ ] 没有产品行为变化。
+- [x] normalized discovery 无意外丢失或重复；
+- [x] no new skip；ArchTests skip 为零；
+- [x] custom orderer、traits、数字 shard 仍为零；
+- [x] 五个 test projects 与 full solution 全绿；
+- [x] 固定四核中位数不比 baseline 慢 10%；
+- [x] `git diff --check` 为空；
+- [x] 没有产品行为变化。
 
 ## STOP conditions
 
@@ -603,16 +606,64 @@ library，不匹配该规则。
 
 | Current method/group | Authority / evidence | Unique regression | Verdict / Kind | Runtime | Action | State |
 |---|---|---|---|---|---|---|
-| `AgentUsageReporterSpecs` methods | reporter contract / `n/a` | pending method audit | investigate / Unit candidate | DI + SQLite | audit | TODO |
-| `AgentActivityFeedAssemblerSpecs` methods | assembler contract / `n/a` | pending duplicate audit | investigate / Unit candidate | DI + SQLite | audit | TODO |
-| `AgentLauncherSpecs` methods | launcher contract / `n/a` | pending method audit | investigate / Unit candidate | DI + grain | audit | TODO |
-| `RunnerWorkflowTerminalStatusHandlerSpecs` methods | no independent source / `n/a` | none; router owner already covers behavior | delete / none | full host | delete | TODO |
-| `AgentCostRollupApiSpecs` methods | product contract evidence pending: inspect endpoint/DTO/consumers/spec behavior | pending product distinction audit | investigate / unknown | HTTP host | audit/collapse | TODO |
-| `IssueWorkflowLifecycleSpecs` methods | product contract evidence pending: inspect domain transitions/API/consumers/spec behavior | pending product distinction audit | investigate / unknown | grain + DB | audit driver | TODO |
-| `IntegrationFixtureSchemaSpecs` methods | test-infrastructure contract / `n/a` | pending migration/consumer duplicate audit | investigate / Unit or delete | SQLite | audit | TODO |
-| `ArchitectureRules` methods | exact `design/` section per rule | pending architecture-quality audit | investigate / Arch candidate | assembly/source inspection | audit/update | TODO |
-| `CliIssueCommandSpecs` methods | product contract evidence pending: inspect docs and command/help/output | pending command-contract audit | investigate / Spec candidate | command + fake HTTP | audit | TODO |
-| `RuntimeConsistencyValidatorSpecs` methods | validator contract / `n/a` | pending method audit | investigate / Unit candidate | direct service | audit/rename | TODO |
+| `AgentUsageReporterSpecs` 20 methods | `AgentUsageReporter` aggregation; API specs retain endpoint contract | bucket/window/cumulative aggregation independent of route wiring | keep / Unit | SQLite + fake time | moved to `AgentUsageReporterTests` | DONE |
+| `AgentActivitySpecs` 4 methods | `design/domain-analysis.md` AgentOps read-side; `/agent/activity` route | activity cards, waiting work and summary counters remain correct | keep / Spec | DI + SQLite | renamed from assembler subject to product activity; deleted two non-observing/default-only cases | DONE |
+| `AgentSubscriptionLaunchVisibilitySpecs` 2 methods | `docs/agent-subscriptions.md`: system starts Agent and records the response relationship | subscription launch is traceable and manual launch does not claim subscription origin | keep / Spec | full host + grain | renamed from launcher subject and retained only visibility contract | DONE |
+| `AgentLauncherTests` 5 methods | `AgentLauncher.LaunchAsync` input contract | invalid caller input fails before collaborators are used | keep / Unit | direct | moved validation cases out of host specs | DONE |
+| `RunnerWorkflowTerminalStatusHandlerSpecs` methods | no independent source | `RunnerWorkflowStatusRouterSpecs` owns connected/offline/no-assignment behavior | delete / none | full host | deleted | DONE |
+| Agent cost and usage API methods | `/agent/cost` and `/agent/usage` routes; Web Insights query clients and charts consume both DTOs | users see cumulative, daily, windowed spend, per-issue cost and usage history | keep / Spec | HTTP host | retained independent visible metric/range cases; deleted four duplicate or derived cases | DONE |
+| `IssueWorkflowLifecycleSpecs` 12 methods | product loop, issue profile API, start readiness, path contract, completion handler and workflow-control specs | ten full-host cases have a natural owner; two start cases are user-observable command behavior | delete + rewrite / Spec | full host | deleted the mixed file; rewrote the two start cases as API-driven `IssueCreationSpecs` | DONE |
+| `IssueCreationSpecs` start lifecycle 2 methods | `/issues/{number}/start` command surface and issue detail read model | repeated start never creates duplicate active work; start after stop binds a new workflow | keep / Spec | HTTP host + grain setup | added the two product-level cases at the existing issue creation boundary | DONE |
+| `IssueRepositoryReferenceSpecs` 6 methods | `IssueRepositoryApiSpecs`, repository workflow/workspace specs and `IssueRepositoryResolverTests` | creation resolution, live configuration changes and each repository problem already have a stronger owner; direct state/DB setup adds no public contract | delete / none | direct DB + querier | deleted the mixed persistence/read-model file | DONE |
+| `IssueRepositoryResolutionRegressionSpecs` 19 methods | `IssueRepositoryApiSpecs`, `IssueWorkflowRepositoryResolutionSpecs`, `IssueWorkspaceRepositoryResolutionSpecs`, `IssueRepositoryResolverTests` and `IssueRebaseRecoveryTests` | list metadata is a distinct API result; rebase input is a direct technical contract; the other host cases repeat an owner or force unreachable state | delete + rewrite / Spec + Unit | HTTP host + direct DB/grain | deleted the mixed regression file; moved the list case to repository API specs and rebase input to a direct Unit test | DONE |
+| `IssueRepositoryApiSpecs` list metadata method | `GET /api/projects/{projectId}/issues` response contract | the issue list reflects the current repository context after configuration changes | keep / Spec | HTTP host | added a single list-specific case | DONE |
+| `IssueRebaseRecoveryTests` task input method | `IssueRoutes.BuildRebaseTaskWith` implementation contract | a queued rebase task receives the resolved repository context | keep / Unit | direct | added direct builder coverage instead of inspecting workflow state through a host | DONE |
+| `IssueWorkflowRepositoryResolutionSpecs` 4 methods | workflow variables are the runner contract; `/issues/{number}/start` is the user command | current repository metadata reaches workflow variables; a removed repository blocks start without creating work | keep + delete/rewrite / Spec | grain + HTTP host | retained two variable-contract cases, rewrote the removed-repository command case in `IssueCreationSpecs`, deleted the unreachable ghost-reference case | DONE |
+| `IssueCreationSpecs` repository start method | `/issues/{number}/start` response and issue read model | removing an issue's repository prevents a new workflow from starting | keep / Spec | HTTP host + grain setup | added a concise `409`/no-workflow case | DONE |
+| workspace diff after repository configuration change | `WorkspaceRoutes` diff contract | the user sees the current base branch after repository configuration changes | keep / Spec | HTTP host + fake workspace | retained | DONE |
+| workspace read operations after repository removal | `WorkspaceRoutes` repository guard | diff, file content, workspace status and cleanup report configuration error instead of using a stale repository | keep / Spec | HTTP host + fake workspace | retained as one shared precondition scenario | DONE |
+| rebase after repository branch change or removal | `IssueRoutes.Rebase` response contract | rebase uses the current base branch and refuses an unconfigured repository | keep / Spec | HTTP host + fake runner | retained | DONE |
+| archive after repository removal | `IssueRoutes.Lifecycle` archive guard | archive refuses an unconfigured repository | keep / Spec | HTTP host | retained | DONE |
+| `IssueWorkspaceRepositoryResolutionSpecs` setup | no behavioral contract | empty test lifecycle and an unused legacy path argument only obscure the actual branch setup | simplify / Spec | HTTP host | removed both without changing scenarios | DONE |
+| `IssueCreationSpecs` default profile, querier, duplicate hydrate and workflow-status shape methods | initial creation case and `IssueVariableBuilderTests` | two cases repeat the same creation/read result; duplicate hydrate has no public command; property absence is source shape rather than a user result | delete / none | grain + host | deleted 4 methods; retained the separate grain-to-event-store persistence regression | DONE |
+| `IssueCreationSpecs` direct prerequisite methods | create/prerequisite HTTP specs and `IssueStartReadinessDomainTests` | multiple, empty, duplicate, invalid, cross-project, self and completed prerequisites are already covered at the API boundary or as domain readiness logic | delete + strengthen / Spec | grain + querier | deleted 10 grain-path duplicates; strengthened the API case to cover two prerequisites | DONE |
+| `IssueCreationSpecs` risk methods | issue create/read API; `IssueDomainTests` | API must return the risk chosen for an issue; allowed values, null and serialization are domain contracts | delete + rewrite / Spec | HTTP host | replaced four direct cases with one create/read API case | DONE |
+| `IntegrationFixtureSchemaSpecs` method | `MigratedSqliteTemplate.CopyTo` schema contract | template must use current migrations, including unique label/workflow indexes | keep / Unit | SQLite | moved and renamed `MigratedSqliteTemplateTests` | DONE |
+| migration source-text methods | no runtime contract; executable migration tests cover schema | none | delete / none | source text | deleted 2 methods | DONE |
+| migrated-service registration matrix | implementation migration history, not a product or stable architecture contract | none; feature tests exercise concrete services | delete / none | DI + grain | deleted 112 theory cases | DONE |
+| `OtelServiceRegistrationSpecs` methods | direct OtelDb tests and OTLP route tests own behavior | none | delete / none | DI + file-like DB | deleted 3 methods | DONE |
+| `ArchitectureRules` layer, persistence and environment rules | `design/architecture.md` Server implementation boundaries | domain/API/data dependency direction and environment abstraction remain enforced | keep / Arch | assembly + project graph | documented the existing boundaries as the rule source | DONE |
+| `ArchitectureRules` track, TestSupport, traits, ordering and collection rules | `design/testing.md` ArchTests, naming/placement and isolation rules | prevents a generic/fourth test project, test-project references, test support fixtures, execution shims and accidental parallel disablement | keep + simplify / Arch | source + project graph | naming rule now validates allowed track suffixes rather than a fixed project inventory | DONE |
+| `DataStores_AreInInfrastructureData`, feature-directory, grain-name/location, EF entity-name, domain-module and Spec parser rules | no stable design decision; several assert current shape, framework discovery, or a bidirectional exception table rather than an architecture invariant | none | delete / none | assembly + source scan | removed nine low-signal Arch rules; the domain model remains a design gap for a future direct, directional constraint | DONE |
+| domain internal-cycle rules | no stable design decision; exceptions and skips leave no current invariant | none | delete / none | assembly scan | deleted one exception-based rule and three skipped rules | DONE |
+| `RuntimeConsistencyValidatorTests` timeout case | timeout at fake-clock deadline | arbitrary scheduler-yield limit could fail under four-core suite load | keep / Unit | fake time + fake HTTP | await request-start signal, then advance fake time | DONE |
+| CLI command files | command/help/output/error contract | CLI product surface | keep / Spec | command + fake HTTP | moved to `Mohist.Cli.SpecTests` | DONE |
+| CLI parser/renderer/updater/probe/validator files | cohesive implementation contracts | technical behavior independent of command route | keep / Unit | direct service | moved and renamed `*Tests` | DONE |
+| `OtelExecutionChainTracingSpecs`, `OtelOutboundHttpTracingSpecs`, `OtelSourceSubscriptionSpecs`, `OtelInboundHttpTracingSpecs`, `OtelExporterFailureIsolationSpecs` | `ConfigureTracing` technical registration; `OtelSelfFeedbackTests` and `OtelSignalRTracingSpecs` retain product-visible telemetry behavior | source registration and provider configuration, not a synthetic listener or TestServer instrumentation topology | delete + rewrite / Unit + Spec | direct source/listener + TestServer | deleted synthetic listener/exporter cases; `MohistOpenTelemetryRegistrationTests` records SignalR and EF activities in the production builder | DONE |
+| `OtlpRoutesIntegrationSpecs`, `OtelQueryRoutesIntegrationSpecs` | OTLP ingestion and trace-query route contracts | clients can write and read telemetry through the public route surface | keep / Spec | HTTP host | renamed to `OtlpRoutesSpecs` and `OtelQueryRoutesSpecs`; no behavior moved | DONE |
+| `HttpApiJsonWiringSpecs` methods | `ConfigureMohistServices` JSON-option registration; `JSONTests` owns shared serializer behavior | HTTP/SignalR option binding is a technical registration contract; raw Unicode HTTP cases repeat serializer coverage | delete + rewrite / Unit | DI + HTTP host | moved four registration cases to `MohistServiceRegistrationJsonTests`; deleted two duplicate HTTP cases | DONE |
+| `AgentSessionGrainRecoverySpecs` and weak `AgentSessionRecoveryApiSpecs` methods | compact/reset route contract, `AgentSessionRecoveryDomainTests`, `AgentSessionGrainPersistenceTests`, `IssueSessionApiSpecs` | public recovery results, technical persistence failure and usage projection already have focused owners | delete / none | full host + direct grain + DB | deleted nine direct-grain duplicates and three empty or duplicate API cases | DONE |
+| direct `ResolveGenericFollowupTargetAsync`, `ResolveGenericCancelTargetAsync`, `ResolveFollowupTargetAsync` methods | generic/issue followup and cancel route specs | route outcomes already prove runner binding, active/inactive, terminal, unknown and project-isolation decisions, including SignalR payloads | delete / none | full host + direct querier | deleted eight resolver mirrors; public HTTP specs remain the only product owner | DONE |
+| `AgentSessionContextExhaustionSpecs` methods | `ContextExhaustionClassifierTests`, `ContextHealthClassifierTests`, `AgentSessionRecoveryDomainTests`, session metadata API and transcript-publisher specs | classifier thresholds/limiting, domain event shape, public metadata and realtime event delivery each have a focused owner | delete / none | full host + direct grain + DB | deleted five repeated grain paths, including weak metadata and event-presence assertions | DONE |
+| duplicated `AgentSessionLifecycleDedupSpecs` methods | retained lifecycle/channel cases in the same Spec and `AgentSessionTransactionalEventAppendTests` | one attached runtime-bound event, transcript-only raw events and lifecycle envelope persistence each need one strongest owner, not status-by-status copies | collapse / Spec + Unit | full host + event store | removed attach duplicate, three terminal-status copies and liveness duplicate; retained six distinct channel/lifecycle risks | DONE |
+| `RuntimeEntrySpecs.AgentStatus_WhenNoRunnerConnected_ReportsUnavailableRuntime` | `AgentStatusResponse.Create` response assembly | no host, route or user flow is driven; the response factory's unavailable-state mapping is an independent technical contract | reclassify / Unit | direct | moved to `AgentStatusResponseTests` | DONE |
+| `CliNotifySetupCommandSpecs.ProbeHermesHealthAsync_NonAbsoluteHealthBase_ReturnsUnhealthy` | `NotifyCommands.ProbeHermesHealthAsync` URL validation | invalid health-base handling is a direct helper contract; CLI setup specs retain user-visible abort/output behavior | reclassify / Unit | direct | moved to `NotifyCommandsTests` | DONE |
+| `AgentSessionSpecs.RunnerAppendsSessionEvents_StoresAggregateDomainEvents` | retained lifecycle Spec and `AgentSessionTransactionalEventAppendTests` | usage-recorded type is already tested through the runner path; source/subject stamping is already tested transactionally | delete / none | full host + event store | deleted overlapping combined assertion | DONE |
+| `CliNotifySetupCommandSpecs` fixture setup/teardown | `FakeFileSystem` is the command's only file dependency | real temporary directory creation/deletion contributes no command behavior and leaks an external dependency | simplify / Spec | fake filesystem | keep an absolute fake path but remove all real directory operations | DONE |
+| `RuntimeEntrySpecs.AgentStatus_WhenRunnerUnregistered_HeartbeatRefreshesInfoButPollRestoresPresence` | `RunnerFailureTests.HeartbeatRepair_OfflineGrain_RefreshesInfoButPollPresenceRestoresOnline` and `RunnerGrainTimeProviderTests.Heartbeat_DoesNotRefreshPresence_ButPollPresenceDoes` | the HTTP test observes only runner grain/registry state, not an API result; the direct technical owners cover offline info refresh and poll-owned presence | delete / none | full host + grain | deleted the duplicate technical path | DONE |
+| `RunnerHeartbeatConnectionApiSpecs` 8 methods | public `GET /api/runner/identity` connection state; `RunnerConnectionTracker` remains an internal transport detail | a runner that reports a connection remains publicly connected after its later info-only heartbeat | collapse + rewrite / Spec | HTTP host | replaced tracker mirrors with one `RunnerIdentityConnectionSpecs` API contract | DONE |
+| `RuntimeEntrySpecs` runtime seed time | `MohistIntegrationFixture.TimeProvider` | workflow setup must not add an untracked wall-clock dependency | simplify / Spec | fake time | replaced `DateTimeOffset.UtcNow` with fixture time | DONE |
+| session activity/read/context Specs, `InboxApiSpecs` and `IssueFeedbackApiSpecs` seed times | `MohistIntegrationFixture.TimeProvider` | ordering, lifecycle and feedback data must be deterministic under any machine clock | simplify / Spec | fake time | replaced local wall-clock construction with fixture time; removed unused inbox polling helper | DONE |
+| `AttachmentApiSpecs` HTTP lifecycle methods | attachment upload/bind/download/remove, project isolation and API limit contracts | users can attach content to issues/comments and receive correct lifecycle/errors | keep / Spec | HTTP host | retained six API cases | DONE |
+| `AttachmentApiSpecs.UploadAsync_RejectsStreamThatExceedsDeclaredSizeLimit`, `CleanupExpiredPending_RemovesRowsAndStoredContent` | `AttachmentService` size-normalization and pending-cleanup implementation contracts | a malformed declared length cannot leave data, and expired pending attachment content/rows are removed | reclassify / Unit | SQLite + storage adapter | moved to `AttachmentServiceTests` with fixed time | DONE |
+| direct wall-clock test seeds and default test clocks | `design/testing.md` deterministic-time rule | source data, fixtures and host setup cannot vary by machine clock | simplify / Spec + Unit | fake time / fixed data | replaced direct wall-clock calls across all five test projects; grain defaults now use a fake clock | DONE |
+| `RuntimeBuildInfoTests.MetadataIdentity_WhenAssemblyHasInformationalVersion_ReturnsVersionAndGitHash`, `GitHash_WhenInitialized_RemainsStableForProcessLifetime` | `ResolveIdentity` Unit tests own version/hash fallback behavior | current assembly, repository and process environment are test-run inputs rather than an independent product or implementation contract | delete / none | process environment + source tree | deleted two build-environment mirrors | DONE |
+| `RuntimeBuildInfo` startup time and Git HEAD parser | `IRuntimeBuildInfo.StartedAt` and identity fallback implementation | startup metadata must be deterministic in tests; detached and symbolic Git HEAD parsing must not require a real repository | keep + rewrite / Unit | fake clock + fake filesystem | injected `TimeProvider`; parser now accepts `IFileSystem` | DONE |
+| `NoActiveProjectMessageSourceAlignmentTests` 3 methods | `NoActiveProjectMessageTests` and CLI command/API output tests | the diagnostic must be emitted to users, not merely referenced from particular source files | delete / none | source text | deleted three source-shape mirrors | DONE |
+| `SystemUpdateServiceInvariantTests.SourceAudit_*` 7 methods | `SystemUpdateServiceRecoveryTests`, `SystemUpdateServiceReconnectTests`, `SystemUpdateServiceStatusTests` and `SystemUpdateServiceOutcomeTests` | failed state, log cap, persistence, lock release and enabled/disabled outcomes are covered through service behavior | delete / none | source text | deleted brittle source-layout scans; retained `PersistTransitionAsync_ReleasesLockOnlyAfterSave` | DONE |
+| `SystemUpdateRecoveryTests.SourceAudit_*` 2 methods | stale/fresh/reconnect/retry recovery behavior driven by fake time and `FakeProcessStartTimeProvider` | production source layout and exact use of process APIs are not a product, technical-result or documented architecture contract | delete / none | source text | deleted two source-layout scans | DONE |
+| `ProjectIsolationIntegrationTests` 6 methods and `SystemSpecs.EventBridgeTests` 2 methods | `UserNotificationDispatcherProjectFilterTests` and `Events.EventBridgeTests` | filter branches and envelope delivery each need one owner; repeated bridge paths do not add a distinct risk | collapse / Unit | direct dispatcher + fake hub | retained one project-scoped EventBridge delivery case; deleted eight duplicates and the `Integration` test name | DONE |
+| `SkillsCliRuntimeTests.InvokeSkillsAsync` setup | `SkillsCliRuntimeTests` composition contract | a read-only command must never accidentally invoke a process or HTTP request | simplify / Unit | rejecting fake command + HTTP handler | replaced real executor/default HTTP handler with fail-fast fakes | DONE |
 
 执行时覆盖全部 Server 与 CLI test methods；只有同一来源、风险和动作的方法组可以合并，
 不允许只完成预填项或只按 file/class 归类。
@@ -621,19 +672,58 @@ library，不匹配该规则。
 
 | Removed test | Retained owner or deletion reason | State |
 |---|---|---|
-| pending | pending | TODO |
+| `RunnerWorkflowTerminalStatusHandlerSpecs` (3) | `RunnerWorkflowStatusRouterSpecs` owns all three routed outcomes | DONE |
+| `AgentSessionEventsMigrationSpecs` source-text methods (2) | migrated schema assertions execute the real migrations | DONE |
+| migrated-service registration matrix (112) | feature tests and the smaller scanner UnitTests own observable registration behavior | DONE |
+| `OtelServiceRegistrationSpecs` (3) | `OtelDbTests` and OTLP route specs own database/route behavior | DONE |
+| `SourceCodeUpdaterStructureTests` and API prelude source-shape methods (5) | behavior tests own updater/API results; source layout is not a contract | DONE |
+| `UnitTests_MustNotReferenceHostingPackages`, `ComponentSpecs_MustNotReferenceMvcTesting` (2) | runtime mechanism does not define a test kind | DONE |
+| `DomainInternalLayers_ShouldBeFreeOfCycles` (1) | exceptions left only an undocumented partial rule | DONE |
+| empty activity limit/default waiting cases (2) | no user-observable assertion or active caller contract | DONE |
+| empty trigger-label map case (1) | no caller or distinct product behavior beyond manual launch | DONE |
+| duplicate Agent cost cases (4) | owned by existing cost/usage cases, or only re-computed a returned value | DONE |
+| lifecycle unknown-issue and database-path cases (2) | completion handler / path contract and workspace API specs own the risk | DONE |
+| `IssueWorkflowLifecycleSpecs` 12 methods | two start cases were rewritten as API specs; the other ten are owned by product loop, issue creation, profile API, start readiness, path contract, completion handler or workflow-control specs; unknown legacy failure values have a focused JSON Unit test | DONE |
+| `IssueRepositoryReferenceSpecs` (6) | repository API covers creation/read behavior, workflow and workspace specs use live configuration, resolver Unit tests cover pure problem classification; direct persistence shape has no standalone contract | DONE |
+| `IssueRepositoryResolutionRegressionSpecs` (19) | one list response case moved to `IssueRepositoryApiSpecs`, one rebase task-input case moved to `IssueRebaseRecoveryTests`; all other cases are covered by repository API, workflow/workspace resolution, resolver Unit tests, or assert forced internal state | DONE |
+| `IssueWorkflowRepositoryResolutionSpecs` removed cases (2) | removed-repository start became an HTTP `IssueCreationSpecs` case; ghost repository reference is uncreatable and resolver Unit tests own its classification | DONE |
+| `IssueCreationSpecs` duplicated/shape methods (4) | initial creation case covers default profile and querier; `IssueVariableBuilderTests` covers the emitted change path; duplicate grain creation has no public contract | DONE |
+| `IssueCreationSpecs` direct prerequisite methods (10) | HTTP create/prerequisite specs cover every user outcome; `IssueStartReadinessDomainTests` covers start-gate logic | DONE |
+| `IssueCreationSpecs` direct risk methods (4) | one create/read API case protects product visibility; `IssueDomainTests` owns allowed values, null and persistence | DONE |
+| three skipped internal-cycle rules | skip has no protection and no ratchet/design decision exists | DONE |
+| synthetic OTel source/listener/exporter cases | `MohistOpenTelemetryRegistrationTests`, `OtelSelfFeedbackTests` and `OtelSignalRTracingSpecs` own production registration and observable tracing behavior | DONE |
+| `HttpApiJsonWiringSpecs` (6) | `MohistServiceRegistrationJsonTests` owns JSON/SignalR registration; `JSONTests` owns serializer behavior | DONE |
+| `AgentSessionGrainRecoverySpecs` (9) and weak recovery API cases (3) | compact/reset API specs, recovery domain/persistence unit tests and session read API specs own each retained risk | DONE |
+| direct followup/cancel resolver mirrors (8) | public followup/cancel API specs cover the same route decisions and runner payloads | DONE |
+| `AgentSessionContextExhaustionSpecs` (5) | classifier/domain Unit tests, session metadata API and transcript publisher specs cover thresholds, event shape and user-visible results | DONE |
+| duplicate `AgentSessionLifecycleDedupSpecs` cases (5) | retained attach, transcript-channel and terminal-channel cases plus transactional lifecycle-event Unit tests | DONE |
+| `AgentSessionSpecs.RunnerAppendsSessionEvents_StoresAggregateDomainEvents` (1) | retained lifecycle Spec and transactional lifecycle-event Unit tests | DONE |
+| nine low-signal Arch rules (`DataStores`, feature directory, grain name/location, EF entity name, domain-module dependency, Spec public/namespace) | no stable design source; the store rule only proved a Store exists and the domain rule used bidirectional exceptions | DONE |
+| `RuntimeEntrySpecs.AgentStatus_WhenRunnerUnregistered_HeartbeatRefreshesInfoButPollRestoresPresence` (1) | direct runner Unit tests own the heartbeat/poll presence invariant | DONE |
+| seven `RunnerHeartbeatConnectionApiSpecs` tracker variants | `RunnerIdentityConnectionSpecs` keeps the public connected-state contract; null/empty/overwrite tracker branches are not independent product cases | DONE |
+| `RuntimeBuildInfoTests.MetadataIdentity_WhenAssemblyHasInformationalVersion_ReturnsVersionAndGitHash`, `GitHash_WhenInitialized_RemainsStableForProcessLifetime` (2) | assembly/repository/process identity is an environment mirror; pure `ResolveIdentity` tests and injected-clock construction own the implementation contract | DONE |
+| `NoActiveProjectMessageSourceAlignmentTests` (3) | direct command/API tests assert the shared diagnostic; source references are not a contract | DONE |
+| `SystemUpdateServiceInvariantTests.SourceAudit_*` (7) | service behavior tests own failed status, log cap, persistence/lock and enablement outcomes; source layout is not a contract | DONE |
+| `SystemUpdateRecoveryTests.SourceAudit_*` (2) | fake-clock and fake-process-start recovery behavior tests own stale/reconnect/retry outcomes; source layout is not a contract | DONE |
+| `ProjectIsolationIntegrationTests` (6) and `SystemSpecs.EventBridgeTests` (2) | one retained `Events.EventBridgeTests` project-routing case, dispatcher filter Unit tests and existing EventBridge envelope tests own the risks | DONE |
+
+Each deliberate deletion above has a retained owner or a stated no-value reason. The final
+discovery record replaces historical subtotal claims after the remaining audit batches.
 
 ### Verification record
 
 | Gate | Result |
-|---|---|
-| Baseline discovery/pass/skip | pending |
-| Server SpecTests | pending |
-| Server UnitTests | pending |
-| Server ArchTests | pending |
-| CLI SpecTests | pending |
-| CLI UnitTests | pending |
-| Full solution twice | pending |
-| Four-core timing twice | pending |
-| Structural searches | pending |
-| `git diff --check` | pending |
+| Baseline discovery/pass/skip | 5013 total: 5001 passed (Unit 1385; Component 1678; Integration 1041; Arch 32; CLI 865) and 12 skipped (Integration 9; Arch 3) |
+| Server SpecTests | 898 passed, 0 skipped |
+| Server UnitTests | 2960 passed, 0 skipped |
+| Server ArchTests | 20 passed, 0 skipped |
+| CLI SpecTests | 721 passed, 0 skipped |
+| CLI UnitTests | 139 passed, 0 skipped |
+| Current total/pass/skip | 4738 total: 4738 passed, 0 skipped; versus baseline, 263 fewer executed cases and 12 fewer skips |
+| Normalized discovery | 4729 method identities, no duplicate display names. `RepoSubcommands_AcceptProjectAndProjectId` has ten `MemberData` rows, so its one discovery identity accounts for the nine-case difference from the executed total |
+| Full solution | `dotnet test Mohist.sln -p:SkipWebBuild=true --no-build` passed three times: 4738/4738, 0 skipped |
+| Four-core timing twice | baseline 30.84s / 30.92s (median 30.88s); current 27.08s / 27.05s (median 27.07s, 12.4% faster) |
+| Baseline stability | one initial baseline run hit the old `RuntimeConsistencyValidatorSpecs` scheduler-yield failure; two later samples passed. The current test awaits a request signal instead. |
+| Structural searches | old project names, orderers/traits/shards, all skip attributes, test-project references and TestSupport test dependencies all empty; no linked test source |
+| `git diff --check` | staged and unstaged checks empty |
+| Scope | product behavior unchanged; source changes are test layout, testability seams, test code and test documentation |
