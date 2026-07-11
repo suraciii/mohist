@@ -72,7 +72,7 @@ Update table after every gate. Another agent should resume without archaeology.
 | Platform split | DONE | Runner typecheck/test typecheck, boundary checker, 73/1005 default suite with Git absent from PATH, and repeated 8/36 isolated integration suite passed; CI stays one Node job |
 | Web boundaries | DONE | checker self-test; Web 297 and Runner 81 scans; Web typecheck; 297/4509 normal and fixed-shuffle suite; MSW HTTP boundary, suffix-only environment, and source-read cleanup complete |
 | File size | DONE | c6dde6695 budget and identity tools; 192e52d64, 06da4cdff, eb2a1ed7e, 1ffa1a1b9, 36b090173, 247b624ab, 0e55f92b3, and def318cd8 splits; 1005 Runner and 4509 Web identities retained; typechecks and committed-history gates passed |
-| Final proof | DONE | checker/comparator self-tests; build; Runner 87/1005 and integration 8/36; Web 313/4509 and E2E 39/39; history gates; three fixed seeds on both suites; isolated TMPDIR/HOME/Git proof; NOT LIVE-VERIFIED |
+| Final proof | DONE | checker/comparator self-tests; build; Runner 87/1007 and integration 8/36; Web 322/4596 and E2E 39/39; history gates; three fixed seeds on both suites; isolated TMPDIR/HOME/Git proof; NOT LIVE-VERIFIED |
 
 Status is `TODO`, `IN PROGRESS`, `DONE`, `SKIPPED: reason`, or
 `BLOCKED: command + error`.
