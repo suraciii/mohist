@@ -1,109 +1,27 @@
-import { execFile } from "node:child_process"
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
-import { join } from "node:path"
-import { promisify } from "node:util"
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { WorkExecutor } from "../src/runtime/executor.js"
+import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { ActionRegistry } from "../src/actions/registry.js"
 import { NETWORK_COMMAND_TIMEOUT_MS } from "../src/actions/git.js"
+import type { ActionContext, ActionResult, RenderedWorkItem } from "../src/core/types.js"
+import { WorkExecutor } from "../src/runtime/executor.js"
+import { setExecutorGitRunnerForTest, type GitRunner } from "../src/runtime/git-probe.js"
 import { WorkspaceManager, WorkspaceNetworkTimeoutError } from "../src/runtime/workspace.js"
-import type { ActionContext, ActionResult, WorkItem } from "../src/core/types.js"
 import type { ServerConnection } from "../src/server/connection.js"
+import { createTestTempDir } from "./support/temp-dir.js"
 
-const exec = promisify(execFile)
+const nonGitRunner: GitRunner = async () => ({
+  success: false,
+  stdout: "",
+  stderr: "not a git repository",
+  exitCode: 128,
+  combinedOutput: "not a git repository",
+})
+
+beforeEach(() => setExecutorGitRunnerForTest(nonGitRunner))
+afterEach(() => setExecutorGitRunnerForTest(null))
 
 describe("workspace preparation across stages", () => {
-  let root: string
-  let repo: string
-  let runnerRoot: string
-  let connection: Pick<ServerConnection, "uploadArtifact" | "report">
-
-  beforeEach(async () => {
-    root = await mkdtemp(join(tmpdir(), "mohist-workspace-stages-"))
-    repo = await createBareUpstream(root)
-    runnerRoot = join(root, "runner")
-    connection = {
-      async report() {
-        return {}
-      },
-      async uploadArtifact() {
-        throw new Error("uploadArtifact should not be called in cross-stage tests")
-      },
-    } as unknown as Pick<ServerConnection, "uploadArtifact" | "report">
-  })
-
-  afterEach(async () => {
-    await rm(root, { recursive: true, force: true })
-  })
-
-  it("FirstDispatchPrepares_ThenReentriesReuseWithoutRecloning", async () => {
-    const manager = new WorkspaceManager(runnerRoot)
-    const signal = new AbortController().signal
-
-    const processMod = await import("../src/system/process.js")
-    const realRunCommand = processMod.runCommand
-    const gitCalls: string[] = []
-    const spy = vi.spyOn(processMod, "runCommand").mockImplementation(async (cmd, args, cwd, sig) => {
-      gitCalls.push(`${cmd} ${args.join(" ")}`)
-      return await realRunCommand(cmd, args, cwd, sig)
-    })
-
-    const handlerCalls: string[] = []
-    const handler: (ctx: ActionContext) => Promise<ActionResult> = async (ctx) => {
-      handlerCalls.push(`${ctx.workType}:${ctx.stage ?? ""}`)
-      return { status: "success", message: "ok" }
-    }
-
-    // No-op action registered as `core/script` so the test does not spawn
-    // real ACP processes. The workspace-preparation contract is
-    // independent of the action.
-    const registry = new ActionRegistry()
-    registry.register("core/script", async (ctx) => handler(ctx))
-
-    const executor = new WorkExecutor(
-      registry,
-      manager,
-      connection as never,
-      {} as never,
-      null,
-      runnerRoot,
-    )
-
-    try {
-      // The first dispatch prepares the workspace (one clone); every
-      // later dispatch for the same run re-enters without re-cloning.
-      const plan = await executor.execute(buildWork(repo, "wr-cross-stage", "issue-cross-stage", "plan", "plan:write"), signal)
-      expect(plan.status).toBe("completed")
-
-      gitCalls.length = 0
-
-      const build = await executor.execute(buildWork(repo, "wr-cross-stage", "issue-cross-stage", "build", "build:agent"), signal)
-      expect(build.status).toBe("completed")
-      const check = await executor.execute(buildWork(repo, "wr-cross-stage", "issue-cross-stage", "check", "check:verdict"), signal)
-      expect(check.status).toBe("completed")
-      const prepare = await executor.execute(buildWork(repo, "wr-cross-stage", "issue-cross-stage", "integrate", "integrate:prepare"), signal)
-      expect(prepare.status).toBe("completed")
-
-      // All four dispatches ran their action.
-      expect(handlerCalls).toEqual(["task:plan", "task:build", "task:check", "task:integrate"])
-
-      // Re-entries never re-clone the upstream.
-      const remoteCloneCalls = gitCalls.filter((call) => call.startsWith("git clone ") && call.includes(repo))
-      expect(remoteCloneCalls).toHaveLength(0)
-
-      // The workspace stays on the run branch throughout.
-      const workspacePath = join(runnerRoot, "mohist-local", "workspaces", "issue-9")
-      const head = await realRunCommand("git", ["-C", workspacePath, "rev-parse", "--abbrev-ref", "HEAD"], ".", signal)
-      expect(head.stdout.trim()).toBe("mohist/run-wr-cross-stage")
-    } finally {
-      spy.mockRestore()
-    }
-  })
-
-  it("AgentJobDispatch_SkipsWorkspacePreparation_ResolvesWorkspaceFromVariables", async () => {
-    // Agent-job dispatches own their workspace and must NOT go through
-    // the runner's prepare() path.
+  it("skips workspace preparation for agent jobs", async () => {
+    const workspacePath = await createTestTempDir("mohist-agent-job-workspace-")
     const recorded = { prepare: 0 }
     const recordingManager = {
       async prepare() {
@@ -115,14 +33,14 @@ describe("workspace preparation across stages", () => {
     const executor = new WorkExecutor(
       buildRegistry(async () => ({ status: "success", message: "agent ran" })),
       recordingManager,
-      connection as never,
+      connection() as never,
       {} as never,
       null,
-      runnerRoot,
+      "/runner",
     )
 
     const result = await executor.execute(
-      buildAgentJobWork("/tmp/agent-job-ws", "wr-agent", "agent-job-1"),
+      buildAgentJobWork(workspacePath, "workflow-agent", "agent-job"),
       new AbortController().signal,
     )
 
@@ -131,12 +49,12 @@ describe("workspace preparation across stages", () => {
     expect(recorded).toEqual({ prepare: 0 })
   })
 
-  it("WorkspaceNetworkTimeoutFailure_SerializesStructuredRetrySafeStep", async () => {
+  it("serializes a workspace network timeout as a retry-safe failure", async () => {
     const timeout = new WorkspaceNetworkTimeoutError(
       "Workspace preparation network command timed out: git-ls-remote after 120s",
       {
         name: "git-ls-remote",
-        command: "ls-remote --heads https://example.com/repo.git master",
+        command: "ls-remote --heads https://example.test/repository.git master",
         exitCode: 124,
         output: `Command timed out after ${NETWORK_COMMAND_TIMEOUT_MS / 1000}s`,
         status: "timeout",
@@ -151,13 +69,16 @@ describe("workspace preparation across stages", () => {
     const executor = new WorkExecutor(
       buildRegistry(async () => ({ status: "success", message: "should not run" })),
       failingManager,
-      connection as never,
+      connection() as never,
       {} as never,
       null,
-      runnerRoot,
+      "/runner",
     )
 
-    const result = await executor.execute(buildWork("https://example.com/repo.git", "wr-timeout", "issue-timeout", "plan", "plan:write"), new AbortController().signal)
+    const result = await executor.execute(
+      buildWork("https://example.test/repository.git", "workflow-timeout", "issue-timeout", "plan", "plan:write"),
+      new AbortController().signal,
+    )
     const output = JSON.parse(result.output ?? "{}")
 
     expect(result.status).toBe("failed")
@@ -167,7 +88,7 @@ describe("workspace preparation across stages", () => {
       failureKind: "retry-safe",
       step: {
         name: "git-ls-remote",
-        command: "ls-remote --heads https://example.com/repo.git master",
+        command: "ls-remote --heads https://example.test/repository.git master",
         exitCode: 124,
         output: `Command timed out after ${NETWORK_COMMAND_TIMEOUT_MS / 1000}s`,
         status: "timeout",
@@ -177,7 +98,18 @@ describe("workspace preparation across stages", () => {
   })
 })
 
-function buildWork(repo: string, workflowRunId: string, issueId: string, stage: string, workId: string): WorkItem {
+function connection(): Pick<ServerConnection, "uploadArtifact" | "report"> {
+  return {
+    async report() {
+      return {}
+    },
+    async uploadArtifact() {
+      throw new Error("uploadArtifact should not be called in workspace boundary tests")
+    },
+  } as unknown as Pick<ServerConnection, "uploadArtifact" | "report">
+}
+
+function buildWork(repo: string, workflowRunId: string, issueId: string, stage: string, workId: string): RenderedWorkItem {
   return {
     workflowRunId,
     workId,
@@ -196,7 +128,7 @@ function buildWork(repo: string, workflowRunId: string, issueId: string, stage: 
   }
 }
 
-function buildAgentJobWork(suppliedPath: string, workflowRunId: string, agentJobId: string): WorkItem {
+function buildAgentJobWork(suppliedPath: string, workflowRunId: string, agentJobId: string): RenderedWorkItem {
   return {
     workflowRunId,
     workId: "agent:job.1",
@@ -207,9 +139,9 @@ function buildAgentJobWork(suppliedPath: string, workflowRunId: string, agentJob
     with: { run: "echo ok" },
     variables: {
       mohist: { runId: workflowRunId },
-      workspace: { path: suppliedPath, branch: "agent-branch", changeDir: null },
+      workspace: { path: suppliedPath, branch: null, changeDir: null },
       project: { id: "project-1", name: "Mohist Local" },
-      repository: { name: "master", gitUrl: "https://example.invalid/repo.git", baseBranch: "master" },
+      repository: { name: "master", gitUrl: "https://example.test/repository.git", baseBranch: "master" },
     },
     ownerKind: "agent-job",
     agentJobId,
@@ -221,23 +153,4 @@ function buildRegistry(handler: (ctx: ActionContext) => Promise<ActionResult>): 
   registry.register("core/script", async (ctx) => handler(ctx))
   registry.register("mohist/rebase", async (ctx) => handler(ctx))
   return registry
-}
-
-async function createBareUpstream(root: string): Promise<string> {
-  const upstream = join(root, "upstream.git")
-  await mkdir(upstream, { recursive: true })
-  await exec("git", ["init", "--bare", "--initial-branch=master", upstream])
-  // Seed the upstream with an initial commit so the bare repo isn't empty.
-  const seed = join(root, "seed")
-  await mkdir(seed, { recursive: true })
-  await exec("git", ["init", "-q", "--initial-branch=master"], { cwd: seed })
-  await exec("git", ["config", "user.email", "test@example.com"], { cwd: seed })
-  await exec("git", ["config", "user.name", "Workspace Test"], { cwd: seed })
-  await exec("git", ["config", "commit.gpgsign", "false"], { cwd: seed })
-  await writeFile(join(seed, "README.md"), "base\n", "utf8")
-  await exec("git", ["add", "README.md"], { cwd: seed })
-  await exec("git", ["commit", "-m", "init", "-q"], { cwd: seed })
-  await exec("git", ["remote", "add", "origin", upstream], { cwd: seed })
-  await exec("git", ["push", "-u", "origin", "master", "-q"], { cwd: seed })
-  return upstream
 }

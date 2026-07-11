@@ -5,21 +5,17 @@ import { dispatchAgentEvent } from '../src/entities/agent'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import React from 'react'
 import type { TextPart, ToolPart, ErrorPart } from '../src/entities/coder-session'
-import { renderHookWithQueryClient, makeTurn, queryClients, originalScrollTo } from './session-page-test-utils'
-
-Object.defineProperty(navigator, 'clipboard', {
-  value: { writeText: vi.fn().mockResolvedValue(undefined) },
-  configurable: true,
-})
+import { renderHookWithQueryClient, makeTurn, queryClients } from './session-page-test-utils'
+import { setScopedValue } from './support/scoped-property'
 
 beforeEach(() => {
   vi.clearAllMocks()
-  Element.prototype.scrollTo = vi.fn()
+  setScopedValue(navigator, 'clipboard', { writeText: vi.fn().mockResolvedValue(undefined) })
+  setScopedValue(Element.prototype, 'scrollTo', vi.fn())
 })
 
 afterEach(() => {
   vi.useRealTimers()
-  Element.prototype.scrollTo = originalScrollTo
   for (const queryClient of queryClients) queryClient.clear()
   queryClients.length = 0
 })
@@ -706,7 +702,7 @@ describe('Thinking state for live sessions', () => {
 describe('Scroll follow behavior', () => {
   it('does not auto-scroll when user is not near bottom', async () => {
     const scrollToMock = vi.fn()
-    Element.prototype.scrollTo = scrollToMock
+    setScopedValue(Element.prototype, 'scrollTo', scrollToMock)
 
     const initialTurns = [makeTurn()]
 
@@ -915,4 +911,3 @@ describe('Live update convergence', () => {
     expect(toolParts?.[0].tool.toolCallId).toBe('tc-order-1')
   })
 })
-

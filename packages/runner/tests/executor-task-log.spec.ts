@@ -2,19 +2,27 @@ import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { ActionRegistry, createDefaultRegistry } from "../src/actions/registry.js"
-import type { ActionContext, ActionResult, WorkItem } from "../src/core/types.js"
+import { ActionRegistry } from "../src/actions/registry.js"
+import type { ActionContext, ActionResult, RenderedWorkItem, WorkItemResult } from "../src/core/types.js"
 import { WorkExecutor } from "../src/runtime/executor.js"
 import { TaskLogCollector } from "../src/runtime/task-log.js"
-import { setExecutorGitRunnerForTest } from "../src/runtime/git-probe.js"
+import { setExecutorGitRunnerForTest, type GitRunner } from "../src/runtime/git-probe.js"
 import { verifyOnlyWorkspaceManager } from "./support/workspace-mock.js"
 import type { WorkspaceManager } from "../src/runtime/workspace.js"
 
 let workDir: string
 
+const nonGitRunner: GitRunner = async () => ({
+  success: false,
+  stdout: "",
+  stderr: "not a git repository",
+  exitCode: 128,
+  combinedOutput: "not a git repository",
+})
+
 beforeEach(async () => {
   workDir = await mkdtemp(join(tmpdir(), "mohist-task-log-executor-"))
-  setExecutorGitRunnerForTest(null)
+  setExecutorGitRunnerForTest(nonGitRunner)
 })
 
 afterEach(async () => {
@@ -40,7 +48,7 @@ function buildExecutor(registry: ActionRegistry, workspaceManager: WorkspaceMana
   )
 }
 
-function buildWork(overrides: Partial<WorkItem> = {}): WorkItem {
+function buildWork(overrides: Partial<RenderedWorkItem> = {}): RenderedWorkItem {
   return {
     workflowRunId: "wf-336",
     workId: "work-336",
@@ -53,16 +61,14 @@ function buildWork(overrides: Partial<WorkItem> = {}): WorkItem {
   }
 }
 
-async function runWith(registry: ActionRegistry, work: WorkItem = buildWork(), workspaceManager?: WorkspaceManager): Promise<{ result: ActionResult; collector: TaskLogCollector }> {
+async function runWith(registry: ActionRegistry, work: RenderedWorkItem = buildWork(), workspaceManager?: WorkspaceManager): Promise<{ result: WorkItemResult; collector: TaskLogCollector }> {
   const executor = buildExecutor(registry, workspaceManager)
   const collector = new TaskLogCollector()
-  const execution = await (executor as unknown as {
-    executeWithLog: (work: WorkItem, signal: AbortSignal, collector: TaskLogCollector | null) => Promise<{ result: ActionResult; collector: TaskLogCollector }>
-  }).executeWithLog(work, new AbortController().signal, collector)
+  const execution = await executor.executeWithLog(work, new AbortController().signal, collector)
   return { result: execution.result, collector: execution.collector }
 }
 
-describe("WorkExecutor task-log phase wiring (T-003)", () => {
+describe("WorkExecutor forwards action output to the task log", () => {
   it("ForwardsActionBodyWriteToSinkTaggedWithActionSource", async () => {
     let loggerPresent = false
     const registry = makeRegistry(async (ctx) => {
@@ -242,31 +248,4 @@ describe("WorkExecutor task-log phase wiring (T-003)", () => {
     }
   })
 
-  it("CoreProcessForwardsStdoutAndStderrToTaskLogSink", async () => {
-    const { result, collector } = await runWith(createDefaultRegistry(), buildWork({
-      uses: "core/process",
-      with: {
-        command: process.execPath,
-        args: ["-e", "process.stdout.write('process-out\\n'); process.stderr.write('process-err\\n')"],
-      },
-    }))
-
-    expect(result.status).toBe("completed")
-    const entries = collector.flush().entries.filter((entry) => entry.source === "action:process")
-    expect(entries.map((entry) => entry.text)).toEqual(["process-out", "process-err"])
-  })
-
-  it("CoreScriptForwardsStdoutAndStderrToTaskLogSink", async () => {
-    const { result, collector } = await runWith(createDefaultRegistry(), buildWork({
-      uses: "core/script",
-      with: {
-        shell: process.execPath,
-        run: "process.stdout.write('script-out\\n'); process.stderr.write('script-err\\n')",
-      },
-    }))
-
-    expect(result.status).toBe("completed")
-    const entries = collector.flush().entries.filter((entry) => entry.source === "action:script")
-    expect(entries.map((entry) => entry.text)).toEqual(["script-out", "script-err"])
-  })
 })

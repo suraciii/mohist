@@ -23,6 +23,7 @@
     "install:cli": "dotnet pack packages/cli/Mohist.Cli/Mohist.Cli.csproj -c Release -o ./nupkg && dotnet tool install -g Mohist.Cli --add-source ./nupkg"
   },
   "devDependencies": {
-    "concurrently": "^9.2.3"
+    "concurrently": "^9.2.3",
+    "typescript": "^5.3.2"
   }
 }

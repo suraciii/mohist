@@ -1,288 +1,300 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
+import { mkdir, readFile, writeFile } from "node:fs/promises"
 import { join } from "node:path"
-import { tmpdir } from "node:os"
-import { describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { NETWORK_COMMAND_TIMEOUT_MS } from "../src/actions/git.js"
 import { WorkspaceManager, slugify } from "../src/runtime/workspace.js"
-import { exists, runCommand } from "../src/system/process.js"
+import * as processModule from "../src/system/process.js"
+import type { CommandLineOptions, CommandResult } from "../src/system/process.js"
+import { createTestTempDir } from "./support/temp-dir.js"
 
-// The workspace is a clone of the repo checked out on a per-run branch.
-// `prepare()` is the two-step contract: (1) have a clone at the workspace
-// path, (2) be on the run branch. The run branch is the identity — its
-// presence means "this run is set up here", so re-entry is cheap and a
-// new run at a reused path is a pristine re-clone.
+interface CommandCall {
+  command: string
+  args: string[]
+  cwd: string
+}
+
+class FakeGitRunner {
+  readonly calls: CommandCall[] = []
+  readonly remoteBranches = new Set(["master"])
+  cloneResult: CommandResult | null = null
+  lsRemoteResult: CommandResult | null = null
+  failedCheckouts = 0
+  private readonly branches = new Map<string, Set<string>>()
+
+  async run(
+    command: string,
+    args: string[],
+    cwd: string,
+    _signal: AbortSignal,
+    _env?: NodeJS.ProcessEnv,
+    _options?: CommandLineOptions,
+  ): Promise<CommandResult> {
+    this.calls.push({ command, args: [...args], cwd })
+    if (command !== "git") throw new Error(`Unexpected command: ${command}`)
+
+    if (args[0] === "ls-remote") {
+      if (this.lsRemoteResult) return this.lsRemoteResult
+      const branch = args.at(-1)
+      return this.remoteBranches.has(branch ?? "")
+        ? commandResult(0, `fake-sha\trefs/heads/${branch}\n`)
+        : commandResult(0)
+    }
+
+    if (args[0] === "clone") {
+      const workspacePath = args[2]
+      if (!workspacePath) throw new Error("git clone needs a destination")
+      if (this.cloneResult) {
+        await mkdir(workspacePath, { recursive: true })
+        return this.cloneResult
+      }
+      await mkdir(join(workspacePath, ".git", "info"), { recursive: true })
+      await writeFile(join(workspacePath, "README.md"), "base\n")
+      this.branches.set(workspacePath, new Set())
+      return commandResult(0)
+    }
+
+    if (args[0] !== "-C" || !args[1]) throw new Error(`Unexpected git arguments: ${args.join(" ")}`)
+    const workspacePath = args[1]
+    const gitArgs = args.slice(2)
+    const branches = this.branches.get(workspacePath)
+    if (!branches) throw new Error(`Unknown fake workspace: ${workspacePath}`)
+
+    if (gitArgs[0] === "rev-parse" && gitArgs[1] === "--verify") {
+      const branch = gitArgs[2]?.replace("refs/heads/", "")
+      return branches.has(branch ?? "") ? commandResult(0, "fake-sha\n") : commandResult(1, "", "unknown branch")
+    }
+
+    if (gitArgs[0] === "checkout" && gitArgs[1] === "-b") {
+      const branch = gitArgs[2]
+      if (!branch) throw new Error("git checkout -b needs a branch")
+      branches.add(branch)
+      return commandResult(0)
+    }
+
+    if (gitArgs[0] === "checkout") {
+      if (this.failedCheckouts > 0) {
+        this.failedCheckouts -= 1
+        return commandResult(1, "", "checkout blocked by unfinished rebase")
+      }
+      return branches.has(gitArgs[1] ?? "") ? commandResult(0) : commandResult(1, "", "unknown branch")
+    }
+
+    if (gitArgs[0] === "rebase" || gitArgs[0] === "merge" || gitArgs[0] === "cherry-pick" || gitArgs[0] === "reset") {
+      return commandResult(0)
+    }
+
+    throw new Error(`Unexpected git arguments: ${args.join(" ")}`)
+  }
+
+  commandArgs() {
+    return this.calls.map((call) => call.args)
+  }
+}
+
+function commandResult(exitCode = 0, stdout = "", stderr = ""): CommandResult {
+  return { exitCode, stdout, stderr }
+}
+
+let gitRunner: FakeGitRunner
+let restoreRunCommand: (() => void) | undefined
+
+beforeEach(() => {
+  gitRunner = new FakeGitRunner()
+  const spy = vi.spyOn(processModule, "runCommand").mockImplementation((command, args, cwd, signal, env, options) => {
+    return gitRunner.run(command, args, cwd, signal, env, options)
+  })
+  restoreRunCommand = () => spy.mockRestore()
+})
+
+afterEach(() => {
+  restoreRunCommand?.()
+  restoreRunCommand = undefined
+})
 
 describe("WorkspaceManager.prepare", () => {
-  it("FreshRun_ClonesAndCreatesRunBranchFromBase", async () => {
-    const root = await mkdtemp(join(tmpdir(), "mohist-workspace-"))
-    const repo = await createRepo(root, "repo")
+  it("FreshRun_CreatesRunBranchAndWorkspaceMarker", async () => {
+    const root = await createTestTempDir("mohist-workspace-")
     const runnerRoot = join(root, "runner")
     const manager = new WorkspaceManager(runnerRoot)
-    const signal = new AbortController().signal
 
-    const workspace = await manager.prepare(work("wr-1", "issue-1", repo), signal)
+    const workspace = await manager.prepare(work("wr-1", "issue-1"), new AbortController().signal)
 
-    expect(workspace.path).toBe(join(runnerRoot, "mohist-local", "workspaces", "issue-9"))
-    expect(workspace.branch).toBe("mohist/run-wr-1")
-    expect(await readFile(join(workspace.path, "README.md"), "utf8")).toBe("base\n")
-    const head = await runCommand("git", ["-C", workspace.path, "rev-parse", "--abbrev-ref", "HEAD"], ".", signal)
-    expect(head.stdout.trim()).toBe("mohist/run-wr-1")
-    // The clone's origin points at the real source (not a cache).
-    const remote = await runCommand("git", ["-C", workspace.path, "remote", "get-url", "origin"], ".", signal)
-    expect(remote.stdout.trim()).toBe(repo)
+    expect(workspace).toEqual({
+      path: join(runnerRoot, "mohist-local", "workspaces", "issue-9"),
+      branch: "mohist/run-wr-1",
+      changeDir: join(runnerRoot, "mohist-local", "workspaces", "issue-9", "openspec/changes/issue-9"),
+    })
+    expect(gitRunner.commandArgs()).toContainEqual(["ls-remote", "--heads", "https://example.test/mohist.git", "master"])
+    expect(gitRunner.commandArgs()).toContainEqual(["clone", "https://example.test/mohist.git", workspace.path])
+    expect(gitRunner.commandArgs()).toContainEqual(["-C", workspace.path, "checkout", "-b", "mohist/run-wr-1", "origin/master"])
+    expect(await readFile(join(workspace.path, ".mohist", "workspace.json"), "utf8")).toBe(JSON.stringify({
+      issueId: "issue-1",
+      issueNumber: 9,
+      workflowRunId: "wr-1",
+    }, null, 2))
   })
 
   it("SameRunReentry_ReusesWorkspaceWithoutRecloning", async () => {
-    const root = await mkdtemp(join(tmpdir(), "mohist-workspace-"))
-    const repo = await createRepo(root, "repo")
-    const runnerRoot = join(root, "runner")
-    const manager = new WorkspaceManager(runnerRoot)
-    const signal = new AbortController().signal
+    const root = await createTestTempDir("mohist-workspace-")
+    const manager = new WorkspaceManager(join(root, "runner"))
+    const item = work("wr-1", "issue-1")
 
-    const first = await manager.prepare(work("wr-1", "issue-1", repo), signal)
+    const first = await manager.prepare(item, new AbortController().signal)
     await writeFile(join(first.path, "draft.txt"), "draft\n")
+    gitRunner.calls.length = 0
 
-    const processMod = await import("../src/system/process.js")
-    const realRun = processMod.runCommand
-    const gitCalls: string[] = []
-    const spy = vi.spyOn(processMod, "runCommand").mockImplementation(async (cmd, args, cwd, sig) => {
-      gitCalls.push(`${cmd} ${args.join(" ")}`)
-      return await realRun(cmd, args, cwd, sig)
-    })
-    try {
-      const second = await manager.prepare(work("wr-1", "issue-1", repo), signal)
-      expect(second.path).toBe(first.path)
-      expect(await readFile(join(second.path, "draft.txt"), "utf8")).toBe("draft\n")
-    } finally {
-      spy.mockRestore()
-    }
+    const second = await manager.prepare(item, new AbortController().signal)
 
-    // Re-entry must not re-clone.
-    expect(gitCalls.filter((c) => c.startsWith("git clone"))).toHaveLength(0)
+    expect(second.path).toBe(first.path)
+    expect(await readFile(join(second.path, "draft.txt"), "utf8")).toBe("draft\n")
+    expect(gitRunner.commandArgs()).not.toContainEqual(["clone", "https://example.test/mohist.git", first.path])
+    expect(gitRunner.commandArgs()).toContainEqual(["-C", first.path, "checkout", "mohist/run-wr-1"])
   })
 
   it("RestartWithNewRun_ReclonesFreshWorkspaceDroppingStaleFiles", async () => {
-    const root = await mkdtemp(join(tmpdir(), "mohist-workspace-"))
-    const repo = await createRepo(root, "repo")
-    const runnerRoot = join(root, "runner")
-    const manager = new WorkspaceManager(runnerRoot)
-    const signal = new AbortController().signal
+    const root = await createTestTempDir("mohist-workspace-")
+    const manager = new WorkspaceManager(join(root, "runner"))
 
-    const first = await manager.prepare(work("wr-old", "issue-same", repo), signal)
+    const first = await manager.prepare(work("wr-old", "issue-same"), new AbortController().signal)
     await writeFile(join(first.path, "stale.txt"), "old run data\n")
+    gitRunner.calls.length = 0
 
-    const second = await manager.prepare(work("wr-new", "issue-same", repo), signal)
+    const second = await manager.prepare(work("wr-new", "issue-same"), new AbortController().signal)
 
     expect(second.path).toBe(first.path)
-    expect(exists(join(second.path, "stale.txt"))).toBe(false)
+    expect(processModule.exists(join(second.path, "stale.txt"))).toBe(false)
     expect(second.branch).toBe("mohist/run-wr-new")
+    expect(gitRunner.commandArgs()).toContainEqual(["clone", "https://example.test/mohist.git", second.path])
   })
 
-  it("MissingBaseBranch_FailsWithoutCreatingWorkspace", async () => {
-    const root = await mkdtemp(join(tmpdir(), "mohist-workspace-"))
-    const repo = await createRepo(root, "repo")
-    const runnerRoot = join(root, "runner")
-    const manager = new WorkspaceManager(runnerRoot)
-    const signal = new AbortController().signal
+  it("MissingBaseBranch_FailsBeforeClone", async () => {
+    const root = await createTestTempDir("mohist-workspace-")
+    const manager = new WorkspaceManager(join(root, "runner"))
+    const item = work("wr-1", "issue-1", "does-not-exist")
 
-    const item = work("wr-1", "issue-1", repo)
-    item.variables.repository = { name: "master", gitUrl: repo, baseBranch: "does-not-exist" }
+    await expect(manager.prepare(item, new AbortController().signal)).rejects.toThrow(/cannot be resolved/)
 
-    await expect(manager.prepare(item, signal)).rejects.toThrow(/cannot be resolved/)
-    expect(exists(join(runnerRoot, "mohist-local", "workspaces"))).toBe(false)
+    expect(gitRunner.commandArgs()).not.toContainEqual(expect.arrayContaining(["clone"]))
+    expect(processModule.exists(join(root, "runner", "mohist-local", "workspaces"))).toBe(false)
   })
 
-  it("CloneFailure_IsFatal", async () => {
-    const root = await mkdtemp(join(tmpdir(), "mohist-workspace-"))
+  it("CloneFailure_IsFatalAndDropsPartialWorkspace", async () => {
+    const root = await createTestTempDir("mohist-workspace-")
     const runnerRoot = join(root, "runner")
     const manager = new WorkspaceManager(runnerRoot)
-    const signal = new AbortController().signal
+    gitRunner.cloneResult = commandResult(1, "", "remote unavailable")
 
-    const badUrl = "file:///this-path-does-not-exist/this-host-has-no-git-server.git"
-    await expect(manager.prepare(work("wr-first", "issue-first", badUrl), signal)).rejects.toThrow(/git clone failed/)
-    expect(exists(join(runnerRoot, "mohist-local", "workspaces", "issue-9"))).toBe(false)
+    await expect(manager.prepare(work("wr-first", "issue-first"), new AbortController().signal)).rejects.toThrow(/git clone failed/)
+
+    expect(processModule.exists(join(runnerRoot, "mohist-local", "workspaces", "issue-9"))).toBe(false)
   })
 
   it("BaseBranchLsRemoteTimeout_FailsBeforeCloneWithStructuredStep", async () => {
-    const root = await mkdtemp(join(tmpdir(), "mohist-workspace-"))
-    const runnerRoot = join(root, "runner")
-    const manager = new WorkspaceManager(runnerRoot)
-    const signal = new AbortController().signal
-    const processMod = await import("../src/system/process.js")
-    const calls: string[] = []
-    const spy = vi.spyOn(processMod, "runCommand").mockImplementation(async (cmd, args) => {
-      const full = `${cmd} ${args.join(" ")}`
-      calls.push(full)
-      if (args.join(" ") === "ls-remote --heads https://example.com/repo.git master") {
-        return {
-          exitCode: 124,
-          stdout: "",
-          stderr: `Command timed out after ${NETWORK_COMMAND_TIMEOUT_MS / 1000}s\n`,
-          status: "timeout" as const,
-          timeoutMs: NETWORK_COMMAND_TIMEOUT_MS,
-        }
-      }
-      throw new Error(`unexpected command: ${full}`)
-    })
-    try {
-      await expect(manager.prepare(work("wr-timeout", "issue-timeout", "https://example.com/repo.git"), signal)).rejects.toMatchObject({
-        kind: "workspace-network-timeout",
-        step: {
-          name: "git-ls-remote",
-          command: "ls-remote --heads https://example.com/repo.git master",
-          exitCode: 124,
-          status: "timeout",
-          timeoutMs: NETWORK_COMMAND_TIMEOUT_MS,
-        },
-      })
-    } finally {
-      spy.mockRestore()
+    const root = await createTestTempDir("mohist-workspace-")
+    const manager = new WorkspaceManager(join(root, "runner"))
+    gitRunner.lsRemoteResult = {
+      exitCode: 124,
+      stdout: "",
+      stderr: `Command timed out after ${NETWORK_COMMAND_TIMEOUT_MS / 1000}s\n`,
+      status: "timeout",
+      timeoutMs: NETWORK_COMMAND_TIMEOUT_MS,
     }
-    expect(calls.some((call) => call.startsWith("git clone"))).toBe(false)
+
+    await expect(manager.prepare(work("wr-timeout", "issue-timeout"), new AbortController().signal)).rejects.toMatchObject({
+      kind: "workspace-network-timeout",
+      step: {
+        name: "git-ls-remote",
+        command: "ls-remote --heads https://example.test/mohist.git master",
+        exitCode: 124,
+        status: "timeout",
+        timeoutMs: NETWORK_COMMAND_TIMEOUT_MS,
+      },
+    })
+    expect(gitRunner.commandArgs().some((args) => args[0] === "clone")).toBe(false)
   })
 
   it("CloneTimeout_FailsWithStructuredStep", async () => {
-    const root = await mkdtemp(join(tmpdir(), "mohist-workspace-"))
+    const root = await createTestTempDir("mohist-workspace-")
     const runnerRoot = join(root, "runner")
     const manager = new WorkspaceManager(runnerRoot)
-    const signal = new AbortController().signal
-    const processMod = await import("../src/system/process.js")
-    const spy = vi.spyOn(processMod, "runCommand").mockImplementation(async (cmd, args) => {
-      const full = `${cmd} ${args.join(" ")}`
-      if (args[0] === "ls-remote") return { exitCode: 1, stdout: "", stderr: "remote unavailable" }
-      if (args[0] === "clone") {
-        return {
-          exitCode: 124,
-          stdout: "",
-          stderr: `Command timed out after ${NETWORK_COMMAND_TIMEOUT_MS / 1000}s\n`,
-          status: "timeout" as const,
-          timeoutMs: NETWORK_COMMAND_TIMEOUT_MS,
-        }
-      }
-      throw new Error(`unexpected command: ${full}`)
-    })
-    try {
-      await expect(manager.prepare(work("wr-timeout", "issue-timeout", "https://example.com/repo.git"), signal)).rejects.toMatchObject({
-        name: "WorkspaceNetworkTimeoutError",
-        step: {
-          name: "git-clone",
-          command: `clone https://example.com/repo.git ${join(runnerRoot, "mohist-local", "workspaces", "issue-9")}`,
-          exitCode: 124,
-          status: "timeout",
-          timeoutMs: NETWORK_COMMAND_TIMEOUT_MS,
-        },
-      })
-    } finally {
-      spy.mockRestore()
+    gitRunner.cloneResult = {
+      exitCode: 124,
+      stdout: "",
+      stderr: `Command timed out after ${NETWORK_COMMAND_TIMEOUT_MS / 1000}s\n`,
+      status: "timeout",
+      timeoutMs: NETWORK_COMMAND_TIMEOUT_MS,
     }
+
+    await expect(manager.prepare(work("wr-timeout", "issue-timeout"), new AbortController().signal)).rejects.toMatchObject({
+      name: "WorkspaceNetworkTimeoutError",
+      step: {
+        name: "git-clone",
+        command: `clone https://example.test/mohist.git ${join(runnerRoot, "mohist-local", "workspaces", "issue-9")}`,
+        exitCode: 124,
+        status: "timeout",
+        timeoutMs: NETWORK_COMMAND_TIMEOUT_MS,
+      },
+    })
   })
 
   it("Preparation_DoesNotUseGitWorktreeCommands", async () => {
-    const root = await mkdtemp(join(tmpdir(), "mohist-workspace-"))
-    const repo = await createRepo(root, "repo")
-    const runnerRoot = join(root, "runner")
-    const manager = new WorkspaceManager(runnerRoot)
-    const signal = new AbortController().signal
+    const root = await createTestTempDir("mohist-workspace-")
+    const manager = new WorkspaceManager(join(root, "runner"))
 
-    const spy = vi.spyOn(await import("../src/system/process.js"), "runCommand")
-    try {
-      await manager.prepare(work("wr-1", "issue-1", repo), signal)
-    } finally {
-      spy.mockRestore()
-    }
+    await manager.prepare(work("wr-1", "issue-1"), new AbortController().signal)
 
-    const worktreeCalls = spy.mock.calls.filter((call) => call[0] === "git" && call[1].some((a) => a === "worktree"))
-    expect(worktreeCalls).toHaveLength(0)
+    expect(gitRunner.commandArgs().filter((args) => args.includes("worktree"))).toEqual([])
   })
 
   it("ServerSuppliedPath_IsHonored", async () => {
-    const root = await mkdtemp(join(tmpdir(), "mohist-workspace-"))
-    const repo = await createRepo(root, "repo")
+    const root = await createTestTempDir("mohist-workspace-")
     const runnerRoot = join(root, "runner")
-    const manager = new WorkspaceManager(runnerRoot)
-    const signal = new AbortController().signal
-
     const suppliedWorkspacePath = join(runnerRoot, "supplied", "workspaces", "issue-9")
-    const item = work("wr-supplied", "issue-1", repo)
+    const item = work("wr-supplied", "issue-1")
     ;(item.variables as Record<string, unknown>).workspace = { path: suppliedWorkspacePath }
+    const manager = new WorkspaceManager(runnerRoot)
 
-    const result = await manager.prepare(item, signal)
+    const result = await manager.prepare(item, new AbortController().signal)
+
     expect(result.path).toBe(suppliedWorkspacePath)
     expect(result.branch).toBe("mohist/run-wr-supplied")
-    expect(await readFile(join(suppliedWorkspacePath, "README.md"), "utf8")).toBe("base\n")
-    const head = await runCommand("git", ["-C", suppliedWorkspacePath, "rev-parse", "--abbrev-ref", "HEAD"], ".", signal)
-    expect(head.stdout.trim()).toBe("mohist/run-wr-supplied")
+    expect(gitRunner.commandArgs()).toContainEqual(["clone", "https://example.test/mohist.git", suppliedWorkspacePath])
   })
 })
 
-// Crash recovery: a rebase/merge that crashed mid-flight leaves the work
-// tree unusable. `prepare()` re-entry must abort the op and realign the
-// tree to the run branch ref — which a failed rebase never moved — so the
-// run's committed work survives.
-describe("WorkspaceManager.prepare crash recovery", () => {
-  it("MidRebaseCrash_ReentryRecoversAndPreservesRunBranch", async () => {
-    const root = await mkdtemp(join(tmpdir(), "mohist-recovery-"))
-    const repo = await createRepo(root, "repo")
-    const runnerRoot = join(root, "runner")
-    const manager = new WorkspaceManager(runnerRoot)
-    const signal = new AbortController().signal
+describe("WorkspaceManager.prepare recovery", () => {
+  it("FailedCheckout_AbortsResidualOperationAndResetsRunBranch", async () => {
+    const root = await createTestTempDir("mohist-workspace-")
+    const manager = new WorkspaceManager(join(root, "runner"))
+    const item = work("wr-recover", "issue-recover")
+    const workspace = await manager.prepare(item, new AbortController().signal)
+    gitRunner.calls.length = 0
+    gitRunner.failedCheckouts = 1
 
-    const item = work("wr-crash", "issue-crash", repo)
-    const workspace = await manager.prepare(item, signal)
-    const runBranch = "mohist/run-wr-crash"
+    const recovered = await manager.prepare(item, new AbortController().signal)
 
-    // Agent commits work to the run branch — this must survive.
-    await writeFile(join(workspace.path, "agent.txt"), "agent work\n")
-    await git(workspace.path, "add", ".")
-    await git(workspace.path, "commit", "-m", "agent commit on run branch")
-    const runShaBefore = (await runCommand("git", ["-C", workspace.path, "rev-parse", `refs/heads/${runBranch}`], ".", signal)).stdout.trim()
-
-    // Advance master with a conflicting change, then start a rebase that
-    // conflicts and leave it mid-flight (as a crashed runner would).
-    await git(workspace.path, "checkout", "master")
-    await writeFile(join(workspace.path, "agent.txt"), "conflicting master change\n")
-    await git(workspace.path, "add", ".")
-    await git(workspace.path, "commit", "-m", "conflicting master commit")
-    await git(workspace.path, "checkout", runBranch)
-    const rebase = await runCommand("git", ["-C", workspace.path, "rebase", "master"], workspace.path, new AbortController().signal)
-    expect(rebase.exitCode).not.toBe(0)
-    expect(exists(join(workspace.path, ".git", "rebase-merge"))).toBe(true)
-
-    // Re-enter: prepare() must heal the workspace.
-    const recovered = await manager.prepare(item, signal)
-    expect(recovered.path).toBe(workspace.path)
-    expect(recovered.branch).toBe(runBranch)
-    expect(exists(join(workspace.path, ".git", "rebase-merge"))).toBe(false)
-    expect(await readFile(join(workspace.path, "agent.txt"), "utf8")).toBe("agent work\n")
-    const status = (await runCommand("git", ["-C", workspace.path, "status", "--porcelain"], ".", signal)).stdout.trim()
-    expect(status).toBe("")
-
-    // The run branch ref is preserved — the recovery realigned the tree
-    // without moving the ref.
-    const runShaAfter = (await runCommand("git", ["-C", workspace.path, "rev-parse", `refs/heads/${runBranch}`], ".", signal)).stdout.trim()
-    expect(runShaAfter).toBe(runShaBefore)
+    expect(recovered).toMatchObject({ path: workspace.path, branch: "mohist/run-wr-recover" })
+    expect(gitRunner.commandArgs()).toContainEqual(["-C", workspace.path, "rebase", "--abort"])
+    expect(gitRunner.commandArgs()).toContainEqual(["-C", workspace.path, "merge", "--abort"])
+    expect(gitRunner.commandArgs()).toContainEqual(["-C", workspace.path, "cherry-pick", "--abort"])
+    expect(gitRunner.commandArgs()).toContainEqual(["-C", workspace.path, "reset", "--hard", "mohist/run-wr-recover"])
+    expect(gitRunner.commandArgs().some((args) => args[0] === "clone")).toBe(false)
   })
 
-  it("CleanReentry_IsNoOp", async () => {
-    const root = await mkdtemp(join(tmpdir(), "mohist-recovery-clean-"))
-    const repo = await createRepo(root, "repo")
-    const runnerRoot = join(root, "runner")
-    const manager = new WorkspaceManager(runnerRoot)
-    const signal = new AbortController().signal
+  it("CleanReentry_OnlyChecksOutRunBranch", async () => {
+    const root = await createTestTempDir("mohist-workspace-")
+    const manager = new WorkspaceManager(join(root, "runner"))
+    const item = work("wr-clean", "issue-clean")
+    const workspace = await manager.prepare(item, new AbortController().signal)
+    gitRunner.calls.length = 0
 
-    const item = work("wr-clean", "issue-clean", repo)
-    const workspace = await manager.prepare(item, signal)
-    const runBranch = "mohist/run-wr-clean"
-    const runShaBefore = (await runCommand("git", ["-C", workspace.path, "rev-parse", `refs/heads/${runBranch}`], ".", signal)).stdout.trim()
+    const second = await manager.prepare(item, new AbortController().signal)
 
-    const second = await manager.prepare(item, signal)
-    expect(second.path).toBe(workspace.path)
-    expect(second.branch).toBe(runBranch)
-
-    const runShaAfter = (await runCommand("git", ["-C", workspace.path, "rev-parse", `refs/heads/${runBranch}`], ".", signal)).stdout.trim()
-    expect(runShaAfter).toBe(runShaBefore)
-    const status = (await runCommand("git", ["-C", workspace.path, "status", "--porcelain"], ".", signal)).stdout.trim()
-    expect(status).toBe("")
+    expect(second).toMatchObject({ path: workspace.path, branch: "mohist/run-wr-clean" })
+    expect(gitRunner.commandArgs()).toEqual([
+      ["-C", workspace.path, "rev-parse", "--verify", "refs/heads/mohist/run-wr-clean"],
+      ["-C", workspace.path, "checkout", "mohist/run-wr-clean"],
+    ])
   })
 })
 
@@ -300,18 +312,7 @@ describe("WorkspaceManager.slugify", () => {
   })
 })
 
-async function createRepo(root: string, name: string) {
-  const repo = join(root, name)
-  await git(root, "init", repo)
-  await git(repo, "config", "user.email", "test@example.com")
-  await git(repo, "config", "user.name", "Test User")
-  await writeFile(join(repo, "README.md"), "base\n")
-  await git(repo, "add", ".")
-  await git(repo, "commit", "-m", "base")
-  return repo
-}
-
-function work(workflowRunId: string, issueId: string, gitUrl: string) {
+function work(workflowRunId: string, issueId: string, baseBranch = "master") {
   return {
     workflowRunId,
     workId: "proposal.1",
@@ -321,19 +322,8 @@ function work(workflowRunId: string, issueId: string, gitUrl: string) {
       mohist: { runId: workflowRunId },
       issue: { id: issueId, number: 9 },
       project: { id: "project-1", name: "Mohist Local" },
-      repository: { name: "master", gitUrl, baseBranch: "master" },
+      repository: { name: "master", gitUrl: "https://example.test/mohist.git", baseBranch },
       openspecChangeDir: "openspec/changes/issue-9",
     },
   }
-}
-
-async function git(cwd: string, ...args: string[]) {
-  const result = await runCommand("git", args, cwd, new AbortController().signal, {
-    GIT_AUTHOR_NAME: "Mohist Test",
-    GIT_AUTHOR_EMAIL: "mohist-test@example.com",
-    GIT_COMMITTER_NAME: "Mohist Test",
-    GIT_COMMITTER_EMAIL: "mohist-test@example.com",
-  })
-  if (result.exitCode !== 0) throw new Error(result.stderr || result.stdout)
-  return result
 }

@@ -1,4 +1,3 @@
-// @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react'
 import { http, HttpResponse } from 'msw'
@@ -217,7 +216,7 @@ describe('EpicDetailPage LinkedIssueRow inline Start', () => {
   })
 })
 
-describe('EpicDetailPage LinkedIssueRow vertical task line layout (T-001)', () => {
+describe('EpicDetailPage LinkedIssueRow vertical task line layout', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     _epicData = makeEpic()

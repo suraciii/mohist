@@ -1,4 +1,3 @@
-// @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -7,6 +6,7 @@ import { ProjectProvider } from '../../../entities/project'
 import type { Project } from '../../../entities/project'
 import { IssueDetailPage } from './IssueDetailPage'
 import { mockAgentStatus, mockIssue, mockIssueCommits, mockIssueDiff, mockWorkflowTimeline, mountIssueDetail } from './_issueDetailMsw'
+import { setScopedValue } from '../../../../tests/support/scoped-property'
 
 
 const projects: Project[] = [
@@ -31,7 +31,7 @@ function mockMatchMedia(narrow: boolean) {
     onchange: null,
   }
   vi.stubGlobal('matchMedia', vi.fn(() => mql))
-  Object.defineProperty(window, 'innerWidth', { configurable: true, value: narrow ? 375 : 1280 })
+  setScopedValue(window, 'innerWidth', narrow ? 375 : 1280)
 }
 
 function renderPage() {
@@ -123,7 +123,7 @@ mountIssueDetail({ issue: baseIssue() })
 
 function resetViewport() {
   mockMatchMedia(false)
-  Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1280 })
+  setScopedValue(window, 'innerWidth', 1280)
   window.dispatchEvent(new Event('resize'))
 }
 
@@ -133,7 +133,6 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup()
-  vi.unstubAllGlobals()
 })
 
 function expectAssigned(testId: string, anchor: string) {
@@ -142,7 +141,7 @@ function expectAssigned(testId: string, anchor: string) {
   expect(container.contains(node)).toBe(true)
 }
 
-describe('T-004: cross-tier verification — archived path', () => {
+describe('IssueDetailPage cross-tier verification: archived path', () => {
   it('assigns headline, identity row, action surface, and archived pill/banner to status-header tier; reading flow and reference rail populated', async () => {
     mockIssue(baseIssue({
       status: 'done',
@@ -187,7 +186,7 @@ describe('T-004: cross-tier verification — archived path', () => {
   })
 })
 
-describe('T-004: cross-tier verification — backlog/readiness path', () => {
+describe('IssueDetailPage cross-tier verification: backlog readiness path', () => {
   it('keeps draft pill in identity row, Start action in header tier, Readiness card in rail, headline shows backlog situation without fabricated stage/progress', async () => {
     mockIssue(baseIssue({
       status: 'backlog',
@@ -231,7 +230,7 @@ describe('T-004: cross-tier verification — backlog/readiness path', () => {
   })
 })
 
-describe('T-004: cross-tier verification — drift path', () => {
+describe('IssueDetailPage cross-tier verification: drift path', () => {
   it('places the drift panel in the reference rail, default-collapsed, expandable on click', async () => {
     mockIssue(baseIssue({
       drift: { drifted: true, detectedAt: '2026-01-05T00:00:00Z', decision: 'needs-attention' },
@@ -251,7 +250,7 @@ describe('T-004: cross-tier verification — drift path', () => {
   })
 })
 
-describe('T-004: cross-tier verification — convergence path', () => {
+describe('IssueDetailPage cross-tier verification: convergence path', () => {
   it('places the convergence panel in the reference rail when health=blocked or convergence exists; default-collapsed on desktop', async () => {
     mockIssue(baseIssue({
       health: 'blocked',
@@ -282,7 +281,7 @@ describe('T-004: cross-tier verification — convergence path', () => {
   })
 })
 
-describe('T-004: cross-tier verification — blocked health path', () => {
+describe('IssueDetailPage cross-tier verification: blocked health path', () => {
   it('reports a blocked projection via the header without a standalone recovery card', async () => {
     mockIssue(baseIssue({
       workflowStatus: 'failed',
@@ -305,7 +304,7 @@ describe('T-004: cross-tier verification — blocked health path', () => {
   })
 })
 
-describe('T-004: cross-tier verification — PR delivery path', () => {
+describe('IssueDetailPage cross-tier verification: PR delivery path', () => {
   it('places PrDeliverySummary inside the reading flow beside the workflow frame', async () => {
     mockIssue(baseIssue({ workflowRunId: 'wr_pr_1', recovery: baseRecovery() }))
     mockWorkflowTimeline(basePrMetadataTimeline('wr_pr_1'))
@@ -328,7 +327,7 @@ describe('T-004: cross-tier verification — PR delivery path', () => {
   })
 })
 
-describe('T-004: cross-tier verification — capacity gating path', () => {
+describe('IssueDetailPage cross-tier verification: capacity gating path', () => {
   it('keeps the Start action inside the status-header tier under full capacity (gating happens in surface, not rail)', async () => {
     mockIssue(baseIssue({ status: 'backlog', workflowStage: null, workflowStatus: null, workflowRunId: null }))
     mockAgentStatus({
@@ -369,7 +368,7 @@ describe('T-004: cross-tier verification — capacity gating path', () => {
   })
 })
 
-describe('T-004: cross-tier verification — no duplication / no orphan', () => {
+describe('IssueDetailPage cross-tier verification: unique tier assignment', () => {
   it('renders every D2 block in exactly one tier, none repeated across tiers, none orphaned', async () => {
     mockIssue(baseIssue({
       workflowRunId: 'wr_overlap_1',
@@ -499,7 +498,7 @@ describe('T-004: cross-tier verification — no duplication / no orphan', () => 
   })
 })
 
-describe('T-004: cross-tier verification — three-tier weight hierarchy holds on every conditional path', () => {
+describe('IssueDetailPage cross-tier verification: tier hierarchy across conditional paths', () => {
   const paths: Array<{ name: string; overrides: Record<string, unknown>; recovery?: ReturnType<typeof baseRecovery> }> = [
     {
       name: 'archived done',
@@ -610,7 +609,6 @@ describe('T-004: cross-tier verification — three-tier weight hierarchy holds o
       expect(referenceRail.className).toMatch(/lg:col-span-1\b/)
 
       cleanup()
-      vi.unstubAllGlobals()
     })
   }
 })

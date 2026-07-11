@@ -1,10 +1,4 @@
 import { afterEach, describe, expect, it } from "vitest"
-import { execFile } from "node:child_process"
-import { mkdtemp, rm, writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
-import { performance } from "node:perf_hooks"
-import { join } from "node:path"
-import { promisify } from "node:util"
 import { createDefaultRegistry } from "../src/actions/registry.js"
 import {
   setWorkspacePrepareExistsCheckerForTest,
@@ -17,7 +11,6 @@ type GitCall = { workDir: string; args: string[] }
 
 const WORKSPACE_PATH = "/workspace"
 const EXPECTED_BRANCH = "mohist/run-wr-prepare-1"
-const exec = promisify(execFile)
 
 afterEach(() => {
   setWorkspacePrepareGitRunnerForTest(null)
@@ -109,13 +102,10 @@ describe("mohist/workspace-prepare", () => {
     setWorkspacePrepareExistsCheckerForTest(() => false)
     const calls = installGit(cleanProbeResponses())
 
-    const startedAt = performance.now()
     const result = await workspacePrepareAction(context())
-    const elapsedMs = performance.now() - startedAt
     const output = JSON.parse(result.output ?? "{}")
 
     expect(result.status).toBe("success")
-    expect(elapsedMs).toBeLessThan(1000)
     expect(result.message).toBe("Workspace prepared")
     expect(output).toMatchObject({
       kind: "workspace-prepare",

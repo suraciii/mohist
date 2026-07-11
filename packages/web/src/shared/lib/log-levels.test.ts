@@ -23,7 +23,7 @@ describe('LEVEL_COLORS', () => {
     expect(Object.keys(LEVEL_COLORS).sort()).toEqual(['DEBUG', 'ERROR', 'INFO', 'WARN'])
   })
 
-  it('ERROR uses red-600 NOT red-500 (Issue #30 regression)', () => {
+  it('ERROR uses red-600 NOT red-500', () => {
     expect(LEVEL_COLORS.ERROR).toContain('text-red-600')
     expect(LEVEL_COLORS.ERROR).not.toContain('red-500')
   })

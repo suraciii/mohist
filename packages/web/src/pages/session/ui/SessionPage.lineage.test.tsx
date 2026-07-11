@@ -1,4 +1,3 @@
-// @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -214,7 +213,7 @@ function baseMetadata(overrides: Partial<AgentSessionMetadata> = {}): AgentSessi
   }
 }
 
-describe('SessionPage lineage link wiring (issue-245 T-006)', () => {
+describe('SessionPage lineage link wiring', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     setupDefaultMocks()

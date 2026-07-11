@@ -1,4 +1,3 @@
-// @vitest-environment jsdom
 import '@testing-library/jest-dom'
 import { http, HttpResponse } from 'msw'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -11,6 +10,7 @@ import { SidebarProvider } from '@/shared/ui/components/sidebar'
 import type { GeneralConfig } from '../../../entities/settings'
 import { SettingsPage } from './SettingsPage'
 import { useMswServer } from '../../../../tests/support/msw'
+import { setScopedProperty } from '../../../../tests/support/scoped-property'
 
 const DEFAULT_CONFIG: GeneralConfig = {
   agentTimeout: 600,
@@ -361,43 +361,25 @@ describe('SettingsPage sub-navigation', () => {
 describe('SettingsSubNav overflow affordance', () => {
   afterEach(() => {
     cleanup()
-    vi.restoreAllMocks()
   })
 
   function withSimulatedOverflow(
     { scrollHeight, clientHeight }: { scrollHeight: number; clientHeight: number },
     run: () => void,
   ) {
-    const originalScrollHeight = Object.getOwnPropertyDescriptor(
-      HTMLElement.prototype,
-      'scrollHeight',
-    )
-    const originalClientHeight = Object.getOwnPropertyDescriptor(
-      HTMLElement.prototype,
-      'clientHeight',
-    )
-    Object.defineProperty(HTMLElement.prototype, 'scrollHeight', {
+    setScopedProperty(HTMLElement.prototype, 'scrollHeight', {
       configurable: true,
       get() {
         return scrollHeight
       },
     })
-    Object.defineProperty(HTMLElement.prototype, 'clientHeight', {
+    setScopedProperty(HTMLElement.prototype, 'clientHeight', {
       configurable: true,
       get() {
         return clientHeight
       },
     })
-    try {
-      run()
-    } finally {
-      if (originalScrollHeight) {
-        Object.defineProperty(HTMLElement.prototype, 'scrollHeight', originalScrollHeight)
-      }
-      if (originalClientHeight) {
-        Object.defineProperty(HTMLElement.prototype, 'clientHeight', originalClientHeight)
-      }
-    }
+    run()
   }
 
   it('does not render a fade affordance when the sub-nav content fits (no overflow)', () => {
@@ -459,32 +441,21 @@ describe('SettingsSubNav overflow affordance', () => {
       expect(screen.getByTestId('settings-subnav-fade-bottom')).toBeInTheDocument()
     })
 
-    // Simulate a viewport resize that shrinks the content below the container height.
-    const originalScrollHeight = Object.getOwnPropertyDescriptor(
-      HTMLElement.prototype,
-      'scrollHeight',
-    )
-    Object.defineProperty(HTMLElement.prototype, 'scrollHeight', {
+    setScopedProperty(HTMLElement.prototype, 'scrollHeight', {
       configurable: true,
       get() {
         return 200
       },
     })
 
-    try {
-      // Triggering a scroll event runs the same measure() handler the hook
-      // attaches; the resize path runs the same handler. We just need to
-      // exercise it once with the new layout values.
-      const subnav = screen.getByTestId('settings-subnav') as HTMLElement
-      fireEvent.scroll(subnav)
+    // Triggering a scroll event runs the same measure() handler the hook
+    // attaches; the resize path runs the same handler. We just need to
+    // exercise it once with the new layout values.
+    const subnav = screen.getByTestId('settings-subnav') as HTMLElement
+    fireEvent.scroll(subnav)
 
-      expect(screen.queryByTestId('settings-subnav-fade-bottom')).not.toBeInTheDocument()
-      expect(screen.queryByTestId('settings-subnav-fade-top')).not.toBeInTheDocument()
-    } finally {
-      if (originalScrollHeight) {
-        Object.defineProperty(HTMLElement.prototype, 'scrollHeight', originalScrollHeight)
-      }
-    }
+    expect(screen.queryByTestId('settings-subnav-fade-bottom')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('settings-subnav-fade-top')).not.toBeInTheDocument()
   })
 })
 
@@ -498,7 +469,7 @@ function getInputByLabel(label: string): HTMLInputElement {
   return input as HTMLInputElement
 }
 
-describe('SettingsSubNav dirty-guard (T-004)', () => {
+describe('SettingsSubNav dirty-guard', () => {
   beforeEach(() => {
     _configData = { ...DEFAULT_CONFIG }
     _repositories = []

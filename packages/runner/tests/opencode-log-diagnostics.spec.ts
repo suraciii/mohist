@@ -1,5 +1,5 @@
 import { join } from "node:path"
-import { afterEach, describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import {
   appendOpencodeDiagnostic,
   findFailFastOpencodeProviderErrorDiagnostic,
@@ -12,7 +12,7 @@ import {
 const LOG_DIR = "/fake/opencode/log"
 
 afterEach(() => {
-  delete process.env.MOHIST_OPENCODE_LOG_DIR
+  vi.unstubAllEnvs()
   setOpencodeLogFileSystemForTest(null)
 })
 
@@ -139,7 +139,7 @@ describe("opencode log diagnostics", () => {
 })
 
 function useOpencodeLogs(files: Record<string, string>) {
-  process.env.MOHIST_OPENCODE_LOG_DIR = LOG_DIR
+  vi.stubEnv("MOHIST_OPENCODE_LOG_DIR", LOG_DIR)
   const entries = Object.entries(files)
   const fileSystem: OpencodeLogFileSystem = {
     async readdir(path) {

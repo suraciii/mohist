@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { CleanupLoopResult } from "../src/runtime/cleanup-loop.js"
 import type { CleanupPolicy } from "../src/core/types.js"
 
-// Idle-system cleanup scenario (issue-359): when `poll` is continuously
+// Idle-system cleanup scenario: when `poll` is continuously
 // returning 204 (no work dispatched), the runner's cleanup-loop tick
 // must still drive eviction by fetching config from the dedicated
 // `/config` channel. This spec exercises the host's
@@ -27,8 +27,10 @@ interface CleanupCall {
 
 interface CleanupTestState {
   cleanupCalls: CleanupCall[]
-  fetchConfigCalls: number[]
+  fetchConfigCalls: undefined[]
   fetchAttempts: number
+  onCleanupCall: ((call: CleanupCall) => void) | null
+  onFetchConfig: (() => void) | null
   stubFetchConfigBehavior: null | (() => Promise<CleanupPolicy | null>)
   stubRunOnceResult: CleanupLoopResult
 }
@@ -40,6 +42,8 @@ const mocks = vi.hoisted(() => {
     cleanupCalls: [],
     fetchConfigCalls: [],
     fetchAttempts: 0,
+    onCleanupCall: null,
+    onFetchConfig: null,
     stubFetchConfigBehavior: null,
     stubRunOnceResult: {
       retentionRemoved: 0,
@@ -53,7 +57,7 @@ const mocks = vi.hoisted(() => {
     connect: vi.fn(async () => undefined),
     heartbeat: vi.fn(async () => undefined),
     disconnect: vi.fn(async () => undefined),
-    poll: vi.fn(async () => null),
+    poll: vi.fn(async () => []),
     report: vi.fn(async () => ({})),
     startSignalR: vi.fn(async () => undefined),
     stopSignalR: vi.fn(async () => undefined),
@@ -73,7 +77,8 @@ vi.mock("../src/server/connection.js", () => ({
     poll = mocks.poll
     report = mocks.report
     fetchConfig = async (_signal: AbortSignal) => {
-      mocks.state.fetchConfigCalls.push(Date.now())
+      mocks.state.fetchConfigCalls.push(undefined)
+      mocks.state.onFetchConfig?.()
       if (!mocks.state.stubFetchConfigBehavior) return null
       return mocks.state.stubFetchConfigBehavior()
     }
@@ -101,7 +106,9 @@ vi.mock("../src/runtime/cleanup-loop.js", () => {
   return {
     CleanupLoop: class {
       async runOnce(policy: CleanupPolicy | null | undefined, _signal: AbortSignal): Promise<CleanupLoopResult> {
-        mocks.state.cleanupCalls.push({ policy: policy ?? null, tickIndex: mocks.state.cleanupCalls.length + 1 })
+        const call = { policy: policy ?? null, tickIndex: mocks.state.cleanupCalls.length + 1 }
+        mocks.state.cleanupCalls.push(call)
+        mocks.state.onCleanupCall?.(call)
         return mocks.state.stubRunOnceResult
       }
     },
@@ -125,6 +132,8 @@ function resetState() {
   mocks.state.cleanupCalls.length = 0
   mocks.state.fetchConfigCalls.length = 0
   mocks.state.fetchAttempts = 0
+  mocks.state.onCleanupCall = null
+  mocks.state.onFetchConfig = null
   mocks.state.stubFetchConfigBehavior = null
   mocks.state.stubRunOnceResult = {
     retentionRemoved: 0,
@@ -152,15 +161,113 @@ async function importHost() {
   return (await import("../src/runtime/host.js")).RunnerHost
 }
 
-async function flushMicrotasks() {
-  // Two awaits in series drain microtasks until quiescence. A single
-  // `await Promise.resolve()` is not enough because some continuations
-  // are scheduled on later microtask turns.
-  await Promise.resolve()
-  await Promise.resolve()
+function deferred() {
+  let resolve!: () => void
+  const promise = new Promise<void>((resolvePromise) => {
+    resolve = resolvePromise
+  })
+  return { promise, resolve }
 }
 
-describe("RunnerHost idle-system cleanup (issue-359 T-002)", () => {
+interface EventQueue<T> {
+  readonly count: number
+  next(): Promise<T>
+  push(value: T): void
+}
+
+function eventQueue<T>(): EventQueue<T> {
+  const values: T[] = []
+  const waiters: Array<(value: T) => void> = []
+  let count = 0
+
+  return {
+    get count() {
+      return count
+    },
+    next() {
+      if (values.length > 0) return Promise.resolve(values.shift()!)
+      return new Promise<T>((resolve) => waiters.push(resolve))
+    },
+    push(value) {
+      count += 1
+      const waiter = waiters.shift()
+      if (waiter) waiter(value)
+      else values.push(value)
+    },
+  }
+}
+
+interface HostEvents {
+  connected: ReturnType<typeof deferred>
+  polled: ReturnType<typeof deferred>
+}
+
+interface CleanupEvents {
+  cleanupCalls: EventQueue<CleanupCall>
+  fetches: EventQueue<void>
+}
+
+function configureHost(): HostEvents {
+  const events: HostEvents = {
+    connected: deferred(),
+    polled: deferred(),
+  }
+
+  vi.clearAllMocks()
+  mocks.connect.mockReset().mockImplementation(async () => {
+    events.connected.resolve()
+  })
+  mocks.heartbeat.mockReset().mockResolvedValue(undefined)
+  mocks.disconnect.mockReset().mockResolvedValue(undefined)
+  mocks.poll.mockReset().mockImplementation(async () => {
+    events.polled.resolve()
+    return []
+  })
+  mocks.report.mockReset().mockResolvedValue({})
+  mocks.startSignalR.mockReset().mockResolvedValue(undefined)
+  mocks.stopSignalR.mockReset().mockResolvedValue(undefined)
+  mocks.getConnectionId.mockReset().mockReturnValue("conn-1")
+  mocks.probeLiveness.mockReset().mockResolvedValue(true)
+  mocks.forceReconnect.mockReset().mockResolvedValue(undefined)
+  mocks.createSharedAcpConnection.mockReset().mockResolvedValue({
+    connection: { prompt: vi.fn(), cancel: vi.fn(), newSession: vi.fn(), resumeSession: vi.fn(), setSessionConfigOption: vi.fn(), closeSession: vi.fn() },
+    processPid: 99999,
+    setSessionHandlers: vi.fn(),
+    clearSessionHandlers: vi.fn(),
+    shutdown: mocks.shutdownSharedAcpConnection,
+  })
+  mocks.shutdownSharedAcpConnection.mockReset().mockResolvedValue(undefined)
+  return events
+}
+
+function observeCleanupTicks(): CleanupEvents {
+  const events: CleanupEvents = {
+    cleanupCalls: eventQueue<CleanupCall>(),
+    fetches: eventQueue<void>(),
+  }
+  mocks.state.onFetchConfig = () => events.fetches.push()
+  mocks.state.onCleanupCall = (call) => events.cleanupCalls.push(call)
+  return events
+}
+
+async function waitForHostStartup(events: HostEvents) {
+  await events.connected.promise
+  await events.polled.promise
+}
+
+async function advanceFetchTick(events: CleanupEvents) {
+  const fetch = events.fetches.next()
+  await vi.advanceTimersByTimeAsync(CLEANUP_INTERVAL_FLOOR_MS)
+  await fetch
+}
+
+async function advanceCleanupTick(events: CleanupEvents): Promise<CleanupCall> {
+  const cleanup = events.cleanupCalls.next()
+  await advanceFetchTick(events)
+  return await cleanup
+}
+
+describe("RunnerHost idle-system cleanup", () => {
   let root: string
 
   beforeEach(async () => {
@@ -188,9 +295,9 @@ describe("RunnerHost idle-system cleanup (issue-359 T-002)", () => {
   }
 
   it("FetchesConfigOnEachCleanupTick_AndRunsEviction_WhenPollStays204", async () => {
-    vi.useFakeTimers()
-    // poll returns 204 (null) every call — the idle scenario.
-    mocks.poll.mockImplementation(async () => [])
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] })
+    const hostEvents = configureHost()
+    const cleanupEvents = observeCleanupTicks()
     mocks.state.stubFetchConfigBehavior = async () => ({ retentionDays: 7 })
     mocks.state.stubRunOnceResult = {
       retentionRemoved: 1,
@@ -204,22 +311,15 @@ describe("RunnerHost idle-system cleanup (issue-359 T-002)", () => {
     const host = new RunnerHost(defaultOptions())
     const run = host.run(controller.signal)
 
-    // Wait for startup connect + first poll cycle.
-    await vi.waitFor(() => expect(mocks.connect).toHaveBeenCalled(), { timeout: 5_000 })
-
-    // Advance one production-floor interval per tick and flush microtasks so the
-    // fire-and-forget runCleanupOnce promises settle before the next
-    // timer fires. With `void this.runCleanupOnce(signal)` the host
-    // discards the promise, so vi.advanceTimersByTimeAsync alone
-    // does not await it.
-    for (let i = 0; i < 5; i += 1) {
-      await vi.advanceTimersByTimeAsync(CLEANUP_INTERVAL_FLOOR_MS)
-      await flushMicrotasks()
+    await waitForHostStartup(hostEvents)
+    const cleanupCalls: CleanupCall[] = []
+    for (let tick = 0; tick < 3; tick += 1) {
+      cleanupCalls.push(await advanceCleanupTick(cleanupEvents))
     }
-    await vi.waitFor(() => expect(mocks.state.cleanupCalls.length).toBeGreaterThanOrEqual(3), { timeout: 5_000 })
 
     // Each cleanup tick issued its own GET — no caching between ticks.
-    expect(mocks.state.fetchConfigCalls.length).toBeGreaterThanOrEqual(3)
+    expect(mocks.state.fetchConfigCalls).toHaveLength(3)
+    expect(cleanupCalls).toHaveLength(3)
     // The CleanupLoop received the policy from the latest fetch on
     // every tick (not a cached value from any dispatch — dispatch is
     // 204 with no body, no policy can leak through).
@@ -228,12 +328,13 @@ describe("RunnerHost idle-system cleanup (issue-359 T-002)", () => {
     }
 
     controller.abort()
-    await vi.waitFor(() => expect(run).resolves.toBeUndefined(), { timeout: 5_000 })
+    await expect(run).resolves.toBeUndefined()
   })
 
   it("FetchesConfigButEvictsNothing_WhenPolicyIsFullyUnconfigured", async () => {
-    vi.useFakeTimers()
-    mocks.poll.mockImplementation(async () => [])
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] })
+    const hostEvents = configureHost()
+    const cleanupEvents = observeCleanupTicks()
     // /config returns a policy with all-null fields — "null means do not evict".
     mocks.state.stubFetchConfigBehavior = async () => ({
       retentionDays: null,
@@ -252,17 +353,15 @@ describe("RunnerHost idle-system cleanup (issue-359 T-002)", () => {
     const host = new RunnerHost(defaultOptions())
     const run = host.run(controller.signal)
 
-    await vi.waitFor(() => expect(mocks.connect).toHaveBeenCalled(), { timeout: 5_000 })
-    for (let i = 0; i < 5; i += 1) {
-      await vi.advanceTimersByTimeAsync(CLEANUP_INTERVAL_FLOOR_MS)
-      await flushMicrotasks()
-    }
-    await vi.waitFor(() => expect(mocks.state.cleanupCalls.length).toBeGreaterThanOrEqual(2), { timeout: 5_000 })
+    await waitForHostStartup(hostEvents)
+    await advanceCleanupTick(cleanupEvents)
+    await advanceCleanupTick(cleanupEvents)
 
     // The host still fetched config on every tick — that is the
     // channel-separation guarantee. Eviction is the loop's job (the
     // stub returns zeros); we only assert fetchConfig was awaited.
-    expect(mocks.state.fetchConfigCalls.length).toBeGreaterThanOrEqual(2)
+    expect(mocks.state.fetchConfigCalls).toHaveLength(2)
+    expect(mocks.state.cleanupCalls).toHaveLength(2)
     for (const call of mocks.state.cleanupCalls) {
       expect(call.policy).toEqual({
         retentionDays: null,
@@ -272,17 +371,19 @@ describe("RunnerHost idle-system cleanup (issue-359 T-002)", () => {
     }
 
     controller.abort()
-    await vi.waitFor(() => expect(run).resolves.toBeUndefined(), { timeout: 5_000 })
+    await expect(run).resolves.toBeUndefined()
   })
 
   it("SkipsCleanupTick_WhenFetchConfigThrows_BestEffortNextTickRetries", async () => {
-    vi.useFakeTimers()
-    mocks.poll.mockImplementation(async () => [])
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] })
+    const hostEvents = configureHost()
+    const cleanupEvents = observeCleanupTicks()
+    const failure = new Error("fetchConfig failed: 404")
 
     mocks.state.stubFetchConfigBehavior = async () => {
       mocks.state.fetchAttempts += 1
       // First attempt throws (simulates 404 from old server, network blip, etc).
-      if (mocks.state.fetchAttempts === 1) throw new Error("fetchConfig failed: 404")
+      if (mocks.state.fetchAttempts === 1) throw failure
       // Subsequent attempts return a configured policy.
       return { retentionDays: 7 }
     }
@@ -299,37 +400,29 @@ describe("RunnerHost idle-system cleanup (issue-359 T-002)", () => {
     const host = new RunnerHost(defaultOptions())
     const run = host.run(controller.signal)
 
-    await vi.waitFor(() => expect(mocks.connect).toHaveBeenCalled(), { timeout: 5_000 })
-    for (let i = 0; i < 5; i += 1) {
-      await vi.advanceTimersByTimeAsync(CLEANUP_INTERVAL_FLOOR_MS)
-      await flushMicrotasks()
-    }
-    await vi.waitFor(() => expect(mocks.state.fetchConfigCalls.length).toBeGreaterThanOrEqual(2), { timeout: 5_000 })
+    try {
+      await waitForHostStartup(hostEvents)
+      await advanceFetchTick(cleanupEvents)
+      expect(mocks.state.cleanupCalls).toHaveLength(0)
 
-    // The first tick's fetch threw — runOnce was NOT called for it.
-    // Subsequent ticks succeeded and reached runOnce. Wait until
-    // microtasks settle so every successful fetch has reached
-    // runOnce.
-    await vi.waitFor(() => expect(mocks.state.cleanupCalls.length).toBeGreaterThanOrEqual(1), { timeout: 5_000 })
-    await flushMicrotasks()
-    expect(mocks.state.cleanupCalls.length).toBeGreaterThanOrEqual(1)
-    expect(mocks.state.cleanupCalls.length).toBeLessThan(mocks.state.fetchConfigCalls.length)
-    // The successful ticks carried the configured policy from the
-    // post-failure fetch attempts.
-    for (const call of mocks.state.cleanupCalls) {
-      expect(call.policy).toEqual({ retentionDays: 7 })
-    }
-    // The first-tick failure was logged (best-effort per design D4).
-    expect(errorSpy.mock.calls.some((call) => call.some((arg) => typeof arg === "string" && arg.includes("workspace cleanup loop failed")))).toBe(true)
+      const successfulCall = await advanceCleanupTick(cleanupEvents)
+      expect(mocks.state.fetchConfigCalls).toHaveLength(2)
+      expect(mocks.state.cleanupCalls).toEqual([successfulCall])
+      expect(successfulCall.policy).toEqual({ retentionDays: 7 })
+      expect(errorSpy).toHaveBeenCalledOnce()
+      expect(errorSpy).toHaveBeenCalledWith("workspace cleanup loop failed:", failure)
 
-    controller.abort()
-    await vi.waitFor(() => expect(run).resolves.toBeUndefined(), { timeout: 5_000 })
-    errorSpy.mockRestore()
+      controller.abort()
+      await expect(run).resolves.toBeUndefined()
+    } finally {
+      errorSpy.mockRestore()
+    }
   })
 
   it("IssuesIndependentFetchPerTick_NoCachingAcrossTicks", async () => {
-    vi.useFakeTimers()
-    mocks.poll.mockImplementation(async () => [])
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] })
+    const hostEvents = configureHost()
+    const cleanupEvents = observeCleanupTicks()
     mocks.state.stubFetchConfigBehavior = async () => ({ retentionDays: 7 })
 
     const RunnerHost = await importHost()
@@ -337,26 +430,17 @@ describe("RunnerHost idle-system cleanup (issue-359 T-002)", () => {
     const host = new RunnerHost(defaultOptions())
     const run = host.run(controller.signal)
 
-    await vi.waitFor(() => expect(mocks.connect).toHaveBeenCalled(), { timeout: 5_000 })
-    for (let i = 0; i < 12; i += 1) {
-      await vi.advanceTimersByTimeAsync(CLEANUP_INTERVAL_FLOOR_MS)
-      await flushMicrotasks()
+    await waitForHostStartup(hostEvents)
+    for (let tick = 0; tick < 5; tick += 1) {
+      await advanceCleanupTick(cleanupEvents)
     }
-    await vi.waitFor(() => expect(mocks.state.fetchConfigCalls.length).toBeGreaterThanOrEqual(5), { timeout: 5_000 })
 
-    // Five consecutive ticks ⇒ five independent GETs to /config. No
-    // ETag / If-None-Match / version conditional fetch is performed.
-    // The host did not retain any cached policy between ticks.
-    // Wait until fetchConfig and runOnce counts align (every fetch
-    // should have reached the cleanup loop in this test — no
-    // fetchConfig failures).
-    await vi.waitFor(() => expect(mocks.state.cleanupCalls.length).toBeGreaterThanOrEqual(5), { timeout: 5_000 })
-    await flushMicrotasks()
-    expect(mocks.state.fetchConfigCalls.length).toBeGreaterThanOrEqual(5)
-    expect(mocks.state.cleanupCalls.length).toBe(mocks.state.fetchConfigCalls.length)
+    // Five consecutive ticks issue five independent GETs to /config.
+    expect(mocks.state.fetchConfigCalls).toHaveLength(5)
+    expect(mocks.state.cleanupCalls).toHaveLength(5)
 
     controller.abort()
-    await vi.waitFor(() => expect(run).resolves.toBeUndefined(), { timeout: 5_000 })
+    await expect(run).resolves.toBeUndefined()
   })
 
   it("HostIntervals_ClampSubSecondCleanupAndConvergenceConfigurationToOneSecond", async () => {

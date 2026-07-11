@@ -1,4 +1,6 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
+import { http, HttpResponse } from 'msw'
+import { server, useMswServer } from '../../../../tests/support/msw'
 import {
   createLabelDefinition,
   deleteLabelDefinition,
@@ -9,23 +11,34 @@ import {
 } from './client'
 import { ApiError } from '../../../shared/api/client'
 
-afterEach(() => {
-  vi.unstubAllGlobals()
-  vi.restoreAllMocks()
-})
+useMswServer()
 
-function okJson<T>(payload: T, status = 200): Response {
-  return new Response(JSON.stringify({ success: true, data: payload }), {
-    status,
-    headers: { 'Content-Type': 'application/json' },
-  })
+interface CapturedRequest {
+  path: string
+  method: string
+  contentType: string | null
+  body?: unknown
 }
 
-function errorJson(message: string, status: number, code?: string): Response {
-  return new Response(
-    JSON.stringify({ success: false, error: message, code: code ?? 'error' }),
-    { status, headers: { 'Content-Type': 'application/json' } },
-  )
+async function captureRequest(request: Request, requests: CapturedRequest[]) {
+  const url = new URL(request.url)
+  const captured: CapturedRequest = {
+    path: `${url.pathname}${url.search}`,
+    method: request.method,
+    contentType: request.headers.get('content-type'),
+  }
+  if (request.method !== 'GET' && request.method !== 'DELETE') {
+    captured.body = await request.json()
+  }
+  requests.push(captured)
+}
+
+function successResponse(payload: unknown, status = 200) {
+  return HttpResponse.json({ success: true, data: payload }, { status })
+}
+
+function errorResponse(message: string, status: number, code = 'error') {
+  return HttpResponse.json({ success: false, error: message, code }, { status })
 }
 
 describe('isValidLabelKey', () => {
@@ -59,14 +72,22 @@ describe('getLabelCatalog', () => {
       { key: 'module', description: 'subsystem' },
       { key: 'kind', description: 'change type' },
     ]
-    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(okJson(definitions))
-    vi.stubGlobal('fetch', fetchMock)
+    const requests: CapturedRequest[] = []
+    server.use(
+      http.get('*/api/projects/:projectId/labels/catalog', async ({ request }) => {
+        await captureRequest(request, requests)
+        return successResponse(definitions)
+      }),
+    )
 
     const result = await getLabelCatalog('proj-1')
 
     expect(result).toEqual(definitions)
-    const [calledPath] = fetchMock.mock.calls[0]
-    expect(calledPath).toBe('/api/projects/proj-1/labels/catalog')
+    expect(requests).toEqual([{
+      path: '/api/projects/proj-1/labels/catalog',
+      method: 'GET',
+      contentType: 'application/json',
+    }])
   })
 
   it('throws when projectId is missing', () => {
@@ -80,10 +101,13 @@ describe('getLabelCatalog', () => {
 
 describe('createLabelDefinition', () => {
   it('POSTs key/description/supportedValues to the catalog endpoint', async () => {
-    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
-      okJson({ key: 'module', description: 'subsystem' }, 201),
+    const requests: CapturedRequest[] = []
+    server.use(
+      http.post('*/api/projects/:projectId/labels/catalog', async ({ request }) => {
+        await captureRequest(request, requests)
+        return successResponse({ key: 'module', description: 'subsystem' }, 201)
+      }),
     )
-    vi.stubGlobal('fetch', fetchMock)
 
     await createLabelDefinition('proj-1', {
       key: 'module',
@@ -91,32 +115,37 @@ describe('createLabelDefinition', () => {
       supportedValues: ['auth', 'ui'],
     })
 
-    expect(fetchMock).toHaveBeenCalledTimes(1)
-    const [calledPath, init] = fetchMock.mock.calls[0]
-    expect(calledPath).toBe('/api/projects/proj-1/labels/catalog')
-    expect(init?.method).toBe('POST')
-    expect(init?.body).toBe(
-      JSON.stringify({ key: 'module', description: 'subsystem', supportedValues: ['auth', 'ui'] }),
-    )
+    expect(requests).toEqual([{
+      path: '/api/projects/proj-1/labels/catalog',
+      method: 'POST',
+      contentType: 'application/json',
+      body: { key: 'module', description: 'subsystem', supportedValues: ['auth', 'ui'] },
+    }])
   })
 
   it('omits supportedValues when not provided', async () => {
-    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
-      okJson({ key: 'freeform', description: 'no values' }, 201),
+    const requests: CapturedRequest[] = []
+    server.use(
+      http.post('*/api/projects/:projectId/labels/catalog', async ({ request }) => {
+        await captureRequest(request, requests)
+        return successResponse({ key: 'freeform', description: 'no values' }, 201)
+      }),
     )
-    vi.stubGlobal('fetch', fetchMock)
 
     await createLabelDefinition('proj-1', { key: 'freeform', description: 'no values' })
 
-    const [, init] = fetchMock.mock.calls[0]
-    expect(init?.body).toBe(JSON.stringify({ key: 'freeform', description: 'no values' }))
+    expect(requests).toEqual([{
+      path: '/api/projects/proj-1/labels/catalog',
+      method: 'POST',
+      contentType: 'application/json',
+      body: { key: 'freeform', description: 'no values' },
+    }])
   })
 
   it('surfaces server error messages on conflict', async () => {
-    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
-      errorJson("Key 'module' already exists", 409, 'conflict'),
+    server.use(
+      http.post('*/api/projects/:projectId/labels/catalog', () => errorResponse("Key 'module' already exists", 409, 'conflict')),
     )
-    vi.stubGlobal('fetch', fetchMock)
 
     await expect(
       createLabelDefinition('proj-1', { key: 'module', description: 'x' }),
@@ -126,63 +155,73 @@ describe('createLabelDefinition', () => {
 
 describe('updateLabelDefinition', () => {
   it('PATCHes only the description field when supportedValues is omitted', async () => {
-    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
-      okJson({ key: 'module', description: 'new', supportedValues: ['auth'] }),
+    const requests: CapturedRequest[] = []
+    server.use(
+      http.patch('*/api/projects/:projectId/labels/catalog/:key', async ({ request }) => {
+        await captureRequest(request, requests)
+        return successResponse({ key: 'module', description: 'new', supportedValues: ['auth'] })
+      }),
     )
-    vi.stubGlobal('fetch', fetchMock)
 
     await updateLabelDefinition('proj-1', 'module', { description: 'new' })
 
-    const [calledPath, init] = fetchMock.mock.calls[0]
-    expect(calledPath).toBe('/api/projects/proj-1/labels/catalog/module')
-    expect(init?.method).toBe('PATCH')
-    expect(init?.body).toBe(JSON.stringify({ description: 'new' }))
+    expect(requests).toEqual([{
+      path: '/api/projects/proj-1/labels/catalog/module',
+      method: 'PATCH',
+      contentType: 'application/json',
+      body: { description: 'new' },
+    }])
   })
 
   it('PATCHes only supportedValues when description is omitted', async () => {
-    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
-      okJson({ key: 'module', description: 'same', supportedValues: ['a', 'b'] }),
+    const requests: CapturedRequest[] = []
+    server.use(
+      http.patch('*/api/projects/:projectId/labels/catalog/:key', async ({ request }) => {
+        await captureRequest(request, requests)
+        return successResponse({ key: 'module', description: 'same', supportedValues: ['a', 'b'] })
+      }),
     )
-    vi.stubGlobal('fetch', fetchMock)
 
     await updateLabelDefinition('proj-1', 'module', { supportedValues: ['a', 'b'] })
 
-    const [, init] = fetchMock.mock.calls[0]
-    expect(init?.body).toBe(JSON.stringify({ supportedValues: ['a', 'b'] }))
+    expect(requests[0]?.body).toEqual({ supportedValues: ['a', 'b'] })
   })
 
   it('PATCHes both fields when both are provided', async () => {
-    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
-      okJson({ key: 'module', description: 'd', supportedValues: ['v'] }),
+    const requests: CapturedRequest[] = []
+    server.use(
+      http.patch('*/api/projects/:projectId/labels/catalog/:key', async ({ request }) => {
+        await captureRequest(request, requests)
+        return successResponse({ key: 'module', description: 'd', supportedValues: ['v'] })
+      }),
     )
-    vi.stubGlobal('fetch', fetchMock)
 
     await updateLabelDefinition('proj-1', 'module', {
       description: 'd',
       supportedValues: ['v'],
     })
 
-    const [, init] = fetchMock.mock.calls[0]
-    expect(init?.body).toBe(JSON.stringify({ description: 'd', supportedValues: ['v'] }))
+    expect(requests[0]?.body).toEqual({ description: 'd', supportedValues: ['v'] })
   })
 
   it('encodes the key segment', async () => {
-    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
-      okJson({ key: 'a/b', description: 'x' }),
+    const requests: CapturedRequest[] = []
+    server.use(
+      http.patch('*/api/projects/:projectId/labels/catalog/:key', async ({ request }) => {
+        await captureRequest(request, requests)
+        return successResponse({ key: 'a/b', description: 'x' })
+      }),
     )
-    vi.stubGlobal('fetch', fetchMock)
 
     await updateLabelDefinition('proj-1', 'a/b', { description: 'x' })
 
-    const [calledPath] = fetchMock.mock.calls[0]
-    expect(calledPath).toBe('/api/projects/proj-1/labels/catalog/a%2Fb')
+    expect(requests[0]?.path).toBe('/api/projects/proj-1/labels/catalog/a%2Fb')
   })
 
   it('surfaces the server-provided error on 404', async () => {
-    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
-      errorJson("Key 'missing' not found", 404, 'not_found'),
+    server.use(
+      http.patch('*/api/projects/:projectId/labels/catalog/:key', () => errorResponse("Key 'missing' not found", 404, 'not_found')),
     )
-    vi.stubGlobal('fetch', fetchMock)
 
     await expect(
       updateLabelDefinition('proj-1', 'missing', { description: 'x' }),
@@ -192,23 +231,27 @@ describe('updateLabelDefinition', () => {
 
 describe('deleteLabelDefinition', () => {
   it('treats HTTP 204 as success', async () => {
-    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
-      new Response(null, { status: 204 }),
+    const requests: CapturedRequest[] = []
+    server.use(
+      http.delete('*/api/projects/:projectId/labels/catalog/:key', async ({ request }) => {
+        await captureRequest(request, requests)
+        return new HttpResponse(null, { status: 204 })
+      }),
     )
-    vi.stubGlobal('fetch', fetchMock)
 
     await expect(deleteLabelDefinition('proj-1', 'module')).resolves.toBeUndefined()
 
-    const [calledPath, init] = fetchMock.mock.calls[0]
-    expect(calledPath).toBe('/api/projects/proj-1/labels/catalog/module')
-    expect(init?.method).toBe('DELETE')
+    expect(requests).toEqual([{
+      path: '/api/projects/proj-1/labels/catalog/module',
+      method: 'DELETE',
+      contentType: 'application/json',
+    }])
   })
 
   it('surfaces the server-provided error on 404', async () => {
-    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
-      errorJson("Key 'missing' not found", 404, 'not_found'),
+    server.use(
+      http.delete('*/api/projects/:projectId/labels/catalog/:key', () => errorResponse("Key 'missing' not found", 404, 'not_found')),
     )
-    vi.stubGlobal('fetch', fetchMock)
 
     await expect(deleteLabelDefinition('proj-1', 'missing')).rejects.toThrow(
       'not found',

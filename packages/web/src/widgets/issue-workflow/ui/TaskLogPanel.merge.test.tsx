@@ -68,7 +68,7 @@ describe('mergeTaskLogDelta — pure merge', () => {
     expect(merged.truncated).toBe(true)
   })
 
-  it('mergeTaskLogDelta is byte-identical to Phase 1/2 — TaskLogLine shape stays {seq,timestamp,source,text} and no "kind" leaks in', () => {
+  it('keeps the TaskLogLine shape stable while merging deltas', () => {
     const page = makePage([makeLine({ seq: 1, text: 'a' })])
     const delta = makeEnvelope([{ seq: 99, source: 'session', text: 'fake-milestone' }])
     const merged = mergeTaskLogDelta(page, delta)

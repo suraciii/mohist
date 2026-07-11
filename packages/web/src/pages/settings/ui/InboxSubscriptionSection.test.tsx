@@ -1,4 +1,3 @@
-// @vitest-environment jsdom
 import '@testing-library/jest-dom'
 import { render, screen } from '../../../../tests/test-utils'
 import userEvent from '@testing-library/user-event'

@@ -1,4 +1,3 @@
-// @vitest-environment jsdom
 import '@testing-library/jest-dom'
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
@@ -87,7 +86,7 @@ afterEach(() => {
   mockSystemInfo(baseSystemInfo)
 })
 
-describe('SystemSettingsSection (T-005)', () => {
+describe('SystemSettingsSection', () => {
   it('renders the Log Path sourced from systemInfo.paths.logs, not a hardcoded string', async () => {
     renderSection()
 

@@ -477,7 +477,7 @@ function SessionHeader({
           </>
         )}
         {siblingNav && (
-          <div className="ml-auto shrink-0 flex items-center gap-1" data-testid="session-sibling-navigation-slot">
+          <div className="ml-auto flex max-w-full min-w-0 flex-wrap items-center gap-1" data-testid="session-sibling-navigation-slot">
             {siblingNav}
           </div>
         )}

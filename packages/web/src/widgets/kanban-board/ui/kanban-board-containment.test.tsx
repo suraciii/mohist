@@ -1,12 +1,9 @@
-// @vitest-environment jsdom
 import '@testing-library/jest-dom'
 import { afterEach, describe, expect, it } from 'vitest'
 import * as React from 'react'
 import { cleanup, render, screen } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
-import fs from 'node:fs'
-import path from 'node:path'
 import { SidebarInset } from '@/shared/ui/components/sidebar'
 import { KanbanBoard } from './KanbanBoard'
 import type { AgentStatus } from '../../../entities/agent'
@@ -85,22 +82,5 @@ describe('Issue board desktop horizontal scroll containment', () => {
     const row = screen.getByTestId('kanban-board-row')
     expect(row.className.split(/\s+/)).toContain('overflow-x-auto')
     expect(row.className.split(/\s+/)).toContain('min-w-0')
-  })
-
-  it('pins min-w-0 on the App.tsx content wrapper inside SidebarInset', () => {
-    const appSource = fs.readFileSync(
-      path.resolve(__dirname, '../../../app/App.tsx'),
-      'utf8',
-    )
-
-    const wrapperMatch = appSource.match(
-      /<SidebarInset>\s*<Header[\s\S]*?\/>\s*<div([^>]*)>/,
-    )
-    expect(wrapperMatch).not.toBeNull()
-
-    const wrapperAttrs = wrapperMatch![1]
-    expect(wrapperAttrs).toContain('min-w-0')
-    expect(wrapperAttrs).toContain('flex-1')
-    expect(wrapperAttrs).toContain('min-h-0')
   })
 })

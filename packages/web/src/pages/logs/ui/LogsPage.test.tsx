@@ -1,4 +1,3 @@
-// @vitest-environment jsdom
 import '@testing-library/jest-dom'
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -82,7 +81,8 @@ describe('LogsPage: File: source line', () => {
 
     render(<LogsPage />)
 
-    await waitFor(() => expect(screen.queryByText(/^File:/)).not.toBeInTheDocument())
+    expect(await screen.findByText('No matching logs')).toBeInTheDocument()
+    expect(screen.queryByText(/^File:/)).not.toBeInTheDocument()
   })
 })
 

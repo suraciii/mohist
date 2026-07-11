@@ -1,4 +1,4 @@
-import { defineConfig } from 'vitest/config'
+import { configDefaults, defineConfig } from 'vitest/config'
 
 // Runner test configuration. Globals auto-restore reduces the flake risk of a
 // stubbed globalThis.fetch leaking across tests; clearMocks resets mock call
@@ -8,6 +8,9 @@ import { defineConfig } from 'vitest/config'
 export default defineConfig({
   test: {
     unstubGlobals: true,
+    unstubEnvs: true,
     clearMocks: true,
+    exclude: [...configDefaults.exclude, 'tests/integration/**'],
+    setupFiles: ['./tests/setup.common.ts', './tests/setup.default.ts'],
   },
 })

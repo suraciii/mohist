@@ -1,4 +1,3 @@
-// @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react'
@@ -71,7 +70,7 @@ function makeEpic(overrides: Record<string, unknown> = {}) {
   }
 }
 
-describe('EpicDetailPage single prominent primary action (T-001)', () => {
+describe('EpicDetailPage single prominent primary action', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     _issuesData = issues

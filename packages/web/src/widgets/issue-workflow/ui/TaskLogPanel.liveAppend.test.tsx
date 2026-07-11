@@ -1,4 +1,3 @@
-// @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
 import { QueryClientProvider, useQuery } from '@tanstack/react-query'
@@ -23,6 +22,7 @@ import {
   newQueryClient,
   type TaskLogTestState,
 } from './_taskLogPanelTestUtils'
+import { deferNextFakeConnectionStart } from '../../../../tests/support/signalr-fake'
 
 const _taskLogPageRef: { current: TaskLogPage | undefined } = { current: undefined }
 const queryClients = new Set<TaskLogTestState['queryClient']>()
@@ -57,7 +57,7 @@ function createTaskLogTestState(initialPage: TaskLogPage | undefined): TaskLogTe
   }
 }
 
-describe('TaskLogPanel — live append (Phase 2 T-004)', () => {
+describe('TaskLogPanel live append', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     fakeConnections.length = 0
@@ -72,7 +72,7 @@ describe('TaskLogPanel — live append (Phase 2 T-004)', () => {
     queryClients.clear()
   })
 
-  it('renders Phase 1 line-by-line output (non-regression)', async () => {
+  it('renders cached log lines in sequence', async () => {
     const testState = createTaskLogTestState(makePage([
       makeLine({ seq: 1, text: 'Cloning repo' }),
       makeLine({ seq: 2, text: 'CONFLICT' }),
@@ -89,39 +89,36 @@ describe('TaskLogPanel — live append (Phase 2 T-004)', () => {
 
   it('calls SubscribeTaskLogAsync when the task is running, the panel is rendered, and the connection is ready', async () => {
     const testState = createTaskLogTestState(makePage([]))
+    deferNextFakeConnectionStart()
 
     renderWithTaskLogProviders(
       <TaskLogPanel issueNumber={161} taskId="build-task-1" workflowRunId="wr-1" taskStatus="running" />,
       testState,
     )
 
-    await flushAndGetLastConnection()
-
-    await waitFor(() => {
-      expect(recordedInvokes.some((inv) => inv.method === 'SubscribeTaskLogAsync')).toBe(true)
-    })
+    const conn = await flushAndGetLastConnection()
+    await conn.waitForInvoke('SubscribeTaskLogAsync')
     const subInvoke = recordedInvokes.find((inv) => inv.method === 'SubscribeTaskLogAsync')
     expect(subInvoke?.args).toEqual(['wr-1', 'build-task-1'])
   })
 
   it('does not subscribe the task-log panel connection to domain or transcript event types', async () => {
     const testState = createTaskLogTestState(makePage([]))
+    deferNextFakeConnectionStart()
 
     renderWithTaskLogProviders(
       <TaskLogPanel issueNumber={161} taskId="build-task-1" workflowRunId="wr-1" taskStatus="running" />,
       testState,
     )
 
-    await flushAndGetLastConnection()
-
-    await waitFor(() => {
-      expect(recordedInvokes.some((inv) => inv.method === 'SubscribeTaskLogAsync')).toBe(true)
-    })
+    const conn = await flushAndGetLastConnection()
+    await conn.waitForInvoke('SubscribeTaskLogAsync')
     expect(recordedInvokes.some((inv) => inv.method === 'SetSubscriptionsAsync')).toBe(false)
   })
 
   it('does not subscribe when the task is in a terminal state', async () => {
     const testState = createTaskLogTestState(makePage([]))
+    deferNextFakeConnectionStart()
 
     renderWithTaskLogProviders(
       <TaskLogPanel issueNumber={161} taskId="build-task-1" workflowRunId="wr-1" taskStatus="failed" />,
@@ -130,15 +127,12 @@ describe('TaskLogPanel — live append (Phase 2 T-004)', () => {
 
     await flushAndGetLastConnection()
 
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 0))
-    })
-
     expect(recordedInvokes.some((inv) => inv.method === 'SubscribeTaskLogAsync')).toBe(false)
   })
 
   it('does not subscribe when workflowRunId is missing', async () => {
     const testState = createTaskLogTestState(makePage([]))
+    deferNextFakeConnectionStart()
 
     renderWithTaskLogProviders(
       <TaskLogPanel issueNumber={161} taskId="build-task-1" workflowRunId={null} taskStatus="running" />,
@@ -147,10 +141,6 @@ describe('TaskLogPanel — live append (Phase 2 T-004)', () => {
 
     await flushAndGetLastConnection()
 
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 0))
-    })
-
     expect(recordedInvokes.some((inv) => inv.method === 'SubscribeTaskLogAsync')).toBe(false)
   })
 
@@ -158,6 +148,7 @@ describe('TaskLogPanel — live append (Phase 2 T-004)', () => {
     const testState = createTaskLogTestState(makePage([
       makeLine({ seq: 1, timestamp: '2026-07-03T08:00:00.000Z', text: 'before' }),
     ]))
+    deferNextFakeConnectionStart()
 
     renderWithTaskLogProviders(
       <TaskLogPanel issueNumber={161} taskId="build-task-1" workflowRunId="wr-1" taskStatus="running" />,
@@ -189,6 +180,7 @@ describe('TaskLogPanel — live append (Phase 2 T-004)', () => {
       makeLine({ seq: 5, text: 'cached-5' }),
       makeLine({ seq: 6, text: 'cached-6' }),
     ]))
+    deferNextFakeConnectionStart()
 
     renderWithTaskLogProviders(
       <TaskLogPanel issueNumber={161} taskId="build-task-1" workflowRunId="wr-1" taskStatus="running" />,
@@ -218,6 +210,7 @@ describe('TaskLogPanel — live append (Phase 2 T-004)', () => {
 
   it('ignores deltas from a different workflowRunId even when taskId matches', async () => {
     const testState = createTaskLogTestState(makePage([]))
+    deferNextFakeConnectionStart()
 
     renderWithTaskLogProviders(
       <TaskLogPanel issueNumber={161} taskId="build-task-1" workflowRunId="wr-2" taskStatus="running" />,
@@ -232,15 +225,12 @@ describe('TaskLogPanel — live append (Phase 2 T-004)', () => {
       handler!(makeEnvelope([{ seq: 1, text: 'wrong-run' }], { ownerId: 'wr-1' }))
     })
 
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 0))
-    })
-
     expect(screen.queryByText('wrong-run')).not.toBeInTheDocument()
   })
 
   it('ignores deltas scoped to a different taskId', async () => {
     const testState = createTaskLogTestState(makePage([]))
+    deferNextFakeConnectionStart()
 
     renderWithTaskLogProviders(
       <TaskLogPanel issueNumber={161} taskId="build-task-1" workflowRunId="wr-1" taskStatus="running" />,
@@ -255,16 +245,13 @@ describe('TaskLogPanel — live append (Phase 2 T-004)', () => {
       handler!(makeEnvelope([{ seq: 1, text: 'for-other-task' }], { taskId: 'other-task' }))
     })
 
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 0))
-    })
-
     expect(screen.queryByText('for-other-task')).not.toBeInTheDocument()
   })
 
   it('triggers queryClient.invalidateQueries for the task-log key when the task reaches a terminal state', async () => {
     const queryClient = newQueryClient()
     const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
+    deferNextFakeConnectionStart()
 
     const { rerender } = render(
       <QueryClientProvider client={queryClient}>
@@ -298,29 +285,27 @@ describe('TaskLogPanel — live append (Phase 2 T-004)', () => {
 
   it('calls UnsubscribeTaskLogAsync when the panel unmounts while subscribed', async () => {
     const testState = createTaskLogTestState(makePage([]))
+    deferNextFakeConnectionStart()
 
     const { unmount } = renderWithTaskLogProviders(
       <TaskLogPanel issueNumber={161} taskId="build-task-1" workflowRunId="wr-1" taskStatus="running" />,
       testState,
     )
 
-    await flushAndGetLastConnection()
-    await waitFor(() => {
-      expect(recordedInvokes.some((inv) => inv.method === 'SubscribeTaskLogAsync')).toBe(true)
-    })
+    const conn = await flushAndGetLastConnection()
+    await conn.waitForInvoke('SubscribeTaskLogAsync')
 
     recordedInvokes.length = 0
     unmount()
 
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 0))
-    })
+    await conn.waitForInvoke('UnsubscribeTaskLogAsync')
 
     expect(recordedInvokes.some((inv) => inv.method === 'UnsubscribeTaskLogAsync')).toBe(true)
   })
 
   it('re-subscribes the active task-log scope after SignalR reconnect', async () => {
     const testState = createTaskLogTestState(makePage([]))
+    deferNextFakeConnectionStart()
 
     renderWithTaskLogProviders(
       <TaskLogPanel issueNumber={161} taskId="build-task-1" workflowRunId="wr-1" taskStatus="running" />,
@@ -328,30 +313,24 @@ describe('TaskLogPanel — live append (Phase 2 T-004)', () => {
     )
 
     const conn = await flushAndGetLastConnection()
-    await waitFor(() => {
-      expect(recordedInvokes.filter((inv) => inv.method === 'SubscribeTaskLogAsync')).toHaveLength(1)
-    })
+    await conn.waitForInvoke('SubscribeTaskLogAsync')
 
     await act(async () => {
       conn.emit('reconnected')
     })
 
-    await waitFor(() => {
-      expect(recordedInvokes.filter((inv) => inv.method === 'SubscribeTaskLogAsync')).toHaveLength(2)
-    })
+    await conn.waitForInvoke('SubscribeTaskLogAsync', 2)
   })
 
   it('does not subscribe for pending or missing task status', async () => {
     const pendingState = createTaskLogTestState(makePage([]))
+    deferNextFakeConnectionStart()
     const { unmount } = renderWithTaskLogProviders(
       <TaskLogPanel issueNumber={161} taskId="build-task-1" workflowRunId="wr-1" taskStatus="pending" />,
       pendingState,
     )
 
     await flushAndGetLastConnection()
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 0))
-    })
     expect(recordedInvokes.some((inv) => inv.method === 'SubscribeTaskLogAsync')).toBe(false)
 
     unmount()
@@ -359,19 +338,18 @@ describe('TaskLogPanel — live append (Phase 2 T-004)', () => {
     recordedInvokes.length = 0
 
     const missingState = createTaskLogTestState(makePage([]))
+    mockConnectionBuilder()
+    deferNextFakeConnectionStart()
     renderWithTaskLogProviders(
       <TaskLogPanel issueNumber={161} taskId="build-task-1" workflowRunId="wr-1" />,
       missingState,
     )
 
     await flushAndGetLastConnection()
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 0))
-    })
     expect(recordedInvokes.some((inv) => inv.method === 'SubscribeTaskLogAsync')).toBe(false)
   })
 
-  it('preserves the truncation indicator from cached data (Phase 1 rendering non-regression)', async () => {
+  it('preserves the truncation indicator from cached data', async () => {
     const testState = createTaskLogTestState(makePage([
       makeLine({ seq: 4999, text: 'CONFLICT' }),
       makeLine({ seq: 5000, text: 'Patch failed' }),
@@ -385,7 +363,7 @@ describe('TaskLogPanel — live append (Phase 2 T-004)', () => {
     expect(await screen.findByTestId('task-log-truncation-indicator')).toBeInTheDocument()
   })
 
-  it('preserves the empty-state message when no lines are cached (Phase 1 rendering non-regression)', async () => {
+  it('preserves the empty-state message when no lines are cached', async () => {
     const testState = createTaskLogTestState(makePage([]))
 
     renderWithTaskLogProviders(
@@ -396,7 +374,7 @@ describe('TaskLogPanel — live append (Phase 2 T-004)', () => {
     expect(await screen.findByTestId('task-log-empty')).toBeInTheDocument()
   })
 
-  it('shows the full authoritative log when there were no live subscribers during execution (Phase 1 non-regression)', async () => {
+  it('shows the full authoritative log when no live subscriber ran', async () => {
     const testState = createTaskLogTestState(makePage([
       makeLine({ seq: 1, timestamp: '2026-07-03T08:00:00.000Z', text: 'authoritative-line-1' }),
       makeLine({ seq: 2, timestamp: '2026-07-03T08:00:00.050Z', text: 'authoritative-line-2' }),

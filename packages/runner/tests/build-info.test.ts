@@ -1,12 +1,9 @@
 import { describe, expect, it } from "vitest"
 import { loadBuildInfo, manifestCandidatesForTesting } from "../src/runtime/build-info.js"
-// Import the pure builder + git reader from the postbuild script. Importing a
-// .mjs via a dynamic import keeps vitest's transform happy while letting the
-// test exercise the real manifest-construction logic with injected fakes.
-const { buildManifest } = await import("../scripts/write-build-info.mjs")
+import { buildManifest } from "../src/runtime/build-manifest.js"
 
 describe("runner build manifest builder", () => {
-  it("writesManifestMatchingInjectedGitHead", () => {
+  it("buildsManifestMatchingInjectedGitHead", () => {
     const readGitHead = () => "deadbeefcafebabe0000000000000000deadbeef"
     const fixedNow = 1_700_000_000_000
     const manifest = buildManifest(readGitHead, () => fixedNow)
@@ -15,7 +12,7 @@ describe("runner build manifest builder", () => {
     expect(manifest.builtAt).toBe(fixedNow)
   })
 
-  it("writesNullGitHashWhenGitRevParseFails", () => {
+  it("buildsNullGitHashWhenGitRevParseFails", () => {
     // Mirrors the production path: readGitHeadForRepo returns null when git is
     // absent or the directory is not a repo. The builder must propagate null
     // rather than throw, so the postbuild step stays non-fatal.

@@ -1,4 +1,3 @@
-// @vitest-environment jsdom
 import '@testing-library/jest-dom'
 import { cleanup, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -9,7 +8,7 @@ describe('SectionState', () => {
     cleanup()
   })
 
-  describe('additive API contract (T-006)', () => {
+  describe('additive API contract', () => {
     it('renders the empty variant unchanged when no action is supplied', () => {
       const { container } = render(
         <SectionState variant="empty" title="Items" />,

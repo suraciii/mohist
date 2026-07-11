@@ -5,7 +5,8 @@ import { http, HttpResponse } from 'msw'
 import { SessionPage } from '../src/pages/session/ui/SessionPage'
 import type { SessionTurn, CoderSessionDetail, SessionMetadata, AgentSessionMetadata } from '../src/entities/coder-session'
 import { useMswServer } from './support/msw'
-import { renderWithQueryClient as renderPageWithQueryClient, makeTurn, convertLegacyToAgentMetadata, queryClients, originalScrollTo } from './session-page-test-utils'
+import { renderWithQueryClient as renderPageWithQueryClient, makeTurn, convertLegacyToAgentMetadata, queryClients } from './session-page-test-utils'
+import { setScopedValue } from './support/scoped-property'
 
 const sessionPageMocks = {
   sessions: [] as any[],
@@ -85,14 +86,8 @@ function renderWithQueryClient(_ui: ReactElement) {
   return renderPageWithQueryClient(<SessionPage />, route)
 }
 
-const originalClipboardDescriptor = Object.getOwnPropertyDescriptor(navigator, 'clipboard')
-const clipboard = { writeText: vi.fn().mockResolvedValue(undefined) }
-
 beforeEach(() => {
-  Object.defineProperty(navigator, 'clipboard', {
-    value: clipboard,
-    configurable: true,
-  })
+  setScopedValue(navigator, 'clipboard', { writeText: vi.fn().mockResolvedValue(undefined) })
   vi.clearAllMocks()
   sessionApiCalls = []
   sessionPageMocks.sessions = []
@@ -105,19 +100,13 @@ beforeEach(() => {
   sessionPageMocks.detailPending = false
   sessionPageMocks.params = { number: '123', sessionName: 'session-123' }
   sessionPageMocks.workflowRunSessions = []
-  Element.prototype.scrollTo = vi.fn()
+  setScopedValue(Element.prototype, 'scrollTo', vi.fn())
 })
 
 afterEach(() => {
   vi.useRealTimers()
-  Element.prototype.scrollTo = originalScrollTo
   for (const queryClient of queryClients) queryClient.clear()
   queryClients.length = 0
-  if (originalClipboardDescriptor) {
-    Object.defineProperty(navigator, 'clipboard', originalClipboardDescriptor)
-  } else {
-    Reflect.deleteProperty(navigator, 'clipboard')
-  }
 })
 
 describe('SessionPage header and states', () => {
@@ -595,11 +584,10 @@ describe('SessionPage header and states', () => {
       expect(h1).not.toBeNull()
       expect(h1?.textContent?.trim().length ?? 0).toBeGreaterThan(0)
 
-      // Wait for the transcript query to populate the turn count in the header.
-      await screen.findByText('2 turns')
+      const issueLink = screen.getByRole('link', { name: /Issue #123/ })
+      await within(issueLink.closest('.border-b') as HTMLElement).findByText('2 turns')
 
       // Issue back-link resolves to the issue page (not a session sub-route).
-      const issueLink = screen.getByRole('link', { name: /Issue #123/ })
       expect(issueLink.getAttribute('href')).toBe('/Test%20Project/issues/123')
 
       // The main branch must NOT show the legacy sticky compact summary.
@@ -640,8 +628,8 @@ describe('SessionPage header and states', () => {
       })
 
       const { unmount } = renderWithQueryClient(<SessionPage />)
-      // Wait for the transcript query to populate the header (turn count from transcript).
-      await screen.findByText('1 turn')
+      await screen.findByTestId('session-transcript-scroll-container')
+      await within(screen.getByRole('link', { name: /Issue #123/ }).closest('.border-b') as HTMLElement).findByText('1 turn')
       expect(screen.getByText('Build')).toBeInTheDocument()
       const completedBadges = screen.getAllByText('Completed')
       expect(completedBadges.length).toBeGreaterThanOrEqual(1)

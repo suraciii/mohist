@@ -1,4 +1,3 @@
-// @vitest-environment jsdom
 import { describe, expect, it, beforeEach } from 'vitest'
 import { screen, waitFor, fireEvent } from '@testing-library/react'
 import { render } from '../../../../tests/test-utils'
@@ -15,6 +14,7 @@ import {
   type WorkflowArtifact,
 } from '../../../entities/issue'
 import type { WorkflowArtifactContentResult } from '../../../entities/issue/api/client'
+import { setScopedValue } from '../../../../tests/support/scoped-property'
 
 let artifactsData: WorkflowArtifact[] = []
 let artifactContent: WorkflowArtifactContentResult | null = null
@@ -380,38 +380,26 @@ describe('ArtifactContentViewer rendering edge cases', () => {
   })
 
   it('shows "Unable to copy" feedback when navigator.clipboard is unavailable', async () => {
-    const originalClipboard = (navigator as { clipboard?: { writeText?: unknown } }).clipboard
-    Object.defineProperty(navigator, 'clipboard', {
-      value: undefined,
-      configurable: true,
+    setScopedValue(navigator, 'clipboard', undefined)
+    artifactsData = [makeFileArtifact({ artifactId: 'art-copy', path: 'copy.md', size: 50 })]
+    artifactContent = { kind: 'text', content: 'Copy me', contentType: 'text/markdown' }
+
+    render(<LatestArtifactsPanel issueNumber={1} workflowRunId="workflow-run-1" />)
+
+    await waitFor(() => {
+      expect(screen.getByText('copy.md')).toBeInTheDocument()
     })
 
-    try {
-      artifactsData = [makeFileArtifact({ artifactId: 'art-copy', path: 'copy.md', size: 50 })]
-      artifactContent = { kind: 'text', content: 'Copy me', contentType: 'text/markdown' }
+    fireEvent.click(screen.getByText('copy.md'))
 
-      render(<LatestArtifactsPanel issueNumber={1} workflowRunId="workflow-run-1" />)
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Copy' })).toBeInTheDocument()
+    })
 
-      await waitFor(() => {
-        expect(screen.getByText('copy.md')).toBeInTheDocument()
-      })
+    fireEvent.click(screen.getByRole('button', { name: 'Copy' }))
 
-      fireEvent.click(screen.getByText('copy.md'))
-
-      await waitFor(() => {
-        expect(screen.getByRole('button', { name: 'Copy' })).toBeInTheDocument()
-      })
-
-      fireEvent.click(screen.getByRole('button', { name: 'Copy' }))
-
-      await waitFor(() => {
-        expect(screen.getByRole('button', { name: 'Unable to copy' })).toBeInTheDocument()
-      })
-    } finally {
-      Object.defineProperty(navigator, 'clipboard', {
-        value: originalClipboard,
-        configurable: true,
-      })
-    }
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Unable to copy' })).toBeInTheDocument()
+    })
   })
 })

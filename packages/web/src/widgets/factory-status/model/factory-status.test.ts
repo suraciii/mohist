@@ -1,4 +1,3 @@
-// @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentCostMetricDto, AgentStatus } from '../../../entities/agent'
 import { IssueHealth, IssueStatus, type Issue } from '../../../entities/issue'

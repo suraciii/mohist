@@ -7,14 +7,11 @@ import {
   splitDiffByFile,
 } from "../src/server/git-parsers.js"
 
-// Direct unit tests for the pure git-output parsers extracted from
-// `runner-signalr.ts` as part of issue-313 T-002. Behaviour must be
-// byte-identical to the inline implementations: the assertions below
-// mirror every scenario from
-// `openspec/changes/issue-313/specs/workspace-git-queries/spec.md`
-// (Numstat parsers tolerate binary entries and malformed lines + Ahead/behind
-// and commit parsers tolerate malformed output) plus the per-file diff b/
-// path key behaviour that `GetDiff` depends on.
+// Direct unit tests for the pure git-output parsers. Behaviour must remain
+// byte-identical to the former inline implementations: numstat parsers
+// tolerate binary entries and malformed lines; ahead/behind and commit
+// parsers tolerate malformed output; and per-file diffs use the b/ path key
+// required by `GetDiff`.
 
 describe("git-parsers", () => {
   describe("parseDiffFiles", () => {

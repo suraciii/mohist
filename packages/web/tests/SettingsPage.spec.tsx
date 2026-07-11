@@ -739,7 +739,7 @@ describe('SettingsPage', () => {
     })
   })
 
-  describe('No-project empty state (T-006)', () => {
+  describe('No-project empty state', () => {
     it('renders the no-project CTA in the Repositories section when no project is selected', () => {
       renderWithoutProject(<SettingsPage />, ['/settings/repositories'])
 

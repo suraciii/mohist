@@ -1,11 +1,11 @@
-import { afterEach, describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { acpAgentAction, setAcpProcessFactoryForTest } from "../../src/actions/acp-agent.js"
+import { stringInput } from "../../src/core/json.js"
 import { setPromptLoaderRegistryForTest } from "../../src/core/prompt.js"
 import {
   contextWithOverrides,
   createSharedSessionFixture,
   resetAcpTestHooks,
-  runAcpActionUntilSettled,
   useAcpFakeTimers,
 } from "./support.js"
 
@@ -15,18 +15,54 @@ afterEach(() => {
   resetAcpTestHooks()
 })
 
+async function runWithProviderDefaultModelWarning<T>(context: Parameters<typeof acpAgentAction>[0], operation: () => Promise<T>): Promise<T> {
+  const warningSpy = vi.spyOn(console, "warn").mockClear().mockImplementation(() => undefined)
+  try {
+    const result = await operation()
+
+    expect(warningSpy).toHaveBeenCalledTimes(1)
+    expect(warningSpy).toHaveBeenNthCalledWith(
+      1,
+      "mohist acp model not configured; using provider default",
+      providerDefaultModelWarningContext(context),
+    )
+    return result
+  } finally {
+    warningSpy.mockRestore()
+  }
+}
+
+function providerDefaultModelWarningContext(context: Parameters<typeof acpAgentAction>[0]) {
+  return {
+    workflowRunId: context.workflowRunId,
+    workId: context.workId,
+    stage: context.stage,
+    sessionName: stringInput(context.with, "session") ?? context.workId,
+    requestedModel: null,
+    requestedModelSource: "none",
+  }
+}
+
 describe("mohist/acp-agent resumed shared sessions", () => {
   it("ResumedSharedSessionStreamsThoughtChunks_ProbeWindowCrossed_DoesNotTimeoutOrAppendThoughtText", async () => {
     useAcpFakeTimers()
     const shared = createSharedSessionFixture("thought-liveness", { sessionRecord: { acpSessionId: "server-session-1" } })
 
-    const result = await runAcpActionUntilSettled(acpAgentAction(contextWithOverrides({
+    const context = contextWithOverrides({
       prompt: "long resumed task",
       session: "shared-session",
       livenessQuietThresholdMs: 50,
       probeTimeoutMs: 80,
       timeout: 1_000,
-    }, undefined, shared.context())))
+    }, undefined, shared.context())
+    const action = runWithProviderDefaultModelWarning(context, () => acpAgentAction(context))
+    await shared.agent.waitForPrompt()
+    await vi.advanceTimersByTimeAsync(20)
+    await vi.advanceTimersByTimeAsync(20)
+    await vi.advanceTimersByTimeAsync(20)
+    await vi.advanceTimersByTimeAsync(20)
+    await vi.advanceTimersByTimeAsync(20)
+    const result = await action
 
     expect(result.status).toBe("success")
     expect(shared.serverConnection.calls.some((entry) => entry.event === "getWorkflowAgentSession" || entry.event === "openWorkflowAgentSession")).toBe(true)

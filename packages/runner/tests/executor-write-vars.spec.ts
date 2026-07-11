@@ -3,18 +3,29 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { ActionRegistry } from "../src/actions/registry.js"
-import type { ActionContext, JsonObject, WorkItem } from "../src/core/types.js"
+import type { ActionContext, JsonObject, RenderedWorkItem } from "../src/core/types.js"
 import { WorkExecutor } from "../src/runtime/executor.js"
+import { setExecutorGitRunnerForTest, type GitRunner } from "../src/runtime/git-probe.js"
 import type { ServerConnection } from "../src/server/connection.js"
 import { verifyOnlyWorkspaceManager } from "./support/workspace-mock.js"
 
 let workDir: string
 
+const nonGitRunner: GitRunner = async () => ({
+  success: false,
+  stdout: "",
+  stderr: "not a git repository",
+  exitCode: 128,
+  combinedOutput: "not a git repository",
+})
+
 beforeEach(async () => {
+  setExecutorGitRunnerForTest(nonGitRunner)
   workDir = await mkdtemp(join(tmpdir(), "mohist-executor-write-vars-"))
 })
 
 afterEach(async () => {
+  setExecutorGitRunnerForTest(null)
   await rm(workDir, { recursive: true, force: true })
 })
 
@@ -56,7 +67,7 @@ describe("WorkExecutor mid-execution variable writes", () => {
   })
 })
 
-function buildWork(): WorkItem {
+function buildWork(): RenderedWorkItem {
   return {
     workflowRunId: "wf-write-vars",
     workId: "work-write-vars",

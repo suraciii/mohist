@@ -1,4 +1,3 @@
-// @vitest-environment jsdom
 import '@testing-library/jest-dom'
 import { fireEvent, render, screen, waitFor } from '../../../../tests/test-utils'
 import { http, HttpResponse } from 'msw'
@@ -328,7 +327,7 @@ describe('LabelCatalogSection', () => {
     expect(updateCaptures[0].patch).toEqual({ description: 'Classifies the subsystem', supportedValues: [] })
   })
 
-  it('deletes an entry via DELETE only after the shared AlertDialog is confirmed (T-002)', async () => {
+  it('deletes an entry via DELETE only after the shared AlertDialog is confirmed', async () => {
     _catalogData = [moduleDef]
 
     renderSection()
@@ -350,7 +349,7 @@ describe('LabelCatalogSection', () => {
     expect(deleteCaptures[0]).toBe('module')
   })
 
-  it('does not invoke the delete mutation when the AlertDialog is cancelled (T-002)', async () => {
+  it('does not invoke the delete mutation when the AlertDialog is cancelled', async () => {
     _catalogData = [moduleDef]
 
     renderSection()
@@ -368,7 +367,7 @@ describe('LabelCatalogSection', () => {
     expect(deleteCaptures).toHaveLength(0)
   })
 
-  it('renders a single shared AlertDialog instance for the whole section, not per row (T-002)', async () => {
+  it('renders a single shared AlertDialog instance for the whole section, not per row', async () => {
     _catalogData = [moduleDef, refactorDef]
 
     renderSection()
@@ -430,7 +429,7 @@ describe('LabelCatalogSection', () => {
     expect(screen.getByRole('status')).toBeInTheDocument()
   })
 
-  it('wires aria-invalid + aria-describedby only on the invalid add-form field (T-003)', async () => {
+  it('wires aria-invalid + aria-describedby only on the invalid add-form field', async () => {
     renderSection()
 
     await screen.findByTestId('label-catalog-add-key')
@@ -458,7 +457,7 @@ describe('LabelCatalogSection', () => {
     expect(valuesInput).not.toHaveAttribute('aria-describedby')
   })
 
-  it('wires aria-invalid + aria-describedby only on the invalid edit-form field (T-003)', async () => {
+  it('wires aria-invalid + aria-describedby only on the invalid edit-form field', async () => {
     _catalogData = [moduleDef]
 
     renderSection()
@@ -485,7 +484,7 @@ describe('LabelCatalogSection', () => {
     expect(valuesInput).not.toHaveAttribute('aria-describedby')
   })
 
-  it('shows edit server errors as form-level alerts without marking every edit field invalid (T-003)', async () => {
+  it('shows edit server errors as form-level alerts without marking every edit field invalid', async () => {
     _catalogData = [moduleDef]
     _updateError = "Key 'module' not found in the project catalog."
 
@@ -509,7 +508,7 @@ describe('LabelCatalogSection', () => {
     expect(valuesInput).not.toHaveAttribute('aria-describedby')
   })
 
-  it('renders an inline New definition CTA when the catalog is empty (T-006)', async () => {
+  it('renders an inline New definition CTA when the catalog is empty', async () => {
     renderSection()
 
     const newButton = await screen.findByTestId('label-catalog-empty-new-button')
@@ -517,7 +516,7 @@ describe('LabelCatalogSection', () => {
     expect(newButton).toHaveTextContent(/New definition/)
   })
 
-  describe('Search input (T-007)', () => {
+  describe('Search input', () => {
     it('renders a search input with an accessible label when a project is selected', async () => {
       _catalogData = [moduleDef, refactorDef]
 

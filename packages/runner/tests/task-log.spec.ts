@@ -287,7 +287,7 @@ describe("TaskLogger single sink", () => {
   })
 })
 
-describe("TaskLogCollector incremental drain + sent-seq watermark (Phase 2 T-003)", () => {
+describe("TaskLogCollector incremental drain and sent-sequence watermark", () => {
   let now: Date
   beforeEach(() => {
     vi.useFakeTimers()
