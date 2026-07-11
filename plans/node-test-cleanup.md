@@ -68,11 +68,11 @@ Update table after every gate. Another agent should resume without archaeology.
 | Shared state | DONE | Boundary checker self-test, 297-file scan, Web typecheck, 297/4531 suite, and fixed shuffle seed 20260710 passed |
 | Fake time | DONE | Boundary checker self-test, Runner/Web scans, typechecks, 73/1036 Runner, 297/4531 Web, and fixed-seed shuffle passed |
 | Browser truth | DONE | checker self-test, 297-file Web scan, typecheck, 297/4528 Web suite, build, and two retry-free CI-mode 39/39 Chromium E2E runs passed |
-| Temp ownership | DONE | Runner test temp helper, six planned owners, target 7/99 isolated-TMPDIR proof, 74/1038 Runner suite, and test typecheck passed; final full-suite TMPDIR proof remains after its named dependencies |
+| Temp ownership | DONE | Runner test temp helper, seven owners including artifact capture, isolated full 87/1005 TMPDIR proof, and test typecheck passed |
 | Platform split | DONE | Runner typecheck/test typecheck, boundary checker, 73/1005 default suite with Git absent from PATH, and repeated 8/36 isolated integration suite passed; CI stays one Node job |
 | Web boundaries | DONE | checker self-test; Web 297 and Runner 81 scans; Web typecheck; 297/4509 normal and fixed-shuffle suite; MSW HTTP boundary, suffix-only environment, and source-read cleanup complete |
-| File size | IN PROGRESS | 192e52d64 ACP, 06da4cdff CleanupLoop, and eb2a1ed7e RunnerHost splits; budget and identity-comparison infrastructure |
-| Final proof | TODO | |
+| File size | DONE | c6dde6695 budget and identity tools; 192e52d64, 06da4cdff, eb2a1ed7e, 1ffa1a1b9, 36b090173, 247b624ab, 0e55f92b3, and def318cd8 splits; 1005 Runner and 4509 Web identities retained; typechecks and committed-history gates passed |
+| Final proof | DONE | checker/comparator self-tests; build; Runner 87/1005 and integration 8/36; Web 313/4509 and E2E 39/39; history gates; three fixed seeds on both suites; isolated TMPDIR/HOME/Git proof; NOT LIVE-VERIFIED |
 
 Status is `TODO`, `IN PROGRESS`, `DONE`, `SKIPPED: reason`, or
 `BLOCKED: command + error`.
@@ -1094,26 +1094,26 @@ git status --short
 
 ## Done
 
-- [ ] ledger complete.
-- [ ] Runner source and test typecheck pass.
-- [ ] no hidden Runner console error.
-- [ ] no unscoped Web process-global mutation.
-- [ ] no real-time synchronization in default tests.
-- [ ] no jsdom geometry claim.
-- [ ] false absence assertions wait for positive completion.
-- [ ] browser tests run in CI entry point.
-- [ ] default and integration TMPDIR empty.
-- [ ] default Runner runtime guard blocks external process.
-- [ ] all 13 platform candidates have disposition.
-- [ ] integration uses isolated HOME and Git config.
-- [ ] Web fetch tests use MSW.
-- [ ] Web environment comes from suffix only.
-- [ ] no Web `vi.mock`, source regex test, or old ratchet.
-- [ ] file budget checker passes and baseline never grows.
-- [ ] named giant files split.
-- [ ] Vitest identity compare shows no silent coverage loss.
-- [ ] three Web and three Runner fixed seeds pass.
-- [ ] no C# or unrelated file changed.
+- [x] ledger complete.
+- [x] Runner source and test typecheck pass.
+- [x] no hidden Runner console error.
+- [x] no unscoped Web process-global mutation.
+- [x] no real-time synchronization in default tests.
+- [x] no jsdom geometry claim.
+- [x] false absence assertions wait for positive completion.
+- [x] browser tests run in CI entry point.
+- [x] default and integration TMPDIR empty.
+- [x] default Runner runtime guard blocks external process.
+- [x] all 13 platform candidates have disposition.
+- [x] integration uses isolated HOME and Git config.
+- [x] Web fetch tests use MSW.
+- [x] Web environment comes from suffix only.
+- [x] no Web `vi.mock`, source regex test, or old ratchet.
+- [x] file budget checker passes and baseline never grows.
+- [x] named giant files split.
+- [x] Vitest identity compare shows no silent coverage loss.
+- [x] three Web and three Runner fixed seeds pass.
+- [x] no C# or unrelated file changed.
 
 ## Stop
 
