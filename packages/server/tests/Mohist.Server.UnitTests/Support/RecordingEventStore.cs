@@ -78,7 +78,7 @@ public class RecordingEventStore : IEventStore
         }
     }
 
-    public Task MarkDispatchedAsync(string source, long id, DateTimeOffset dispatchedAt, CancellationToken ct = default) => Task.CompletedTask;
+    public Task MarkDispatchedAsync(EventOrigin origin, string source, long id, DateTimeOffset dispatchedAt, CancellationToken ct = default) => Task.CompletedTask;
 
     public Task<IReadOnlyList<UndeliveredEvent>> ListUndeliveredAsync(int limit = 100, CancellationToken ct = default) =>
         Task.FromResult<IReadOnlyList<UndeliveredEvent>>([]);

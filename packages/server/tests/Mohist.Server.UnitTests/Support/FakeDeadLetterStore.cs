@@ -43,7 +43,12 @@ public sealed class FakeDeadLetterStore : IDeadLetterStore
             throw new InvalidOperationException("simulated dead-letter settlement failure");
 
         if (EventStore is not null)
-            await EventStore.MarkDispatchedAsync(sourceEvent.Source, sourceEvent.Id, dispatchedAt, ct);
+            await EventStore.MarkDispatchedAsync(
+                sourceEvent.Origin,
+                sourceEvent.Source,
+                sourceEvent.Id,
+                dispatchedAt,
+                ct);
 
         lock (_gate)
         {

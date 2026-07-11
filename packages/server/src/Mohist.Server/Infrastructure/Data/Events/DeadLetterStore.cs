@@ -63,6 +63,7 @@ public sealed class DeadLetterStore : IDeadLetterStore
 
         await EventStore.SetDispatchedAsync(
             db,
+            sourceEvent.Origin,
             sourceEvent.Source,
             sourceEvent.Id,
             dispatchedAt,

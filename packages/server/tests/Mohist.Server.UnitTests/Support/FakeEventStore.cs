@@ -60,13 +60,19 @@ public sealed class FakeEventStore : IEventStore
     public Task<IReadOnlyList<StoredCloudEvent>> ListAgentSessionEventsAsync(string sessionId, int limit = 200, CancellationToken ct = default) =>
         Task.FromResult<IReadOnlyList<StoredCloudEvent>>([]);
 
-    public Task MarkDispatchedAsync(string source, long id, DateTimeOffset dispatchedAt, CancellationToken ct = default)
+    public Task MarkDispatchedAsync(
+        EventOrigin origin,
+        string source,
+        long id,
+        DateTimeOffset dispatchedAt,
+        CancellationToken ct = default)
     {
         if (ThrowOnMark is not null)
         {
             lock (_gate)
             {
-                var match = _undelivered.FirstOrDefault(e => e.Source == source && e.Id == id);
+                var match = _undelivered.FirstOrDefault(e =>
+                    e.Origin == origin && e.Source == source && e.Id == id);
                 if (match is not null && ThrowOnMark(match))
                     throw new InvalidOperationException(
                         $"simulated mark-dispatched failure for {source}/{id}");
@@ -74,8 +80,8 @@ public sealed class FakeEventStore : IEventStore
         }
         lock (_gate)
         {
-            _marked.Add(new RecordedDispatch(source, id, dispatchedAt));
-            _undelivered.RemoveAll(e => e.Source == source && e.Id == id);
+            _marked.Add(new RecordedDispatch(origin, source, id, dispatchedAt));
+            _undelivered.RemoveAll(e => e.Origin == origin && e.Source == source && e.Id == id);
         }
         return Task.CompletedTask;
     }
@@ -132,7 +138,11 @@ public sealed class FakeEventStore : IEventStore
         }
     }
 
-    public sealed record RecordedDispatch(string Source, long Id, DateTimeOffset DispatchedAt);
+    public sealed record RecordedDispatch(
+        EventOrigin Origin,
+        string Source,
+        long Id,
+        DateTimeOffset DispatchedAt);
 
     /// <summary>
     /// Builds an <see cref="UndeliveredEvent"/> with sensible defaults for

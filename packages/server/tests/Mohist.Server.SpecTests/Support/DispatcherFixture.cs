@@ -79,9 +79,14 @@ public sealed class CapturingEventStore : IEventStore
     public Task<IReadOnlyList<StoredCloudEvent>> ListAgentSessionEventsAsync(string sessionId, int limit = 200, CancellationToken ct = default) =>
         Task.FromResult<IReadOnlyList<StoredCloudEvent>>([]);
 
-    public Task MarkDispatchedAsync(string source, long id, DateTimeOffset dispatchedAt, CancellationToken ct = default)
+    public Task MarkDispatchedAsync(
+        EventOrigin origin,
+        string source,
+        long id,
+        DateTimeOffset dispatchedAt,
+        CancellationToken ct = default)
     {
-        lock (_gate) { _rows.RemoveAll(r => r.Source == source && r.Id == id); }
+        lock (_gate) { _rows.RemoveAll(r => r.Origin == origin && r.Source == source && r.Id == id); }
         return Task.CompletedTask;
     }
 
@@ -166,7 +171,12 @@ public sealed class CapturingDeadLetterStore : IDeadLetterStore
         DateTimeOffset dispatchedAt,
         CancellationToken ct = default)
     {
-        await _events.MarkDispatchedAsync(sourceEvent.Source, sourceEvent.Id, dispatchedAt, ct);
+        await _events.MarkDispatchedAsync(
+            sourceEvent.Origin,
+            sourceEvent.Source,
+            sourceEvent.Id,
+            dispatchedAt,
+            ct);
         foreach (var row in rows)
             await WriteAsync(row, ct);
     }

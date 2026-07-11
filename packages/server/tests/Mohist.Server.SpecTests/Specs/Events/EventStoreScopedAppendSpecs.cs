@@ -211,10 +211,42 @@ public class EventStoreScopedAppendSpecs : IAsyncLifetime
             AgentSessionEventPersistence.AgentSessionSource(sessionId),
             "com.mohist.agent.session.bound"));
 
-        await _store.MarkDispatchedAsync(AgentSessionEventPersistence.AgentSessionSource(sessionId), 1, DateTimeOffset.UtcNow);
+        await _store.MarkDispatchedAsync(
+            EventOrigin.AgentSession,
+            AgentSessionEventPersistence.AgentSessionSource(sessionId),
+            1,
+            FixedTime);
 
         var undelivered = await _store.ListUndeliveredAsync();
         Assert.DoesNotContain(undelivered, r => r.Origin == EventOrigin.AgentSession);
+    }
+
+    [Fact]
+    public async Task AppendAsync_FallbackSource_CanBeMarkedFromReportedOrigin()
+    {
+        var source = new Uri("test://custom-source");
+        await _store.AppendAsync(new CloudEvent(
+            id: "evt_custom_source",
+            source: source,
+            type: "test.custom",
+            time: FixedTime,
+            data: JsonDocument.Parse("{}").RootElement));
+
+        var pending = Assert.Single(
+            await _store.ListUndeliveredAsync(),
+            row => row.EventId == "evt_custom_source");
+        Assert.Equal(EventOrigin.WorkflowRun, pending.Origin);
+        Assert.Equal(source.ToString(), pending.Source);
+
+        await _store.MarkDispatchedAsync(
+            pending.Origin,
+            pending.Source,
+            pending.Id,
+            FixedTime);
+
+        Assert.DoesNotContain(
+            await _store.ListUndeliveredAsync(),
+            row => row.EventId == "evt_custom_source");
     }
 
     [Fact]

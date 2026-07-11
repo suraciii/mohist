@@ -200,7 +200,7 @@ public sealed class EventDispatcherService
             if (deadLetters.Count == 0)
             {
                 await _events
-                    .MarkDispatchedAsync(evt.Source, evt.Id, settledAt, ct)
+                    .MarkDispatchedAsync(evt.Origin, evt.Source, evt.Id, settledAt, ct)
                     .ConfigureAwait(false);
             }
             else

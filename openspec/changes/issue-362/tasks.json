@@ -36,6 +36,7 @@
         "Per-handler retry uses a fixed attempt cap; exhausted handler rows and the original event DispatchedAt are committed through one atomic dead-letter settlement.",
         "Per-handler isolation holds: when an event matches two handlers and one exhausts, the sibling handler still receives the event independently and its outcome does not depend on the failing handler.",
         "Per-row DispatchedAt is set only after all matching handlers have settled (succeeded or dead-lettered); no undelivered row is marked before delivery.",
+        "Settlement uses the EventOrigin returned by ListUndeliveredAsync to select the persisted truth table; custom/future source URIs routed through the WorkflowRun fallback remain markable after delivery.",
         "A MarkDispatchedAsync failure propagates and stops the current batch so a higher row in the same stream cannot overtake the unmarked row.",
         "The closed-generic discovery bug in AddCloudEventHandlersFromAssembly is fixed (proper ICloudEventHandler<> closed-generic scan) so EpicAutoDoneHandler and EpicCancelledReconcileHandler are registered and invoked in the fan-out.",
         "InMemoryEventBus no longer reads DateTimeOffset.UtcNow; it uses an injected TimeProvider for the envelope timestamp.",

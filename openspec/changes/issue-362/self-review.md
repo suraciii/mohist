@@ -46,13 +46,20 @@
   Resolution: Preserved the AI review repair replacing dispatcher test wall-clock values with fixed `EventTime`.
   Status: resolved
 
+- [ID: item-8]
+  Severity: blocking
+  Scope: source-event settlement routing
+  Resolution: `UndeliveredEvent.Origin` now flows through `IEventStore.MarkDispatchedAsync` and atomic dead-letter settlement, so the persisted table is authoritative. Custom/future CloudEvent sources that use the WorkflowRun fallback can be delivered and marked instead of failing after their handlers run. A real SQLite regression covers append → list undelivered → mark for a non-Mohist source URI.
+  Status: resolved
+
 ## Verification
 
 - Dispatcher/Hermes unit slice: 30 passed.
 - AgentJob persistence + AgentLauncher specs: 30 passed.
 - Dead-letter, reminder/failover, API, Agent, and Epic focused server specs: 81 passed.
+- Origin-aware settlement regression slices: 42 server specs and 36 server unit tests passed.
 - Architecture tests: 24 passed, 3 pre-existing skips.
-- Full rebased `npm test`: CLI 870; server unit 1361; server spec 2832 with 9 skips; Web 4596; Runner 1007; Node test-boundary checks passed.
+- Full rebased `npm test`: CLI 870; server unit 1361; server spec 2835 with 9 skips; Web 4596; Runner 1007; Node test-boundary checks passed.
 - `git diff --check` and `tasks.json` JSON validation pass.
 
 ## Follow-up Items

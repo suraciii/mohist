@@ -70,6 +70,7 @@ public class EventDispatcherSpecs
 
         Assert.Equal(new[] { "evt_1" }, calls);
         var marked = Assert.Single(events.Marked);
+        Assert.Equal(EventOrigin.Issue, marked.Origin);
         Assert.Equal("/mohist/issues/issue_1", marked.Source);
         Assert.Equal(1, marked.Id);
         Assert.Equal(StartTime, marked.DispatchedAt);

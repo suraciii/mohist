@@ -163,7 +163,7 @@ public class EventStore : IEventStore
         return rows.Select(ToEpicStored).ToList();
     }
 
-public async Task<IReadOnlyList<StoredCloudEvent>> ListAgentSessionEventsAsync(string sessionId, int limit = 200, CancellationToken ct = default)
+    public async Task<IReadOnlyList<StoredCloudEvent>> ListAgentSessionEventsAsync(string sessionId, int limit = 200, CancellationToken ct = default)
     {
         var source = AgentSessionEventPersistence.AgentSessionSource(sessionId);
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
@@ -177,52 +177,62 @@ public async Task<IReadOnlyList<StoredCloudEvent>> ListAgentSessionEventsAsync(s
         return rows.Select(ToAgentSessionStored).ToList();
     }
 
-    public async Task MarkDispatchedAsync(string source, long id, DateTimeOffset dispatchedAt, CancellationToken ct = default)
+    public async Task MarkDispatchedAsync(
+        EventOrigin origin,
+        string source,
+        long id,
+        DateTimeOffset dispatchedAt,
+        CancellationToken ct = default)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        await SetDispatchedAsync(db, source, id, dispatchedAt, ct);
+        await SetDispatchedAsync(db, origin, source, id, dispatchedAt, ct);
         await db.SaveChangesAsync(ct);
     }
 
     internal static async Task SetDispatchedAsync(
         MohistDbContext db,
+        EventOrigin origin,
         string source,
         long id,
         DateTimeOffset dispatchedAt,
         CancellationToken ct)
     {
-        if (source.StartsWith(AgentSessionEventPersistence.SourcePrefix, StringComparison.Ordinal))
+        switch (origin)
         {
-            var row = await db.AgentSessionEvents.FirstOrDefaultAsync(e => e.Source == source && e.Id == id, ct);
-            if (row is null)
-                throw new InvalidOperationException($"Agent session event '{source}'/{id} was not found.");
-            row.DispatchedAt = dispatchedAt;
-        }
-        else if (source.StartsWith(IssueEventPersistence.SourcePrefix, StringComparison.Ordinal))
-        {
-            var row = await db.IssueEvents.FirstOrDefaultAsync(e => e.Source == source && e.Id == id, ct);
-            if (row is null)
-                throw new InvalidOperationException($"Issue event '{source}'/{id} was not found.");
-            row.DispatchedAt = dispatchedAt;
-        }
-        else if (source.StartsWith(EpicEventPersistence.SourcePrefix, StringComparison.Ordinal))
-        {
-            var row = await db.EpicEvents.FirstOrDefaultAsync(e => e.Source == source && e.Id == id, ct);
-            if (row is null)
-                throw new InvalidOperationException($"Epic event '{source}'/{id} was not found.");
-            row.DispatchedAt = dispatchedAt;
-        }
-        else if (source.StartsWith(WorkflowRunEventPersistence.SourcePrefix, StringComparison.Ordinal)
-                 || string.Equals(source, "/mohist/inbox", StringComparison.Ordinal))
-        {
-            var row = await db.WorkflowRunEvents.FirstOrDefaultAsync(e => e.Source == source && e.Id == id, ct);
-            if (row is null)
-                throw new InvalidOperationException($"Workflow run event '{source}'/{id} was not found.");
-            row.DispatchedAt = dispatchedAt;
-        }
-        else
-        {
-            throw new ArgumentException($"Unrecognized event source '{source}'.", nameof(source));
+            case EventOrigin.AgentSession:
+            {
+                var row = await db.AgentSessionEvents.FirstOrDefaultAsync(e => e.Source == source && e.Id == id, ct);
+                if (row is null)
+                    throw new InvalidOperationException($"Agent session event '{source}'/{id} was not found.");
+                row.DispatchedAt = dispatchedAt;
+                break;
+            }
+            case EventOrigin.Issue:
+            {
+                var row = await db.IssueEvents.FirstOrDefaultAsync(e => e.Source == source && e.Id == id, ct);
+                if (row is null)
+                    throw new InvalidOperationException($"Issue event '{source}'/{id} was not found.");
+                row.DispatchedAt = dispatchedAt;
+                break;
+            }
+            case EventOrigin.Epic:
+            {
+                var row = await db.EpicEvents.FirstOrDefaultAsync(e => e.Source == source && e.Id == id, ct);
+                if (row is null)
+                    throw new InvalidOperationException($"Epic event '{source}'/{id} was not found.");
+                row.DispatchedAt = dispatchedAt;
+                break;
+            }
+            case EventOrigin.WorkflowRun:
+            {
+                var row = await db.WorkflowRunEvents.FirstOrDefaultAsync(e => e.Source == source && e.Id == id, ct);
+                if (row is null)
+                    throw new InvalidOperationException($"Workflow run event '{source}'/{id} was not found.");
+                row.DispatchedAt = dispatchedAt;
+                break;
+            }
+            default:
+                throw new ArgumentOutOfRangeException(nameof(origin), origin, "Unknown event origin.");
         }
     }
 
