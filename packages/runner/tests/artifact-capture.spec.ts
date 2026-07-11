@@ -1,7 +1,6 @@
-import { mkdir, mkdtemp, rm, symlink, writeFile, readFile } from "node:fs/promises"
+import { mkdir, symlink, writeFile, readFile } from "node:fs/promises"
 import { join } from "node:path"
-import { tmpdir } from "node:os"
-import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import { beforeEach, describe, expect, it } from "vitest"
 import {
   actionProducedArtifacts,
   captureArtifacts,
@@ -14,6 +13,7 @@ import {
 } from "../src/runtime/artifact-capture.js"
 import type { ServerConnection, ArtifactUploadResponse } from "../src/server/connection.js"
 import type { JsonObject, RenderedWorkItem } from "../src/core/types.js"
+import { createTestTempDir } from "./support/temp-dir.js"
 
 class FakeServerConnection implements Pick<ServerConnection, "uploadArtifact"> {
   public uploads: CapturedArtifact[] = []
@@ -56,13 +56,11 @@ class FakeServerConnection implements Pick<ServerConnection, "uploadArtifact"> {
 }
 
 let workDir: string
+let outsideDir: string
 
 beforeEach(async () => {
-  workDir = await mkdtemp(join(tmpdir(), "mohist-artifact-capture-"))
-})
-
-afterEach(async () => {
-  await rm(workDir, { recursive: true, force: true })
+  workDir = await createTestTempDir("mohist-artifact-capture-")
+  outsideDir = await createTestTempDir("mohist-artifact-capture-outside-")
 })
 
 function workItem(artifacts: JsonObject | null): RenderedWorkItem {
@@ -161,7 +159,7 @@ describe("captureOne", () => {
   it("refusesSymlinkedFileInsideDirectoryArtifact", async () => {
     const specsDir = join(workDir, "specs")
     await mkdir(specsDir, { recursive: true })
-    const target = join(workDir, "..", "outside.md")
+    const target = join(outsideDir, "outside.md")
     await writeFile(target, "outside", "utf8")
     await symlink(target, join(specsDir, "link.md"))
     await expect(captureOne(workDir, { path: "specs", source: "declared" })).rejects.toThrow(/symlink/)
