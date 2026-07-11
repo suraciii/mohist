@@ -11,6 +11,9 @@ public static class DeadLetterRoutes
 
     public static WebApplication MapDeadLetterRoutes(this WebApplication app)
     {
+        if (!UsesLoopbackOnlyListener(app.Configuration))
+            return app;
+
         var group = app.MapGroup("/api/events/dead-letters");
 
         group.MapGet("/", async (
@@ -20,8 +23,8 @@ public static class DeadLetterRoutes
             IDeadLetterStore store,
             CancellationToken ct) =>
         {
-            if (!IsLocalOperator(context.Connection.RemoteIpAddress))
-                return ApiResults.Fail("Dead-letter operations require a loopback caller", 403, "local_operator_required");
+            if (!IsDirectLoopbackRequest(context))
+                return ApiResults.Fail("Dead-letter operations require a direct loopback caller", 403, "local_operator_required");
 
             var resolvedLimit = limit ?? DefaultLimit;
             if (resolvedLimit is < 1 or > MaxLimit)
@@ -56,8 +59,8 @@ public static class DeadLetterRoutes
             IGrainFactory grains,
             CancellationToken ct) =>
         {
-            if (!IsLocalOperator(context.Connection.RemoteIpAddress))
-                return ApiResults.Fail("Dead-letter operations require a loopback caller", 403, "local_operator_required");
+            if (!IsDirectLoopbackRequest(context))
+                return ApiResults.Fail("Dead-letter operations require a direct loopback caller", 403, "local_operator_required");
 
             var result = await grains
                 .GetGrain<IDispatcherGrain>(DispatcherGrain.FixedKey)
@@ -84,6 +87,48 @@ public static class DeadLetterRoutes
         return app;
     }
 
-    internal static bool IsLocalOperator(IPAddress? remoteAddress) =>
-        remoteAddress is null || IPAddress.IsLoopback(remoteAddress);
+    internal static bool IsDirectLoopbackRequest(HttpContext context)
+    {
+        if (HasProxyMarker(context.Request.Headers))
+            return false;
+        if (!IsLoopbackHost(context.Request.Host.Host))
+            return false;
+        if (!IsLoopbackAddress(context.Connection.RemoteIpAddress))
+            return false;
+        return IsLoopbackAddress(context.Connection.LocalIpAddress);
+    }
+
+    internal static bool UsesLoopbackOnlyListener(IConfiguration configuration)
+    {
+        var configuredUrls = configuration["urls"] ?? configuration["ASPNETCORE_URLS"];
+        if (!string.IsNullOrWhiteSpace(configuredUrls))
+        {
+            var urls = configuredUrls.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            return urls.Length > 0 && urls.All(url =>
+                Uri.TryCreate(url, UriKind.Absolute, out var uri)
+                && !IsPublicListenerHost(uri.Host));
+        }
+
+        return !IsPublicListenerHost(configuration["Mohist:Host"] ?? "localhost");
+    }
+
+    internal static bool IsLoopbackAddress(IPAddress? address) =>
+        address is not null && IPAddress.IsLoopback(address);
+
+    private static bool HasProxyMarker(IHeaderDictionary headers) =>
+        headers.ContainsKey("Forwarded")
+        || headers.ContainsKey("X-Forwarded-For")
+        || headers.ContainsKey("X-Forwarded-Host")
+        || headers.ContainsKey("X-Forwarded-Proto")
+        || headers.ContainsKey("X-Forwarded-Prefix")
+        || headers.ContainsKey("X-Original-For")
+        || headers.ContainsKey("X-Real-IP")
+        || headers.ContainsKey("Via");
+
+    private static bool IsLoopbackHost(string host) =>
+        string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase)
+        || (IPAddress.TryParse(host, out var address) && IPAddress.IsLoopback(address));
+
+    private static bool IsPublicListenerHost(string host) =>
+        host is "*" or "0.0.0.0" or "::" or "[::]";
 }

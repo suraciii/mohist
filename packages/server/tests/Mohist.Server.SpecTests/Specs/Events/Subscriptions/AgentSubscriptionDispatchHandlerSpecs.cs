@@ -419,7 +419,7 @@ public class AgentSubscriptionDispatchHandlerSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
-    public async Task HandleAsync_LaunchFailure_PropagatesToDispatcher()
+    public async Task HandleAsync_LaunchFailure_IsLoggedAndSwallowed()
     {
         var (recorder, scope) = Build();
         await using var _ = scope;
@@ -430,18 +430,21 @@ public class AgentSubscriptionDispatchHandlerSpecs
             filterType: "com.mohist.issue.*", priority: 5);
         recorder.Failure = new InvalidOperationException("launch unavailable");
 
-        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            scope.Handler.HandleAsync(new CloudEvent(
+        await scope.Handler.HandleAsync(
+            new CloudEvent(
                 id: "evt_failure",
                 source: new Uri("/mohist/issues/issue_x", UriKind.Relative),
                 type: EventCatalog.ReverseDns.IssueWorkStarted,
                 time: DateTimeOffset.UnixEpoch,
                 data: null,
                 extensions: new Dictionary<string, string> { ["projectid"] = "proj_a" }),
-                CancellationToken.None));
+            CancellationToken.None);
 
-        Assert.Equal("launch unavailable", error.Message);
         Assert.Single(recorder.Calls);
+        var warning = Assert.Single(scope.Logger.Entries);
+        Assert.Equal(Microsoft.Extensions.Logging.LogLevel.Warning, warning.Level);
+        Assert.Equal("launch unavailable", warning.Exception?.Message);
+        Assert.Contains("evt_failure", warning.Message, StringComparison.Ordinal);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]

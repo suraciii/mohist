@@ -14,7 +14,7 @@ issue-362 — T-001 working memory
 - IDeadLetterStore includes atomic `SettleAsync`, explicit redelivery start/failure/resolve transitions, and direct write/query/get/delete primitives. QueryAsync returns unresolved rows ordered by (DeadLetteredAt ASC, DeadLetterId ASC).
 - DeadLetterStore.QueryAsync uses raw SQL (`SqlQueryRaw<DeadLetterSqlRow>`) with a `(failingHandler IS NULL OR FailingHandler = @filter)` predicate so one query covers both filter modes. Mirrors the historical DeadLetterStore + the GetUndelivered UNION pattern already in EventStore.cs.
 - DeadLetterStore.GetAsync uses an EF no-tracking single-row lookup. Recovery state is `Pending`, `Redelivering`, or `Resolved`; resolved rows stay auditable but are excluded from unresolved queries.
-- DI registration: `silo.Services.TryAddSingleton<IDeadLetterStore, DeadLetterStore>()` in MohistSiloRegistration. TryAdd lets tests inject NoopDeadLetterStore (placed in both UnitTests/Support and SpecTests/Support) without disturbing production wiring.
+- DI registration: `services.TryAddSingleton<IDeadLetterStore, DeadLetterStore>()` in `ConfigureMohistServices`. TryAdd lets tests inject NoopDeadLetterStore (placed in both UnitTests/Support and SpecTests/Support) without disturbing the single host-shared production graph.
 - Migrations: `20260709002625_AddDeadLetters` creates the table; `20260711041122_HardenDeadLetterRecovery` adds recovery state and unique `(Source, Id, FailingHandler)`. No DispatchedAt column is added because all four source truth tables already own it.
 - Spec tests: DeadLetterStoreSpecs covers Write/Get (with AgentSession origin), monotonic IDs, query order + limit + handler-filter narrowing + empty, unknown GetAsync → null, Noop fake usability. DeadLettersMigrationSpecs covers: all columns, both indexes, migration-applies-cleanly from previous state, migration source contains CreateTable/PK/indexes, model snapshot includes the entity + both indexes, MigratedSqliteTemplate already contains the table+indexes (proves the new migration runs end-to-end).
 - Speed=Service (not Unit) on both spec files: they go through the real EF pipeline + MigratedSqliteTemplate, same as AgentSessionEventsMigrationSpecs and EventStoreScopedAppendSpecs.
@@ -43,16 +43,16 @@ issue-362 — T-002 working memory
 ## Decisions (T-002)
 
 - `EventDispatcherService` is a plain DI singleton (not an interface) injected by `DispatcherGrain`. Tests build it directly with fake store + FakeTimeProvider, so an `IEventDispatcherService` seam is unnecessary for the test surface — the unit specs are the source of truth and they use the concrete class.
-- `DispatcherOptions` lives in `Events/Grains/` next to the grain (the only consumer that binds the section via `IOptions<>`). The service constructor takes `IOptions<DispatcherOptions>` so the section binding lives at the silo registration site (`configuration.GetSection(DispatcherOptions.SectionName)`).
+- `DispatcherOptions` lives in `Events/Grains/` next to the grain. The service constructor takes `IOptions<DispatcherOptions>` and `ConfigureMohistServices` binds the section once for the host-shared graph.
 - `InMemoryEventBus` constructor was widened to require `TimeProvider` (after `IEventStore`). Two constructors stay: parameterless one (for fixtures that wire subscriptions later) and full DI one. Every test fixture that built an `InMemoryEventBus` directly had to pass `TimeProvider.System` (or a `FakeTimeProvider` for unit tests).
 - `DispatcherGrain` calls `RegisterOrUpdateReminder` in `OnActivateAsync`; `DispatcherActivationService` activates the fixed key during host startup. `ReceiveReminder` filters by name and ignores foreign reminders.
 - `ReminderOptions.MinimumReminderPeriod` lowered to 100ms in BOTH the production silo (`MohistSiloRegistration`) AND the test silo (`GrainTestConfig.ConfigureSilo`). Without this, the in-memory reminder service refuses to register a sub-second period; the production `UseAdoNetReminderService` has the same restriction.
 - `RedeliverAsync(deadLetterId)` reconstructs the envelope, persists `Redelivering`, retries only the recorded failing handler, and marks the row `Resolved` after success. A post-handler persistence failure leaves an explicit ambiguous state for idempotent replay.
 - Retry is a hand-rolled loop in `InvokeWithRetryAsync` with `DispatcherOptions.HandlerMaxAttempts` cap (default 3). No Polly. No backoff. The cap is configurable so the spec test's `per-handler isolation` scenario can use 2 attempts without overflowing.
 - Per-row `DispatchedAt` is set after matching handlers settle. Poison rows use one transaction for handler-keyed dead-letter upserts plus source mark; any settlement failure aborts the batch to preserve FIFO.
-- Durable production reactions await required side effects and propagate failures. Hermes retains its documented background best-effort dispatcher and absorbs notification failures without retry/DLQ.
-- Agent subscription launches derive stable session/job keys from project + event + subscription. AgentJob persists input, candidate runner, stable work id, retry state, and terminal state; replay never treats session labels as the launch claim.
-- Dead-letter API operations are loopback-only and redact raw exception stacks. Closed-generic Epic handlers create a scope per delivery for `EpicQuerier`.
+- Durable production reactions await required side effects and propagate failures. Hermes and `AgentSubscriptionDispatchHandler` retain their documented best-effort catch-and-log contracts and do not enter retry/DLQ.
+- Once an Agent subscription launch is accepted, it derives stable session/job keys from project + event + subscription. AgentJob persists input, candidate runner, stable work id, retry state, and terminal state; replay never treats session labels as the launch claim.
+- Dead-letter API operations require a direct loopback connection, reject proxy forwarding, are absent on public listeners, and redact raw exception stacks. Closed-generic Epic handlers create a scope per delivery for `EpicQuerier`.
 
 ## Gotchas
 
@@ -60,7 +60,7 @@ issue-362 — T-002 working memory
 - `Closed-generic scan fix` in `AddCloudEventHandlersFromAssembly` is just the swap of the `typeof(ICloudEventHandler<>).IsAssignableFrom(t)` line to a proper `GetInterfaces().Any(IsCloudEventHandlerInterface)` walk — both `ICloudEventHandler` (non-generic) and `ICloudEventHandler<>` (closed-generic) are now discoverable. The `IsCloudEventHandlerInterface` helper is private static at the bottom of the class. No new types, no new DI lifetime.
 - `IDispatcherGrain` lives in `Mohist.Server.Events.Grains` so its Orleans proxy generator can be discovered by the silo (`IGrainWithStringKey` convention). No explicit grain class registration in DI is needed.
 - `DispatcherFixture` uses `CapturingEventStore` (in the fixture file, not the Support fakes) to track events AND drive the dispatcher's `ListUndeliveredAsync`. It also installs `NoopDeadLetterStore` so `RedeliverAsync` is exercised without EF.
-- The silo registers `EventDispatcherService` as a singleton; `DispatcherGrain` resolves it by constructor injection. `DispatcherOptions` is bound from `Mohist:Dispatcher` configuration section.
+- The host-shared application graph registers `EventDispatcherService` as a singleton; `DispatcherGrain` resolves it by constructor injection. `DispatcherOptions` is bound from the `Mohist:Dispatcher` configuration section.
 - `InMemoryEventBus` no longer reads `DateTimeOffset.UtcNow` — both constructors take `TimeProvider` and use `_time.GetUtcNow()` in the typed `PublishAsync<TData>` overload. The two existing constructors are unchanged in argument order except for the new `TimeProvider time` parameter between `IEventStore` and `ILogger`.
 
 ## Acceptance criteria status
@@ -73,10 +73,10 @@ issue-362 — T-002 working memory
 - [x] Per-row DispatchedAt set only after all matching handlers settled
 - [x] Closed-generic discovery bug fixed (proper ICloudEventHandler<> closed-generic scan)
 - [x] InMemoryEventBus uses injected TimeProvider (no DateTimeOffset.UtcNow)
-- [x] RedeliverAsync retries only the recorded failing handler, tracks recovery state, and is exposed through loopback-only redacted API + CLI
+- [x] RedeliverAsync retries only the recorded failing handler, tracks recovery state, and is exposed through direct-loopback-only, proxy-rejecting, redacted API + CLI
 - [x] Fresh-host activation registers the dispatcher reminder without producer traffic
-- [x] Durable handler failures propagate; Hermes remains best-effort; Agent trigger launches resume durable stable job/work identities
-- [x] EventDispatcherService + IDeadLetterStore→DeadLetterStore (+ NoopDeadLetterStore via TryAdd) + dispatcher grain registered in MohistSiloRegistration
+- [x] Durable handler failures propagate; Hermes and Agent subscription dispatch remain best-effort; accepted Agent trigger launches resume durable stable job/work identities
+- [x] EventDispatcherService + IDeadLetterStore→DeadLetterStore (+ NoopDeadLetterStore via TryAdd) + subscriptions registered once in the host-shared application graph; MohistSiloRegistration contains Orleans infrastructure only
 - [x] Unit tests cover pull→match→invoke→mark; FIFO (Source,Id); retry-then-succeed; exhaustion; per-handler isolation; deliver-before-mark crash recovery; CloudEventTypeMatcher fan-out with closed-generic handler
 - [x] Spec tests cover PulseAsync, actual reminder callback without Pulse, two-silo host loss recovery, closed-generic handlers, exact-handler dead-letter recovery, API/CLI boundary, and Agent crash checkpoints
-- [x] Full `npm test` green on rebased master: CLI 870, server unit 1361, arch 24 (3 skipped), server spec 2832 (9 skipped), Web 4596, Runner 1007; Node test-boundary checks and TreatWarningsAsErrors clean
+- [x] Full `npm test` green on rebased master: CLI 870, server unit 1363, arch 24 (3 skipped), server spec 2843 (9 skipped), Web 4596, Runner 1007; Node test-boundary checks and TreatWarningsAsErrors clean

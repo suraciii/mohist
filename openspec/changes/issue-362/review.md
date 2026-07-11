@@ -2,91 +2,62 @@
 
 ## Result: FAIL
 
-The post-repair candidate passes the full automated suite, but it does not yet provide safe at-least-once Agent delivery or consistent poison-message settlement.
-
 ## Repaired Items
 
-- [ID: item-1]
-  Severity: info
-  Scope: test-determinism
-  Evidence: `DispatcherGrainSpecs.cs` constructed three dispatcher events with `DateTimeOffset.UtcNow`, violating the project's no-wall-clock test rule.
-  Verification: Replaced those inputs with fixed `EventTime`. `dotnet test packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj --no-restore --filter "FullyQualifiedName~DispatcherGrainSpecs|FullyQualifiedName~DispatcherStartupSpecs|FullyQualifiedName~DeadLetterRoutesSpecs|FullyQualifiedName~DeadLetterStoreSpecs|FullyQualifiedName~DeadLettersMigrationSpecs|FullyQualifiedName~AgentLauncherSpecs"` passed 35 tests; `npm test` passed.
-  Status: resolved
+- None.
 
 ## Blocking Items
 
+- [ID: item-1]
+  Severity: blocking
+  Scope: `packages/server/src/Mohist.Server/Events/Subscriptions/AgentSubscriptionDispatchHandler.cs`
+  Evidence: The issue explicitly keeps `AgentSubscriptionDispatchHandler` as a best-effort, exception-swallowing consumer whose contract must not change. This candidate removes its exception boundary: `HandleAsync` delegates directly to `DispatchAsync` at line 77, and a launch failure now escapes from `LaunchAsync` at lines 141-146. The new regression test asserts that changed behavior at `AgentSubscriptionDispatchHandlerSpecs.cs:422-445`. The dispatcher will consequently retry and dead-letter Agent subscription failures, which is a public behavior change and conflicts with the issue's stated Agent-event contract. [disallowed:public-contract]
+  SuggestedAction: Restore the handler's best-effort catch-and-log behavior, including a regression test that a launcher failure is swallowed while the source event may later be replayed. If durable retry/dead-letter behavior is intended instead, amend the issue/spec before implementing that contract change.
+  Verification: Dispatch an event through a failing `IAgentLauncher`; assert the handler completes successfully, the dispatcher marks the event as settled, and the logged failure remains observable without creating a dead letter.
+  Status: open
+
 - [ID: item-2]
   Severity: blocking
-  Scope: `packages/server/src/Mohist.Server/Infrastructure/Events/EventDispatcherService.cs`, `packages/server/src/Mohist.Server/Infrastructure/Data/Events/DeadLetterStore.cs`, `packages/server/src/Mohist.Server/Infrastructure/Data/Db/MohistDbContext.cs`
-  Evidence: On retry exhaustion, `DeadLetterAsync` commits a dead-letter row at `EventDispatcherService.cs:241-261` / `DeadLetterStore.cs:18-23`; the original event is marked in a later independent commit at `EventDispatcherService.cs:181-185` / `EventStore.cs:180-218`. A mark failure after a successful dead-letter write leaves the source row eligible for another delivery. The next tick can either insert a duplicate dead letter or deliver successfully while leaving the first row falsely unresolved. The schema has no uniqueness key for the event and failing handler at `MohistDbContext.cs:481-530`. The same non-atomicity exists between successful manual handler invocation and `DeleteAsync` at `EventDispatcherService.cs:148-153`. [disallowed:data-safety]
-  SuggestedAction: Make poison settlement an atomic persistence operation that marks the source event and creates one handler-keyed dead letter in the same transaction, or introduce a unique natural key plus conflict-safe reconciliation. Define recovery state so a successful manual re-delivery cannot remain unresolved after a delete failure.
-  Verification: Inject a mark failure after a successful dead-letter insert, then retry both a still-failing and a recovered handler. Assert one accurate dead-letter row, no stale row after recovery, and no duplicate side effect.
+  Scope: `packages/server/src/Mohist.Server/Api/DeadLetterRoutes.cs`, operator access boundary
+  Evidence: The new operator endpoints authorize solely from `HttpContext.Connection.RemoteIpAddress` at lines 23-24 and 59-60. A remote caller routed through a loopback reverse proxy is therefore seen as `127.0.0.1` and can list event payloads or invoke handler replay. The server supports non-loopback binding in `Program.cs:41-46`, while no authenticated operator boundary exists. This does not meet the requirement that only loopback callers may inspect or redeliver dead letters. [disallowed:security-posture]
+  SuggestedAction: Keep these routes unreachable through a proxy/public listener until authentication exists, or add a trusted-proxy-aware client-address policy together with authenticated operator authorization.
+  Verification: Put the server behind a loopback reverse proxy and issue a request from a non-loopback client. It must receive `403` and must not trigger a redelivery side effect.
   Status: open
 
 - [ID: item-3]
-  Severity: blocking
-  Scope: `packages/server/src/Mohist.Server/Agent/Services/AgentLauncher.cs`, `packages/server/src/Mohist.Server/Agent/Grains/AgentJobGrain.cs`
-  Evidence: `AgentLauncher` submits the stable-keyed job at `AgentLauncher.cs:102-116`, then persists the trigger labels used as the replay claim at `AgentLauncher.cs:118-126`. `AgentJobGrain` explicitly stores its lifecycle only in memory at `AgentJobGrain.cs:10-21`, returns from `SubmitAsync` after detached dispatch at `AgentJobGrain.cs:202-224`, and creates a fresh runner work id after activation at `AgentJobGrain.cs:310-337`. A silo crash after label persistence but before durable runner acceptance causes the replay to return early at `AgentLauncher.cs:78-85`, losing the launch. A crash after runner acceptance but before label persistence can replay through a fresh in-memory job and produce another work id. This fails the issue's required duplicate absorption and missed-launch recovery. [disallowed:data-safety]
-  SuggestedAction: Persist a trigger-keyed launch claim and durable job/queue record before acknowledging the subscription handler. Replay must resume that durable record, not infer completion from session labels.
-  Verification: Add deterministic crash checkpoints after submit, after trigger-label persistence, and after runner acceptance. Reactivate the job/silo and replay the source event; assert exactly one durable job and one runner work, with no missed launch.
-  Status: open
-
-- [ID: item-4]
-  Severity: warning
-  Scope: `packages/server/src/Mohist.Server/Events/Subscriptions/HermesIssueNotificationHandler.cs`, `docs/hermes-notifications.md`
-  Evidence: The changed handler now awaits and propagates webhook failures at `HermesIssueNotificationHandler.cs:41-60`, so the dispatcher retries and dead-letters them at `EventDispatcherService.cs:167-171`. The published Hermes contract explicitly says failures are logged and swallowed, with no retry queue or DLQ at `docs/hermes-notifications.md:216-222`; issue design D5 also excludes unrelated best-effort channel convergence. The altered test now asserts propagation at `HermesIssueNotificationTests.cs:154-165`.
-  SuggestedAction: Restore the documented best-effort behavior, or explicitly approve and document a durable/retryable Hermes contract including webhook idempotency.
-  Verification: Simulate a webhook failure during dispatcher delivery and assert the chosen contract: no retry/DLQ for best-effort, or documented retry plus idempotent receiver behavior for durable delivery.
-  Status: unresolved
-
-- [ID: item-5]
   Severity: test-gap
-  Scope: `packages/server/tests/Mohist.Server.SpecTests/Specs/Events/DispatcherGrainSpecs.cs`, `packages/server/tests/Mohist.Server.SpecTests/Specs/Events/DispatcherStartupSpecs.cs`
-  Evidence: Delivery specs drive `PulseAsync` directly at `DispatcherGrainSpecs.cs:37-90`; reminder coverage only reads the registration row at `DispatcherGrainSpecs.cs:122-136` and `DispatcherStartupSpecs.cs:23-34`. No test fires a reminder without Pulse, moves the fixed-key activation to another silo after a crash, or proves resumption after failover. This leaves the issue's self-waking and self-healing acceptance criteria unverified.
-  SuggestedAction: Use the controllable reminder infrastructure with a multi-silo test to fire the reminder without Pulse, deactivate/crash its hosting silo, and assert delivery resumes from the persisted reminder.
-  Verification: The test must deliver an appended event only from a reminder callback, then repeat after host-silo loss without using Pulse.
-  Status: open
-
-- [ID: item-6]
-  Severity: warning
-  Scope: `packages/server/src/Mohist.Server/Api/DeadLetterRoutes.cs`, `packages/server/src/Mohist.Server/Program.cs`
-  Evidence: The new routes return full event data, extensions, and server exception stacks at `DeadLetterRoutes.cs:15-45`, and allow any caller to re-run a handler side effect at `DeadLetterRoutes.cs:47-72`. They have no authorization boundary; the server permits a non-loopback bind when `Mohist:Host` is `0.0.0.0` or `*` at `Program.cs:41-46`. This exposes operational payloads and replay capability to any network peer in such a deployment. [disallowed:security-posture]
-  SuggestedAction: Restrict the routes to authenticated operators, or reject non-loopback exposure until an operator authorization model exists. Avoid returning raw exception stacks by default.
-  Verification: An unauthenticated remote request cannot list payloads or invoke re-delivery, while an authorized operator can perform both actions.
-  Status: unresolved
-
-- [ID: item-7]
-  Severity: minor
-  Scope: `packages/server/src/Mohist.Server/Infrastructure/Events/CloudEventBusServiceCollectionExtensions.cs`, `packages/server/src/Mohist.Server/Events/Subscriptions/EpicAutoDoneHandler.cs`
-  Evidence: The reflection change now makes the two closed-generic Epic handlers live. Handler registration is singleton at `CloudEventBusServiceCollectionExtensions.cs:24-47`, but each captures `EpicQuerier` at `EpicAutoDoneHandler.cs:20-25` / `48-53`; `EpicQuerier` is conventionally scoped at `EpicQuerier.cs:16-24`. Scope validation can reject this graph, and otherwise the scoped query service is retained from the root scope for the dispatcher's lifetime.
-  SuggestedAction: Resolve `EpicQuerier` inside an async scope per delivery, consistent with the scoped access pattern in `AgentSubscriptionDispatchHandler` and `InboxProjectionHandler`.
-  Verification: Build the production service graph with scope validation enabled and dispatch a real `IssueCompleted` event through the closed-generic handler.
+  Scope: `packages/server/tests/Mohist.Server.SpecTests/Specs/Events/DispatcherGrainSpecs.cs`
+  Evidence: The new reminder/failover test uses `signal.WaitAsync(TimeSpan.FromSeconds(10))` at lines 213-223. `design/testing.md:53-59` forbids wall-clock waits and requires an awaitable signal or injected fake-time progression. This introduces a timing-dependent failure path into the highest-risk recovery coverage.
+  SuggestedAction: Make the test complete from the existing deterministic signals and fake-time advancement without a real-time timeout; use the suite's deterministic failure mechanism for diagnostics.
+  Verification: Run the dispatcher failover spec repeatedly under CPU contention and confirm it contains no `WaitAsync(TimeSpan)`, `Task.Delay`, or wall-clock deadline.
   Status: open
 
 ## Follow-up Items
 
-- [ID: item-8]
-  Severity: follow-up
-  Scope: `packages/server/src/Mohist.Server/Events/Grains/DispatcherGrain.cs`
-  Evidence: `OnActivateAsync` receives a cancellation token but does not pass it to reminder registration at `DispatcherGrain.cs:37-42`.
-  SuggestedAction: Propagate the activation cancellation token if supported by the Orleans reminder overload.
-  Status: follow-up
+- None.
 
 ## Pre-existing or Out-of-scope Items
 
-- [ID: item-9]
-  Severity: warning
-  Scope: `packages/server/src/Mohist.Server/Epic/Grains/EpicGrain.cs`
-  Evidence: Epic mutations save state before attempting event persistence at `EpicGrain.cs:48-67`, and `PersistEpicEventsAsync` intentionally catches and suppresses append failures at `EpicGrain.cs:948-993`. A crash or append failure therefore loses the corresponding Epic event permanently, so the dispatcher cannot recover or deliver all event truth-table changes. The issue-specific commits did not introduce this producer behavior, but the candidate depends on durable events for its guarantees.
-  SuggestedAction: Make Epic state and event rows commit in the same transaction, as the Issue, WorkflowRun, and AgentSession stores already do.
+- [ID: item-4]
+  Severity: info
+  Scope: server test suite
+  Evidence: `dotnet test Mohist.sln -p:SkipWebBuild=true --no-restore` passed, but retained 3 architecture-test skips and 9 server-spec skips. These predate the candidate and did not fail the current test run.
+  SuggestedAction: Track and remove the skipped coverage separately, following the repository rule against skipped tests masking uncertainty.
   Status: pre-existing
 
 ## Acceptance Criteria Assessment
 
-- Cluster-singleton wiring, fixed-key activation, four-table pull, fan-out, retry, and CLI/API recovery are present in `IDispatcherGrain.cs`, `DispatcherGrain.cs`, `EventStore.cs:220-250`, `EventDispatcherService.cs`, `DeadLetterRoutes.cs`, and `MohistCliCommands.Event.cs`.
-- Per-stream serial mark ordering is implemented and covered by `EventDispatcherSpecs.cs:76-108` and `250-278`.
-- The deliver-before-mark unit path is covered by `EventDispatcherSpecs.cs:213-248`, but it proves only a test recorder's local idempotency. The required production Agent replay behavior is invalidated by item-3.
-- Query and manual re-delivery surfaces exist, but item-2 means poison-message state is not reliable enough to satisfy the dead-letter acceptance criterion.
-- Reminder registration is covered, but actual reminder-driven delivery and failover are missing as described in item-5.
+- Cluster singleton startup and reminder wiring are present in `DispatcherGrain.cs:18-65` and `DispatcherActivationService.cs:15-18`; focused reminder/failover coverage passes in `DispatcherGrainSpecs.cs:139-177`.
+- The four-table, single-query pull and origin-aware settlement are implemented in `EventStore.cs:180-268`; serial dispatch and atomic poison settlement are implemented in `EventDispatcherService.cs:82-96` and `197-211`.
+- Retry, per-handler isolation, dead-letter persistence/recovery, API, and CLI coverage are present and passed in the focused suites.
+- At-least-once deliver-before-mark behavior is covered by `EventDispatcherSpecs.cs:217-253`, and durable Agent job/work identities are covered by `AgentJobGrainPersistenceSpecs.cs:52-84` and `AgentLauncherSpecs.cs:138-203`.
+- The Agent consumer contract and loopback-only operator requirement remain unsatisfied by items 1 and 2, so the post-review candidate cannot pass.
+
+## Verification
+
+- `git diff --check origin/master...HEAD` passed.
+- Focused dispatcher/dead-letter/Agent server tests passed: 36 unit tests and 63 specs.
+- Focused CLI dead-letter tests passed: 5 tests.
+- `dotnet test Mohist.sln -p:SkipWebBuild=true --no-restore` passed: CLI 870, server unit 1361, architecture 24 passed / 3 skipped, server specs 2836 passed / 9 skipped.
 
 <promise>FAIL</promise>

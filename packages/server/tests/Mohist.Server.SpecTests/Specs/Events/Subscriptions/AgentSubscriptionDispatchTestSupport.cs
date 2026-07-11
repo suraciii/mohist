@@ -1,7 +1,7 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Agent.Domain;
 using Mohist.Server.Agent.Services;
@@ -30,11 +30,12 @@ internal static class AgentSubscriptionDispatchTestSupport
     {
         var database = CreateDatabase();
         var recording = new RecordingAgentLauncher();
+        var logger = new RecordingLogger<AgentSubscriptionDispatchHandler>();
         var scopeFactory = new TestScopeFactory(database, recording);
         var handler = new AgentSubscriptionDispatchHandler(
             scopeFactory,
-            NullLogger<AgentSubscriptionDispatchHandler>.Instance);
-        return (recording, new TestScope(database, handler));
+            logger);
+        return (recording, new TestScope(database, handler, logger));
     }
 
     public static async Task SeedProjectAsync(TestScope scope, string projectId)
@@ -128,14 +129,44 @@ internal static class AgentSubscriptionDispatchTestSupport
     public sealed class TestScope : IAsyncDisposable
     {
         private readonly TestDatabase _database;
-        public TestScope(TestDatabase database, AgentSubscriptionDispatchHandler handler)
+        public TestScope(
+            TestDatabase database,
+            AgentSubscriptionDispatchHandler handler,
+            RecordingLogger<AgentSubscriptionDispatchHandler> logger)
         {
             _database = database;
             Handler = handler;
+            Logger = logger;
         }
         public TestDatabase Database => _database;
         public AgentSubscriptionDispatchHandler Handler { get; }
+        public RecordingLogger<AgentSubscriptionDispatchHandler> Logger { get; }
         public async ValueTask DisposeAsync() => await _database.DisposeAsync();
+    }
+
+    public sealed record RecordedLog(LogLevel Level, string Message, Exception? Exception);
+
+    public sealed class RecordingLogger<T> : ILogger<T>
+    {
+        public List<RecordedLog> Entries { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => NoopScope.Instance;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter) =>
+            Entries.Add(new RecordedLog(logLevel, formatter(state, exception), exception));
+
+        private sealed class NoopScope : IDisposable
+        {
+            public static NoopScope Instance { get; } = new();
+            public void Dispose() { }
+        }
     }
 
     /// <summary>

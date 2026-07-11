@@ -27,7 +27,7 @@
       "id": "T-002",
       "title": "Implement the self-driven cluster-singleton event dispatcher",
       "spec": "specs/event-dispatch/spec.md#Cluster-singleton self-waking sole notifier",
-      "description": "Build the sole, self-healing notifier as an Orleans cluster-singleton grain over a pure-DI fan-out service. Pull all truth tables, deliver matching subscriptions with per-handler retry, atomically settle poison outcomes, and preserve serial FIFO. Persist AgentJob trigger inputs and stable runner work identities before acknowledgement so activation loss resumes one job/work. Keep documented best-effort handlers best-effort, scope closed-generic Epic queries per delivery, and expose loopback-only redacted API/CLI recovery.",
+      "description": "Build the sole, self-healing notifier as an Orleans cluster-singleton grain over a pure-DI fan-out service. Pull all truth tables, deliver matching subscriptions with per-handler retry, atomically settle poison outcomes, and preserve serial FIFO. Persist AgentJob trigger inputs and stable runner work identities before acknowledgement so activation loss resumes one job/work. Keep documented best-effort handlers best-effort, scope closed-generic Epic queries per delivery, and expose direct-loopback-only redacted API/CLI recovery.",
       "acceptanceCriteria": [
         "IDispatcherGrain (IGrainWithStringKey, IRemindable) and DispatcherGrain exist with fixed key \"dispatcher\"; the grain registers a persisted reminder (~1s, cadence configurable) on activation, and both ReceiveReminder and PulseAsync run exactly one pull–fan-out–mark cycle by delegating to EventDispatcherService.DispatchAsync.",
         "DispatcherActivationService activates the fixed-key grain during host startup, and an integration spec verifies that a fresh host has registered the dispatcher reminder without an explicit producer Pulse.",
@@ -40,13 +40,13 @@
         "A MarkDispatchedAsync failure propagates and stops the current batch so a higher row in the same stream cannot overtake the unmarked row.",
         "The closed-generic discovery bug in AddCloudEventHandlersFromAssembly is fixed (proper ICloudEventHandler<> closed-generic scan) so EpicAutoDoneHandler and EpicCancelledReconcileHandler are registered and invoked in the fan-out.",
         "InMemoryEventBus no longer reads DateTimeOffset.UtcNow; it uses an injected TimeProvider for the envelope timestamp.",
-        "RedeliverAsync(deadLetterId) retries only the recorded failing handler, persists recovery state, marks success resolved, and remains available through loopback-only server API and mo CLI surfaces that redact exception stacks.",
-        "Required durable handler side effects are awaited and propagate failure; documented best-effort Hermes notifications remain background/log-and-swallow and never enter retry/dead-letter flow.",
+        "RedeliverAsync(deadLetterId) retries only the recorded failing handler, persists recovery state, marks success resolved, and remains available through direct-loopback-only server API and mo CLI surfaces that reject proxy forwarding and redact exception stacks.",
+        "Required durable handler side effects are awaited and propagate failure; documented best-effort Hermes notifications and Agent subscription launches remain log-and-swallow and never enter retry/dead-letter flow.",
         "Agent subscription launches use stable session/job identities; AgentJob input, candidate runner, work id, retry state, and terminal state are durable, and Runner acceptance replay reuses the same work id.",
         "Closed-generic Epic handlers resolve scoped EpicQuerier instances inside an async scope per delivery; production scope validation succeeds.",
-        "EventDispatcherService, IDeadLetterStore→DeadLetterStore (with NoopDeadLetterStore via TryAdd), and the dispatcher grain are registered in the silo container (MohistSiloRegistration).",
+        "EventDispatcherService, IDeadLetterStore→DeadLetterStore (with NoopDeadLetterStore via TryAdd), subscriptions, and AgentJob observer defaults are registered once in the host-shared application service graph; MohistSiloRegistration adds only Orleans infrastructure.",
         "Unit tests (fake IEventStore + fake/Noop IDeadLetterStore + FakeTimeProvider) cover: pull→match→invoke→mark; per-stream FIFO (Source,Id) ordering with no skip; per-handler retry-then-succeed; exhaustion → dead-letter written + DispatchedAt set + not retried next tick; per-handler isolation; deliver-before-mark crash → row stays undelivered → re-delivered on next tick; CloudEventTypeMatcher fan-out including a closed-generic handler.",
-        "Spec/integration tests cover reminder-callback delivery without Pulse, fixed-key recovery on another silo after host-silo loss, Pulse latency, closed-generic Epic delivery, and AgentJob deactivation/crash checkpoints.",
+        "Spec/integration tests cover reminder-callback delivery without Pulse using fake time and deterministic signals, fixed-key recovery on another silo after host-silo loss, Pulse latency, closed-generic Epic delivery, Agent best-effort settlement, proxy rejection, and AgentJob deactivation/crash checkpoints.",
         "Server npm test is green and TreatWarningsAsErrors stays clean."
       ],
       "priority": 2,
@@ -55,7 +55,7 @@
       "output": "IDispatcherGrain.cs, DispatcherGrain.cs, DispatcherActivationService.cs, EventDispatcherService.cs, handler outcome/idempotency hardening, the discovery/filter fix in CloudEventBusServiceCollectionExtensions.cs, the InMemoryEventBus TimeProvider edit, silo/host registrations, DeadLetterRoutes + mo event dead-letter commands, and unit + spec/integration/CLI tests.",
       "dependsOn": ["T-001"],
       "passes": true,
-      "notes": "Follow design.md decisions D1–D13. Retry is hand-rolled with a fixed attempt cap and no backoff/jitter. Fresh host startup calls EnsureStartedAsync. Durable handler failures propagate; documented best-effort handlers absorb their own failures. Poison settlement is atomic. Agent launch replay resumes durable stable job/work identities. Dead-letter recovery targets one handler and is loopback-only through API + mo CLI."
+      "notes": "Follow design.md decisions D1–D13. Retry is hand-rolled with a fixed attempt cap and no backoff/jitter. Fresh host startup calls EnsureStartedAsync. Durable handler failures propagate; documented best-effort handlers absorb their own failures. Poison settlement is atomic. Agent launch replay resumes durable stable job/work identities. Dead-letter recovery targets one handler and is available only through a direct loopback API + mo CLI connection."
     }
   ]
 }

@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Mohist.Server.Events.Grains;
 using Mohist.Server.Events.Hosting;
 using Mohist.Server.Events.Hub;
 using Mohist.Server.Infrastructure.Events;
@@ -81,6 +82,8 @@ public static class MohistServiceRegistration
         services.AddSingleton<Mohist.Server.Workflow.Services.Prompts.IPromptLoader, Mohist.Server.Workflow.Services.Prompts.FilePromptLoader>();
         services.AddSingleton<IEventStore, EventStore>();
         services.TryAddSingleton<IDeadLetterStore, DeadLetterStore>();
+        services.AddSingleton<EventDispatcherService>();
+        services.Configure<DispatcherOptions>(configuration.GetSection(DispatcherOptions.SectionName));
         services.Configure<HermesNotificationOptions>(configuration.GetSection(HermesNotificationOptions.SectionName));
         services.AddSingleton<HermesIssueNotificationRenderer>();
         services.AddSingleton<IHermesIssueNotificationDispatcher, BackgroundHermesIssueNotificationDispatcher>();
@@ -119,6 +122,7 @@ public static class MohistServiceRegistration
         services.AddScoped<IWorkflowArtifactBindService, WorkflowArtifactBindService>();
         services.AddScoped<IWorkflowArtifactQuerier, WorkflowArtifactQuerier>();
         services.Configure<AgentJobOptions>(configuration.GetSection(AgentJobOptions.SectionName));
+        services.TryAddSingleton<IAgentJobDispatchObserver>(NoopAgentJobDispatchObserver.Instance);
         services.Configure<WorkflowOptions>(configuration.GetSection(WorkflowOptions.SectionName));
         services.Configure<CleanupPolicyOptions>(configuration.GetSection(CleanupPolicyOptions.SectionName));
         services.Configure<Mohist.Server.Otel.OtelOptions>(configuration.GetSection(Mohist.Server.Otel.OtelOptions.SectionName));

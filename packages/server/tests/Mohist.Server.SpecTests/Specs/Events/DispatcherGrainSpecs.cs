@@ -1,6 +1,7 @@
 using Mohist.Server.Events.Grains;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Issue.Domain.Events;
+using Mohist.Server.Runner.Grains;
 using Mohist.Server.SpecTests.Support;
 using Orleans;
 using Orleans.Runtime;
@@ -145,8 +146,7 @@ public class DispatcherGrainSpecs
 
         var beforeTick = _fixture.WaitForSpecificInvocationAsync("evt_reminder_before");
         await PublishWorkflowCompletedAsync("evt_reminder_before", "issue_reminder_before");
-        _fixture.TimeProvider.Advance(TimeSpan.FromHours(1));
-        await AwaitSignalAsync(beforeTick, "dispatcher reminder delivery for evt_reminder_before");
+        await AwaitSignalAsync(beforeTick, "dispatcher reminder delivery before silo loss");
         Assert.Contains("evt_reminder_before", _fixture.SpecificInvocations);
 
         var hostingSilo = _fixture.Cluster.GetSiloForAddress(initialSilo);
@@ -156,13 +156,11 @@ public class DispatcherGrainSpecs
         try
         {
             await _fixture.Cluster.WaitForLivenessToStabilizeAsync(didKill: true);
-            _fixture.TimeProvider.Advance(TimeSpan.FromHours(1));
-            await AwaitSignalAsync(reminderReloaded, "dispatcher reminder reload after silo loss");
+            await AwaitSignalAsync(reminderReloaded, "persisted reminder reload after silo loss");
 
             var afterTick = _fixture.WaitForSpecificInvocationAsync("evt_reminder_after");
             await PublishWorkflowCompletedAsync("evt_reminder_after", "issue_reminder_after");
-            _fixture.TimeProvider.Advance(TimeSpan.FromHours(1));
-            await AwaitSignalAsync(afterTick, "dispatcher reminder delivery for evt_reminder_after");
+            await AwaitSignalAsync(afterTick, "dispatcher reminder delivery after silo loss");
 
             Assert.Contains("evt_reminder_after", _fixture.SpecificInvocations);
             Assert.Equal(0, _fixture.EventStore.PendingCount);
@@ -210,16 +208,20 @@ public class DispatcherGrainSpecs
             time: EventTime,
             data: null));
 
-    private static async Task AwaitSignalAsync(Task signal, string description)
+    private Task AwaitSignalAsync(Task signal, string description) =>
+        TestWait.ForAsync(
+            () => signal.IsCompleted,
+            timeout: TimeSpan.FromSeconds(5),
+            step: TimeSpan.FromMilliseconds(100),
+            description,
+            advance: AdvanceClusterTurnAsync);
+
+    private async Task AdvanceClusterTurnAsync()
     {
-        try
-        {
-            await signal.WaitAsync(TimeSpan.FromSeconds(10));
-        }
-        catch (TimeoutException)
-        {
-            Assert.Fail($"Timed out waiting for {description}.");
-        }
+        _fixture.TimeProvider.Advance(TimeSpan.FromHours(1));
+        await _fixture.Grains
+            .GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global)
+            .ListRunnerIdsAsync();
     }
 }
 

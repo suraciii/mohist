@@ -4,7 +4,7 @@
 
 ## Context
 
-#361 made event writes durable (inside the aggregate state transaction) and removed the synchronous in-memory fan-out in `InMemoryEventBus`. Every `[Subscription]` handler is now dormant: the cross-aggregate reactions that drive the workflow forward (`WorkflowRunCompleted → CompleteIssue`, stage-lock release, epic auto-done, inbox projection, Hermes notification) no longer fire, and `AgentSubscriptionDispatchHandler`'s at-least-once contract is unfulfilled. Events are truth on disk; nobody is pushing them to subscribers.
+#361 made event writes durable (inside the aggregate state transaction) and removed the synchronous in-memory fan-out in `InMemoryEventBus`. Every `[Subscription]` handler is now dormant: the cross-aggregate reactions that drive the workflow forward (`WorkflowRunCompleted → CompleteIssue`, stage-lock release, epic auto-done, inbox projection, Hermes notification) no longer fire, and `AgentSubscriptionDispatchHandler` cannot receive future replay attempts. Events are truth on disk; nobody is pushing them to subscribers.
 
 Current state of the relevant pieces (verified against the tree):
 
@@ -14,7 +14,7 @@ Current state of the relevant pieces (verified against the tree):
 - **Reminder subsystem is already enabled** via `UseAdoNetReminderService` (`MohistSiloRegistration.cs:33`), but **`RegisterOrUpdateReminder` is called nowhere in `packages/server/src`** — `RunnerGrain` is the only `IRemindable` and drives presence via a grain timer instead. This issue establishes the first live reminder.
 - **DeadLetters layer is absent.** It was added then deleted in the test reorg (`ba50c2089`); only its ghost lingers in one migration Designer snapshot. It must be re-created.
 - **Closed-generic handler discovery is broken** at `CloudEventBusServiceCollectionExtensions.cs:20-24`: `typeof(ICloudEventHandler<>).IsAssignableFrom(t)` is always `false` for concrete closed-generic types, so `EpicAutoDoneHandler`/`EpicCancelledReconcileHandler` (which implement only `ICloudEventHandler<TData>`) are silently excluded.
-- **`TimeProvider` is registered** in both containers (`MohistSiloRegistration.cs:64`, `MohistServiceRegistration.cs:97`) and overridden with `FakeTimeProvider` in `MohistIntegrationFixture`. The event path has one wall-clock offender left: `InMemoryEventBus.cs:75` (`DateTimeOffset.UtcNow`).
+- **`TimeProvider` is registered** in the host-shared application service graph and overridden with `FakeTimeProvider` in `MohistIntegrationFixture`. The event path has one wall-clock offender left: `InMemoryEventBus.cs:75` (`DateTimeOffset.UtcNow`).
 
 Constraints: no broker, no per-stream grain, no Orleans.Streaming (converged in `eventbus-v2.md`). Testing 铃律: no real time, no real external dependency, fast (<50ms unit, <500ms spec).
 
@@ -22,7 +22,7 @@ Constraints: no broker, no per-stream grain, no Orleans.Streaming (converged in 
 
 **Goals:**
 - A sole, self-healing notifier that delivers every persisted event at least once to matching `[Subscription]` handlers, with per-stream FIFO, retry, and a poison-message dead-letter escape.
-- Reactivate the 8 existing handlers with **no change to their contracts** (`AgentSubscriptionDispatchHandler` gains at-least-once; the Epic closed-generic handlers actually enter the fan-out set).
+- Reactivate the 8 existing handlers with **no change to their contracts** (`AgentSubscriptionDispatchHandler` receives at-least-once event attempts but keeps best-effort launch failure handling; the Epic closed-generic handlers actually enter the fan-out set).
 - A dispatch core that is a plain DI service, unit-testable with fake stores + injected `TimeProvider`; the grain is a thin shell.
 
 **Non-Goals** (carry over from the issue):
@@ -37,7 +37,7 @@ Constraints: no broker, no per-stream grain, no Orleans.Streaming (converged in 
 
 `IDispatcherGrain : IGrainWithStringKey, IRemindable`, fixed key `"dispatcher"`. Orleans placement gives exactly one cluster-wide activation for that key → the sole notifier; the persisted reminder self-heals across silo crash. `DispatcherActivationService` calls `EnsureStartedAsync` during host startup so a fresh database gets its first reminder without relying on a producer ping. The grain remains a thin shell: `ReceiveReminder` and `PulseAsync` call `fanOutService.DispatchAsync(ct)`.
 
-The actual logic — pull → match → invoke → retry → dead-letter → mark — lives in an `EventDispatcherService` (plain singleton in the silo container) with `IEventStore`, `IEnumerable<Subscription>`, `IDeadLetterStore`, `ILogger`, `TimeProvider` injected. This is the explicit directive of `eventbus-v2.md:178-189` and makes the core unit-testable without a silo (`MohistDbFixture` provides the real service graph minus the silo; pure unit tests use a fake `IEventStore` + `IDeadLetterStore` + `FakeTimeProvider`).
+The actual logic — pull → match → invoke → retry → dead-letter → mark — lives in an `EventDispatcherService` (plain singleton in the host-shared application service graph) with `IEventStore`, `IEnumerable<Subscription>`, `IDeadLetterStore`, `ILogger`, `TimeProvider` injected. This is the explicit directive of `eventbus-v2.md:178-189` and makes the core unit-testable without a silo (`MohistDbFixture` provides the real application graph minus Orleans infrastructure; pure unit tests use a fake `IEventStore` + `IDeadLetterStore` + `FakeTimeProvider`).
 
 - **Alternative: per-stream consumer grains.** Rejected (`eventbus-v2.md:89,119-136`): puller count must be constant, not proportional to stream count; 1M workflows must not mean 1M grains.
 - **Alternative: signal-driven dispatch (producers trigger).** Rejected (`eventbus-v2.md:114-117`): correctness must not depend on any external signal; a self-waking reminder is the only driver that survives lost pings.
@@ -69,7 +69,7 @@ Process the returned batch serially in the `ListUndeliveredAsync` order (`Source
 
 For each undelivered event, iterate the registered `IEnumerable<Subscription>`; for each whose `CloudEventTypeMatcher.Matches(sub.Type, evt.Type)` is true, invoke its `DispatchDelegate`. Each matching handler is retried **independently** — one handler's transient failure or exhaustion never affects a sibling's delivery of the same event (spec: "per-handler isolation"). The event row is marked dispatched once all matching handlers have settled (succeeded or dead-lettered).
 
-The returned `Task` is the delivery outcome contract for durable domain reactions. A handler may return normally for an intentional no-op, but it must propagate an exception when its required side effect fails; it must not detach work that determines success. Explicitly best-effort channels keep their published contract: Hermes logs and absorbs webhook failures, so the dispatcher sees that notification as a settled best-effort attempt and does not retry or dead-letter it.
+The returned `Task` is the delivery outcome contract for durable domain reactions. A handler may return normally for an intentional no-op, but it must propagate an exception when its required side effect fails; it must not detach work that determines success. Explicitly best-effort channels keep their published contracts: Hermes logs and absorbs webhook failures, and `AgentSubscriptionDispatchHandler` logs and absorbs launch-path failures. The dispatcher therefore sees either case as a settled best-effort attempt and does not retry or dead-letter it.
 
 Fixing the closed-generic discovery bug (D8) is what puts `EpicAutoDoneHandler`/`EpicCancelledReconcileHandler` into this set.
 
@@ -108,9 +108,9 @@ At `CloudEventBusServiceCollectionExtensions.cs:20-24`, replace the dead `typeof
 
 `EventDispatcherService` and `DispatcherGrain` take `TimeProvider` (constructor → `readonly TimeProvider _time` → `_time.GetUtcNow()` for `DispatchedAt` and `DeadLetteredAt`), mirroring the pervasive existing idiom (`WorkflowGrain.cs:32,45`, etc.). Replace `DateTimeOffset.UtcNow` at `InMemoryEventBus.cs:75` with the same injected `TimeProvider`. `TimeProvider.System` is already registered; tests inject `FakeTimeProvider`.
 
-### D10 — DI registration site: `MohistSiloRegistration.cs`
+### D10 — One host-shared application service graph
 
-Register dispatcher-specific services through `ConfigureMohistSilo`: `EventDispatcherService` (singleton), `IDeadLetterStore` → `DeadLetterStore` (+ `NoopDeadLetterStore` as the test fake via `TryAdd`), and the grain implementation. Under Generic Host, `ISiloBuilder.Services` contributes to the same host service collection that `AddMohistServerCore` completes, so scoped handler dependencies come from that shared graph; the conventional service graph must not be registered a second time. `AddCloudEventHandlersFromAssembly` feeds `IEnumerable<Subscription>` to the service.
+Under Generic Host, `ISiloBuilder.Services` is the same collection that `AddMohistServerCore` configures. Register `EventDispatcherService`, `IDeadLetterStore` → `DeadLetterStore` (+ test replacement through `TryAdd`), handler discovery, options, and observer defaults once through `ConfigureMohistServices`; `ConfigureMohistSilo` owns only Orleans clustering, persistence, reminder, telemetry, and logging infrastructure. `AddCloudEventHandlersFromAssembly` feeds one `IEnumerable<Subscription>` to the dispatcher.
 
 ### D11 — Agent event launches use durable stable job identities
 
@@ -118,9 +118,9 @@ Register dispatcher-specific services through `ConfigureMohistSilo`: `EventDispa
 
 `AgentJobGrain` persists the input, lifecycle, candidate runner, and a stable work id derived from the grain key before acknowledging `SubmitAsync` or calling the Runner. A crash before Runner acceptance reactivates and resumes the same record. A crash after Runner acceptance replays the same `(ownerId, workId)`, which `RunnerGrain.AssignAgentJobAsync` already absorbs idempotently. The Runner may regard the persisted assigning state as runnable, closing the acceptance-versus-status crash window. Terminal state and retry counters are persisted as well.
 
-### D12 — Dead-letter operator routes are loopback-only and redact stacks
+### D12 — Dead-letter operator routes require a direct loopback connection and redact stacks
 
-Mohist does not yet have an operator authentication model. Until one exists, list and re-delivery routes reject non-loopback requests. API responses omit raw exception stacks; the server log remains the diagnostic surface. TestServer requests with no network peer are treated as local.
+Mohist does not yet have an operator authentication model. Until one exists, a public listener does not map the dead-letter routes at all. A loopback listener accepts only direct requests whose host, remote address, and local address are loopback and which carry no standard reverse-proxy forwarding markers. API responses omit raw exception stacks; the server log remains the diagnostic surface. TestServer supplies explicit loopback connection addresses instead of treating an unknown peer as authorized.
 
 ### D13 — Singleton handlers open a scope per delivery
 

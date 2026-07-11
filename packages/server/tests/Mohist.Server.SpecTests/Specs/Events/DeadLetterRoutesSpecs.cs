@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Api;
 using Mohist.Server.Events.Hub;
@@ -93,16 +94,72 @@ public sealed class DeadLetterRoutesSpecs
     [InlineData("203.0.113.10", false)]
     public void OperatorBoundary_AllowsOnlyLoopback(string address, bool expected)
     {
-        Assert.Equal(expected, DeadLetterRoutes.IsLocalOperator(IPAddress.Parse(address)));
+        Assert.Equal(expected, DeadLetterRoutes.IsLoopbackAddress(IPAddress.Parse(address)));
     }
 
-    private static DeadLetterRow BuildRow(string failingHandler) =>
-        new()
+    [Fact]
+    public void OperatorBoundary_RejectsMissingPeerAddress()
+    {
+        Assert.False(DeadLetterRoutes.IsLoopbackAddress(null));
+    }
+
+    [Theory]
+    [InlineData("http://127.0.0.1:3456", true)]
+    [InlineData("http://localhost:3456", true)]
+    [InlineData("http://0.0.0.0:3456", false)]
+    [InlineData("http://*:3456", false)]
+    [InlineData("http://[::]:3456", false)]
+    public void OperatorBoundary_MapsRoutesOnlyOnLoopbackListener(string url, bool expected)
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["urls"] = url })
+            .Build();
+
+        Assert.Equal(expected, DeadLetterRoutes.UsesLoopbackOnlyListener(configuration));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
+    [Fact]
+    public async Task Redeliver_RejectsLoopbackProxyForRemoteCallerWithoutSideEffect()
+    {
+        var store = _fixture.Services.GetRequiredService<IDeadLetterStore>();
+        var row = BuildRow(typeof(EventBridge).FullName!);
+        await store.WriteAsync(row);
+
+        try
+        {
+            using var request = new HttpRequestMessage(
+                HttpMethod.Post,
+                $"/api/events/dead-letters/{row.DeadLetterId}/redeliver")
+            {
+                Content = JsonContent.Create(new { }),
+            };
+            request.Headers.TryAddWithoutValidation("X-Forwarded-For", "203.0.113.10");
+
+            using var response = await _fixture.Client.SendAsync(request);
+
+            Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+            var stored = await store.GetAsync(row.DeadLetterId);
+            Assert.NotNull(stored);
+            Assert.Equal(DeadLetterStatus.Pending, stored.Status);
+            Assert.Null(stored.RedeliveryAttemptedAt);
+        }
+        finally
+        {
+            await store.DeleteAsync(row.DeadLetterId);
+        }
+    }
+
+    private static DeadLetterRow BuildRow(string failingHandler)
+    {
+        var key = Guid.NewGuid().ToString("N");
+        return new()
         {
             Origin = nameof(EventOrigin.Issue),
             Id = 42,
-            Source = "/mohist/issues/issue_dead_letter",
-            EventId = $"evt_dead_letter_{Guid.NewGuid():N}",
+            Source = $"/mohist/issues/issue_dead_letter_{key}",
+            EventId = $"evt_dead_letter_{key}",
             Type = "com.mohist.test.dead-letter",
             Time = new DateTimeOffset(2026, 7, 11, 1, 0, 0, TimeSpan.Zero),
             SpecVersion = "1.0",
@@ -116,4 +173,5 @@ public sealed class DeadLetterRoutesSpecs
             AttemptCount = 3,
             DeadLetteredAt = new DateTimeOffset(2026, 7, 11, 1, 1, 0, TimeSpan.Zero),
         };
+    }
 }

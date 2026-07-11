@@ -25,13 +25,13 @@
 - [ID: item-4]
   Severity: test-gap
   Scope: reminder self-healing
-  Resolution: The dispatcher fixture now has two silos backed by one shared reminder table. A deterministic test advances the injected `FakeTimeProvider` to fire a real reminder without `PulseAsync` or direct callback invocation, kills the hosting silo, waits for membership convergence and persisted reminder reload, then proves the next real tick delivers on the surviving silo. The fixture restores a second silo afterward and every signal has a bounded failure timeout.
+  Resolution: The dispatcher fixture now has two silos backed by one shared reminder table. A deterministic test advances the injected `FakeTimeProvider` to fire a real reminder without `PulseAsync` or direct callback invocation, kills the hosting silo, waits for membership convergence and persisted reminder reload, then proves the next real tick delivers on the surviving silo. The fixture restores a second silo afterward; delivery and reload completion come from explicit `TaskCompletionSource` signals guarded by `TestWait`'s fixed attempt budget. Each attempt advances fake time and completes an unrelated read-only Orleans grain turn, with no wall-clock wait and no dispatcher activation or pulse.
   Status: resolved
 
 - [ID: item-5]
   Severity: warning
   Scope: operator security
-  Resolution: Dead-letter list/re-delivery reject non-loopback callers and API responses omit exception stacks. Tests cover loopback/remote classification and response redaction.
+  Resolution: Public listeners do not map dead-letter routes. Loopback listeners require a direct request with loopback host, local address, and remote address, reject standard proxy markers, and deny unknown peers. API responses omit exception stacks. Tests cover public-listener disablement, loopback/remote classification, proxy rejection before redelivery, and response redaction.
   Status: resolved
 
 - [ID: item-6]
@@ -64,16 +64,34 @@
   Resolution: The two unit-test classes that replace `Console.Out` / `Console.Error` now share a non-parallel xUnit collection, preventing one test from restoring the process-global writers while the other is capturing them.
   Status: resolved
 
+- [ID: item-11]
+  Severity: blocking
+  Scope: Agent subscription contract
+  Resolution: Restored `AgentSubscriptionDispatchHandler` catch-and-log behavior while preserving cancellation propagation. A failing launcher is observable as a warning but completes the handler successfully; dispatcher coverage proves the source row settles without a dead letter.
+  Status: resolved
+
+- [ID: item-12]
+  Severity: warning
+  Scope: production service graph
+  Resolution: Orleans and the Web host share one `IServiceCollection`, so application registrations now live only in `ConfigureMohistServices`; `ConfigureMohistSilo` contains Orleans infrastructure only. A regression pins one event bus, event store, dead-letter store, dispatcher, subscription set, handler, Hermes dispatcher, AgentJob observer, and TimeProvider registration.
+  Status: resolved
+
+- [ID: item-13]
+  Severity: test-gap
+  Scope: reminder test timing
+  Resolution: Removed `WaitAsync(TimeSpan)` from the reminder/failover spec. It advances only the injected fake clock and probes the shared reminder-table and handler-delivery signals through `TestWait`'s fixed attempt budget; the between-attempt hook completes an unrelated read-only Orleans grain turn without sleeping or touching the dispatcher.
+  Status: resolved
+
 ## Verification
 
 - Dispatcher/Hermes unit slice: 30 passed.
 - AgentJob persistence + AgentLauncher specs: 30 passed.
 - Dead-letter, reminder/failover, API, Agent, and Epic focused server specs: 81 passed.
 - Origin-aware settlement regression slices: 42 server specs and 36 server unit tests passed.
-- Repaired dispatcher suite: 7 passed in three consecutive runs; the failover test uses real reminder ticks and shared persistence.
+- Repaired dispatcher suite: 7 passed, plus the failover case passed in three concurrent processes; it uses real reminder ticks, shared persistence, fake time, and deterministic signals.
 - Event-delivery index model + migration regression: 1 passed.
 - Console-capture slice: 9 passed in five consecutive runs.
-- Full CI-equivalent validation: CLI 870; server unit 1361; architecture 24 with 3 pre-existing skips; server spec 2836 with 9 pre-existing skips; Web 4596; Runner 1007; Node test-boundary checks passed.
+- Full CI-equivalent validation: CLI 870; server unit 1363; architecture 24 with 3 pre-existing skips; server spec 2843 with 9 pre-existing skips; Web 4596; Runner 1007; Node test-boundary checks passed.
 - `git diff --check` and `tasks.json` JSON validation pass.
 
 ## Follow-up Items

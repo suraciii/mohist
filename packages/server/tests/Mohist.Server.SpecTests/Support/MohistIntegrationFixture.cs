@@ -1,3 +1,5 @@
+using System.Net;
+using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.SignalR;
@@ -177,6 +179,7 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
         builder.ConfigureTestServices(services =>
         {
             services.RemoveAll<IGitService>();
+            services.AddSingleton<IStartupFilter, LoopbackTestConnectionStartupFilter>();
             services.AddSingleton<FakeGitService>();
             services.AddSingleton<IGitService>(provider => provider.GetRequiredService<FakeGitService>());
             services.RemoveAll<IRunnerWorkspaceClient>();
@@ -277,6 +280,20 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
         File.WriteAllText(Path.Combine(root, "index.html"), "<html><body>Mohist Test Web</body></html>");
         return root;
     }
+}
+
+public sealed class LoopbackTestConnectionStartupFilter : IStartupFilter
+{
+    public Action<IApplicationBuilder> Configure(Action<IApplicationBuilder> next) => app =>
+    {
+        app.Use(async (context, continuation) =>
+        {
+            context.Connection.RemoteIpAddress ??= IPAddress.Loopback;
+            context.Connection.LocalIpAddress ??= IPAddress.Loopback;
+            await continuation();
+        });
+        next(app);
+    };
 }
 
 public sealed class RecordingRunnerHubContext : IHubContext<RunnerHub>

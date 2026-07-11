@@ -1,8 +1,10 @@
 using System.Text.Json;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Events.Grains;
+using Mohist.Server.Events.Subscriptions;
 using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Issue.Domain.Events;
@@ -136,6 +138,34 @@ public class EventDispatcherSpecs
 
         Assert.Equal(2, attempts);
         Assert.Single(events.Marked);
+        Assert.Empty(dlq.Written);
+    }
+
+    [Fact]
+    public async Task DispatchAsync_AgentBestEffortFailure_MarksDeliveredWithoutDeadLetter()
+    {
+        var time = new FakeTimeProvider(StartTime);
+        var events = new FakeEventStore();
+        var dlq = new FakeDeadLetterStore();
+        var handler = new AgentSubscriptionDispatchHandler(
+            new ThrowingScopeFactory(),
+            NullLogger<AgentSubscriptionDispatchHandler>.Instance);
+        var dispatcher = BuildDispatcher(
+            events,
+            dlq,
+            [new Subscription("*", handler, DispatchDynamic)],
+            time);
+
+        events.Enqueue(FakeEventStore.Build(
+            type: IssueCompleted,
+            source: "/mohist/issues/issue_agent_best_effort",
+            eventId: "evt_agent_best_effort",
+            extensions: new Dictionary<string, string> { ["projectid"] = "project_agent" }));
+
+        await dispatcher.DispatchAsync(CancellationToken.None);
+
+        Assert.Single(events.Marked);
+        Assert.Empty(events.PendingUndelivered);
         Assert.Empty(dlq.Written);
     }
 
@@ -699,5 +729,11 @@ public class EventDispatcherSpecs
             _onEvent(evt);
             return Task.CompletedTask;
         }
+    }
+
+    private sealed class ThrowingScopeFactory : IServiceScopeFactory
+    {
+        public IServiceScope CreateScope() =>
+            throw new InvalidOperationException("launch unavailable");
     }
 }

@@ -47,11 +47,17 @@ A dead-lettered event SHALL be manually re-deliverable on operator action, so a 
 
 ### Requirement: Dead-letter operator access is local and redacted
 
-Until Mohist has authenticated operator identities, dead-letter list and re-delivery operations SHALL only accept loopback callers. List responses SHALL NOT expose raw exception stacks.
+Until Mohist has authenticated operator identities, dead-letter list and re-delivery operations SHALL only be mapped on a loopback listener and SHALL only accept direct loopback callers. Proxy-forwarded requests SHALL be rejected. List responses SHALL NOT expose raw exception stacks.
 
 #### Scenario: Remote caller cannot inspect or replay
 
 - **WHEN** a non-loopback caller requests a dead-letter list or re-delivery
+- **THEN** the server SHALL reject the request
+- **AND** no handler side effect SHALL run
+
+#### Scenario: Reverse proxy cannot expose local operator routes
+
+- **WHEN** a non-loopback caller reaches the server through a loopback reverse proxy
 - **THEN** the server SHALL reject the request
 - **AND** no handler side effect SHALL run
 

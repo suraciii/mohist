@@ -1,21 +1,7 @@
 using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
-using Mohist.Server.Agent.Grains;
-using Mohist.Server.Events.Grains;
-using Mohist.Server.Infrastructure.Data;
-using Mohist.Server.Infrastructure.Data.Events;
-using Mohist.Server.Infrastructure.Data.Issue;
-using Mohist.Server.Infrastructure.Data.Workflow;
-using Mohist.Server.Infrastructure.Events;
-using Mohist.Server.Inbox;
-using Mohist.Server.Notifications;
-using Mohist.Server.Workflow.Domain.Run;
-using Mohist.Server.Workflow.Grains;
 using Orleans.Configuration;
 using Orleans.Hosting;
-using DomainIssue = Mohist.Server.Issue.Domain.Issue;
 
 namespace Mohist.Server.Infrastructure.Hosting;
 
@@ -57,24 +43,6 @@ public static class MohistSiloRegistration
         {
             options.MinimumReminderPeriod = TimeSpan.FromMilliseconds(100);
         });
-
-        silo.Services.AddCloudEventBus();
-        silo.Services.AddSingleton<IEventStore, EventStore>();
-        silo.Services.TryAddSingleton<IDeadLetterStore, DeadLetterStore>();
-        silo.Services.AddSingleton<EventDispatcherService>();
-        silo.Services.Configure<DispatcherOptions>(configuration.GetSection(DispatcherOptions.SectionName));
-        silo.Services.AddScoped<InboxStore>();
-        silo.Services.AddScoped<IStateStore<DomainIssue>>(sp => sp.GetRequiredService<IIssueStore>());
-        silo.Services.AddScoped<IIssueStore, IssueStore>();
-        silo.Services.AddScoped<IWorkflowRunStore, WorkflowRunStore>();
-        silo.Services.Configure<HermesNotificationOptions>(configuration.GetSection(HermesNotificationOptions.SectionName));
-        silo.Services.AddSingleton<HermesIssueNotificationRenderer>();
-        silo.Services.AddSingleton<IHermesIssueNotificationDispatcher, BackgroundHermesIssueNotificationDispatcher>();
-        silo.Services.AddHttpClient<IHermesWebhookClient, HermesWebhookClient>();
-        silo.Services.AddCloudEventHandlersFromAssembly(typeof(MohistSiloRegistration).Assembly);
-        silo.Services.Configure<AgentJobOptions>(configuration.GetSection(AgentJobOptions.SectionName));
-        silo.Services.TryAddSingleton<IAgentJobDispatchObserver>(NoopAgentJobDispatchObserver.Instance);
-        silo.Services.TryAddSingleton(TimeProvider.System);
 
         return silo;
     }

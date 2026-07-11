@@ -25,10 +25,6 @@ public static class TestWait
         string description,
         Func<Task>? advance = null)
     {
-        if (advance is not null)
-        {
-        }
-
         var attempts = Attempts(timeout, step);
         T current = default!;
         for (var i = 0; i <= attempts; i++)
