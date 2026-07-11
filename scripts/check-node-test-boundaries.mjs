@@ -1028,7 +1028,9 @@ function isExcludedWebFile(relativePath) {
 
 function isActiveWebVitestFile(relativePath) {
   if (isExcludedWebFile(relativePath)) return false
-  if (relativePath.startsWith('src/')) return /\.(?:test|spec)\.tsx?$/.test(relativePath)
+  if (relativePath.startsWith('src/')) {
+    return /\.test\.tsx?$/.test(relativePath) || /\.spec\.tsx$/.test(relativePath)
+  }
   if (!relativePath.startsWith('tests/')) return false
   if (relativePath.startsWith('tests/e2e/')) return false
   return /\.spec\.tsx$/.test(relativePath)
