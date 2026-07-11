@@ -5,8 +5,8 @@
  * Vitest hoists them per file.
  */
 import type { ReactNode } from 'react'
-import { act, render, waitFor } from '@testing-library/react'
-import { expect, vi } from 'vitest'
+import { act, render } from '@testing-library/react'
+import { vi } from 'vitest'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ProjectProvider } from '../../../entities/project'
 import type { TaskLogLine, TaskLogPage } from '../../../entities/issue'
@@ -15,6 +15,7 @@ import {
   fakeConnections,
   recordedInvokes,
   makeFakeConnection,
+  waitForFakeConnection,
   type FakeConnection,
 } from '../../../../tests/support/signalr-fake'
 
@@ -114,13 +115,12 @@ export function renderWithTaskLogProviders(ui: ReactNode, testState: TaskLogTest
 }
 
 export async function flushAndGetLastConnection(): Promise<FakeConnection> {
-  await waitFor(() => {
-    expect(fakeConnections.length).toBeGreaterThan(0)
-  })
+  const connection = await waitForFakeConnection()
   await act(async () => {
-    await new Promise((resolve) => setTimeout(resolve, 0))
+    connection.completeStart()
+    await connection.waitForStart()
   })
-  return fakeConnections[fakeConnections.length - 1]
+  return connection
 }
 
 export interface DownloadCapture {

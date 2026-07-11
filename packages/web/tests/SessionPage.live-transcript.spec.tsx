@@ -5,17 +5,16 @@ import { dispatchAgentEvent } from '../src/entities/agent'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import React from 'react'
 import type { SessionTurn, TextPart, ToolPart, ErrorPart } from '../src/entities/coder-session'
+import { setScopedValue } from './support/scoped-property'
 
-const originalScrollTo = Element.prototype.scrollTo
 const queryClients: QueryClient[] = []
 
 beforeEach(() => {
   vi.clearAllMocks()
-  Element.prototype.scrollTo = vi.fn()
+  setScopedValue(Element.prototype, 'scrollTo', vi.fn())
 })
 
 afterEach(() => {
-  Element.prototype.scrollTo = originalScrollTo
   for (const queryClient of queryClients) queryClient.clear()
   queryClients.length = 0
 })

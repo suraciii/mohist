@@ -1,4 +1,3 @@
-// @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -212,7 +211,7 @@ function setupDefaultMocks() {
   }
 }
 
-describe('SessionPage sticky recovery bar (issue-245 T-004)', () => {
+describe('SessionPage sticky recovery bar', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     setupDefaultMocks()
@@ -353,49 +352,44 @@ describe('SessionPage sticky recovery bar (issue-245 T-004)', () => {
 
   it('keeps the recovery bar visible in the page scroll context after the transcript has scrolled (scroll-stick)', async () => {
     const originalGetBoundingClientRect = Element.prototype.getBoundingClientRect
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function mockRect(this: Element) {
+      const testId = (this as HTMLElement).getAttribute?.('data-testid') ?? ''
+      if (testId === 'session-transcript-scroll-container') {
+        return { top: 120, bottom: 480, left: 0, right: 800, width: 800, height: 360, x: 0, y: 120, toJSON: () => ({}) } as DOMRect
+      }
+      if (testId === 'session-sticky-title') {
+        return { top: 120, bottom: 156, left: 0, right: 800, width: 800, height: 36, x: 0, y: 120, toJSON: () => ({}) } as DOMRect
+      }
+      if (testId === 'session-recovery-bar') {
+        return { top: 156, bottom: 216, left: 0, right: 800, width: 800, height: 60, x: 0, y: 156, toJSON: () => ({}) } as DOMRect
+      }
+      if (testId === 'session-transcript-layout') {
+        return { top: 216, bottom: 2400, left: 0, right: 800, width: 800, height: 2184, x: 0, y: 216, toJSON: () => ({}) } as DOMRect
+      }
+      return originalGetBoundingClientRect.call(this)
+    })
 
-    try {
-      Element.prototype.getBoundingClientRect = vi.fn(function mockRect(this: Element) {
-        const testId = (this as HTMLElement).getAttribute?.('data-testid') ?? ''
-        if (testId === 'session-transcript-scroll-container') {
-          return { top: 120, bottom: 480, left: 0, right: 800, width: 800, height: 360, x: 0, y: 120, toJSON: () => ({}) } as DOMRect
-        }
-        if (testId === 'session-sticky-title') {
-          return { top: 120, bottom: 156, left: 0, right: 800, width: 800, height: 36, x: 0, y: 120, toJSON: () => ({}) } as DOMRect
-        }
-        if (testId === 'session-recovery-bar') {
-          return { top: 156, bottom: 216, left: 0, right: 800, width: 800, height: 60, x: 0, y: 156, toJSON: () => ({}) } as DOMRect
-        }
-        if (testId === 'session-transcript-layout') {
-          return { top: 216, bottom: 2400, left: 0, right: 800, width: 800, height: 2184, x: 0, y: 216, toJSON: () => ({}) } as DOMRect
-        }
-        return originalGetBoundingClientRect.call(this)
-      })
+    const { container } = await renderPage()
+    const scrollContainer = container.querySelector('[data-testid="session-transcript-scroll-container"]')
+    expect(scrollContainer).not.toBeNull()
 
-      const { container } = await renderPage()
-      const scrollContainer = container.querySelector('[data-testid="session-transcript-scroll-container"]')
-      expect(scrollContainer).not.toBeNull()
+    const recoveryBar = scrollContainer!.querySelector('[data-testid="session-recovery-bar"]')
+    const stickyTitle = scrollContainer!.querySelector('[data-testid="session-sticky-title"]')
+    expect(recoveryBar).not.toBeNull()
+    expect(stickyTitle).not.toBeNull()
+    expect(recoveryBar!.getAttribute('data-sticky')).toBe('true')
 
-      const recoveryBar = scrollContainer!.querySelector('[data-testid="session-recovery-bar"]')
-      const stickyTitle = scrollContainer!.querySelector('[data-testid="session-sticky-title"]')
-      expect(recoveryBar).not.toBeNull()
-      expect(stickyTitle).not.toBeNull()
-      expect(recoveryBar!.getAttribute('data-sticky')).toBe('true')
+    const scrollRect = scrollContainer!.getBoundingClientRect()
+    const titleRect = stickyTitle!.getBoundingClientRect()
+    const barRect = recoveryBar!.getBoundingClientRect()
 
-      const scrollRect = scrollContainer!.getBoundingClientRect()
-      const titleRect = stickyTitle!.getBoundingClientRect()
-      const barRect = recoveryBar!.getBoundingClientRect()
+    expect(titleRect.top).toBe(scrollRect.top)
+    expect(barRect.top).toBe(titleRect.bottom)
+    expect(barRect.bottom).toBeLessThanOrEqual(scrollRect.bottom)
 
-      expect(titleRect.top).toBe(scrollRect.top)
-      expect(barRect.top).toBe(titleRect.bottom)
-      expect(barRect.bottom).toBeLessThanOrEqual(scrollRect.bottom)
-
-      const compact = recoveryBar!.querySelector('[data-testid="session-recovery-compact"]')
-      const reset = recoveryBar!.querySelector('[data-testid="session-recovery-reset"]')
-      expect(compact).not.toBeNull()
-      expect(reset).not.toBeNull()
-    } finally {
-      Element.prototype.getBoundingClientRect = originalGetBoundingClientRect
-    }
+    const compact = recoveryBar!.querySelector('[data-testid="session-recovery-compact"]')
+    const reset = recoveryBar!.querySelector('[data-testid="session-recovery-reset"]')
+    expect(compact).not.toBeNull()
+    expect(reset).not.toBeNull()
   })
 })

@@ -1,4 +1,3 @@
-// @vitest-environment jsdom
 import '@testing-library/jest-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
@@ -41,7 +40,7 @@ afterEach(() => {
   vi.clearAllMocks()
 })
 
-describe('PreferencesSection (T-003)', () => {
+describe('PreferencesSection', () => {
   beforeEach(() => {
     __resetShortcutHandlersForTesting()
   })
@@ -164,8 +163,8 @@ describe('PreferencesSection (T-003)', () => {
   })
 
   it('every shortcut id declared in SHORTCUTS can be resolved to a registered handler', () => {
-    // Mount the component, then simulate T-004 (the settings search dialog)
-    // registering the missing handler. After both are in place every id
+    // Mount the component, then register the settings search handler.
+    // After both handlers are in place every id
     // must resolve — this is the "no fake shortcuts" guard the spec calls
     // for.
     renderPreferences()
@@ -190,11 +189,8 @@ describe('PreferencesSection (T-003)', () => {
   })
 
   it('does not depend on SidebarProvider for its core render', () => {
-    // The Preferences tab is part of the Settings surface and may be
-    // rendered in contexts where SidebarProvider is not present (a11y
-    // scans, design review snapshots, future portal mounts). It must
-    // therefore not call useSidebar — guard the assumption by mounting
-    // without a SidebarProvider and asserting the core cards render.
+    // The Preferences tab may render without SidebarProvider, so mount it
+    // that way and assert the core cards still render.
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     render(
       <QueryClientProvider client={queryClient}>
@@ -211,7 +207,7 @@ describe('PreferencesSection (T-003)', () => {
   })
 })
 
-describe('PREFERENCES_DESCRIPTORS (T-003 registry entry)', () => {
+describe('PREFERENCES_DESCRIPTORS', () => {
   it('contains exactly one entry: the theme selector with focusTargetId preferences-theme', () => {
     expect(PREFERENCES_DESCRIPTORS).toEqual([
       {

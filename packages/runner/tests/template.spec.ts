@@ -50,8 +50,7 @@ describe("renderTemplate", () => {
   })
 
   it("UnresolvedEmbeddedReference_LeavesLiteral", () => {
-    // Mirrors the T-001.6 scenario in #49 where the agent task description
-    // embeds the literal text "${{ prompts.xxx }}" (a documentation example
+    // A task description can embed the literal text "${{ prompts.xxx }}" (a documentation example
     // the agent should read, not a template reference). The embedded form
     // must NOT fail the dispatch — the unresolved reference is preserved
     // verbatim so the agent sees the example.
@@ -191,8 +190,8 @@ describe("wholeStringUnresolvedReferences", () => {
   })
 
   it("ReturnsOnlyEmbeddedUnresolved_AsEmpty", () => {
-    // The T-001.6 case: a description embeds the literal text "${{ prompts.xxx }}"
-    // alongside other resolvable variables. The whole-string check should NOT
+    // A description can embed the literal text "${{ prompts.xxx }}" alongside
+    // other resolvable variables. The whole-string check should NOT
     // flag it because the unresolved reference is not the entire value of any
     // string field.
     const unresolved = wholeStringUnresolvedReferences(

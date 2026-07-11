@@ -1,4 +1,3 @@
-// @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -8,6 +7,7 @@ import type { Project } from '../../../entities/project'
 import { IssueDetailPage, type IssueDetailPageComponents } from './IssueDetailPage'
 import { RuntimeToastHost, useRuntimeToast } from '../../../shared/ui/toast'
 import { mockIssue, mockIssueCommits, mockIssueDiff, mockWorkflowTimeline, mockWorkspaceStatus, mountIssueDetail } from './_issueDetailMsw'
+import { setScopedValue } from '../../../../tests/support/scoped-property'
 
 function LocationProbe() {
   const location = useLocation()
@@ -272,7 +272,7 @@ describe('IssueDetailPage runtime decision surface', () => {
 
 describe('IssueDetailPage repository metadata containment', () => {
   beforeEach(() => {
-    window.innerWidth = 1280
+    setScopedValue(window, 'innerWidth', 1280)
     window.dispatchEvent(new Event('resize'))
   })
 
@@ -557,7 +557,7 @@ describe('IssueDetailPage activity dialog', () => {
       workflowStatus: 'running',
     }))
 
-    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 375 })
+    setScopedValue(window, 'innerWidth', 375)
     window.dispatchEvent(new Event('resize'))
 
     renderPage()
@@ -601,9 +601,9 @@ describe('IssueDetailPage activity dialog', () => {
   })
 })
 
-describe('IssueDetailPage density and whitespace rhythm (issue-180 T-004)', () => {
+describe('IssueDetailPage density and whitespace rhythm', () => {
   beforeEach(() => {
-    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1280 })
+    setScopedValue(window, 'innerWidth', 1280)
     window.dispatchEvent(new Event('resize'))
   })
 
@@ -815,7 +815,7 @@ describe('IssueDetailPage density and whitespace rhythm (issue-180 T-004)', () =
   })
 })
 
-describe('IssueDetailPage Ask Agent entry (T-005)', () => {
+describe('IssueDetailPage Ask Agent entry', () => {
   it('renders an Ask Agent button in the Actions card section', async () => {
     mockIssue(makeIssue())
 

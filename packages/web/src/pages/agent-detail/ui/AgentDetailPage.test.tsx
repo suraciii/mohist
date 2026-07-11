@@ -1,4 +1,3 @@
-// @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider, useMutation } from '@tanstack/react-query'
@@ -311,7 +310,7 @@ describe('AgentDetailPage', () => {
     })
   })
 
-  describe('Subscriptions section wiring (T-004)', () => {
+  describe('Subscriptions section wiring', () => {
     it('mounts the SubscriptionsSection for an active agent with its own data-agent-id', async () => {
       mockAgent(makeAgent({ id: 'agent-42', status: 'active' }))
       renderPage()

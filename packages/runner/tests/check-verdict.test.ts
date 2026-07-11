@@ -3,8 +3,7 @@ import type { WorkExecutor } from "../src/runtime/executor.js"
 import type { ActionRegistry } from "../src/actions/registry.js"
 import type { ServerConnection } from "../src/server/connection.js"
 import type { AcpSessionManager, SharedAcpConnection } from "../src/runtime/acp-connection.js"
-import type { WorkItem } from "../src/core/types.js"
-import type { ActionResult } from "../src/core/types.js"
+import type { ActionResult, JsonObject, RenderedWorkItem } from "../src/core/types.js"
 import { verifyOnlyWorkspaceManager } from "./support/workspace-mock.js"
 
 const mockFallbackWorkDir = "/tmp"
@@ -40,14 +39,14 @@ describe("Check verdict validation", () => {
     ;(mockActionRegistry.resolve as any).mockImplementation(() => async () => result)
   }
 
-  const makeCheckWork = (checks: Array<{ name: string; uses: string; with?: { [key: string]: unknown } | null }>): WorkItem => ({
+  const makeCheckWork = (checks: JsonObject[]): RenderedWorkItem => ({
     workflowRunId: "wf-1",
     workId: "work-checks-1",
     workType: "checks",
     stage: "check",
     title: "Run checks",
     uses: "mohist/acp-agent",
-    with: { checks: checks as any },
+    with: { checks },
     variables: {},
     projectId: "project-1",
     issueNumber: 1,

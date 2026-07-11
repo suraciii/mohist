@@ -10,6 +10,7 @@
 grug want green test mean real green.
 
 - Runner fake match production contract.
+- Test names describe behavior, never the historical work-item that prompted them.
 - Runner test TypeScript checked.
 - unexpected console error fail test.
 - Web shared globals always restored.
@@ -62,16 +63,16 @@ Update table after every gate. Another agent should resume without archaeology.
 
 | Gate | Status | Commit or note |
 |---|---|---|
-| Baseline | TODO | |
-| Runner truth | TODO | |
-| Shared state | TODO | |
-| Fake time | TODO | |
-| Browser truth | TODO | |
-| Temp ownership | TODO | |
-| Platform split | TODO | |
-| Web boundaries | TODO | |
-| File size | TODO | |
-| Final proof | TODO | |
+| Baseline | DONE | Web 296/4527; Runner 72/1031; fixed shuffle passed; hidden `uploadTaskLog` TypeError reproduced |
+| Runner truth | DONE | Runner production/test typecheck, target retry regression, 73/1036 suite, fixed shuffle seed 20260710, and build passed |
+| Shared state | DONE | Boundary checker self-test, 297-file scan, Web typecheck, 297/4531 suite, and fixed shuffle seed 20260710 passed |
+| Fake time | DONE | Boundary checker self-test, Runner/Web scans, typechecks, 73/1036 Runner, 297/4531 Web, and fixed-seed shuffle passed |
+| Browser truth | DONE | checker self-test, 297-file Web scan, typecheck, 297/4528 Web suite, build, and two retry-free CI-mode 39/39 Chromium browser runs passed |
+| Temp ownership | DONE | Runner test temp helper, seven owners including artifact capture, isolated full 87/1005 TMPDIR proof, and test typecheck passed |
+| Platform split | DONE | Runner typecheck/test typecheck, boundary checker, 73/1005 default suite with Git absent from PATH, and repeated 8/36 isolated integration suite passed; CI stays one Node job |
+| Web boundaries | DONE | checker self-test; Web 297 and Runner 81 scans; Web typecheck; 297/4509 normal and fixed-shuffle suite; MSW HTTP boundary, suffix-only environment, and source-read cleanup complete |
+| File size | DONE | c6dde6695 budget and identity tools; 192e52d64, 06da4cdff, eb2a1ed7e, 1ffa1a1b9, 36b090173, 247b624ab, 0e55f92b3, and def318cd8 splits; 1005 Runner and 4509 Web identities retained; typechecks and committed-history gates passed |
+| Final proof | DONE | checker/comparator self-tests; build; Runner 87/1007 and integration 8/36; Web 322/4596 and browser 39/39; history gates; three fixed seeds on both suites; isolated TMPDIR/HOME/Git proof; NOT LIVE-VERIFIED |
 
 Status is `TODO`, `IN PROGRESS`, `DONE`, `SKIPPED: reason`, or
 `BLOCKED: command + error`.
@@ -98,6 +99,7 @@ Allowed files:
 - `packages/runner/scripts/write-build-info.mjs`
 - `packages/runner/src/runtime/build-manifest.ts`
 - `packages/runner/src/runtime/host.ts`, only for narrow timer signal
+- `packages/runner/src/runtime/worktree-enforcement.ts`, only for injected lock clock
 - `packages/runner/src/system/process-policy.ts`
 - `packages/runner/src/system/process.ts`, only for process-policy calls
 - `packages/runner/src/runtime/acp-connection.ts`, only for process-policy calls
@@ -277,7 +279,7 @@ Work item model errors, 76 diagnostics:
 - `packages/runner/tests/executor-task-log.spec.ts`
 - `packages/runner/tests/executor-workspace-boundary.spec.ts`
 - `packages/runner/tests/executor-write-vars.spec.ts`
-- `packages/runner/tests/issue-112-regression.spec.ts`
+- `packages/runner/tests/worktree-cleanup-delivery.spec.ts`
 - `packages/runner/tests/workspace-prepare-workflow.spec.ts`
 
 Fix factory at source. Executor fixture returns exact `RenderedWorkItem`.
@@ -434,6 +436,7 @@ Migrate exact files:
 - `packages/web/tests/SessionPage.live-transcript.spec.tsx`
 - `packages/web/tests/SessionPageHeader.spec.tsx`
 - `packages/web/tests/ToolRegistryAndRefetch.spec.tsx`
+- `packages/web/src/widgets/epic-dependency-graph/ui/DependencyGraphCanvas.test.tsx`
 
 Move common successful clipboard fake to scoped support. Delete module-load
 clipboard mutation. Delete bespoke restore bookkeeping after helper owns it.
@@ -538,7 +541,7 @@ layout.
 
 Browser files:
 
-- create `packages/web/tests/e2e/epic-dialog-mobile-overflow.spec.ts`.
+- create `packages/web/tests/browser/epic-dialog-mobile-overflow.spec.ts`.
 - extend `epic-list-mobile-overflow.spec.ts`.
 - strengthen `epic-detail-mobile-overflow.spec.ts`.
 - extend `workflow-sessions-responsive.spec.ts` with long Markdown code line.
@@ -552,25 +555,15 @@ inside viewport for:
 - detail: edit button and visible lifecycle action.
 - transcript: code block and nearest horizontal scroll owner.
 
-Split a11y commands:
-
-```json
-{
-  "test:a11y:unit": "vitest run --config vitest.a11y.config.ts",
-  "test:a11y:browser": "playwright test -c playwright.a11y.config.ts",
-  "test:a11y": "npm run test:a11y:unit && npm run test:a11y:browser"
-}
-```
-
-Test script never installs browser. CI installs once:
+CI installs Chromium once for browser tests:
 
 ```bash
 npm exec -w packages/web -- playwright install --with-deps chromium
 ```
 
 Keep one Node CI job. Build Web once. Under CI, Playwright serves existing
-`dist`; it does not rebuild for each config. Run default Web, a11y unit, browser
-install, E2E, a11y browser. Upload trace only on failure.
+`dist`; it does not rebuild. Run default Web, install Chromium, and browser tests. Upload
+trace only on failure.
 
 Verify:
 
@@ -578,9 +571,7 @@ Verify:
 npm exec -w packages/web -- playwright install --with-deps chromium
 npm run check:test-boundaries -w packages/web
 npm run test:ci -w packages/web
-npm run test:a11y:unit -w packages/web
-npm run test:e2e -w packages/web
-npm run test:a11y:browser -w packages/web
+npm run test:browser -w packages/web
 ```
 
 ## Gate: Temp ownership
@@ -597,13 +588,32 @@ Add Runner temp support and central cleanup. Migrate exact files:
 Use `mkdtemp` or `mkdtempSync`. No Date plus random path name. File already
 touched by earlier gate may adopt helper, but no repo-wide cleanup hunt.
 
-Verify:
+This gate proves only those six owners. `worktree-cleanup-delivery.spec.ts` is
+now a fake Git-state test and owns no temp root. The full-suite empty `TMPDIR`
+proof still depends on separately cleaning `artifact-capture.spec.ts`, whose
+fixture writes outside its owned root. Do not fold that change into this gate.
+
+Verify the migrated owners:
 
 ```bash
 set -euo pipefail
 tmp_root="$(mktemp -d)"
 trap 'rm -rf "$tmp_root"' EXIT
-TMPDIR="$tmp_root" npm run test:ci -w packages/runner
+
+NODE_DISABLE_COMPILE_CACHE=1 TMPDIR="$tmp_root" \
+  npm run typecheck:tests -w packages/runner
+NODE_DISABLE_COMPILE_CACHE=1 TMPDIR="$tmp_root" \
+  npm run check:test-boundaries -w packages/runner
+NODE_DISABLE_COMPILE_CACHE=1 TMPDIR="$tmp_root" \
+  npm exec -w packages/runner -- vitest run \
+    tests/support/temp-dir.test.ts \
+    tests/expectations.spec.ts \
+    tests/workspace.spec.ts \
+    tests/openspec-archive-change.spec.ts \
+    tests/openspec-tasks.spec.ts \
+    tests/openspec-artifacts.spec.ts \
+    tests/acp-tool-noise.spec.ts
+
 test -z "$(find "$tmp_root" -mindepth 1 -print -quit)"
 rmdir "$tmp_root"
 trap - EXIT
@@ -623,24 +633,44 @@ Exact candidate files:
 - `packages/runner/tests/executor-task-log.spec.ts`
 - `packages/runner/tests/executor-workspace-boundary.spec.ts`
 - `packages/runner/tests/git-sink.spec.ts`
-- `packages/runner/tests/issue-112-regression.spec.ts`
+- `packages/runner/tests/worktree-cleanup-delivery.spec.ts`
 - `packages/runner/tests/process.spec.ts`
-- `packages/runner/tests/system-process-timeout.spec.ts`
+- `packages/runner/tests/integration/system-process-timeout.spec.ts`
 - `packages/runner/tests/workspace-prepare.spec.ts`
-- `packages/runner/tests/workspace-registry-integration.spec.ts`
+- `packages/runner/tests/integration/workspace-registry-lifecycle.spec.ts`
 - `packages/runner/tests/workspace.spec.ts`
 
 Ledger records each as `HERMETIC`, `INTEGRATION`, or `SPLIT`, with final path.
 Build-info should already be `HERMETIC` from Runner truth gate.
 
+Final disposition:
+
+| Candidate | Disposition | Final coverage |
+|---|---|---|
+| `acp-tool-noise.spec.ts` | HERMETIC | fake ACP and Git/process seam |
+| `build-info.test.ts` | HERMETIC | injected Git reader |
+| `executor-branch-stability.spec.ts` | SPLIT | model behavior plus branch smoke |
+| `executor-cleanup.spec.ts` | HERMETIC | fake worktree state and fixed lock clock |
+| `executor-task-log.spec.ts` | SPLIT | default task-log behavior plus process smoke |
+| `executor-workspace-boundary.spec.ts` | SPLIT | default boundary behavior plus repo smoke |
+| `git-sink.spec.ts` | HERMETIC | fake Git runner |
+| `worktree-cleanup-delivery.spec.ts` | HERMETIC | fake Git-state fixture |
+| `process.spec.ts` | SPLIT | default environment helper plus process behavior |
+| `integration/system-process-timeout.spec.ts` | INTEGRATION | timeout, abort, and POSIX group kill |
+| `workspace-prepare.spec.ts` | HERMETIC | injected Git runner |
+| `integration/workspace-registry-lifecycle.spec.ts` | INTEGRATION | workspace materialization and registry lifecycle |
+| `workspace.spec.ts` | SPLIT | clone, branch, and rebase smoke |
+
 Integration layout:
 
 - real tests only in `packages/runner/tests/integration/**/*.spec.ts`.
-- default config excludes directory.
+- default config explicitly excludes directory; checker exclusion alone does not
+  change Vitest discovery.
 - `vitest.integration.config.ts` includes only directory.
 - both tracks load common setup for console, timers, env, temp, child cleanup.
 - default loads deny policy setup.
 - integration loads allow-and-register policy setup.
+- CI runs both tracks in the existing Node job after the shared build.
 
 Keep real coverage only for:
 
@@ -649,8 +679,9 @@ Keep real coverage only for:
 - timeout and abort termination.
 - POSIX process group kill where supported.
 
-Use `it.skipIf` for unsupported platform. Never early return. Checker bans
-`.skip`, `.only`, and `.todo`; integration `skipIf` is allowed.
+Use `it.skipIf(process.platform === "win32")` for POSIX-only process
+group cases. Never early return. Checker bans `.skip`, `.only`, and `.todo`;
+integration `skipIf` is allowed.
 
 ### Runtime guard
 
@@ -679,9 +710,10 @@ Default setup imports only `process-policy.ts`, never modules commonly replaced
 by hoisted `vi.mock`. It installs deny policy at setup load, before each test,
 and after each test. Deny throws `external process forbidden in default test`.
 
-Integration setup imports same policy registry and installs allow-and-register
-policy. Direct integration `child_process` use calls
-`registerTestChild(child)` itself.
+Integration setup installs allow-and-register policy at module load and before
+each test, cleans registered children after each test, and resets after all
+tests. Direct integration `child_process` use calls `registerTestChild(child)`
+itself.
 
 Existing local factory setters stay. Resetting local factory to `null` may
 restore real factory, but real factory still consults current track policy.
@@ -691,7 +723,8 @@ uses existing local setter; fake does not spawn.
 No setup imports `acp-connection`, `opencode-models`, or ACP process module.
 Hoisted RunnerHost mocks remain hoisted.
 
-Add `packages/runner/tests/support/external-process-guard.test.ts`:
+Add `packages/runner/tests/external-process-guard.test.ts` and
+`packages/runner/tests/integration/external-process-guard.spec.ts`:
 
 - direct guard call throws before spawn.
 - one test uses existing local process fake and sees fake sentinel.
@@ -701,23 +734,27 @@ Add `packages/runner/tests/support/external-process-guard.test.ts`:
 - focused RunnerHost tests prove existing hoisted module replacements still win.
 
 No-op guard must fail this focused test even when default suite has no platform
-candidate left.
+candidate left. `tests/support/child-process.ts` owns direct integration child
+registration and teardown; it is not an integration test file itself.
 
 No generic service container. One policy module and four call sites. grug keep
 club small.
 
 Extend checker for default Runner:
 
-- no direct `node:child_process` import.
+- no `child_process` import or CommonJS require.
 - no `process.execPath` launch.
 - no real Git command call.
-- no import of executable package script.
+- no import of an executable Runner module.
 - no `vi.mock` of `system/process-policy`.
 - no active `.skip`, `.only`, `.todo`.
+- no historical `issue-<number>`, `Issue #<number>`, or `T-<number>` in a
+  test API title literal across Runner and Web.
 
 Real Git test uses dedicated HOME, XDG config, explicit user identity, explicit
 branch name, disabled hooks, `GIT_CONFIG_NOSYSTEM=1`, and dedicated global config.
-Never user repo. Never user credential helper.
+Clear inherited Git repository-selection and credential-helper variables before
+spawning. Never user repo. Never user credential helper.
 
 Verify default and integration:
 
@@ -750,6 +787,7 @@ XDG_CONFIG_HOME="$integration_home/xdg" \
 GIT_CONFIG_NOSYSTEM=1 \
 GIT_CONFIG_GLOBAL="$integration_home/gitconfig" \
 TMPDIR="$integration_tmp" \
+NODE_DISABLE_COMPILE_CACHE=1 \
 CI=1 \
 npm run test:integration -w packages/runner
 
@@ -801,7 +839,7 @@ Final discovery:
 
 - node: `src/**/*.test.ts`, excluding `*.dom.test.ts`.
 - jsdom: `src/**/*.test.tsx`, `src/**/*.dom.test.ts`, `tests/**/*.spec.tsx`.
-- browser and a11y dirs stay outside default.
+- browser dirs stay outside default.
 - no `@vitest-environment` directive.
 - no central filename allowlist.
 
@@ -874,12 +912,25 @@ Extend checker with simple budget:
 - renamed offender cannot escape limit.
 - trusted-base compare rejects new baseline key and higher old number.
 
+Earlier gates can make an old file bigger before this gate starts. bootstrap
+only inherits identities already over limit in trusted source. It maps same
+budget-kind rename into committed `HEAD`, then records committed `HEAD` lines.
+Never read dirty worktree. Source-compliant file gets no allowance. `.spec` to
+`.test` is not same budget kind. split it.
+
 Only mandatory splits in this plan:
 
 - `packages/runner/tests/runner-signalr.spec.ts`
 - `packages/web/src/widgets/session-transcript/ui/SessionTranscriptView.test.tsx`
 - `packages/web/src/pages/issue-changed-files/ui/IssueChangedFilesPage.test.tsx`
 - `packages/web/tests/ToolRegistryAndRefetch.spec.tsx`
+
+These three became over limit in earlier gates. They are not old debt. Split
+them before baseline can go green:
+
+- `packages/runner/tests/acp/session-strategies.spec.ts`
+- `packages/runner/tests/cleanup-loop.spec.ts`
+- `packages/runner/tests/runner-host.spec.ts`
 
 Split by current top-level behavior. Shared stateless data builder uses narrow
 `*-test-utils.ts`. Lifetime owner uses `Fixture` under test support. No new
@@ -906,11 +957,15 @@ Command scans test files from trusted source ref, not mutable working tree. It
 must fail if baseline file already exists. Later work edits baseline only to
 lower limits or remove compliant paths.
 
-Normal checker with `--budget-base-ref` does this:
+`--budget-base-ref` adds Git history check:
 
-- if trusted tree has baseline file, compare current JSON to trusted JSON.
-- if trusted tree has no baseline yet, compute expected bootstrap values from
-  trusted tree files.
+- normal boundary and absolute-size check still read worktree.
+- no-growth compare reads baseline and sizes from committed `HEAD`. Run it
+  after split commit.
+- if trusted tree has baseline file, compare committed `HEAD` JSON to trusted
+  JSON.
+- if trusted tree has no baseline yet, find source files already over limit,
+  map same-kind rename into committed `HEAD`, and use committed `HEAD` value.
 - reject new offender, higher number, missing old path that still violates
   absolute budget, or current file longer than allowed value.
 
@@ -950,12 +1005,20 @@ Verify every batch:
 
 ```bash
 node scripts/compare-vitest-results.mjs --self-test
-npm run check:test-boundaries -w packages/web -- --budget-base-ref "$(git merge-base HEAD origin/master)"
-npm run check:test-boundaries -w packages/runner -- --budget-base-ref "$(git merge-base HEAD origin/master)"
+npm run check:test-boundaries -w packages/web
+npm run check:test-boundaries -w packages/runner
 npm run typecheck -w packages/web
 npm run typecheck:tests -w packages/runner
 npm run test:ci -w packages/web
 npm run test:ci -w packages/runner
+```
+
+After split batch commit:
+
+```bash
+base_ref="$(git merge-base HEAD origin/master)"
+npm run check:test-boundaries -w packages/web -- --budget-base-ref "$base_ref"
+npm run check:test-boundaries -w packages/runner -- --budget-base-ref "$base_ref"
 ```
 
 Other old over-budget files stay in no-growth baseline. They are future work.
@@ -971,10 +1034,8 @@ Keep one Node CI job. Order:
 - Runner default.
 - Runner integration.
 - Web default.
-- Web a11y unit.
 - install Chromium once.
-- Web E2E.
-- Web a11y browser.
+- Web browser tests.
 
 Weekly Web shuffle:
 
@@ -998,9 +1059,7 @@ npm run test:integration -w packages/runner
 npm run check:test-boundaries -w packages/web -- --budget-base-ref "$base_ref"
 npm run test:ci -w packages/web
 npm exec -w packages/web -- playwright install --with-deps chromium
-npm run test:a11y:unit -w packages/web
-npm run test:e2e -w packages/web
-npm run test:a11y:browser -w packages/web
+npm run test:browser -w packages/web
 ```
 
 Run Web shuffle:
@@ -1035,26 +1094,26 @@ git status --short
 
 ## Done
 
-- [ ] ledger complete.
-- [ ] Runner source and test typecheck pass.
-- [ ] no hidden Runner console error.
-- [ ] no unscoped Web process-global mutation.
-- [ ] no real-time synchronization in default tests.
-- [ ] no jsdom geometry claim.
-- [ ] false absence assertions wait for positive completion.
-- [ ] browser and a11y tests run in CI entry point.
-- [ ] default and integration TMPDIR empty.
-- [ ] default Runner runtime guard blocks external process.
-- [ ] all 13 platform candidates have disposition.
-- [ ] integration uses isolated HOME and Git config.
-- [ ] Web fetch tests use MSW.
-- [ ] Web environment comes from suffix only.
-- [ ] no Web `vi.mock`, source regex test, or old ratchet.
-- [ ] file budget checker passes and baseline never grows.
-- [ ] named giant files split.
-- [ ] Vitest identity compare shows no silent coverage loss.
-- [ ] three Web and three Runner fixed seeds pass.
-- [ ] no C# or unrelated file changed.
+- [x] ledger complete.
+- [x] Runner source and test typecheck pass.
+- [x] no hidden Runner console error.
+- [x] no unscoped Web process-global mutation.
+- [x] no real-time synchronization in default tests.
+- [x] no jsdom geometry claim.
+- [x] false absence assertions wait for positive completion.
+- [x] browser tests run in CI entry point.
+- [x] default and integration TMPDIR empty.
+- [x] default Runner runtime guard blocks external process.
+- [x] all 13 platform candidates have disposition.
+- [x] integration uses isolated HOME and Git config.
+- [x] Web fetch tests use MSW.
+- [x] Web environment comes from suffix only.
+- [x] no Web `vi.mock`, source regex test, or old ratchet.
+- [x] file budget checker passes and baseline never grows.
+- [x] named giant files split.
+- [x] Vitest identity compare shows no silent coverage loss.
+- [x] three Web and three Runner fixed seeds pass.
+- [x] no C# or unrelated file changed.
 
 ## Stop
 

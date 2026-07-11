@@ -329,17 +329,17 @@ function SiblingNavigation({
 }) {
   const toProjectPath = useProjectPath()
   return (
-    <div className="flex items-center gap-1" data-testid="session-sibling-navigation">
+    <div className="flex max-w-full min-w-0 flex-wrap items-center gap-1" data-testid="session-sibling-navigation">
       {previous ? (
         <Link
           to={toProjectPath(`/issues/${issueNumber}/workflow/sessions/${encodeURIComponent(previous.sessionName)}`)}
-          className="inline-flex items-center gap-1 rounded border border-gray-200 bg-white px-2 py-1 text-xs font-medium text-gray-700 transition-colors hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700"
+          className="inline-flex max-w-full min-w-0 items-center gap-1 rounded border border-gray-200 bg-white px-2 py-1 text-xs font-medium text-gray-700 transition-colors hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700"
           data-testid="session-sibling-prev"
           title={`Previous session: ${previous.sessionName}`}
           aria-label={`Previous session: ${previous.sessionName}`}
         >
           <ChevronLeftIcon className="h-3.5 w-3.5" aria-hidden="true" />
-          <span className="font-mono">prev: {previous.sessionName}</span>
+          <span className="min-w-0 truncate font-mono">prev: {previous.sessionName}</span>
         </Link>
       ) : (
         <span
@@ -355,12 +355,12 @@ function SiblingNavigation({
       {next ? (
         <Link
           to={toProjectPath(`/issues/${issueNumber}/workflow/sessions/${encodeURIComponent(next.sessionName)}`)}
-          className="inline-flex items-center gap-1 rounded border border-gray-200 bg-white px-2 py-1 text-xs font-medium text-gray-700 transition-colors hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700"
+          className="inline-flex max-w-full min-w-0 items-center gap-1 rounded border border-gray-200 bg-white px-2 py-1 text-xs font-medium text-gray-700 transition-colors hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700"
           data-testid="session-sibling-next"
           title={`Next session: ${next.sessionName}`}
           aria-label={`Next session: ${next.sessionName}`}
         >
-          <span className="font-mono">next: {next.sessionName}</span>
+          <span className="min-w-0 truncate font-mono">next: {next.sessionName}</span>
           <ChevronRightIcon className="h-3.5 w-3.5" aria-hidden="true" />
         </Link>
       ) : (

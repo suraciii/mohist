@@ -1,4 +1,3 @@
-// @vitest-environment jsdom
 import '@testing-library/jest-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
@@ -27,11 +26,11 @@ function makeIssue(overrides: Partial<LinkedIssue> = {}): LinkedIssue {
   }
 }
 
-function LocationCapture() {
+function LocationCapture({ onLocationChange }: { onLocationChange: (pathname: string) => void }) {
   const location = useLocation()
   useEffect(() => {
-    ;(window as unknown as { __lastLocation: string }).__lastLocation = location.pathname
-  }, [location.pathname])
+    onLocationChange(location.pathname)
+  }, [location.pathname, onLocationChange])
   return null
 }
 
@@ -44,7 +43,8 @@ function renderCanvas(
 ) {
   const queryClient = new QueryClient()
   const initialPath = options.initialPath ?? '/epics/epic-1'
-  return render(
+  const location = { pathname: initialPath }
+  const view = render(
     <QueryClientProvider client={queryClient}>
       <ProjectProvider>
         <MemoryRouter initialEntries={[initialPath]}>
@@ -53,7 +53,7 @@ function renderCanvas(
               path="*"
               element={
                 <>
-                  <LocationCapture />
+                  <LocationCapture onLocationChange={(pathname) => { location.pathname = pathname }} />
                   <DependencyGraphCanvas
                     linkedIssues={linkedIssues}
                     navigatePathFor={(n) => `/p/test/issues/${n}`}
@@ -67,6 +67,7 @@ function renderCanvas(
       </ProjectProvider>
     </QueryClientProvider>,
   )
+  return { ...view, location }
 }
 
 afterEach(() => {
@@ -252,7 +253,7 @@ describe('DependencyGraphCanvas - click navigation', () => {
   it('navigates to the issue route when a member node is clicked', async () => {
     const a = makeIssue({ number: 7, id: 'a', title: 'Clickable A' })
     const b = makeIssue({ number: 8, id: 'b', prerequisiteNumbers: [7], title: 'Clickable B' })
-    renderCanvas([a, b])
+    const { location } = renderCanvas([a, b])
     await waitFor(() => {
       expect(screen.getAllByTestId('epic-dep-member-node')).toHaveLength(2)
     })
@@ -263,7 +264,7 @@ describe('DependencyGraphCanvas - click navigation', () => {
       fireEvent.click(target)
     })
     await waitFor(() => {
-      expect((window as unknown as { __lastLocation: string }).__lastLocation).toBe('/p/test/issues/7')
+      expect(location.pathname).toBe('/p/test/issues/7')
     })
   })
 
@@ -275,15 +276,15 @@ describe('DependencyGraphCanvas - click navigation', () => {
       externalPrerequisites: [{ number: 99, title: 'External', stage: 'plan', status: 'active' }],
     })
     const b = makeIssue({ number: 2, id: 'b', prerequisiteNumbers: [1] })
-    renderCanvas([a, b])
+    const { location } = renderCanvas([a, b])
     await waitFor(() => {
       expect(screen.getByTestId('epic-dep-ghost-node')).toBeInTheDocument()
     })
-    const before = (window as unknown as { __lastLocation: string }).__lastLocation
+    const before = location.pathname
     const ghost = screen.getByTestId('epic-dep-ghost-node')
     fireEvent.click(ghost)
     await waitFor(() => {
-      expect((window as unknown as { __lastLocation: string }).__lastLocation).toBe(before)
+      expect(location.pathname).toBe(before)
     })
   })
 })

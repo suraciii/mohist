@@ -1,4 +1,3 @@
-// @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -741,7 +740,7 @@ describe('EpicListPage numbered display', () => {
   })
 })
 
-describe('EpicListPage mobile no-overflow invariants', () => {
+describe('EpicListPage responsive markup', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     _epicsRequests.length = 0
@@ -752,33 +751,6 @@ describe('EpicListPage mobile no-overflow invariants', () => {
   afterEach(() => {
     cleanup()
     vi.restoreAllMocks()
-  })
-
-  function stubWidth(width: number) {
-    Object.defineProperty(document.documentElement, 'scrollWidth', {
-      configurable: true,
-      get: () => width,
-    })
-    Object.defineProperty(document.documentElement, 'clientWidth', {
-      configurable: true,
-      get: () => width,
-    })
-  }
-
-  function expectNoOverflow(width: number) {
-    stubWidth(width)
-    expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(document.documentElement.clientWidth)
-  }
-
-  it('renders across all four active groups without horizontal overflow at 320, 390, and 430 px', async () => {
-    _epicsData = [runningEpic, readyToStartEpic, waitingBlockedEpic, idleReadyEpic, idleEmptyEpic]
-
-    for (const width of [320, 390, 430]) {
-      cleanup()
-      renderPage()
-      await waitForList()
-      expectNoOverflow(width)
-    }
   })
 
   it('forbids fixed-width and min-width on status/priority badges, progress bar, current/next text, and Start next issue control', async () => {

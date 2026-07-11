@@ -1,10 +1,10 @@
-// @vitest-environment jsdom
 import '@testing-library/jest-dom'
 import { fireEvent, render } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useState } from 'react'
 import { SessionTranscriptLayout } from './SessionTranscriptLayout'
 import type { DisplayTurn } from '../model/session-transcript-display'
+import { setScopedValue } from '../../../../tests/support/scoped-property'
 
 function makeTurn(overrides: {
   id?: string
@@ -491,21 +491,18 @@ describe('SessionTranscriptLayout TOC + toolbar + responsive integration', () =>
 })
 
 describe('SessionTranscriptLayout narrow viewport no-overflow integration', () => {
-  let originalInnerWidth: number
   let scrollIntoViewSpy: ReturnType<typeof vi.spyOn>
 
   beforeEach(() => {
-    originalInnerWidth = window.innerWidth
     scrollIntoViewSpy = vi.spyOn(Element.prototype, 'scrollIntoView').mockImplementation(() => {})
   })
 
   afterEach(() => {
-    Object.defineProperty(window, 'innerWidth', { writable: true, configurable: true, value: originalInnerWidth })
     scrollIntoViewSpy.mockRestore()
   })
 
   function renderLongLineTranscript(width: number) {
-    Object.defineProperty(window, 'innerWidth', { writable: true, configurable: true, value: width })
+    setScopedValue(window, 'innerWidth', width)
     const turns: DisplayTurn[] = Array.from({ length: 3 }, (_, i) => makeTurn({
       id: `t${i + 1}`,
       prompt: {

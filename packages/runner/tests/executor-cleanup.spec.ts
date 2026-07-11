@@ -1,25 +1,27 @@
-import { execFile } from "node:child_process"
-import { mkdir, mkdtemp, rm, stat, utimes, writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
-import { join, dirname } from "node:path"
+import { mkdir, stat, utimes, writeFile } from "node:fs/promises"
+import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { promisify } from "node:util"
 import { WorkExecutor } from "../src/runtime/executor.js"
-import { setCleanupAgentActionForTest, setExecutorLockHolderProbeForTest } from "../src/runtime/worktree-enforcement.js"
+import { setCleanupAgentActionForTest, setExecutorLockHolderProbeForTest, setWorktreeClockForTest } from "../src/runtime/worktree-enforcement.js"
 import { setExecutorGitRunnerForTest } from "../src/runtime/git-probe.js"
 import { ActionRegistry } from "../src/actions/registry.js"
 import type { ActionContext, ActionResult, RenderedWorkItem } from "../src/core/types.js"
 import type { ServerConnection } from "../src/server/connection.js"
 import { verifyOnlyWorkspaceManager } from "./support/workspace-mock.js"
+import { createTestTempDir } from "./support/temp-dir.js"
 
-const exec = promisify(execFile)
+const FIXED_NOW_MS = 1_000_000
 
 let workDir: string
 let connection: Pick<ServerConnection, "uploadArtifact" | "report">
+let worktree: FakeWorktree
 
 beforeEach(async () => {
-  workDir = await mkdtemp(join(tmpdir(), "mohist-executor-cleanup-"))
-  await initGitRepo(workDir)
+  workDir = await createTestTempDir("mohist-executor-cleanup-")
+  await mkdir(join(workDir, ".git"), { recursive: true })
+  worktree = { workDir, branch: "main", staged: [], unstaged: [], untracked: [] }
+  installExecutorGit(worktree)
+  setWorktreeClockForTest(() => FIXED_NOW_MS)
   connection = {
     async report() {
       return {}
@@ -30,46 +32,70 @@ beforeEach(async () => {
   } as unknown as Pick<ServerConnection, "uploadArtifact" | "report">
 })
 
-afterEach(async () => {
+afterEach(() => {
   setCleanupAgentActionForTest(null)
   setExecutorGitRunnerForTest(null)
   setExecutorLockHolderProbeForTest(null)
-  await rm(workDir, { recursive: true, force: true })
+  setWorktreeClockForTest(null)
 })
 
-async function initGitRepo(dir: string) {
-  await exec("git", ["init", "--initial-branch=main", "-q"], { cwd: dir })
-  await exec("git", ["config", "user.email", "test@example.com"], { cwd: dir })
-  await exec("git", ["config", "user.name", "Test"], { cwd: dir })
-  await exec("git", ["config", "commit.gpgsign", "false"], { cwd: dir })
-  await writeFile(join(dir, "README.md"), "init\n", "utf8")
-  await exec("git", ["add", "README.md"], { cwd: dir })
-  await exec("git", ["commit", "-m", "init", "-q"], { cwd: dir })
+type FakeWorktree = {
+  workDir: string
+  branch: string
+  staged: string[]
+  unstaged: string[]
+  untracked: string[]
 }
 
-async function dirtyRepoWith(file: { path: string; content: string; stage?: boolean; untracked?: boolean; tracked?: boolean }) {
-  const full = join(workDir, file.path)
-  await mkdir(dirname(full), { recursive: true })
-  if (file.tracked) {
-    // Commit a baseline first so the file is tracked, then modify
-    // it so `git diff --name-only` (unstaged) shows it. Use
-    // `git commit -- <path>` so the commit only takes that one
-    // file — a plain `git commit` would also pick up any staged
-    // changes from a previous call, which is exactly the trap the
-    // multi-file test would otherwise hit.
-    await writeFile(full, "baseline\n", "utf8")
-    await exec("git", ["add", file.path], { cwd: workDir })
-    await exec("git", ["commit", "-m", `baseline ${file.path}`, "-q", "--", file.path], { cwd: workDir })
-    await writeFile(full, file.content, "utf8")
-    if (file.stage) {
-      await exec("git", ["add", file.path], { cwd: workDir })
+function installExecutorGit(state: FakeWorktree) {
+  setExecutorGitRunnerForTest(async (observedWorkDir, args) => {
+    expect(observedWorkDir).toBe(state.workDir)
+    switch (args.join(" ")) {
+      case "rev-parse --abbrev-ref HEAD":
+        return gitOk(`${state.branch}\n`)
+      case "rev-parse --is-inside-work-tree":
+        return gitOk("true\n")
+      case "diff --cached --name-only":
+        return gitOk(fileList(state.staged))
+      case "diff --name-only":
+        return gitOk(fileList(state.unstaged))
+      case "ls-files --others --exclude-standard":
+        return gitOk(fileList(state.untracked))
+      case "rev-parse --git-path index.lock":
+        return gitOk(join(state.workDir, ".git", "index.lock"))
+      default:
+        throw new Error(`unexpected executor git call: ${args.join(" ")}`)
     }
-    return
+  })
+}
+
+function markWorktreeDirty(path: string, category: "staged" | "unstaged" | "untracked" = "unstaged") {
+  worktree[category].push(path)
+}
+
+function commitCleanup(paths: string[]) {
+  for (const path of paths) {
+    worktree.staged = worktree.staged.filter((entry) => entry !== path)
+    worktree.unstaged = worktree.unstaged.filter((entry) => entry !== path)
+    worktree.untracked = worktree.untracked.filter((entry) => entry !== path)
   }
-  await writeFile(full, file.content, "utf8")
-  if (file.stage) {
-    await exec("git", ["add", file.path], { cwd: workDir })
-  }
+}
+
+function expectWorktreeClean() {
+  expect({ staged: worktree.staged, unstaged: worktree.unstaged, untracked: worktree.untracked })
+    .toEqual({ staged: [], unstaged: [], untracked: [] })
+}
+
+function fileList(paths: string[]) {
+  return paths.length === 0 ? "" : `${paths.join("\n")}\n`
+}
+
+function gitOk(stdout: string) {
+  return { success: true, stdout, stderr: "", exitCode: 0, combinedOutput: stdout.trim() }
+}
+
+function gitFail(stderr: string, exitCode = 128) {
+  return { success: false, stdout: "", stderr, exitCode, combinedOutput: stderr }
 }
 
 function makeRegistry(handler: (ctx: ActionContext) => Promise<ActionResult>): ActionRegistry {
@@ -124,7 +150,7 @@ describe("WorkExecutor clean worktree invariant", () => {
     // Deterministic (non-agent) action leaves a modified file. The
     // runner must fail the task with structured dirty-worktree
     // evidence listing staged, unstaged, and untracked files.
-    await dirtyRepoWith({ path: "src/leftover.ts", content: "export const x = 1\n", tracked: true })
+    markWorktreeDirty("src/leftover.ts")
     const executor = buildExecutor(makeRegistry(async () => ({ status: "success", message: "ran" })))
 
     const result = await executor.execute(buildWork(), new AbortController().signal)
@@ -148,9 +174,9 @@ describe("WorkExecutor clean worktree invariant", () => {
     // Three file categories must all appear in the structured
     // evidence: staged (added to index), unstaged (modified), and
     // untracked (not in index).
-    await dirtyRepoWith({ path: "src/staged.ts", content: "s\n", tracked: true, stage: true })
-    await dirtyRepoWith({ path: "src/unstaged.ts", content: "u\n", tracked: true })
-    await dirtyRepoWith({ path: "src/untracked.ts", content: "n\n", untracked: true })
+    markWorktreeDirty("src/staged.ts", "staged")
+    markWorktreeDirty("src/unstaged.ts")
+    markWorktreeDirty("src/untracked.ts", "untracked")
 
     const executor = buildExecutor(makeRegistry(async () => ({ status: "success" })))
 
@@ -166,10 +192,9 @@ describe("WorkExecutor clean worktree invariant", () => {
   })
 
   it("succeedsAfterSingleCleanupAttemptWhenAgentCommitsLeftoverChanges", async () => {
-    // Agent-backed task leaves a modified file. The cleanup agent
-    // commits the file. The next `git status --porcelain` is empty
-    // and the task completes with cleanupAttempts=1.
-    await dirtyRepoWith({ path: "src/forgot.ts", content: "export const forgot = 1\n", tracked: true })
+    // Agent-backed task leaves a modified file. The cleanup action
+    // resolves it, so the next worktree probe is clean.
+    markWorktreeDirty("src/forgot.ts")
     setCleanupAgentActionForTest(async (ctx) => {
       const prompt = String(ctx.with?.prompt ?? "")
       // The cleanup prompt must explicitly constrain the agent.
@@ -178,8 +203,7 @@ describe("WorkExecutor clean worktree invariant", () => {
       expect(prompt).toMatch(/commit task-related changes or revert unrelated ones/i)
       expect(prompt).toMatch(/commit SHA|no-change/i)
       expect(prompt).toContain("src/forgot.ts")
-      await exec("git", ["add", "src/forgot.ts"], { cwd: ctx.workDir })
-      await exec("git", ["commit", "-m", "commit leftover from cleanup test", "-q"], { cwd: ctx.workDir })
+      commitCleanup(["src/forgot.ts"])
       return { status: "success", message: "committed abc1234" }
     })
 
@@ -190,8 +214,7 @@ describe("WorkExecutor clean worktree invariant", () => {
     expect(result.status).toBe("completed")
     expect(result.cleanupAttempts).toBe(1)
     expect(result.message).toBe("agent done")
-    const after = await exec("git", ["status", "--porcelain"], { cwd: workDir })
-    expect(after.stdout).toBe("")
+    expectWorktreeClean()
   })
 
   it("clearsStaleGitIndexLockBeforeAgentCleanupCommit", async () => {
@@ -199,19 +222,18 @@ describe("WorkExecutor clean worktree invariant", () => {
     // output. The runner should clear it before asking the agent to
     // perform the bounded cleanup commit so a crashed previous Git
     // command does not make all cleanup retries fail.
-    await dirtyRepoWith({ path: "src/stale-lock.ts", content: "export const stale = 1\n", tracked: true })
+    markWorktreeDirty("src/stale-lock.ts")
     const lockPath = join(workDir, ".git", "index.lock")
     await writeFile(lockPath, "", "utf8")
-    const old = new Date(Date.now() - 120_000)
+    const old = new Date(FIXED_NOW_MS - 120_000)
     await utimes(lockPath, old, old)
 
     let cleanupCalls = 0
     setExecutorLockHolderProbeForTest(async () => ({ held: false }))
-    setCleanupAgentActionForTest(async (ctx) => {
+    setCleanupAgentActionForTest(async () => {
       cleanupCalls += 1
       await expect(stat(lockPath)).rejects.toMatchObject({ code: "ENOENT" })
-      await exec("git", ["add", "src/stale-lock.ts"], { cwd: ctx.workDir })
-      await exec("git", ["commit", "-m", "cleanup stale lock test", "-q"], { cwd: ctx.workDir })
+      commitCleanup(["src/stale-lock.ts"])
       return { status: "success", message: "committed stale lock cleanup" }
     })
 
@@ -223,15 +245,14 @@ describe("WorkExecutor clean worktree invariant", () => {
     expect(result.cleanupAttempts).toBe(1)
     expect(cleanupCalls).toBe(1)
     await expect(stat(lockPath)).rejects.toMatchObject({ code: "ENOENT" })
-    const after = await exec("git", ["status", "--porcelain"], { cwd: workDir })
-    expect(after.stdout).toBe("")
+    expectWorktreeClean()
   })
 
   it("doesNotClearStaleGitIndexLockWhenStillHeld", async () => {
-    await dirtyRepoWith({ path: "src/held-lock.ts", content: "export const held = 1\n", tracked: true })
+    markWorktreeDirty("src/held-lock.ts")
     const lockPath = join(workDir, ".git", "index.lock")
     await writeFile(lockPath, "", "utf8")
-    const old = new Date(Date.now() - 120_000)
+    const old = new Date(FIXED_NOW_MS - 120_000)
     await utimes(lockPath, old, old)
     let cleanupCalls = 0
     setExecutorLockHolderProbeForTest(async (_workDir, observedPath) => {
@@ -264,9 +285,10 @@ describe("WorkExecutor clean worktree invariant", () => {
     // A fresh lock may still belong to a running Git process. The
     // runner must not remove it or spend cleanup attempts by sending
     // the agent into a commit that cannot succeed.
-    await dirtyRepoWith({ path: "src/fresh-lock.ts", content: "export const fresh = 1\n", tracked: true })
+    markWorktreeDirty("src/fresh-lock.ts")
     const lockPath = join(workDir, ".git", "index.lock")
     await writeFile(lockPath, "", "utf8")
+    await utimes(lockPath, new Date(FIXED_NOW_MS - 1), new Date(FIXED_NOW_MS - 1))
     let cleanupCalls = 0
     setCleanupAgentActionForTest(async () => {
       cleanupCalls += 1
@@ -297,7 +319,7 @@ describe("WorkExecutor clean worktree invariant", () => {
     // requirements. Those requirements are filesystem paths, so they
     // must use the same rendered `with` object as the original action
     // rather than the raw workflow template.
-    await dirtyRepoWith({ path: "openspec/changes/issue-127/specs/cli-interface/spec.md", content: "spec\n" })
+    markWorktreeDirty("openspec/changes/cli-interface-update/specs/cli-interface/spec.md")
     let observedExpectedPath: unknown
     setCleanupAgentActionForTest(async (ctx) => {
       const expectInput = ctx.with?.expect
@@ -307,8 +329,7 @@ describe("WorkExecutor clean worktree invariant", () => {
           observedExpectedPath = (files[0] as { path?: unknown }).path
         }
       }
-      await exec("git", ["add", "openspec/changes/issue-127/specs/cli-interface/spec.md"], { cwd: ctx.workDir })
-      await exec("git", ["commit", "-m", "add spec artifact", "-q"], { cwd: ctx.workDir })
+      commitCleanup(["openspec/changes/cli-interface-update/specs/cli-interface/spec.md"])
       return { status: "success" }
     })
 
@@ -320,7 +341,7 @@ describe("WorkExecutor clean worktree invariant", () => {
       },
       variables: {
         workspace: { path: workDir, branch: "main", changeDir: null },
-        openspecChangeDir: "openspec/changes/issue-127",
+        openspecChangeDir: "openspec/changes/cli-interface-update",
       },
     })
     const executor = buildExecutor(makeRegistry(async () => ({ status: "success" })))
@@ -328,27 +349,25 @@ describe("WorkExecutor clean worktree invariant", () => {
     const result = await executor.execute(work, new AbortController().signal)
 
     expect(result.status).toBe("completed")
-    expect(observedExpectedPath).toBe("openspec/changes/issue-127/specs")
+    expect(observedExpectedPath).toBe("openspec/changes/cli-interface-update/specs")
   })
 
   it("succeedsAfterMultipleCleanupAttemptsWithTotalCountRecorded", async () => {
     // First cleanup only partially resolves the worktree (one
     // file committed, another left). Second cleanup commits the
     // remaining file. The task completes with cleanupAttempts=2.
-    await dirtyRepoWith({ path: "src/keep.ts", content: "k\n", tracked: true })
-    await dirtyRepoWith({ path: "src/extra.ts", content: "e\n", tracked: true })
+    markWorktreeDirty("src/keep.ts")
+    markWorktreeDirty("src/extra.ts")
     let attempt = 0
     setCleanupAgentActionForTest(async (ctx) => {
       attempt += 1
       const prompt = String(ctx.with?.prompt ?? "")
       expect(prompt).toContain(`attempt ${attempt}`)
       if (attempt === 1) {
-        await exec("git", ["add", "src/keep.ts"], { cwd: ctx.workDir })
-        await exec("git", ["commit", "-m", "partial cleanup", "-q"], { cwd: ctx.workDir })
+        commitCleanup(["src/keep.ts"])
         return { status: "success", message: "partial" }
       }
-      await exec("git", ["add", "src/extra.ts"], { cwd: ctx.workDir })
-      await exec("git", ["commit", "-m", "full cleanup", "-q"], { cwd: ctx.workDir })
+      commitCleanup(["src/extra.ts"])
       return { status: "success", message: "full" }
     })
 
@@ -366,7 +385,7 @@ describe("WorkExecutor clean worktree invariant", () => {
     // dirty. The runner must stop after the default 3 attempts and
     // fail with structured evidence carrying the categorized file
     // lists and cleanupAttempts=3.
-    await dirtyRepoWith({ path: "src/never.ts", content: "n\n", tracked: true })
+    markWorktreeDirty("src/never.ts")
     const cleanupCalls: number[] = []
     setCleanupAgentActionForTest(async (ctx) => {
       cleanupCalls.push(cleanupCalls.length + 1)
@@ -398,7 +417,7 @@ describe("WorkExecutor clean worktree invariant", () => {
   it("respectsRunnerCleanupMaxAttemptsOverrideBelowDefault", async () => {
     // Variables can lower the cleanup bound to 1. After the single
     // failed attempt the runner must fail with cleanupAttempts=1.
-    await dirtyRepoWith({ path: "src/stubborn.ts", content: "s\n", tracked: true })
+    markWorktreeDirty("src/stubborn.ts")
     setCleanupAgentActionForTest(async () => ({ status: "success", message: "did nothing" }))
 
     const work = buildWork({ uses: "mohist/acp-agent" })
@@ -421,7 +440,7 @@ describe("WorkExecutor clean worktree invariant", () => {
     // `workId` for the session name, so the cleanup context must
     // carry the original workId and the same `with.session` value
     // to reuse the same session rather than start a new one.
-    await dirtyRepoWith({ path: "src/session.ts", content: "s\n", tracked: true })
+    markWorktreeDirty("src/session.ts")
     const observedWorkIds: string[] = []
     const observedSessions: (string | undefined)[] = []
     setCleanupAgentActionForTest(async (ctx) => {
@@ -443,8 +462,7 @@ describe("WorkExecutor clean worktree invariant", () => {
       expect(session === "named-session" || session === undefined).toBe(true)
       expect(ctx.workId).toBe("work-session-test")
       expect(prompt).toContain("attempt 1")
-      await exec("git", ["add", "src/session.ts"], { cwd: ctx.workDir })
-      await exec("git", ["commit", "-m", "cleanup", "-q"], { cwd: ctx.workDir })
+      commitCleanup(["src/session.ts"])
       return { status: "success" }
     })
 
@@ -476,13 +494,12 @@ describe("WorkExecutor clean worktree invariant", () => {
     // When the original work has no `with.session`, the acpAgentAction
     // derives the session name from `workId`. The cleanup must
     // therefore reuse the same workId so the same session is hit.
-    await dirtyRepoWith({ path: "src/default-session.ts", content: "d\n", tracked: true })
+    markWorktreeDirty("src/default-session.ts")
     const observedWorkIds: string[] = []
     setCleanupAgentActionForTest(async (ctx) => {
       observedWorkIds.push(ctx.workId)
       expect(ctx.with?.["session"]).toBeUndefined()
-      await exec("git", ["add", "src/default-session.ts"], { cwd: ctx.workDir })
-      await exec("git", ["commit", "-m", "cleanup", "-q"], { cwd: ctx.workDir })
+      commitCleanup(["src/default-session.ts"])
       return { status: "success" }
     })
 
@@ -507,7 +524,7 @@ describe("WorkExecutor clean worktree invariant", () => {
     // The cleanup action itself returns a failure status. The
     // runner counts that as a real attempt and stops; the failure
     // evidence lists the categorized files at that point.
-    await dirtyRepoWith({ path: "src/abort.ts", content: "a\n", tracked: true })
+    markWorktreeDirty("src/abort.ts")
     setCleanupAgentActionForTest(async () => ({ status: "failure", message: "agent crashed" }))
 
     const executor = buildExecutor(makeRegistry(async () => ({ status: "success" })))
@@ -526,7 +543,7 @@ describe("WorkExecutor clean worktree invariant", () => {
     // When the action produced structured output (e.g. an acp-agent
     // result blob), the dirty-worktree failure must merge that
     // output with the evidence rather than dropping it.
-    await dirtyRepoWith({ path: "src/preserved.ts", content: "p\n", tracked: true })
+    markWorktreeDirty("src/preserved.ts")
     const actionOutput = JSON.stringify({ kind: "acp-agent", acpSessionId: "sess-1", model: "openai/gpt-5" })
     const executor = buildExecutor(makeRegistry(async () => ({ status: "success", output: actionOutput })))
 
@@ -545,46 +562,45 @@ describe("WorkExecutor clean worktree invariant", () => {
     // worktree is not a git repository (e.g. test fixtures that
     // resolve to a plain tmpdir). It must treat the worktree as
     // clean so the task can still complete.
-    const plainDir = await mkdtemp(join(tmpdir(), "mohist-executor-cleanup-plain-"))
-    try {
-      const executor = new WorkExecutor(
-        makeRegistry(async () => ({ status: "success", message: "ran" })),
-        verifyOnlyWorkspaceManager({ path: plainDir, branch: null, changeDir: null }),
-        connection as never,
-        {} as never,
-        null,
-        plainDir,
-      )
+    const plainDir = await createTestTempDir("mohist-executor-cleanup-plain-")
+    setExecutorGitRunnerForTest(async (observedWorkDir) => {
+      expect(observedWorkDir).toBe(plainDir)
+      return gitFail("fatal: not a git repository (or any of the parent directories): .git")
+    })
+    const executor = new WorkExecutor(
+      makeRegistry(async () => ({ status: "success", message: "ran" })),
+      verifyOnlyWorkspaceManager({ path: plainDir, branch: null, changeDir: null }),
+      connection as never,
+      {} as never,
+      null,
+      plainDir,
+    )
 
-      const work: RenderedWorkItem = {
-        workflowRunId: "wf-1",
-        workId: "work-plain",
-        workType: "task",
-        title: "Plain tmpdir test",
-        uses: "core/script",
-        with: {},
-        variables: { workspace: { path: plainDir, branch: null, changeDir: null } },
-      }
-
-      const result = await executor.execute(work, new AbortController().signal)
-
-      expect(result.status).toBe("completed")
-      expect(result.cleanupAttempts).toBeUndefined()
-    } finally {
-      await rm(plainDir, { recursive: true, force: true })
+    const work: RenderedWorkItem = {
+      workflowRunId: "wf-1",
+      workId: "work-plain",
+      workType: "task",
+      title: "Plain worktree test",
+      uses: "core/script",
+      with: {},
+      variables: { workspace: { path: plainDir, branch: null, changeDir: null } },
     }
+
+    const result = await executor.execute(work, new AbortController().signal)
+
+    expect(result.status).toBe("completed")
+    expect(result.cleanupAttempts).toBeUndefined()
   })
 
   it("cleanupPromptCarriesExplicitConstraintsAndOriginalPromptContext", async () => {
     // The cleanup prompt must name the file categories, instruct
     // the agent to report a commit SHA or no-change, and include
     // a short reference to the original task prompt for context.
-    await dirtyRepoWith({ path: "src/context.ts", content: "c\n" })
+    markWorktreeDirty("src/context.ts")
     let capturedPrompt: string | undefined
     setCleanupAgentActionForTest(async (ctx) => {
       capturedPrompt = String(ctx.with?.prompt ?? "")
-      await exec("git", ["add", "src/context.ts"], { cwd: ctx.workDir })
-      await exec("git", ["commit", "-m", "context cleanup", "-q"], { cwd: ctx.workDir })
+      commitCleanup(["src/context.ts"])
       return { status: "success" }
     })
 
@@ -652,12 +668,11 @@ describe("WorkExecutor clean worktree invariant", () => {
     // does not know how to load it; the constraint must therefore be
     // documented so callers don't depend on the loader resolution
     // during cleanup.
-    await dirtyRepoWith({ path: "src/loader.ts", content: "l\n" })
+    markWorktreeDirty("src/loader.ts")
     let capturedPrompt: unknown
     setCleanupAgentActionForTest(async (ctx) => {
       capturedPrompt = ctx.with?.prompt
-      await exec("git", ["add", "src/loader.ts"], { cwd: ctx.workDir })
-      await exec("git", ["commit", "-m", "cleanup", "-q"], { cwd: ctx.workDir })
+      commitCleanup(["src/loader.ts"])
       return { status: "success" }
     })
 

@@ -1,4 +1,3 @@
-// @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -76,7 +75,7 @@ function createTaskLogTestState(initialPage: TaskLogPage | undefined): TaskLogTe
   }
 }
 
-describe('TaskLogPanel — agent-task milestone rows (Phase 3b T-001)', () => {
+describe('TaskLogPanel agent-task milestone rows', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     fakeConnections.length = 0

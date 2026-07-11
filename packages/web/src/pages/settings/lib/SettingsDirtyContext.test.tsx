@@ -1,4 +1,3 @@
-// @vitest-environment jsdom
 import '@testing-library/jest-dom'
 import { act, render, renderHook } from '@testing-library/react'
 import { type ReactNode } from 'react'

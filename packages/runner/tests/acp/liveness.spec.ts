@@ -7,6 +7,7 @@ import {
 import type { ActionContext } from "../../src/core/types.js"
 import type { OpencodeProviderErrorDiagnostic } from "../../src/runtime/opencode-log-diagnostics.js"
 import { ServerConnection } from "../../src/server/connection.js"
+import { deferred } from "../support/deferred.js"
 import {
   baseContext,
   contextWithOverrides,
@@ -16,7 +17,6 @@ import {
   FakeAcpAgent,
   FakeServerConnection,
   resetAcpTestHooks,
-  runAcpActionUntilSettled,
   useAcpProviderDiagnostic,
   useAcpFakeTimers,
 } from "./support.js"
@@ -35,6 +35,7 @@ describe("mohist/acp-agent monitorPrompt provider fail-fast", () => {
     const context = baseContext({ prompt: "hanging task" }, controller.signal)
     const connection = {
       async prompt() {
+        promptStarted.resolve()
         return await new Promise(() => {})
       },
       async cancel() {
@@ -42,14 +43,18 @@ describe("mohist/acp-agent monitorPrompt provider fail-fast", () => {
       },
     }
 
-    const result = await runAcpActionUntilSettled(monitorPrompt(context, connection as never, "fake-session-1", "do the work", {
+    const promptStarted = deferred<void>()
+    const action = monitorPrompt(context, connection as never, "fake-session-1", "do the work", {
       timeoutMs: 50,
       livenessQuietThresholdMs: 5_000,
       probeTimeoutMs: 5_000,
       livenessState: createSessionLivenessState(),
       waitForData: () => new Promise<"data">(() => {}),
       providerErrorCheckIntervalMs: 1,
-    }))
+    })
+    await promptStarted.promise
+    await vi.advanceTimersByTimeAsync(50)
+    const result = await action
 
     expect(result).not.toBe("completed")
     expect(addSpy).toHaveBeenCalledTimes(1)
@@ -64,8 +69,10 @@ describe("mohist/acp-agent monitorPrompt provider fail-fast", () => {
       serverConnection: new FakeServerConnection() as unknown as ServerConnection,
     }
     let cancelled = false
+    const promptStarted = deferred<void>()
     const connection = {
       async prompt() {
+        promptStarted.resolve()
         return await new Promise(() => {})
       },
       async cancel() {
@@ -74,13 +81,17 @@ describe("mohist/acp-agent monitorPrompt provider fail-fast", () => {
       },
     }
 
-    const result = await runAcpActionUntilSettled(monitorPrompt(context, connection as never, "fake-session-1", "do the work", {
+    const action = monitorPrompt(context, connection as never, "fake-session-1", "do the work", {
       timeoutMs: 1_000,
       livenessQuietThresholdMs: 5_000,
       probeTimeoutMs: 5_000,
       livenessState: createSessionLivenessState(),
       waitForData: () => new Promise<"data">(() => {}),
-    }))
+      providerErrorCheckIntervalMs: 1,
+    })
+    await promptStarted.promise
+    await vi.advanceTimersByTimeAsync(1)
+    const result = await action
 
     expect(result).not.toBe("completed")
     if (result === "completed") return
@@ -100,8 +111,10 @@ describe("mohist/acp-agent monitorPrompt provider fail-fast", () => {
   it("SocketProviderDiagnostic_MonitorDoesNotFailFastBeforePromptTimeout", async () => {
     useAcpFakeTimers()
     useAcpProviderDiagnostic(socketDiagnostic(new Date().toISOString()))
+    const promptStarted = deferred<void>()
     const connection = {
       async prompt() {
+        promptStarted.resolve()
         return await new Promise(() => {})
       },
       async cancel() {
@@ -109,13 +122,16 @@ describe("mohist/acp-agent monitorPrompt provider fail-fast", () => {
       },
     }
 
-    const result = await runAcpActionUntilSettled(monitorPrompt(baseContext({ prompt: "hanging task" }), connection as never, "fake-session-1", "do the work", {
+    const action = monitorPrompt(baseContext({ prompt: "hanging task" }), connection as never, "fake-session-1", "do the work", {
       timeoutMs: 40,
       livenessQuietThresholdMs: 5_000,
       probeTimeoutMs: 5_000,
       livenessState: createSessionLivenessState(),
       waitForData: () => new Promise<"data">(() => {}),
-    }))
+    })
+    await promptStarted.promise
+    await vi.advanceTimersByTimeAsync(40)
+    const result = await action
 
     expect(result).not.toBe("completed")
     if (result === "completed") return
@@ -125,25 +141,27 @@ describe("mohist/acp-agent monitorPrompt provider fail-fast", () => {
 })
 
 describe("mohist/acp-agent cancelAndReturn bounded cleanup", () => {
-  it("EphemeralSessionCancelHangs_CleanupForcesProcessKill_AndReturnsWithinBound", async () => {
+  it("EphemeralSessionCancelHangs_CleanupForcesProcessKill", async () => {
     useAcpFakeTimers()
     const agent = new FakeAcpAgent("cancel-hangs")
     const tracked = createTrackedFakeProcess(agent, { hangCancelWrites: true })
     setAcpProcessFactoryForTest(() => tracked)
     const serverConnection = new FakeServerConnection()
 
-    const startedAt = Date.now()
-    const result = await runAcpActionUntilSettled(acpAgentAction({
+    const result = await runWithDefaultModelWarning("work-1", () => acpAgentAction({
       ...baseContext({ prompt: "hanging task", timeout: 100 }),
       serverConnection: serverConnection as unknown as ServerConnection,
-    }))
-    const elapsed = Date.now() - startedAt
+    }), async (action) => {
+      await agent.waitForPrompt()
+      await vi.advanceTimersByTimeAsync(100)
+      await tracked.waitForCancelWrite()
+      await vi.advanceTimersByTimeAsync(50)
+      return action
+    })
 
     expect(result.status).toBe("failure")
     expect(result.message ?? "").toContain("Timed out")
     expect(tracked.cleanupCount()).toBeGreaterThanOrEqual(1)
-    expect(elapsed).toBeGreaterThanOrEqual(150)
-    expect(elapsed).toBeLessThan(500)
   })
 
   it("EphemeralSessionCancelResolvesPromptly_NoForceCleanupFromTimeoutRace", async () => {
@@ -154,20 +172,19 @@ describe("mohist/acp-agent cancelAndReturn bounded cleanup", () => {
     setAcpProcessFactoryForTest(() => tracked)
     const serverConnection = new FakeServerConnection()
     const controller = new AbortController()
-    setTimeout(() => controller.abort(), 30)
 
     const cleanupBefore = tracked.cleanupCount()
-    const startedAt = Date.now()
-    const result = await runAcpActionUntilSettled(acpAgentAction({
+    const action = runWithDefaultModelWarning("work-1", () => acpAgentAction({
       ...baseContext({ prompt: "abort task", timeout: 5_000 }, controller.signal),
       serverConnection: serverConnection as unknown as ServerConnection,
     }))
-    const elapsed = Date.now() - startedAt
+    await agent.waitForPrompt()
+    controller.abort()
+    const result = await action
 
     expect(result.status).toBe("failure")
     expect(result.message ?? "").toMatch(/stopped by user/i)
     expect(agent.calls.some((entry) => entry.event === "cancel")).toBe(true)
-    expect(elapsed).toBeLessThan(2_000)
     const extraCleanups = tracked.cleanupCount() - cleanupBefore
     expect(extraCleanups).toBeLessThanOrEqual(1)
   })
@@ -177,13 +194,17 @@ describe("mohist/acp-agent cancelAndReturn bounded cleanup", () => {
     const shared = createSharedSessionFixture("thought-liveness", { sessionRecord: { acpSessionId: "server-session-1" } })
     shared.agent.cancelHangs = true
 
-    const result = await runAcpActionUntilSettled(acpAgentAction(contextWithOverrides({
+    const result = await runWithDefaultModelWarning("shared-session", () => acpAgentAction(contextWithOverrides({
       prompt: "long shared task",
       session: "shared-session",
       livenessQuietThresholdMs: 5_000,
       probeTimeoutMs: 5_000,
       timeout: 100,
-    }, undefined, shared.context())))
+    }, undefined, shared.context())), async (action) => {
+      await shared.agent.waitForPrompt()
+      await vi.advanceTimersByTimeAsync(100)
+      return action
+    })
 
     expect(result.status).toBe("failure")
     expect(result.message ?? "").toContain("Timed out")
@@ -198,12 +219,16 @@ describe("mohist/acp-agent monitorPrompt prompt_timeout diagnostics", () => {
     const fixture = createFixture("cancel-hangs")
     setAcpProcessFactoryForTest(() => createFakeProcess(fixture.agent))
 
-    const result = await runAcpActionUntilSettled(acpAgentAction(fixture.context({
+    const result = await runWithDefaultModelWarning("work-1", () => acpAgentAction(fixture.context({
       prompt: "hanging prompt",
       timeout: 100,
       livenessQuietThresholdMs: 5_000,
       probeTimeoutMs: 5_000,
-    })))
+    })), async (action) => {
+      await fixture.agent.waitForPrompt()
+      await vi.advanceTimersByTimeAsync(100)
+      return action
+    })
 
     expect(result.status).toBe("failure")
     expect(result.message ?? "").toContain("Timed out after")
@@ -236,12 +261,16 @@ describe("mohist/acp-agent monitorPrompt prompt_timeout diagnostics", () => {
     const fixture = createFixture("cancel-hangs")
     setAcpProcessFactoryForTest(() => createFakeProcess(fixture.agent))
 
-    const result = await runAcpActionUntilSettled(acpAgentAction(fixture.context({
+    const result = await runWithDefaultModelWarning("work-1", () => acpAgentAction(fixture.context({
       prompt: "hanging prompt no log",
       timeout: 100,
       livenessQuietThresholdMs: 5_000,
       probeTimeoutMs: 5_000,
-    })))
+    })), async (action) => {
+      await fixture.agent.waitForPrompt()
+      await vi.advanceTimersByTimeAsync(100)
+      return action
+    })
 
     expect(result.status).toBe("failure")
     expect(result.message ?? "").toContain("Timed out after")
@@ -270,12 +299,16 @@ describe("mohist/acp-agent monitorPrompt prompt_timeout diagnostics", () => {
     const fixture = createFixture("cancel-hangs")
     setAcpProcessFactoryForTest(() => createFakeProcess(fixture.agent))
 
-    await runAcpActionUntilSettled(acpAgentAction(fixture.context({
+    await runWithDefaultModelWarning("work-1", () => acpAgentAction(fixture.context({
       prompt: "hanging prompt liveness event",
       timeout: 100,
       livenessQuietThresholdMs: 5_000,
       probeTimeoutMs: 5_000,
-    })))
+    })), async (action) => {
+      await fixture.agent.waitForPrompt()
+      await vi.advanceTimersByTimeAsync(100)
+      return action
+    })
 
     const livenessEvents = fixture.serverConnection.calls
       .filter((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "session.liveness")
@@ -286,6 +319,34 @@ describe("mohist/acp-agent monitorPrompt prompt_timeout diagnostics", () => {
     expect(failed?.acpSessionId).toBe("fake-session-1")
   })
 })
+
+async function runWithDefaultModelWarning<T>(
+  sessionName: string,
+  operation: () => Promise<T>,
+  drive?: (action: Promise<T>) => Promise<T>,
+): Promise<T> {
+  const warningSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined)
+  try {
+    const action = operation()
+    const result = drive === undefined ? await action : await drive(action)
+    expect(warningSpy).toHaveBeenCalledTimes(1)
+    expect(warningSpy).toHaveBeenNthCalledWith(
+      1,
+      "mohist acp model not configured; using provider default",
+      {
+        workflowRunId: "workflow-1",
+        workId: "work-1",
+        stage: "build",
+        sessionName,
+        requestedModel: null,
+        requestedModelSource: "none",
+      },
+    )
+    return result
+  } finally {
+    warningSpy.mockRestore()
+  }
+}
 
 function createFixture(scenario: "cancel-hangs") {
   const timeline: Array<{ event: string }> = []

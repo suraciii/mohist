@@ -1,4 +1,3 @@
-// @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react'
 import { useMutation } from '@tanstack/react-query'
@@ -77,7 +76,7 @@ function makeEpic(overrides: Record<string, unknown> = {}) {
   }
 }
 
-describe('EpicDetailPage LinkedIssueRow Remove confirmation flow (T-002)', () => {
+describe('EpicDetailPage LinkedIssueRow Remove confirmation flow', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     _epicData = makeEpic()

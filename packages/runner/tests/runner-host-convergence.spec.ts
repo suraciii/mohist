@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { RunnerHost } from "../src/runtime/host.js"
 import { defaultWorkspaceRegistryFilePath } from "../src/runtime/workspace-registry.js"
 
-// Lifecycle coverage for the convergence backstop wiring (T-003):
+// Lifecycle coverage for the convergence backstop wiring:
 //   - On startup (after the first SignalR connect) the runner fires a
 //     single convergence pass against the server.
 //   - On SignalR reconnect (onReconnected callback) the runner fires
@@ -36,6 +36,53 @@ let capturedOnReconnected: ((connectionId: string) => void) | null = null
 const forceReconnect = vi.fn(async () => undefined)
 const createSharedAcpConnection = vi.fn()
 const shutdownSharedAcpConnection = vi.fn()
+const registryTransitions = vi.hoisted(() => ({
+  markEligible: vi.fn(),
+  remove: vi.fn(),
+}))
+
+interface EventQueue<T> {
+  readonly count: number
+  next(): Promise<T>
+  push(value: T): void
+}
+
+function eventQueue<T>(): EventQueue<T> {
+  const values: T[] = []
+  const waiters: Array<(value: T) => void> = []
+  let count = 0
+
+  return {
+    get count() {
+      return count
+    },
+    next() {
+      if (values.length > 0) return Promise.resolve(values.shift()!)
+      return new Promise<T>((resolve) => waiters.push(resolve))
+    },
+    push(value) {
+      count += 1
+      const waiter = waiters.shift()
+      if (waiter) waiter(value)
+      else values.push(value)
+    },
+  }
+}
+
+interface HostEvents {
+  connected: EventQueue<void>
+  statusQueries: EventQueue<string[]>
+  polls: EventQueue<void>
+}
+
+interface RegistryEvents {
+  eligible: EventQueue<string>
+  removed: EventQueue<string>
+}
+
+type StatusResponder = (workflowRunIds: string[]) => Record<string, string> | Promise<Record<string, string>>
+
+let registryEvents: RegistryEvents
 
 vi.mock("../src/server/connection.js", () => ({
   ServerConnection: class {
@@ -65,6 +112,27 @@ vi.mock("../src/runtime/opencode-models.js", () => ({
   discoverOpencodeModels: vi.fn(async () => ({ models: ["openai/gpt-5.5"], variants: {} })),
 }))
 
+vi.mock("../src/runtime/workspace-registry.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/runtime/workspace-registry.js")>()
+
+  return {
+    ...actual,
+    WorkspaceRegistry: class extends actual.WorkspaceRegistry {
+      async markEligible(workflowRunId: string) {
+        const entry = await super.markEligible(workflowRunId)
+        registryTransitions.markEligible(workflowRunId)
+        return entry
+      }
+
+      async remove(workflowRunId: string) {
+        const removed = await super.remove(workflowRunId)
+        registryTransitions.remove(workflowRunId)
+        return removed
+      }
+    },
+  }
+})
+
 vi.mock("../src/runtime/acp-connection.js", () => ({
   AcpSessionManager: class {
     key(_workflowRunId: string, _sessionName: string) { return `${_workflowRunId}:${_sessionName}` }
@@ -77,6 +145,12 @@ vi.mock("../src/runtime/acp-connection.js", () => ({
 }))
 
 beforeEach(() => {
+  registryEvents = {
+    eligible: eventQueue<string>(),
+    removed: eventQueue<string>(),
+  }
+  registryTransitions.markEligible.mockReset().mockImplementation((workflowRunId: string) => registryEvents.eligible.push(workflowRunId))
+  registryTransitions.remove.mockReset().mockImplementation((workflowRunId: string) => registryEvents.removed.push(workflowRunId))
   createSharedAcpConnection.mockResolvedValue({
     connection: { prompt: vi.fn(), cancel: vi.fn(), newSession: vi.fn(), resumeSession: vi.fn(), setSessionConfigOption: vi.fn(), closeSession: vi.fn() },
     processPid: 99999,
@@ -87,14 +161,61 @@ beforeEach(() => {
   shutdownSharedAcpConnection.mockResolvedValue(undefined)
 })
 
-describe("RunnerHost convergence wiring (T-003)", () => {
+function configureHost(statusResponder: StatusResponder = async () => ({})): HostEvents {
+  const events: HostEvents = {
+    connected: eventQueue<void>(),
+    statusQueries: eventQueue<string[]>(),
+    polls: eventQueue<void>(),
+  }
+
+  vi.clearAllMocks()
+  capturedOnReconnected = null
+  connect.mockReset().mockImplementation(async () => {
+    events.connected.push()
+  })
+  heartbeat.mockReset().mockResolvedValue(undefined)
+  disconnect.mockReset().mockResolvedValue(undefined)
+  poll.mockReset().mockImplementation(async () => {
+    events.polls.push()
+    return []
+  })
+  startSignalR.mockReset().mockResolvedValue(undefined)
+  stopSignalR.mockReset().mockResolvedValue(undefined)
+  getConnectionId.mockReset().mockReturnValue("conn-1")
+  probeLiveness.mockReset().mockResolvedValue(true)
+  workflowRunsStatus.mockReset().mockImplementation(async (workflowRunIds: string[]) => {
+    events.statusQueries.push([...workflowRunIds])
+    return await statusResponder([...workflowRunIds])
+  })
+  fetchConfig.mockReset().mockResolvedValue(null)
+  forceReconnect.mockReset().mockResolvedValue(undefined)
+  createSharedAcpConnection.mockReset().mockResolvedValue({
+    connection: { prompt: vi.fn(), cancel: vi.fn(), newSession: vi.fn(), resumeSession: vi.fn(), setSessionConfigOption: vi.fn(), closeSession: vi.fn() },
+    processPid: 99999,
+    setSessionHandlers: vi.fn(),
+    clearSessionHandlers: vi.fn(),
+    shutdown: shutdownSharedAcpConnection,
+  })
+  shutdownSharedAcpConnection.mockReset().mockResolvedValue(undefined)
+  return events
+}
+
+async function waitForActiveStartup(events: HostEvents): Promise<string[]> {
+  const workflowRunIds = await events.statusQueries.next()
+  await events.polls.next()
+  return workflowRunIds
+}
+
+describe("RunnerHost converges active workflow runs", () => {
   let root: string
 
   beforeEach(async () => {
     root = await mkdtemp(join(tmpdir(), "mohist-host-convergence-"))
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] })
   })
 
   afterEach(async () => {
+    vi.useRealTimers()
     await rm(root, { recursive: true, force: true })
   })
 
@@ -132,14 +253,9 @@ describe("RunnerHost convergence wiring (T-003)", () => {
   }
 
   it("Startup_RunsOneConvergencePass_WithActiveEntriesFromRegistry", async () => {
-    vi.clearAllMocks()
     const wsPath = join(root, "mohist-local/workspaces/issue-1")
     await seedActiveEntry("wr-1", wsPath)
-    workflowRunsStatus.mockResolvedValue({ "wr-1": "Completed" })
-    poll.mockResolvedValue([])
-    startSignalR.mockResolvedValue(undefined)
-    stopSignalR.mockResolvedValue(undefined)
-    probeLiveness.mockResolvedValue(true)
+    const events = configureHost(async () => ({ "wr-1": "Completed" }))
 
     const controller = new AbortController()
     const host = new RunnerHost({
@@ -147,24 +263,16 @@ describe("RunnerHost convergence wiring (T-003)", () => {
       cleanupConvergenceIntervalMs: 5 * 60_000,
     })
     const run = host.run(controller.signal)
-    await vi.waitFor(() => expect(connect).toHaveBeenCalled())
-    await vi.waitFor(() => expect(workflowRunsStatus).toHaveBeenCalled(), { timeout: 5_000 })
 
-    const lastCall = workflowRunsStatus.mock.calls.at(-1)!
-    expect(lastCall[0]).toEqual(["wr-1"])
+    expect(await waitForActiveStartup(events)).toEqual(["wr-1"])
     controller.abort()
     await expect(run).resolves.toBeUndefined()
   })
 
   it("Startup_ConvergenceTransitionsServerReportedTerminalToEligible", async () => {
-    vi.clearAllMocks()
     const wsPath = join(root, "mohist-local/workspaces/issue-1")
     await seedActiveEntry("wr-1", wsPath)
-    workflowRunsStatus.mockResolvedValue({ "wr-1": "Completed" })
-    poll.mockResolvedValue([])
-    startSignalR.mockResolvedValue(undefined)
-    stopSignalR.mockResolvedValue(undefined)
-    probeLiveness.mockResolvedValue(true)
+    const events = configureHost(async () => ({ "wr-1": "Completed" }))
 
     const controller = new AbortController()
     const host = new RunnerHost({
@@ -172,19 +280,16 @@ describe("RunnerHost convergence wiring (T-003)", () => {
       cleanupConvergenceIntervalMs: 5 * 60_000,
     })
     const run = host.run(controller.signal)
-    await vi.waitFor(() => expect(workflowRunsStatus).toHaveBeenCalled(), { timeout: 5_000 })
-    // Wait for the transition to land on disk.
-    await vi.waitFor(async () => {
-      const onDisk = JSON.parse(await readFile(defaultWorkspaceRegistryFilePath(root), "utf8"))
-      expect(onDisk.entries["wr-1"].phase).toBe("eligible")
-    }, { timeout: 5_000 })
+    await waitForActiveStartup(events)
+    expect(await registryEvents.eligible.next()).toBe("wr-1")
+    const onDisk = JSON.parse(await readFile(defaultWorkspaceRegistryFilePath(root), "utf8"))
+    expect(onDisk.entries["wr-1"].phase).toBe("eligible")
 
     controller.abort()
     await expect(run).resolves.toBeUndefined()
   })
 
   it("Startup_OnlyActiveEntriesAreQueried_NeverEligible", async () => {
-    vi.clearAllMocks()
     const wsPathA = join(root, "mohist-local/workspaces/issue-1")
     const wsPathB = join(root, "mohist-local/workspaces/issue-2")
     // Seed one active + one eligible directly via the file.
@@ -214,11 +319,7 @@ describe("RunnerHost convergence wiring (T-003)", () => {
         },
       },
     }))
-    workflowRunsStatus.mockResolvedValue({ "wr-active": "Running" })
-    poll.mockResolvedValue([])
-    startSignalR.mockResolvedValue(undefined)
-    stopSignalR.mockResolvedValue(undefined)
-    probeLiveness.mockResolvedValue(true)
+    const events = configureHost(async () => ({ "wr-active": "Running" }))
 
     const controller = new AbortController()
     const host = new RunnerHost({
@@ -226,9 +327,8 @@ describe("RunnerHost convergence wiring (T-003)", () => {
       cleanupConvergenceIntervalMs: 5 * 60_000,
     })
     const run = host.run(controller.signal)
-    await vi.waitFor(() => expect(workflowRunsStatus).toHaveBeenCalled(), { timeout: 5_000 })
 
-    const queried = workflowRunsStatus.mock.calls.at(-1)![0] as string[]
+    const queried = await waitForActiveStartup(events)
     expect(queried).toEqual(["wr-active"])
     expect(queried).not.toContain("wr-eligible")
     controller.abort()
@@ -236,8 +336,6 @@ describe("RunnerHost convergence wiring (T-003)", () => {
   })
 
   it("OnReconnected_RunsAnotherConvergencePass", async () => {
-    vi.clearAllMocks()
-    capturedOnReconnected = null
     const wsPath1 = join(root, "mohist-local/workspaces/issue-1")
     const wsPath2 = join(root, "mohist-local/workspaces/issue-2")
     // Seed TWO active entries. The startup convergence marks wr-1
@@ -261,13 +359,15 @@ describe("RunnerHost convergence wiring (T-003)", () => {
         },
       },
     }))
-    workflowRunsStatus
-      .mockResolvedValueOnce({ "wr-1": "Completed", "wr-2": "Running" })
-      .mockResolvedValueOnce({ "wr-1": "Completed", "wr-2": "Completed" })
-    poll.mockResolvedValue([])
-    startSignalR.mockResolvedValue(undefined)
-    stopSignalR.mockResolvedValue(undefined)
-    probeLiveness.mockResolvedValue(true)
+    const responses: Array<Record<string, string>> = [
+      { "wr-1": "Completed", "wr-2": "Running" },
+      { "wr-2": "Completed" },
+    ]
+    const events = configureHost(async () => {
+      const response = responses.shift()
+      if (!response) throw new Error("unexpected convergence query")
+      return response
+    })
     getConnectionId.mockReturnValue("conn-A")
 
     const controller = new AbortController()
@@ -276,11 +376,8 @@ describe("RunnerHost convergence wiring (T-003)", () => {
       cleanupConvergenceIntervalMs: 5 * 60_000,
     })
     const run = host.run(controller.signal)
-    await vi.waitFor(() => expect(connect).toHaveBeenCalled())
-
-    // Wait for the startup convergence call.
-    await vi.waitFor(() => expect(workflowRunsStatus.mock.calls.length).toBeGreaterThanOrEqual(1), { timeout: 5_000 })
-    const startupCalls = workflowRunsStatus.mock.calls.length
+    expect(await waitForActiveStartup(events)).toEqual(["wr-1", "wr-2"])
+    expect(await registryEvents.eligible.next()).toBe("wr-1")
 
     // Simulate a SignalR reconnect landing: by the time onreconnected
     // fires, getConnectionId() already returns the new id.
@@ -289,88 +386,69 @@ describe("RunnerHost convergence wiring (T-003)", () => {
     getConnectionId.mockReturnValue("conn-AFTER")
     capturedOnReconnected!("conn-AFTER")
 
-    await vi.waitFor(() => expect(workflowRunsStatus.mock.calls.length).toBeGreaterThan(startupCalls), { timeout: 5_000 })
-
-    // After both convergence passes, both wr-1 and wr-2 are eligible.
-    // Wait for the second convergence's markEligible persistence to land
-    // on disk (the convergence is detached via `void`).
-    await vi.waitFor(async () => {
-      const onDisk = JSON.parse(await readFile(defaultWorkspaceRegistryFilePath(root), "utf8"))
-      expect(onDisk.entries["wr-1"].phase).toBe("eligible")
-      expect(onDisk.entries["wr-2"].phase).toBe("eligible")
-    }, { timeout: 5_000 })
+    expect(await events.statusQueries.next()).toEqual(["wr-2"])
+    expect(await registryEvents.eligible.next()).toBe("wr-2")
+    const onDisk = JSON.parse(await readFile(defaultWorkspaceRegistryFilePath(root), "utf8"))
+    expect(onDisk.entries["wr-1"].phase).toBe("eligible")
+    expect(onDisk.entries["wr-2"].phase).toBe("eligible")
 
     controller.abort()
     await expect(run).resolves.toBeUndefined()
   })
 
   it("PeriodicTimer_FiresConvergenceRepeatedly_AfterInterval", async () => {
-    vi.clearAllMocks()
     const wsPath = join(root, "mohist-local/workspaces/issue-1")
     await seedActiveEntry("wr-1", wsPath)
-    workflowRunsStatus.mockResolvedValue({ "wr-1": "Running" })
-    poll.mockResolvedValue([])
-    startSignalR.mockResolvedValue(undefined)
-    stopSignalR.mockResolvedValue(undefined)
-    probeLiveness.mockResolvedValue(true)
+    const events = configureHost(async () => ({ "wr-1": "Running" }))
+    const convergenceIntervalMs = 1_000
 
     const controller = new AbortController()
     const host = new RunnerHost({
       ...defaultOptions(),
-      // Short interval so the test does not need to wait long.
-      cleanupConvergenceIntervalMs: 30,
-      // Keep the worker pool idle.
+      cleanupConvergenceIntervalMs: convergenceIntervalMs,
       pollIntervalMs: 60_000,
     })
     const run = host.run(controller.signal)
-    await vi.waitFor(() => expect(connect).toHaveBeenCalled())
-    await vi.waitFor(() => expect(workflowRunsStatus).toHaveBeenCalled(), { timeout: 5_000 })
-    const startupCalls = workflowRunsStatus.mock.calls.length
+    expect(await waitForActiveStartup(events)).toEqual(["wr-1"])
 
-    // Wait long enough for at least 3 additional periodic ticks.
-    await vi.waitFor(() => expect(workflowRunsStatus.mock.calls.length).toBeGreaterThanOrEqual(startupCalls + 3), { timeout: 5_000 })
+    for (let tick = 0; tick < 3; tick += 1) {
+      const query = events.statusQueries.next()
+      await vi.advanceTimersByTimeAsync(convergenceIntervalMs)
+      expect(await query).toEqual(["wr-1"])
+    }
+    expect(events.statusQueries.count).toBe(4)
 
     controller.abort()
     await expect(run).resolves.toBeUndefined()
   })
 
   it("PeriodicTimer_IsClearedOnShutdown_NoLeakAcrossReconnectLoops", async () => {
-    vi.clearAllMocks()
     const wsPath = join(root, "mohist-local/workspaces/issue-1")
     await seedActiveEntry("wr-1", wsPath)
-    workflowRunsStatus.mockResolvedValue({ "wr-1": "Running" })
-    poll.mockResolvedValue([])
-    startSignalR.mockResolvedValue(undefined)
-    stopSignalR.mockResolvedValue(undefined)
-    probeLiveness.mockResolvedValue(true)
+    const events = configureHost(async () => ({ "wr-1": "Running" }))
+    const convergenceIntervalMs = 1_000
 
     const controller = new AbortController()
     const host = new RunnerHost({
       ...defaultOptions(),
-      cleanupConvergenceIntervalMs: 20,
+      cleanupConvergenceIntervalMs: convergenceIntervalMs,
       pollIntervalMs: 60_000,
     })
     const run = host.run(controller.signal)
-    await vi.waitFor(() => expect(connect).toHaveBeenCalled())
-    await vi.waitFor(() => expect(workflowRunsStatus.mock.calls.length).toBeGreaterThanOrEqual(1), { timeout: 5_000 })
-    const callsAtShutdown = workflowRunsStatus.mock.calls.length
+    await waitForActiveStartup(events)
+    const callsAtShutdown = events.statusQueries.count
 
     controller.abort()
     await expect(run).resolves.toBeUndefined()
 
-    await new Promise((r) => setTimeout(r, 80))
-    expect(workflowRunsStatus.mock.calls.length).toBe(callsAtShutdown)
+    await vi.advanceTimersByTimeAsync(convergenceIntervalMs * 4)
+    expect(events.statusQueries.count).toBe(callsAtShutdown)
   })
 
   it("Convergence_NeverQueriesWorkflowRunsOutsideTheRegistry", async () => {
-    vi.clearAllMocks()
     const wsPath = join(root, "mohist-local/workspaces/issue-1")
     await seedActiveEntry("wr-mine", wsPath)
-    workflowRunsStatus.mockResolvedValue({ "wr-mine": "Running" })
-    poll.mockResolvedValue([])
-    startSignalR.mockResolvedValue(undefined)
-    stopSignalR.mockResolvedValue(undefined)
-    probeLiveness.mockResolvedValue(true)
+    const events = configureHost(async () => ({ "wr-mine": "Running" }))
 
     const controller = new AbortController()
     const host = new RunnerHost({
@@ -378,29 +456,20 @@ describe("RunnerHost convergence wiring (T-003)", () => {
       cleanupConvergenceIntervalMs: 20,
     })
     const run = host.run(controller.signal)
-    await vi.waitFor(() => expect(connect).toHaveBeenCalled())
-    await vi.waitFor(() => expect(workflowRunsStatus.mock.calls.length).toBeGreaterThanOrEqual(1), { timeout: 5_000 })
 
-    for (const call of workflowRunsStatus.mock.calls) {
-      const ids = call[0] as string[]
-      expect(ids).toContain("wr-mine")
-      expect(ids).not.toContain("wr-other-runner")
-      expect(ids).not.toContain("wr-not-mine")
-    }
+    const ids = await waitForActiveStartup(events)
+    expect(ids).toContain("wr-mine")
+    expect(ids).not.toContain("wr-other-runner")
+    expect(ids).not.toContain("wr-not-mine")
 
     controller.abort()
     await expect(run).resolves.toBeUndefined()
   })
 
   it("Convergence_ServerForgotRun_DropsRegistryEntry", async () => {
-    vi.clearAllMocks()
     const wsPath = join(root, "mohist-local/workspaces/issue-1")
     await seedActiveEntry("wr-forgotten", wsPath)
-    workflowRunsStatus.mockResolvedValue({}) // server drops wr-forgotten
-    poll.mockResolvedValue([])
-    startSignalR.mockResolvedValue(undefined)
-    stopSignalR.mockResolvedValue(undefined)
-    probeLiveness.mockResolvedValue(true)
+    const events = configureHost(async () => ({}))
 
     const controller = new AbortController()
     const host = new RunnerHost({
@@ -408,51 +477,48 @@ describe("RunnerHost convergence wiring (T-003)", () => {
       cleanupConvergenceIntervalMs: 5 * 60_000,
     })
     const run = host.run(controller.signal)
-    await vi.waitFor(() => expect(workflowRunsStatus).toHaveBeenCalled(), { timeout: 5_000 })
-    await vi.waitFor(async () => {
-      const onDisk = JSON.parse(await readFile(defaultWorkspaceRegistryFilePath(root), "utf8"))
-      expect(onDisk.entries["wr-forgotten"]).toBeUndefined()
-    }, { timeout: 5_000 })
+    expect(await waitForActiveStartup(events)).toEqual(["wr-forgotten"])
+    expect(await registryEvents.removed.next()).toBe("wr-forgotten")
+    const onDisk = JSON.parse(await readFile(defaultWorkspaceRegistryFilePath(root), "utf8"))
+    expect(onDisk.entries["wr-forgotten"]).toBeUndefined()
 
     controller.abort()
     await expect(run).resolves.toBeUndefined()
   })
 
   it("Convergence_OnServerError_LogsAndContinues_DoesNotBlockWorkerPool", async () => {
-    vi.clearAllMocks()
     const wsPath = join(root, "mohist-local/workspaces/issue-1")
     await seedActiveEntry("wr-1", wsPath)
-    workflowRunsStatus.mockRejectedValue(new Error("network blip"))
-    poll.mockResolvedValue([])
-    startSignalR.mockResolvedValue(undefined)
-    stopSignalR.mockResolvedValue(undefined)
-    probeLiveness.mockResolvedValue(true)
+    const failure = new Error("network blip")
+    const events = configureHost(async () => {
+      throw failure
+    })
 
     const controller = new AbortController()
     const host = new RunnerHost({
       ...defaultOptions(),
       cleanupConvergenceIntervalMs: 5 * 60_000,
     })
-    const run = host.run(controller.signal)
-    await vi.waitFor(() => expect(connect).toHaveBeenCalled())
-    await vi.waitFor(() => expect(workflowRunsStatus).toHaveBeenCalled(), { timeout: 5_000 })
-    // Worker pool is still ticking: heartbeat fires per its interval.
-    await vi.waitFor(() => expect(poll).toHaveBeenCalled(), { timeout: 5_000 })
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
+    try {
+      const run = host.run(controller.signal)
+      expect(await waitForActiveStartup(events)).toEqual(["wr-1"])
 
-    // The registry entry is still active.
-    const onDisk = JSON.parse(await readFile(defaultWorkspaceRegistryFilePath(root), "utf8"))
-    expect(onDisk.entries["wr-1"].phase).toBe("active")
+      // The registry entry is still active.
+      const onDisk = JSON.parse(await readFile(defaultWorkspaceRegistryFilePath(root), "utf8"))
+      expect(onDisk.entries["wr-1"].phase).toBe("active")
 
-    controller.abort()
-    await expect(run).resolves.toBeUndefined()
+      controller.abort()
+      await expect(run).resolves.toBeUndefined()
+      expect(errorSpy).toHaveBeenCalledOnce()
+      expect(errorSpy).toHaveBeenCalledWith("workspace cleanup convergence query failed:", failure)
+    } finally {
+      errorSpy.mockRestore()
+    }
   })
 
   it("EmptyRegistry_StartupConvergence_DoesNotCallServer", async () => {
-    vi.clearAllMocks()
-    poll.mockResolvedValue([])
-    startSignalR.mockResolvedValue(undefined)
-    stopSignalR.mockResolvedValue(undefined)
-    probeLiveness.mockResolvedValue(true)
+    const events = configureHost()
 
     const controller = new AbortController()
     const host = new RunnerHost({
@@ -460,9 +526,9 @@ describe("RunnerHost convergence wiring (T-003)", () => {
       cleanupConvergenceIntervalMs: 5 * 60_000,
     })
     const run = host.run(controller.signal)
-    await vi.waitFor(() => expect(connect).toHaveBeenCalled())
-    await vi.waitFor(() => expect(poll).toHaveBeenCalled(), { timeout: 5_000 })
-    expect(workflowRunsStatus).not.toHaveBeenCalled()
+    await events.connected.next()
+    await events.polls.next()
+    expect(events.statusQueries.count).toBe(0)
 
     controller.abort()
     await expect(run).resolves.toBeUndefined()

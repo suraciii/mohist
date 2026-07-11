@@ -1,4 +1,3 @@
-// @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider, useMutation } from '@tanstack/react-query'
@@ -294,7 +293,7 @@ describe('GenericSessionPage', () => {
     })
   })
 
-  describe('cancel control (issue-349 T-002)', () => {
+  describe('cancel control', () => {
     it.each(['active', 'running', 'probing'])(
       'renders the cancel trigger in the header when the generic session is non-terminal (%s)',
       async (status) => {
@@ -320,7 +319,7 @@ describe('GenericSessionPage', () => {
       },
     )
 
-    it('does not render the cancel trigger inside the followup composer (issue-242 composer constraint)', async () => {
+    it('does not render the cancel trigger inside the followup composer', async () => {
       _summaryData = baseSummary({ status: 'running' })
       mocks.transcriptTurns = [makeTurn()]
       renderPage()

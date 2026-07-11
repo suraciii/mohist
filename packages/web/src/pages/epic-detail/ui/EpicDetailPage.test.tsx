@@ -1,4 +1,3 @@
-// @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -560,7 +559,7 @@ describe('EpicDetailPage markdown description', () => {
     expect(container.querySelectorAll('h1, h2, h3, h4, h5, h6').length).toBe(0)
   })
 })
-describe('EpicDetailPage Ask Agent entry (T-005)', () => {
+describe('EpicDetailPage Ask Agent entry', () => {
   function makeEpic(overrides: Record<string, unknown> = {}) {
     return {
       id: 'epic-12345678',

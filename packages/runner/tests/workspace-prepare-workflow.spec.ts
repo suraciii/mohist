@@ -107,6 +107,16 @@ function work(workId: string, uses: string, overrides: Partial<RenderedWorkItem>
   }
 }
 
+function actionContext(item: RenderedWorkItem): ActionContext {
+  return {
+    ...item,
+    variables: item.variables ?? {},
+    workDir: workspacePath,
+    signal: new AbortController().signal,
+    writeVars: async () => {},
+  }
+}
+
 describe("workspace-prepare stage-boundary dispatch regression", () => {
   it("RerunAfterRebaseFailure_DispatchesWorkspacePrepareFirstAndThenBusinessTask", async () => {
     installExecutorGitProbe()
@@ -206,7 +216,7 @@ describe("workspace-prepare stage-boundary dispatch regression", () => {
       }
     })
 
-    await workspacePrepareAction(work("workspace-prepare", "mohist/workspace-prepare"))
+    await workspacePrepareAction(actionContext(work("workspace-prepare", "mohist/workspace-prepare")))
 
     // Local-only probes — no network, no per-command timeout.
     for (const call of calls) {

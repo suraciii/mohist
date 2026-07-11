@@ -1,4 +1,6 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
+import { http, HttpResponse } from 'msw'
+import { server, useMswServer } from '../../../../tests/support/msw'
 import {
   archiveAgentSubscription,
   createAgentSubscription,
@@ -9,83 +11,77 @@ import {
 } from './subscriptions'
 import { ApiError } from '../../../shared/api/client'
 
-afterEach(() => {
-  vi.unstubAllGlobals()
-  vi.restoreAllMocks()
-})
+useMswServer()
 
-function envelope<T>(data: T, status: number = 200): Response {
-  return new Response(JSON.stringify({ success: true, data }), {
+function successResponse(payload: unknown, status = 200) {
+  return HttpResponse.json({ success: true, data: payload }, { status })
+}
+
+function subscription(status: 'active' | 'archived', id = 'subs_x') {
+  return {
+    id,
+    projectId: 'proj-1',
+    agentId: 'agent-1',
+    name: 'fallback',
+    filter: { type: 'com.mohist.workflow.stage.*', source: null, subject: null },
+    responsePrompt: 'approve if clear',
+    priority: 0,
     status,
-    headers: { 'Content-Type': 'application/json' },
-  })
+    createdAt: '2026-06-01T00:00:00.000Z',
+    updatedAt: '2026-06-02T00:00:00.000Z',
+  }
+}
+
+function requestPath(request: Request) {
+  const url = new URL(request.url)
+  return `${url.pathname}${url.search}`
 }
 
 describe('listAgentSubscriptions', () => {
   it('GETs /api/projects/{ref}/agents/{agentRef}/subscriptions and returns an array', async () => {
-    const fetchMock = vi.fn<typeof fetch>()
-    fetchMock.mockResolvedValue(
-      envelope([
-        {
-          id: 'subs_1',
-          projectId: 'proj-1',
-          agentId: 'agent-1',
-          name: 'default',
-          filter: { type: 'com.mohist.workflow.stage.*', source: null, subject: null },
-          responsePrompt: 'approve if clear',
-          priority: 0,
-          status: 'active',
-          createdAt: '2026-06-01T00:00:00.000Z',
-          updatedAt: '2026-06-01T00:00:00.000Z',
-        },
-      ]),
+    const requests: Request[] = []
+    server.use(
+      http.get('*/api/projects/:projectId/agents/:agentRef/subscriptions', ({ request }) => {
+        requests.push(request)
+        return successResponse([{ ...subscription('active'), name: 'default', updatedAt: '2026-06-01T00:00:00.000Z' }])
+      }),
     )
-    vi.stubGlobal('fetch', fetchMock)
 
     const result = await listAgentSubscriptions('proj-1', 'agent-1')
 
     expect(result).toHaveLength(1)
     expect(result[0].name).toBe('default')
     expect(result[0].status).toBe('active')
-    expect(fetchMock).toHaveBeenCalledTimes(1)
-    const [calledPath, calledInit] = fetchMock.mock.calls[0]
-    expect(calledPath).toBe('/api/projects/proj-1/agents/agent-1/subscriptions')
-    expect(calledInit?.method ?? 'GET').toBe('GET')
+    expect(requests).toHaveLength(1)
+    expect(requestPath(requests[0])).toBe('/api/projects/proj-1/agents/agent-1/subscriptions')
+    expect(requests[0].method).toBe('GET')
+    expect(requests[0].headers.get('content-type')).toBe('application/json')
   })
 
   it('encodes agent refs with special characters', async () => {
-    const fetchMock = vi.fn<typeof fetch>()
-    fetchMock.mockResolvedValue(envelope([]))
-    vi.stubGlobal('fetch', fetchMock)
+    const paths: string[] = []
+    server.use(
+      http.get('*/api/projects/:projectId/agents/:agentRef/subscriptions', ({ request }) => {
+        paths.push(requestPath(request))
+        return successResponse([])
+      }),
+    )
 
     await listAgentSubscriptions('proj-1', 'a/b')
 
-    const [calledPath] = fetchMock.mock.calls[0]
-    expect(calledPath).toBe('/api/projects/proj-1/agents/a%2Fb/subscriptions')
+    expect(paths).toEqual(['/api/projects/proj-1/agents/a%2Fb/subscriptions'])
   })
 })
 
 describe('createAgentSubscription', () => {
   it('POSTs the subscription payload and returns the dto', async () => {
-    const fetchMock = vi.fn<typeof fetch>()
-    fetchMock.mockResolvedValue(
-      envelope(
-        {
-          id: 'subs_new',
-          projectId: 'proj-1',
-          agentId: 'agent-1',
-          name: 'fallback',
-          filter: { type: 'com.mohist.workflow.stage.*', source: null, subject: null },
-          responsePrompt: 'approve if clear',
-          priority: 1,
-          status: 'active',
-          createdAt: '2026-06-01T00:00:00.000Z',
-          updatedAt: '2026-06-01T00:00:00.000Z',
-        },
-        201,
-      ),
+    const requests: Request[] = []
+    server.use(
+      http.post('*/api/projects/:projectId/agents/:agentRef/subscriptions', ({ request }) => {
+        requests.push(request)
+        return successResponse({ ...subscription('active', 'subs_new'), priority: 1 }, 201)
+      }),
     )
-    vi.stubGlobal('fetch', fetchMock)
 
     const result = await createAgentSubscription('proj-1', 'agent-1', {
       name: 'fallback',
@@ -96,32 +92,26 @@ describe('createAgentSubscription', () => {
 
     expect(result.id).toBe('subs_new')
     expect(result.status).toBe('active')
-    const [calledPath, calledInit] = fetchMock.mock.calls[0]
-    expect(calledPath).toBe('/api/projects/proj-1/agents/agent-1/subscriptions')
-    expect(calledInit?.method).toBe('POST')
-    expect(calledInit?.body).toBe(
-      JSON.stringify({
-        name: 'fallback',
-        filter: { type: 'com.mohist.workflow.stage.*' },
-        responsePrompt: 'approve if clear',
-        priority: 1,
-      }),
-    )
+    expect(requests).toHaveLength(1)
+    expect(requestPath(requests[0])).toBe('/api/projects/proj-1/agents/agent-1/subscriptions')
+    expect(requests[0].method).toBe('POST')
+    expect(requests[0].headers.get('content-type')).toBe('application/json')
+    await expect(requests[0].json()).resolves.toEqual({
+      name: 'fallback',
+      filter: { type: 'com.mohist.workflow.stage.*' },
+      responsePrompt: 'approve if clear',
+      priority: 1,
+    })
   })
 
   it('surfaces server-side error messages (e.g. agent_archived)', async () => {
-    const fetchMock = vi.fn<typeof fetch>()
-    fetchMock.mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          success: false,
-          error: 'Archived agents cannot receive new subscriptions',
-          code: 'agent_archived',
-        }),
-        { status: 409, headers: { 'Content-Type': 'application/json' } },
-      ),
+    server.use(
+      http.post('*/api/projects/:projectId/agents/:agentRef/subscriptions', () => HttpResponse.json({
+        success: false,
+        error: 'Archived agents cannot receive new subscriptions',
+        code: 'agent_archived',
+      }, { status: 409 })),
     )
-    vi.stubGlobal('fetch', fetchMock)
 
     await expect(
       createAgentSubscription('proj-1', 'agent-1', {
@@ -139,101 +129,74 @@ describe('createAgentSubscription', () => {
 
 describe('archiveAgentSubscription', () => {
   it('POSTs the archive endpoint and returns the dto', async () => {
-    const fetchMock = vi.fn<typeof fetch>()
-    fetchMock.mockResolvedValue(
-      envelope({
-        id: 'subs_x',
-        projectId: 'proj-1',
-        agentId: 'agent-1',
-        name: 'fallback',
-        filter: { type: 'com.mohist.workflow.stage.*', source: null, subject: null },
-        responsePrompt: 'approve if clear',
-        priority: 0,
-        status: 'archived',
-        createdAt: '2026-06-01T00:00:00.000Z',
-        updatedAt: '2026-06-02T00:00:00.000Z',
+    const requests: Request[] = []
+    server.use(
+      http.post('*/api/projects/:projectId/agents/:agentRef/subscriptions/:subscriptionId/archive', ({ request }) => {
+        requests.push(request)
+        return successResponse(subscription('archived'))
       }),
     )
-    vi.stubGlobal('fetch', fetchMock)
 
     const result = await archiveAgentSubscription('proj-1', 'agent-1', 'subs_x')
 
     expect(result.status).toBe('archived')
-    const [calledPath, calledInit] = fetchMock.mock.calls[0]
-    expect(calledPath).toBe(
-      '/api/projects/proj-1/agents/agent-1/subscriptions/subs_x/archive',
-    )
-    expect(calledInit?.method).toBe('POST')
+    expect(requests).toHaveLength(1)
+    expect(requestPath(requests[0])).toBe('/api/projects/proj-1/agents/agent-1/subscriptions/subs_x/archive')
+    expect(requests[0].method).toBe('POST')
+    expect(requests[0].headers.get('content-type')).toBe('application/json')
   })
 
   it('encodes subscription ids with special characters', async () => {
-    const fetchMock = vi.fn<typeof fetch>()
-    fetchMock.mockResolvedValue(
-      envelope({
-        id: 'subs/a',
-        projectId: 'proj-1',
-        agentId: 'agent-1',
-        name: 'fallback',
-        filter: { type: 'com.mohist.workflow.stage.*', source: null, subject: null },
-        responsePrompt: 'approve if clear',
-        priority: 0,
-        status: 'archived',
-        createdAt: '2026-06-01T00:00:00.000Z',
-        updatedAt: '2026-06-02T00:00:00.000Z',
+    const paths: string[] = []
+    server.use(
+      http.post('*/api/projects/:projectId/agents/:agentRef/subscriptions/:subscriptionId/archive', ({ request }) => {
+        paths.push(requestPath(request))
+        return successResponse(subscription('archived', 'subs/a'))
       }),
     )
-    vi.stubGlobal('fetch', fetchMock)
 
     await archiveAgentSubscription('proj-1', 'agent-1', 'subs/a')
 
-    const [calledPath] = fetchMock.mock.calls[0]
-    expect(calledPath).toBe(
-      '/api/projects/proj-1/agents/agent-1/subscriptions/subs%2Fa/archive',
-    )
+    expect(paths).toEqual(['/api/projects/proj-1/agents/agent-1/subscriptions/subs%2Fa/archive'])
   })
 })
 
 describe('restoreAgentSubscription', () => {
   it('POSTs the restore endpoint and returns the dto', async () => {
-    const fetchMock = vi.fn<typeof fetch>()
-    fetchMock.mockResolvedValue(
-      envelope({
-        id: 'subs_x',
-        projectId: 'proj-1',
-        agentId: 'agent-1',
-        name: 'fallback',
-        filter: { type: 'com.mohist.workflow.stage.*', source: null, subject: null },
-        responsePrompt: 'approve if clear',
-        priority: 0,
-        status: 'active',
-        createdAt: '2026-06-01T00:00:00.000Z',
-        updatedAt: '2026-06-02T00:00:00.000Z',
+    const requests: Request[] = []
+    server.use(
+      http.post('*/api/projects/:projectId/agents/:agentRef/subscriptions/:subscriptionId/restore', ({ request }) => {
+        requests.push(request)
+        return successResponse(subscription('active'))
       }),
     )
-    vi.stubGlobal('fetch', fetchMock)
 
     const result = await restoreAgentSubscription('proj-1', 'agent-1', 'subs_x')
 
     expect(result.status).toBe('active')
-    const [calledPath, calledInit] = fetchMock.mock.calls[0]
-    expect(calledPath).toBe(
-      '/api/projects/proj-1/agents/agent-1/subscriptions/subs_x/restore',
-    )
-    expect(calledInit?.method).toBe('POST')
+    expect(requests).toHaveLength(1)
+    expect(requestPath(requests[0])).toBe('/api/projects/proj-1/agents/agent-1/subscriptions/subs_x/restore')
+    expect(requests[0].method).toBe('POST')
+    expect(requests[0].headers.get('content-type')).toBe('application/json')
   })
 })
 
 describe('deleteAgentSubscription', () => {
   it('DELETEs the subscription endpoint', async () => {
-    const fetchMock = vi.fn<typeof fetch>()
-    fetchMock.mockResolvedValue(envelope(null))
-    vi.stubGlobal('fetch', fetchMock)
+    const requests: Request[] = []
+    server.use(
+      http.delete('*/api/projects/:projectId/agents/:agentRef/subscriptions/:subscriptionId', ({ request }) => {
+        requests.push(request)
+        return successResponse(null)
+      }),
+    )
 
     await deleteAgentSubscription('proj-1', 'agent-1', 'subs_x')
 
-    const [calledPath, calledInit] = fetchMock.mock.calls[0]
-    expect(calledPath).toBe('/api/projects/proj-1/agents/agent-1/subscriptions/subs_x')
-    expect(calledInit?.method).toBe('DELETE')
+    expect(requests).toHaveLength(1)
+    expect(requestPath(requests[0])).toBe('/api/projects/proj-1/agents/agent-1/subscriptions/subs_x')
+    expect(requests[0].method).toBe('DELETE')
+    expect(requests[0].headers.get('content-type')).toBe('application/json')
   })
 })
 

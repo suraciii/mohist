@@ -1,4 +1,3 @@
-// @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react'
 import { useEffect } from 'react'
@@ -170,7 +169,7 @@ function makeEpicWithLinkedIssues(linkedIssues: unknown[]) {
   }
 }
 
-describe('EpicDetailPage Graph unrenderable banner + Error Boundary (T-004)', () => {
+describe('EpicDetailPage Graph unrenderable banner + Error Boundary', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     widgetBehavior.mode = 'default'

@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { ServerConnection } from "../src/server/connection.js"
 
-// Integration coverage for the ServerConnection.workflowRunsStatus method
-// (T-003 convergence query plumbing). The endpoint exists at
+// Integration coverage for the ServerConnection.workflowRunsStatus method.
+// The endpoint exists at
 // POST /api/runner/{runnerId}/workflow-runs/status and returns
 // { statuses: { [runId]: status } }. The runner only sends
 // workflowRunIds for registry entries still in phase `active`, and the

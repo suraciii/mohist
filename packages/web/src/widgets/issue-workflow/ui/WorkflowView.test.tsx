@@ -10,6 +10,7 @@ import type { ArtifactContentHook } from './ArtifactContentViewer'
 import type { StepListDependencies } from './InlineApproval'
 import { IssueStatus, IssueHealth, WorkflowStage, type ApprovalFeedback, type Issue, type WorkflowTimeline, type useWorkflowTimeline } from '../../../entities/issue'
 import type { WorkflowArtifactContentResult } from '../../../entities/issue/api/client'
+import { setScopedValue } from '../../../../tests/support/scoped-property'
 
 let approveRequests: string[] = []
 let feedbackRequests: Array<{ issueNumber: string; stage: string; body: string }> = []
@@ -271,7 +272,7 @@ describe('WorkflowView', () => {
     artifactRequests = []
     timelineRequests = []
     timelineData = makeTimeline()
-    window.innerWidth = 1280
+    setScopedValue(window, 'innerWidth', 1280)
   })
 
   it('renders workflow timeline tasks and checks', () => {
@@ -287,7 +288,7 @@ describe('WorkflowView', () => {
   })
 
   it('renders a scrollable stage stepper on mobile without clipping stage labels', async () => {
-    window.innerWidth = 390
+    setScopedValue(window, 'innerWidth', 390)
     setWorkflowTimeline({ data: makeTimeline() } as ReturnType<typeof useWorkflowTimeline>)
 
     render(<WorkflowView issue={makeIssue()} />)

@@ -1,4 +1,3 @@
-// @vitest-environment jsdom
 import { beforeEach, describe, expect, it } from 'vitest'
 import { fireEvent, render, screen, waitFor, within } from '../../../../tests/test-utils'
 import userEvent from '@testing-library/user-event'
@@ -133,7 +132,7 @@ function renderWithoutProject() {
 }
 
 describe('ProjectDefaultWorkflowControl', () => {
-  it('renders a no-project CTA when the WorkflowProfilesSection is mounted without a project (T-006)', () => {
+  it('renders a no-project CTA when the WorkflowProfilesSection is mounted without a project', () => {
     renderWithoutProject()
 
     expect(screen.getByTestId('no-project-select-button')).toBeInTheDocument()
@@ -304,9 +303,13 @@ describe('ProjectDefaultWorkflowControl', () => {
   })
 
   it('keeps workflow switches inactive until the project blacklist has loaded', async () => {
+    let releaseResponse!: () => void
+    const response = new Promise<void>((resolve) => {
+      releaseResponse = resolve
+    })
     server.use(
       http.get('/api/projects/test-project/workflow-profile', async () => {
-        await new Promise((resolve) => setTimeout(resolve, 80))
+        await response
         return HttpResponse.json({
           success: true,
           data: { projectId: 'test-project', defaultTemplateId: null, disabledWorkflowProfileIds: ['mohist/local'] },
@@ -319,9 +322,9 @@ describe('ProjectDefaultWorkflowControl', () => {
     expect(screen.getByRole('status')).toBeInTheDocument()
     expect(screen.queryByRole('switch', { name: /Disable workflow profile Mohist Local/ })).not.toBeInTheDocument()
 
-    await waitFor(() =>
-      expect(screen.getByRole('switch', { name: /Enable workflow profile Mohist Local/ })).toBeInTheDocument(),
-    )
+    releaseResponse()
+
+    expect(await screen.findByRole('switch', { name: /Enable workflow profile Mohist Local/ })).toBeInTheDocument()
   })
 
   it('shows an error instead of defaulting switches to enabled when the blacklist fails to load', async () => {

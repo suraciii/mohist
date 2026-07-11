@@ -91,4 +91,4 @@ npm test           -w packages/runner
 * **禁止真实时间**：时间逻辑必须可注入（C# `TimeProvider` / TS `vi.useFakeTimers`），不得走墙钟；不得用 `while(now<deadline)` 或 `elapsed < N` 做断言。
 * **不得 flaky**：不得依赖顺序、时间戳种子、未恢复的 stub；不得用 `it.skip` 掩盖 flaky。
 * **简洁、无冗余、读得出 spec**：setup 抽共享 helper，迁移/回归完成后删旧文件，禁止新旧并存。
-* **足够快**：unit < 50ms，spec < 500ms；e2e/a11y 单独跑，不进默认 `npm test`。
+* **足够快**：unit < 50ms，spec < 500ms；browser 单独跑，不进默认 `npm test`。

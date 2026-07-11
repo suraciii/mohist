@@ -1,4 +1,3 @@
-// @vitest-environment jsdom
 import '@testing-library/jest-dom'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -70,33 +69,9 @@ function renderDialog(props: { open?: boolean; onClose?: () => void; epic?: Epic
   )
 }
 
-const originalScrollWidthDescriptor = Object.getOwnPropertyDescriptor(document.documentElement, 'scrollWidth')
-const originalClientWidthDescriptor = Object.getOwnPropertyDescriptor(document.documentElement, 'clientWidth')
-
-function stubWidth(width: number) {
-  Object.defineProperty(document.documentElement, 'scrollWidth', {
-    configurable: true,
-    get: () => width,
-  })
-  Object.defineProperty(document.documentElement, 'clientWidth', {
-    configurable: true,
-    get: () => width,
-  })
-}
-
 afterEach(() => {
   cleanup()
   vi.clearAllMocks()
-  if (originalScrollWidthDescriptor) {
-    Object.defineProperty(document.documentElement, 'scrollWidth', originalScrollWidthDescriptor)
-  } else {
-    Reflect.deleteProperty(document.documentElement, 'scrollWidth')
-  }
-  if (originalClientWidthDescriptor) {
-    Object.defineProperty(document.documentElement, 'clientWidth', originalClientWidthDescriptor)
-  } else {
-    Reflect.deleteProperty(document.documentElement, 'clientWidth')
-  }
 })
 
 describe('EditEpicDialog verbatim load', () => {
@@ -297,18 +272,8 @@ describe('EditEpicDialog opt-in Insert template', () => {
   })
 })
 
-describe('EditEpicDialog mobile-safe layout', () => {
-  it('renders without horizontal overflow at 320, 390, and 430 px', () => {
-    for (const width of [320, 390, 430]) {
-      cleanup()
-      stubWidth(width)
-      renderDialog()
-
-      expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(document.documentElement.clientWidth)
-    }
-  })
-
-  it('keeps the submit action reachable through a sticky footer (footer is outside the scroll region)', () => {
+describe('EditEpicDialog footer structure', () => {
+  it('places the submit action in a footer outside the scroll region', () => {
     renderDialog()
 
     const footer = screen.getByTestId('edit-epic-footer')
@@ -322,7 +287,7 @@ describe('EditEpicDialog mobile-safe layout', () => {
     expect(scrollRegion.contains(footer)).toBe(false)
   })
 
-  it('keeps the cancel action in the same sticky footer', () => {
+  it('places the cancel action in the same footer', () => {
     renderDialog()
 
     const footer = screen.getByTestId('edit-epic-footer')

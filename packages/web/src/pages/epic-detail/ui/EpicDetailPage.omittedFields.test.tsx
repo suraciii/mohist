@@ -1,4 +1,3 @@
-// @vitest-environment jsdom
 // Regression: the epic detail API omits nullable fields (startBlocker, nextIssueReason)
 // when they are null. The page must tolerate their absence (undefined, not null) without
 // crashing, and still identify the startable next issue. All fixture data below is

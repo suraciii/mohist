@@ -260,7 +260,7 @@ describe('FeedbackHistory', () => {
     expect(screen.getByText(/Latest check rerun: review-passed \(passed\)/)).toBeInTheDocument()
   })
 
-  it('reads resolution fields from the nested resolution object (regression for issue-109 item-1)', () => {
+  it('reads resolution fields from the nested resolution object', () => {
     const nested = makeFeedback({
       id: 'fb-nested',
       status: 'resolved',

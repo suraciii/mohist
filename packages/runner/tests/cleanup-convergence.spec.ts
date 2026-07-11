@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { ConvergenceBackstop, type ConvergenceRunner } from "../src/runtime/cleanup-convergence.js"
 import { WorkspaceRegistry } from "../src/runtime/workspace-registry.js"
 
-// Unit coverage for the convergence backstop (T-003). The backstop
+// Unit coverage for the convergence backstop. The backstop
 // enumerates only registry entries still in phase `active`, asks the
 // server for their status, and transitions server-reported-terminal
 // entries to `eligible`. It must:
@@ -152,12 +152,11 @@ describe("ConvergenceBackstop", () => {
     expect(registry.get("wr-1")?.phase).toBe("active")
   })
 
-  // T-003: cleanup-guard vocabulary widened to the new enum. The
-  // convergence backstop is the runner-side enforcement point for
-  // `runner-workspace-cleanup/spec.md#Non-eligible workspaces are never
-  // auto-cleaned`: each non-terminal status reported by the server must
+  // The cleanup guard recognizes the expanded workflow status vocabulary. The
+  // convergence backstop is the runner-side enforcement point: each
+  // non-terminal status reported by the server must
   // leave an active entry active and drop nothing from the registry.
-  // Per the D1 state-machine contract the runner must specifically
+  // The state-machine contract requires the runner to specifically
   // tolerate the new `Created` (built not started) and `Ready`
   // (assigned, waiting for pickup) values — a regression in either
   // would mark the workspace eligible and trigger automatic removal on
@@ -296,13 +295,21 @@ describe("ConvergenceBackstop", () => {
     const registry = await makeRegistry()
     await registry.register({ issueId: "i1", issueNumber: 1, workflowRunId: "wr-1", workspacePath: join(root, "w1") })
 
-    const stub = new StubRunner([new Error("network blip")])
+    const failure = new Error("network blip")
+    const stub = new StubRunner([failure])
     const backstop = new ConvergenceBackstop(registry, stub)
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
 
-    const result = await backstop.runOnce(new AbortController().signal)
+    try {
+      const result = await backstop.runOnce(new AbortController().signal)
 
-    expect(result).toEqual({ queried: 1, transitioned: 0, dropped: 0 })
-    expect(registry.get("wr-1")?.phase).toBe("active")
+      expect(result).toEqual({ queried: 1, transitioned: 0, dropped: 0 })
+      expect(registry.get("wr-1")?.phase).toBe("active")
+      expect(errorSpy).toHaveBeenCalledOnce()
+      expect(errorSpy).toHaveBeenCalledWith("workspace cleanup convergence query failed:", failure)
+    } finally {
+      errorSpy.mockRestore()
+    }
   })
 
   it("RunOnce_OnTerminalStatus_StampsTerminalAt", async () => {

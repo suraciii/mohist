@@ -6,7 +6,6 @@ import React from 'react'
 import type { SessionTurn, CoderSessionDetail, AgentSessionMetadata } from '../src/entities/coder-session'
 
 export const queryClients: QueryClient[] = []
-export const originalScrollTo = Element.prototype.scrollTo
 
 export function createMockQueryClient() {
   return new QueryClient({

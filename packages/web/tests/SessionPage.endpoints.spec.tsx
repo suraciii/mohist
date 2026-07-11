@@ -10,6 +10,7 @@ import type {
   AgentSessionTranscriptResponse,
   SessionTurn,
 } from '../src/entities/coder-session'
+import { setScopedValue } from './support/scoped-property'
 
 let _sessionsData: any[] = []
 let _sessionsLoading = false
@@ -48,7 +49,6 @@ const sessionPageDependencies: SessionPageDependencies = {
   },
 }
 
-const originalScrollTo = Element.prototype.scrollTo
 const queryClients: QueryClient[] = []
 
 beforeEach(() => {
@@ -59,12 +59,11 @@ beforeEach(() => {
   _metadataData = null
   _transcriptData = { turns: [], partCount: 0, lastActivityAt: null }
   _params = { number: '51', sessionName: 'T-003.1' }
-  Element.prototype.scrollTo = vi.fn()
+  setScopedValue(Element.prototype, 'scrollTo', vi.fn())
 })
 
 afterEach(() => {
   vi.useRealTimers()
-  Element.prototype.scrollTo = originalScrollTo
   for (const queryClient of queryClients) queryClient.clear()
   queryClients.length = 0
 })
@@ -222,7 +221,7 @@ function makeSessionsForLookup() {
   }]
 }
 
-describe('T-009: SessionPage split endpoints', () => {
+describe('SessionPage split endpoints', () => {
   describe('metadata and transcript endpoint usage', () => {
     it('loads metadata and transcript through project-scoped session key endpoints', async () => {
       _params = { number: '51', sessionName: 'T-003.1' }

@@ -1,4 +1,3 @@
-// @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -194,7 +193,7 @@ function baseRunningMetadata(overrides: Partial<AgentSessionMetadata> = {}): Age
   }
 }
 
-describe('SessionPage cancel control absence (issue-349 T-002 regression)', () => {
+describe('SessionPage cancel control absence', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     setupRunningIssueMocks()

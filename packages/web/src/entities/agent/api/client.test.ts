@@ -1,57 +1,63 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
+import { http, HttpResponse } from 'msw'
+import { server, useMswServer } from '../../../../tests/support/msw'
 import { readAgentModelAndVariant, unarchiveAgent, writeAgentModelAndVariant } from './client'
 
-afterEach(() => {
-  vi.unstubAllGlobals()
-  vi.restoreAllMocks()
-})
+useMswServer()
 
-function mockJsonResponse(payload: unknown, status: number = 200): Response {
-  return new Response(JSON.stringify({ success: true, data: payload }), {
-    status,
-    headers: { 'Content-Type': 'application/json' },
-  })
+function successResponse(payload: unknown) {
+  return HttpResponse.json({ success: true, data: payload })
+}
+
+function requestPath(request: Request) {
+  const url = new URL(request.url)
+  return `${url.pathname}${url.search}`
 }
 
 describe('unarchiveAgent', () => {
   it('POSTs /api/projects/{ref}/agents/{id}/unarchive and returns the agent payload', async () => {
-    const fetchMock = vi.fn<typeof fetch>()
-    fetchMock.mockResolvedValue(
-      mockJsonResponse({
-        id: 'agent-1',
-        projectId: 'proj-1',
-        name: 'Agent 1',
-        status: 'active',
+    const requests: Request[] = []
+    const bodies: string[] = []
+    server.use(
+      http.post('*/api/projects/:projectId/agents/:agentId/unarchive', async ({ request }) => {
+        requests.push(request)
+        bodies.push(await request.text())
+        return successResponse({
+          id: 'agent-1',
+          projectId: 'proj-1',
+          name: 'Agent 1',
+          status: 'active',
+        })
       }),
     )
-    vi.stubGlobal('fetch', fetchMock)
 
     const result = await unarchiveAgent('proj-1', 'agent-1')
 
     expect(result).toMatchObject({ id: 'agent-1', status: 'active' })
-    expect(fetchMock).toHaveBeenCalledTimes(1)
-    const [calledPath, calledInit] = fetchMock.mock.calls[0]
-    expect(calledPath).toBe('/api/projects/proj-1/agents/agent-1/unarchive')
-    expect(calledInit?.method).toBe('POST')
+    expect(requests).toHaveLength(1)
+    expect(requestPath(requests[0])).toBe('/api/projects/proj-1/agents/agent-1/unarchive')
+    expect(requests[0].method).toBe('POST')
+    expect(requests[0].headers.get('content-type')).toBe('application/json')
+    expect(bodies).toEqual([''])
   })
 
   it('encodes agent ids that need URL escaping', async () => {
-    const fetchMock = vi.fn<typeof fetch>()
-    fetchMock.mockResolvedValue(
-      mockJsonResponse({
-        id: 'a/b',
-        projectId: 'proj-1',
-        name: 'A/B',
-        status: 'active',
+    const paths: string[] = []
+    server.use(
+      http.post('*/api/projects/:projectId/agents/:agentId/unarchive', ({ request }) => {
+        paths.push(requestPath(request))
+        return successResponse({
+          id: 'a/b',
+          projectId: 'proj-1',
+          name: 'A/B',
+          status: 'active',
+        })
       }),
     )
-    vi.stubGlobal('fetch', fetchMock)
 
     await unarchiveAgent('proj-1', 'a/b')
 
-    const [calledPath, calledInit] = fetchMock.mock.calls[0]
-    expect(calledPath).toBe('/api/projects/proj-1/agents/a%2Fb/unarchive')
-    expect(calledInit?.method).toBe('POST')
+    expect(paths).toEqual(['/api/projects/proj-1/agents/a%2Fb/unarchive'])
   })
 })
 
