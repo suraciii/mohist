@@ -117,8 +117,8 @@ jobs:
       - name: Install Chromium
         run: npm exec -w packages/web -- playwright install --with-deps chromium
 
-      - name: Test web E2E
-        run: npm run test:e2e -w packages/web
+      - name: Test web browser
+        run: npm run test:browser -w packages/web
 
       - name: Upload Playwright traces
         if: failure()

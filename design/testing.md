@@ -8,8 +8,13 @@ All packages (server, runner, web, cli).
 |---|---|---|---|
 | Spec | product behavior / user flow | high: through product entry point | near product surface |
 | Unit | single module / class / function | low: all collaborators faked | near code under test |
+| Browser | real layout and browser interaction | production Web build in Chromium; API and Hub responses controlled | `packages/web/tests/browser/` |
 
-Architecture tests (ArchTests) are a third category: verify structure, not behavior.
+Architecture tests (ArchTests) are a separate category: verify structure, not behavior.
+
+Browser tests are Web-only. They verify behavior that requires a real layout and
+interaction engine. They do not exercise Server, persistence, or a real network,
+so they are not end-to-end tests.
 
 Track expressed by naming + directory (not runtime trait):
 
@@ -77,7 +82,7 @@ Web tests run with `isolate: false`: test files share a worker module registry a
 |---|---|---|
 | Unit | < 50ms | < 300 LOC |
 | Spec | < 500ms (hard cap 5s); collection ≤ 2min | < 800 LOC (C# 24KB enforced) |
-| E2E | separate `npm run test:e2e`; never in default `npm test` | |
+| Browser | separate `npm run test:browser`; never in default `npm test` | |
 
 Extract shared setup. One product ability = one test file. Migration splits: delete old file once equivalent coverage exists.
 

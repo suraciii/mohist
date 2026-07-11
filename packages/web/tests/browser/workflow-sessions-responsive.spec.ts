@@ -1,8 +1,8 @@
 import { expect, test, type Locator, type Page } from '@playwright/test'
 
 const project = {
-  id: 'proj-workflow-sessions-responsive-e2e',
-  name: 'workflow-sessions-responsive-e2e-project',
+  id: 'proj-workflow-sessions-responsive-browser',
+  name: 'workflow-sessions-responsive-browser-project',
   repositories: [],
   createdAt: '2026-06-01T00:00:00Z',
   updatedAt: '2026-06-01T00:00:00Z',

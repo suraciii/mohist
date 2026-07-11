@@ -1,8 +1,8 @@
 import { expect, test, type Locator, type Page } from '@playwright/test'
 
 const project = {
-  id: 'proj-issue-board-layout-e2e',
-  name: 'issue-board-layout-e2e-project',
+  id: 'proj-issue-board-layout-browser',
+  name: 'issue-board-layout-browser-project',
   repositories: [],
   createdAt: '2026-06-01T00:00:00Z',
   updatedAt: '2026-06-01T00:00:00Z',

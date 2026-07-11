@@ -4,9 +4,9 @@ const webServerCommand = process.env.CI
   ? 'npm run preview -- --host 127.0.0.1 --port 4173'
   : 'npm run build && npm run preview -- --host 127.0.0.1 --port 4173'
 
-/** Browser config for behavioral E2E tests. */
+/** Browser config for real layout and interaction tests. */
 export default defineConfig({
-  testDir: './tests/e2e',
+  testDir: './tests/browser',
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
   retries: 0,

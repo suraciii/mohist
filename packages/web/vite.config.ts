@@ -56,12 +56,10 @@ export default defineConfig({
     exclude: [
       '**/node_modules/**',
       '**/dist/**',
-      '**/tests/e2e/**',
-      '**/e2e/**',
-      'tests/e2e/**',
+      '**/tests/browser/**',
       'node_modules/**',
       'dist/**',
-      'tests/e2e/**',
+      'tests/browser/**',
     ],
     // Test suffix owns the environment. Pure logic uses .test.ts; DOM tests
     // without JSX use .dom.test.ts; JSX and spec files use jsdom.

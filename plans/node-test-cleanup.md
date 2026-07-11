@@ -67,12 +67,12 @@ Update table after every gate. Another agent should resume without archaeology.
 | Runner truth | DONE | Runner production/test typecheck, target retry regression, 73/1036 suite, fixed shuffle seed 20260710, and build passed |
 | Shared state | DONE | Boundary checker self-test, 297-file scan, Web typecheck, 297/4531 suite, and fixed shuffle seed 20260710 passed |
 | Fake time | DONE | Boundary checker self-test, Runner/Web scans, typechecks, 73/1036 Runner, 297/4531 Web, and fixed-seed shuffle passed |
-| Browser truth | DONE | checker self-test, 297-file Web scan, typecheck, 297/4528 Web suite, build, and two retry-free CI-mode 39/39 Chromium E2E runs passed |
+| Browser truth | DONE | checker self-test, 297-file Web scan, typecheck, 297/4528 Web suite, build, and two retry-free CI-mode 39/39 Chromium browser runs passed |
 | Temp ownership | DONE | Runner test temp helper, seven owners including artifact capture, isolated full 87/1005 TMPDIR proof, and test typecheck passed |
 | Platform split | DONE | Runner typecheck/test typecheck, boundary checker, 73/1005 default suite with Git absent from PATH, and repeated 8/36 isolated integration suite passed; CI stays one Node job |
 | Web boundaries | DONE | checker self-test; Web 297 and Runner 81 scans; Web typecheck; 297/4509 normal and fixed-shuffle suite; MSW HTTP boundary, suffix-only environment, and source-read cleanup complete |
 | File size | DONE | c6dde6695 budget and identity tools; 192e52d64, 06da4cdff, eb2a1ed7e, 1ffa1a1b9, 36b090173, 247b624ab, 0e55f92b3, and def318cd8 splits; 1005 Runner and 4509 Web identities retained; typechecks and committed-history gates passed |
-| Final proof | DONE | checker/comparator self-tests; build; Runner 87/1007 and integration 8/36; Web 322/4596 and E2E 39/39; history gates; three fixed seeds on both suites; isolated TMPDIR/HOME/Git proof; NOT LIVE-VERIFIED |
+| Final proof | DONE | checker/comparator self-tests; build; Runner 87/1007 and integration 8/36; Web 322/4596 and browser 39/39; history gates; three fixed seeds on both suites; isolated TMPDIR/HOME/Git proof; NOT LIVE-VERIFIED |
 
 Status is `TODO`, `IN PROGRESS`, `DONE`, `SKIPPED: reason`, or
 `BLOCKED: command + error`.
@@ -541,7 +541,7 @@ layout.
 
 Browser files:
 
-- create `packages/web/tests/e2e/epic-dialog-mobile-overflow.spec.ts`.
+- create `packages/web/tests/browser/epic-dialog-mobile-overflow.spec.ts`.
 - extend `epic-list-mobile-overflow.spec.ts`.
 - strengthen `epic-detail-mobile-overflow.spec.ts`.
 - extend `workflow-sessions-responsive.spec.ts` with long Markdown code line.
@@ -562,7 +562,7 @@ npm exec -w packages/web -- playwright install --with-deps chromium
 ```
 
 Keep one Node CI job. Build Web once. Under CI, Playwright serves existing
-`dist`; it does not rebuild. Run default Web, install Chromium, and E2E. Upload
+`dist`; it does not rebuild. Run default Web, install Chromium, and browser tests. Upload
 trace only on failure.
 
 Verify:
@@ -571,7 +571,7 @@ Verify:
 npm exec -w packages/web -- playwright install --with-deps chromium
 npm run check:test-boundaries -w packages/web
 npm run test:ci -w packages/web
-npm run test:e2e -w packages/web
+npm run test:browser -w packages/web
 ```
 
 ## Gate: Temp ownership
@@ -1035,7 +1035,7 @@ Keep one Node CI job. Order:
 - Runner integration.
 - Web default.
 - install Chromium once.
-- Web E2E.
+- Web browser tests.
 
 Weekly Web shuffle:
 
@@ -1059,7 +1059,7 @@ npm run test:integration -w packages/runner
 npm run check:test-boundaries -w packages/web -- --budget-base-ref "$base_ref"
 npm run test:ci -w packages/web
 npm exec -w packages/web -- playwright install --with-deps chromium
-npm run test:e2e -w packages/web
+npm run test:browser -w packages/web
 ```
 
 Run Web shuffle:

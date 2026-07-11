@@ -1,8 +1,8 @@
 import { expect, test, type Page } from '@playwright/test'
 
 const project = {
-  id: 'proj-search-e2e',
-  name: 'search-e2e-project',
+  id: 'proj-search-browser',
+  name: 'search-browser-project',
   repositories: [
     { name: 'frontend', gitUrl: 'https://github.com/example/frontend.git', baseBranch: 'main', isDefault: true },
     { name: 'backend', gitUrl: 'https://github.com/example/backend.git', baseBranch: 'develop', isDefault: false },
@@ -128,7 +128,7 @@ async function gotoSettingsTab(page: Page, tab: 'ai' | 'agent' | 'repositories' 
   await expect(page).toHaveURL(new RegExp(`/settings/${tab}$`))
 }
 
-test.describe('Settings search dialog (e2e)', () => {
+test.describe('Settings search dialog in Chromium', () => {
   test('⌘K opens the dialog on a Settings tab', async ({ page }) => {
     await mockSettingsApi(page)
     await gotoSettingsTab(page, 'agent')

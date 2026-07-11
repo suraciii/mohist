@@ -1,8 +1,8 @@
 import { expect, test, type Page } from '@playwright/test'
 
 const project = {
-  id: 'proj-epic-list-mobile-e2e',
-  name: 'epic-list-mobile-e2e-project',
+  id: 'proj-epic-list-mobile-browser',
+  name: 'epic-list-mobile-browser-project',
   repositories: [],
   createdAt: '2026-06-01T00:00:00Z',
   updatedAt: '2026-06-01T00:00:00Z',

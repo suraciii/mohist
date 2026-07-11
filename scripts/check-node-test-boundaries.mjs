@@ -710,7 +710,7 @@ function createJsdomGeometryViolation(filePath, sourceFile, node) {
   return createViolation(filePath, sourceFile, node, {
     rule: jsdomGeometryRule,
     description: 'asserts page-fit geometry that jsdom does not measure',
-    fix: 'Keep semantic structure assertions here and move viewport geometry coverage to Playwright.',
+    fix: 'Keep semantic structure assertions here and move viewport geometry coverage to the browser track.',
   })
 }
 
@@ -1032,7 +1032,7 @@ function isActiveWebVitestFile(relativePath) {
     return /\.test\.tsx?$/.test(relativePath) || /\.spec\.tsx$/.test(relativePath)
   }
   if (!relativePath.startsWith('tests/')) return false
-  if (relativePath.startsWith('tests/e2e/')) return false
+  if (relativePath.startsWith('tests/browser/')) return false
   return /\.spec\.tsx$/.test(relativePath)
 }
 
