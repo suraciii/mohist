@@ -83,6 +83,7 @@ public static class MohistServiceRegistration
         services.TryAddSingleton<IDeadLetterStore, DeadLetterStore>();
         services.Configure<HermesNotificationOptions>(configuration.GetSection(HermesNotificationOptions.SectionName));
         services.AddSingleton<HermesIssueNotificationRenderer>();
+        services.AddSingleton<IHermesIssueNotificationDispatcher, BackgroundHermesIssueNotificationDispatcher>();
         services.AddHttpClient<IHermesWebhookClient, HermesWebhookClient>();
         services.AddCloudEventBus();
         services.AddCloudEventHandlersFromAssembly(typeof(MohistServiceRegistration).Assembly);

@@ -145,11 +145,26 @@ public sealed class EventDispatcherService
                 $"Handler '{row.FailingHandler}' is not registered for event type '{row.Type}'");
         }
 
-        var (outcome, error, attempts, _) = await InvokeWithRetryAsync(subscription, envelope, ct).ConfigureAwait(false);
-        if (outcome == HandlerOutcome.Exhausted)
-            return new DeadLetterRedeliveryResult(true, false, attempts, error);
+        row = await _deadLetters
+            .StartRedeliveryAsync(deadLetterId, _time.GetUtcNow(), ct)
+            .ConfigureAwait(false);
+        if (row is null)
+            return new DeadLetterRedeliveryResult(false, false, 0, "Dead-letter row is already resolved");
 
-        await _deadLetters.DeleteAsync(deadLetterId, ct).ConfigureAwait(false);
+        var (outcome, error, attempts, errorStack) = await InvokeWithRetryAsync(subscription, envelope, ct).ConfigureAwait(false);
+        if (outcome == HandlerOutcome.Exhausted)
+        {
+            await _deadLetters.RecordRedeliveryFailureAsync(
+                deadLetterId,
+                error ?? "unknown",
+                errorStack,
+                attempts,
+                _time.GetUtcNow(),
+                ct).ConfigureAwait(false);
+            return new DeadLetterRedeliveryResult(true, false, attempts, error);
+        }
+
+        await _deadLetters.ResolveAsync(deadLetterId, _time.GetUtcNow(), ct).ConfigureAwait(false);
         return new DeadLetterRedeliveryResult(true, true, attempts, null);
     }
 
@@ -157,6 +172,7 @@ public sealed class EventDispatcherService
     {
         var envelope = ReconstructEnvelope(evt);
         var anyMatched = false;
+        var deadLetters = new List<DeadLetterRow>();
 
         foreach (var sub in _subscriptions)
         {
@@ -168,7 +184,7 @@ public sealed class EventDispatcherService
             if (settled == HandlerOutcome.Delivered)
                 continue;
 
-            await DeadLetterAsync(evt, sub, error, attemptCount, errorStack, ct).ConfigureAwait(false);
+            deadLetters.Add(BuildDeadLetter(evt, sub, error, attemptCount, errorStack));
         }
 
         if (!anyMatched)
@@ -180,14 +196,24 @@ public sealed class EventDispatcherService
 
         try
         {
-            await _events
-                .MarkDispatchedAsync(evt.Source, evt.Id, _time.GetUtcNow(), ct)
-                .ConfigureAwait(false);
+            var settledAt = _time.GetUtcNow();
+            if (deadLetters.Count == 0)
+            {
+                await _events
+                    .MarkDispatchedAsync(evt.Source, evt.Id, settledAt, ct)
+                    .ConfigureAwait(false);
+            }
+            else
+            {
+                await _deadLetters
+                    .SettleAsync(evt, deadLetters, settledAt, ct)
+                    .ConfigureAwait(false);
+            }
         }
         catch (Exception ex)
         {
             _log.LogError(ex,
-                "Dispatcher: failed to mark {Origin}/{Id} as dispatched; stopping the tick to preserve FIFO",
+                "Dispatcher: failed to settle {Origin}/{Id}; stopping the tick to preserve FIFO",
                 evt.Origin, evt.Id);
             throw;
         }
@@ -230,15 +256,14 @@ public sealed class EventDispatcherService
         return (HandlerOutcome.Exhausted, Summarize(lastError), attempts, lastError?.ToString());
     }
 
-    private async Task DeadLetterAsync(
+    private DeadLetterRow BuildDeadLetter(
         UndeliveredEvent evt,
         Subscription sub,
         string? error,
         int attempts,
-        string? errorStack,
-        CancellationToken ct)
+        string? errorStack)
     {
-        var row = new DeadLetterRow
+        return new DeadLetterRow
         {
             Origin = evt.Origin.ToString(),
             Id = evt.Id,
@@ -257,8 +282,6 @@ public sealed class EventDispatcherService
             AttemptCount = attempts,
             DeadLetteredAt = _time.GetUtcNow(),
         };
-
-        await _deadLetters.WriteAsync(row, ct).ConfigureAwait(false);
     }
 
     private static string? Summarize(Exception? ex)

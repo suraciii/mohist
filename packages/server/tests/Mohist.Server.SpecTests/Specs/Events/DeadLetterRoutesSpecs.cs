@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
+using Mohist.Server.Api;
 using Mohist.Server.Events.Hub;
 using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Infrastructure.Events;
@@ -41,6 +42,7 @@ public sealed class DeadLetterRoutesSpecs
             Assert.Equal(row.EventId, listed.GetProperty("eventId").GetString());
             Assert.Equal("test.list.handler", listed.GetProperty("handler").GetString());
             Assert.Equal(row.AttemptCount, listed.GetProperty("attempts").GetInt32());
+            Assert.False(listed.TryGetProperty("errorStack", out _));
         }
         finally
         {
@@ -51,7 +53,7 @@ public sealed class DeadLetterRoutesSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
-    public async Task Redeliver_RetriesRecordedHandlerAndDeletesResolvedRow()
+    public async Task Redeliver_RetriesRecordedHandlerAndResolvesRow()
     {
         var store = _fixture.Services.GetRequiredService<IDeadLetterStore>();
         var row = BuildRow(typeof(EventBridge).FullName!);
@@ -66,7 +68,12 @@ public sealed class DeadLetterRoutesSpecs
         Assert.Equal(row.DeadLetterId, data.GetProperty("id").GetInt64());
         Assert.True(data.GetProperty("delivered").GetBoolean());
         Assert.Equal(1, data.GetProperty("attempts").GetInt32());
-        Assert.Null(await store.GetAsync(row.DeadLetterId));
+        var resolved = await store.GetAsync(row.DeadLetterId);
+        Assert.NotNull(resolved);
+        Assert.Equal(DeadLetterStatus.Resolved, resolved.Status);
+        Assert.DoesNotContain(
+            await store.QueryAsync(failingHandler: null, limit: 100),
+            item => item.DeadLetterId == row.DeadLetterId);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -78,6 +85,15 @@ public sealed class DeadLetterRoutesSpecs
             "/api/events/dead-letters?limit=501");
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Theory]
+    [InlineData("127.0.0.1", true)]
+    [InlineData("::1", true)]
+    [InlineData("203.0.113.10", false)]
+    public void OperatorBoundary_AllowsOnlyLoopback(string address, bool expected)
+    {
+        Assert.Equal(expected, DeadLetterRoutes.IsLocalOperator(IPAddress.Parse(address)));
     }
 
     private static DeadLetterRow BuildRow(string failingHandler) =>

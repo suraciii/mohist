@@ -23,6 +23,7 @@ public class AgentJobGrainSpecs
     public AgentJobGrainSpecs(AgentJobGrainFixture fixture)
     {
         _fixture = fixture;
+        _fixture.DispatchObserver.Reset();
     }
 
     private IGrainFactory Grains => _fixture.Grains;

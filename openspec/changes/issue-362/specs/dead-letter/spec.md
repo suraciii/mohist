@@ -1,6 +1,6 @@
 ### Requirement: Poison messages dead-lettered on retry exhaustion
 
-When a handler's transient-failure retries are exhausted on a poison message, the event SHALL be written to the dead-letter table with the failing handler, the failure reason, and the attempt count. The dispatcher SHALL then set `DispatchedAt` on the original event row so that the dispatcher stops retrying it on subsequent ticks.
+When a handler's transient-failure retries are exhausted on a poison message, the event SHALL be written to the dead-letter table with the failing handler, the failure reason, and the attempt count. The dead-letter write and the original event's `DispatchedAt` update SHALL commit atomically. A natural key SHALL keep one row per source event and failing handler.
 
 #### Scenario: Exhausted handler moves the event to the dead-letter table
 
@@ -8,6 +8,8 @@ When a handler's transient-failure retries are exhausted on a poison message, th
 - **THEN** the event SHALL be written to the dead-letter table
 - **AND** the dead-letter row SHALL record the failing handler, the error, and the attempt count
 - **AND** the original event row's `DispatchedAt` SHALL be set
+- **AND** both persistence changes SHALL commit in one transaction or neither SHALL commit
+- **AND** retrying settlement SHALL NOT create a duplicate handler row
 - **AND** the dispatcher SHALL NOT retry that row on subsequent ticks
 
 ### Requirement: Per-handler isolation
@@ -39,7 +41,25 @@ A dead-lettered event SHALL be manually re-deliverable on operator action, so a 
 - **WHEN** an operator requests re-delivery of a dead-lettered event
 - **THEN** the event SHALL be re-dispatched only to the failing handler recorded by that dead-letter row
 - **AND** already-successful sibling handlers SHALL NOT be invoked again
-- **AND** a successful re-delivery SHALL remove the resolved dead-letter row
+- **AND** recovery state SHALL be persisted before invoking the handler
+- **AND** a successful re-delivery SHALL mark the row resolved
+- **AND** a persistence failure after handler success SHALL leave an explicit ambiguous redelivery state rather than report false success
+
+### Requirement: Dead-letter operator access is local and redacted
+
+Until Mohist has authenticated operator identities, dead-letter list and re-delivery operations SHALL only accept loopback callers. List responses SHALL NOT expose raw exception stacks.
+
+#### Scenario: Remote caller cannot inspect or replay
+
+- **WHEN** a non-loopback caller requests a dead-letter list or re-delivery
+- **THEN** the server SHALL reject the request
+- **AND** no handler side effect SHALL run
+
+#### Scenario: Local operator receives redacted diagnostics
+
+- **WHEN** a loopback operator lists unresolved dead letters
+- **THEN** the event and summary error SHALL be returned
+- **AND** the raw server exception stack SHALL NOT be returned
 
 ### Requirement: Dead-letter recovery has an operator surface
 

@@ -58,9 +58,9 @@ Each tick calls `IEventStore.ListUndeliveredAsync(limit)` — already a single 4
 
 > **Clarification on the 3-vs-4 tables wording.** The issue body says "三张事件真相表" (`WorkflowRunEvents` + `IssueEvents` + `EpicEvents`); the specs and proposal say four (adding `AgentSessionEvents`). The implementation is unambiguous: `ListUndeliveredAsync` already covers **all four** tables, and the dispatcher is table-agnostic. AgentSession events therefore get delivered too — consistent with the `AgentSubscriptionDispatchHandler` `[Subscription(Type="*")]` contract. No code diverges from the specs. (See Open Questions.)
 
-### D4 — Per-stream FIFO via serial `(Source, Id)` processing; per-row mark after delivery
+### D4 — Per-stream FIFO via serial `(Source, Id)` processing; atomic poison settlement
 
-Process the returned batch serially in the `ListUndeliveredAsync` order (`Source, Id`). For each event: fan out (D5), then `MarkDispatchedAsync(source, id, _time.GetUtcNow())`. A mark failure aborts the tick and propagates to the reminder/Pulse caller. Continuing would allow a higher `Id` from the same source to run before the lower row is durably marked, then re-deliver the lower row on the next tick and violate FIFO. Because the batch is globally sorted and failures stop progress, no higher `Id` in a stream is delivered before a lower one settles → **per-stream FIFO, no reorder, no skip**.
+Process the returned batch serially in the `ListUndeliveredAsync` order (`Source, Id`). For a fully delivered event, call `MarkDispatchedAsync(source, id, _time.GetUtcNow())`. For an event with exhausted handlers, call one dead-letter settlement operation that upserts every handler-keyed dead-letter row and sets the source row's `DispatchedAt` in the same database transaction. Any persistence failure aborts the tick and propagates to the reminder/Pulse caller. Continuing would allow a higher `Id` from the same source to overtake an unsettled lower row. Because the batch is globally sorted and failures stop progress, no higher `Id` in a stream is delivered before a lower one settles → **per-stream FIFO, no reorder, no skip**.
 
 - **Alternative: per-stream cursor / `DeliveryOffsets` table.** Rejected (`eventbus-v2.md:75-77`): a cursor advanced before handlers finish degrades to at-most-once on crash. Per-row `DispatchedAt` is both simplest and correct.
 - **Fairness note** (`eventbus-v2.md:142`): `ORDER BY Source, Id` drains one stream before the next; a chatty stream could starve others. Personal-scale event volume makes this a non-issue now; a future "oldest-per-stream round-robin" is pure-additive and out of scope.
@@ -69,7 +69,7 @@ Process the returned batch serially in the `ListUndeliveredAsync` order (`Source
 
 For each undelivered event, iterate the registered `IEnumerable<Subscription>`; for each whose `CloudEventTypeMatcher.Matches(sub.Type, evt.Type)` is true, invoke its `DispatchDelegate`. Each matching handler is retried **independently** — one handler's transient failure or exhaustion never affects a sibling's delivery of the same event (spec: "per-handler isolation"). The event row is marked dispatched once all matching handlers have settled (succeeded or dead-lettered).
 
-The returned `Task` is the sole delivery outcome contract. A handler may return normally for an intentional no-op, but it must propagate an exception when its required side effect fails; it must not log-and-swallow or detach work that determines success. This moves retry/dead-letter policy into one authority (the dispatcher) and removes the old synchronous-publish rationale for swallowing failures.
+The returned `Task` is the delivery outcome contract for durable domain reactions. A handler may return normally for an intentional no-op, but it must propagate an exception when its required side effect fails; it must not detach work that determines success. Explicitly best-effort channels keep their published contract: Hermes logs and absorbs webhook failures, so the dispatcher sees that notification as a settled best-effort attempt and does not retry or dead-letter it.
 
 Fixing the closed-generic discovery bug (D8) is what puts `EpicAutoDoneHandler`/`EpicCancelledReconcileHandler` into this set.
 
@@ -86,17 +86,17 @@ Decision: implement a minimal per-handler retry loop with a **fixed attempt cap*
 - **Alternative: add Polly now.** Viable but rejected for v1: net-new dependency for a feature (timed backoff) we cannot exercise deterministically under the 铃律, and the doc frames it as borrowed design rather than a required package.
 - **Alternative: no retry, straight to DLQ.** Rejected: defeats the point of tolerating transient handler failures (spec: "transient failures retried per handler").
 
-### D7 — DeadLetters layer re-created; exhaustion sets `DispatchedAt`
+### D7 — DeadLetters use handler-keyed atomic settlement and explicit recovery state
 
 Re-introduce the layer deleted in `ba50c2089`, modeled on its historical shape:
-- `DeadLetterRow` (`Infrastructure/Data/Events/DeadLetterRow.cs`): `DeadLetterId` (PK, `long`), a snapshot of the event (source/id/eventId/type/data/extensions), `FailingHandler`, `Error`/`Reason`, `AttemptCount`, `DeadLetteredAt` (`DateTimeOffset`).
+- `DeadLetterRow` (`Infrastructure/Data/Events/DeadLetterRow.cs`): `DeadLetterId` (PK, `long`), a snapshot of the event (source/id/eventId/type/data/extensions), `FailingHandler`, `Error`/`Reason`, `AttemptCount`, `DeadLetteredAt` (`DateTimeOffset`), and recovery state (`Pending`, `Redelivering`, `Resolved`) with attempt/resolution timestamps.
 - `DbSet<DeadLetterRow> DeadLetters` in `MohistDbContext`; key `DeadLetterId`; indexes on `DeadLetteredAt` and `(FailingHandler, DeadLetteredAt)` (matches the queryable-by-handler requirement).
-- `IDeadLetterStore` with `WriteAsync(row)`, `QueryAsync(handlerFilter?)`, `GetAsync(id)`, and `DeleteAsync(id)`, plus `NoopDeadLetterStore` test fake.
+- `IDeadLetterStore` with direct write/query/get primitives plus `SettleAsync(event, rows, dispatchedAt)`, `StartRedeliveryAsync(id, attemptedAt)`, and `ResolveAsync(id, resolvedAt)`, plus a `NoopDeadLetterStore` test fake.
 - EF migration creating the `DeadLetters` table.
 
-Flow on exhaustion (per handler): write a `DeadLetterRow` (failing handler + error + attempt count), then the dispatcher sets `DispatchedAt` on the **original event row** so it stops retrying that event on subsequent ticks. Because exhaustion is tracked per handler (D5), a sibling handler that succeeded does **not** get dead-lettered; only the failing handler's outcome is recorded.
+Flow on exhaustion: collect one `DeadLetterRow` per exhausted handler, then atomically upsert them by `(Source, Id, FailingHandler)` and set `DispatchedAt` on the **original event row** in the same `SaveChanges` transaction. The natural key prevents duplicate rows if an earlier commit outcome is retried. A sibling handler that succeeded does **not** get dead-lettered; only exhausted outcomes are recorded.
 
-Manual re-delivery targets the recorded `FailingHandler` only. Replaying every matching handler would repeat already-successful side effects and contradict per-handler isolation. A successful re-delivery deletes the dead-letter row; a failed re-delivery keeps it unresolved. `GET /api/events/dead-letters` and `POST /api/events/dead-letters/{id}/redeliver`, surfaced by `mo event dead-letter list|redeliver`, form the operator boundary.
+Manual re-delivery targets the recorded `FailingHandler` only. Before invocation the row is durably moved to `Redelivering`; success moves it to `Resolved`, while failure returns it to `Pending` with the latest failure. If persistence fails after handler success, the row remains `Redelivering`, accurately exposing an ambiguous at-least-once outcome instead of falsely reporting success. Repeating recovery uses the same CloudEvent id, so durable handlers must absorb duplicates. `GET /api/events/dead-letters` lists unresolved rows and `POST /api/events/dead-letters/{id}/redeliver`, surfaced by `mo event dead-letter list|redeliver`, form the operator boundary.
 
 ### D8 — Fix closed-generic handler discovery in the reflection scan
 
@@ -112,24 +112,34 @@ At `CloudEventBusServiceCollectionExtensions.cs:20-24`, replace the dead `typeof
 
 Register in the **silo** container (the dispatcher is a grain and must resolve its dependencies from the silo graph, not the web container): `EventDispatcherService` (singleton), `IDeadLetterStore` → `DeadLetterStore` (+ `NoopDeadLetterStore` as the test fake via `TryAdd`), and the grain implementation. `AddCloudEventHandlersFromAssembly` (already called at `:62`) feeds `IEnumerable<Subscription>` to the service.
 
-### D11 — Agent event launches use stable session/job identities
+### D11 — Agent event launches use durable stable job identities
 
-`AgentSubscriptionDispatchHandler` passes the trigger event/subscription labels it already owns. `AgentLauncher` derives stable AgentSession and AgentJob grain keys from `(projectId, triggerEventId, triggerSubscriptionId)` for subscription-driven launches; manual launches keep random identities. The launcher opens the stable session, submits the stable job idempotently, then persists the trigger labels before returning. A completed handler invocation can therefore be repeated after deliver-before-mark failure without minting another session or job.
+`AgentSubscriptionDispatchHandler` passes the trigger event/subscription labels it already owns. `AgentLauncher` derives stable AgentSession and AgentJob grain keys from `(projectId, triggerEventId, triggerSubscriptionId)` for subscription-driven launches; manual launches keep random identities. It always submits the stable job on replay instead of treating session labels as the launch claim.
+
+`AgentJobGrain` persists the input, lifecycle, candidate runner, and a stable work id derived from the grain key before acknowledging `SubmitAsync` or calling the Runner. A crash before Runner acceptance reactivates and resumes the same record. A crash after Runner acceptance replays the same `(ownerId, workId)`, which `RunnerGrain.AssignAgentJobAsync` already absorbs idempotently. The Runner may regard the persisted assigning state as runnable, closing the acceptance-versus-status crash window. Terminal state and retry counters are persisted as well.
+
+### D12 — Dead-letter operator routes are loopback-only and redact stacks
+
+Mohist does not yet have an operator authentication model. Until one exists, list and re-delivery routes reject non-loopback requests. API responses omit raw exception stacks; the server log remains the diagnostic surface. TestServer requests with no network peer are treated as local.
+
+### D13 — Singleton handlers open a scope per delivery
+
+Subscription instances remain singleton because the dispatcher owns a compiled, stable handler set. Any handler that needs a scoped query service receives `IServiceScopeFactory` and resolves that service inside `HandleAsync`. In particular, the Epic terminal handlers resolve `EpicQuerier` per delivery rather than retaining a root scoped instance.
 
 ## Risks / Trade-offs
 
-- **[First live reminder in the codebase]** → Mitigation: reminder service is already configured (`UseAdoNetReminderService`); assert grain registration and fresh-host activation against the real reminder table, then drive deterministic delivery through `PulseAsync` rather than waiting on wall-clock reminder timing. Keep reminder cadence configurable.
+- **[First live reminder in the codebase]** → Mitigation: reminder service is already configured (`UseAdoNetReminderService`); assert grain registration and fresh-host activation against the real reminder table, then invoke the reminder callback in a two-silo fixture before and after killing the hosting silo. Keep reminder cadence configurable.
 - **[Polly absence vs. proposal claim]** → Mitigation: hand-rolled retry (D6); record the decision here so reviewers don't expect Polly. If timed backoff is later required, it lands as a single seam swap.
 - **[Single dispatcher = throughput ceiling]** → Mitigation: `LIMIT N` per tick caps work; no sharding is a Non-Goal. The `hash(Source)%N` extension is modeled and pure-additive (`eventbus-v2.md:155-161`).
 - **[Deliver-before-mark crash → re-delivery]** → Mitigation: domain reactions are already state-check/idempotent; inbox insertion is keyed by source event; Agent subscription launches use stable session/job identities (D11). The test suite exercises real production idempotency rather than a recorder-only fake.
 - **[Starvation under a chatty stream]** → Mitigation: out of scope this issue (personal-scale volume); future round-robin is documented. No data model change needed.
-- **[Reminder table in tests]** → Orleans ADO.NET reminder table is bootstrapped by Orleans scripts, not EF migrations; verify the test DB template (`MigratedSqliteTemplate`) has the reminder schema, or assert delivery via `PulseAsync` only.
+- **[Reminder table in tests]** → Orleans ADO.NET reminder table is bootstrapped by Orleans scripts, not EF migrations; the full-host spec verifies the persisted row and the two-silo spec verifies callback-driven delivery and reactivation without `PulseAsync`.
 - **[Handler failure visibility]** → Mitigation: required side effects are awaited and exceptions propagate to the dispatcher. Best-effort behavior is expressed as an intentional successful no-op, not an invisible failed Task.
 
 ## Migration Plan
 
-- **DB:** one new EF migration creating the `DeadLetters` table + indexes. No data migration of existing event rows — `DispatchedAt` already exists on all four tables (from prior issues), and producers only append. DeadLetters starts empty.
-- **Code:** add the grain, activation service, dispatch service, store, row type, operator API/CLI; fix the reflection scan; inject `TimeProvider`; make subscription Tasks report real completion; make Agent launch identities stable for event triggers.
+- **DB:** one migration creates `DeadLetters`; a hardening migration adds recovery state and the unique handler-keyed settlement index. No source-event data migration is needed because `DispatchedAt` already exists on all four truth tables.
+- **Code:** add the grain, activation service, dispatch service, store, row type, operator API/CLI; fix the reflection scan; inject `TimeProvider`; keep best-effort handler contracts explicit; persist AgentJob launch state and stable work identities.
 - **Deploy:** start the host → `DispatcherActivationService` activates the fixed-key grain → the grain registers its reminder → ticking begins. Event rows left `DispatchedAt IS NULL` from the dormant window are picked up on the first tick.
 - **Rollback:** stop the silo / disable the grain registration. Producers keep appending (they only append). Undelivered rows accumulate but are never lost; redeploying resumes from where the tables are. Dropping the `DeadLetters` table is safe (it only held poison records) but unnecessary to roll back.
 
@@ -137,6 +147,6 @@ Register in the **silo** container (the dispatcher is a grain and must resolve i
 
 1. **3 vs 4 truth tables (issue body vs specs).** Issue body says three; specs/proposal say four (incl. `AgentSessionEvents`). Implementation is table-agnostic and already covers all four via `ListUndeliveredAsync`. **Proposed resolution: follow the specs (all four delivered); confirm with the issue author that AgentSession delivery is desired** — it is consistent with the `AgentSubscriptionDispatchHandler` `[Subscription(Type="*")]` contract, so the default is safe.
 2. **Retry policy specifics.** Attempt cap value, and whether any (time-source-driven) backoff is wanted in v1. Current decision: fixed cap, no backoff. Confirm acceptable.
-3. **Dead-letter re-delivery scope.** Resolved: retry only the recorded failing handler and delete the row after success; already-successful sibling handlers are not repeated.
+3. **Dead-letter re-delivery scope.** Resolved: retry only the recorded failing handler and mark its row resolved after success; already-successful sibling handlers are not repeated.
 4. **Producer `Pulse` wiring scope.** The grain exposes `PulseAsync`; whether to wire producers (via `IGrainFactory`) to call it after commit is in this issue or a follow-up. Current read: expose the entry point here; wiring all producers is best-effort and can follow up. Confirm.
 5. **Reminder cadence / `LIMIT`.** Exact reminder period (~1s) and per-tick `LIMIT N` default. Current: configurable, ~1s / 100. Confirm.

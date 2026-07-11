@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Mohist.Server.Events.Subscriptions;
 using Mohist.Server.Infrastructure.Data;
@@ -28,6 +29,7 @@ public sealed class HermesIssueNotificationTests
             EventCatalog.ReverseDns.StageApprovalRequested,
             "run_1",
             new StageApprovalRequested("plan")), CancellationToken.None);
+        await fixture.Dispatcher.RunAllAsync();
 
         var payload = Assert.Single(fixture.Client.Sent);
         Assert.Equal(NotificationKinds.ApprovalRequested, payload.NotificationType);
@@ -48,6 +50,7 @@ public sealed class HermesIssueNotificationTests
             EventCatalog.ReverseDns.WorkflowRunFailed,
             "run_1",
             new WorkflowRunFailed("check task failed")), CancellationToken.None);
+        await fixture.Dispatcher.RunAllAsync();
 
         var payload = Assert.Single(fixture.Client.Sent);
         Assert.Equal(NotificationKinds.WorkflowFailed, payload.NotificationType);
@@ -69,6 +72,7 @@ public sealed class HermesIssueNotificationTests
             EventCatalog.ReverseDns.WorkflowRunFailed,
             "run_1",
             new WorkflowRunFailed(failure)), CancellationToken.None);
+        await fixture.Dispatcher.RunAllAsync();
 
         var payload = Assert.Single(fixture.Client.Sent);
         Assert.Equal("System.InvalidOperationException: check task failed", payload.FailureReason);
@@ -86,6 +90,7 @@ public sealed class HermesIssueNotificationTests
         await fixture.Handler.HandleAsync(IssueEvent(
             EventCatalog.ReverseDns.IssueCompleted,
             new IssueCompleted("run_1")), CancellationToken.None);
+        await fixture.Dispatcher.RunAllAsync();
 
         var payload = Assert.Single(fixture.Client.Sent);
         Assert.Equal(NotificationKinds.IssueCompleted, payload.NotificationType);
@@ -101,6 +106,7 @@ public sealed class HermesIssueNotificationTests
         await defaultFixture.Handler.HandleAsync(IssueEvent(
             EventCatalog.ReverseDns.IssueWorkStarted,
             new IssueWorkStarted("run_1")), CancellationToken.None);
+        await defaultFixture.Dispatcher.RunAllAsync();
         Assert.Empty(defaultFixture.Client.Sent);
 
         var enabledFixture = CreateFixture(new HermesNotificationOptions
@@ -111,6 +117,7 @@ public sealed class HermesIssueNotificationTests
         await enabledFixture.Handler.HandleAsync(IssueEvent(
             EventCatalog.ReverseDns.IssueWorkStarted,
             new IssueWorkStarted("run_1")), CancellationToken.None);
+        await enabledFixture.Dispatcher.RunAllAsync();
 
         var payload = Assert.Single(enabledFixture.Client.Sent);
         Assert.Equal(NotificationKinds.IssueStarted, payload.NotificationType);
@@ -128,6 +135,7 @@ public sealed class HermesIssueNotificationTests
             new StageApprovalRequested("plan")), CancellationToken.None);
 
         Assert.Empty(fixture.Client.Sent);
+        Assert.Equal(0, fixture.Dispatcher.QueuedCount);
         Assert.Equal(0, fixture.WorkflowRuns.LoadCount);
         Assert.Equal(0, fixture.Issues.LoadCount);
     }
@@ -147,33 +155,40 @@ public sealed class HermesIssueNotificationTests
             new StageApprovalRequested("plan")), CancellationToken.None);
 
         Assert.Empty(fixture.Client.Sent);
+        Assert.Equal(0, fixture.Dispatcher.QueuedCount);
         Assert.Equal(0, fixture.WorkflowRuns.LoadCount);
         Assert.Equal(0, fixture.Issues.LoadCount);
     }
 
     [Fact]
-    public async Task DeliveryFailure_PropagatesToDispatcher()
+    public async Task DeliveryFailure_IsSwallowed()
     {
         var fixture = CreateFixture();
         fixture.Client.ThrowOnSend = true;
 
-        await Assert.ThrowsAsync<HttpRequestException>(() =>
-            fixture.Handler.HandleAsync(WorkflowEvent(
-                EventCatalog.ReverseDns.StageApprovalRequested,
-                "run_1",
-                new StageApprovalRequested("plan")), CancellationToken.None));
+        await fixture.Handler.HandleAsync(WorkflowEvent(
+            EventCatalog.ReverseDns.StageApprovalRequested,
+            "run_1",
+            new StageApprovalRequested("plan")), CancellationToken.None);
+        await fixture.Dispatcher.RunAllAsync();
+        Assert.Empty(fixture.Client.Sent);
     }
 
     [Fact]
-    public async Task DeliveryWork_IsAwaitedBeforeHandlerCompletes()
+    public async Task DeliveryWork_IsQueuedWithoutAwaitingSlowWebhookSend()
     {
         var fixture = CreateFixture();
         fixture.Client.BlockSend = true;
 
-        var delivery = fixture.Handler.HandleAsync(WorkflowEvent(
+        await fixture.Handler.HandleAsync(WorkflowEvent(
             EventCatalog.ReverseDns.StageApprovalRequested,
             "run_1",
             new StageApprovalRequested("plan")), CancellationToken.None);
+
+        Assert.Equal(1, fixture.Dispatcher.QueuedCount);
+        Assert.Empty(fixture.Client.Sent);
+
+        var delivery = fixture.Dispatcher.RunNextAsync();
         await fixture.Client.SendStarted.Task;
 
         Assert.False(delivery.IsCompleted);
@@ -184,17 +199,15 @@ public sealed class HermesIssueNotificationTests
     }
 
     [Fact]
-    public async Task IssueLoadFailure_PropagatesToDispatcher()
+    public async Task IssueLoadFailure_IsSwallowed()
     {
         var fixture = CreateFixture();
         fixture.Issues.LoadFailure = new InvalidOperationException("issue store unavailable");
 
-        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            fixture.Handler.HandleAsync(IssueEvent(
-                EventCatalog.ReverseDns.IssueCompleted,
-                new IssueCompleted("run_1")), CancellationToken.None));
-
-        Assert.Equal("issue store unavailable", error.Message);
+        await fixture.Handler.HandleAsync(IssueEvent(
+            EventCatalog.ReverseDns.IssueCompleted,
+            new IssueCompleted("run_1")), CancellationToken.None);
+        await fixture.Dispatcher.RunAllAsync();
         Assert.Empty(fixture.Client.Sent);
     }
 
@@ -283,13 +296,16 @@ public sealed class HermesIssueNotificationTests
         services.AddSingleton<IWorkflowRunStore>(workflowRuns);
         var provider = services.BuildServiceProvider();
         var client = new RecordingHermesWebhookClient();
+        var dispatcher = new RecordingHermesIssueNotificationDispatcher();
         var handler = new HermesIssueNotificationHandler(
             provider.GetRequiredService<IServiceScopeFactory>(),
             new TestOptionsMonitor<HermesNotificationOptions>(options),
             new HermesIssueNotificationRenderer(),
-            client);
+            client,
+            dispatcher,
+            NullLogger<HermesIssueNotificationHandler>.Instance);
 
-        return new NotificationFixture(handler, client, issues, workflowRuns, provider);
+        return new NotificationFixture(handler, client, dispatcher, issues, workflowRuns, provider);
     }
 
     private static CloudEvent WorkflowEvent<T>(string type, string workflowRunId, T data) where T : class =>
@@ -339,6 +355,7 @@ public sealed class HermesIssueNotificationTests
     private sealed record NotificationFixture(
         HermesIssueNotificationHandler Handler,
         RecordingHermesWebhookClient Client,
+        RecordingHermesIssueNotificationDispatcher Dispatcher,
         FakeIssueStore Issues,
         FakeWorkflowRunStore WorkflowRuns,
         ServiceProvider Provider) : IDisposable
@@ -368,6 +385,23 @@ public sealed class HermesIssueNotificationTests
         }
 
         public void ReleaseSend() => _releaseSend.TrySetResult();
+    }
+
+    private sealed class RecordingHermesIssueNotificationDispatcher : IHermesIssueNotificationDispatcher
+    {
+        private readonly Queue<Func<CancellationToken, Task>> _works = new();
+
+        public int QueuedCount => _works.Count;
+
+        public void Dispatch(Func<CancellationToken, Task> work) => _works.Enqueue(work);
+
+        public async Task RunAllAsync(CancellationToken ct = default)
+        {
+            while (_works.Count > 0)
+                await RunNextAsync(ct).ConfigureAwait(false);
+        }
+
+        public Task RunNextAsync(CancellationToken ct = default) => _works.Dequeue()(ct);
     }
 
     private sealed class FakeIssueStore : IStateStore<DomainIssue>

@@ -525,8 +525,16 @@ public class MohistDbContext : DbContext
                 .IsRequired();
             entity.Property(e => e.DeadLetteredAt)
                 .IsRequired();
+            entity.Property(e => e.Status)
+                .HasConversion<string>()
+                .HasMaxLength(32)
+                .IsRequired();
+            entity.Property(e => e.RedeliveryAttemptedAt);
+            entity.Property(e => e.ResolvedAt);
             entity.HasIndex(e => e.DeadLetteredAt);
             entity.HasIndex(e => new { e.FailingHandler, e.DeadLetteredAt });
+            entity.HasIndex(e => new { e.Source, e.Id, e.FailingHandler })
+                .IsUnique();
         });
 
         modelBuilder.Entity<WorkflowRunRow>(entity =>

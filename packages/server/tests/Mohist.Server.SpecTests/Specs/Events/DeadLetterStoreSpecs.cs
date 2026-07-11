@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.Extensions.Logging.Abstractions;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Infrastructure.Events;
@@ -20,7 +21,9 @@ public class DeadLetterStoreSpecs : IAsyncLifetime
 
     private SqliteConnection _keeper = null!;
     private DbContextOptions<MohistDbContext> _options = null!;
+    private Factory _factory = null!;
     private DeadLetterStore _store = null!;
+    private EventStore _events = null!;
 
     public Task InitializeAsync()
     {
@@ -32,7 +35,9 @@ public class DeadLetterStoreSpecs : IAsyncLifetime
             .UseSqlite(connectionString)
             .ConfigureWarnings(w => w.Ignore(RelationalEventId.PendingModelChangesWarning))
             .Options;
-        _store = new DeadLetterStore(new Factory(_options));
+        _factory = new Factory(_options);
+        _store = new DeadLetterStore(_factory);
+        _events = new EventStore(_factory, NullLogger<EventStore>.Instance);
         return Task.CompletedTask;
     }
 
@@ -156,6 +161,78 @@ public class DeadLetterStoreSpecs : IAsyncLifetime
     }
 
     [Fact]
+    public async Task SettleAsync_WritesOneHandlerRowAndMarksSourceInOneCommit()
+    {
+        var envelope = new CloudEvent(
+            id: "evt_atomic",
+            source: new Uri("/mohist/issues/issue_atomic", UriKind.Relative),
+            type: "com.mohist.issue.completed",
+            time: FirstTime,
+            data: JsonSerializer.SerializeToElement(new { value = 1 }));
+        await _events.AppendAsync(envelope);
+        var sourceEvent = Assert.Single(await _events.ListUndeliveredAsync());
+        var deadLetter = FromSource(
+            BuildRow(nameof(EventOrigin.Issue), FirstTime, eventId: envelope.Id),
+            sourceEvent);
+
+        await _store.SettleAsync(sourceEvent, [deadLetter], SecondTime);
+
+        Assert.Empty(await _events.ListUndeliveredAsync());
+        var stored = Assert.Single(await _store.QueryAsync(failingHandler: null, limit: 100));
+        Assert.Equal(DeadLetterStatus.Pending, stored.Status);
+
+        deadLetter.ErrorMessage = "updated failure";
+        await _store.SettleAsync(sourceEvent, [deadLetter], ThirdTime);
+
+        stored = Assert.Single(await _store.QueryAsync(failingHandler: null, limit: 100));
+        Assert.Equal("updated failure", stored.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task SettleAsync_SourceMarkFailureDoesNotCommitDeadLetter()
+    {
+        var missing = new UndeliveredEvent(
+            EventOrigin.Issue,
+            999,
+            "/mohist/issues/missing",
+            "evt_missing",
+            "com.mohist.issue.completed",
+            FirstTime,
+            "1.0",
+            null,
+            "application/json",
+            JsonSerializer.SerializeToElement(new { value = 1 }),
+            "{}");
+        var deadLetter = FromSource(
+            BuildRow(nameof(EventOrigin.Issue), FirstTime, eventId: missing.EventId),
+            missing);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            _store.SettleAsync(missing, [deadLetter], SecondTime));
+
+        Assert.Empty(await _store.QueryAsync(failingHandler: null, limit: 100));
+    }
+
+    [Fact]
+    public async Task RedeliveryState_TracksAmbiguousAttemptAndResolution()
+    {
+        var row = BuildRow(origin: "Issue", deadLetteredAt: FirstTime);
+        await _store.WriteAsync(row);
+
+        var started = await _store.StartRedeliveryAsync(row.DeadLetterId, SecondTime);
+        Assert.NotNull(started);
+        Assert.Equal(DeadLetterStatus.Redelivering, started.Status);
+
+        await _store.ResolveAsync(row.DeadLetterId, ThirdTime);
+
+        var resolved = await _store.GetAsync(row.DeadLetterId);
+        Assert.NotNull(resolved);
+        Assert.Equal(DeadLetterStatus.Resolved, resolved.Status);
+        Assert.Equal(ThirdTime, resolved.ResolvedAt);
+        Assert.Empty(await _store.QueryAsync(failingHandler: null, limit: 100));
+    }
+
+    [Fact]
     public void NoopDeadLetterStore_IsUsableFake()
     {
         IDeadLetterStore fake = new NoopDeadLetterStore();
@@ -171,7 +248,7 @@ public class DeadLetterStoreSpecs : IAsyncLifetime
         {
             Origin = origin,
             Id = 42,
-            Source = "/mohist/workflow-runs/wr_42",
+            Source = $"/mohist/workflow-runs/{eventId}",
             EventId = eventId,
             Type = "com.mohist.workflow.task.completed",
             Time = FirstTime,
@@ -185,6 +262,27 @@ public class DeadLetterStoreSpecs : IAsyncLifetime
             ErrorStack = "stack line 1\nstack line 2",
             AttemptCount = 3,
             DeadLetteredAt = deadLetteredAt,
+        };
+
+    private static DeadLetterRow FromSource(DeadLetterRow template, UndeliveredEvent sourceEvent) =>
+        new()
+        {
+            Origin = sourceEvent.Origin.ToString(),
+            Id = sourceEvent.Id,
+            Source = sourceEvent.Source,
+            EventId = sourceEvent.EventId,
+            Type = sourceEvent.Type,
+            Time = sourceEvent.Time,
+            SpecVersion = sourceEvent.SpecVersion,
+            Subject = sourceEvent.Subject,
+            DataContentType = sourceEvent.DataContentType,
+            Data = sourceEvent.Data,
+            ExtensionsJson = sourceEvent.ExtensionsJson,
+            FailingHandler = template.FailingHandler,
+            ErrorMessage = template.ErrorMessage,
+            ErrorStack = template.ErrorStack,
+            AttemptCount = template.AttemptCount,
+            DeadLetteredAt = template.DeadLetteredAt,
         };
 
     private static void AssertRowEqual(DeadLetterRow expected, DeadLetterRow actual)

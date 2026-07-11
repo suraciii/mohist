@@ -25,8 +25,18 @@ public sealed class DeadLetterRow
     public required JsonElement Data { get; init; }
     public required string ExtensionsJson { get; init; }
     public required string FailingHandler { get; init; }
-    public required string ErrorMessage { get; init; }
-    public string? ErrorStack { get; init; }
-    public required int AttemptCount { get; init; }
-    public required DateTimeOffset DeadLetteredAt { get; init; }
+    public required string ErrorMessage { get; set; }
+    public string? ErrorStack { get; set; }
+    public required int AttemptCount { get; set; }
+    public required DateTimeOffset DeadLetteredAt { get; set; }
+    public DeadLetterStatus Status { get; set; } = DeadLetterStatus.Pending;
+    public DateTimeOffset? RedeliveryAttemptedAt { get; set; }
+    public DateTimeOffset? ResolvedAt { get; set; }
+}
+
+public enum DeadLetterStatus
+{
+    Pending,
+    Redelivering,
+    Resolved,
 }

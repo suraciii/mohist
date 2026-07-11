@@ -180,6 +180,17 @@ public async Task<IReadOnlyList<StoredCloudEvent>> ListAgentSessionEventsAsync(s
     public async Task MarkDispatchedAsync(string source, long id, DateTimeOffset dispatchedAt, CancellationToken ct = default)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        await SetDispatchedAsync(db, source, id, dispatchedAt, ct);
+        await db.SaveChangesAsync(ct);
+    }
+
+    internal static async Task SetDispatchedAsync(
+        MohistDbContext db,
+        string source,
+        long id,
+        DateTimeOffset dispatchedAt,
+        CancellationToken ct)
+    {
         if (source.StartsWith(AgentSessionEventPersistence.SourcePrefix, StringComparison.Ordinal))
         {
             var row = await db.AgentSessionEvents.FirstOrDefaultAsync(e => e.Source == source && e.Id == id, ct);
@@ -213,8 +224,6 @@ public async Task<IReadOnlyList<StoredCloudEvent>> ListAgentSessionEventsAsync(s
         {
             throw new ArgumentException($"Unrecognized event source '{source}'.", nameof(source));
         }
-
-        await db.SaveChangesAsync(ct);
     }
 
     public async Task<IReadOnlyList<UndeliveredEvent>> ListUndeliveredAsync(int limit = 100, CancellationToken ct = default)

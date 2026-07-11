@@ -1,3 +1,4 @@
+using System.Net;
 using Mohist.Server.Events.Grains;
 using Mohist.Server.Infrastructure.Events;
 
@@ -13,11 +14,15 @@ public static class DeadLetterRoutes
         var group = app.MapGroup("/api/events/dead-letters");
 
         group.MapGet("/", async (
+            HttpContext context,
             string? handler,
             int? limit,
             IDeadLetterStore store,
             CancellationToken ct) =>
         {
+            if (!IsLocalOperator(context.Connection.RemoteIpAddress))
+                return ApiResults.Fail("Dead-letter operations require a loopback caller", 403, "local_operator_required");
+
             var resolvedLimit = limit ?? DefaultLimit;
             if (resolvedLimit is < 1 or > MaxLimit)
                 return ApiResults.BadRequest($"limit must be between 1 and {MaxLimit}");
@@ -38,17 +43,22 @@ public static class DeadLetterRoutes
                 extensions = row.ExtensionsJson,
                 handler = row.FailingHandler,
                 error = row.ErrorMessage,
-                errorStack = row.ErrorStack,
                 attempts = row.AttemptCount,
                 row.DeadLetteredAt,
+                status = row.Status.ToString(),
+                row.RedeliveryAttemptedAt,
             }));
         });
 
         group.MapPost("/{deadLetterId:long}/redeliver", async (
+            HttpContext context,
             long deadLetterId,
             IGrainFactory grains,
             CancellationToken ct) =>
         {
+            if (!IsLocalOperator(context.Connection.RemoteIpAddress))
+                return ApiResults.Fail("Dead-letter operations require a loopback caller", 403, "local_operator_required");
+
             var result = await grains
                 .GetGrain<IDispatcherGrain>(DispatcherGrain.FixedKey)
                 .RedeliverAsync(deadLetterId, ct);
@@ -73,4 +83,7 @@ public static class DeadLetterRoutes
 
         return app;
     }
+
+    internal static bool IsLocalOperator(IPAddress? remoteAddress) =>
+        remoteAddress is null || IPAddress.IsLoopback(remoteAddress);
 }

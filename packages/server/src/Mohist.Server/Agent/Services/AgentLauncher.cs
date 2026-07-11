@@ -30,10 +30,9 @@ namespace Mohist.Server.Agent.Services;
 /// sequentially because both the manual launch path and the subscription
 /// path require the session to be open (and addressable by label) before
 /// the AgentJobGrain dispatches. The dispatch submission itself is
-/// fire-and-forget at the grain side — <see cref="IAgentJobGrain.SubmitAsync"/>
-/// mints an AgentJob and enqueues dispatch without blocking on a runner —
-/// so this launcher adds no new blocking surface beyond what the manual
-/// HTTP path already had.
+/// durable at the grain side — <see cref="IAgentJobGrain.SubmitAsync"/>
+/// persists the job input before performing one dispatch attempt without
+/// waiting for Agent execution — so a replay resumes the same job record.
 /// </para>
 /// </summary>
 public sealed class AgentLauncher : IAgentLauncher, IScopedService
@@ -69,22 +68,6 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
         }
 
         var triggerIdentity = BuildTriggerIdentity(context.ProjectId, triggerLabels);
-        if (triggerIdentity is not null)
-        {
-            var lookupLabels = new Dictionary<string, string>(triggerLabels!, StringComparer.Ordinal)
-            {
-                [AgentSessionQueryMetadataKeys.ProjectId] = context.ProjectId,
-            };
-            var existingSessionId = await _sessions.ResolveByLabelsAsync(lookupLabels, ct).ConfigureAwait(false);
-            if (existingSessionId is not null)
-            {
-                return new AgentLaunchResult(
-                    SessionId: existingSessionId,
-                    AgentId: agent.Id,
-                    AgentName: agent.Name);
-            }
-        }
-
         var sessionId = triggerIdentity is null
             ? _sessions.NewSessionId()
             : StableId("agent-session", triggerIdentity);

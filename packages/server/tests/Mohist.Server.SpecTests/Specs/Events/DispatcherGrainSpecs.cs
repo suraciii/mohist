@@ -3,6 +3,7 @@ using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Issue.Domain.Events;
 using Mohist.Server.SpecTests.Support;
 using Orleans;
+using Orleans.Runtime;
 using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Events;
@@ -18,14 +19,13 @@ namespace Mohist.Server.SpecTests.Specs.Events;
 [Collection("Dispatcher")]
 public class DispatcherGrainSpecs
 {
+    private static readonly DateTimeOffset EventTime = new(2026, 7, 11, 0, 0, 0, TimeSpan.Zero);
+
     private readonly DispatcherFixture _fixture;
 
     public DispatcherGrainSpecs(DispatcherFixture fixture)
     {
         _fixture = fixture;
-        // The fixture's InitializeAsync already drained the empty queue
-        // via the activation Pulse. Tests that publish start from a
-        // clean slate; only their own additions are visible.
         _fixture.ClosedGenericInvocations.Clear();
         _fixture.CatchAllInvocations.Clear();
         _fixture.SpecificInvocations.Clear();
@@ -43,7 +43,7 @@ public class DispatcherGrainSpecs
             id: "evt_pulse_closed",
             source: new Uri("/mohist/issues/issue_pulse", UriKind.Relative),
             type: EventCatalog.ReverseDns.IssueCompleted,
-            time: DateTimeOffset.UtcNow,
+            time: EventTime,
             data: System.Text.Json.JsonSerializer.SerializeToElement(
                 new IssueCompleted(WorkflowRunId: "wr_pulse"), CloudEvent.JsonOptions),
             subject: "1",
@@ -77,7 +77,7 @@ public class DispatcherGrainSpecs
             id: "evt_pulse_immediate",
             source: new Uri("/mohist/issues/issue_pulse_imm", UriKind.Relative),
             type: EventCatalog.ReverseDns.WorkflowRunCompleted,
-            time: DateTimeOffset.UtcNow,
+            time: EventTime,
             data: null);
 
         await _fixture.EventPublisher.PublishAsync(envelope);
@@ -138,13 +138,40 @@ public class DispatcherGrainSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
+    public async Task ReminderCallback_DeliversBeforeAndAfterHostingSiloLoss()
+    {
+        var dispatcherId = _fixture.Dispatcher.GetGrainId();
+        Assert.True(_fixture.Cluster.TryGetGrainContext(dispatcherId, out var initialContext));
+        var initialSilo = initialContext.Address.SiloAddress
+            ?? throw new InvalidOperationException("Dispatcher activation has no silo address");
+
+        await PublishWorkflowCompletedAsync("evt_reminder_before", "issue_reminder_before");
+        await FireReminderAsync();
+        Assert.Contains("evt_reminder_before", _fixture.SpecificInvocations);
+
+        var hostingSilo = _fixture.Cluster.GetSiloForAddress(initialSilo);
+        Assert.NotNull(hostingSilo);
+        await _fixture.Cluster.KillSiloAsync(hostingSilo);
+
+        await PublishWorkflowCompletedAsync("evt_reminder_after", "issue_reminder_after");
+        await FireReminderAsync();
+
+        Assert.Contains("evt_reminder_after", _fixture.SpecificInvocations);
+        Assert.Equal(0, _fixture.EventStore.PendingCount);
+        Assert.True(_fixture.Cluster.TryGetGrainContext(dispatcherId, out var recoveredContext));
+        Assert.NotEqual(initialSilo, recoveredContext.Address.SiloAddress);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
     public async Task PoisonEvent_ExhaustsRetries_DeadLettersAndMarksDispatched()
     {
         var envelope = new CloudEvent(
             id: "evt_poison_spec",
             source: new Uri("/mohist/issues/issue_poison", UriKind.Relative),
             type: "test.poison",
-            time: DateTimeOffset.UtcNow,
+            time: EventTime,
             data: null);
 
         await _fixture.EventPublisher.PublishAsync(envelope);
@@ -160,6 +187,19 @@ public class DispatcherGrainSpecs
         Assert.Contains("InvalidOperationException", dl.ErrorStack);
         Assert.Equal(0, _fixture.EventStore.PendingCount);
     }
+
+    private Task FireReminderAsync() =>
+        _fixture.Dispatcher.ReceiveReminder(
+            DispatcherGrain.ReminderName,
+            new TickStatus(EventTime.UtcDateTime, TimeSpan.FromSeconds(1), EventTime.UtcDateTime));
+
+    private Task PublishWorkflowCompletedAsync(string eventId, string issueId) =>
+        _fixture.EventPublisher.PublishAsync(new CloudEvent(
+            id: eventId,
+            source: new Uri($"/mohist/issues/{issueId}", UriKind.Relative),
+            type: EventCatalog.ReverseDns.WorkflowRunCompleted,
+            time: EventTime,
+            data: null));
 }
 
 /// <summary>

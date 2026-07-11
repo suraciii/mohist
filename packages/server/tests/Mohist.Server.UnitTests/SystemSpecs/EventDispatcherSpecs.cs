@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Events.Grains;
+using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Issue.Domain.Events;
 using Mohist.Server.UnitTests.Support;
@@ -30,8 +31,10 @@ public class EventDispatcherSpecs
         IEnumerable<Subscription> subs,
         FakeTimeProvider time,
         int handlerMaxAttempts = 3,
-        int batchLimit = 100) =>
-        new(
+        int batchLimit = 100)
+    {
+        deadLetters.EventStore = events;
+        return new(
             events,
             subs,
             deadLetters,
@@ -42,6 +45,7 @@ public class EventDispatcherSpecs
                 HandlerMaxAttempts = handlerMaxAttempts,
             }),
             NullLogger<EventDispatcherService>.Instance);
+    }
 
     [Fact]
     public async Task DispatchAsync_PullsUndeliveredRow_MatchesHandler_InvokesAndMarks()
@@ -372,6 +376,44 @@ public class EventDispatcherSpecs
     }
 
     [Fact]
+    public async Task DispatchAsync_PoisonSettlementMarkFailureCommitsNeitherSide()
+    {
+        var time = new FakeTimeProvider(StartTime);
+        var events = new FakeEventStore { ThrowOnMark = _ => true };
+        var dlq = new FakeDeadLetterStore();
+        var attempts = 0;
+        var sub = new Subscription(
+            IssueCompleted,
+            new FlakyRecorder(() =>
+            {
+                attempts++;
+                throw new InvalidOperationException("poison");
+            }),
+            DispatchDynamic);
+        var dispatcher = BuildDispatcher(events, dlq, [sub], time, handlerMaxAttempts: 1);
+        events.Enqueue(FakeEventStore.Build(
+            IssueCompleted,
+            "/mohist/issues/issue_atomic",
+            id: 1,
+            eventId: "evt_atomic_failure"));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            dispatcher.DispatchAsync(CancellationToken.None));
+
+        Assert.Equal(1, attempts);
+        Assert.Empty(events.Marked);
+        Assert.Empty(dlq.Written);
+        Assert.Single(events.PendingUndelivered);
+
+        events.ThrowOnMark = null;
+        await dispatcher.DispatchAsync(CancellationToken.None);
+
+        Assert.Equal(2, attempts);
+        Assert.Single(events.Marked);
+        Assert.Single(dlq.Written);
+    }
+
+    [Fact]
     public async Task DispatchAsync_NoMatchingSubscription_MarksRowDeliveredWithoutInvoking()
     {
         // An event with no fan-out target is still marked DispatchedAt
@@ -509,6 +551,48 @@ public class EventDispatcherSpecs
         Assert.True(result.Delivered);
         Assert.Equal(1, goodCalls);
         Assert.Equal(3, badCalls);
+        Assert.Empty(dlq.Written);
+    }
+
+    [Fact]
+    public async Task RedeliverAsync_ResolveFailureLeavesAmbiguousState_AndReplayIsIdempotent()
+    {
+        var time = new FakeTimeProvider(StartTime);
+        var events = new FakeEventStore();
+        var dlq = new FakeDeadLetterStore();
+        var poison = true;
+        var sideEffects = new HashSet<string>(StringComparer.Ordinal);
+        var handler = new Recorder(evt =>
+        {
+            if (poison)
+                throw new InvalidOperationException("poison");
+            sideEffects.Add(evt.Id);
+        });
+        var sub = new Subscription(IssueCompleted, handler, DispatchDynamic);
+        var dispatcher = BuildDispatcher(events, dlq, [sub], time, handlerMaxAttempts: 1);
+        events.Enqueue(FakeEventStore.Build(
+            IssueCompleted,
+            "/mohist/issues/issue_redelivery_state",
+            id: 1,
+            eventId: "evt_redelivery_state"));
+        await dispatcher.DispatchAsync(CancellationToken.None);
+        var deadLetter = Assert.Single(dlq.Written);
+
+        poison = false;
+        dlq.ThrowOnResolve = true;
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            dispatcher.RedeliverAsync(deadLetter.DeadLetterId, CancellationToken.None));
+
+        Assert.Single(sideEffects);
+        Assert.Equal(
+            DeadLetterStatus.Redelivering,
+            (await dlq.GetAsync(deadLetter.DeadLetterId))!.Status);
+
+        dlq.ThrowOnResolve = false;
+        var result = await dispatcher.RedeliverAsync(deadLetter.DeadLetterId, CancellationToken.None);
+
+        Assert.True(result.Delivered);
+        Assert.Single(sideEffects);
         Assert.Empty(dlq.Written);
     }
 

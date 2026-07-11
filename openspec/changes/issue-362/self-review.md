@@ -5,38 +5,59 @@
 ## Repaired Items
 
 - [ID: item-1]
-  Severity: info
-  Scope: consistency
-  Evidence: `proposal.md` line 32 (Impact) claimed "no new external dependencies (Polly already referenced)". Verified against the tree: `Polly` appears nowhere in `packages/server` source, `Directory.Packages.props`, or any csproj. `design.md` D6 already flags this ("The proposal asserts 'Polly already referenced.' **It is not**") and decides a hand-rolled per-handler attempt cap; `tasks.json` T-002 notes repeat "do NOT add Polly". The stale proposal line was the only artifact diverging. Changed the line to state retry is hand-rolled with a fixed cap and to reference D6, aligning proposal ↔ design ↔ tasks.
-  Verification: Re-read the edited `proposal.md` Impact section; confirmed `design.md` D6 and `tasks.json` T-002 notes are unchanged and now consistent with the proposal. No product/architectural change.
+  Severity: blocking
+  Scope: poison settlement
+  Resolution: Exhausted handler rows are collected and passed to `IDeadLetterStore.SettleAsync`, which upserts by `(Source, Id, FailingHandler)` and marks the source event in one SQLite transaction. A source-mark failure commits neither side. Tests cover rollback and conflict-safe retry.
   Status: resolved
 
-## Blocking Items
-
-_None._
-
-## Follow-up Items
-
 - [ID: item-2]
-  Severity: follow-up
-  Scope: alignment
-  Evidence: The initial plan review identified that Issue AC #4 required both re-delivery and handler-side idempotent absorption, while the original task wording only named the dispatcher half.
-  Resolution: Added deliver-before-mark idempotent absorption coverage and stable Agent session/job identities, including identical AgentJob submission semantics.
+  Severity: blocking
+  Scope: Agent launch durability
+  Resolution: `AgentJobGrain` persists input, candidate runner, stable work id, retry counters, timestamps, and terminal result. Submission and activation await a tracked dispatch attempt. Runner acceptance replay uses the same `(AgentJobId, WorkId)`, and pending prepared work is runnable so the acceptance/status crash window cannot drop it. `AgentLauncher` always replays the stable job instead of treating session labels as the launch claim.
   Status: resolved
 
 - [ID: item-3]
-  Severity: follow-up
-  Scope: consistency
-  Evidence: The issue body says "三张事件真相表" (`WorkflowRunEvents` + `IssueEvents` + `EpicEvents`); specs/proposal enumerate four (adding `AgentSessionEvents`). `design.md` D3 documents the chosen four-table interpretation, consistent with the existing table-agnostic query and wildcard Agent subscription contract.
-  Resolution: Followed the product specs and the existing table-agnostic four-way `ListUndeliveredAsync` contract; AgentSession events remain included.
+  Severity: warning
+  Scope: Hermes contract
+  Resolution: Restored the documented background best-effort dispatcher. Webhook and state-load failures are logged and swallowed, so Hermes does not enter durable retry/dead-letter flow.
   Status: resolved
 
-## Review Notes
+- [ID: item-4]
+  Severity: test-gap
+  Scope: reminder self-healing
+  Resolution: The dispatcher fixture now has two silos and activates with `EnsureStartedAsync`, not `PulseAsync`. A deterministic test calls the reminder callback, kills the hosting silo, calls the callback again through the fixed key, and proves delivery resumes on the other silo in 53ms.
+  Status: resolved
 
-- **Alignment:** Every issue acceptance criterion maps to a proposal "What Changes" entry and a spec requirement. AC1→event-dispatch (singleton + single-query); AC2→event-dispatch (fan-out + retry) + dead-letter (exhaustion); AC3→event-dispatch (FIFO + per-row mark); AC4→event-dispatch (crash recovery); AC5→dead-letter (queryable + manually re-deliverable). Non-Goals (no sharding, no UI channel, no broker) are respected — no task touches them.
-- **Completeness:** Both specs fully covered by tasks. `dead-letter` requirements split correctly: store/query layer in T-001, dead-lettering flow + per-handler isolation + RedeliverAsync in T-002. `event-dispatch` all in T-002. Edge cases (deliver-before-mark crash, per-handler isolation, closed-generic inclusion, correctness-without-ping) appear in T-002 acceptance criteria.
-- **Feasibility:** Two tasks at feature-slice granularity. T-001 ("Re-create the DeadLetters persistence layer") is a self-contained persistence+query module with its own tests; T-002 ("Implement the self-driven cluster-singleton event dispatcher") bundles grain + service + scan fix + TimeProvider injection + DI registration + tests into one coherent slice. No over-fine tasks ("定义接口"/"注册DI"/"创建文件"/standalone test tasks are absent). Dependencies are available: `IEventStore.ListUndeliveredAsync`/`MarkDispatchedAsync`, `[Subscription]` reflection scan, `CloudEventTypeMatcher`, `TimeProvider.System`, `UseAdoNetReminderService` all verified present in the tree.
-- **Dependency completeness:** T-001 `dependsOn: []`, priority 1. T-002 `dependsOn: ["T-001"]`, priority 2. All `dependsOn` point to existing IDs with lower priority. No cycles. T-002 consuming `IDeadLetterStore` (built in T-001) justifies the ordering.
-- **Facts spot-checked against the tree:** `ListUndeliveredAsync` is a single 4-way `UNION ALL` ordered by `(Source, Id)` (`EventStore.cs:220`); `MarkDispatchedAsync` exists (`EventStore.cs:180`); closed-generic bug confirmed at `CloudEventBusServiceCollectionExtensions.cs:21` (`typeof(ICloudEventHandler<>).IsAssignableFrom(t)` is always false for closed generics); wall-clock confirmed at `InMemoryEventBus.cs:74` (`DateTimeOffset.UtcNow`); `TimeProvider.System` registered in silo (`MohistSiloRegistration.cs:64`); `UseAdoNetReminderService` wired (`MohistSiloRegistration.cs:33`); `RegisterOrUpdateReminder` called nowhere in src; `IRemindable` only on `RunnerGrain`; `DeadLetters` absent from `MohistDbContext` (only in 3 frozen historical migration Designer snapshots). All consistent with the artifacts.
+- [ID: item-5]
+  Severity: warning
+  Scope: operator security
+  Resolution: Dead-letter list/re-delivery reject non-loopback callers and API responses omit exception stacks. Tests cover loopback/remote classification and response redaction.
+  Status: resolved
+
+- [ID: item-6]
+  Severity: minor
+  Scope: DI lifetime
+  Resolution: Singleton Epic handlers resolve `EpicQuerier` inside an async scope per delivery. Full-host integration startup and closed-generic handler specs pass with scope validation.
+  Status: resolved
+
+- [ID: item-7]
+  Severity: info
+  Scope: test determinism
+  Resolution: Preserved the AI review repair replacing dispatcher test wall-clock values with fixed `EventTime`.
+  Status: resolved
+
+## Verification
+
+- Dispatcher/Hermes unit slice: 30 passed.
+- AgentJob persistence + AgentLauncher specs: 30 passed.
+- Dead-letter, reminder/failover, API, Agent, and Epic focused server specs: 81 passed.
+- Architecture tests: 24 passed, 3 pre-existing skips.
+- Full rebased `npm test`: CLI 870; server unit 1361; server spec 2832 with 9 skips; Web 4596; Runner 1007; Node test-boundary checks passed.
+- `git diff --check` and `tasks.json` JSON validation pass.
+
+## Follow-up Items
+
+- Orleans 10.1 `RegisterOrUpdateReminder` exposes no activation cancellation-token overload, so the review's token-propagation suggestion is not applicable.
+- Epic event publication atomicity remains the pre-existing out-of-scope producer issue recorded in the formal review.
 
 <promise>PASS</promise>

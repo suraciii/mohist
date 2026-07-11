@@ -112,6 +112,13 @@ Correctness SHALL NOT depend on any external signal or best-effort ping. If the 
 - **THEN** the same AgentSession and AgentJob identities SHALL be reused
 - **AND** no second Agent launch SHALL be minted for that event/subscription pair
 
+#### Scenario: Agent launch resumes after activation loss
+
+- **WHEN** a silo stops after the AgentJob submission is accepted or after the Runner accepts its work
+- **THEN** the AgentJob SHALL reactivate from durable state
+- **AND** SHALL resume with the same work identity
+- **AND** replaying the source event SHALL produce neither a missed launch nor a second Runner work
+
 #### Scenario: Correctness holds without any ping
 
 - **WHEN** every producer ping signal is lost

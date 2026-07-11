@@ -123,7 +123,13 @@ public sealed class CapturingDeadLetterStore : IDeadLetterStore
 {
     private readonly object _gate = new();
     private readonly List<DeadLetterRow> _rows = [];
+    private readonly CapturingEventStore _events;
     private long _nextId;
+
+    public CapturingDeadLetterStore(CapturingEventStore events)
+    {
+        _events = events;
+    }
 
     public Task WriteAsync(DeadLetterRow row, CancellationToken ct = default)
     {
@@ -154,11 +160,22 @@ public sealed class CapturingDeadLetterStore : IDeadLetterStore
         return Task.CompletedTask;
     }
 
+    public async Task SettleAsync(
+        UndeliveredEvent sourceEvent,
+        IReadOnlyList<DeadLetterRow> rows,
+        DateTimeOffset dispatchedAt,
+        CancellationToken ct = default)
+    {
+        await _events.MarkDispatchedAsync(sourceEvent.Source, sourceEvent.Id, dispatchedAt, ct);
+        foreach (var row in rows)
+            await WriteAsync(row, ct);
+    }
+
     public Task<IReadOnlyList<DeadLetterRow>> QueryAsync(string? failingHandler, int limit, CancellationToken ct = default)
     {
         lock (_gate)
         {
-            IEnumerable<DeadLetterRow> q = _rows;
+            IEnumerable<DeadLetterRow> q = _rows.Where(row => row.Status != DeadLetterStatus.Resolved);
             if (!string.IsNullOrEmpty(failingHandler))
                 q = q.Where(r => r.FailingHandler == failingHandler);
             return Task.FromResult<IReadOnlyList<DeadLetterRow>>(q
@@ -177,6 +194,44 @@ public sealed class CapturingDeadLetterStore : IDeadLetterStore
         }
     }
 
+    public Task<DeadLetterRow?> StartRedeliveryAsync(long deadLetterId, DateTimeOffset attemptedAt, CancellationToken ct = default)
+    {
+        lock (_gate)
+        {
+            var row = _rows.FirstOrDefault(row => row.DeadLetterId == deadLetterId);
+            if (row is null || row.Status == DeadLetterStatus.Resolved)
+                return Task.FromResult<DeadLetterRow?>(null);
+            row.Status = DeadLetterStatus.Redelivering;
+            row.RedeliveryAttemptedAt = attemptedAt;
+            return Task.FromResult<DeadLetterRow?>(row);
+        }
+    }
+
+    public Task RecordRedeliveryFailureAsync(long deadLetterId, string errorMessage, string? errorStack, int attemptCount, DateTimeOffset attemptedAt, CancellationToken ct = default)
+    {
+        lock (_gate)
+        {
+            var row = _rows.Single(row => row.DeadLetterId == deadLetterId);
+            row.Status = DeadLetterStatus.Pending;
+            row.ErrorMessage = errorMessage;
+            row.ErrorStack = errorStack;
+            row.AttemptCount = attemptCount;
+            row.RedeliveryAttemptedAt = attemptedAt;
+        }
+        return Task.CompletedTask;
+    }
+
+    public Task ResolveAsync(long deadLetterId, DateTimeOffset resolvedAt, CancellationToken ct = default)
+    {
+        lock (_gate)
+        {
+            var row = _rows.Single(row => row.DeadLetterId == deadLetterId);
+            row.Status = DeadLetterStatus.Resolved;
+            row.ResolvedAt = resolvedAt;
+        }
+        return Task.CompletedTask;
+    }
+
     public Task DeleteAsync(long deadLetterId, CancellationToken ct = default)
     {
         lock (_gate)
@@ -188,7 +243,7 @@ public sealed class CapturingDeadLetterStore : IDeadLetterStore
 
     public IReadOnlyList<DeadLetterRow> Written
     {
-        get { lock (_gate) { return _rows.ToList(); } }
+        get { lock (_gate) { return _rows.Where(row => row.Status != DeadLetterStatus.Resolved).ToList(); } }
     }
 }
 
@@ -207,7 +262,7 @@ public sealed class DispatcherFixture : IAsyncLifetime
     public FakeTimeProvider TimeProvider { get; } = new(new DateTimeOffset(2026, 7, 1, 0, 0, 0, TimeSpan.Zero));
     public CapturingEventStore EventStore { get; } = new();
     public CapturingEventPublisher EventPublisher { get; } = new();
-    public CapturingDeadLetterStore DeadLetterStore { get; } = new();
+    public CapturingDeadLetterStore DeadLetterStore { get; }
     public FakeRunnerWorkspaceClient RunnerWorkspace { get; private set; } = null!;
     public IReminderTable ReminderTable => Cluster.GetSiloServiceProvider(null).GetRequiredService<IReminderTable>();
 
@@ -227,6 +282,11 @@ public sealed class DispatcherFixture : IAsyncLifetime
 
     private SqliteConnection _keeper = null!;
 
+    public DispatcherFixture()
+    {
+        DeadLetterStore = new CapturingDeadLetterStore(EventStore);
+    }
+
     public async Task InitializeAsync()
     {
         var dbName = $"mohist-dispatcher-{Guid.NewGuid():N}";
@@ -235,7 +295,7 @@ public sealed class DispatcherFixture : IAsyncLifetime
         _keeper.Open();
 
         var builder = new InProcessTestClusterBuilder();
-        builder.Options.InitialSilosCount = 1;
+        builder.Options.InitialSilosCount = 2;
         builder.ConfigureSilo((_, siloBuilder) =>
             ConfigureDispatcherSilo(siloBuilder, connectionString));
         Cluster = builder.Build();
@@ -244,9 +304,7 @@ public sealed class DispatcherFixture : IAsyncLifetime
         RunnerWorkspace = Cluster.GetSiloServiceProvider(null).GetRequiredService<FakeRunnerWorkspaceClient>();
         EventPublisher.RegisterSink(EventStore);
 
-        // Touch the dispatcher grain so it activates — this is what
-        // registers the reminder.
-        await Dispatcher.PulseAsync();
+        await Dispatcher.EnsureStartedAsync();
     }
 
     public Task DisposeAsync()
@@ -293,6 +351,11 @@ public sealed class DispatcherFixture : IAsyncLifetime
 
         siloBuilder.Services.AddSingleton<EventDispatcherService>();
         siloBuilder.Services.AddSingleton<TimeProvider>(TimeProvider);
+        siloBuilder.Services.Configure<DispatcherOptions>(options =>
+        {
+            options.ReminderDueTime = TimeSpan.FromHours(1);
+            options.ReminderPeriod = TimeSpan.FromHours(1);
+        });
 
         siloBuilder.Services.AddSingleton<ITranscriptEventPublisher, TestNoopTranscriptEventPublisher>();
         siloBuilder.Services.AddScoped<IWorkflowArtifactBindService, WorkflowArtifactBindService>();
@@ -304,6 +367,7 @@ public sealed class DispatcherFixture : IAsyncLifetime
             opts.DispatchRetryBound = TimeSpan.FromSeconds(5);
             opts.JobTimeout = TimeSpan.FromSeconds(10);
         });
+        siloBuilder.Services.AddSingleton<IAgentJobDispatchObserver>(NoopAgentJobDispatchObserver.Instance);
         siloBuilder.Services.Configure<WorkflowOptions>(_ => { });
     }
 }

@@ -22,6 +22,55 @@ public sealed class DeadLetterStore : IDeadLetterStore
         await db.SaveChangesAsync(ct);
     }
 
+    public async Task SettleAsync(
+        UndeliveredEvent sourceEvent,
+        IReadOnlyList<DeadLetterRow> rows,
+        DateTimeOffset dispatchedAt,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(sourceEvent);
+        ArgumentNullException.ThrowIfNull(rows);
+        if (rows.Count == 0)
+            throw new ArgumentException("At least one dead-letter row is required.", nameof(rows));
+
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+
+        var handlers = rows.Select(row => row.FailingHandler).Distinct(StringComparer.Ordinal).ToArray();
+        var existing = await db.DeadLetters
+            .Where(row => row.Source == sourceEvent.Source
+                && row.Id == sourceEvent.Id
+                && handlers.Contains(row.FailingHandler))
+            .ToDictionaryAsync(row => row.FailingHandler, StringComparer.Ordinal, ct);
+
+        foreach (var row in rows)
+        {
+            if (existing.TryGetValue(row.FailingHandler, out var stored))
+            {
+                stored.ErrorMessage = row.ErrorMessage;
+                stored.ErrorStack = row.ErrorStack;
+                stored.AttemptCount = row.AttemptCount;
+                stored.DeadLetteredAt = row.DeadLetteredAt;
+                stored.Status = DeadLetterStatus.Pending;
+                stored.RedeliveryAttemptedAt = null;
+                stored.ResolvedAt = null;
+            }
+            else
+            {
+                db.DeadLetters.Add(row);
+            }
+        }
+
+        await EventStore.SetDispatchedAsync(
+            db,
+            sourceEvent.Source,
+            sourceEvent.Id,
+            dispatchedAt,
+            ct);
+        await db.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
+    }
+
     public async Task<IReadOnlyList<DeadLetterRow>> QueryAsync(string? failingHandler, int limit, CancellationToken ct = default)
     {
         // SQLite's EF provider cannot translate ORDER BY over DateTimeOffset,
@@ -32,9 +81,11 @@ public sealed class DeadLetterStore : IDeadLetterStore
         const string sql = """
             SELECT "DeadLetterId", "Origin", "Id", "Source", "EventId", "Type", "Time",
                    "SpecVersion", "Subject", "DataContentType", "Data", "ExtensionsJson",
-                   "FailingHandler", "ErrorMessage", "ErrorStack", "AttemptCount", "DeadLetteredAt"
+                   "FailingHandler", "ErrorMessage", "ErrorStack", "AttemptCount", "DeadLetteredAt",
+                   "Status", "RedeliveryAttemptedAt", "ResolvedAt"
             FROM "DeadLetters"
-            WHERE @filter IS NULL OR "FailingHandler" = @filter
+            WHERE "Status" <> 'Resolved'
+              AND (@filter IS NULL OR "FailingHandler" = @filter)
             ORDER BY "DeadLetteredAt", "DeadLetterId"
             LIMIT @limit
             """;
@@ -54,6 +105,54 @@ public sealed class DeadLetterStore : IDeadLetterStore
         var row = await db.DeadLetters.AsNoTracking()
             .FirstOrDefaultAsync(r => r.DeadLetterId == deadLetterId, ct);
         return row is null ? null : ToRow(row);
+    }
+
+    public async Task<DeadLetterRow?> StartRedeliveryAsync(
+        long deadLetterId,
+        DateTimeOffset attemptedAt,
+        CancellationToken ct = default)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var row = await db.DeadLetters.FirstOrDefaultAsync(r => r.DeadLetterId == deadLetterId, ct);
+        if (row is null || row.Status == DeadLetterStatus.Resolved)
+            return null;
+
+        row.Status = DeadLetterStatus.Redelivering;
+        row.RedeliveryAttemptedAt = attemptedAt;
+        await db.SaveChangesAsync(ct);
+        return ToRow(row);
+    }
+
+    public async Task RecordRedeliveryFailureAsync(
+        long deadLetterId,
+        string errorMessage,
+        string? errorStack,
+        int attemptCount,
+        DateTimeOffset attemptedAt,
+        CancellationToken ct = default)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var row = await db.DeadLetters.FirstOrDefaultAsync(r => r.DeadLetterId == deadLetterId, ct)
+            ?? throw new InvalidOperationException($"Dead-letter row '{deadLetterId}' was not found.");
+        row.Status = DeadLetterStatus.Pending;
+        row.ErrorMessage = errorMessage;
+        row.ErrorStack = errorStack;
+        row.AttemptCount = attemptCount;
+        row.RedeliveryAttemptedAt = attemptedAt;
+        await db.SaveChangesAsync(ct);
+    }
+
+    public async Task ResolveAsync(
+        long deadLetterId,
+        DateTimeOffset resolvedAt,
+        CancellationToken ct = default)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var row = await db.DeadLetters.FirstOrDefaultAsync(r => r.DeadLetterId == deadLetterId, ct)
+            ?? throw new InvalidOperationException($"Dead-letter row '{deadLetterId}' was not found.");
+        row.Status = DeadLetterStatus.Resolved;
+        row.ResolvedAt = resolvedAt;
+        await db.SaveChangesAsync(ct);
     }
 
     public async Task DeleteAsync(long deadLetterId, CancellationToken ct = default)
@@ -84,6 +183,9 @@ public sealed class DeadLetterStore : IDeadLetterStore
             ErrorStack = row.ErrorStack,
             AttemptCount = row.AttemptCount,
             DeadLetteredAt = row.DeadLetteredAt,
+            Status = Enum.Parse<DeadLetterStatus>(row.Status, ignoreCase: false),
+            RedeliveryAttemptedAt = row.RedeliveryAttemptedAt,
+            ResolvedAt = row.ResolvedAt,
         };
 
     private static DeadLetterRow ToRow(DeadLetterRow row) =>
@@ -106,6 +208,9 @@ public sealed class DeadLetterStore : IDeadLetterStore
             ErrorStack = row.ErrorStack,
             AttemptCount = row.AttemptCount,
             DeadLetteredAt = row.DeadLetteredAt,
+            Status = row.Status,
+            RedeliveryAttemptedAt = row.RedeliveryAttemptedAt,
+            ResolvedAt = row.ResolvedAt,
         };
 
     private static JsonElement ParseJsonElement(string json) =>
@@ -130,5 +235,8 @@ public sealed class DeadLetterStore : IDeadLetterStore
         public string? ErrorStack { get; set; }
         public int AttemptCount { get; set; }
         public DateTimeOffset DeadLetteredAt { get; set; }
+        public string Status { get; set; } = nameof(DeadLetterStatus.Pending);
+        public DateTimeOffset? RedeliveryAttemptedAt { get; set; }
+        public DateTimeOffset? ResolvedAt { get; set; }
     }
 }
