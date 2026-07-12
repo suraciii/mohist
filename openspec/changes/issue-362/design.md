@@ -124,6 +124,10 @@ Under Generic Host, `ISiloBuilder.Services` is the same collection that `AddMohi
 
 Agent jobs participate in the same poll reconciliation contract as workflow work. The runner reports stable `agent-job:{agentJobId}:{workId}` keys in `inFlight` or `awaitingAck`; missing running work is reoffered with the persisted dispatch snapshot, so a lost poll response does not turn Runner acceptance into at-most-once delivery. One Runner poll owns a transient poll gate. Overlapping polls return no work, and new Agent admission is retried while reconciliation is active, so agent assignment cannot race a workflow claim based on stale capacity. `DispatchService` subtracts every active Agent work before claiming workflows.
 
+The Runner's last registration profile is persisted beside its durable Agent work. Activation starts offline but restores that profile; the first poll can therefore prove presence, rebuild the registry entry, and reconcile outstanding Agent work without waiting for a separate heartbeat or registration. Explicit unregister clears the profile so a later stray poll cannot resurrect an intentionally removed runner.
+
+Poll admission returns the current slots snapshot while holding the same gate through the complete reconciliation round. `DispatchService` no longer accepts caller-supplied capacity, and the HTTP route no longer reads slots before admission. Capacity updates wait for the poll gate, making every poll linearize wholly before or after a slots change; the snapshot cannot become stale between admission and workflow claims.
+
 ### D12 — Dead-letter operator routes require a credential on a loopback listener and redact diagnostics
 
 A public listener does not map the dead-letter routes. A loopback listener requires a high-entropy operator credential on every dead-letter request; the server creates a user-only, non-symlink local credential file by default, while an explicit environment/config override supports managed deployments. Server and CLI resolve one contract in this order: `MOHIST_OPERATOR_TOKEN`, `Mohist:OperatorToken`, `MOHIST_OPERATOR_TOKEN_PATH`, `Mohist:OperatorTokenPath`, then `~/.mohist/operator-token`. The `mo` CLI sends the resolved value in a dedicated header. Remote/local addresses and forwarding headers are not authentication signals, because a loopback reverse proxy can reproduce them. List responses are `no-store`; API responses return only bounded diagnostic summaries with embedded stack frames, paths, ANSI sequences, and controls removed, while raw exception details remain in protected storage and server logs. CLI table output shows recovery status and strips carriage returns, ANSI escapes, and other terminal controls from untrusted cells.
@@ -135,6 +139,8 @@ Subscription instances remain singleton because the dispatcher owns a compiled, 
 ### D14 — Inbox projection and durable hint commit atomically
 
 `InboxProjectionHandler` writes the inbox row and its `com.mohist.inbox.item-persisted` event through one caller-owned `MohistDbContext` transaction. `InboxStore.InsertAsync(MohistDbContext, ...)` stages the projection on that context and `IEventStore.AppendAsync(MohistDbContext, ...)` stages the hint before the shared commit. If the event append fails, the inbox row rolls back; dispatcher retry therefore performs both writes again instead of treating the projection as a completed duplicate and losing the hint.
+
+The transaction contract is pinned against the production `EventStore`, not only an immediate-publisher fake. An SQLite trigger aborts the persisted hint insert after the inbox row has already been saved inside the open transaction; verification observes zero rows on both sides, then removes the fault and proves replay commits exactly one inbox row and one durable hint.
 
 ## Risks / Trade-offs
 

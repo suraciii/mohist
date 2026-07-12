@@ -37,8 +37,7 @@ public class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTests.Specs.
         Assert.NotNull(first);
         var workId = first!.WorkId;
 
-        var slots = await runner.GetSlotsAsync();
-        var resp = await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], []), slots);
+        var resp = await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], []));
 
         var redelivery = Assert.Single(resp.Dispatches);
         Assert.Equal(_workflowId, redelivery.WorkflowRunId);
@@ -58,8 +57,7 @@ public class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTests.Specs.
         Assert.NotNull(first);
         var key = WorkKey(_workflowId!, first!.WorkId);
 
-        var slots = await runner.GetSlotsAsync();
-        var resp = await Dispatch.PollAsync(runnerId, new RunnerPollRequest([key], []), slots);
+        var resp = await Dispatch.PollAsync(runnerId, new RunnerPollRequest([key], []));
 
         Assert.Empty(resp.Dispatches);
     }
@@ -77,8 +75,7 @@ public class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTests.Specs.
         Assert.NotNull(first);
         var key = WorkKey(_workflowId!, first!.WorkId);
 
-        var slots = await runner.GetSlotsAsync();
-        var resp = await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], [key]), slots);
+        var resp = await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], [key]));
 
         Assert.Empty(resp.Dispatches);
     }
@@ -121,8 +118,7 @@ public class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTests.Specs.
 
         await runner.UnregisterAsync();
 
-        var slots = await runner.GetSlotsAsync();
-        var resp = await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], []), slots);
+        var resp = await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], []));
 
         Assert.Empty(resp.Dispatches);
     }

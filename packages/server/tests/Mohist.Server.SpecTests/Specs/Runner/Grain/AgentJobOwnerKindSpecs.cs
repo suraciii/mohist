@@ -125,18 +125,17 @@ public class AgentJobOwnerKindSpecs : WorkflowGrainSpecs
         await runner.AssignAgentJobAsync(AgentDispatch(agentJobId, workId));
         await Grains.GetGrain<IAgentJobGrain>(agentJobId).AssignRunnerAsync(runnerId, workId);
 
-        var slots = await runner.GetSlotsAsync();
         var first = Assert.Single((await Dispatch.PollAsync(
-            runnerId, new RunnerPollRequest([], []), slots)).Dispatches);
+            runnerId, new RunnerPollRequest([], []))).Dispatches);
         var redelivery = Assert.Single((await Dispatch.PollAsync(
-            runnerId, new RunnerPollRequest([], []), slots)).Dispatches);
+            runnerId, new RunnerPollRequest([], []))).Dispatches);
 
         Assert.Equal(first.AgentJobId, redelivery.AgentJobId);
         Assert.Equal(first.WorkId, redelivery.WorkId);
 
         var key = $"{WorkDispatchOwnerKinds.AgentJob}:{agentJobId}:{workId}";
         var reported = await Dispatch.PollAsync(
-            runnerId, new RunnerPollRequest([key], []), slots);
+            runnerId, new RunnerPollRequest([key], []));
         Assert.Empty(reported.Dispatches);
     }
 
@@ -152,8 +151,8 @@ public class AgentJobOwnerKindSpecs : WorkflowGrainSpecs
             runner.TryBeginPollAsync(),
             runner.TryBeginPollAsync());
 
-        Assert.Single(admissions, admitted => admitted);
-        Assert.Single(admissions, admitted => !admitted);
+        Assert.Single(admissions, admission => admission.Admitted);
+        Assert.Single(admissions, admission => !admission.Admitted);
         await runner.EndPollAsync();
     }
 
@@ -164,7 +163,7 @@ public class AgentJobOwnerKindSpecs : WorkflowGrainSpecs
     {
         var runnerId = await RegisterRunnerAsync($"agent-job-poll-admission-{Guid.NewGuid():N}");
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
-        Assert.True(await runner.TryBeginPollAsync());
+        Assert.True((await runner.TryBeginPollAsync()).Admitted);
 
         try
         {

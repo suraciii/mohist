@@ -17,8 +17,8 @@ public interface IRunnerGrain : IGrainWithStringKey
     // runner's process-lifetime reported set.
     Task<RunnerWorkAssignmentResult> AssignAgentJobAsync(WorkDispatch work);
     Task<RunnerWorkReportResult> ReportAgentJobResultAsync(string agentJobId, string workId, WorkResult result);
-    /// <summary>Atomically admits one reconciliation round for this runner.</summary>
-    Task<bool> TryBeginPollAsync();
+    /// <summary>Atomically admits one reconciliation round and captures its capacity.</summary>
+    Task<RunnerPollAdmission> TryBeginPollAsync();
     /// <summary>Releases the reconciliation round admitted by <see cref="TryBeginPollAsync"/>.</summary>
     Task EndPollAsync();
     /// <summary>Returns active Agent capacity and at most one missing stable dispatch.</summary>
@@ -126,6 +126,11 @@ public sealed record RunnerPollRequest(
 {
     public RunnerPollRequest() : this([], []) { }
 }
+
+[GenerateSerializer]
+public sealed record RunnerPollAdmission(
+    [property: Id(0)] bool Admitted,
+    [property: Id(1)] int Slots);
 
 /// <summary>
 /// The dispatches rendered for this poll: redeliveries (desired − reported) plus

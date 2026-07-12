@@ -55,7 +55,10 @@ issue-362 — T-002 working memory
 - Dead-letter API operations are absent on public listeners and require a high-entropy operator credential on loopback listeners. The CLI reads the user-only credential file, responses are no-store and stack/path-redacted, and table output exposes recovery status without terminal controls. Closed-generic Epic handlers create a scope per delivery for `EpicQuerier`.
 - RunnerGrain owns atomic agent-job admission: lifecycle changes and admission share one gate, offline runners reject work, and concurrent jobs cannot both consume a one-slot runner.
 - Agent jobs use poll reconciliation after admission: accepted work is reoffered until its stable key appears in the runner's reported set. A per-runner poll gate excludes overlapping rounds, Agent admission retries while reconciliation is active, and active Agent work is subtracted before workflow claims.
+- Runner persistent state retains the last registration profile. After activation loss, the first poll restores online presence and the registry before reconciling the same durable Agent work; explicit unregister clears the profile.
+- Poll admission captures slots inside the Runner grain and holds the admission gate through reconciliation. The route no longer pre-reads capacity, `DispatchService` accepts no caller-provided slots, and capacity updates wait until the admitted poll finishes.
 - Inbox projection and `InboxItemPersisted` event append share one database transaction. A failed append rolls the projection back, so dispatcher replay cannot lose the durable hint behind an `AlreadyExisted` early return.
+- The inbox/hint transaction is verified with the real `EventStore`: an SQLite trigger aborts the final hint insert after the inbox save, proving zero/zero rollback and exactly-one/exactly-one replay.
 - Server and CLI operator credential precedence is environment token, config token, environment path, config path, then the default user-only file. Operator diagnostics redact embedded one-line frames and path substrings in addition to newline-separated stacks.
 
 ## Gotchas
@@ -81,9 +84,11 @@ issue-362 — T-002 working memory
 - [x] Fresh-host activation registers the dispatcher reminder without producer traffic
 - [x] Durable handler failures propagate; Hermes and Agent subscription dispatch remain best-effort; accepted Agent trigger launches resume durable stable job/work identities
 - [x] Accepted Agent work is reoffered until reported; overlapping polls are excluded; Agent and workflow work share one capacity calculation without admission-vs-claim races
+- [x] Runner activation loss restores the durable registration profile so an empty poll immediately restores presence and reoffers accepted Agent work
+- [x] Poll admission atomically captures capacity; slot updates cannot cross an admitted reconciliation round and stale route-level reads are impossible
 - [x] Inbox projection and its durable realtime hint commit atomically and replay after append failure
 - [x] EventDispatcherService + IDeadLetterStore→DeadLetterStore (+ NoopDeadLetterStore via TryAdd) + subscriptions registered once in the host-shared application graph; MohistSiloRegistration contains Orleans infrastructure only
 - [x] Unit tests cover pull→match→invoke→mark; FIFO (Source,Id); retry-then-succeed; exhaustion; per-handler isolation; deliver-before-mark crash recovery; CloudEventTypeMatcher fan-out with closed-generic handler
 - [x] Spec tests cover PulseAsync, actual reminder callback without Pulse, two-silo host loss recovery, closed-generic handlers, exact-handler dead-letter recovery, credential-protected API/CLI boundary, real workflow handler dispatch, atomic Runner admission, and Agent crash checkpoints including AgentConfig reactivation
 - [x] Real/fake persistence coverage includes post-mark settlement rollback and all four event-table UNION branches in global source/id order
-- [x] Full `npm test` green on rebased master: CLI 874, server unit 1373, arch 24 (3 skipped), server spec 2848 (9 skipped), Web 4596, Runner 1007; Node test-boundary checks and TreatWarningsAsErrors clean
+- [x] Full `npm test` green on rebased master: CLI 874, server unit 1373, arch 24 (3 skipped), server spec 2852 (9 skipped), Web 4596, Runner 1007; Node test-boundary checks and TreatWarningsAsErrors clean

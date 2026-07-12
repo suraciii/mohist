@@ -1,8 +1,10 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
 using Mohist.Server.Events.Subscriptions;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Inbox;
 using Mohist.Server.SpecTests.Support;
@@ -237,6 +239,63 @@ public class InboxProjectionHandlerRealtimeHintSpecs
         Assert.Single(publisher.Published);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
+    [Fact]
+    public async Task Hint_RealEventStore_RollsBackAndReplaysBothRowsAtomically()
+    {
+        await using var database = InboxProjectionTestSupport.CreateDatabase();
+        await InboxProjectionTestSupport.SeedIssueAsync(database,
+            projectId: "proj_atomic",
+            issueId: "issue_atomic",
+            issueNumber: 7,
+            title: "Atomic hint");
+
+        var eventStore = new EventStore(database.Factory, NullLogger<EventStore>.Instance);
+        var handler = InboxProjectionTestSupport.CreateHandler(
+            database,
+            new InboxProjectionTestSupport.NoopEventPublisher(),
+            services =>
+            {
+                var registered = services.Single(service => service.ServiceType == typeof(IEventStore));
+                services.Remove(registered);
+                services.AddSingleton<IEventStore>(eventStore);
+            });
+        var evt = InboxProjectionTestSupport.BuildIssueEvent(
+            type: EventCatalog.ReverseDns.IssueWorkStarted,
+            projectId: "proj_atomic",
+            issueId: "issue_atomic",
+            issueNumber: 7,
+            eventId: "evt-atomic-hint");
+
+        await using (var db = database.CreateDbContext())
+        {
+            await db.Database.ExecuteSqlRawAsync("""
+                CREATE TRIGGER "FailInboxHintInsert"
+                BEFORE INSERT ON "WorkflowRunEvents"
+                WHEN NEW."Source" = '/mohist/inbox'
+                BEGIN
+                    SELECT RAISE(ABORT, 'simulated inbox hint failure');
+                END;
+                """);
+        }
+
+        await Assert.ThrowsAsync<DbUpdateException>(() =>
+            handler.HandleAsync(evt, CancellationToken.None));
+
+        await AssertPersistedCountsAsync(database, inbox: 0, hints: 0);
+
+        await using (var db = database.CreateDbContext())
+        {
+            await db.Database.ExecuteSqlRawAsync("DROP TRIGGER \"FailInboxHintInsert\"");
+        }
+
+        await handler.HandleAsync(evt, CancellationToken.None);
+        await handler.HandleAsync(evt, CancellationToken.None);
+
+        await AssertPersistedCountsAsync(database, inbox: 1, hints: 1);
+    }
+
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
@@ -345,6 +404,17 @@ public class InboxProjectionHandlerRealtimeHintSpecs
         var hint = Assert.Single(publisher.Published);
         Assert.Equal("proj_b", hint.Extensions!["projectid"]);
         Assert.Equal("proj_b", hint.Data!.Value.GetProperty("projectId").GetString());
+    }
+
+    private static async Task AssertPersistedCountsAsync(
+        InboxProjectionTestSupport.TestDatabase database,
+        int inbox,
+        int hints)
+    {
+        await using var db = database.CreateDbContext();
+        Assert.Equal(inbox, await db.InboxItems.CountAsync(item => item.ProjectId == "proj_atomic"));
+        Assert.Equal(hints, await db.WorkflowRunEvents.CountAsync(evt =>
+            evt.Source == HintSource && evt.Type == HintType));
     }
 
     private sealed class CapturingEventPublisher : IEventPublisher

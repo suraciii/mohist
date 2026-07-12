@@ -222,13 +222,11 @@ public abstract class WorkflowGrainSpecs
         await EnsureRunnerForCurrentWorkflowAsync(runnerId);
         var dispatch = _fixture.Cluster.GetSiloServiceProvider(null)
             .GetRequiredService<Mohist.Server.Runner.Services.DispatchService>();
-        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
-        var slots = await runner.GetSlotsAsync();
         WorkDispatch? work = null;
         await TestWait.ForAsync(
             async () =>
             {
-                var resp = await dispatch.PollAsync(runnerId, new RunnerPollRequest([], []), slots);
+                var resp = await dispatch.PollAsync(runnerId, new RunnerPollRequest([], []));
                 work = resp.Dispatches.FirstOrDefault();
                 return work;
             },

@@ -19,6 +19,7 @@ public class RunnerDefinitionStateSpecs : WorkflowGrainSpecs
 
     private async Task DeactivateRunnerAsync(string runnerId)
     {
+        await Grains.GetGrain<IRunnerGrain>(runnerId).DeactivateForTestAsync();
         var management = Grains.GetGrain<IManagementGrain>(0);
         await management.ForceActivationCollection(TimeSpan.Zero);
 
@@ -126,6 +127,115 @@ public class RunnerDefinitionStateSpecs : WorkflowGrainSpecs
             projectId));
 
         Assert.Equal(4, await reactivated.GetSlotsAsync());
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
+    [Fact]
+    public async Task GrainReactivation_EmptyPollRestoresPresenceAndRedeliversAgentWork()
+    {
+        var projectId = $"test-project-{Guid.NewGuid():N}";
+        var runnerId = await RegisterRunnerForProjectAsync(projectId);
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        var agentJobId = $"agent-job-reactivation-{Guid.NewGuid():N}";
+        var workId = $"agent-work-reactivation-{Guid.NewGuid():N}";
+        var dispatch = new WorkDispatch(
+            WorkflowRunId: string.Empty,
+            WorkId: workId,
+            OwnerKind: WorkDispatchOwnerKinds.AgentJob,
+            AgentJobId: agentJobId);
+
+        Assert.Equal(
+            RunnerWorkAssignmentStatus.Assigned,
+            (await runner.AssignAgentJobAsync(dispatch)).Status);
+        await Grains.GetGrain<IAgentJobGrain>(agentJobId)
+            .AssignRunnerAsync(runnerId, workId);
+
+        var lostResponse = Assert.Single(await runner.PollAllAsync(Services));
+        Assert.Equal(workId, lostResponse.WorkId);
+
+        await DeactivateRunnerAsync(runnerId);
+
+        var reactivated = Grains.GetGrain<IRunnerGrain>(runnerId);
+        var redelivery = Assert.Single(await reactivated.PollAllAsync(Services));
+
+        Assert.Equal(agentJobId, redelivery.AgentJobId);
+        Assert.Equal(workId, redelivery.WorkId);
+        Assert.NotNull(await reactivated.GetInfoAsync());
+        Assert.Equal(RunnerStatus.Online, (await reactivated.GetRuntimeStateAsync()).Status);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
+    [Fact]
+    public async Task UpdateAsync_WaitsForAdmittedPollAndNextAdmissionUsesNewCapacity()
+    {
+        var projectId = $"test-project-{Guid.NewGuid():N}";
+        var runnerId = await RegisterRunnerForProjectAsync(projectId, maxWorkflowSlots: 2);
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        var admission = await runner.TryBeginPollAsync();
+        Assert.True(admission.Admitted);
+        Assert.Equal(2, admission.Slots);
+
+        var update = runner.UpdateAsync(1);
+        try
+        {
+            Assert.False(update.IsCompleted);
+        }
+        finally
+        {
+            await runner.EndPollAsync();
+        }
+
+        await update;
+        var nextAdmission = await runner.TryBeginPollAsync();
+        try
+        {
+            Assert.True(nextAdmission.Admitted);
+            Assert.Equal(1, nextAdmission.Slots);
+        }
+        finally
+        {
+            await runner.EndPollAsync();
+        }
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
+    [Fact]
+    public async Task Poll_AfterCapacityReductionIgnoresEarlierSlotRead()
+    {
+        var projectId = $"test-project-{Guid.NewGuid():N}";
+        var runnerId = await RegisterRunnerForProjectAsync(projectId, maxWorkflowSlots: 2);
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        Assert.Equal(2, await runner.GetSlotsAsync());
+
+        var agentJobId = $"agent-job-capacity-update-{Guid.NewGuid():N}";
+        var workId = $"agent-work-capacity-update-{Guid.NewGuid():N}";
+        var agentDispatch = new WorkDispatch(
+            WorkflowRunId: string.Empty,
+            WorkId: workId,
+            OwnerKind: WorkDispatchOwnerKinds.AgentJob,
+            AgentJobId: agentJobId);
+        Assert.Equal(
+            RunnerWorkAssignmentStatus.Assigned,
+            (await runner.AssignAgentJobAsync(agentDispatch)).Status);
+        await Grains.GetGrain<IAgentJobGrain>(agentJobId)
+            .AssignRunnerAsync(runnerId, workId);
+
+        await runner.UpdateAsync(1);
+
+        var workflowId = $"wf-capacity-update-{Guid.NewGuid():N}";
+        var workflow = Grains.GetGrain<IWorkflowGrain>(workflowId);
+        await SeedWorkflowTemplateAsync(workflowId, SingleStage(checks: []), projectId);
+        await workflow.StartAsync(TestInput(projectId));
+
+        var works = await runner.PollAllAsync(Services);
+
+        var only = Assert.Single(works);
+        Assert.Equal(WorkDispatchOwnerKinds.AgentJob, only.OwnerKind);
+        Assert.Equal(agentJobId, only.AgentJobId);
+        Assert.DoesNotContain(works, work => work.WorkflowRunId == workflowId);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]

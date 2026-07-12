@@ -27,8 +27,7 @@ public static class DispatchTestExtensions
     {
         var dispatch = ResolveScoped<DispatchService>(serviceProvider);
         var runnerId = runner.GetPrimaryKeyString();
-        var slots = await runner.GetSlotsAsync();
-        var response = await dispatch.PollAsync(runnerId, new RunnerPollRequest([], []), slots);
+        var response = await dispatch.PollAsync(runnerId, new RunnerPollRequest([], []));
         return response.Dispatches.FirstOrDefault();
     }
 
@@ -44,8 +43,7 @@ public static class DispatchTestExtensions
     {
         var dispatch = ResolveScoped<DispatchService>(serviceProvider);
         var runnerId = runner.GetPrimaryKeyString();
-        var slots = await runner.GetSlotsAsync();
-        var response = await dispatch.PollAsync(runnerId, new RunnerPollRequest([], []), slots);
+        var response = await dispatch.PollAsync(runnerId, new RunnerPollRequest([], []));
         return response.Dispatches;
     }
 

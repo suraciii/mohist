@@ -154,6 +154,24 @@
   Resolution: `docs/cli-reference.md` now includes the `event` root, dead-letter list/redeliver commands, status behavior, credential prerequisite, and the shared resolution order. CLI reference contract tests pass.
   Status: resolved
 
+- [ID: item-26]
+  Severity: blocking
+  Scope: Runner activation recovery
+  Resolution: Runner persistent state now retains the last registration profile as well as durable Agent work. Activation restores the profile but remains offline until the first poll proves presence; that poll rebuilds the registry entry and reoffers the same stable Agent work without a heartbeat or registration. Explicit unregister clears the durable profile. A grain reactivation spec discards the first Agent dispatch, collects the Runner activation, and verifies the next empty poll returns the same AgentJob/work pair while the Runner becomes online.
+  Status: resolved
+
+- [ID: item-27]
+  Severity: blocking
+  Scope: capacity update versus poll
+  Resolution: Poll admission now returns the slots snapshot while holding a per-Runner gate through all reconciliation claims. The route and `DispatchService` no longer accept a pre-read capacity value, while `UpdateAsync` waits for the same gate. Specs cover an admitted two-slot poll delaying a one-slot update and a stale earlier slot read followed by reduction, where one active Agent work prevents any workflow claim.
+  Status: resolved
+
+- [ID: item-28]
+  Severity: test-gap
+  Scope: Inbox durable hint production transaction
+  Resolution: A real SQLite `EventStore` spec injects a trigger failure on the durable hint insert after the inbox row was saved inside the shared transaction. The failure leaves zero inbox and zero hint rows; replay after removing the trigger commits exactly one row on each side and a duplicate replay remains one-to-one.
+  Status: resolved
+
 ## Verification
 
 - Dispatcher/Hermes unit slice: 30 passed.
@@ -164,7 +182,8 @@
 - Event-delivery index model + migration regression: 1 passed.
 - Console-capture slice: 9 passed in five consecutive runs.
 - Final review-repair slices: Agent poll/capacity 24; Inbox projection/hint 40; diagnostic unit/API 16; credential CLI/server 12; dispatcher fake + four-table SQLite 40; CLI docs/event 18. All passed.
-- Full CI-equivalent validation: CLI 874; server unit 1373; architecture 24 with 3 pre-existing skips; server spec 2848 with 9 pre-existing skips; Web 4596; Runner 1007; Node test-boundary checks passed.
+- Post-review Runner/Agent/Inbox slice: 42 passed, including activation recovery, poll/update linearization, stale-slot rejection, and real EventStore rollback/replay.
+- Full CI-equivalent validation: CLI 874; server unit 1373; architecture 24 with 3 pre-existing skips; server spec 2852 with 9 pre-existing skips; Web 4596; Runner 1007; Node test-boundary checks passed.
 - `git diff --check` and `tasks.json` JSON validation pass.
 
 ## Follow-up Items

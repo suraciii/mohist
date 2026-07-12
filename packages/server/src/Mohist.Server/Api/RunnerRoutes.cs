@@ -112,9 +112,7 @@ public static class RunnerRoutes
                 }
             }
 
-            var runner = grains.GetGrain<IRunnerGrain>(runnerId);
-            var slots = await runner.GetSlotsAsync();
-            var response = await dispatch.PollAsync(runnerId, req, slots, ct);
+            var response = await dispatch.PollAsync(runnerId, req, ct);
             if (response.Dispatches.Count == 0) return Results.NoContent();
 
             return Results.Ok(new RunnerPollResponseDto(

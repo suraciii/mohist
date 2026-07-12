@@ -36,16 +36,16 @@ public sealed class DispatchService : IScopedService
     public async Task<RunnerPollResponse> PollAsync(
         string runnerId,
         RunnerPollRequest req,
-        int slots,
         CancellationToken ct = default)
     {
         var runner = _grains.GetGrain<IRunnerGrain>(runnerId);
-        if (!await runner.TryBeginPollAsync())
+        var admission = await runner.TryBeginPollAsync();
+        if (!admission.Admitted)
             return new RunnerPollResponse([]);
 
         try
         {
-            return await PollCoreAsync(runner, runnerId, req, slots, ct);
+            return await PollCoreAsync(runner, runnerId, req, admission.Slots, ct);
         }
         finally
         {

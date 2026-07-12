@@ -45,10 +45,12 @@ public sealed class RunnerWork
 }
 
 /// <summary>
-/// Orleans persistent state wrapper for the runner's work tracking list.
+/// Orleans persistent state for the runner's durable Agent work and the last
+/// registration profile needed to restore poll-driven presence after activation.
 /// </summary>
 [GenerateSerializer]
 public sealed class RunnerWorksState
 {
     [Id(0)] public List<RunnerWork> Works { get; set; } = [];
+    [Id(1)] public RunnerInfo? LastKnownInfo { get; set; }
 }
