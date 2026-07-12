@@ -49,8 +49,34 @@ Leading slash. Plural nouns. URL path segments. No trailing slash.
 | Runner | runnerId | runnerId | /projects/{projectId}/runners/{runnerId} |
 | WorkflowBacklog | — | projectId | /projects/{projectId}/workflow-backlog |
 | StageLock | — | internal id | /projects/{projectId}/workflow-stage-locks/{resource} |
-| AgentSession | sessionId | sessionId | /projects/{projectId}/workflow-runs/{runId}/sessions/{name} |
+| AgentSession | sessionId | sessionId | /projects/{projectId}/agent-sessions/{sessionId} |
 | Event | eventId | — | /events/{eventId} |
+
+## AgentSession runtime identity
+
+`sessionId` is Mohist's stable logical AgentSession identity. A runtime-owned physical
+Session is identified separately:
+
+Concept ownership and origin rules are defined in
+[`agent-execution.md`](agent-execution.md).
+
+```json
+{
+  "runtime": "opencode",
+  "runtimeSessionId": "ses_..."
+}
+```
+
+- Use `runtimeSessionId` for the external physical identity. Never use `acpSessionId` or
+  `coderSessionId` as aliases.
+- `workflowRunId + sessionName` and `agentId` are origin/lookup references, not AgentSession
+  identity. Workflow- and Agent-scoped routes resolve to the canonical `sessionId` resource.
+- `runtime` names the execution backend. Do not add a second `kind` field.
+- Current runtime binding also retains `runnerId` and immutable `workDir` so Session commands
+  survive Runner process restart.
+- Runtime Session lineage records `runtime`, `runtimeSessionId`, and `boundAt`.
+- Compact does not change `runtimeSessionId`. Reset, runtime change, or work directory change
+  appends a new lineage entry while preserving `sessionId`.
 
 ## WorkflowRun metadata
 

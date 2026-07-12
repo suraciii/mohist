@@ -5,6 +5,10 @@ status: wip
 # Agent Subscriptions
 
 Agent listens to CloudEvents and auto-responds by prompt, instead of manual launch.
+Here, Agent always means the project-scoped Mohist Agent definition, never an Inline Agent
+invocation or the OpenCode runtime `agent` option.
+Lifecycle ownership and Session relationships are defined in
+[`agent-execution.md`](agent-execution.md).
 
 ## Boundary
 
@@ -60,6 +64,8 @@ Every triggered session gets two metadata labels:
 - `mohist.io/trigger/subscription-id` — which subscription
 
 Traceable in both directions. User owns config correctness; system owns observability.
+Each trigger creates an AgentJob plus an AgentSession. AgentJob is authoritative for response
+completion; the labeled AgentSession supplies conversation and audit evidence.
 
 ## Components
 
@@ -74,6 +80,7 @@ Handler has zero business domain `using`.
 
 - Agent-specific approve channel. Agents use `mo workflow approve` / `mo issue approve`.
 - Strict conflict detection. Visibility replaces it.
-- Per-subscription retry/outbox. Reuse event bus delivery + AgentSession failure visibility.
+- Per-subscription retry/outbox. Reuse event bus delivery + AgentJob failure visibility and
+  AgentSession audit evidence.
 - Workflow profile `requiresApproval`. Orthogonal.
 - Per-agent concurrency gate. Control through subscription and visibility first.

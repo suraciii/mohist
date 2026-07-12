@@ -9,9 +9,9 @@
 | .NET SDK | 11.0+ | `dotnet --version` |
 | Node.js | 22+ | `node --version` |
 | npm | 10+ | `npm --version` |
-| opencode CLI | 任意 | `opencode --version` |
+| opencode CLI | 可正常启动 | `opencode --version` |
 
-如果 `opencode` 没装，按 [opencode 官方文档](https://opencode.ai) 装。Mohist 不内置 AI 模型，依赖 opencode 作为 coder agent。
+如果 `opencode` 没装，按 [opencode 官方文档](https://opencode.ai) 装。Mohist 不内置 AI 模型，Inline Agent 依赖 OpenCode 执行任务。
 
 ## 1. 获取代码 + 安装依赖
 
@@ -50,7 +50,7 @@ npm run dev:web
 
 > 生产或长跑场景请参考 [Self-host 部署](self-host.md)，不用三个终端。
 
-## 4. 配置 coder agent 模型
+## 4. 配置 Inline Agent 模型
 
 Mohist 通过 opencode 调用 LLM。你需要确保 opencode 能正常工作：
 
@@ -59,7 +59,10 @@ Mohist 通过 opencode 调用 LLM。你需要确保 opencode 能正常工作：
 opencode --help
 ```
 
-然后在 Web UI 的 **Settings → Coder Agent** 里选择 default model。这个模型会在 workflow 执行时传给 opencode。
+不指定模型时，Inline Agent 使用 OpenCode 的默认模型。需要显式选择时，可以
+直接写在 task 的 `options`，也可以在 Workflow variables 中配置后通过
+`options: ${{ vars.agent }}` 传入。完整配置见
+[`mohist/opencode` Action](opencode-action.md)。
 
 ## 5. 创建你的第一个项目
 
@@ -104,7 +107,7 @@ mo issue start 1
 
 这时 Mohist 会：
 1. 创建 worktree（`mo/issue-1` 分支）
-2. 进入 **Plan** 阶段，Agent 开始分析需求、产出 proposal/design/specs/tasks
+2. 进入 **Plan** 阶段，Inline Agent 开始分析需求、产出 proposal/design/specs/tasks
 
 ## 8. 等待 Plan 完成
 
@@ -120,13 +123,13 @@ Plan 完成后，issue 会停在 **awaiting approval** 状态，表示 workflow 
 
 进入 issue 详情页，看 `LatestArtifactsPanel` 里的产物：
 
-- `proposal.md` — Agent 对这个需求的理解
+- `proposal.md` — Inline Agent 对这个需求的理解
 - `design.md` — 设计决策
 - `specs/` — 规格变更
 - `tasks.json` — 接下来 Build 阶段会执行的步骤
-- `self-review.md` — Agent 自己的 review
+- `self-review.md` — Inline Agent 自己的 review
 
-读一遍，觉得合理就点 **Approve**。觉得有问题就 **Reject**（Agent 会重新 plan）。这一步处理的是 workflow 的审批点；动作可以来自 Web UI、CLI、Agent 或其它自动化。
+读一遍，觉得合理就点 **Approve**。觉得有问题就 **Reject**（Inline Agent 会重新 plan）。这一步处理的是 workflow 的审批点；动作可以来自 Web UI、CLI、Mohist Agent 或其它自动化。
 
 ```bash
 mo issue approve 1     # 批准
@@ -137,8 +140,8 @@ mo issue reject 1      # 打回
 
 审批通过后 workflow 自动推进：
 
-- **Build**：Agent 按 tasks.json 写代码、跑测试
-- **Check**：Agent review 自己的产出，可能再次等待审批
+- **Build**：Inline Agent 按 tasks.json 写代码、跑测试
+- **Check**：Inline Agent review 自己的产出，可能再次等待审批
 - **Integrate**：把 `mo/issue-1` 分支合并回 base branch
 
 任何阶段失败，issue 会进入 blocked 状态。看 [故障恢复](troubleshooting.md) 怎么处理。

@@ -78,7 +78,7 @@ mo info         CLI 本地诊断（受控例外：跨资源只读，不归任一
 | `mo workflow pause <runId>` | 暂停（可恢复） |
 | `mo workflow stop <runId>` | 终止（不可恢复） |
 
-这些动作也可通过 issue 号触发（`mo issue approve <编号>`），issue 号是工作流执行的人类可读别名。直接寻址面向脚本与 agent 订阅场景——它们手里只有执行 ID。
+这些动作也可通过 issue 号触发（`mo issue approve <编号>`），issue 号是工作流执行的人类可读别名。直接寻址面向脚本与 Mohist Agent 订阅场景——它们手里只有执行 ID。
 
 所有控制命令支持 `-o table|json` 和 `--dry-run`（打印请求体不发请求）。issue 快捷方式同样使用 `mo issue rerun <编号> --from-stage <阶段>`；`pause` 可恢复，`stop` 是终态。
 
@@ -186,6 +186,11 @@ mo issue session reset <编号> <名称>
 mo issue session followup <编号> <名称> [--text <文本>|--text-file <路径>]
 ```
 
+`compact` 使用当前执行后端的原生压缩并保持底层 Session 身份；`reset` 建立
+没有旧上下文的新 Session 并保留会话沿革；`followup` 在执行中进入当前回合，空闲
+时开始下一回合。会话身份与来源见 [Agent 与 AgentSession](agents.md)；OpenCode 的
+具体行为见 [`mohist/opencode` Action](opencode-action.md)。
+
 常用示例：
 
 ```
@@ -216,7 +221,10 @@ mo epic close <epic-id-or-number>            放弃里程碑
 
 epic 无 delete——里程碑用 done（完成）或 close（放弃）收尾，不删除。
 
-## Agent（智能体）
+## Mohist Agent（Named Agent）
+
+`mo agent` 管理的是 Project 内有稳定身份的 Mohist Agent。Inline Agent 由 Workflow
+task 的 Action Input 定义，不通过这组命令创建或管理。
 
 ```
 mo agent create [options]
@@ -229,8 +237,17 @@ mo agent session get <会话id>
 mo agent session transcript <会话id>
 mo agent session launch <agent> [--prompt <文本>|--prompt-file <路径>]
 mo agent session followup <会话id> [--text <文本>|--text-file <路径>]
+mo agent session compact <会话id>
+mo agent session reset <会话id>
 mo agent session cancel <会话id>
 ```
+
+`mo issue session ...` 与 `mo agent session ...` 面向同一种 AgentSession。前者按
+Workflow 来源查找，后者按 Mohist Agent 来源查找；它们不是两套 Session 模型。
+
+`launch` 是便利入口：它解析指定 Mohist Agent，并同时创建一次 AgentJob 和一段
+AgentSession。AgentJob 负责这次执行的成功或失败，命令返回的 Session ID 用于查看
+对话和继续 follow-up。`cancel` 只中断当前执行回合，不删除 AgentSession。
 
 ## Label（标签）
 
@@ -328,7 +345,9 @@ mo update runner                    仅升级执行器
 
 ## 实装差距
 
-当前实装与本文无未收敛项。命令面随各命令组改进 issue 进一步对齐到本文。
+`mo agent session compact/reset` 尚未交付；当前只有 Workflow 来源的 Session 提供
+对应 CLI 入口。两种来源会随统一 AgentSession 模型和 `mohist/opencode` 替换一起
+对齐。其它命令面随各命令组改进 issue 进一步对齐到本文。
 
 ## 典型工作流脚本
 

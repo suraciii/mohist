@@ -10,8 +10,7 @@ Workflow Profile 定义"Issue 怎么从 Draft 走到 Done"，包括阶段、任�
 
 ```yaml
 variables:
-  agent:
-    type: opencode
+  agent: {}
 
 stages:
   - stage: plan
@@ -19,12 +18,14 @@ stages:
     tasks:
       - id: proposal
         title: Generate proposal
-        uses: mohist/acp-agent
+        uses: mohist/opencode
         with:
+          session: plan
           prompt: ${{ prompts.proposal }}
-          expect:
-            files:
-              - path: ${{ openspecChangeDir }}/proposal.md
+          options: ${{ vars.agent }}
+        expect:
+          files:
+            - path: ${{ openspecChangeDir }}/proposal.md
       - id: specs
         # ...
       - id: design
@@ -47,7 +48,7 @@ stages:
     requiresApproval: true
     tasks:
       - id: review
-        # Agent review 自己的产出
+        # Inline Agent review 自己的产出
 
   - stage: integrate
     requiresApproval: false
@@ -76,22 +77,28 @@ stage 依次执行 `archive-change` → `push` → `merge-pr`，
     - id: tasks
     - id: self-review
       with:
+        session: plan
         prompt: ${{ prompts.self-review }}
-        expect:
-          markers:
-            - path: ${{ openspecChangeDir }}/self-review.md
-              oneOf: [PASS, FAIL]
-              failIf: FAIL
-      onFailure:
-        limit: 2
-        cases:
-          - when:
-              output.errorCode: review-failed
+        options: ${{ vars.agent }}
+      expect:
+        markers:
+          - path: ${{ openspecChangeDir }}/self-review.md
+            oneOf:
+              - <promise>PASS</promise>
+              - <promise>FAIL</promise>
+            failIf: <promise>FAIL</promise>
+      recovery:
+        budget: 2
+        handlers:
+          - when: promise=FAIL
             tasks:
               - id: recover:fix-plan-review
-                uses: mohist/acp-agent
-                with: { prompt: ${{ prompts.fix-plan-review }} }
-            retry: self
+                uses: mohist/opencode
+                with:
+                  session: plan
+                  prompt: ${{ prompts.fix-plan-review }}
+                  options: ${{ vars.agent }}
+            retrySelf: true
     - id: open-draft-pr        # mohist/create-github-pr
       with:
         draft: true
@@ -109,70 +116,81 @@ stage 依次执行 `archive-change` → `push` → `merge-pr`，
   tasks:
     - id: ai-review
       with:
+        session: check
         prompt: ${{ prompts.review }}
-        expect:
-          markers:
-            - path: ${{ openspecChangeDir }}/review.md
-              oneOf: [PASS, FAIL]
-              failIf: FAIL
-      onFailure:
-        limit: 2
-        cases:
-          - when:
-              output.errorCode: review-failed
+        options: ${{ vars.agent }}
+      expect:
+        markers:
+          - path: ${{ openspecChangeDir }}/review.md
+            oneOf:
+              - <promise>PASS</promise>
+              - <promise>FAIL</promise>
+            failIf: <promise>FAIL</promise>
+      recovery:
+        budget: 2
+        handlers:
+          - when: promise=FAIL
             tasks:
               - id: recover:fix-review-findings
-                uses: mohist/acp-agent
-                with: { prompt: ${{ prompts.auto-fix }} }
-            retry: self
+                uses: mohist/opencode
+                with:
+                  session: check
+                  prompt: ${{ prompts.auto-fix }}
+                  options: ${{ vars.agent }}
+            retrySelf: true
     - id: push                 # mohist/push (forceWithLease: true)
     - id: mark-pr-ready        # mohist/mark-github-pr-ready
   checks:
     - name: github-pr-status   # mohist/github-pr-status (read-only)
 
-  - stage: integrate
-    tasks:
-      - id: archive-change
+- stage: integrate
+  tasks:
+    - id: archive-change
     - id: push
     - id: merge-pr            # mohist/merge-github-pr
       with:
         prNumber: ${{ vars.github.pr.number }}
         method: squash
-      onFailure:
-        limit: 2
-        cases:
-          - when:
-              output.errorCode: base-moved
+      recovery:
+        budget: 2
+        handlers:
+          - when: errorCode=base-moved
             tasks:
               - id: recover:rebase        # mohist/rebase (conflictMode: task)
-                onFailure:
-                  limit: 1
-                  cases:
-                    - when:
-                        output.errorCode: conflict
+                recovery:
+                  budget: 1
+                  handlers:
+                    - when: errorCode=conflict
                       tasks:
                         - id: recover:resolve-rebase-conflicts
-                          uses: mohist/acp-agent
-                          with: { prompt: ${{ prompts.resolve-rebase-conflicts }} }
+                          uses: mohist/opencode
+                          with:
+                            session: integrate
+                            prompt: ${{ prompts.resolve-rebase-conflicts }}
+                            options: ${{ vars.agent }}
               - id: recover:push
-            retry: self
+            retrySelf: true
 
-          - when:
-              output.errorCode: pr-checks-failed
+          - when: errorCode=pr-checks-failed
             tasks:
-              - id: recover:fix-pr-checks   # mohist/acp-agent
-                with: { prompt: ${{ prompts.fix-pr-checks }} }
+              - id: recover:fix-pr-checks   # mohist/opencode
+                uses: mohist/opencode
+                with:
+                  session: integrate
+                  prompt: ${{ prompts.fix-pr-checks }}
+                  options: ${{ vars.agent }}
               - id: recover:push
-            retry: self
+            retrySelf: true
   checks:
     - name: merge-verified    # mohist/github-pr-status with expect: merged
 ```
 
-`self-review` 和 `ai-review` 都使用 `expect.markers` + `failIf: FAIL` 把
-marker 命中映射成 task 失败，`output.errorCode`（如 `review-failed`）由
-对应 action 在自己的 marker artifact 中声明（参见
+`self-review` 和 `ai-review` 都使用 `expect.markers` +
+`failIf: <promise>FAIL</promise>` 把
+marker 命中映射成 task 失败，并把命中的 promise 值作为 `output.promise`
+返回。`recovery.handlers` 可以直接匹配 `promise=FAIL`（参见
 [`design/workflow/actions.md`](../design/workflow/actions.md)）。失败会
-触发 `onFailure` 声明的 recovery task，recovery 完成后用 `retry: self`
+触发匹配 handler 声明的 recovery task，recovery 完成后用 `retrySelf: true`
 重新运行原失败 task。
 
 `open-draft-pr` 是 plan 的最后一个 task，它把稳定的 PR 身份写入 workflow
@@ -192,10 +210,10 @@ runtime variables，后续 stage 不需要重复打开 PR：
 `mohist/github-pr-status` 的 `expect: merged` 做只读确认。
 
 rebase 冲突只通过 task-level recovery 处理。冲突时返回
-`output.errorCode: conflict` 并保留 rebase 进行中；profile 的
-`recover:rebase` recovery（`output.errorCode: conflict` →
-`recover:resolve-rebase-conflicts`）由 agent 解决冲突、完成 rebase，然后
-workflow 继续走 `recover:push` 并 `retry: self` 重新合并。
+`errorCode: conflict` 并保留 rebase 进行中；profile 的
+`recover:rebase` recovery（`errorCode=conflict` →
+`recover:resolve-rebase-conflicts`）由 Inline Agent 解决冲突、完成 rebase，然后
+workflow 继续走 `recover:push` 并 `retrySelf: true` 重新合并。
 
 PR title/body 不从 workflow metadata 读取。profile 通过
 `titleFrom: issue.title`、`bodyFrom: issue.body` 指示 `mohist/create-github-pr`
@@ -215,14 +233,14 @@ PR title/body 不从 workflow metadata 读取。profile 通过
   等待 GitHub PR checks，通过后 `gh pr merge --squash` 并确认
   `state=MERGED`；recoverable failure 返回 action-owned
   `errorCode: base-moved` 或 `errorCode: pr-checks-failed`，由 profile 的
-  `merge-pr.onFailure` 显式处理。
+  `merge-pr.recovery` 显式处理。
 - `mohist/github-pr-status` 是只读 check：默认验证 PR 已 ready，
   `expect: merged` 验证 PR 已合入。
 
 PR checks 属于 `mohist/merge-github-pr` 的内部前置条件，不是 stage-level
-check。`pr-checks-failed` 在 `merge-pr.onFailure` 里显式声明 recovery
-（`recover:fix-pr-checks` → `recover:push` → `retry: self`），失败后由
-agent 自动修并重新合并；不依赖 stage hook 或隐式边界动作。
+check。`pr-checks-failed` 在 `merge-pr.recovery` 里显式声明
+（`recover:fix-pr-checks` → `recover:push` → `retrySelf: true`），失败后由
+Inline Agent 自动修并重新合并；不依赖 stage hook 或隐式边界动作。
 
 ## 关键字段
 
@@ -241,7 +259,7 @@ agent 自动修并重新合并；不依赖 stage hook 或隐式边界动作。
 - Check: `true`（等待审批）
 - Integrate: `false`（自动合并）
 
-`requiresApproval` 的含义是阶段完成后需要审批。Workflow 只关心是否收到 approve / reject 决策，不关心审批者是 owner、脚本还是 Agent。
+`requiresApproval` 的含义是阶段完成后需要审批。Workflow 只关心是否收到 approve / reject 决策，不关心审批者是 owner、脚本还是 Mohist Agent。
 
 ### tasks
 
@@ -249,8 +267,9 @@ agent 自动修并重新合并；不依赖 stage hook 或隐式边界动作。
 
 - `id`：唯一标识
 - `title`：人读的名字
-- `uses`：用哪个 action（如 `mohist/acp-agent`、`core/artifact-exists`）
-- `with`：传给 action 的参数（prompt、expect 等）
+- `uses`：用哪个 action（如 `mohist/opencode`、`core/artifact-exists`）
+- `with`：传给 action 的参数；`mohist/opencode` 只使用 `prompt`、`session`、`options`
+- `expect`：Workflow 对本次 task 的完成要求，不属于 Action Input
 - `artifacts`：声明产出哪些文件
 
 ### checks
@@ -259,7 +278,8 @@ agent 自动修并重新合并；不依赖 stage hook 或隐式边界动作。
 
 ### variables
 
-可复用变量。最常见的是 `agent`（coder agent 类型）。
+可复用变量。最常见的是 `agent`（传给 `mohist/opencode` 的 OpenCode options）。
+变量只有通过 `options: ${{ vars.agent }}` 绑定到 task 后才会影响执行。
 
 ### prompts
 
@@ -285,7 +305,7 @@ Settings → Workflows → 选 profile → 编辑 yaml。
 
 适合简单项目不想多一层审查。直接删掉 check stage 的整段。
 
-注意：去掉 check 意味着你信任 build 的产出，没有 Agent 二次 review。
+注意：去掉 check 意味着你信任 build 的产出，没有 Inline Agent 二次 review。
 
 ### 3. 加 deploy 阶段
 
@@ -303,18 +323,23 @@ Settings → Workflows → 选 profile → 编辑 yaml。
 
 ### 4. 改 AI 模型 per-stage
 
-每个 task 的 `with.agent` 可以指定不同模型：
+每个 task 的 `with.options` 可以指定不同模型：
 
 ```yaml
 - id: proposal
-  uses: mohist/acp-agent
+  uses: mohist/opencode
   with:
-    agent:
-      type: opencode
-      model: claude-sonnet-4   # 用强模型做规划
+    session: plan
+    prompt: ${{ prompts.proposal }}
+    options:
+      model:
+        providerID: anthropic
+        id: claude-sonnet-4
+        variant: high
 ```
 
-或通过 Web UI Settings → Coder Agent → Stage Model Overrides。
+也可以把同一个 `options` 对象放进 project、issue 或 stage variables，再用
+`options: ${{ vars.agent }}` 绑定。Workflow 不限制变量由哪一层提供。
 
 ## 创建新 Profile
 
@@ -326,6 +351,14 @@ Settings → Workflows → 选 profile → 编辑 yaml。
 4. 重启 server
 
 之后 `mo issue create --workflow-profile <your-name>` 就能用。
+
+## Inline Agent 实装差距
+
+本文按目标接口使用 `mohist/opencode` 和 `options: ${{ vars.agent }}`。
+当前内置 profile 仍使用 `mohist/acp-agent` 和旧的 `agent` input；在
+[`mohist/opencode` Action](opencode-action.md) 所述替换完成前，自定义现有 profile 时仍需
+以当前可用 action 为准。当前 schema 还把 `expect` 放在 `with` 中；目标实现会把它
+提升为 Workflow task 的完成契约，使 OpenCode Action Input 保持最小。
 
 ## Profile ID 约定
 
@@ -358,7 +391,7 @@ Workflow 里的 `prompts.proposal` 等模板可以在 Settings → Templates 里
 - `${{ vars.agent }}`
 - 等等
 
-完整 issue 内容由 Agent 通过 CLI 获取，例如：
+完整 issue 内容由 Inline Agent 通过 CLI 获取，例如：
 
 ```bash
 mo issue show ${{ issue.number }} --project-id ${{ project.id }}

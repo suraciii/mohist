@@ -66,6 +66,29 @@ for (k,v) in taskWith:
   else → preserve
 ```
 
+Whole-value expansion preserves the resolved JSON type. This is how Workflow variables
+select OpenCode options without creating a second configuration path:
+
+```yaml
+variables:
+  agent:
+    model:
+      providerID: anthropic
+      id: claude-sonnet-4
+
+tasks:
+  - uses: mohist/opencode
+    with:
+      prompt: ${{ prompts.proposal }}
+      options: ${{ vars.agent }}
+```
+
+After expansion, `options` is an object in Action Input. The action must not read the
+effective variable bundle or merge `vars.agent` again.
+
+Task-level `expect` uses the same template lookup rules but is expanded separately. It never
+deep-merges into `with` and never becomes Action Input.
+
 ## Runtime writes: setVars
 
 Task success → action output projected to run profile via `setVars`:

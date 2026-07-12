@@ -33,7 +33,7 @@ mo issue show <number>
 | AI 自检失败（check 没过） | `mo issue retry <n>` | 重新跑当前阶段 |
 | Runner 崩了且自动恢复失败 | `mo issue retry <n>` | Runner 恢复后重试失败阶段 |
 | 想完全重做当前阶段 | `mo issue rerun <n>` | 丢弃当前产物重跑 |
-| 当前阶段彻底卡死 | `mo issue force-stop <n>` | 强杀 agent，再 retry/resume |
+| 当前阶段彻底卡死 | `mo issue force-stop <n>` | 终止当前 Inline Agent 回合，再 retry/resume |
 | 不想继续了 | `mo issue stop <n>` | 终止运行（保留状态） |
 | 完全放弃 | `mo issue close <n>` | 进 cancelled 终态 |
 
@@ -60,7 +60,7 @@ mo issue sessions <n>  # 看 AI 实际在想什么
 **解决**：
 
 - 确认 `opencode --help` 工作
-- Web UI Settings → Coder Agent 检查模型配置
+- Web UI Settings → OpenCode 检查模型配置
 - 改 issue body 更具体，retry
 
 ### 2. Build 阶段写不出代码
@@ -132,7 +132,7 @@ mo project status
 
 仍在等待的 Workflow 会自动继续。已经 blocked 的 Workflow 在 Runner 恢复后执行 Retry；已完成阶段和历史不会丢失。
 
-### 6. Agent session 卡死（无输出）
+### 6. AgentSession 卡死（无输出）
 
 **症状**：Issue 显示 running，但长时间（> 10 分钟）无任何输出。
 
@@ -228,7 +228,7 @@ git worktree prune
 
 - issue 输入不够清楚，Plan 经常跑偏
 - 测试慢、不稳定，Check 经常误伤
-- 模块边界混乱，Agent 难以在短上下文里完成修改
+- 模块边界混乱，Inline Agent 难以在短上下文里完成修改
 - workflow profile 不适合当前任务类型
 
 这类问题会拖慢整条生产线。优先修输入模板、测试、模块边界或 workflow profile，再继续扩大并发。

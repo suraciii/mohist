@@ -9,7 +9,7 @@ Web UI 是日常使用 Mohist 的主要入口。访问 `http://localhost:3456`�
 | **看板（Home）** | 默认页。所有 issue 按状态分列 |
 | **Issue 详情** | 单个 issue 的全部信息和操作 |
 | **Issue 改动文件** | 看一个 issue 改了哪些文件、diff |
-| **Coder Session** | Agent 执行时的对话回放 |
+| **AgentSession** | Workflow 或 Mohist Agent 执行时的对话记录与操作 |
 | **Epics** | Epic 列表和详情 |
 | **Activity** | 实时活动流 |
 | **Logs** | 系统日志 |
@@ -38,7 +38,7 @@ Web UI 是日常使用 Mohist 的主要入口。访问 `http://localhost:3456`�
 - Status pill（blocked / approval / running / waiting / drift）
 - Workflow stage pill（Plan / Build / Check / Integrate）
 - Health pill（active / paused / blocked 等）
-- Running indicator（脉冲蓝点，表示 Agent 正在工作）
+- Running indicator（脉冲蓝点，表示 Inline Agent 正在工作）
 
 ### 筛选和排序
 
@@ -102,7 +102,7 @@ Web UI 是日常使用 Mohist 的主要入口。访问 `http://localhost:3456`�
 | 状态 | 可见按钮 | 含义 |
 |---|---|---|
 | Backlog | Start | 启动 workflow |
-| Running | Running indicator + Force Stop | Agent 正在执行，可强停 |
+| Running | Running indicator + Force Stop | Inline Agent 正在执行，可强停 |
 | Awaiting approval | Approve / Reject | 审批 |
 | Blocked | Retry / Resume / Rerun / Stop | 页面突出显示当前可用的推荐操作 |
 | Done | Close / Archive | 终态处理 |
@@ -113,17 +113,23 @@ URL: `/issues/<number>/files`
 
 显示一个 issue 改动的所有文件，含 diff 视图。
 
-## Coder Session 页
+## AgentSession 页
 
-URL: `/sessions/<session-id>`
+从 Issue 的 Workflow Session 列表或 Mohist Agent 的 Session 列表进入。
 
-Agent 在执行 task 时的对话回放。可以：
+这里展示 Workflow 或 Mohist Agent 执行时的对话记录。可以：
 
-- 看 Agent 的执行过程
-- 看每个工具调用（读文件、写文件、跑命令）
-- 调试为什么 Agent 做了某个奇怪的决定
+- 看每个回合的消息和工具调用
+- 看模型、用量、压缩记录和会话沿革
+- 提交 follow-up：执行中进入当前回合，空闲时开始下一回合
+- Compact：使用当前执行后端的原生能力压缩上下文
+- Reset：在 Session 空闲时开始一段没有旧上下文的新对话，同时保留旧会话记录
+- 调试某个回合为什么产生当前结果
 
-调试 plan/build 诡异行为时必看。
+Compact 不会创建一段伪装成原 Session 的新对话。Reset 才会建立新的底层 Session，
+并继续显示在同一个 AgentSession 下。Session 来源与身份见
+[Agent 与 AgentSession](agents.md)；OpenCode 操作语义见
+[`mohist/opencode` Action](opencode-action.md)。
 
 ## Epics 页
 
@@ -180,7 +186,7 @@ URL: `/activity`
 
 - Issue 状态变化
 - Workflow stage 推进
-- Agent session 开始/结束
+- AgentSession 开始/结束
 - Runner 连接/断开
 
 调试"刚才发生了什么"时看。
@@ -199,7 +205,7 @@ URL: `/settings/<section>`
 
 | Section | 用途 |
 |---|---|
-| **Coder Agent** | 配 AI 模型（default + per-stage override） |
+| **OpenCode** | 查看 OpenCode 模型与配置 |
 | **Runtime** | Runner 状态、并发容量 |
 | **Repositories** | 项目关联的 git 仓库 |
 | **Workflows** | Workflow profile 管理 |

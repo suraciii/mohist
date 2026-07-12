@@ -47,7 +47,7 @@ body 质量**决定 plan 质量**，plan 质量**决定整个 issue 的成败**�
 这个 issue 完成后，世界应该变成什么样？
 
 ## Non-goals
-明确不做什么（避免 Agent 顺手做太多）
+明确不做什么（避免 Inline Agent 顺手做太多）
 
 ## Acceptance criteria
 怎么算完成？（可验证的条件）
@@ -59,7 +59,7 @@ body 质量**决定 plan 质量**，plan 质量**决定整个 issue 的成败**�
 Add search
 ```
 
-Agent 不知道你要搜什么、搜哪些字段、要不要高亮、要不要分页。结果 plan 写一堆你不需要的东西。
+Inline Agent 不知道你要搜什么、搜哪些字段、要不要高亮、要不要分页。结果 plan 写一堆你不需要的东西。
 
 **正例**：
 
@@ -110,7 +110,7 @@ Web UI 上点 issue card 进详情页，能看到：
 - Diff / commits 概览
 - Latest artifacts（plan/check 产物）
 - 操作按钮（Start / Approve / Reject / Stop / Retry / 等）
-- Coder sessions（Agent 执行时的对话回放）
+- AgentSessions（Workflow 执行时的对话记录）
 
 ## 启动 Issue
 
@@ -122,7 +122,7 @@ mo issue start 42
 
 1. Mohist 创建 `mo/issue-42` worktree 分支
 2. 进入 Plan 阶段
-3. Agent 开始执行
+3. Inline Agent 开始执行
 
 **前置条件**：
 - Issue 在 backlog
@@ -135,10 +135,10 @@ Plan / Check 完成后，issue 进入 `awaiting approval`。这表示 workflow �
 
 ```bash
 mo issue approve 42     # 通过，进下一阶段
-mo issue reject 42 --message "Missing error handling in proposal"  # 打回，Agent 重做当前阶段
+mo issue reject 42 --message "Missing error handling in proposal"  # 打回，Inline Agent 重做当前阶段
 ```
 
-Workflow 不关心审批者是 owner、Agent 还是脚本。你手动处理时，`reject` 必须带理由，用 `--message`（或 `-m`）说明需要重做什么。需要更长上下文时，可以先 add comment，再用简短 reject message 指向它：
+Workflow 不关心审批者是 owner、Mohist Agent 还是脚本。你手动处理时，`reject` 必须带理由，用 `--message`（或 `-m`）说明需要重做什么。需要更长上下文时，可以先 add comment，再用简短 reject message 指向它：
 
 ```bash
 mo issue comment add 42 --body "Reject because: missing error handling in proposal"
@@ -156,7 +156,7 @@ mo issue comment add 42 --body "Looks good but check edge cases"
 
 Web UI 上 issue 详情页底部有 comment 区。
 
-Comment 是你和 Agent 协作的**轻量通道**——Agent 在 plan 阶段会读 comment 作为额外上下文。
+Comment 是你和 Inline Agent 协作的**轻量通道**——Inline Agent 在 plan 阶段会读 comment 作为额外上下文。
 
 ## Prerequisite（前置依赖）
 
@@ -174,7 +174,7 @@ Web UI 上 issue 详情页有 "Add Prerequisite" 区。
 ## 中断、停止与关闭
 
 ```bash
-# 可恢复暂停（force-stop）—— 终止运行中的 agent session，后续用 resume 接着跑
+# 可恢复暂停（force-stop）—— 终止当前执行回合，保留 AgentSession，后续用 resume 接着跑
 mo issue force-stop 42
 
 # 永久停止（stop）—— terminal，不能 resume
@@ -189,7 +189,7 @@ mo issue reopen 42
 
 | 操作 | 适用场景 | 后果 |
 |---|---|---|
-| `force-stop` | 暂时停止、agent 卡住、想保留恢复入口 | 终止运行中的 agent，workflow 进入可 `resume` 的 paused 状态 |
+| `force-stop` | 暂时停止、Inline Agent 卡住、想保留恢复入口 | 终止当前回合，workflow 进入可 `resume` 的 paused 状态 |
 | `stop` | 确定不再继续这次 workflow | 永久停止 workflow run，terminal，不能 resume |
 | `close` | 这个 issue 不做了 | 进入 closed 终态，可 reopen |
 | `reopen` | 误关了，或想再做 | 回到 backlog |
@@ -229,7 +229,7 @@ mo issue update 42 --priority p1
 mo issue update 42 --label kind=bug --label area=web
 ```
 
-启动后的 issue 改 body 要谨慎——Agent 已经基于旧 body 在工作。
+启动后的 issue 改 body 要谨慎——Inline Agent 已经基于旧 body 在工作。
 
 ## CLI 完整命令一览
 
@@ -259,7 +259,7 @@ mo issue logs <number>
 mo issue events <number>
 mo issue diff <number>
 mo issue commits <number>
-mo issue sessions <number>     # coder session 回放
+mo issue sessions <number>     # AgentSession 记录
 mo issue workflow [options]    # workflow 子命令
 ```
 
