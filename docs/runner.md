@@ -7,7 +7,7 @@ Runner 是 Mohist 的执行后端。Server 是大脑（决定做什么），Runn
 Mohist 的架构原则：**控制平面和执行平面分离**。
 
 - **Server**（控制平面）：维护状态、做决策、推事件
-- **Runner**（执行平面）：跑 shell、起 agent、操作 git、写文件
+- **Runner**（执行平面）：执行 Action、操作 git、写文件并连接 OpenCode 等执行后端
 
 为什么分开？
 
@@ -59,7 +59,7 @@ Runner 有最大并发限制（默认 8）。意思是：
 
 **别盲目调高**：
 
-- 每个 agent session 占 CPU 和内存
+- 每个 AgentSession turn 占 CPU 和内存
 - 同时跑太多 → 模型 API 限速、机器负载爆、git lock 冲突
 - 个人开发机建议 4-8
 
@@ -69,8 +69,8 @@ Runner 有最大并发限制（默认 8）。意思是：
 
 1. **准备 worktree**：克隆 base branch 到 `mo/issue-<n>` 分支
 2. **渲染 prompt**：用 issue body、artifacts、模板拼出 prompt
-3. **起 agent**：调用 opencode（或配置的其他 agent）
-4. **流式接收**：实时把 agent 输出回传 Server（更新 UI）
+3. **执行 Action**：`mohist/opencode` 把这次 turn 交给已安装的 OpenCode
+4. **流式接收**：实时把 Action 执行事实回传 Server（更新 UI）
 5. **验证产出**：检查 expect.files 是否存在
 6. **回收 workspace**：task 完成后清理（或保留供 debug）
 
@@ -114,7 +114,7 @@ mo runner logs                  # runner 受管服务的运维日志
 ```bash
 mo issue logs <number>
 mo issue events <number>     # 事件流
-mo issue sessions <number>   # coder session 回放
+mo issue sessions <number>   # AgentSession 记录
 ```
 
 ### 常见 Runner 问题
@@ -134,7 +134,10 @@ Runner 行为可通过环境变量或 config 文件调（看 `mo runner start --
 - 并发 capacity
 - Server URL
 - Workspace 路径
-- Agent type（默认 opencode）
+
+Runtime 后端不由 Runner 全局 `type` 选择；Workflow task 的 `uses` 决定执行
+`mohist/opencode`。模型等选项由 Action Input 提供，见
+[`mohist/opencode` Action](opencode-action.md)。
 
 ## Self-host 场景
 

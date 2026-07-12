@@ -1,8 +1,9 @@
 # Task Dispatch
 
-## task.with expansion
+## Task configuration expansion
 
-`tasks[*].with` has `${{ }}` template expressions. WorkflowGrain expands them at dispatch.
+`tasks[*].with` and task-level `expect` may contain `${{ }}` template expressions.
+WorkflowGrain expands them at dispatch.
 
 ```
 ${{ path }}  →  resolved variable value
@@ -10,10 +11,17 @@ non-template  →  kept as-is
 ```
 
 Expanded JSON objects deep-merge with resolved vars (vars win, task-level stays).
+A whole-value expression keeps the resolved JSON type, so
+`options: ${{ vars.agent }}` dispatches an object rather than a JSON string. The rendered
+`with` payload is the action's only variable/configuration input; actions do not read the
+Workflow variable store again.
+
+`expect` is expanded and dispatched separately as Workflow's task completion contract. It is
+not inserted into `with` and is not part of a runtime-specific Action Input.
 
 ## Dispatch context
 
-Available in `with` expressions:
+Available in `with` and `expect` expressions:
 
 | Variable | Source |
 |---|---|

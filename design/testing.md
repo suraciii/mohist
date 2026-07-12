@@ -117,7 +117,7 @@ Planned:
 | HTTP | WebApplicationFactory + TestServer | vi.stubGlobal('fetch') | MSW | RecordingHttpHandler |
 | SignalR | RecordingRunnerHubContext | vi.mock('@microsoft/signalr') | config alias → tests/support/signalr-fake.ts | — |
 | notification | — | — | config alias → tests/support/sonner-fake.ts | — |
-| process | — | setAcpProcessFactoryForTest | — | FakeCommandExecutor |
+| process | — | fake OpenCodeRuntime / SDK server factory | — | FakeCommandExecutor |
 | DB | in-memory SQLite, clone from MigratedSqliteTemplate.CopyTo (no Migrate()) | — | — | fake IOtelQueryExecutor |
 | grain | InProcessTestCluster, ControllableReminderTable | — | — | — |
 | render | — | — | customRender (tests/test-utils.tsx) | — |

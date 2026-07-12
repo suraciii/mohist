@@ -4,7 +4,7 @@
 
 ## 一句话版本
 
-> 你在 **Project** 里把产品目标拆成 **Issue**，由 **Workflow** 推进到 Done。多个相关 Issue 组成 **Epic**。**Agent** 执行工作，也可以通过事件订阅响应系统事件。需求探索由外部 **Skill** 完成，产物是可进入 Workflow 的 Issue。
+> 你在 **Project** 里把产品目标拆成 **Issue**，由 **Workflow** 推进到 Done。多个相关 Issue 组成 **Epic**。Workflow 可通过 **Inline Agent** 直接执行 task；有稳定身份的 **Mohist Agent** 可以被启动，也可以通过订阅响应系统事件。需求探索由外部 **Skill** 完成，产物是可进入 Workflow 的 Issue。
 
 ## Project（项目）
 
@@ -59,12 +59,12 @@ Draft → Plan → Build → Check → Integrate → Done
 每个阶段：
 
 - **Draft** — Issue 创建后的初始状态，没启动
-- **Plan** — Agent 理解需求、产出 proposal/design/specs/tasks
-- **Build** — Agent 按 tasks 写代码、跑测试
-- **Check** — Agent review 自己的产出
+- **Plan** — Inline Agent 理解需求、产出 proposal/design/specs/tasks
+- **Build** — Inline Agent 按 tasks 写代码、跑测试
+- **Check** — Inline Agent review 自己的产出
 - **Integrate** — 合并分支回 base branch
 
-某些阶段（默认是 Plan 和 Check）完成后会进入**审批点**。Workflow 只关心是否收到 approve / reject 决策，不关心审批者是 owner、Agent 还是脚本。
+某些阶段（默认是 Plan 和 Check）完成后会进入**审批点**。Workflow 只关心是否收到 approve / reject 决策，不关心审批者是 owner、Mohist Agent 还是脚本。
 
 详见 [工作流详解](the-workflow.md)。
 
@@ -83,16 +83,18 @@ Epic 是为一个产品目标持续供料的单位。新建的 Epic 默认 `idle
 
 详见 [用 Epic 规划](epics.md) 了解完整生命周期。
 
-## Agent（执行者、响应者、代理人）
+## Inline Agent 与 Mohist Agent
 
-Agent 有两种用法：
+Inline Agent 是 Workflow 直接通过 `mohist/opencode` 等 Action 调用 Agent 能力的
+方式，没有独立 Agent ID。Mohist Agent 则是 Project 内有稳定 ID、名称、Instructions
+和配置的 Named Agent，可以手动启动或响应事件。
 
-- **执行 workflow task**：Runner 启动 Agent，让它按 workflow 输入完成规划、实现、审查、修复等任务。
-- **响应系统事件**：Agent 事件订阅让 Agent 监听 workflow / issue / epic / runner 等事件，按订阅提示词自动行动。
+AgentSession 不是 Agent，也不是工作结果；它记录一段对话的消息、上下文、用量和
+会话沿革。Workflow TaskRun 或 AgentJob 负责工作生命周期，AgentSession 只负责
+会话与审计。
 
-Agent 的核心位置是代理人：它进入流水线上原本由 owner 负责的占位。所有 Agent 可以做的动作，都必须能由人手动做；Agent 只是按配置和提示词代你执行。
-
-事件响应不是只为审批准备的。常见场景包括在审批点到达时发起 approve / reject、分析失败、总结完成内容、生成后续 issue、通知 owner。
+完整关系见 [Agent 与 AgentSession](agents.md)；OpenCode Action 配置见
+[`mohist/opencode` Action](opencode-action.md)。
 
 ## Approval（审批）
 
@@ -101,10 +103,10 @@ Agent 的核心位置是代理人：它进入流水线上原本由 owner 负责�
 一个审批点可以由多种机制给出决策：
 
 - 自动检查：测试、lint、artifact 是否齐全。
-- Agent 或脚本：读取证据后调用 approve / reject。
+- Mohist Agent 或脚本：读取证据后调用 approve / reject。
 - owner：在需要人工判断时调用 approve / reject。
 
-Workflow 不区分这些来源。谁来发起审批，是 Agent、CLI、Web UI 或外部自动化的职责；审批结果仍然只有 approve / reject。
+Workflow 不区分这些来源。谁来发起审批，是 Mohist Agent、CLI、Web UI 或外部自动化的职责；审批结果仍然只有 approve / reject。
 
 ## Skill（外部 agent 能力）
 
@@ -126,7 +128,7 @@ Mohist 分发两个 Skill：
   ↓（mohist skill 创建 issue）
 Issue 进入 Mohist workflow
   ↓
-Agent 按 workflow 执行到 Done
+Inline Agent 按 workflow 执行到 Done
 ```
 
 详见 [Skill 机制](skills.md)。
@@ -152,7 +154,7 @@ Agent 按 workflow 执行到 Done
 [产品向前进一步]
 ```
 
-记住一个心智模型：**你是 owner；Epic 负责目标和供料；Issue 是工件；Workflow 是生产线；Agent 是代理人；审批点决定工件能不能继续流动。**
+记住一个心智模型：**你是 owner；Epic 负责目标和供料；Issue 是工件；Workflow 是生产线；Inline Agent 直接执行 task；Mohist Agent 是可复用的代理人；AgentSession 记录每段对话；审批点决定工件能不能继续流动。**
 
 ---
 

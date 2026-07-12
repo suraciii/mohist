@@ -10,14 +10,19 @@
 - [cli.md](cli.md) — 命令面设计契约：句法（资源在前）、命令树形状、资源命名（作用域用 flag、子资源挂父资源下）、动词一致性、唯一入口与全局 flag 约定。
 - [testing.md](testing.md) — 测试两条轨道（spec/unit）、外部依赖、时间依赖、fake 入口速查。
 - [eventbus.md](eventbus.md) — 事件总线：CloudEvent 订阅契约 + 单分发器可靠 at-least-once 通知（分发器**未交付**）。
-- [agent-subscriptions.md](agent-subscriptions.md) — Agent 事件订阅（**WIP**）：Agent 监听 CloudEvent、按订阅响应提示词自动启动。归属 Agent 上下文，消费 PL；handler 只读信封、Agent 用 `mo workflow show <runId>` 自拉上下文；前置依赖 mo workflow 命令套件已由 issue #381 交付。
+
+## Agent 与执行
+
+- [agent-execution.md](agent-execution.md) — Action、Inline Agent、Mohist Agent、AgentJob、AgentSession 与 Runtime Session 的分层和生命周期所有权。
+- [opencode-runtime.md](opencode-runtime.md) — `mohist/opencode`、OpenCode SDK v2、物理 Session、事件补偿与 Session 命令边界。
+- [agent-subscriptions.md](agent-subscriptions.md) — Mohist Agent 事件订阅（**WIP**）：Named Agent 监听 CloudEvent、按订阅响应提示词自动启动。
 
 ## Workflow 核心域
 
 - [workflow/actions.md](workflow/actions.md) — action input/output 接口、errorCode、失败恢复编排。
 - [workflow/builtin-workflows/](workflow/builtin-workflows/) — 内置 workflow；一个 workflow 一个文件。
 - [workflow/profile.md](workflow/profile.md) — profile = template + variables 的加载与合并。
-- [workflow/task-dispatch.md](workflow/task-dispatch.md) — task.with 模板展开和 dispatch 输入。
+- [workflow/task-dispatch.md](workflow/task-dispatch.md) — Action Input 与 task-level `expect` 的独立模板展开和 dispatch 输入。
 - [workflow/recovery.md](workflow/recovery.md) — 失败恢复：recovery 声明、when 匹配、runner 构造恢复任务。
 - [workflow/scheduling.md](workflow/scheduling.md) — runner claim、pull、report、supervision。
 - [workflow/issue-coordination.md](workflow/issue-coordination.md) — Issue、WorkflowRun、Runner、Session 的跨聚合交互。

@@ -6,13 +6,20 @@ status: wip-not-implemented
 
 > **⚠️ 尚未实现**：本文描述的功能当前**没有**实装。这是产品方案，记录用户需求与设计方向。已实装的能力请看其它文档。
 
+本文的 Agent 均指有稳定 ID、名称和 Instructions 的 **Mohist Agent（Named Agent）**，
+不是 Workflow 通过 `mohist/opencode` 直接调用的 Inline Agent。Inline Agent 没有可供
+订阅引用的 Agent 身份。两者关系见 [Agent 与 AgentSession](agents.md)。
+
 > **CLI 前置依赖已就绪**：Agent 响应提示词里要按 `workflowRunId` 拉取 run 详情（含关联 issue）的能力已由 `mo workflow get <runId>` 提供（issue #381）。本特性落地时不再受该前置依赖阻塞。
 
 ## 它解决什么问题
 
-Mohist 是一条软件生产线。Workflow、issue、epic、runner、agent session 都会产生事件：阶段等待审批、任务失败、issue 完成、epic 没有可推进的 issue、runner 掉线等。
+Mohist 是一条软件生产线。Workflow、issue、epic、runner、AgentSession 都会产生事件：阶段等待审批、任务失败、issue 完成、epic 没有可推进的 issue、runner 掉线等。
 
 Agent 事件订阅让你把这些事件交给 Agent 响应。你配置一条订阅：匹配什么事件、由哪个 Agent 响应、响应时用什么提示词。事件发生后，Agent 自动启动，按提示词读取上下文并执行动作。
+
+每次命中都会创建一次 AgentJob 和一段 AgentSession。AgentJob 记录这次响应是否完成，
+AgentSession 记录对话和工具调用；订阅本身不把 Session 当作工作结果。
 
 > 用你的话说：「我实际上是在配置让一个 agent 监听某个 issue 的某个事件，事件发生时 agent 就会响应……判断逻辑写在提示词里，不写在程序里——我来负责把提示词写好。」
 
@@ -96,7 +103,7 @@ Agent 在这里是代理人。它进入流水线上原本由 owner 负责的位�
 系统不做严格冲突拦截（不强制你把所有订阅优先级配得互不重叠），但提供**可见性**让你自己核对配置是否符合预期：
 
 - 从事件查：某次事件 → 是被哪个 Agent、哪条订阅响应的。
-- 从 Agent job 查：这个 Agent 这次执行 → 是响应哪个事件、哪条订阅触发的。
+- 从 AgentJob 查：这个 Agent 这次执行 → 是响应哪个事件、哪条订阅触发的。
 
 兜底/接管配错了（你以为 B 接管结果 A 跑了），从可见性里能发现，然后你去调优先级。**配置正确性你负责，可观测性系统负责。**
 
@@ -122,7 +129,7 @@ Agent 在这里是代理人。它进入流水线上原本由 owner 负责的位�
 
 ## 还没定的几件事
 
-1. **动作可追溯性**：Workflow 不关心审批者是谁，但审计视图需要能看出某次动作是由哪个 Agent session、脚本或用户发起。
+1. **动作可追溯性**：Workflow 不关心审批者是谁，但审计视图需要能看出某次动作是由哪个 AgentSession、脚本或用户发起。
 2. **配置入口**：订阅在 Web UI 的 Agent 详情页里配（Subscriptions 分区），还是单独的订阅管理页？CLI 要不要 `mo agent subscribe ...`？
 3. **过滤表达式的精确语法**：沿用现有 `|` 多选 + `.*` 通配的写法，还是引入更通用的多属性过滤语法，待技术方案定。
 4. **响应方式**：哪些事件默认 fan-out，哪些事件必须互斥，是否由订阅显式声明，待技术方案定。

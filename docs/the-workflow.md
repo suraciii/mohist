@@ -20,7 +20,7 @@ Draft ──start──▶ Plan ──approve──▶ Build ──auto──▶
 Issue 创建后的初始状态。这时：
 
 - 没有启动 workflow
-- Agent 还没开始执行
+- Inline Agent 还没开始执行
 - 可以编辑 title、body、labels、priority
 - 可以加 prerequisites（"等 #N 完成再开始"）
 
@@ -31,7 +31,7 @@ mo issue start <number>   # 启动 workflow，进入 Plan
 
 ## Plan（规划）
 
-Agent 理解需求、规划怎么实现。这是**最重要的阶段**——规划错了后面全错。
+Inline Agent 理解需求、规划怎么实现。这是**最重要的阶段**——规划错了后面全错。
 
 ### Plan 阶段做的事
 
@@ -43,7 +43,7 @@ Agent 理解需求、规划怎么实现。这是**最重要的阶段**——规�
 | `specs/` | capability spec 的具体改动（用户故事级别） |
 | `design.md` | 技术设计决策（如果有多种实现方式，写清楚选哪个、为什么） |
 | `tasks.json` | 接下来 Build 阶段要执行的步骤清单（含验收条件） |
-| `self-review.md` | Agent 自己对 plan 的 review（"我考虑了 X、权衡了 Y、担心 Z"） |
+| `self-review.md` | Inline Agent 对 plan 的 self-review（"我考虑了 X、权衡了 Y、担心 Z"） |
 
 ### Plan 阶段通常 5-20 分钟
 
@@ -61,11 +61,11 @@ mo issue approve <number>   # 通过 plan，进入 Build
 mo issue reject <number>    # 打回，重新 plan
 ```
 
-Workflow 不关心审批者是 owner、Agent 还是脚本。人工处理时，重点看 proposal.md 和 tasks.json；这是发现方向错误成本最低的位置。
+Workflow 不关心审批者是 owner、Mohist Agent 还是脚本。人工处理时，重点看 proposal.md 和 tasks.json；这是发现方向错误成本最低的位置。
 
 ## Build（实现）
 
-Agent 按 tasks.json 里的步骤写代码。
+Inline Agent 按 tasks.json 里的步骤写代码。
 
 ### Build 阶段做的事
 
@@ -81,12 +81,12 @@ Agent 按 tasks.json 里的步骤写代码。
 
 ## Check（审查）
 
-Agent 复审 Build 的产出，相当于内部 code review。
+Inline Agent 复审 Build 的产出，相当于内部 code review。
 
 ### Check 阶段做的事
 
 - 跑完整测试套件
-- Agent review 自己的 diff
+- Inline Agent review 自己的 diff
 - 产出 `review.md`（review 结论 + 发现的问题 + 建议修复）
 - 如果发现问题，可能触发 re-build 修复
 
@@ -99,7 +99,7 @@ mo issue approve <number>   # 进入 Integrate
 mo issue reject <number>    # 回到 Build 重做
 ```
 
-人工处理时读 `review.md`。Agent 的 review 通常会暴露 Build 阶段没注意到的问题。
+人工处理时读 `review.md`。Inline Agent 的 review 通常会暴露 Build 阶段没注意到的问题。
 
 ## Integrate（合并）
 
@@ -173,7 +173,7 @@ Web UI 上每个 issue card 会用颜色点显示 health。
 3. **Issue blocked** — 看原因，retry/rerun/stop
 4. **Runner 不可用且自动恢复失败** — 按页面给出的操作继续
 
-这些动作可以由 owner、脚本或 Agent 发起。Workflow 只关心审批动作本身和结果。
+这些动作可以由 owner、脚本或 Mohist Agent 发起。Workflow 只关心审批动作本身和结果。
 
 ## 自定义 Workflow
 

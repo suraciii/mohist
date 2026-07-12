@@ -9,7 +9,9 @@ Action = workflow task execution interface. `uses` selects the action. `with` pa
 - Engine never defines global `FailureKind` / `ErrorKind`.
 - Engine never interprets action output semantics.
 
-Engine only: expands `tasks[*].with`, stores task output, projects output to workflow variables via `setVars`, matches `when` for recovery, inserts recovery tasks mechanically.
+Engine only: expands task input and Workflow-owned completion declarations, stores task
+output, projects output to workflow variables via `setVars`, matches `when` for recovery,
+and inserts recovery tasks mechanically.
 
 ## Input
 
@@ -66,7 +68,9 @@ artifacts:
 
 ## expect
 
-Task completion contract. Only `expect` failure fails the task.
+Workflow-owned task completion contract, separate from Action Input. The Runner's Workflow
+task executor receives it alongside the rendered input and applies it after Action execution;
+actions and runtime modules never interpret it. Only `expect` failure fails the task.
 
 ```yaml
 expect:
@@ -89,6 +93,34 @@ Recovery `when` matches any field: `errorCode=base-moved`, `promise=FAIL`, `erro
 
 No global error enum. No engine understanding of specific error meanings.
 Recovery design: `recovery.md`.
+
+## OpenCode action
+
+`mohist/opencode` is a runtime-specific Action. Direct Workflow use is Inline Agent
+execution; the Action is not a Mohist Agent and does not resolve Agent definitions. Its
+runtime is selected by `uses`, so input has no `kind` or `type` discriminator.
+
+```yaml
+uses: mohist/opencode
+with:
+  session: plan
+  prompt: ${{ prompts.proposal }}
+  options: ${{ vars.agent }}
+```
+
+The action receives only the rendered `prompt`, optional logical `session` name, and optional
+OpenCode-native `options`. Workflow supplies `expect` separately as the task completion
+contract. The action never reads `vars.agent` as a hidden fallback. Output is `null` unless
+an expectation matches a promise marker, in which case it is only:
+
+```json
+{ "promise": "PASS" }
+```
+
+Runtime Session identity, model, usage, transcript, diagnostics, and expectation detail are
+stored in their owning models rather than duplicated in action output. Concept ownership:
+[`../agent-execution.md`](../agent-execution.md). OpenCode implementation:
+[`../opencode-runtime.md`](../opencode-runtime.md).
 
 ## GitHub PR actions
 
