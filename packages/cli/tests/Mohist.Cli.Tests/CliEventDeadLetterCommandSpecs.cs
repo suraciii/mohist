@@ -184,6 +184,29 @@ public sealed class CliEventDeadLetterCommandSpecs
     }
 
     [Fact]
+    public async Task List_NonLoopbackServerFailsBeforeReadingOrSendingCredential()
+    {
+        var env = Setup((_, _) => throw new InvalidOperationException("API must not be called"));
+        env.Http.BaseAddress = new Uri("https://example.test");
+        env.Environment[OperatorCredentialProvider.TokenEnvironmentVariable] = "";
+        env.Environment["HOME"] = "/home/no-credential";
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            env.Http,
+            ["event", "dead-letter", "list"],
+            env.Output,
+            env.Error,
+            env.FileSystem,
+            env.Executor,
+            env.Environment);
+
+        Assert.Equal(1, exitCode);
+        Assert.Contains("loopback", env.Error.ToString(), StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("credential was not found", env.Error.ToString(), StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(env.Handler.Requests);
+    }
+
+    [Fact]
     public async Task List_DefaultCredentialFileAuthenticatesRequest()
     {
         var env = Setup((_, _) => Task.FromResult(RecordingHttpHandler.Json(new

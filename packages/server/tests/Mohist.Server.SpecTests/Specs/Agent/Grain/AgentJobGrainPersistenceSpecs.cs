@@ -84,6 +84,7 @@ public sealed class AgentJobGrainPersistenceSpecs
         Assert.Equal(AgentJobStatus.Pending, prepared.Status);
         Assert.Equal(runnerId, prepared.RunnerId);
         Assert.False(string.IsNullOrWhiteSpace(prepared.CurrentWorkId));
+        Assert.False(prepared.RunnerAccepted);
 
         await job.AsReference<IGrainManagementExtension>().DeactivateOnIdle();
         _fixture.DispatchObserver.FailRunnerAccepted = false;
@@ -93,8 +94,53 @@ public sealed class AgentJobGrainPersistenceSpecs
 
         var resumed = await job.GetRuntimeSnapshotAsync();
         Assert.Equal(prepared.CurrentWorkId, resumed.CurrentWorkId);
+        Assert.True(resumed.RunnerAccepted);
         var runnerState = await Grains.GetGrain<IRunnerGrain>(runnerId).GetRuntimeStateAsync();
         var work = Assert.Single(runnerState.ActiveWorks, item => item.OwnerId == jobKey);
+        Assert.Equal(prepared.CurrentWorkId, work.WorkId);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
+    [Fact]
+    public async Task PreparedAssignment_OfflineBeforeAcceptance_ReassignsStableWorkToHealthyRunner()
+    {
+        await ClearRunnerRegistryAsync();
+        var projectId = $"agent-job-replacement-project-{Guid.NewGuid():N}";
+        var unavailableRunnerId = await RegisterRunnerAsync(projectId, "unavailable");
+        var jobKey = $"agent-job-replacement-{Guid.NewGuid():N}";
+        var job = Grains.GetGrain<IAgentJobGrain>(jobKey);
+        var input = new AgentJobInput(
+            "replace unaccepted runner",
+            WorkspacePath: "/tmp/agent-job-replacement",
+            ProjectId: projectId);
+        _fixture.DispatchObserver.FailAssignmentPrepared = true;
+
+        await job.SubmitAsync(input);
+        await _fixture.DispatchObserver.WaitForAssignmentPreparedAsync();
+
+        var prepared = await job.GetRuntimeSnapshotAsync();
+        Assert.Equal(AgentJobStatus.Pending, prepared.Status);
+        Assert.Equal(unavailableRunnerId, prepared.RunnerId);
+        Assert.False(prepared.RunnerAccepted);
+        Assert.False(string.IsNullOrWhiteSpace(prepared.CurrentWorkId));
+
+        _fixture.DispatchObserver.FailAssignmentPrepared = false;
+        await Grains.GetGrain<IRunnerGrain>(unavailableRunnerId).UnregisterAsync();
+        var replacementRunnerId = await RegisterRunnerAsync(projectId, "replacement");
+        await job.AsReference<IGrainManagementExtension>().DeactivateOnIdle();
+
+        await job.EnsureSubmittedAsync(input);
+        await WaitForRunningAsync(job);
+
+        var resumed = await job.GetRuntimeSnapshotAsync();
+        Assert.Equal(replacementRunnerId, resumed.RunnerId);
+        Assert.Equal(prepared.CurrentWorkId, resumed.CurrentWorkId);
+        Assert.True(resumed.RunnerAccepted);
+        var replacementState = await Grains
+            .GetGrain<IRunnerGrain>(replacementRunnerId)
+            .GetRuntimeStateAsync();
+        var work = Assert.Single(replacementState.ActiveWorks, item => item.OwnerId == jobKey);
         Assert.Equal(prepared.CurrentWorkId, work.WorkId);
     }
 

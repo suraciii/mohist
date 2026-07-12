@@ -57,11 +57,19 @@ public sealed class AgentJobGrainFixture : IAsyncLifetime
 
 public sealed class ControllableAgentJobDispatchObserver : IAgentJobDispatchObserver
 {
+    private TaskCompletionSource _assignmentPrepared = NewSignal();
     private TaskCompletionSource _runnerAccepted = NewSignal();
 
+    public bool FailAssignmentPrepared { get; set; }
     public bool FailRunnerAccepted { get; set; }
 
-    public Task AssignmentPreparedAsync(string agentJobId, string runnerId, string workId) => Task.CompletedTask;
+    public Task AssignmentPreparedAsync(string agentJobId, string runnerId, string workId)
+    {
+        _assignmentPrepared.TrySetResult();
+        return FailAssignmentPrepared
+            ? Task.FromException(new InvalidOperationException("simulated activation loss after assignment preparation"))
+            : Task.CompletedTask;
+    }
 
     public Task RunnerAcceptedAsync(string agentJobId, string runnerId, string workId)
     {
@@ -73,9 +81,13 @@ public sealed class ControllableAgentJobDispatchObserver : IAgentJobDispatchObse
 
     public Task WaitForRunnerAcceptedAsync() => _runnerAccepted.Task;
 
+    public Task WaitForAssignmentPreparedAsync() => _assignmentPrepared.Task;
+
     public void Reset()
     {
+        FailAssignmentPrepared = false;
         FailRunnerAccepted = false;
+        _assignmentPrepared = NewSignal();
         _runnerAccepted = NewSignal();
     }
 

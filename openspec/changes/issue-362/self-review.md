@@ -172,6 +172,54 @@
   Resolution: A real SQLite `EventStore` spec injects a trigger failure on the durable hint insert after the inbox row was saved inside the shared transaction. The failure leaves zero inbox and zero hint rows; replay after removing the trigger commits exactly one row on each side and a duplicate replay remains one-to-one.
   Status: resolved
 
+- [ID: item-29]
+  Severity: blocking
+  Scope: dispatcher fixed-key invariant
+  Resolution: `DispatcherGrain.OnActivateAsync` rejects every primary key except `FixedKey` before registering a reminder. A grain spec resolves a non-fixed key and proves activation fails without reminder registration or handler invocation.
+  Status: resolved
+
+- [ID: item-30]
+  Severity: blocking
+  Scope: unregister versus admitted poll
+  Resolution: `RunnerGrain.UnregisterAsync` now waits for the poll-admission gate before clearing the registration profile and offline state. The gates are released before cross-grain closeout to avoid a lock cycle; later polls observe the cleared registration and cannot claim work. A deterministic spec pauses an admitted poll, starts unregister, and proves unregister cannot linearize until the poll completes.
+  Status: resolved
+
+- [ID: item-31]
+  Severity: blocking
+  Scope: CLI operator credential boundary
+  Resolution: Dead-letter commands require an absolute loopback `HttpClient.BaseAddress` before resolving the operator credential or sending a request. A CLI spec uses a non-loopback address and proves the command fails without reading the configured token file or invoking the HTTP handler.
+  Status: resolved
+
+- [ID: item-32]
+  Severity: warning
+  Scope: operator diagnostic UNC redaction
+  Resolution: Operator diagnostics redact UNC paths before the existing drive-letter and POSIX path pass. Unit and API specs prove the returned summary exposes neither the server/share path nor the file name.
+  Status: resolved
+
+- [ID: item-33]
+  Severity: warning
+  Scope: managed operator secret paths
+  Resolution: Generated default credentials retain the non-symlink and user-only permission contract. Explicitly configured paths are treated as operator-managed inputs, may resolve through a secret-volume symlink, and are read without chmod or replacement. Specs accept an explicit symlink and continue to reject a default-path symlink.
+  Status: resolved
+
+- [ID: item-34]
+  Severity: warning
+  Scope: Agent candidate acceptance recovery
+  Resolution: AgentJob state persists an explicit Runner-accepted checkpoint. A prepared candidate is reconciled by replaying the same stable work to the original Runner; an existing durable work record confirms acceptance, while an offline Runner with no record rejects it and is released for replacement. Specs cover both the post-acceptance checkpoint crash and replacement after `AssignmentPreparedAsync` without creating a second work identity.
+  Status: resolved
+
+- [ID: item-35]
+  Severity: test-gap
+  Scope: fresh-host first reminder delivery
+  Resolution: The two-silo fixture now registers `DispatcherActivationService` as a real hosted service. A spec appends an event after cluster startup, advances fake time, and observes reminder-driven handler delivery without direct `EnsureStartedAsync`, `ReceiveReminder`, or `PulseAsync` calls.
+  Status: resolved
+
+- [ID: item-36]
+  Severity: test-gap
+  Scope: production dead-letter failure persistence
+  Resolution: A real SQLite `DeadLetterStore` spec persists a row, starts redelivery, records an exhausted failure, reloads it from a fresh context, and verifies `Pending` status, replacement diagnostics, attempt count, timestamp, and unresolved-query visibility.
+  Status: resolved
+
 ## Verification
 
 - Dispatcher/Hermes unit slice: 30 passed.
@@ -183,7 +231,8 @@
 - Console-capture slice: 9 passed in five consecutive runs.
 - Final review-repair slices: Agent poll/capacity 24; Inbox projection/hint 40; diagnostic unit/API 16; credential CLI/server 12; dispatcher fake + four-table SQLite 40; CLI docs/event 18. All passed.
 - Post-review Runner/Agent/Inbox slice: 42 passed, including activation recovery, poll/update linearization, stale-slot rejection, and real EventStore rollback/replay.
-- Full CI-equivalent validation: CLI 874; server unit 1373; architecture 24 with 3 pre-existing skips; server spec 2852 with 9 pre-existing skips; Web 4596; Runner 1007; Node test-boundary checks passed.
+- Latest formal-review repair slices: server spec 114; server unit 32; CLI dead-letter 10. All passed.
+- Full CI-equivalent validation after the latest formal-review repairs: CLI 875; server unit 1376; architecture 24 with 3 pre-existing skips; server spec 2858 with 9 pre-existing skips; Web 4596; Runner 1007; Node test-boundary checks passed.
 - `git diff --check` and `tasks.json` JSON validation pass.
 
 ## Follow-up Items

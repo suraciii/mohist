@@ -21,9 +21,18 @@ public sealed class OperatorCredential : ISingletonService
         var configured = string.IsNullOrWhiteSpace(environmentToken)
             ? configuration["Mohist:OperatorToken"]
             : environmentToken;
-        var token = string.IsNullOrWhiteSpace(configured)
-            ? LoadOrCreate(ResolvePath(configuration, environment))
-            : configured;
+        string token;
+        if (string.IsNullOrWhiteSpace(configured))
+        {
+            var path = ResolvePath(configuration, environment);
+            token = path.IsExplicit
+                ? ReadExplicit(path.Value)
+                : LoadOrCreateDefault(path.Value);
+        }
+        else
+        {
+            token = configured;
+        }
 
         token = token.Trim();
         if (token.Length < MinimumTokenLength)
@@ -47,7 +56,7 @@ public sealed class OperatorCredential : ISingletonService
             && CryptographicOperations.FixedTimeEquals(suppliedBytes, _token);
     }
 
-    internal static string ResolvePath(
+    internal static OperatorCredentialPath ResolvePath(
         IConfiguration configuration,
         IEnvironmentVariableProvider environment)
     {
@@ -56,14 +65,16 @@ public sealed class OperatorCredential : ISingletonService
             ? configuration["Mohist:OperatorTokenPath"]
             : environmentPath;
         if (!string.IsNullOrWhiteSpace(configured))
-            return Path.GetFullPath(configured);
+            return new OperatorCredentialPath(Path.GetFullPath(configured), IsExplicit: true);
 
         var home = environment.GetEnvironmentVariable(MohistServiceRegistration.HomeEnvironmentVariable)
             ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        return Path.Combine(home, ".mohist", "operator-token");
+        return new OperatorCredentialPath(
+            Path.Combine(home, ".mohist", "operator-token"),
+            IsExplicit: false);
     }
 
-    private static string LoadOrCreate(string path)
+    private static string LoadOrCreateDefault(string path)
     {
         if (File.Exists(path))
             return ReadAndSecure(path);
@@ -111,4 +122,19 @@ public sealed class OperatorCredential : ISingletonService
             File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
         return File.ReadAllText(path, Encoding.UTF8);
     }
+
+    private static string ReadExplicit(string path)
+    {
+        try
+        {
+            return File.ReadAllText(path, Encoding.UTF8);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            throw new InvalidOperationException(
+                $"Mohist operator credential could not be read from '{path}': {ex.Message}", ex);
+        }
+    }
+
+    internal sealed record OperatorCredentialPath(string Value, bool IsExplicit);
 }

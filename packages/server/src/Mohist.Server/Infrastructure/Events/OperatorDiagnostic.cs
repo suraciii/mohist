@@ -25,6 +25,7 @@ public static partial class OperatorDiagnostic
 
         var sanitized = RemoveControls(AnsiEscapePattern().Replace(firstLine.ToString(), string.Empty));
         sanitized = StackFramePattern().Replace(sanitized, "[stack]");
+        sanitized = UncPathPattern().Replace(sanitized, "[path]");
         sanitized = PathPattern().Replace(sanitized, "[path]");
         sanitized = WhitespacePattern().Replace(sanitized, " ").Trim();
         var summary = sanitized.Length <= MaximumLength
@@ -48,6 +49,9 @@ public static partial class OperatorDiagnostic
 
     [GeneratedRegex(@"(?<!\S)at\s+[\p{L}\p{N}_.$+`<>\[\],]+\([^)]*\)(?:\s+in\s+.*)?", RegexOptions.CultureInvariant)]
     private static partial Regex StackFramePattern();
+
+    [GeneratedRegex(@"\\\\[^\\\s'""<>()\[\]{}]+\\[^\s'""<>()\[\]{}]+", RegexOptions.CultureInvariant)]
+    private static partial Regex UncPathPattern();
 
     [GeneratedRegex(@"(?:file://)?(?:[a-zA-Z]:[\\/]|/)[^\s'""<>()\[\]{}]+", RegexOptions.CultureInvariant)]
     private static partial Regex PathPattern();

@@ -155,22 +155,31 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
 
     public async Task UnregisterAsync()
     {
-        await _lifecycleGate.WaitAsync();
+        await _pollAdmissionGate.WaitAsync();
         try
         {
-            _log.LogInformation("Runner {Id} unregistered", RunnerId);
-            _status = RunnerStatus.Offline;
-            SetRunnerInfo(null);
-            await PersistAsync();
-            var registry = GrainFactory.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
-            await registry.UnregisterAsync(RunnerId);
-            await CloseoutLostAsync();
-            await ClearWorksAsync(WorkDispatchOwnerKinds.AgentJob);
+            await _lifecycleGate.WaitAsync();
+            try
+            {
+                _log.LogInformation("Runner {Id} unregistered", RunnerId);
+                _status = RunnerStatus.Offline;
+                SetRunnerInfo(null);
+                await PersistAsync();
+                var registry = GrainFactory.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
+                await registry.UnregisterAsync(RunnerId);
+            }
+            finally
+            {
+                _lifecycleGate.Release();
+            }
         }
         finally
         {
-            _lifecycleGate.Release();
+            _pollAdmissionGate.Release();
         }
+
+        await CloseoutLostAsync();
+        await ClearWorksAsync(WorkDispatchOwnerKinds.AgentJob);
     }
 
     public Task HeartbeatAsync() => Task.CompletedTask;
@@ -231,13 +240,13 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
             await _lifecycleGate.WaitAsync();
             try
             {
-                if (_status != RunnerStatus.Online || _info is null)
-                    return new RunnerWorkAssignmentResult(RunnerWorkAssignmentStatus.Rejected, "runner-offline");
-
                 var ownerId = work.AgentJobId!;
                 var existing = FindWork(work.WorkId, WorkDispatchOwnerKinds.AgentJob, ownerId);
                 if (existing is not null)
                     return new RunnerWorkAssignmentResult(RunnerWorkAssignmentStatus.Assigned);
+
+                if (_status != RunnerStatus.Online || _info is null)
+                    return new RunnerWorkAssignmentResult(RunnerWorkAssignmentStatus.Rejected, "runner-offline");
 
                 var state = await GetRuntimeStateAsync();
                 var activeOwnerCount = state.ActiveWorks

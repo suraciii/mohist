@@ -36,6 +36,12 @@ public sealed class DispatcherGrain : Grain, IDispatcherGrain, IRemindable
 
     public override async Task OnActivateAsync(CancellationToken ct)
     {
+        if (!string.Equals(this.GetPrimaryKeyString(), FixedKey, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                $"Dispatcher grain must use the fixed key '{FixedKey}'.");
+        }
+
         await this.RegisterOrUpdateReminder(
             ReminderName,
             _options.ReminderDueTime,

@@ -101,6 +101,27 @@ public class DispatcherGrainSpecs
         await second.PulseAsync();
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task DispatcherGrain_NonFixedKeyCannotRegisterOrDispatch()
+    {
+        var eventId = $"evt_non_fixed_{Guid.NewGuid():N}";
+        await PublishWorkflowCompletedAsync(eventId, "issue_non_fixed");
+        var rogue = _fixture.Grains.GetGrain<IDispatcherGrain>($"rogue-{Guid.NewGuid():N}");
+
+        var error = await Assert.ThrowsAnyAsync<Exception>(() => rogue.PulseAsync());
+
+        Assert.Contains(DispatcherGrain.FixedKey, error.ToString(), StringComparison.Ordinal);
+        Assert.Null(await _fixture.ReminderTable.ReadRow(
+            rogue.GetGrainId(),
+            DispatcherGrain.ReminderName));
+        Assert.Equal(1, _fixture.EventStore.PendingCount);
+        Assert.DoesNotContain(eventId, _fixture.SpecificInvocations);
+
+        await _fixture.Dispatcher.PulseAsync();
+    }
+
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
@@ -132,6 +153,21 @@ public class DispatcherGrainSpecs
         Assert.Equal("dispatcher-tick", row.ReminderName);
         Assert.True(row.Period > TimeSpan.Zero,
             $"Reminder period must be positive (got {row.Period})");
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task HostedActivation_FirstReminderDeliversWithoutPulse()
+    {
+        var eventId = $"evt_hosted_reminder_{Guid.NewGuid():N}";
+        var delivered = _fixture.WaitForSpecificInvocationAsync(eventId);
+        await PublishWorkflowCompletedAsync(eventId, "issue_hosted_reminder");
+
+        await AwaitSignalAsync(delivered, "hosted dispatcher reminder delivery");
+
+        Assert.Contains(eventId, _fixture.SpecificInvocations);
+        Assert.Equal(0, _fixture.EventStore.PendingCount);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]

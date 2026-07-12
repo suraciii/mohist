@@ -37,7 +37,8 @@ public sealed record AgentJobRuntimeSnapshot(
     [property: Id(1)] string? RunnerId,
     [property: Id(2)] string? CurrentWorkId,
     [property: Id(3)] string? FailureReason,
-    [property: Id(4)] int DispatchAttempts = 0);
+    [property: Id(4)] int DispatchAttempts = 0,
+    [property: Id(5)] bool RunnerAccepted = false);
 
 public enum AgentJobStatus
 {

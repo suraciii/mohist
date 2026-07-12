@@ -183,6 +183,35 @@ public sealed class DeadLetterRoutesSpecs
         }
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
+    [Fact]
+    public async Task List_RedactsUncPaths()
+    {
+        var store = _fixture.Services.GetRequiredService<IDeadLetterStore>();
+        var row = BuildRow("test.unc-redaction.handler");
+        row.ErrorMessage = @"handler failed at \\fileserver\share\secret.txt";
+        await store.WriteAsync(row);
+
+        try
+        {
+            using var response = await _fixture.Client.GetAsync(
+                "/api/events/dead-letters?handler=test.unc-redaction.handler");
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+            var listed = Assert.Single(body.GetProperty("data").EnumerateArray());
+            var error = listed.GetProperty("error").GetString();
+            Assert.Contains("[path]", error, StringComparison.Ordinal);
+            Assert.DoesNotContain("fileserver", error, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("secret.txt", error, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            await store.DeleteAsync(row.DeadLetterId);
+        }
+    }
+
     private static DeadLetterRow BuildRow(string failingHandler)
     {
         var key = Guid.NewGuid().ToString("N");

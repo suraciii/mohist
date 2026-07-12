@@ -203,6 +203,33 @@ public class RunnerDefinitionStateSpecs : WorkflowGrainSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
+    public async Task UnregisterAsync_WaitsForAdmittedPollBeforeClearingRegistration()
+    {
+        var projectId = $"test-project-{Guid.NewGuid():N}";
+        var runnerId = await RegisterRunnerForProjectAsync(projectId);
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        var admission = await runner.TryBeginPollAsync();
+        Assert.True(admission.Admitted);
+
+        var unregister = runner.UnregisterAsync();
+        try
+        {
+            Assert.False(unregister.IsCompleted);
+            Assert.NotNull(await runner.GetInfoAsync());
+        }
+        finally
+        {
+            await runner.EndPollAsync();
+        }
+
+        await unregister;
+        Assert.Null(await runner.GetInfoAsync());
+        Assert.Empty(await runner.PollAllAsync(Services));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
+    [Fact]
     public async Task Poll_AfterCapacityReductionIgnoresEarlierSlotRead()
     {
         var projectId = $"test-project-{Guid.NewGuid():N}";

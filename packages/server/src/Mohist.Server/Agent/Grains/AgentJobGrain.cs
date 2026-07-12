@@ -93,7 +93,8 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             State.RunnerId,
             State.WorkId,
             State.FailureReason,
-            State.DispatchAttempts));
+            State.DispatchAttempts,
+            State.RunnerAccepted));
 
     /// <summary>
     /// Returns the job's terminal result. Before the job has reached a terminal
@@ -122,7 +123,9 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
                 $"AgentJob '{Key}' cannot accept runner assignment in status {State.Status}");
 
         AssignRunnerInternal(runnerId, workId);
+        State.RunnerAccepted = true;
         State.Status = AgentJobStatus.Running;
+        State.RunningSince = _timeProvider.GetUtcNow();
         await SaveAsync();
         ArmJobTimeout();
     }
@@ -131,7 +134,8 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
     {
         State.RunnerId = runnerId;
         State.WorkId = workId;
-        State.RunningSince = _timeProvider.GetUtcNow();
+        State.RunnerAccepted = false;
+        State.RunningSince = null;
     }
 
     public Task<bool> IsWorkRunnableAsync(string runnerId, string workId)
@@ -375,9 +379,13 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
 
         if (State.RunnerId is not null)
         {
-            if (!await TryAssignToRunnerAsync(State.RunnerId))
+            if (await TryAssignToRunnerAsync(State.RunnerId))
+                return;
+            if (State.RunnerId is not null)
+            {
                 await ScheduleNextDispatchAsync();
-            return;
+                return;
+            }
         }
 
         var projectId = State.Input.ProjectId ?? string.Empty;
@@ -403,13 +411,14 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
     private async Task<bool> TryAssignToRunnerAsync(string runnerId)
     {
         var runner = GrainFactory.GetGrain<IRunnerGrain>(runnerId);
-        var state = await runner.GetRuntimeStateAsync();
-        if (state.Status != RunnerStatus.Online)
-            return false;
-
-        var assignmentPrepared = State.RunnerId is not null;
+        var assignmentPrepared = string.Equals(State.RunnerId, runnerId, StringComparison.Ordinal)
+            && State.WorkId is not null;
         if (!assignmentPrepared)
         {
+            var state = await runner.GetRuntimeStateAsync();
+            if (state.Status != RunnerStatus.Online)
+                return false;
+
             var maxSlots = await runner.GetSlotsAsync();
             var activeWorkCount = state.ActiveWorks
                 .Select(w => w.OwnerId)
@@ -434,15 +443,23 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
 
         if (result.Status != RunnerWorkAssignmentStatus.Assigned)
         {
+            if (State.Status != AgentJobStatus.Pending)
+                return false;
+            if (string.Equals(result.Reason, "runner-reconciling", StringComparison.Ordinal))
+                return false;
+
             State.RunnerId = null;
             State.WorkId = null;
+            State.RunnerAccepted = false;
             State.RunningSince = null;
             await SaveAsync();
             return false;
         }
 
         await _dispatchObserver.RunnerAcceptedAsync(Key, runnerId, State.WorkId!);
+        State.RunnerAccepted = true;
         State.Status = AgentJobStatus.Running;
+        State.RunningSince = _timeProvider.GetUtcNow();
         await SaveAsync();
         DisposeDispatchTimer();
         ArmJobTimeout();

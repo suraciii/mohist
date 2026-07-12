@@ -5,6 +5,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Events.Grains;
+using Mohist.Server.Events.Hosting;
 using Mohist.Server.Infrastructure.Data;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Events;
@@ -390,8 +391,6 @@ public sealed class DispatcherFixture : IAsyncLifetime
 
         RunnerWorkspace = Cluster.GetSiloServiceProvider(null).GetRequiredService<FakeRunnerWorkspaceClient>();
         EventPublisher.RegisterSink(EventStore);
-
-        await Dispatcher.EnsureStartedAsync();
     }
 
     public void ResetInvocationRecords()
@@ -468,6 +467,7 @@ public sealed class DispatcherFixture : IAsyncLifetime
         siloBuilder.Services.AddCloudEventHandlersFromAssembly(typeof(DispatcherFixture).Assembly);
 
         siloBuilder.Services.AddSingleton<EventDispatcherService>();
+        siloBuilder.Services.AddHostedService<DispatcherActivationService>();
         siloBuilder.Services.AddSingleton<TimeProvider>(TimeProvider);
         siloBuilder.Services.Configure<DispatcherOptions>(options =>
         {

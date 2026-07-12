@@ -233,6 +233,32 @@ public class DeadLetterStoreSpecs : IAsyncLifetime
     }
 
     [Fact]
+    public async Task RedeliveryFailure_ReturnsToPendingWithUpdatedDiagnostics()
+    {
+        var row = BuildRow(origin: "Issue", deadLetteredAt: FirstTime);
+        await _store.WriteAsync(row);
+        await _store.StartRedeliveryAsync(row.DeadLetterId, SecondTime);
+
+        await _store.RecordRedeliveryFailureAsync(
+            row.DeadLetterId,
+            "replacement handler failure",
+            "replacement stack",
+            attemptCount: 5,
+            attemptedAt: ThirdTime);
+
+        var stored = await _store.GetAsync(row.DeadLetterId);
+        Assert.NotNull(stored);
+        Assert.Equal(DeadLetterStatus.Pending, stored.Status);
+        Assert.Equal("replacement handler failure", stored.ErrorMessage);
+        Assert.Equal("replacement stack", stored.ErrorStack);
+        Assert.Equal(5, stored.AttemptCount);
+        Assert.Equal(ThirdTime, stored.RedeliveryAttemptedAt);
+        Assert.Contains(
+            await _store.QueryAsync(failingHandler: null, limit: 100),
+            candidate => candidate.DeadLetterId == row.DeadLetterId);
+    }
+
+    [Fact]
     public void NoopDeadLetterStore_IsUsableFake()
     {
         IDeadLetterStore fake = new NoopDeadLetterStore();

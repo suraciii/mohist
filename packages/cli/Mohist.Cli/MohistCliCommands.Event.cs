@@ -98,6 +98,14 @@ internal static class EventCommands
         MohistCliApi api,
         OperatorCredentialProvider credentials)
     {
+        var baseAddress = api.Http.BaseAddress;
+        if (baseAddress is null || !baseAddress.IsLoopback)
+        {
+            api.Error.WriteLine(
+                $"Dead-letter operations require a loopback Mohist server URL; refusing to send the operator credential to '{baseAddress}'.");
+            return null;
+        }
+
         try
         {
             var token = await credentials.GetAsync().ConfigureAwait(false);

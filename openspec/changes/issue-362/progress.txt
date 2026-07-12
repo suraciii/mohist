@@ -60,6 +60,10 @@ issue-362 — T-002 working memory
 - Inbox projection and `InboxItemPersisted` event append share one database transaction. A failed append rolls the projection back, so dispatcher replay cannot lose the durable hint behind an `AlreadyExisted` early return.
 - The inbox/hint transaction is verified with the real `EventStore`: an SQLite trigger aborts the final hint insert after the inbox save, proving zero/zero rollback and exactly-one/exactly-one replay.
 - Server and CLI operator credential precedence is environment token, config token, environment path, config path, then the default user-only file. Operator diagnostics redact embedded one-line frames and path substrings in addition to newline-separated stacks.
+- Dispatcher activation enforces `DispatcherGrain.FixedKey` before reminder registration. The string-key interface is therefore not an escape hatch for additional notifier activations.
+- AgentJob persists Runner acceptance separately from candidate preparation. Recovery replays the same stable work to the prepared Runner to distinguish an already accepted assignment from a proven rejection; only the latter can move to a replacement Runner.
+- Explicit unregister waits for the poll-admission boundary before clearing the durable registration profile and offline state. Cross-grain closeout runs after the gates are released, avoiding a Runner/AgentJob lock cycle while preserving the registration linearization point.
+- Dead-letter CLI commands require a loopback base address before resolving credentials. The generated default token remains non-symlink/user-only, explicit managed paths may be symlinks and are never chmodded, and API diagnostic redaction includes UNC paths.
 
 ## Gotchas
 
@@ -69,10 +73,13 @@ issue-362 — T-002 working memory
 - `DispatcherFixture` uses `CapturingEventStore` (in the fixture file, not the Support fakes) to track events AND drive the dispatcher's `ListUndeliveredAsync`. It also installs `NoopDeadLetterStore` so `RedeliverAsync` is exercised without EF.
 - The host-shared application graph registers `EventDispatcherService` as a singleton; `DispatcherGrain` resolves it by constructor injection. `DispatcherOptions` is bound from the `Mohist:Dispatcher` configuration section.
 - `InMemoryEventBus` no longer reads `DateTimeOffset.UtcNow` — both constructors take `TimeProvider` and use `_time.GetUtcNow()` in the typed `PublishAsync<TData>` overload. The two existing constructors are unchanged in argument order except for the new `TimeProvider time` parameter between `IEventStore` and `ILogger`.
+- The deterministic dispatcher cluster fixture registers `DispatcherActivationService` through `IHostedService`; fresh-host reminder delivery tests must not call `EnsureStartedAsync`, `ReceiveReminder`, or `PulseAsync` directly.
+- `RunnerGrain.UnregisterAsync` must release lifecycle/poll gates before calling AgentJob closeout. Holding either gate across that cross-grain callback can deadlock with AgentJob recovery calling back into Runner admission.
 
 ## Acceptance criteria status
 
 - [x] IDispatcherGrain + DispatcherGrain (fixed key "dispatcher") + persisted reminder
+- [x] Non-fixed dispatcher keys fail activation before reminder registration or handler delivery
 - [x] EventDispatcherService: IEventStore, IEnumerable<Subscription>, IDeadLetterStore, TimeProvider, ILogger; all timestamps from injected TimeProvider
 - [x] Pulls via ListUndeliveredAsync (UNION ALL), serial (Source, Id), CloudEventTypeMatcher fan-out
 - [x] Per-handler retry with fixed attempt cap; exhaustion atomically upserts DL rows + sets DispatchedAt
@@ -85,10 +92,15 @@ issue-362 — T-002 working memory
 - [x] Durable handler failures propagate; Hermes and Agent subscription dispatch remain best-effort; accepted Agent trigger launches resume durable stable job/work identities
 - [x] Accepted Agent work is reoffered until reported; overlapping polls are excluded; Agent and workflow work share one capacity calculation without admission-vs-claim races
 - [x] Runner activation loss restores the durable registration profile so an empty poll immediately restores presence and reoffers accepted Agent work
+- [x] Explicit unregister waits for admitted poll reconciliation before clearing the registration profile, preventing post-unregister workflow claims
+- [x] Prepared Agent candidates persist a separate acceptance checkpoint; replay confirms existing stable work or safely replaces a proven-unaccepted offline candidate
 - [x] Poll admission atomically captures capacity; slot updates cannot cross an admitted reconciliation round and stale route-level reads are impossible
 - [x] Inbox projection and its durable realtime hint commit atomically and replay after append failure
 - [x] EventDispatcherService + IDeadLetterStore→DeadLetterStore (+ NoopDeadLetterStore via TryAdd) + subscriptions registered once in the host-shared application graph; MohistSiloRegistration contains Orleans infrastructure only
 - [x] Unit tests cover pull→match→invoke→mark; FIFO (Source,Id); retry-then-succeed; exhaustion; per-handler isolation; deliver-before-mark crash recovery; CloudEventTypeMatcher fan-out with closed-generic handler
 - [x] Spec tests cover PulseAsync, actual reminder callback without Pulse, two-silo host loss recovery, closed-generic handlers, exact-handler dead-letter recovery, credential-protected API/CLI boundary, real workflow handler dispatch, atomic Runner admission, and Agent crash checkpoints including AgentConfig reactivation
 - [x] Real/fake persistence coverage includes post-mark settlement rollback and all four event-table UNION branches in global source/id order
-- [x] Full `npm test` green on rebased master: CLI 874, server unit 1373, arch 24 (3 skipped), server spec 2852 (9 skipped), Web 4596, Runner 1007; Node test-boundary checks and TreatWarningsAsErrors clean
+- [x] Real-store recovery coverage includes failed redelivery returning to Pending with replacement diagnostics and unresolved-query visibility
+- [x] Operator boundary rejects non-loopback CLI targets before credential reads, supports explicit managed symlinks without weakening the default file, and redacts UNC paths in unit/API output
+- [x] Latest formal-review repair slices green: server spec 114, server unit 32, CLI dead-letter 10
+- [x] Full `npm test` green on rebased master after the latest formal-review repairs: CLI 875, server unit 1376, arch 24 (3 skipped), server spec 2858 (9 skipped), Web 4596, Runner 1007; Node test-boundary checks and TreatWarningsAsErrors clean

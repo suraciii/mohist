@@ -23,6 +23,7 @@ public sealed class OperatorDiagnosticTests
     [InlineData("failed path=/srv/private/db.sqlite", "/srv/private", "db.sqlite")]
     [InlineData("failed file:///srv/private/db.sqlite", "/srv/private", "db.sqlite")]
     [InlineData(@"failed path=C:\\private\\db.sqlite", @"C:\\private", "db.sqlite")]
+    [InlineData(@"failed path=\\fileserver\share\secret.txt", "fileserver", "secret.txt")]
     public void Summarize_RedactsSingleLineFramesAndEmbeddedPaths(
         string value,
         string firstSecret,
