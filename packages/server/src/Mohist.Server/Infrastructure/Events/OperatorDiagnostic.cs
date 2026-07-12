@@ -1,10 +1,12 @@
 using System.Text;
+using System.Text.RegularExpressions;
 
 namespace Mohist.Server.Infrastructure.Events;
 
-public static class OperatorDiagnostic
+public static partial class OperatorDiagnostic
 {
     private const int MaximumLength = 1024;
+    private const int MaximumInputLength = 4096;
 
     public static string? Summarize(Exception? exception) =>
         exception is null
@@ -18,31 +20,17 @@ public static class OperatorDiagnostic
 
         var lineEnd = value.AsSpan().IndexOfAny('\r', '\n');
         var firstLine = lineEnd >= 0 ? value.AsSpan(0, lineEnd) : value.AsSpan();
-        var result = new StringBuilder(Math.Min(firstLine.Length, MaximumLength));
+        if (firstLine.Length > MaximumInputLength)
+            firstLine = firstLine[..MaximumInputLength];
 
-        foreach (var token in firstLine.ToString().Split(' ', StringSplitOptions.RemoveEmptyEntries))
-        {
-            if (result.Length > 0)
-                result.Append(' ');
-            result.Append(LooksLikePath(token) ? "[path]" : RemoveControls(token));
-            if (result.Length >= MaximumLength)
-                break;
-        }
-
-        if (result.Length > MaximumLength)
-            result.Length = MaximumLength;
-        var summary = result.ToString().Trim();
+        var sanitized = RemoveControls(AnsiEscapePattern().Replace(firstLine.ToString(), string.Empty));
+        sanitized = StackFramePattern().Replace(sanitized, "[stack]");
+        sanitized = PathPattern().Replace(sanitized, "[path]");
+        sanitized = WhitespacePattern().Replace(sanitized, " ").Trim();
+        var summary = sanitized.Length <= MaximumLength
+            ? sanitized
+            : sanitized[..MaximumLength].TrimEnd();
         return summary.Length == 0 ? null : summary;
-    }
-
-    private static bool LooksLikePath(string token)
-    {
-        var candidate = token.TrimStart('(', '[', '{', '\'', '"');
-        return candidate.StartsWith('/', StringComparison.Ordinal)
-            || (candidate.Length >= 3
-                && char.IsAsciiLetter(candidate[0])
-                && candidate[1] == ':'
-                && candidate[2] is '/' or '\\');
     }
 
     private static string RemoveControls(string value)
@@ -50,9 +38,20 @@ public static class OperatorDiagnostic
         var result = new StringBuilder(value.Length);
         foreach (var character in value)
         {
-            if (!char.IsControl(character))
-                result.Append(character);
+            result.Append(char.IsControl(character) ? ' ' : character);
         }
         return result.ToString();
     }
+
+    [GeneratedRegex("\\x1B\\[[0-?]*[ -/]*[@-~]", RegexOptions.CultureInvariant)]
+    private static partial Regex AnsiEscapePattern();
+
+    [GeneratedRegex(@"(?<!\S)at\s+[\p{L}\p{N}_.$+`<>\[\],]+\([^)]*\)(?:\s+in\s+.*)?", RegexOptions.CultureInvariant)]
+    private static partial Regex StackFramePattern();
+
+    [GeneratedRegex(@"(?:file://)?(?:[a-zA-Z]:[\\/]|/)[^\s'""<>()\[\]{}]+", RegexOptions.CultureInvariant)]
+    private static partial Regex PathPattern();
+
+    [GeneratedRegex(@"\s+", RegexOptions.CultureInvariant)]
+    private static partial Regex WhitespacePattern();
 }

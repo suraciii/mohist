@@ -200,6 +200,41 @@ public class DispatcherGrainSpecs
         Assert.Equal(0, _fixture.EventStore.PendingCount);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task PoisonSettlementFailure_RollsBackSourceMarkAndDeadLetterRows()
+    {
+        var eventId = $"evt_poison_rollback_{Guid.NewGuid():N}";
+        var envelope = new CloudEvent(
+            id: eventId,
+            source: new Uri($"/mohist/issues/issue_poison_rollback_{Guid.NewGuid():N}", UriKind.Relative),
+            type: "test.poison",
+            time: EventTime,
+            data: null);
+        _fixture.DeadLetterStore.ThrowAfterSourceMark = true;
+
+        try
+        {
+            await _fixture.EventPublisher.PublishAsync(envelope);
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                _fixture.Dispatcher.PulseAsync());
+
+            Assert.Contains(
+                await _fixture.EventStore.ListUndeliveredAsync(),
+                row => row.EventId == eventId);
+            Assert.DoesNotContain(
+                _fixture.DeadLetterStore.Written,
+                row => row.EventId == eventId);
+        }
+        finally
+        {
+            _fixture.DeadLetterStore.ThrowAfterSourceMark = false;
+        }
+
+        await _fixture.Dispatcher.PulseAsync();
+    }
+
     private Task PublishWorkflowCompletedAsync(string eventId, string issueId) =>
         _fixture.EventPublisher.PublishAsync(new CloudEvent(
             id: eventId,

@@ -17,4 +17,22 @@ public sealed class OperatorDiagnosticTests
         Assert.DoesNotContain("\u001b", summary, StringComparison.Ordinal);
         Assert.DoesNotContain("/tmp/private", summary, StringComparison.Ordinal);
     }
+
+    [Theory]
+    [InlineData("failure at Namespace.Handler() in /tmp/private/Handler.cs:line 42", "Namespace.Handler", "/tmp/private")]
+    [InlineData("failed path=/srv/private/db.sqlite", "/srv/private", "db.sqlite")]
+    [InlineData("failed file:///srv/private/db.sqlite", "/srv/private", "db.sqlite")]
+    [InlineData(@"failed path=C:\\private\\db.sqlite", @"C:\\private", "db.sqlite")]
+    public void Summarize_RedactsSingleLineFramesAndEmbeddedPaths(
+        string value,
+        string firstSecret,
+        string secondSecret)
+    {
+        var summary = OperatorDiagnostic.Summarize(value);
+
+        Assert.NotNull(summary);
+        Assert.DoesNotContain(firstSecret, summary, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(secondSecret, summary, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("[", summary, StringComparison.Ordinal);
+    }
 }

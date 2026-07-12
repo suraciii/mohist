@@ -108,6 +108,26 @@ public sealed class CapturingEventStore : IEventStore
         get { lock (_gate) { return _rows.Count; } }
     }
 
+    internal StateSnapshot CaptureState()
+    {
+        lock (_gate)
+        {
+            return new StateSnapshot(_rows.ToList(), _nextId);
+        }
+    }
+
+    internal void RestoreState(StateSnapshot snapshot)
+    {
+        lock (_gate)
+        {
+            _rows.Clear();
+            _rows.AddRange(snapshot.Rows);
+            _nextId = snapshot.NextId;
+        }
+    }
+
+    internal sealed record StateSnapshot(IReadOnlyList<UndeliveredEvent> Rows, long NextId);
+
     private static EventOrigin ResolveOrigin(string source)
     {
         if (source.StartsWith("/mohist/workflow-runs/", StringComparison.Ordinal)) return EventOrigin.WorkflowRun;
@@ -130,6 +150,8 @@ public sealed class CapturingDeadLetterStore : IDeadLetterStore
     private readonly List<DeadLetterRow> _rows = [];
     private readonly CapturingEventStore _events;
     private long _nextId;
+
+    public bool ThrowAfterSourceMark { get; set; }
 
     public CapturingDeadLetterStore(CapturingEventStore events)
     {
@@ -171,14 +193,39 @@ public sealed class CapturingDeadLetterStore : IDeadLetterStore
         DateTimeOffset dispatchedAt,
         CancellationToken ct = default)
     {
-        await _events.MarkDispatchedAsync(
-            sourceEvent.Origin,
-            sourceEvent.Source,
-            sourceEvent.Id,
-            dispatchedAt,
-            ct);
-        foreach (var row in rows)
-            await WriteAsync(row, ct);
+        var eventSnapshot = _events.CaptureState();
+        List<DeadLetterRow> rowSnapshot;
+        long nextIdSnapshot;
+        lock (_gate)
+        {
+            rowSnapshot = _rows.Select(Clone).ToList();
+            nextIdSnapshot = _nextId;
+        }
+
+        try
+        {
+            await _events.MarkDispatchedAsync(
+                sourceEvent.Origin,
+                sourceEvent.Source,
+                sourceEvent.Id,
+                dispatchedAt,
+                ct);
+            if (ThrowAfterSourceMark)
+                throw new InvalidOperationException("simulated post-mark settlement failure");
+            foreach (var row in rows)
+                await WriteAsync(row, ct);
+        }
+        catch
+        {
+            _events.RestoreState(eventSnapshot);
+            lock (_gate)
+            {
+                _rows.Clear();
+                _rows.AddRange(rowSnapshot);
+                _nextId = nextIdSnapshot;
+            }
+            throw;
+        }
     }
 
     public Task<IReadOnlyList<DeadLetterRow>> QueryAsync(string? failingHandler, int limit, CancellationToken ct = default)
@@ -255,6 +302,31 @@ public sealed class CapturingDeadLetterStore : IDeadLetterStore
     {
         get { lock (_gate) { return _rows.Where(row => row.Status != DeadLetterStatus.Resolved).ToList(); } }
     }
+
+    private static DeadLetterRow Clone(DeadLetterRow row) =>
+        new()
+        {
+            DeadLetterId = row.DeadLetterId,
+            Origin = row.Origin,
+            Id = row.Id,
+            Source = row.Source,
+            EventId = row.EventId,
+            Type = row.Type,
+            Time = row.Time,
+            SpecVersion = row.SpecVersion,
+            Subject = row.Subject,
+            DataContentType = row.DataContentType,
+            Data = row.Data,
+            ExtensionsJson = row.ExtensionsJson,
+            FailingHandler = row.FailingHandler,
+            ErrorMessage = row.ErrorMessage,
+            ErrorStack = row.ErrorStack,
+            AttemptCount = row.AttemptCount,
+            DeadLetteredAt = row.DeadLetteredAt,
+            Status = row.Status,
+            RedeliveryAttemptedAt = row.RedeliveryAttemptedAt,
+            ResolvedAt = row.ResolvedAt,
+        };
 }
 
 /// <summary>

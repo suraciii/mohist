@@ -160,7 +160,7 @@ public sealed class DeadLetterRoutesSpecs
     {
         var store = _fixture.Services.GetRequiredService<IDeadLetterStore>();
         var row = BuildRow("test.redaction.handler");
-        row.ErrorMessage = "handler failed\n   at Example.Handler in /tmp/private/Handler.cs:line 42";
+        row.ErrorMessage = "handler failed at Example.Handler() in /tmp/private/Handler.cs:line 42 path=/srv/private/db.sqlite";
         await store.WriteAsync(row);
 
         try
@@ -172,9 +172,10 @@ public sealed class DeadLetterRoutesSpecs
             var body = await response.Content.ReadFromJsonAsync<JsonElement>();
             var listed = Assert.Single(body.GetProperty("data").EnumerateArray());
             var error = listed.GetProperty("error").GetString();
-            Assert.Equal("handler failed", error);
+            Assert.Contains("[stack]", error, StringComparison.Ordinal);
             Assert.DoesNotContain("/tmp/private", error, StringComparison.Ordinal);
-            Assert.DoesNotContain(" at ", error, StringComparison.Ordinal);
+            Assert.DoesNotContain("/srv/private", error, StringComparison.Ordinal);
+            Assert.DoesNotContain("Example.Handler", error, StringComparison.Ordinal);
         }
         finally
         {

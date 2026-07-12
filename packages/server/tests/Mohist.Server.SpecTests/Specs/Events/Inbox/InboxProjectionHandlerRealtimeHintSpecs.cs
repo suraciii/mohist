@@ -203,7 +203,7 @@ public class InboxProjectionHandlerRealtimeHintSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
-    public async Task Hint_PublishException_PropagatesAfterProjectionIsPersisted()
+    public async Task Hint_PublishException_RollsBackProjectionAndReplayCommitsBothWrites()
     {
         await using var database = InboxProjectionTestSupport.CreateDatabase();
         await InboxProjectionTestSupport.SeedIssueAsync(database,
@@ -226,8 +226,15 @@ public class InboxProjectionHandlerRealtimeHintSpecs
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
             handler.HandleAsync(evt, CancellationToken.None));
 
+        Assert.Empty(await InboxProjectionTestSupport.GetInboxAsync(database, "proj_a"));
+
+        var publisher = new CapturingEventPublisher();
+        var retryHandler = InboxProjectionTestSupport.CreateHandler(database, publisher);
+        await retryHandler.HandleAsync(evt, CancellationToken.None);
+
         var row = Assert.Single(await InboxProjectionTestSupport.GetInboxAsync(database, "proj_a"));
         Assert.Equal("evt-publish-fails", row.SourceEventId);
+        Assert.Single(publisher.Published);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]

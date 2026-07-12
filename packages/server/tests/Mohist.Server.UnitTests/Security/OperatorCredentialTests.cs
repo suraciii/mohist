@@ -73,4 +73,29 @@ public sealed class OperatorCredentialTests
             Directory.Delete(home, recursive: true);
         }
     }
+
+    [Fact]
+    public void EnvironmentCredentialOverridesConfigCredential()
+    {
+        var environment = new MockEnvironmentVariableProvider(addExistingEnvironmentVariables: false)
+        {
+            [OperatorCredential.TokenEnvironmentVariable] = "environment-operator-token-0123456789abcdef",
+        };
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Mohist:OperatorToken"] = "configuration-operator-token-0123456789abcdef",
+            })
+            .Build();
+        var credential = new OperatorCredential(configuration, environment);
+        var context = new DefaultHttpContext();
+
+        context.Request.Headers[OperatorCredential.HeaderName] =
+            "configuration-operator-token-0123456789abcdef";
+        Assert.False(credential.Authorizes(context.Request.Headers));
+
+        context.Request.Headers[OperatorCredential.HeaderName] =
+            "environment-operator-token-0123456789abcdef";
+        Assert.True(credential.Authorizes(context.Request.Headers));
+    }
 }

@@ -1,3 +1,6 @@
+using System.Text.Json;
+using System.Text.Json.Nodes;
+
 namespace Mohist.Cli;
 
 internal sealed class OperatorCredentialProvider
@@ -21,8 +24,13 @@ internal sealed class OperatorCredentialProvider
     public async Task<string> GetAsync()
     {
         var configured = _environment.GetEnvironmentVariable(TokenEnvironmentVariable);
+        var userConfig = string.IsNullOrWhiteSpace(configured)
+            ? ReadUserConfig()
+            : UserConfig.Empty;
+        if (string.IsNullOrWhiteSpace(configured))
+            configured = userConfig.Token;
         var token = string.IsNullOrWhiteSpace(configured)
-            ? await ReadFileAsync(ResolvePath()).ConfigureAwait(false)
+            ? await ReadFileAsync(ResolvePath(userConfig.TokenPath)).ConfigureAwait(false)
             : configured;
 
         token = token.Trim();
@@ -32,15 +40,48 @@ internal sealed class OperatorCredentialProvider
         return token;
     }
 
-    private string ResolvePath()
+    private string ResolvePath(string? configuredPath)
     {
-        var configured = _environment.GetEnvironmentVariable(TokenPathEnvironmentVariable);
+        var environmentPath = _environment.GetEnvironmentVariable(TokenPathEnvironmentVariable);
+        var configured = string.IsNullOrWhiteSpace(environmentPath)
+            ? configuredPath
+            : environmentPath;
         if (!string.IsNullOrWhiteSpace(configured))
             return Path.GetFullPath(configured);
 
-        var home = _environment.GetEnvironmentVariable("HOME")
+        return Path.Combine(HomeDirectory(), ".mohist", "operator-token");
+    }
+
+    private UserConfig ReadUserConfig()
+    {
+        var path = Path.Combine(HomeDirectory(), ".mohist", "config.jsonc");
+        if (!_fileSystem.Exists(path))
+            return UserConfig.Empty;
+
+        try
+        {
+            var root = JsonNode.Parse(
+                _fileSystem.ReadAllText(path),
+                documentOptions: new JsonDocumentOptions
+                {
+                    CommentHandling = JsonCommentHandling.Skip,
+                    AllowTrailingCommas = true,
+                });
+            return new UserConfig(
+                root?["Mohist"]?["OperatorToken"]?.GetValue<string>(),
+                root?["Mohist"]?["OperatorTokenPath"]?.GetValue<string>());
+        }
+        catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            throw new InvalidOperationException(
+                $"Mohist operator credential configuration could not be read from '{path}': {ex.Message}", ex);
+        }
+    }
+
+    private string HomeDirectory()
+    {
+        return _environment.GetEnvironmentVariable("HOME")
             ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        return Path.Combine(home, ".mohist", "operator-token");
     }
 
     private async Task<string> ReadFileAsync(string path)
@@ -58,5 +99,10 @@ internal sealed class OperatorCredentialProvider
             throw new InvalidOperationException(
                 $"Mohist operator credential could not be read from '{path}': {ex.Message}", ex);
         }
+    }
+
+    private sealed record UserConfig(string? Token, string? TokenPath)
+    {
+        public static readonly UserConfig Empty = new(null, null);
     }
 }

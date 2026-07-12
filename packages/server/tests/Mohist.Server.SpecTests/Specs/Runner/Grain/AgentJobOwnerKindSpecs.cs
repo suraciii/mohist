@@ -2,6 +2,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Runner.Grains;
+using Mohist.Server.Runner.Services;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.SpecTests.Specs.Workflow;
 using Mohist.Server.Workflow.Grains;
@@ -15,6 +16,10 @@ namespace Mohist.Server.SpecTests.Specs.Runner.Grain;
 public class AgentJobOwnerKindSpecs : WorkflowGrainSpecs
 {
     public AgentJobOwnerKindSpecs(WorkflowGrainFixture fixture) : base(fixture) { }
+
+    private DispatchService Dispatch => _fixture.Cluster.GetSiloServiceProvider(null)
+        .GetRequiredService<IServiceScopeFactory>().CreateScope()
+        .ServiceProvider.GetRequiredService<DispatchService>();
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
@@ -106,6 +111,73 @@ public class AgentJobOwnerKindSpecs : WorkflowGrainSpecs
         var snapshot = await agentJob.GetRuntimeSnapshotAsync();
         Assert.Equal(AgentJobStatus.Running, snapshot.Status);
         Assert.Equal(workId, snapshot.CurrentWorkId);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
+    [Fact]
+    public async Task Poll_AgentJobLostResponse_IsRedeliveredUntilReported()
+    {
+        var runnerId = await RegisterRunnerAsync($"agent-job-redelivery-{Guid.NewGuid():N}");
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        var agentJobId = $"agent-job-redelivery-{Guid.NewGuid():N}";
+        var workId = $"agent-work-redelivery-{Guid.NewGuid():N}";
+        await runner.AssignAgentJobAsync(AgentDispatch(agentJobId, workId));
+        await Grains.GetGrain<IAgentJobGrain>(agentJobId).AssignRunnerAsync(runnerId, workId);
+
+        var slots = await runner.GetSlotsAsync();
+        var first = Assert.Single((await Dispatch.PollAsync(
+            runnerId, new RunnerPollRequest([], []), slots)).Dispatches);
+        var redelivery = Assert.Single((await Dispatch.PollAsync(
+            runnerId, new RunnerPollRequest([], []), slots)).Dispatches);
+
+        Assert.Equal(first.AgentJobId, redelivery.AgentJobId);
+        Assert.Equal(first.WorkId, redelivery.WorkId);
+
+        var key = $"{WorkDispatchOwnerKinds.AgentJob}:{agentJobId}:{workId}";
+        var reported = await Dispatch.PollAsync(
+            runnerId, new RunnerPollRequest([key], []), slots);
+        Assert.Empty(reported.Dispatches);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
+    [Fact]
+    public async Task PollGate_AdmitsOnlyOneOverlappingPoll()
+    {
+        var runnerId = await RegisterRunnerAsync($"agent-job-poll-gate-{Guid.NewGuid():N}");
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+
+        var admissions = await Task.WhenAll(
+            runner.TryBeginPollAsync(),
+            runner.TryBeginPollAsync());
+
+        Assert.Single(admissions, admitted => admitted);
+        Assert.Single(admissions, admitted => !admitted);
+        await runner.EndPollAsync();
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
+    [Fact]
+    public async Task AssignAgentJobAsync_DuringPollReconciliation_IsRetriedLater()
+    {
+        var runnerId = await RegisterRunnerAsync($"agent-job-poll-admission-{Guid.NewGuid():N}");
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        Assert.True(await runner.TryBeginPollAsync());
+
+        try
+        {
+            var result = await runner.AssignAgentJobAsync(
+                AgentDispatch("agent-job-during-poll", "agent-work-during-poll"));
+
+            Assert.Equal(RunnerWorkAssignmentStatus.Rejected, result.Status);
+            Assert.Equal("runner-reconciling", result.Reason);
+        }
+        finally
+        {
+            await runner.EndPollAsync();
+        }
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]

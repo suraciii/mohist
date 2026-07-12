@@ -138,6 +138,29 @@ public sealed class FakeEventStore : IEventStore
         }
     }
 
+    internal StateSnapshot CaptureState()
+    {
+        lock (_gate)
+        {
+            return new StateSnapshot(_undelivered.ToList(), _marked.ToList());
+        }
+    }
+
+    internal void RestoreState(StateSnapshot snapshot)
+    {
+        lock (_gate)
+        {
+            _undelivered.Clear();
+            _undelivered.AddRange(snapshot.Undelivered);
+            _marked.Clear();
+            _marked.AddRange(snapshot.Marked);
+        }
+    }
+
+    internal sealed record StateSnapshot(
+        IReadOnlyList<UndeliveredEvent> Undelivered,
+        IReadOnlyList<RecordedDispatch> Marked);
+
     public sealed record RecordedDispatch(
         EventOrigin Origin,
         string Source,

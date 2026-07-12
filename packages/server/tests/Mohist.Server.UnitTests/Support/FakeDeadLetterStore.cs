@@ -17,6 +17,7 @@ public sealed class FakeDeadLetterStore : IDeadLetterStore
     private long _nextId;
 
     public Func<DeadLetterRow, bool>? ThrowOnWrite { get; set; }
+    public bool ThrowAfterSourceMark { get; set; }
     public bool ThrowOnResolve { get; set; }
     public FakeEventStore? EventStore { get; set; }
 
@@ -39,39 +40,63 @@ public sealed class FakeDeadLetterStore : IDeadLetterStore
         DateTimeOffset dispatchedAt,
         CancellationToken ct = default)
     {
-        if (rows.Any(row => ThrowOnWrite?.Invoke(row) == true))
-            throw new InvalidOperationException("simulated dead-letter settlement failure");
-
-        if (EventStore is not null)
-            await EventStore.MarkDispatchedAsync(
-                sourceEvent.Origin,
-                sourceEvent.Source,
-                sourceEvent.Id,
-                dispatchedAt,
-                ct);
-
+        var eventSnapshot = EventStore?.CaptureState();
+        List<DeadLetterRow> rowSnapshot;
+        long nextIdSnapshot;
         lock (_gate)
         {
-            foreach (var row in rows)
-            {
-                var existing = _rows.FirstOrDefault(stored =>
-                    stored.Source == row.Source
-                    && stored.Id == row.Id
-                    && stored.FailingHandler == row.FailingHandler);
-                if (existing is null)
-                {
-                    _rows.Add(Clone(row, ++_nextId));
-                    continue;
-                }
+            rowSnapshot = _rows.Select(row => Clone(row, row.DeadLetterId)).ToList();
+            nextIdSnapshot = _nextId;
+        }
 
-                existing.ErrorMessage = row.ErrorMessage;
-                existing.ErrorStack = row.ErrorStack;
-                existing.AttemptCount = row.AttemptCount;
-                existing.DeadLetteredAt = row.DeadLetteredAt;
-                existing.Status = DeadLetterStatus.Pending;
-                existing.RedeliveryAttemptedAt = null;
-                existing.ResolvedAt = null;
+        try
+        {
+            if (EventStore is not null)
+                await EventStore.MarkDispatchedAsync(
+                    sourceEvent.Origin,
+                    sourceEvent.Source,
+                    sourceEvent.Id,
+                    dispatchedAt,
+                    ct);
+
+            if (ThrowAfterSourceMark || rows.Any(row => ThrowOnWrite?.Invoke(row) == true))
+                throw new InvalidOperationException("simulated dead-letter settlement failure");
+
+            lock (_gate)
+            {
+                foreach (var row in rows)
+                {
+                    var existing = _rows.FirstOrDefault(stored =>
+                        stored.Source == row.Source
+                        && stored.Id == row.Id
+                        && stored.FailingHandler == row.FailingHandler);
+                    if (existing is null)
+                    {
+                        _rows.Add(Clone(row, ++_nextId));
+                        continue;
+                    }
+
+                    existing.ErrorMessage = row.ErrorMessage;
+                    existing.ErrorStack = row.ErrorStack;
+                    existing.AttemptCount = row.AttemptCount;
+                    existing.DeadLetteredAt = row.DeadLetteredAt;
+                    existing.Status = DeadLetterStatus.Pending;
+                    existing.RedeliveryAttemptedAt = null;
+                    existing.ResolvedAt = null;
+                }
             }
+        }
+        catch
+        {
+            if (EventStore is not null && eventSnapshot is not null)
+                EventStore.RestoreState(eventSnapshot);
+            lock (_gate)
+            {
+                _rows.Clear();
+                _rows.AddRange(rowSnapshot);
+                _nextId = nextIdSnapshot;
+            }
+            throw;
         }
     }
 

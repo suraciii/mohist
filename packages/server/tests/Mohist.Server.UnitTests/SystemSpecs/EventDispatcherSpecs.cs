@@ -216,6 +216,31 @@ public class EventDispatcherSpecs
     }
 
     [Fact]
+    public async Task DispatchAsync_DeadLetterSettlementFailure_RollsBackSourceMarkAndDeadLetterRows()
+    {
+        var time = new FakeTimeProvider(StartTime);
+        var events = new FakeEventStore();
+        var dlq = new FakeDeadLetterStore { ThrowAfterSourceMark = true };
+        var sub = new Subscription(
+            IssueCompleted,
+            new FlakyRecorder(() => throw new InvalidOperationException("permanent")),
+            DispatchDynamic);
+        var dispatcher = BuildDispatcher(events, dlq, [sub], time, handlerMaxAttempts: 1);
+        events.Enqueue(FakeEventStore.Build(
+            IssueCompleted,
+            "/mohist/issues/issue_settlement_rollback",
+            id: 1,
+            eventId: "evt_settlement_rollback"));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            dispatcher.DispatchAsync(CancellationToken.None));
+
+        Assert.Empty(events.Marked);
+        Assert.Single(events.PendingUndelivered);
+        Assert.Empty(dlq.Written);
+    }
+
+    [Fact]
     public async Task DispatchAsync_PerHandlerIsolation_SiblingSucceedsWhenPeerExhausts()
     {
         var time = new FakeTimeProvider(StartTime);

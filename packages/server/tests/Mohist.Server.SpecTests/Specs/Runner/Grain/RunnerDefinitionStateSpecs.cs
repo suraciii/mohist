@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using Mohist.Server.Agent.Grains;
 using Mohist.Server.Infrastructure.Data.Runner;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Workflow.Grains;
@@ -193,7 +194,7 @@ public class RunnerDefinitionStateSpecs : WorkflowGrainSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
-    public async Task Dispatch_AgentJobWork_DoesNotConsumeWorkflowAssignmentSlot()
+    public async Task Dispatch_AgentJobWork_ConsumesSharedWorkflowSlot()
     {
         var projectId = $"test-project-{Guid.NewGuid():N}";
         var runnerId = await RegisterRunnerForProjectAsync(projectId);
@@ -206,16 +207,20 @@ public class RunnerDefinitionStateSpecs : WorkflowGrainSpecs
             AgentJobId: $"agent-job-{Guid.NewGuid():N}");
         var assignment = await runner.AssignAgentJobAsync(agentJobDispatch);
         Assert.Equal(RunnerWorkAssignmentStatus.Assigned, assignment.Status);
+        await Grains.GetGrain<IAgentJobGrain>(agentJobDispatch.AgentJobId!)
+            .AssignRunnerAsync(runnerId, agentJobDispatch.WorkId);
 
         var workflowId = $"wf-agent-slot-{Guid.NewGuid():N}";
         var workflow = Grains.GetGrain<IWorkflowGrain>(workflowId);
         await SeedWorkflowTemplateAsync(workflowId, SingleStage(checks: []), projectId);
         await workflow.StartAsync(TestInput(projectId));
 
-        var work = await runner.PollAsync(Services);
+        var works = await runner.PollAllAsync(Services);
 
-        Assert.NotNull(work);
-        Assert.Equal(workflowId, work.WorkflowRunId);
+        var work = Assert.Single(works);
+        Assert.Equal(WorkDispatchOwnerKinds.AgentJob, work.OwnerKind);
+        Assert.Equal(agentJobDispatch.AgentJobId, work.AgentJobId);
+        Assert.DoesNotContain(works, item => item.WorkflowRunId == workflowId);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]

@@ -54,6 +54,9 @@ issue-362 — T-002 working memory
 - Agent subscription launches write trigger labels before durable submission and derive stable session/job keys from project + event + subscription. AgentJob persists raw AgentConfig JSON, candidate runner, stable work id, retry state, and terminal state; replay never treats session labels as the launch claim.
 - Dead-letter API operations are absent on public listeners and require a high-entropy operator credential on loopback listeners. The CLI reads the user-only credential file, responses are no-store and stack/path-redacted, and table output exposes recovery status without terminal controls. Closed-generic Epic handlers create a scope per delivery for `EpicQuerier`.
 - RunnerGrain owns atomic agent-job admission: lifecycle changes and admission share one gate, offline runners reject work, and concurrent jobs cannot both consume a one-slot runner.
+- Agent jobs use poll reconciliation after admission: accepted work is reoffered until its stable key appears in the runner's reported set. A per-runner poll gate excludes overlapping rounds, Agent admission retries while reconciliation is active, and active Agent work is subtracted before workflow claims.
+- Inbox projection and `InboxItemPersisted` event append share one database transaction. A failed append rolls the projection back, so dispatcher replay cannot lose the durable hint behind an `AlreadyExisted` early return.
+- Server and CLI operator credential precedence is environment token, config token, environment path, config path, then the default user-only file. Operator diagnostics redact embedded one-line frames and path substrings in addition to newline-separated stacks.
 
 ## Gotchas
 
@@ -77,7 +80,10 @@ issue-362 — T-002 working memory
 - [x] RedeliverAsync retries only the recorded failing handler, tracks recovery state, and is exposed through loopback-only, operator-credential-protected, redacted API + CLI
 - [x] Fresh-host activation registers the dispatcher reminder without producer traffic
 - [x] Durable handler failures propagate; Hermes and Agent subscription dispatch remain best-effort; accepted Agent trigger launches resume durable stable job/work identities
+- [x] Accepted Agent work is reoffered until reported; overlapping polls are excluded; Agent and workflow work share one capacity calculation without admission-vs-claim races
+- [x] Inbox projection and its durable realtime hint commit atomically and replay after append failure
 - [x] EventDispatcherService + IDeadLetterStore→DeadLetterStore (+ NoopDeadLetterStore via TryAdd) + subscriptions registered once in the host-shared application graph; MohistSiloRegistration contains Orleans infrastructure only
 - [x] Unit tests cover pull→match→invoke→mark; FIFO (Source,Id); retry-then-succeed; exhaustion; per-handler isolation; deliver-before-mark crash recovery; CloudEventTypeMatcher fan-out with closed-generic handler
 - [x] Spec tests cover PulseAsync, actual reminder callback without Pulse, two-silo host loss recovery, closed-generic handlers, exact-handler dead-letter recovery, credential-protected API/CLI boundary, real workflow handler dispatch, atomic Runner admission, and Agent crash checkpoints including AgentConfig reactivation
-- [x] Full `npm test` green on rebased master: CLI 873, server unit 1367, arch 24 (3 skipped), server spec 2843 (9 skipped), Web 4596, Runner 1007; Node test-boundary checks and TreatWarningsAsErrors clean
+- [x] Real/fake persistence coverage includes post-mark settlement rollback and all four event-table UNION branches in global source/id order
+- [x] Full `npm test` green on rebased master: CLI 874, server unit 1373, arch 24 (3 skipped), server spec 2848 (9 skipped), Web 4596, Runner 1007; Node test-boundary checks and TreatWarningsAsErrors clean

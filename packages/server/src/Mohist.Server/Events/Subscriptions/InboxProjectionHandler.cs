@@ -1,6 +1,9 @@
+using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Mohist.Server.Infrastructure.Data;
+using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Inbox;
@@ -50,14 +53,12 @@ namespace Mohist.Server.Events.Subscriptions;
 /// disabled, or mismatched domain data remains an intentional no-op.
 ///
 /// <para>
-/// <b>Realtime hint</b>. On a successful, non-duplicate
-/// <see cref="InboxStore.InsertAsync"/> the handler publishes exactly one
+/// <b>Realtime hint</b>. The inbox projection and its
 /// <c>com.mohist.inbox.item-persisted</c> CloudEvent carrying an
 /// <see cref="InboxItemPersistedHint"/> identity payload and an
 /// <c>extensions["projectid"]</c> stamp so the dispatcher can route it
-/// project-scoped. The publish is awaited inline <i>after</i> the insert
-/// returns. A publish failure propagates so the source event is retried; the
-/// source-event key makes the already-inserted inbox row idempotent.
+/// project-scoped commit in one transaction. A failed event append rolls the
+/// projection back so dispatcher retry can complete both writes exactly once.
 /// </para>
 /// </summary>
 [Subscription(Type =
@@ -131,9 +132,16 @@ public sealed class InboxProjectionHandler : ICloudEventHandler
             SourceEventSource: evt.Source.ToString(),
             SourceEventId: evt.Id);
 
-        var result = await inboxStore.InsertAsync(draft, ct).ConfigureAwait(false);
+        var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<MohistDbContext>>();
+        var eventStore = scope.ServiceProvider.GetRequiredService<IEventStore>();
+        var time = scope.ServiceProvider.GetRequiredService<TimeProvider>();
+        await using var db = await dbFactory.CreateDbContextAsync(ct).ConfigureAwait(false);
+        await using var transaction = await db.Database.BeginTransactionAsync(ct).ConfigureAwait(false);
+
+        var result = await inboxStore.InsertAsync(db, draft, ct).ConfigureAwait(false);
         if (result.AlreadyExisted)
         {
+            await transaction.CommitAsync(ct).ConfigureAwait(false);
             return;
         }
 
@@ -149,19 +157,16 @@ public sealed class InboxProjectionHandler : ICloudEventHandler
             ["projectid"] = draft.ProjectId,
         };
 
-        // The hint publish reuses the same async scope that resolved
-        // InboxStore. We cannot inject IEventPublisher through the
-        // handler constructor: the bus wires InboxProjectionHandler as a
-        // singleton, and IEventPublisher resolves to the InMemoryEventBus
-        // singleton whose constructor enumerates all handler subscriptions,
-        // which would close a DI cycle on first construction. Resolving
-        // the publisher from the already-open scope avoids this and is
-        // semantically identical — IEventPublisher is itself a singleton,
-        // so every request would land on the same instance.
-        var eventPublisher = scope.ServiceProvider.GetRequiredService<IEventPublisher>();
-        await eventPublisher
-            .PublishAsync(hint, EventCatalog.ReverseDns.InboxItemPersisted, HintSource, extensions: extensions, ct: ct)
-            .ConfigureAwait(false);
+        var envelope = new CloudEvent(
+            id: Guid.NewGuid().ToString(),
+            source: new Uri(HintSource, UriKind.Relative),
+            type: EventCatalog.ReverseDns.InboxItemPersisted,
+            time: time.GetUtcNow(),
+            data: JsonSerializer.SerializeToElement(hint, CloudEvent.JsonOptions),
+            extensions: extensions);
+        await eventStore.AppendAsync(db, envelope, ct).ConfigureAwait(false);
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+        await transaction.CommitAsync(ct).ConfigureAwait(false);
     }
 
     private async Task<ResolvedIdentity?> ResolveFromWorkflowRunAsync(CloudEvent evt, IWorkflowRunStore workflowRunStore, CancellationToken ct)

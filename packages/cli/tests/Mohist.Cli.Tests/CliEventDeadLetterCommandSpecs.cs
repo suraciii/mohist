@@ -214,6 +214,47 @@ public sealed class CliEventDeadLetterCommandSpecs
     }
 
     [Fact]
+    public async Task List_ConfiguredCredentialPathAuthenticatesRequest()
+    {
+        var env = Setup((_, _) => Task.FromResult(RecordingHttpHandler.Json(new
+        {
+            success = true,
+            data = Array.Empty<object>(),
+        })));
+        env.Environment[OperatorCredentialProvider.TokenEnvironmentVariable] = "";
+        env.Environment[OperatorCredentialProvider.TokenPathEnvironmentVariable] = "";
+        env.Environment["HOME"] = "/home/test";
+        env.FileSystem.AddFile(
+            "/home/test/.mohist/config.jsonc",
+            """
+            {
+              // Shared by the server and mo CLI.
+              "Mohist": {
+                "OperatorTokenPath": "/run/mohist/operator-token",
+              },
+            }
+            """);
+        env.FileSystem.AddFile(
+            "/run/mohist/operator-token",
+            "configured-file-token-0123456789abcdef");
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            env.Http,
+            ["event", "dead-letter", "list"],
+            env.Output,
+            env.Error,
+            env.FileSystem,
+            env.Executor,
+            env.Environment);
+
+        Assert.Equal(0, exitCode);
+        var request = Assert.Single(env.Handler.Requests);
+        Assert.Equal(
+            "configured-file-token-0123456789abcdef",
+            Assert.Single(request.Headers[OperatorCredentialProvider.HeaderName]));
+    }
+
+    [Fact]
     public async Task List_Table_StripsTerminalControlSequencesFromUntrustedCells()
     {
         var env = Setup((_, _) => Task.FromResult(RecordingHttpHandler.Json(new

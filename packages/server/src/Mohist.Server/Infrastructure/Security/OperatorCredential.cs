@@ -17,8 +17,10 @@ public sealed class OperatorCredential : ISingletonService
         IConfiguration configuration,
         IEnvironmentVariableProvider environment)
     {
-        var configured = configuration["Mohist:OperatorToken"]
-            ?? environment.GetEnvironmentVariable(TokenEnvironmentVariable);
+        var environmentToken = environment.GetEnvironmentVariable(TokenEnvironmentVariable);
+        var configured = string.IsNullOrWhiteSpace(environmentToken)
+            ? configuration["Mohist:OperatorToken"]
+            : environmentToken;
         var token = string.IsNullOrWhiteSpace(configured)
             ? LoadOrCreate(ResolvePath(configuration, environment))
             : configured;
@@ -49,8 +51,10 @@ public sealed class OperatorCredential : ISingletonService
         IConfiguration configuration,
         IEnvironmentVariableProvider environment)
     {
-        var configured = configuration["Mohist:OperatorTokenPath"]
-            ?? environment.GetEnvironmentVariable(TokenPathEnvironmentVariable);
+        var environmentPath = environment.GetEnvironmentVariable(TokenPathEnvironmentVariable);
+        var configured = string.IsNullOrWhiteSpace(environmentPath)
+            ? configuration["Mohist:OperatorTokenPath"]
+            : environmentPath;
         if (!string.IsNullOrWhiteSpace(configured))
             return Path.GetFullPath(configured);
 

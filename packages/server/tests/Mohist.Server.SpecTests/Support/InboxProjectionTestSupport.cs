@@ -254,7 +254,7 @@ internal static class InboxProjectionTestSupport
             Task.FromResult<IReadOnlyList<StoredCloudEvent>>(Array.Empty<StoredCloudEvent>());
         public Task<IReadOnlyList<StoredCloudEvent>> ListEpicEventsAsync(string epicId, int limit = 200, CancellationToken ct = default) =>
             Task.FromResult<IReadOnlyList<StoredCloudEvent>>(Array.Empty<StoredCloudEvent>());
-public Task<IReadOnlyList<StoredCloudEvent>> ListAgentSessionEventsAsync(string sessionId, int limit = 200, CancellationToken ct = default) =>
+        public Task<IReadOnlyList<StoredCloudEvent>> ListAgentSessionEventsAsync(string sessionId, int limit = 200, CancellationToken ct = default) =>
             Task.FromResult<IReadOnlyList<StoredCloudEvent>>(Array.Empty<StoredCloudEvent>());
         public Task MarkDispatchedAsync(EventOrigin origin, string source, long id, DateTimeOffset dispatchedAt, CancellationToken ct = default) => Task.CompletedTask;
         public Task<IReadOnlyList<UndeliveredEvent>> ListUndeliveredAsync(int limit = 100, CancellationToken ct = default) =>
@@ -307,6 +307,7 @@ public Task<IReadOnlyList<StoredCloudEvent>> ListAgentSessionEventsAsync(string 
                 services.AddSingleton<IDbContextFactory<MohistDbContext>>(_database.Factory);
                 services.AddSingleton<TimeProvider>(new FakeTimeProvider(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero)));
                 services.AddSingleton(eventPublisher);
+                services.AddSingleton<IEventStore>(new PublisherEventStore(eventPublisher));
                 services.AddScoped<InboxStore>();
                 services.AddScoped<InboxSubscriptionStore>();
                 services.AddScoped<IWorkflowRunStore>(sp => new WorkflowRunStore(
@@ -318,5 +319,36 @@ public Task<IReadOnlyList<StoredCloudEvent>> ListAgentSessionEventsAsync(string 
                 return services.BuildServiceProvider();
             }
         }
+    }
+
+    private sealed class PublisherEventStore : IEventStore
+    {
+        private readonly IEventPublisher _publisher;
+
+        public PublisherEventStore(IEventPublisher publisher) => _publisher = publisher;
+
+        public Task AppendAsync(CloudEvent evt, CancellationToken ct = default) =>
+            _publisher.PublishAsync(evt, ct);
+
+        public Task AppendAsync(MohistDbContext db, CloudEvent evt, CancellationToken ct = default) =>
+            _publisher.PublishAsync(evt, ct);
+
+        public Task<IReadOnlyList<StoredCloudEvent>> ListAsync(string workflowRunId, int limit = 200, CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<StoredCloudEvent>>([]);
+
+        public Task<IReadOnlyList<StoredCloudEvent>> ListIssueEventsAsync(string issueId, int limit = 200, CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<StoredCloudEvent>>([]);
+
+        public Task<IReadOnlyList<StoredCloudEvent>> ListEpicEventsAsync(string epicId, int limit = 200, CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<StoredCloudEvent>>([]);
+
+        public Task<IReadOnlyList<StoredCloudEvent>> ListAgentSessionEventsAsync(string sessionId, int limit = 200, CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<StoredCloudEvent>>([]);
+
+        public Task MarkDispatchedAsync(EventOrigin origin, string source, long id, DateTimeOffset dispatchedAt, CancellationToken ct = default) =>
+            Task.CompletedTask;
+
+        public Task<IReadOnlyList<UndeliveredEvent>> ListUndeliveredAsync(int limit = 100, CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<UndeliveredEvent>>([]);
     }
 }

@@ -204,6 +204,44 @@ public class EventStoreScopedAppendSpecs : IAsyncLifetime
     }
 
     [Fact]
+    public async Task ListUndeliveredAsync_UnionsAllOriginsInSourceIdOrder_AndMarksByOrigin()
+    {
+        var events = new[]
+        {
+            BuildEvent(WorkflowRunEventPersistence.WorkflowRunSource("zeta"), "test.workflow", "evt-workflow-1"),
+            BuildEvent(IssueEventPersistence.IssueSource("alpha"), "test.issue", "evt-issue-1"),
+            BuildEvent(IssueEventPersistence.IssueSource("alpha"), "test.issue", "evt-issue-2"),
+            BuildEvent(EpicEventPersistence.EpicSource("middle"), "test.epic", "evt-epic-1"),
+            BuildEvent(AgentSessionEventPersistence.AgentSessionSource("beta"), "test.agent", "evt-agent-1"),
+        };
+        foreach (var evt in events)
+            await _store.AppendAsync(evt);
+
+        var undelivered = await _store.ListUndeliveredAsync();
+
+        Assert.Equal(5, undelivered.Count);
+        Assert.Equal(4, undelivered.Select(row => row.Origin).Distinct().Count());
+        Assert.Contains(undelivered, row => row.Origin == EventOrigin.WorkflowRun);
+        Assert.Contains(undelivered, row => row.Origin == EventOrigin.Issue);
+        Assert.Contains(undelivered, row => row.Origin == EventOrigin.Epic);
+        Assert.Contains(undelivered, row => row.Origin == EventOrigin.AgentSession);
+        Assert.Equal(
+            undelivered.OrderBy(row => row.Source, StringComparer.Ordinal).ThenBy(row => row.Id)
+                .Select(row => (row.Source, row.Id)),
+            undelivered.Select(row => (row.Source, row.Id)));
+
+        var epic = Assert.Single(undelivered, row => row.Origin == EventOrigin.Epic);
+        await _store.MarkDispatchedAsync(epic.Origin, epic.Source, epic.Id, FixedTime);
+
+        var remaining = await _store.ListUndeliveredAsync();
+        Assert.Equal(4, remaining.Count);
+        Assert.DoesNotContain(remaining, row => row.EventId == epic.EventId);
+        Assert.Contains(remaining, row => row.Origin == EventOrigin.WorkflowRun);
+        Assert.Contains(remaining, row => row.Origin == EventOrigin.Issue);
+        Assert.Contains(remaining, row => row.Origin == EventOrigin.AgentSession);
+    }
+
+    [Fact]
     public async Task ListUndeliveredAsync_OmitsAgentSessionRowsOnceDispatched()
     {
         var sessionId = "sess_scoped_dispatched";
@@ -265,9 +303,9 @@ public class EventStoreScopedAppendSpecs : IAsyncLifetime
         Assert.Equal(1, stored.Id);
     }
 
-    private static CloudEvent BuildEvent(string source, string type) =>
+    private static CloudEvent BuildEvent(string source, string type, string? eventId = null) =>
         new(
-            id: Guid.NewGuid().ToString(),
+            id: eventId ?? Guid.NewGuid().ToString(),
             source: new Uri(source, UriKind.Relative),
             type: type,
             time: FixedTime,

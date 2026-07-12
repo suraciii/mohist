@@ -112,6 +112,48 @@
   Resolution: Subscription patterns are validated during reflection registration; FIFO asserts handler observation order directly; stage-lock specs now deliver persisted workflow events through DI-registered `EventDispatcherService` and `WorkflowStageLockReleaseHandler`; AgentJob persistence deactivates and replays a non-null AgentConfig. That test exposed nullable `JsonElement` persistence drift, so raw JSON is now the sole durable AgentConfig representation and is reconstructed on demand.
   Status: resolved
 
+- [ID: item-19]
+  Severity: blocking
+  Scope: Agent poll recovery
+  Resolution: Agent jobs now use the same stable reported-work key contract as workflow work. `ReconcileAgentJobsAsync` reoffers accepted running work while its key is absent from `inFlight` and `awaitingAck`, and stops reoffering once the runner reports it. A lost first poll response returns the same AgentJob/work pair on the next poll.
+  Status: resolved
+
+- [ID: item-20]
+  Severity: blocking
+  Scope: Runner poll concurrency and shared capacity
+  Resolution: One transient Runner poll gate excludes overlapping reconciliation rounds. Agent admission is retried while that gate is held, and all active Agent works are subtracted before workflow claims. Tests cover one admitted overlapping poll, admission during reconciliation, and a one-slot runner receiving only its runnable Agent work instead of both Agent and workflow dispatches.
+  Status: resolved
+
+- [ID: item-21]
+  Severity: blocking
+  Scope: Inbox durable hint recovery
+  Resolution: `InboxProjectionHandler` now writes the inbox row and `InboxItemPersisted` event through one caller-owned database transaction. A hint append failure rolls back the projection; replay then commits one row and one hint instead of returning early on `AlreadyExisted`.
+  Status: resolved
+
+- [ID: item-22]
+  Severity: warning
+  Scope: operator diagnostic redaction
+  Resolution: Diagnostic input is bounded before processing, ANSI/control sequences are neutralized, embedded single-line method frames are replaced, and Unix, Windows, `file://`, and key/value path forms are redacted as substrings. Unit and API tests cover the reported examples.
+  Status: resolved
+
+- [ID: item-23]
+  Severity: warning
+  Scope: operator credential interoperability
+  Resolution: Server and CLI share environment-before-config resolution for direct tokens and token paths. The CLI parses `~/.mohist/config.jsonc` with JSONC comment and trailing-comma support, so a server configured only with `Mohist:OperatorTokenPath` works without a second CLI override.
+  Status: resolved
+
+- [ID: item-24]
+  Severity: test-gap
+  Scope: settlement fakes and four-table pull
+  Resolution: Unit and grain fakes snapshot and roll back both source and dead-letter state after an injected post-mark failure. A real SQLite spec inserts interleaved WorkflowRun, Issue, Epic, and AgentSession events, asserts global `(Source, Id)` order, marks one origin, and proves only that row leaves the pull set.
+  Status: resolved
+
+- [ID: item-25]
+  Severity: minor
+  Scope: CLI product spec
+  Resolution: `docs/cli-reference.md` now includes the `event` root, dead-letter list/redeliver commands, status behavior, credential prerequisite, and the shared resolution order. CLI reference contract tests pass.
+  Status: resolved
+
 ## Verification
 
 - Dispatcher/Hermes unit slice: 30 passed.
@@ -121,7 +163,8 @@
 - Repaired dispatcher suite: 7 passed, plus the failover case passed in three concurrent processes; it uses real reminder ticks, shared persistence, fake time, and deterministic signals.
 - Event-delivery index model + migration regression: 1 passed.
 - Console-capture slice: 9 passed in five consecutive runs.
-- Full CI-equivalent validation: CLI 873; server unit 1367; architecture 24 with 3 pre-existing skips; server spec 2843 with 9 pre-existing skips; Web 4596; Runner 1007; Node test-boundary checks passed.
+- Final review-repair slices: Agent poll/capacity 24; Inbox projection/hint 40; diagnostic unit/API 16; credential CLI/server 12; dispatcher fake + four-table SQLite 40; CLI docs/event 18. All passed.
+- Full CI-equivalent validation: CLI 874; server unit 1373; architecture 24 with 3 pre-existing skips; server spec 2848 with 9 pre-existing skips; Web 4596; Runner 1007; Node test-boundary checks passed.
 - `git diff --check` and `tasks.json` JSON validation pass.
 
 ## Follow-up Items
