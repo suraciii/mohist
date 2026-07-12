@@ -275,6 +275,34 @@ public class RerunFromStageTests
     }
 
     [Fact]
+    public void RerunFromStage_PendingTaskInFailedRange_IsDiscarded()
+    {
+        var run = BuildCompletedRun();
+        run.Status = WorkflowRunStatus.Failed;
+        run.Failure = new FailureDetails(FailureReason.TaskFailed, "integrate", "merge.1");
+
+        // Add a pending (never-started) task to a later stage — it should not
+        // block rerun since it was never dispatched.
+        var integrateStage = run.Stages[2];
+        integrateStage.Tasks.Add(new TaskRun
+        {
+            Id = "merge-pending",
+            DefinitionId = "merge",
+            Attempt = 1,
+            Title = "Pending Merge",
+            Uses = "spec/task",
+            Status = TaskRunStatus.Pending,
+        });
+
+        var events = run.RerunFromStage("build", DateTimeOffset.UnixEpoch);
+
+        var newIntegrate = run.Stages.Single(s => s.Id == "integrate");
+        Assert.Empty(newIntegrate.Tasks);
+        Assert.Null(run.Failure);
+        Assert.Equal(WorkflowRunStatus.Ready, run.Status);
+    }
+
+    [Fact]
     public void RerunFromStage_RunningCheckInRange_ThrowsWithActiveWorkCode()
     {
         var run = BuildCompletedRun();

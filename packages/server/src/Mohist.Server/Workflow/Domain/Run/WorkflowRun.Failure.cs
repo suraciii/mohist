@@ -202,7 +202,7 @@ public static partial class WorkflowRunExtensions
             for (var i = targetIdx; i < run.Stages.Count; i++)
             {
                 var stage = run.Stages[i];
-                if (stage.Tasks.Any(t => t.Status is not (TaskRunStatus.Completed or TaskRunStatus.Failed)))
+                if (stage.Tasks.Any(t => t.Status == TaskRunStatus.Running))
                     throw new WorkflowControlRejectionException(
                         "active_work_in_range",
                         $"Cannot rerun from stage '{stageId}' because there is active work in the invalidation range. Stop or cancel the active work first, then retry.");

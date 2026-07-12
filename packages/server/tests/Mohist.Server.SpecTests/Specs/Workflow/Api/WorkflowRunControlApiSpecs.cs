@@ -314,6 +314,11 @@ public class WorkflowRunControlApiSpecs
     {
         var (_, _, _, wrId) = await SeedActiveWorkflowAsync();
 
+        // Claim the plan task so it is genuinely Running (active work).
+        var wf = _grains.GetGrain<IWorkflowGrain>(wrId);
+        await wf.AssignWorkerAsync("spec-runner");
+        await wf.ClaimNextAsync("spec-runner");
+
         var response = await _client.PostAsJsonAsync(
             $"/api/workflow-runs/{wrId}/rerun-from-stage",
             new { stage = "plan" });
