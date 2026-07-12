@@ -13,4 +13,5 @@ public sealed class AgentJobState
     [Id(7)] public DateTimeOffset? RunningSince { get; set; }
     [Id(8)] public TimeSpan NextDispatchDelay { get; set; }
     [Id(9)] public int DispatchAttempts { get; set; }
+    [Id(10)] public string? AgentConfigJson { get; set; }
 }

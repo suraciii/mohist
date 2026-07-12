@@ -28,6 +28,7 @@ namespace Mohist.Server.SpecTests.Support;
 
 public class MohistIntegrationFixture : IAsyncLifetime
 {
+    public const string OperatorToken = "test-operator-token-0123456789abcdef";
     private SqliteConnection _keeper = null!;
     private MohistWebApplicationFactory _factory = null!;
     private string? _runnerRoot;
@@ -65,6 +66,7 @@ public class MohistIntegrationFixture : IAsyncLifetime
 
         _factory = new MohistWebApplicationFactory(ConnectionString, _runnerRoot, _systemUpdateStatePath, _logsPath, TimeProvider, siloPort, gatewayPort);
         Client = _factory.CreateClient();
+        Client.DefaultRequestHeaders.Add(Mohist.Server.Infrastructure.Security.OperatorCredential.HeaderName, OperatorToken);
         await _factory.EnsureSchemaAsync();
     }
 
@@ -173,6 +175,7 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
                 ["Mohist:AgentJob:DispatchRetryBound"] = "00:00:05",
                 ["Mohist:AgentJob:JobTimeout"] = "00:00:08",
                 ["Mohist:Notifications:Hermes:WebhookUrl"] = null,
+                ["Mohist:OperatorToken"] = MohistIntegrationFixture.OperatorToken,
             });
         });
 

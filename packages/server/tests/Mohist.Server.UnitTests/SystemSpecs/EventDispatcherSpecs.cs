@@ -85,10 +85,10 @@ public class EventDispatcherSpecs
         var time = new FakeTimeProvider(StartTime);
         var events = new FakeEventStore();
         var dlq = new FakeDeadLetterStore();
-        var seen = new List<long>();
+        var seen = new List<string>();
         var sub = new Subscription(
             IssueCompleted,
-            new Recorder(_ => seen.Add(0)),
+            new Recorder(evt => seen.Add(evt.Id)),
             DispatchDynamic);
         var dispatcher = BuildDispatcher(events, dlq, [sub], time);
 
@@ -103,6 +103,9 @@ public class EventDispatcherSpecs
         await dispatcher.DispatchAsync(CancellationToken.None);
 
         // Source ordering first (issue_A < issue_B), then per-source id.
+        Assert.Equal(
+            new[] { "A_1", "A_2", "A_3", "B_1", "B_2" },
+            seen);
         Assert.Equal(
             new[] { "A_1", "A_2", "A_3", "B_1", "B_2" },
             events.Marked.Select(m => m.Source switch

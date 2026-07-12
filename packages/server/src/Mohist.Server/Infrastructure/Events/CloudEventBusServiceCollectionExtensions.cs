@@ -15,8 +15,13 @@ public static class CloudEventBusServiceCollectionExtensions
 
     public static IServiceCollection AddCloudEventHandlersFromAssembly(
         this IServiceCollection services, Assembly assembly)
+        => services.AddCloudEventHandlers(assembly.GetTypes());
+
+    internal static IServiceCollection AddCloudEventHandlers(
+        this IServiceCollection services,
+        IEnumerable<Type> discoveredTypes)
     {
-        var handlerTypes = assembly.GetTypes()
+        var handlerTypes = discoveredTypes
             .Where(t => !t.IsAbstract && !t.IsInterface)
             .Where(t => t.GetInterfaces().Any(IsCloudEventHandlerInterface))
             .ToList();
@@ -26,6 +31,7 @@ public static class CloudEventBusServiceCollectionExtensions
             var attr = handlerType.GetCustomAttribute<SubscriptionAttribute>()
                 ?? throw new InvalidOperationException(
                     $"Handler {handlerType.FullName} must have [{nameof(SubscriptionAttribute)}] attribute");
+            CloudEventTypeMatcher.ValidatePattern(attr.Type);
 
             services.AddSingleton(handlerType);
 

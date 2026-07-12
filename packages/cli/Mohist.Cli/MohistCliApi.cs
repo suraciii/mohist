@@ -724,15 +724,25 @@ internal sealed class MohistCliApi
         return (resolved, 0);
     }
 
-    public async Task<int> PrintWithOutputAsync(string path, string mode, string? tableShape = null)
+    public async Task<int> PrintWithOutputAsync(
+        string path,
+        string mode,
+        string? tableShape = null,
+        IReadOnlyDictionary<string, string>? headers = null)
     {
-        using var response = await SendAsync(HttpMethod.Get, path, body: null);
+        using var response = await SendAsync(HttpMethod.Get, path, body: null, headers: headers);
         return response is null ? 1 : await PrintEnvelopeAsync(response, mode, tableShape);
     }
 
-    public async Task<int> PrintPostWithOutputAsync(string path, object body, string mode, string? tableShape = null, bool rawJson = false)
+    public async Task<int> PrintPostWithOutputAsync(
+        string path,
+        object body,
+        string mode,
+        string? tableShape = null,
+        bool rawJson = false,
+        IReadOnlyDictionary<string, string>? headers = null)
     {
-        using var response = await SendAsync(HttpMethod.Post, path, body);
+        using var response = await SendAsync(HttpMethod.Post, path, body, headers: headers);
         return response is null ? 1 : await PrintEnvelopeAsync(response, mode, tableShape, rawJson: rawJson);
     }
 
@@ -1121,13 +1131,19 @@ internal sealed class MohistCliApi
         HttpMethod method,
         string path,
         object? body,
-        bool printServerUnavailable = true)
+        bool printServerUnavailable = true,
+        IReadOnlyDictionary<string, string>? headers = null)
     {
         try
         {
             using var request = new HttpRequestMessage(method, path);
             if (body is not null)
                 request.Content = JsonContent.Create(body, options: JsonOptions);
+            if (headers is not null)
+            {
+                foreach (var (name, value) in headers)
+                    request.Headers.TryAddWithoutValidation(name, value);
+            }
             return await _http.SendAsync(request);
         }
         catch (HttpRequestException) when (printServerUnavailable)

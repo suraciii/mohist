@@ -26,10 +26,10 @@ namespace Mohist.Server.Agent.Services;
 /// </para>
 ///
 /// <para>
-/// The two <c>OpenAsync</c> + <c>SubmitAsync</c> calls are awaited
-/// sequentially because both the manual launch path and the subscription
-/// path require the session to be open (and addressable by label) before
-/// the AgentJobGrain dispatches. The dispatch submission itself is
+/// <c>OpenAsync</c> and <c>SubmitAsync</c> are awaited sequentially because
+/// both the manual launch path and the subscription path require the
+/// session, including trigger correlation labels, to be durable before the
+/// AgentJobGrain dispatches. The dispatch submission itself is
 /// durable at the grain side — <see cref="IAgentJobGrain.SubmitAsync"/>
 /// persists the job input before performing one dispatch attempt without
 /// waiting for Agent execution — so a replay resumes the same job record.
@@ -73,6 +73,9 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
             : StableId("agent-session", triggerIdentity);
         var sessionContext = BuildContext(context, agent);
         var metadata = GenericAgentSessionMetadata.Metadata(sessionContext);
+        var durableMetadata = triggerIdentity is null
+            ? metadata
+            : WithTriggerLabels(metadata, triggerLabels!);
 
         var sessionGrain = _sessions.GetGrain(sessionId);
         await sessionGrain.OpenAsync(
@@ -80,7 +83,7 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
                 RunnerId: string.Empty,
                 AgentRuntime: "opencode",
                 WorkDir: context.WorkspacePath,
-                Metadata: metadata));
+                Metadata: durableMetadata));
 
         var jobKey = triggerIdentity is null
             ? $"agent-job-launch-{Guid.NewGuid():N}"
@@ -100,16 +103,6 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
             await jobGrain.SubmitAsync(jobInput);
         else
             await jobGrain.EnsureSubmittedAsync(jobInput);
-
-        if (triggerIdentity is not null)
-        {
-            await sessionGrain.OpenAsync(
-                new OpenAgentSessionCommand(
-                    RunnerId: string.Empty,
-                    AgentRuntime: "opencode",
-                    WorkDir: context.WorkspacePath,
-                    Metadata: WithTriggerLabels(metadata, triggerLabels!)));
-        }
 
         return new AgentLaunchResult(
             SessionId: sessionId,

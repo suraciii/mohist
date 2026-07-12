@@ -45,27 +45,27 @@ A dead-lettered event SHALL be manually re-deliverable on operator action, so a 
 - **AND** a successful re-delivery SHALL mark the row resolved
 - **AND** a persistence failure after handler success SHALL leave an explicit ambiguous redelivery state rather than report false success
 
-### Requirement: Dead-letter operator access is local and redacted
+### Requirement: Dead-letter operator access is authenticated, local by default, and redacted
 
-Until Mohist has authenticated operator identities, dead-letter list and re-delivery operations SHALL only be mapped on a loopback listener and SHALL only accept direct loopback callers. Proxy-forwarded requests SHALL be rejected. List responses SHALL NOT expose raw exception stacks.
+Dead-letter list and re-delivery operations SHALL only be mapped on a loopback listener and SHALL require an operator credential. The default local credential SHALL be stored outside the API and supplied by the `mo` CLI; network addresses and forwarding headers SHALL NOT be treated as proof of operator identity. List and re-delivery responses SHALL expose only bounded, stack-free diagnostic summaries.
 
 #### Scenario: Remote caller cannot inspect or replay
 
-- **WHEN** a non-loopback caller requests a dead-letter list or re-delivery
+- **WHEN** a caller without the operator credential requests a dead-letter list or re-delivery
 - **THEN** the server SHALL reject the request
 - **AND** no handler side effect SHALL run
 
 #### Scenario: Reverse proxy cannot expose local operator routes
 
-- **WHEN** a non-loopback caller reaches the server through a loopback reverse proxy
+- **WHEN** a caller reaches the loopback listener through a reverse proxy without the operator credential
 - **THEN** the server SHALL reject the request
 - **AND** no handler side effect SHALL run
 
 #### Scenario: Local operator receives redacted diagnostics
 
-- **WHEN** a loopback operator lists unresolved dead letters
+- **WHEN** an authenticated operator lists unresolved dead letters
 - **THEN** the event and summary error SHALL be returned
-- **AND** the raw server exception stack SHALL NOT be returned
+- **AND** the raw server exception stack, stack frames, and file paths SHALL NOT be returned
 
 ### Requirement: Dead-letter recovery has an operator surface
 
@@ -74,6 +74,8 @@ Dead-letter query and re-delivery SHALL be available through the server API and 
 #### Scenario: Operator lists and re-delivers through mo
 
 - **WHEN** an operator runs `mo event dead-letter list`
-- **THEN** unresolved dead-letter rows SHALL be displayed and MAY be filtered by failing handler
+- **THEN** the CLI SHALL authenticate with the local operator credential
+- **AND** unresolved dead-letter rows SHALL be displayed with recovery status and MAY be filtered by failing handler
 - **WHEN** the operator runs `mo event dead-letter redeliver <id>`
-- **THEN** the corresponding API recovery operation SHALL run and report whether delivery succeeded
+- **THEN** the CLI SHALL authenticate with the local operator credential
+- **AND** the corresponding API recovery operation SHALL run and report whether delivery succeeded

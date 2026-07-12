@@ -330,6 +330,55 @@ public class AgentJobOwnerKindSpecs : WorkflowGrainSpecs
         Assert.Single(state.ActiveWorks);
         Assert.Equal(agentJobId, state.ActiveWorks[0].OwnerId);
     }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
+    [Fact]
+    public async Task AssignAgentJobAsync_ConcurrentJobsRespectSingleSlotCapacity()
+    {
+        var projectId = TestProjectId($"agent-job-capacity-{Guid.NewGuid():N}");
+        var runnerId = await RegisterRunnerForProjectAsync(
+            projectId,
+            $"agent-job-capacity-runner-{Guid.NewGuid():N}",
+            maxWorkflowSlots: 1);
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+
+        var assignments = await Task.WhenAll(
+            runner.AssignAgentJobAsync(AgentDispatch("agent-job-capacity-a", "agent-work-capacity-a")),
+            runner.AssignAgentJobAsync(AgentDispatch("agent-job-capacity-b", "agent-work-capacity-b")));
+
+        Assert.Single(assignments, result => result.Status == RunnerWorkAssignmentStatus.Assigned);
+        var rejected = Assert.Single(assignments, result => result.Status == RunnerWorkAssignmentStatus.Rejected);
+        Assert.Equal("capacity-exhausted", rejected.Reason);
+        Assert.Single((await runner.GetRuntimeStateAsync()).ActiveWorks);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
+    [Fact]
+    public async Task AssignAgentJobAsync_AfterUnregisterIsRejected()
+    {
+        var projectId = TestProjectId($"agent-job-offline-{Guid.NewGuid():N}");
+        var runnerId = await RegisterRunnerForProjectAsync(
+            projectId,
+            $"agent-job-offline-runner-{Guid.NewGuid():N}");
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        await runner.UnregisterAsync();
+
+        var result = await runner.AssignAgentJobAsync(
+            AgentDispatch("agent-job-offline", "agent-work-offline"));
+
+        Assert.Equal(RunnerWorkAssignmentStatus.Rejected, result.Status);
+        Assert.Equal("runner-offline", result.Reason);
+        Assert.Empty((await runner.GetRuntimeStateAsync()).ActiveWorks);
+    }
+
+    private static WorkDispatch AgentDispatch(string agentJobId, string workId) =>
+        new(
+            WorkflowRunId: string.Empty,
+            WorkId: workId,
+            AgentJobId: agentJobId,
+            OwnerKind: WorkDispatchOwnerKinds.AgentJob);
 }
 
 [Collection("RunnerGrain")]

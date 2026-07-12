@@ -7,6 +7,7 @@ using Mohist.Server.Api;
 using Mohist.Server.Events.Hub;
 using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Infrastructure.Events;
+using Mohist.Server.Infrastructure.Security;
 using Mohist.Server.SpecTests.Support;
 using Xunit;
 
@@ -37,6 +38,7 @@ public sealed class DeadLetterRoutesSpecs
                 "/api/events/dead-letters?limit=10&handler=test.list.handler");
 
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            Assert.Equal("no-store", response.Headers.CacheControl?.ToString());
             var body = await response.Content.ReadFromJsonAsync<JsonElement>();
             var listed = Assert.Single(body.GetProperty("data").EnumerateArray());
             Assert.Equal(row.DeadLetterId, listed.GetProperty("id").GetInt64());
@@ -89,23 +91,9 @@ public sealed class DeadLetterRoutesSpecs
     }
 
     [Theory]
-    [InlineData("127.0.0.1", true)]
-    [InlineData("::1", true)]
-    [InlineData("203.0.113.10", false)]
-    public void OperatorBoundary_AllowsOnlyLoopback(string address, bool expected)
-    {
-        Assert.Equal(expected, DeadLetterRoutes.IsLoopbackAddress(IPAddress.Parse(address)));
-    }
-
-    [Fact]
-    public void OperatorBoundary_RejectsMissingPeerAddress()
-    {
-        Assert.False(DeadLetterRoutes.IsLoopbackAddress(null));
-    }
-
-    [Theory]
     [InlineData("http://127.0.0.1:3456", true)]
     [InlineData("http://localhost:3456", true)]
+    [InlineData("http://192.168.1.10:3456", false)]
     [InlineData("http://0.0.0.0:3456", false)]
     [InlineData("http://*:3456", false)]
     [InlineData("http://[::]:3456", false)]
@@ -121,7 +109,7 @@ public sealed class DeadLetterRoutesSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
-    public async Task Redeliver_RejectsLoopbackProxyForRemoteCallerWithoutSideEffect()
+    public async Task Redeliver_RejectsProxyCallerWithoutCredentialAndHasNoSideEffect()
     {
         var store = _fixture.Services.GetRequiredService<IDeadLetterStore>();
         var row = BuildRow(typeof(EventBridge).FullName!);
@@ -137,13 +125,56 @@ public sealed class DeadLetterRoutesSpecs
             };
             request.Headers.TryAddWithoutValidation("X-Forwarded-For", "203.0.113.10");
 
-            using var response = await _fixture.Client.SendAsync(request);
+            _fixture.Client.DefaultRequestHeaders.Remove(OperatorCredential.HeaderName);
+            HttpResponseMessage response;
+            try
+            {
+                response = await _fixture.Client.SendAsync(request);
+            }
+            finally
+            {
+                _fixture.Client.DefaultRequestHeaders.Add(
+                    OperatorCredential.HeaderName,
+                    MohistIntegrationFixture.OperatorToken);
+            }
+            using (response)
+            {
+                Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+            }
 
-            Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
             var stored = await store.GetAsync(row.DeadLetterId);
             Assert.NotNull(stored);
             Assert.Equal(DeadLetterStatus.Pending, stored.Status);
             Assert.Null(stored.RedeliveryAttemptedAt);
+        }
+        finally
+        {
+            await store.DeleteAsync(row.DeadLetterId);
+        }
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
+    [Fact]
+    public async Task List_RedactsEmbeddedStackFramesAndPaths()
+    {
+        var store = _fixture.Services.GetRequiredService<IDeadLetterStore>();
+        var row = BuildRow("test.redaction.handler");
+        row.ErrorMessage = "handler failed\n   at Example.Handler in /tmp/private/Handler.cs:line 42";
+        await store.WriteAsync(row);
+
+        try
+        {
+            using var response = await _fixture.Client.GetAsync(
+                "/api/events/dead-letters?handler=test.redaction.handler");
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+            var listed = Assert.Single(body.GetProperty("data").EnumerateArray());
+            var error = listed.GetProperty("error").GetString();
+            Assert.Equal("handler failed", error);
+            Assert.DoesNotContain("/tmp/private", error, StringComparison.Ordinal);
+            Assert.DoesNotContain(" at ", error, StringComparison.Ordinal);
         }
         finally
         {

@@ -253,7 +253,7 @@ public sealed class EventDispatcherService
             }
         }
 
-        return (HandlerOutcome.Exhausted, Summarize(lastError), attempts, lastError?.ToString());
+        return (HandlerOutcome.Exhausted, OperatorDiagnostic.Summarize(lastError), attempts, lastError?.ToString());
     }
 
     private DeadLetterRow BuildDeadLetter(
@@ -282,13 +282,6 @@ public sealed class EventDispatcherService
             AttemptCount = attempts,
             DeadLetteredAt = _time.GetUtcNow(),
         };
-    }
-
-    private static string? Summarize(Exception? ex)
-    {
-        if (ex is null) return null;
-        var msg = ex.Message ?? string.Empty;
-        return msg.Length <= 1024 ? msg : msg[..1024];
     }
 
     private static CloudEvent ReconstructEnvelope(UndeliveredEvent evt)

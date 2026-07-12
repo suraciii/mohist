@@ -18,17 +18,18 @@ internal sealed partial class TableRenderer
         {
             cells.Add([
                 NumberOf(row, "id"),
-                Truncate(StringOf(row, "type"), 42),
-                Truncate(StringOf(row, "handler"), 44),
+                Truncate(SanitizeTerminalText(StringOf(row, "type")), 42),
+                Truncate(SanitizeTerminalText(StringOf(row, "handler")), 44),
+                Truncate(SanitizeTerminalText(StringOf(row, "status")), 12),
                 NumberOf(row, "attempts"),
-                Truncate(StringOf(row, "deadLetteredAt"), 25),
-                Truncate(StringOf(row, "error"), 60),
+                Truncate(SanitizeTerminalText(StringOf(row, "deadLetteredAt")), 25),
+                Truncate(SanitizeTerminalText(StringOf(row, "error")), 60),
             ]);
         }
 
         WriteTable(
-            ["id", "type", "handler", "attempts", "dead-lettered", "error"],
-            [10, 42, 44, 8, 25, 60],
+            ["id", "type", "handler", "status", "attempts", "dead-lettered", "error"],
+            [10, 42, 44, 12, 8, 25, 60],
             cells);
     }
 
@@ -46,6 +47,34 @@ internal sealed partial class TableRenderer
         _out.WriteLine($"Dead-letter {NumberOf(row, "id")}: {status} after {NumberOf(row, "attempts")} attempt(s)");
         var error = StringOf(row, "error");
         if (!string.IsNullOrWhiteSpace(error))
-            _out.WriteLine(error);
+            _out.WriteLine(SanitizeTerminalText(error));
+    }
+
+    private static string SanitizeTerminalText(string value)
+    {
+        var result = new System.Text.StringBuilder(value.Length);
+        for (var index = 0; index < value.Length; index++)
+        {
+            var character = value[index];
+            if (character is '\r' or '\n')
+                break;
+            if (character == '\u001b')
+            {
+                if (index + 1 < value.Length && value[index + 1] == '[')
+                {
+                    index += 2;
+                    while (index < value.Length && value[index] is < '@' or > '~')
+                        index++;
+                }
+                else if (index + 1 < value.Length)
+                {
+                    index++;
+                }
+                continue;
+            }
+            if (!char.IsControl(character))
+                result.Append(character);
+        }
+        return result.ToString();
     }
 }

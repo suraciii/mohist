@@ -229,14 +229,16 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
     {
         if (State.Input is not null)
         {
-            if (EquivalentInput(State.Input, input))
+            var existingInput = InputWithAgentConfig()!;
+            if (EquivalentInput(existingInput, input))
             {
                 if (!IsTerminal && State.Status == AgentJobStatus.Pending)
                     await TryDispatchAsync();
                 return;
             }
             throw new InvalidOperationException(
-                $"AgentJob '{Key}' cannot accept a different submission after it has started");
+                $"AgentJob '{Key}' cannot accept a different submission after it has started " +
+                $"({DescribeInputDifferences(existingInput, input)})");
         }
 
         if (State.Status != AgentJobStatus.Pending)
@@ -246,7 +248,8 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         if (input is null || string.IsNullOrWhiteSpace(input.Prompt))
             throw new ArgumentException("AgentJobInput.Prompt is required", nameof(input));
 
-        State.Input = input;
+        State.AgentConfigJson = SerializeAgentConfig(input.AgentConfig);
+        State.Input = input with { AgentConfig = null };
         State.SubmittedAt = _timeProvider.GetUtcNow();
         State.NextDispatchDelay = TimeSpan.Zero;
         State.DispatchAttempts = 0;
@@ -277,16 +280,44 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         && string.Equals(left.AgentSessionId, right.AgentSessionId, StringComparison.Ordinal)
         && JsonEquals(left.AgentConfig, right.AgentConfig);
 
+    private static string DescribeInputDifferences(AgentJobInput left, AgentJobInput right)
+    {
+        var fields = new List<string>();
+        if (!string.Equals(left.Prompt, right.Prompt, StringComparison.Ordinal)) fields.Add(nameof(AgentJobInput.Prompt));
+        if (!string.Equals(left.Model, right.Model, StringComparison.Ordinal)) fields.Add(nameof(AgentJobInput.Model));
+        if (!string.Equals(left.WorkspacePath, right.WorkspacePath, StringComparison.Ordinal)) fields.Add(nameof(AgentJobInput.WorkspacePath));
+        if (!string.Equals(left.ProjectId, right.ProjectId, StringComparison.Ordinal)) fields.Add(nameof(AgentJobInput.ProjectId));
+        if (!string.Equals(left.Uses, right.Uses, StringComparison.Ordinal)) fields.Add(nameof(AgentJobInput.Uses));
+        if (!string.Equals(left.AgentId, right.AgentId, StringComparison.Ordinal)) fields.Add(nameof(AgentJobInput.AgentId));
+        if (!string.Equals(left.AgentInstructions, right.AgentInstructions, StringComparison.Ordinal)) fields.Add(nameof(AgentJobInput.AgentInstructions));
+        if (!string.Equals(left.AgentSessionId, right.AgentSessionId, StringComparison.Ordinal)) fields.Add(nameof(AgentJobInput.AgentSessionId));
+        if (!JsonEquals(left.AgentConfig, right.AgentConfig)) fields.Add(nameof(AgentJobInput.AgentConfig));
+        return string.Join(", ", fields);
+    }
+
     private static bool JsonEquals(JsonElement? left, JsonElement? right)
     {
-        var leftJson = left is { ValueKind: not JsonValueKind.Undefined } leftElement
-            ? leftElement.GetRawText()
-            : null;
-        var rightJson = right is { ValueKind: not JsonValueKind.Undefined } rightElement
-            ? rightElement.GetRawText()
-            : null;
-        return string.Equals(leftJson, rightJson, StringComparison.Ordinal);
+        var hasLeft = left is { ValueKind: not JsonValueKind.Undefined };
+        var hasRight = right is { ValueKind: not JsonValueKind.Undefined };
+        if (!hasLeft || !hasRight)
+            return hasLeft == hasRight;
+        return JsonElement.DeepEquals(left!.Value, right!.Value);
     }
+
+    private AgentJobInput? InputWithAgentConfig() =>
+        State.Input is null
+            ? null
+            : State.Input with
+            {
+                AgentConfig = string.IsNullOrWhiteSpace(State.AgentConfigJson)
+                    ? null
+                    : JSON.DeserializeElement(State.AgentConfigJson),
+            };
+
+    private static string? SerializeAgentConfig(JsonElement? config) =>
+        config is { ValueKind: not JsonValueKind.Undefined } element
+            ? element.GetRawText()
+            : null;
 
     public async Task CheckTimeoutsAsync()
     {
@@ -423,7 +454,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
 
     private WorkDispatch BuildDispatch(string workId)
     {
-        var input = State.Input!;
+        var input = InputWithAgentConfig()!;
         var payload = new Dictionary<string, JsonElement?>(StringComparer.Ordinal);
         if (!string.IsNullOrWhiteSpace(input.WorkspacePath))
             payload["workspace"] = JSON.SerializeToElement(

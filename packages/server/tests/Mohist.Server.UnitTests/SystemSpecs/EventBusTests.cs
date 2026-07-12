@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Infrastructure.Events;
@@ -146,6 +147,17 @@ public class EventBusTests
         Assert.Single(store.Appended);
     }
 
+    [Fact]
+    public void HandlerRegistration_InvalidSubscriptionPatternFailsImmediately()
+    {
+        var services = new ServiceCollection();
+
+        var error = Assert.Throws<ArgumentException>(() =>
+            services.AddCloudEventHandlers([typeof(InvalidPatternHandler)]));
+
+        Assert.Contains("wildcards are only allowed", error.Message, StringComparison.Ordinal);
+    }
+
     private sealed record TestPayload(string Message);
 
     private static Task DispatchDynamic(object handler, CloudEvent evt, CancellationToken ct)
@@ -180,5 +192,13 @@ public class EventBusTests
             _onEvent(evt);
             return Task.CompletedTask;
         }
+    }
+
+    [Subscription(Type = "test.*.invalid")]
+    private sealed class InvalidPatternHandler : ICloudEventHandler
+    {
+        public bool Filter(CloudEvent evt) => true;
+
+        public Task HandleAsync(CloudEvent evt, CancellationToken ct) => Task.CompletedTask;
     }
 }

@@ -347,10 +347,6 @@ public class StageLockSpecs : WorkflowGrainSpecs
     {
         using var scope = Services.CreateScope();
         var events = scope.ServiceProvider.GetRequiredService<IEventStore>();
-        var handler = new WorkflowStageLockReleaseHandler(
-            Grains,
-            Microsoft.Extensions.Logging.Abstractions.NullLogger<WorkflowStageLockReleaseHandler>.Instance);
-
         var stored = await Mohist.Server.SpecTests.Support.TestWait.ForAsync(
             async () =>
             {
@@ -364,6 +360,8 @@ public class StageLockSpecs : WorkflowGrainSpecs
             TimeSpan.FromMilliseconds(50),
             $"{type}({stage}) event row for {workflowRunId}");
 
-        await handler.HandleAsync(stored!.Envelope, CancellationToken.None);
+        await scope.ServiceProvider
+            .GetRequiredService<EventDispatcherService>()
+            .DispatchAsync(CancellationToken.None);
     }
 }

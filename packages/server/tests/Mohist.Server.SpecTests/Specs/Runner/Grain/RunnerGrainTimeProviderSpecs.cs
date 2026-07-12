@@ -25,6 +25,7 @@ public class RunnerGrainTimeProviderSpecs : WorkflowGrainSpecs
             ["spec/*"],
             "time-host",
             "test-project"));
+        await runner.UpdateAsync(2);
 
         var before = _fixture.TimeProvider.GetUtcNow();
         await runner.AssignAgentJobAsync(new WorkDispatch(
@@ -38,7 +39,7 @@ public class RunnerGrainTimeProviderSpecs : WorkflowGrainSpecs
         Assert.Equal("agent-work-1", active.WorkId);
         Assert.Equal(before, active.TakenAt);
 
-        _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(5));
+        _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(1));
         var after = _fixture.TimeProvider.GetUtcNow();
 
         await runner.AssignAgentJobAsync(new WorkDispatch(

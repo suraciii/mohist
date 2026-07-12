@@ -10,26 +10,66 @@
 
 - [ID: item-1]
   Severity: blocking
-  Scope: `packages/server/src/Mohist.Server/Events/Subscriptions/AgentSubscriptionDispatchHandler.cs`
-  Evidence: The issue explicitly keeps `AgentSubscriptionDispatchHandler` as a best-effort, exception-swallowing consumer whose contract must not change. This candidate removes its exception boundary: `HandleAsync` delegates directly to `DispatchAsync` at line 77, and a launch failure now escapes from `LaunchAsync` at lines 141-146. The new regression test asserts that changed behavior at `AgentSubscriptionDispatchHandlerSpecs.cs:422-445`. The dispatcher will consequently retry and dead-letter Agent subscription failures, which is a public behavior change and conflicts with the issue's stated Agent-event contract. [disallowed:public-contract]
-  SuggestedAction: Restore the handler's best-effort catch-and-log behavior, including a regression test that a launcher failure is swallowed while the source event may later be replayed. If durable retry/dead-letter behavior is intended instead, amend the issue/spec before implementing that contract change.
-  Verification: Dispatch an event through a failing `IAgentLauncher`; assert the handler completes successfully, the dispatcher marks the event as settled, and the logged failure remains observable without creating a dead letter.
+  Scope: `packages/server/src/Mohist.Server/Api/DeadLetterRoutes.cs`
+  Evidence: `UsesLoopbackOnlyListener` maps the unauthenticated routes for any specifically bound address, including `http://192.168.1.10:3456`, because only wildcard hosts are considered public at lines 101-113 and 132-133. The per-request proxy defense at lines 90-99 relies on a finite, client-controlled header denylist at lines 118-126. A loopback proxy can omit or strip those headers and forward a remote request with `Host: localhost`, making it appear direct. This violates the local-only and proxy-rejection requirement while exposing event payloads and handler replay. [disallowed:security-posture]
+  SuggestedAction: Do not map these routes unless every listener is a real loopback listener. Use a non-proxyable local transport or authenticated operator authorization; request-header checks cannot prove a caller was direct.
+  Verification: Bind the server to a non-loopback address behind a loopback proxy that strips forwarding headers. A remote request to list or redeliver must be unreachable and must not invoke the handler.
   Status: open
 
 - [ID: item-2]
   Severity: blocking
-  Scope: `packages/server/src/Mohist.Server/Api/DeadLetterRoutes.cs`, operator access boundary
-  Evidence: The new operator endpoints authorize solely from `HttpContext.Connection.RemoteIpAddress` at lines 23-24 and 59-60. A remote caller routed through a loopback reverse proxy is therefore seen as `127.0.0.1` and can list event payloads or invoke handler replay. The server supports non-loopback binding in `Program.cs:41-46`, while no authenticated operator boundary exists. This does not meet the requirement that only loopback callers may inspect or redeliver dead letters. [disallowed:security-posture]
-  SuggestedAction: Keep these routes unreachable through a proxy/public listener until authentication exists, or add a trusted-proxy-aware client-address policy together with authenticated operator authorization.
-  Verification: Put the server behind a loopback reverse proxy and issue a request from a non-loopback client. It must receive `403` and must not trigger a redelivery side effect.
+  Scope: `packages/server/src/Mohist.Server/Agent/Services/AgentLauncher.cs`
+  Evidence: The stable session is opened without trigger labels at lines 77-83, its durable job is submitted at lines 99-102, and the correlation labels are written only in a second `OpenAsync` at lines 104-112. If that final persistence fails, `AgentSubscriptionDispatchHandler` logs and swallows the error at lines 77-92, so the dispatcher settles the source event while the running job has no trigger event/subscription correlation. This regresses the Agent subscription visibility contract and prevents reliable traceability of replayed launches. [disallowed:public-contract]
+  SuggestedAction: Include trigger labels in the initial session open, before submitting the job, and preserve stable identities on replay.
+  Verification: Make only the second session write fail after `EnsureSubmittedAsync` succeeds; assert the persisted session still has both trigger labels and the event outcome remains auditable.
   Status: open
 
 - [ID: item-3]
+  Severity: blocking
+  Scope: `packages/server/src/Mohist.Server/Agent/Grains/AgentJobGrain.cs`, `packages/server/src/Mohist.Server/Runner/Grains/RunnerGrain.cs`
+  Evidence: `AgentJobGrain` checks runtime status and capacity before calling the runner at lines 375-402, but `AssignAgentJobAsync` only validates the work shape and duplicate identity at `RunnerGrain.cs:181-191`, then unconditionally persists the work at lines 193-216. A runner can unregister after the snapshot and still accept work; two jobs can both observe an empty one-slot runner and both be accepted. This violates runner availability and configured capacity, and turns the new durable replay path into work that may never run. [disallowed:product-behavior]
+  SuggestedAction: Make `AssignAgentJobAsync` the atomic admission boundary: reject offline runners and enforce the slot limit before inserting the work. Keep the caller-side check only as an optimization.
+  Verification: Race unregister against assignment and submit two jobs concurrently to a one-slot runner; the first must be admitted and the other must remain pending, with no offline assignment.
+  Status: open
+
+- [ID: item-4]
+  Severity: warning
+  Scope: dead-letter diagnostics API
+  Evidence: Retry exhaustion stores `Exception.Message` as the response-safe error at `EventDispatcherService.cs:256-292`, and `DeadLetterRoutes.cs:48` and `:77` return that value unchanged. Omitting `ErrorStack` does not redact a stack embedded in an exception message, for example an exception constructed with `Environment.StackTrace`. The route test checks only that `errorStack` is absent at `DeadLetterRoutesSpecs.cs:46`.
+  SuggestedAction: Derive a bounded, stack-free diagnostic summary for the operator response and retain raw diagnostics only in server logs or protected storage.
+  Verification: Cause a handler to throw a message containing a stack trace; list and redelivery responses must contain no stack frames or file paths.
+  Status: open
+
+- [ID: item-5]
+  Severity: warning
+  Scope: `packages/cli/Mohist.Cli/TableRenderer.Events.cs`
+  Evidence: The API supplies the recovery state at `DeadLetterRoutes.cs:51-52`, but the default `mo event dead-letter list` table renders no `status` column at `TableRenderer.Events.cs:19-32`. A row left `Redelivering` after successful delivery but failed resolution is indistinguishable from a safely retryable `Pending` row, despite the explicit ambiguous-state design.
+  SuggestedAction: Render recovery status in the default table and cover `Redelivering` output.
+  Verification: List a `Redelivering` row using table output and assert that its state is displayed.
+  Status: open
+
+- [ID: item-6]
+  Severity: minor
+  Scope: `packages/cli/Mohist.Cli/TableRenderer.Events.cs`
+  Evidence: Handler-originated dead-letter errors are rendered directly at line 25. `TableRenderer.Truncate` removes only text after `\n` at lines 326-335, leaving carriage returns and ANSI control sequences intact. A poisoned handler error can therefore alter terminal output for a local operator.
+  SuggestedAction: Strip or escape terminal control characters from all table cells before rendering.
+  Verification: Return an error containing `\r` and ANSI erase/color sequences; table output must display inert text without terminal control effects.
+  Status: open
+
+- [ID: item-7]
+  Severity: minor
+  Scope: `packages/server/src/Mohist.Server/Infrastructure/Events/CloudEventBusServiceCollectionExtensions.cs`
+  Evidence: Reflection registration creates `Subscription` values from attributes without pattern validation at lines 50-61, while the dispatcher marks an event with no matching handler as delivered at `EventDispatcherService.cs:190-204`. The existing validator is private to `InMemoryEventBus` at lines 86-107 and that bus is not a required dispatcher dependency. A malformed static subscription pattern can therefore silently drop a required domain reaction instead of failing during startup.
+  SuggestedAction: Validate every discovered subscription pattern during service registration or in `EventDispatcherService` construction.
+  Verification: Add a handler with an invalid wildcard pattern and assert that host construction fails before any event can be marked dispatched.
+  Status: open
+
+- [ID: item-8]
   Severity: test-gap
-  Scope: `packages/server/tests/Mohist.Server.SpecTests/Specs/Events/DispatcherGrainSpecs.cs`
-  Evidence: The new reminder/failover test uses `signal.WaitAsync(TimeSpan.FromSeconds(10))` at lines 213-223. `design/testing.md:53-59` forbids wall-clock waits and requires an awaitable signal or injected fake-time progression. This introduces a timing-dependent failure path into the highest-risk recovery coverage.
-  SuggestedAction: Make the test complete from the existing deterministic signals and fake-time advancement without a real-time timeout; use the suite's deterministic failure mechanism for diagnostics.
-  Verification: Run the dispatcher failover spec repeatedly under CPU contention and confirm it contains no `WaitAsync(TimeSpan)`, `Task.Delay`, or wall-clock deadline.
+  Scope: dispatcher, workflow-handler, and AgentJob recovery coverage
+  Evidence: `WorkflowGrainFixture.cs:50-63` adds a subscription to `InMemoryEventBus`, but its silo setup registers neither `EventDispatcherService` nor the corresponding subscription set at `GrainTestConfig.cs:261-279`; the stage-lock specs instead instantiate and invoke the handler directly at `StageLockSpecs.cs:346-367`. The FIFO unit spec records handler observations but asserts only mark order at `EventDispatcherSpecs.cs:83-114`. AgentJob persistence tests deactivate only a config-less `AgentJobInput` at `AgentJobGrainPersistenceSpecs.cs:26-47`, while the `JsonElement` configuration case never deactivates at `AgentJobGrainSpecs.cs:502-545`. These gaps leave actual workflow handler activation, handler ordering, and the previously fragile serialized Agent configuration recovery unproven.
+  SuggestedAction: Add deterministic integration coverage that appends a real workflow stage event and observes its registered handler through the dispatcher, assert handler order directly, and deactivate/reactivate a job containing non-null `AgentConfig` before replay.
+  Verification: Run the new focused tests repeatedly with fake time and no direct handler invocation, then confirm the source row, side effect, and durable state all converge.
   Status: open
 
 ## Follow-up Items
@@ -38,26 +78,23 @@
 
 ## Pre-existing or Out-of-scope Items
 
-- [ID: item-4]
+- [ID: item-9]
   Severity: info
   Scope: server test suite
-  Evidence: `dotnet test Mohist.sln -p:SkipWebBuild=true --no-restore` passed, but retained 3 architecture-test skips and 9 server-spec skips. These predate the candidate and did not fail the current test run.
-  SuggestedAction: Track and remove the skipped coverage separately, following the repository rule against skipped tests masking uncertainty.
+  Evidence: `npm test` passed, but retained 3 architecture-test skips and 9 server-spec skips. The skips predate this candidate and do not fail the current test run.
+  SuggestedAction: Remove or replace skipped coverage in its owning issues under the repository's no-skipped-tests policy.
   Status: pre-existing
 
 ## Acceptance Criteria Assessment
 
-- Cluster singleton startup and reminder wiring are present in `DispatcherGrain.cs:18-65` and `DispatcherActivationService.cs:15-18`; focused reminder/failover coverage passes in `DispatcherGrainSpecs.cs:139-177`.
-- The four-table, single-query pull and origin-aware settlement are implemented in `EventStore.cs:180-268`; serial dispatch and atomic poison settlement are implemented in `EventDispatcherService.cs:82-96` and `197-211`.
-- Retry, per-handler isolation, dead-letter persistence/recovery, API, and CLI coverage are present and passed in the focused suites.
-- At-least-once deliver-before-mark behavior is covered by `EventDispatcherSpecs.cs:217-253`, and durable Agent job/work identities are covered by `AgentJobGrainPersistenceSpecs.cs:52-84` and `AgentLauncherSpecs.cs:138-203`.
-- The Agent consumer contract and loopback-only operator requirement remain unsatisfied by items 1 and 2, so the post-review candidate cannot pass.
+- Cluster-singleton reminder wiring and startup activation are present in `DispatcherGrain.cs:18-65` and `DispatcherActivationService.cs:15-18`; reminder registration is covered by `DispatcherStartupSpecs.cs:23-34`.
+- The single four-table undelivered query and persisted-origin marking are implemented in `EventStore.cs:180-268`. Serial fan-out, retry, per-row settlement, and atomic poison routing are implemented in `EventDispatcherService.cs:82-256` and `DeadLetterStore.cs:25-73`.
+- Deliver-before-mark redelivery and idempotent absorption are covered in `EventDispatcherSpecs.cs:248-283`; dead-letter persistence, querying, and recovery-state storage are covered in `DeadLetterStoreSpecs.cs:164-233`.
+- The required manual recovery surface exists in `DeadLetterRoutes.cs:19-85` and `MohistCliCommands.Event.cs:18-84`, but its access boundary remains unsafe (item-1). Agent replay durability is incomplete due to correlation loss and runner-admission defects (items 2-3), with coverage gaps in item-8.
 
 ## Verification
 
-- `git diff --check origin/master...HEAD` passed.
-- Focused dispatcher/dead-letter/Agent server tests passed: 36 unit tests and 63 specs.
-- Focused CLI dead-letter tests passed: 5 tests.
-- `dotnet test Mohist.sln -p:SkipWebBuild=true --no-restore` passed: CLI 870, server unit 1361, architecture 24 passed / 3 skipped, server specs 2836 passed / 9 skipped.
+- `git diff --check e594b8c4f^..HEAD` passed.
+- `npm test` passed: CLI 870, server unit 1363, architecture 24 passed / 3 skipped, server specs 2843 passed / 9 skipped, Web 4596, runner 1007.
 
 <promise>FAIL</promise>

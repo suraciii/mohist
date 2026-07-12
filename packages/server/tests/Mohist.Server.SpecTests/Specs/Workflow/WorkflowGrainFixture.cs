@@ -24,12 +24,17 @@ public class WorkflowGrainFixture : IAsyncLifetime
     public IReminderTable ReminderTable => Cluster.GetSiloServiceProvider(null).GetRequiredService<IReminderTable>();
     public ControllableReminderTable ControllableReminderTable => Cluster.GetSiloServiceProvider(null).GetRequiredService<ControllableReminderTable>();
 
-    private readonly InMemoryEventBus _sharedEventBus = new(
-        new RecordingEventStore(),
-        System.TimeProvider.System,
-        NullLogger<InMemoryEventBus>.Instance);
     private readonly RecordingEventStore _sharedEventStore = new();
+    private readonly InMemoryEventBus _sharedEventBus;
     private SqliteConnection _keeper = null!;
+
+    public WorkflowGrainFixture()
+    {
+        _sharedEventBus = new InMemoryEventBus(
+            _sharedEventStore,
+            TimeProvider,
+            NullLogger<InMemoryEventBus>.Instance);
+    }
 
     public async Task InitializeAsync()
     {
@@ -46,21 +51,6 @@ public class WorkflowGrainFixture : IAsyncLifetime
             GrainTestConfig.ConfigureSilo(siloBuilder, connectionString, _sharedEventBus, _sharedEventStore, TimeProvider));
         Cluster = builder.Build();
         await Cluster.DeployAsync();
-
-        // Wire the bus-side subscriptions that the production pipeline
-        // registers via AddCloudEventHandlersFromAssembly. Test fixtures
-        // do not run that registration path, so we add them explicitly
-        // here after the cluster has been deployed (the handler needs a
-        // live cluster client to dispatch lock releases into the running
-        // silo). New bus-side handlers must be added here so tests
-        // exercise the real dispatch path.
-        var handler = new WorkflowStageLockReleaseHandler(
-            Cluster.Client,
-            NullLogger<WorkflowStageLockReleaseHandler>.Instance);
-        _sharedEventBus.AddSubscription(new Subscription(
-            "com.mohist.workflow.stage.completed|com.mohist.workflow.stage.failed",
-            handler,
-            (h, e, ct) => ((WorkflowStageLockReleaseHandler)h).HandleAsync(e, ct)));
     }
 
     public Task DisposeAsync()

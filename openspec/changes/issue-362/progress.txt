@@ -51,8 +51,9 @@ issue-362 — T-002 working memory
 - Retry is a hand-rolled loop in `InvokeWithRetryAsync` with `DispatcherOptions.HandlerMaxAttempts` cap (default 3). No Polly. No backoff. The cap is configurable so the spec test's `per-handler isolation` scenario can use 2 attempts without overflowing.
 - Per-row `DispatchedAt` is set after matching handlers settle. Poison rows use one transaction for handler-keyed dead-letter upserts plus source mark; any settlement failure aborts the batch to preserve FIFO.
 - Durable production reactions await required side effects and propagate failures. Hermes and `AgentSubscriptionDispatchHandler` retain their documented best-effort catch-and-log contracts and do not enter retry/DLQ.
-- Once an Agent subscription launch is accepted, it derives stable session/job keys from project + event + subscription. AgentJob persists input, candidate runner, stable work id, retry state, and terminal state; replay never treats session labels as the launch claim.
-- Dead-letter API operations require a direct loopback connection, reject proxy forwarding, are absent on public listeners, and redact raw exception stacks. Closed-generic Epic handlers create a scope per delivery for `EpicQuerier`.
+- Agent subscription launches write trigger labels before durable submission and derive stable session/job keys from project + event + subscription. AgentJob persists raw AgentConfig JSON, candidate runner, stable work id, retry state, and terminal state; replay never treats session labels as the launch claim.
+- Dead-letter API operations are absent on public listeners and require a high-entropy operator credential on loopback listeners. The CLI reads the user-only credential file, responses are no-store and stack/path-redacted, and table output exposes recovery status without terminal controls. Closed-generic Epic handlers create a scope per delivery for `EpicQuerier`.
+- RunnerGrain owns atomic agent-job admission: lifecycle changes and admission share one gate, offline runners reject work, and concurrent jobs cannot both consume a one-slot runner.
 
 ## Gotchas
 
@@ -73,10 +74,10 @@ issue-362 — T-002 working memory
 - [x] Per-row DispatchedAt set only after all matching handlers settled
 - [x] Closed-generic discovery bug fixed (proper ICloudEventHandler<> closed-generic scan)
 - [x] InMemoryEventBus uses injected TimeProvider (no DateTimeOffset.UtcNow)
-- [x] RedeliverAsync retries only the recorded failing handler, tracks recovery state, and is exposed through direct-loopback-only, proxy-rejecting, redacted API + CLI
+- [x] RedeliverAsync retries only the recorded failing handler, tracks recovery state, and is exposed through loopback-only, operator-credential-protected, redacted API + CLI
 - [x] Fresh-host activation registers the dispatcher reminder without producer traffic
 - [x] Durable handler failures propagate; Hermes and Agent subscription dispatch remain best-effort; accepted Agent trigger launches resume durable stable job/work identities
 - [x] EventDispatcherService + IDeadLetterStore→DeadLetterStore (+ NoopDeadLetterStore via TryAdd) + subscriptions registered once in the host-shared application graph; MohistSiloRegistration contains Orleans infrastructure only
 - [x] Unit tests cover pull→match→invoke→mark; FIFO (Source,Id); retry-then-succeed; exhaustion; per-handler isolation; deliver-before-mark crash recovery; CloudEventTypeMatcher fan-out with closed-generic handler
-- [x] Spec tests cover PulseAsync, actual reminder callback without Pulse, two-silo host loss recovery, closed-generic handlers, exact-handler dead-letter recovery, API/CLI boundary, and Agent crash checkpoints
-- [x] Full `npm test` green on rebased master: CLI 870, server unit 1363, arch 24 (3 skipped), server spec 2843 (9 skipped), Web 4596, Runner 1007; Node test-boundary checks and TreatWarningsAsErrors clean
+- [x] Spec tests cover PulseAsync, actual reminder callback without Pulse, two-silo host loss recovery, closed-generic handlers, exact-handler dead-letter recovery, credential-protected API/CLI boundary, real workflow handler dispatch, atomic Runner admission, and Agent crash checkpoints including AgentConfig reactivation
+- [x] Full `npm test` green on rebased master: CLI 873, server unit 1367, arch 24 (3 skipped), server spec 2843 (9 skipped), Web 4596, Runner 1007; Node test-boundary checks and TreatWarningsAsErrors clean

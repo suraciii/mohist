@@ -31,7 +31,7 @@
 - [ID: item-5]
   Severity: warning
   Scope: operator security
-  Resolution: Public listeners do not map dead-letter routes. Loopback listeners require a direct request with loopback host, local address, and remote address, reject standard proxy markers, and deny unknown peers. API responses omit exception stacks. Tests cover public-listener disablement, loopback/remote classification, proxy rejection before redelivery, and response redaction.
+  Resolution: Superseded by item-14 after the next review proved that address/header checks cannot establish directness through a loopback proxy. Public-listener disablement and response redaction remain; caller identity now comes from the operator credential.
   Status: resolved
 
 - [ID: item-6]
@@ -82,6 +82,36 @@
   Resolution: Removed `WaitAsync(TimeSpan)` from the reminder/failover spec. It advances only the injected fake clock and probes the shared reminder-table and handler-delivery signals through `TestWait`'s fixed attempt budget; the between-attempt hook completes an unrelated read-only Orleans grain turn without sleeping or touching the dispatcher.
   Status: resolved
 
+- [ID: item-14]
+  Severity: blocking
+  Scope: dead-letter operator authorization
+  Resolution: Public listeners still do not map the routes. Loopback routes now require a high-entropy operator credential created in a user-only, non-symlink file (or supplied explicitly by environment/config); `mo` reads the same credential and sends a dedicated header. IP addresses and forwarding headers are no longer treated as identity. Missing credentials are rejected before store or handler access, and list responses are `no-store`.
+  Status: resolved
+
+- [ID: item-15]
+  Severity: blocking
+  Scope: Agent trigger correlation
+  Resolution: Trigger event/subscription labels are merged into the first `OpenAsync` command, before `EnsureSubmittedAsync`. There is no post-submit metadata write that can fail after the event is settled. Stable session/job identities remain unchanged on replay.
+  Status: resolved
+
+- [ID: item-16]
+  Severity: blocking
+  Scope: Runner admission
+  Resolution: Runner lifecycle changes and `AssignAgentJobAsync` share one serialized gate. Admission rejects offline runners, checks current capacity inside the Runner aggregate, and only then persists work. Concurrent one-slot submissions produce one assignment and one `capacity-exhausted` rejection; post-unregister submissions return `runner-offline`.
+  Status: resolved
+
+- [ID: item-17]
+  Severity: warning
+  Scope: diagnostics and CLI recovery visibility
+  Resolution: Stored and returned operator errors are bounded to a stack-free first line with path/control redaction. The default CLI table renders `Pending`/`Redelivering` status and strips ANSI, carriage-return, newline, and other terminal controls from untrusted cells.
+  Status: resolved
+
+- [ID: item-18]
+  Severity: test-gap
+  Scope: registration, FIFO, workflow delivery, and AgentJob recovery
+  Resolution: Subscription patterns are validated during reflection registration; FIFO asserts handler observation order directly; stage-lock specs now deliver persisted workflow events through DI-registered `EventDispatcherService` and `WorkflowStageLockReleaseHandler`; AgentJob persistence deactivates and replays a non-null AgentConfig. That test exposed nullable `JsonElement` persistence drift, so raw JSON is now the sole durable AgentConfig representation and is reconstructed on demand.
+  Status: resolved
+
 ## Verification
 
 - Dispatcher/Hermes unit slice: 30 passed.
@@ -91,7 +121,7 @@
 - Repaired dispatcher suite: 7 passed, plus the failover case passed in three concurrent processes; it uses real reminder ticks, shared persistence, fake time, and deterministic signals.
 - Event-delivery index model + migration regression: 1 passed.
 - Console-capture slice: 9 passed in five consecutive runs.
-- Full CI-equivalent validation: CLI 870; server unit 1363; architecture 24 with 3 pre-existing skips; server spec 2843 with 9 pre-existing skips; Web 4596; Runner 1007; Node test-boundary checks passed.
+- Full CI-equivalent validation: CLI 873; server unit 1367; architecture 24 with 3 pre-existing skips; server spec 2843 with 9 pre-existing skips; Web 4596; Runner 1007; Node test-boundary checks passed.
 - `git diff --check` and `tasks.json` JSON validation pass.
 
 ## Follow-up Items

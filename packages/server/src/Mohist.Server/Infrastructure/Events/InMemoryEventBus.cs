@@ -28,7 +28,7 @@ public sealed class InMemoryEventBus : IEventPublisher
         _log = log;
 
         foreach (var sub in _subscriptions)
-            ValidateType(sub.Type);
+            CloudEventTypeMatcher.ValidatePattern(sub.Type);
 
         log.LogInformation(
             "Event bus ready: {Count} subscriptions", _subscriptions.Count);
@@ -52,7 +52,7 @@ public sealed class InMemoryEventBus : IEventPublisher
     /// </summary>
     public void AddSubscription(Subscription subscription)
     {
-        ValidateType(subscription.Type);
+        CloudEventTypeMatcher.ValidatePattern(subscription.Type);
         lock (_subscriptions)
         {
             _subscriptions.Add(subscription);
@@ -83,28 +83,6 @@ public sealed class InMemoryEventBus : IEventPublisher
         await _eventStore.AppendAsync(evt, ct).ConfigureAwait(false);
     }
 
-    private static void ValidateType(string type)
-    {
-        if (string.IsNullOrEmpty(type))
-            throw new ArgumentException("Empty type", nameof(type));
-        foreach (var alternative in type.Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-        {
-            if (alternative == "*") continue;
-            if (alternative.EndsWith(".*", StringComparison.Ordinal))
-            {
-                if (alternative.IndexOf('*') != alternative.Length - 1)
-                    throw new ArgumentException(
-                        $"Invalid subscription type '{type}': wildcards are only allowed as '.*' suffix",
-                        nameof(type));
-            }
-            else if (alternative.Contains('*'))
-            {
-                throw new ArgumentException(
-                    $"Invalid subscription type '{type}': wildcards are only allowed as '.*' suffix",
-                    nameof(type));
-            }
-        }
-    }
 }
 
 public sealed record Subscription(

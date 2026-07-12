@@ -5,6 +5,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Events.Grains;
+using Mohist.Server.Events.Subscriptions;
 using Mohist.Server.Infrastructure.Data;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Runner;
@@ -260,6 +261,26 @@ public static class GrainTestConfig
         siloBuilder.Services.AddSingleton<IRunnerWorkspaceClient>(provider => provider.GetRequiredService<FakeRunnerWorkspaceClient>());
         siloBuilder.Services.AddSingleton(eventBus);
         siloBuilder.Services.AddSingleton(eventStore);
+        siloBuilder.Services.AddSingleton<IDeadLetterStore, NoopDeadLetterStore>();
+        siloBuilder.Services.AddSingleton<WorkflowStageLockReleaseHandler>();
+        siloBuilder.Services.AddSingleton<IEnumerable<Subscription>>(services =>
+        {
+            var handler = services.GetRequiredService<WorkflowStageLockReleaseHandler>();
+            return
+            [
+                new Subscription(
+                    "com.mohist.workflow.stage.completed|com.mohist.workflow.stage.failed",
+                    handler,
+                    (instance, envelope, ct) =>
+                        ((WorkflowStageLockReleaseHandler)instance).HandleAsync(envelope, ct)),
+            ];
+        });
+        siloBuilder.Services.Configure<DispatcherOptions>(options =>
+        {
+            options.BatchLimit = 100;
+            options.HandlerMaxAttempts = 3;
+        });
+        siloBuilder.Services.AddSingleton<EventDispatcherService>();
         siloBuilder.Services.AddSingleton<ITranscriptEventPublisher, NoopTranscriptEventPublisher>();
         siloBuilder.Services.AddSingleton<TimeProvider>(timeProvider ?? TimeProvider.System);
         siloBuilder.Services.AddScoped<IWorkflowArtifactBindService, WorkflowArtifactBindService>();

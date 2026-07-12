@@ -30,6 +30,10 @@ public sealed class RecordingHttpHandler : HttpMessageHandler
             Method = request.Method,
             RequestUri = request.RequestUri,
             Body = request.Content is null ? null : await request.Content.ReadAsStringAsync(cancellationToken),
+            Headers = request.Headers.ToDictionary(
+                pair => pair.Key,
+                pair => pair.Value.ToArray(),
+                StringComparer.OrdinalIgnoreCase),
         };
         Requests.Add(captured);
         return await _responder(request, cancellationToken);
@@ -55,4 +59,6 @@ public sealed class CapturedRequest
     public HttpMethod Method { get; set; } = null!;
     public Uri? RequestUri { get; set; }
     public string? Body { get; set; }
+    public IReadOnlyDictionary<string, string[]> Headers { get; set; } =
+        new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase);
 }

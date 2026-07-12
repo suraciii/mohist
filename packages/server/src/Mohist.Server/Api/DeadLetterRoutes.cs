@@ -1,6 +1,6 @@
-using System.Net;
 using Mohist.Server.Events.Grains;
 using Mohist.Server.Infrastructure.Events;
+using Mohist.Server.Infrastructure.Security;
 
 namespace Mohist.Server.Api;
 
@@ -14,6 +14,7 @@ public static class DeadLetterRoutes
         if (!UsesLoopbackOnlyListener(app.Configuration))
             return app;
 
+        var credential = app.Services.GetRequiredService<OperatorCredential>();
         var group = app.MapGroup("/api/events/dead-letters");
 
         group.MapGet("/", async (
@@ -23,8 +24,9 @@ public static class DeadLetterRoutes
             IDeadLetterStore store,
             CancellationToken ct) =>
         {
-            if (!IsDirectLoopbackRequest(context))
-                return ApiResults.Fail("Dead-letter operations require a direct loopback caller", 403, "local_operator_required");
+            context.Response.Headers.CacheControl = "no-store";
+            if (!credential.Authorizes(context.Request.Headers))
+                return ApiResults.Fail("Dead-letter operations require an operator credential", 403, "operator_credential_required");
 
             var resolvedLimit = limit ?? DefaultLimit;
             if (resolvedLimit is < 1 or > MaxLimit)
@@ -45,7 +47,7 @@ public static class DeadLetterRoutes
                 row.Data,
                 extensions = row.ExtensionsJson,
                 handler = row.FailingHandler,
-                error = row.ErrorMessage,
+                error = OperatorDiagnostic.Summarize(row.ErrorMessage),
                 attempts = row.AttemptCount,
                 row.DeadLetteredAt,
                 status = row.Status.ToString(),
@@ -59,8 +61,8 @@ public static class DeadLetterRoutes
             IGrainFactory grains,
             CancellationToken ct) =>
         {
-            if (!IsDirectLoopbackRequest(context))
-                return ApiResults.Fail("Dead-letter operations require a direct loopback caller", 403, "local_operator_required");
+            if (!credential.Authorizes(context.Request.Headers))
+                return ApiResults.Fail("Dead-letter operations require an operator credential", 403, "operator_credential_required");
 
             var result = await grains
                 .GetGrain<IDispatcherGrain>(DispatcherGrain.FixedKey)
@@ -74,28 +76,17 @@ public static class DeadLetterRoutes
                 id = deadLetterId,
                 delivered = result.Delivered,
                 attempts = result.Attempts,
-                error = result.Error,
+                error = OperatorDiagnostic.Summarize(result.Error),
             };
             return result.Delivered
                 ? ApiResults.Ok(response)
                 : ApiResults.Conflict(
-                    result.Error ?? "Dead-letter re-delivery failed",
+                    OperatorDiagnostic.Summarize(result.Error) ?? "Dead-letter re-delivery failed",
                     "dead_letter_redelivery_failed",
                     response);
         });
 
         return app;
-    }
-
-    internal static bool IsDirectLoopbackRequest(HttpContext context)
-    {
-        if (HasProxyMarker(context.Request.Headers))
-            return false;
-        if (!IsLoopbackHost(context.Request.Host.Host))
-            return false;
-        if (!IsLoopbackAddress(context.Connection.RemoteIpAddress))
-            return false;
-        return IsLoopbackAddress(context.Connection.LocalIpAddress);
     }
 
     internal static bool UsesLoopbackOnlyListener(IConfiguration configuration)
@@ -106,29 +97,13 @@ public static class DeadLetterRoutes
             var urls = configuredUrls.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
             return urls.Length > 0 && urls.All(url =>
                 Uri.TryCreate(url, UriKind.Absolute, out var uri)
-                && !IsPublicListenerHost(uri.Host));
+                && IsLoopbackHost(uri.Host));
         }
 
-        return !IsPublicListenerHost(configuration["Mohist:Host"] ?? "localhost");
+        return IsLoopbackHost(configuration["Mohist:Host"] ?? "localhost");
     }
-
-    internal static bool IsLoopbackAddress(IPAddress? address) =>
-        address is not null && IPAddress.IsLoopback(address);
-
-    private static bool HasProxyMarker(IHeaderDictionary headers) =>
-        headers.ContainsKey("Forwarded")
-        || headers.ContainsKey("X-Forwarded-For")
-        || headers.ContainsKey("X-Forwarded-Host")
-        || headers.ContainsKey("X-Forwarded-Proto")
-        || headers.ContainsKey("X-Forwarded-Prefix")
-        || headers.ContainsKey("X-Original-For")
-        || headers.ContainsKey("X-Real-IP")
-        || headers.ContainsKey("Via");
 
     private static bool IsLoopbackHost(string host) =>
         string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase)
-        || (IPAddress.TryParse(host, out var address) && IPAddress.IsLoopback(address));
-
-    private static bool IsPublicListenerHost(string host) =>
-        host is "*" or "0.0.0.0" or "::" or "[::]";
+        || (System.Net.IPAddress.TryParse(host, out var address) && System.Net.IPAddress.IsLoopback(address));
 }

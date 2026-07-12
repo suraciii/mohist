@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.SpecTests.Support;
@@ -28,7 +29,13 @@ public sealed class AgentJobGrainPersistenceSpecs
         await ClearRunnerRegistryAsync();
         var projectId = $"agent-job-persist-project-{Guid.NewGuid():N}";
         var job = Grains.GetGrain<IAgentJobGrain>($"agent-job-persist-{Guid.NewGuid():N}");
-        var input = new AgentJobInput("persist me", WorkspacePath: "/tmp/agent-job-persist", ProjectId: projectId);
+        var agentConfig = JsonDocument.Parse(
+            "{\"type\":\"opencode\",\"model\":\"openai/gpt-5.6\"}").RootElement.Clone();
+        var input = new AgentJobInput(
+            "persist me",
+            WorkspacePath: "/tmp/agent-job-persist",
+            ProjectId: projectId,
+            AgentConfig: agentConfig);
 
         await job.SubmitAsync(input);
         Assert.Equal(AgentJobStatus.Pending, await job.GetStatusAsync());
@@ -38,12 +45,20 @@ public sealed class AgentJobGrainPersistenceSpecs
             job.SubmitAsync(input with { Prompt = "different" }));
 
         var runnerId = await RegisterRunnerAsync(projectId, "persist");
-        await job.SubmitAsync(input);
+        await job.EnsureSubmittedAsync(input);
         await WaitForRunningAsync(job);
 
         var snapshot = await job.GetRuntimeSnapshotAsync();
         Assert.Equal(runnerId, snapshot.RunnerId);
         Assert.False(string.IsNullOrWhiteSpace(snapshot.CurrentWorkId));
+
+        var dispatch = await Grains.GetGrain<IRunnerGrain>(runnerId)
+            .PollAsync(_fixture.Cluster.GetSiloServiceProvider(null));
+        Assert.NotNull(dispatch);
+        var with = JsonSerializer.Deserialize<JsonElement>(dispatch!.With!);
+        Assert.Equal(
+            "openai/gpt-5.6",
+            with.GetProperty("prompt").GetProperty("agent-launch").GetProperty("config").GetProperty("model").GetString());
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
