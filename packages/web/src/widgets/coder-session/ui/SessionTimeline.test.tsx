@@ -3,7 +3,6 @@ import { render, screen, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import type { Round, ContextHealthState } from '../model/useSessionTimeline'
 import { SessionTimeline } from './SessionTimeline'
-
 function makeRound(overrides: Partial<Round> = {}): Round {
   return {
     roundIndex: 0,
@@ -113,6 +112,7 @@ describe('SessionTimeline', () => {
     expect(section).toBeInTheDocument()
     const bar = within(section).getByTestId('context-health-bar')
     expect(bar).toHaveAttribute('data-status', 'red')
+    expect(within(screen.getByTestId('workflow-status-stage-build')).getByText('Build').previousElementSibling).toHaveClass('bg-info')
   })
 
   it('renders only real workflow stages in the status timeline', () => {

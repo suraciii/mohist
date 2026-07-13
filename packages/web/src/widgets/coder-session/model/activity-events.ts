@@ -28,6 +28,7 @@ export interface ActivityEvent {
   title: string
   description: string
   targets: ActivityEventTargets
+  outcome?: 'completed' | 'failed'
 }
 
 export interface ActivityEventsInput {
@@ -128,7 +129,8 @@ function fromActivity(path: string): string {
   return `${path}${separator}from=activity`
 }
 
-function readString(data: Record<string, unknown>, keys: string[]): string | null {
+function readString(data: Record<string, unknown> | null | undefined, keys: string[]): string | null {
+  if (data == null) return null
   const normalizedKeys = new Set(keys.map((key) => key.toLowerCase()))
   for (const [key, value] of Object.entries(data)) {
     if (!normalizedKeys.has(key.toLowerCase())) continue
@@ -139,6 +141,7 @@ function readString(data: Record<string, unknown>, keys: string[]): string | nul
 }
 
 function readIssueNumber(event: ProjectEventDto): number | null {
+  if (event.issueNumber != null && Number.isFinite(event.issueNumber)) return event.issueNumber
   const raw = readString(event.data, ['issueNumber', 'issueNo', 'issue_number'])
     ?? readString(event.extensions, ['issueno', 'issueNumber', 'issueNo'])
     ?? event.subject
@@ -222,6 +225,7 @@ function buildIssueEventEntry(event: ProjectEventDto): ActivityEvent | null {
     title,
     description,
     targets,
+    outcome: event.type === 'com.mohist.issue.completed' ? 'completed' : undefined,
   }
 }
 
@@ -265,6 +269,7 @@ function buildWorkflowEventEntry(event: ProjectEventDto): ActivityEvent | null {
     title,
     description,
     targets,
+    outcome: info.attention === 'failure' ? 'failed' : info.label === 'completed' ? 'completed' : undefined,
   }
 }
 
@@ -277,54 +282,28 @@ function buildAgentSessionEventEntry(
 
   const sessionId = event.sourceAggregateId || readString(event.data, ['sessionId', 'coderSessionId']) || String(event.id)
   const session = sessionById.get(sessionId)
-  const agentId = session?.agentId ?? readString(event.data, ['agentId'])
-  const agentName = session?.agentName ?? readString(event.data, ['agentName'])
-  const isGeneric = agentId != null && agentId.length > 0
+  const agentId = event.agentId ?? session?.agentId ?? readString(event.data, ['agentId'])
+  const agentName = event.agentName ?? session?.agentName ?? readString(event.data, ['agentName'])
   const issueNumber = session && session.issueNumber > 0 ? session.issueNumber : readIssueNumber(event)
+  const sourceKind = event.sessionSourceKind ?? (session?.agentId ? 'agent-launch' : session ? 'workflow' : null)
+  const isGeneric = sourceKind === 'agent-launch' || (sourceKind == null && (agentId != null || issueNumber == null))
 
-  let title: string
-  let targets: ActivityEventTargets = {}
-  if (session) {
-    if (isGeneric) {
-      const displayName = agentName ?? agentId ?? 'Agent'
-      title = `Agent ${displayName} session ${info.label}`
-      targets.agent = agentTarget(agentId!, agentName)
-      targets.primary = {
-        path: sessionPath(sessionId, null, true),
-        label: 'Session',
-      }
-      targets.session = { sessionId, label: 'Session', isGeneric: true, path: sessionPath(sessionId, null, true) }
-    } else if (issueNumber != null && issueNumber > 0) {
-      title = `Issue #${issueNumber} session ${info.label}`
-      targets.issue = issueTarget(issueNumber)
-      targets.primary = {
-        path: sessionPath(sessionId, issueNumber, false),
-        label: 'Session',
-      }
-      targets.session = { sessionId, label: 'Session', isGeneric: false, path: sessionPath(sessionId, issueNumber, false) }
-      targets.workflow = workflowTarget(issueNumber)
-    } else {
-      title = `Session ${sessionId} ${info.label}`
-      targets.primary = { path: sessionPath(sessionId, null, true), label: 'Session' }
-      targets.session = { sessionId, label: 'Session', isGeneric: true, path: sessionPath(sessionId, null, true) }
-    }
-  } else if (isGeneric) {
+  let title = `Session ${sessionId} ${info.label}`
+  const targets: ActivityEventTargets = {}
+  if (isGeneric) {
     const displayName = agentName ?? agentId ?? 'Agent'
     title = `Agent ${displayName} session ${info.label}`
-    targets.agent = agentTarget(agentId!, agentName)
     targets.primary = { path: sessionPath(sessionId, null, true), label: 'Session' }
     targets.session = { sessionId, label: 'Session', isGeneric: true, path: sessionPath(sessionId, null, true) }
   } else if (issueNumber != null && issueNumber > 0) {
     title = `Issue #${issueNumber} session ${info.label}`
-    targets.issue = issueTarget(issueNumber)
     targets.primary = { path: sessionPath(sessionId, issueNumber, false), label: 'Session' }
     targets.session = { sessionId, label: 'Session', isGeneric: false, path: sessionPath(sessionId, issueNumber, false) }
-    targets.workflow = workflowTarget(issueNumber)
-  } else {
-    title = `Session ${sessionId} ${info.label}`
-    targets.primary = { path: sessionPath(sessionId, null, true), label: 'Session' }
-    targets.session = { sessionId, label: 'Session', isGeneric: true, path: sessionPath(sessionId, null, true) }
   }
+  if (issueNumber != null && issueNumber > 0) targets.issue = issueTarget(issueNumber)
+  if (event.workflowRunId && issueNumber != null && issueNumber > 0) targets.workflow = workflowTarget(issueNumber)
+  if (agentId) targets.agent = agentTarget(agentId, agentName)
+  if (event.runnerId) targets.runner = runnerTarget(event.runnerId)
 
   const eventType: ActivityEventType = info.attention === 'failure' ? 'failure' : 'agent-session'
   const failureCategory = readString(event.data, ['failureCategory', 'FailureCategory'])
@@ -340,6 +319,7 @@ function buildAgentSessionEventEntry(
     title,
     description,
     targets,
+    outcome: info.attention === 'failure' ? 'failed' : info.label === 'completed' ? 'completed' : undefined,
   }
 }
 

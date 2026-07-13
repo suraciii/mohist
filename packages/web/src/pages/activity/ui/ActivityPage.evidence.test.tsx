@@ -143,4 +143,10 @@ describe('ActivityPage evidence feed', () => {
     expect(entry).toHaveClass('bg-danger-subtle', 'border-danger-border')
     expect(entry.querySelector('.bg-danger')).toBeInTheDocument()
   })
+
+  it('derives terminal counts from rendered evidence instead of legacy snapshot counts', () => {
+    renderPage([makeEvent('failure', 'failure', { id: 'failure-1', title: 'Stage failed', outcome: 'failed' })])
+
+    expect(screen.getByTestId('status-bar-failed')).toHaveTextContent('Failed:1')
+  })
 })

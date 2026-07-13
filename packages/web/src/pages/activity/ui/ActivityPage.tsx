@@ -138,7 +138,7 @@ export function ActivityPage({
   now?: number
 } = {}) {
   const { activityEventsHook: useEvents, activityCardsHook: useCards, activityUsageSnapshotHook: useUsageSnapshot, RunnerSummaryBadge: RunnerBadge } = dependencies
-  const { events, isLoading } = useEvents()
+  const { events, isLoading, isError } = useEvents()
   const { statusCounts, slotUsage } = useCards()
   const usageSnapshot = useUsageSnapshot()
   const toProjectPath = useProjectPath()
@@ -181,14 +181,18 @@ export function ActivityPage({
 
   const attentionEntries = filtered.filter((e) => e.attention !== 'routine')
   const routineEntries = filtered.filter((e) => e.attention === 'routine')
+  const evidenceCounts = useMemo(() => ({
+    completed: orderedEvents.filter((event) => event.outcome === 'completed').length,
+    failed: orderedEvents.filter((event) => event.outcome === 'failed').length,
+  }), [orderedEvents])
 
   return (
     <div className="flex-1 flex flex-col min-h-0">
       <StatusBar
         active={statusCounts.active}
         waiting={statusCounts.waiting}
-        completed={statusCounts.completed}
-        failed={statusCounts.failed}
+        completed={evidenceCounts.completed}
+        failed={evidenceCounts.failed}
         activeSlots={slotUsage.active}
         maxSlots={slotUsage.max}
       >
@@ -238,6 +242,12 @@ export function ActivityPage({
               counts={counts}
             />
 
+            {isError && (
+              <div data-testid="activity-evidence-error" className="rounded-lg border border-warning-border bg-warning-subtle px-4 py-3 text-sm text-warning-foreground">
+                Activity evidence is incomplete. Refresh to retry the recorded event feed.
+              </div>
+            )}
+
             {isLoading && events.length === 0 && (
               <div className="space-y-2">
                 {[1, 2, 3].map((i) => (
@@ -246,7 +256,7 @@ export function ActivityPage({
               </div>
             )}
 
-            {!isLoading && events.length === 0 && (
+            {!isLoading && !isError && events.length === 0 && (
               <div className="rounded-lg border border-dashed border-border bg-muted/50 px-4 py-8 text-center">
                 <p className="text-sm text-muted-foreground">No activity yet.</p>
               </div>

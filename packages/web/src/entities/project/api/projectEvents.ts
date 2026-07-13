@@ -12,9 +12,14 @@ export interface ProjectEventDto {
   specVersion: string
   subject: string | null
   dataContentType: string | null
-  data: Record<string, unknown>
+  data: Record<string, unknown> | null
   extensions: Record<string, string>
   runnerId: string | null
+  issueNumber?: number | null
+  sessionSourceKind?: string | null
+  workflowRunId?: string | null
+  agentId?: string | null
+  agentName?: string | null
 }
 
 export function getProjectEvents(params?: { projectId?: string | null; limit?: number }) {

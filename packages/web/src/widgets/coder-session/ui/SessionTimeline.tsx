@@ -167,7 +167,7 @@ export function WorkflowStatusTimeline({ currentStage }: { currentStage: string 
             data-state={stageState}
           >
             {i > 0 && (
-              <div className={`h-0.5 w-4 ${isCompleted || isCurrent ? 'bg-info-subtle0' : 'bg-muted'}`} />
+              <div className={`h-0.5 w-4 ${isCompleted || isCurrent ? 'bg-info' : 'bg-muted'}`} />
             )}
             <div className="flex items-center gap-1">
               {isCompleted ? (
@@ -175,7 +175,7 @@ export function WorkflowStatusTimeline({ currentStage }: { currentStage: string 
                   <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z" clipRule="evenodd" />
                 </svg>
               ) : isCurrent ? (
-                <span className="inline-block h-2.5 w-2.5 rounded-full bg-info-subtle0 animate-pulse" />
+                <span className="inline-block h-2.5 w-2.5 rounded-full bg-info animate-pulse" />
               ) : (
                 <span className="inline-block h-2 w-2 rounded-full bg-muted" />
               )}
@@ -206,7 +206,7 @@ function getRoundColor(round: Round, isLive: boolean) {
   }
   if (isLive && !round.completedAt) {
     return {
-      dot: 'bg-info-subtle0 animate-pulse',
+      dot: 'bg-info animate-pulse',
       border: 'border-info-border',
       bg: 'bg-info-subtle/30',
       text: 'text-info',
@@ -272,7 +272,7 @@ export function RoundSection({
             <div className="text-sm text-foreground whitespace-pre-wrap leading-relaxed pt-2">
               {round.agentText}
               {isLiveRound && isStreaming && (
-                <span className="inline-block w-1.5 h-4 bg-info-subtle0 ml-0.5 animate-pulse align-text-bottom" />
+                <span className="inline-block w-1.5 h-4 bg-info ml-0.5 animate-pulse align-text-bottom" />
               )}
             </div>
           )}

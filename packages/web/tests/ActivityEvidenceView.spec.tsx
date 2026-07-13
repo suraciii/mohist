@@ -35,9 +35,11 @@ let agentActivity: AgentActivity = {
   waiting: [],
 }
 let runners: RunnerStatusListResponse = { runners: [] }
+let projectEventsFailed = false
 
 useMswServer(
   http.get('*/api/projects/:projectId/events', () => {
+    if (projectEventsFailed) return new HttpResponse(null, { status: 500 })
     return HttpResponse.json({ success: true, data: projectEvents })
   }),
   http.get('*/api/projects/:projectId/agent/activity', () => {
@@ -56,11 +58,12 @@ beforeEach(() => {
     waiting: [],
   }
   runners = { runners: [] }
+  projectEventsFailed = false
   document.documentElement.classList.remove('dark')
 })
 
 function renderPage() {
-  return render(<ActivityPage />, {
+  return render(<ActivityPage now={Date.parse('2026-01-01T01:00:00.000Z')} />, {
     route: `/${TEST_PROJECT.name}/activity`,
   })
 }
@@ -289,7 +292,7 @@ describe('Activity evidence view', () => {
     expect(entry.className).toContain('border-danger-border')
 
     document.documentElement.classList.add('dark')
-    rerender(<ActivityPage />)
+    rerender(<ActivityPage now={Date.parse('2026-01-01T01:00:00.000Z')} />)
 
     await waitFor(() => {
       expect(screen.getByTestId('activity-event-entry').className).toContain('bg-danger-subtle')
@@ -297,5 +300,16 @@ describe('Activity evidence view', () => {
     expect(screen.getByTestId('activity-event-entry').className).toContain('border-danger-border')
 
     document.documentElement.classList.remove('dark')
+  })
+
+  it('shows incomplete evidence when the recorded event request fails', async () => {
+    projectEventsFailed = true
+
+    renderPage()
+
+    await waitFor(() => {
+      expect(screen.getByTestId('activity-evidence-error')).toBeInTheDocument()
+    })
+    expect(screen.queryByText('No activity yet.')).not.toBeInTheDocument()
   })
 })

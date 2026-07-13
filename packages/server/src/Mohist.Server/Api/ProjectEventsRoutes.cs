@@ -6,12 +6,11 @@ namespace Mohist.Server.Api;
 
 /// <summary>
 /// Project-scoped read endpoint for the Activity evidence feed
-/// (issue-402 T-000). The route surfaces recorded CloudEvents from every
-/// per-aggregate event table owned by the resolved project
-/// (<c>IssueEvents</c>, <c>WorkflowRunEvents</c>, <c>AgentSessionEvents</c>,
-/// <c>EpicEvents</c>) without changing how events are recorded, emitted, or
-/// subscribed. The endpoint is read-only — it does not introduce any new
-/// event-subscription or event-stream behaviour.
+/// (issue-402 T-000). The route surfaces recorded issue, workflow, and
+/// agent-session CloudEvents with persisted session lifecycle transcript facts,
+/// without changing how events are recorded, emitted, or subscribed. The
+/// endpoint is read-only and does not introduce event-subscription or
+/// event-stream behaviour.
 /// </summary>
 public static class ProjectEventsRoutes
 {
@@ -70,7 +69,12 @@ public sealed record ProjectEventDto(
     string? DataContentType,
     JsonElement Data,
     Dictionary<string, string> Extensions,
-    string? RunnerId)
+    string? RunnerId,
+    int? IssueNumber,
+    string? SessionSourceKind,
+    string? WorkflowRunId,
+    string? AgentId,
+    string? AgentName)
 {
     public static ProjectEventDto From(ProjectEventEnvelope envelope) =>
         new(
@@ -87,5 +91,10 @@ public sealed record ProjectEventDto(
             envelope.DataContentType,
             envelope.Data,
             new Dictionary<string, string>(envelope.Extensions),
-            envelope.RunnerId);
+            envelope.RunnerId,
+            envelope.IssueNumber,
+            envelope.SessionSourceKind,
+            envelope.WorkflowRunId,
+            envelope.AgentId,
+            envelope.AgentName);
 }

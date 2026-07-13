@@ -1,47 +1,14 @@
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Events;
+using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Hosting;
+using Mohist.Server.Sessions.Services;
 
 namespace Mohist.Server.Project.Services;
 
-/// <summary>
-/// Reads recorded CloudEvents across all per-aggregate event tables for a
-/// single project (issue-402 T-000). Sources are the four event tables
-/// (<c>IssueEvents</c>, <c>WorkflowRunEvents</c>, <c>AgentSessionEvents</c>,
-/// <c>EpicEvents</c>) that already persist every domain transition; the
-/// querier projects them onto a unified, time-sorted stream without changing
-/// how events are recorded, emitted, or subscribed.
-/// </summary>
-/// <remarks>
-/// <para>
-/// Project scoping is computed once per call by collecting the
-/// aggregate ids owned by the project (<c>Issues</c> by <c>ProjectId</c>,
-/// <c>WorkflowRuns</c> by the <c>MetadataProjectId</c> computed column,
-/// <c>AgentSessions</c> by the <c>LabelProjectId</c> computed column, and
-/// <c>Epics</c> by <c>ProjectId</c>) and then translating each id to its
-/// canonical CloudEvent <c>source</c> prefix. The four queries ride the
-/// existing <c>Source</c> indexes on the event tables; an empty project
-/// short-circuits before any event-table read.
-/// </para>
-/// <para>
-/// Per-table order is most-recent-first by <c>Time</c>, with
-/// <c>Id</c> (per-table monotonic) as a stable tiebreaker so two events
-/// at the same <c>Time</c> keep a deterministic order. The final merge
-/// sorts the per-table buckets in memory (SQLite's EF provider cannot
-/// translate ORDER BY over <c>DateTimeOffset</c>) and then caps the
-/// merged stream at <paramref name="limit"/> so a project with
-/// concentrated issue activity and sparse session activity cannot be
-/// starved of session evidence just because issues dominate the
-/// underlying sources.
-/// </para>
-/// <para>
-/// This read path is purely additive: <c>AppendAsync</c> /
-/// <c>ListAsync</c> / <c>ListUndeliveredAsync</c> semantics are unchanged,
-/// and no subscription or dispatch behavior is added.
-/// </para>
-/// </remarks>
 public class ProjectEventQuerier : IScopedService
 {
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
@@ -56,189 +23,187 @@ public class ProjectEventQuerier : IScopedService
         int limit = 200,
         CancellationToken ct = default)
     {
-        if (string.IsNullOrWhiteSpace(projectId))
-            return [];
+        if (string.IsNullOrWhiteSpace(projectId)) return [];
         if (limit <= 0) limit = 200;
 
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-
         var scope = await LoadScopeAsync(db, projectId, ct);
         if (scope.IsEmpty) return [];
 
-        var perTableCap = Math.Max(limit, 200);
-
-        var tasks = new List<Task<List<ProjectEventEnvelope>>>();
-
+        var buckets = new List<IReadOnlyList<ProjectEventEnvelope>>();
         if (scope.IssueSources.Count > 0)
-        {
-            tasks.Add(LoadIssueEventsAsync(db, scope.IssueSources, perTableCap, ct));
-        }
+            buckets.Add(await LoadIssueEventsAsync(db, scope.IssueSources, limit, ct));
         if (scope.WorkflowSources.Count > 0)
+            buckets.Add(await LoadWorkflowEventsAsync(db, scope.WorkflowSources, scope.WorkflowIssueNumbers, limit, ct));
+        if (scope.AgentSessions.Count > 0)
         {
-            tasks.Add(LoadWorkflowEventsAsync(db, scope.WorkflowSources, perTableCap, ct));
+            var sessionById = scope.AgentSessions.ToDictionary(session => session.SessionId, StringComparer.Ordinal);
+            buckets.Add(await LoadAgentSessionEventsAsync(db, scope.AgentSessionSources, sessionById, limit, ct));
+            buckets.Add(BuildSessionOpenedEvents(scope.AgentSessions));
+            buckets.Add(await LoadSessionClosedEventsAsync(db, sessionById, ct));
         }
-        if (scope.AgentSessionSources.Count > 0)
-        {
-            tasks.Add(LoadAgentSessionEventsAsync(db, scope.AgentSessionSources, perTableCap, ct));
-        }
-        if (scope.EpicSources.Count > 0)
-        {
-            tasks.Add(LoadEpicEventsAsync(db, scope.EpicSources, perTableCap, ct));
-        }
-
-        var buckets = await Task.WhenAll(tasks);
 
         return buckets
-            .SelectMany(b => b)
-            .OrderByDescending(e => e.Time)
-            .ThenByDescending(e => e.Id)
+            .SelectMany(bucket => bucket)
+            .OrderByDescending(entry => entry.Time)
+            .ThenByDescending(entry => entry.Id)
+            .ThenBy(entry => entry.Origin)
+            .ThenBy(entry => entry.Source, StringComparer.Ordinal)
+            .ThenBy(entry => entry.Type, StringComparer.Ordinal)
+            .ThenBy(entry => entry.EnvelopeId, StringComparer.Ordinal)
             .Take(limit)
             .ToList();
     }
 
     private static async Task<ProjectScope> LoadScopeAsync(MohistDbContext db, string projectId, CancellationToken ct)
     {
-        var issueIds = await db.Issues.AsNoTracking()
-            .Where(r => r.ProjectId == projectId)
-            .Select(r => r.IssueId)
+        var issues = await db.Issues.AsNoTracking()
+            .Where(row => row.ProjectId == projectId)
+            .Select(row => new { row.IssueId, row.Number, row.WorkflowRunId })
+            .ToListAsync(ct);
+        var workflowRuns = await db.WorkflowRuns.AsNoTracking()
+            .Where(row => row.MetadataProjectId == projectId)
+            .Select(row => new { row.WorkflowRunId, row.State })
+            .ToListAsync(ct);
+        var sessionRows = await db.AgentSessions.AsNoTracking()
+            .Where(row => row.LabelProjectId == projectId)
             .ToListAsync(ct);
 
-        var workflowRunIds = await db.WorkflowRuns.AsNoTracking()
-            .Where(r => r.MetadataProjectId == projectId)
-            .Select(r => r.WorkflowRunId)
-            .ToListAsync(ct);
-
-        var agentSessionIds = await db.AgentSessions.AsNoTracking()
-            .Where(s => s.LabelProjectId == projectId)
-            .Select(s => s.Id)
-            .ToListAsync(ct);
-
-        var epicIds = await db.Epics.AsNoTracking()
-            .Where(e => e.ProjectId == projectId)
-            .Select(e => e.Id)
-            .ToListAsync(ct);
+        var workflowIssueNumbers = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var workflowRun in workflowRuns)
+        {
+            var issueNumber = ReadWorkflowIssueNumber(workflowRun.State);
+            if (issueNumber is not null) workflowIssueNumbers[workflowRun.WorkflowRunId] = issueNumber.Value;
+        }
+        foreach (var issue in issues)
+        {
+            if (!string.IsNullOrWhiteSpace(issue.WorkflowRunId) && issue.Number is not null)
+                workflowIssueNumbers[issue.WorkflowRunId] = issue.Number.Value;
+        }
 
         return new ProjectScope(
-            issueIds.Select(IssueEventPersistence.IssueSource).ToList(),
-            workflowRunIds.Select(WorkflowRunEventPersistence.WorkflowRunSource).ToList(),
-            agentSessionIds.Select(AgentSessionEventPersistence.AgentSessionSource).ToList(),
-            epicIds.Select(EpicEventPersistence.EpicSource).ToList());
+            issues.Select(issue => IssueEventPersistence.IssueSource(issue.IssueId)).ToList(),
+            workflowRuns.Select(workflowRun => WorkflowRunEventPersistence.WorkflowRunSource(workflowRun.WorkflowRunId)).ToList(),
+            workflowIssueNumbers,
+            sessionRows.Select(ProjectEventSessionContext.From).ToList());
     }
 
-    private static async Task<List<ProjectEventEnvelope>> LoadIssueEventsAsync(
+    private static async Task<IReadOnlyList<ProjectEventEnvelope>> LoadIssueEventsAsync(
         MohistDbContext db,
         IReadOnlyList<string> sources,
         int limit,
         CancellationToken ct)
     {
         var rows = await db.IssueEvents.AsNoTracking()
-            .Where(e => sources.Contains(e.Source))
-            .Take(limit)
+            .Where(row => sources.Contains(row.Source))
             .ToListAsync(ct);
 
         return rows
-            .OrderByDescending(e => e.Time)
-            .ThenByDescending(e => e.Id)
+            .OrderByDescending(row => row.Time)
+            .ThenByDescending(row => row.Id)
+            .Take(limit)
             .Select(ProjectEventEnvelope.FromIssue)
             .ToList();
     }
 
-    private static async Task<List<ProjectEventEnvelope>> LoadWorkflowEventsAsync(
+    private static async Task<IReadOnlyList<ProjectEventEnvelope>> LoadWorkflowEventsAsync(
         MohistDbContext db,
         IReadOnlyList<string> sources,
+        IReadOnlyDictionary<string, int> workflowIssueNumbers,
         int limit,
         CancellationToken ct)
     {
         var rows = await db.WorkflowRunEvents.AsNoTracking()
-            .Where(e => sources.Contains(e.Source))
-            .Take(limit)
+            .Where(row => sources.Contains(row.Source))
             .ToListAsync(ct);
 
         return rows
-            .OrderByDescending(e => e.Time)
-            .ThenByDescending(e => e.Id)
-            .Select(ProjectEventEnvelope.FromWorkflowRun)
+            .OrderByDescending(row => row.Time)
+            .ThenByDescending(row => row.Id)
+            .Take(limit)
+            .Select(row => ProjectEventEnvelope.FromWorkflowRun(
+                row,
+                workflowIssueNumbers.GetValueOrDefault(ProjectEventEnvelope.ExtractWorkflowRunId(row.Source))))
             .ToList();
     }
 
-    private static async Task<List<ProjectEventEnvelope>> LoadAgentSessionEventsAsync(
+    private static async Task<IReadOnlyList<ProjectEventEnvelope>> LoadAgentSessionEventsAsync(
         MohistDbContext db,
         IReadOnlyList<string> sources,
+        IReadOnlyDictionary<string, ProjectEventSessionContext> sessionById,
         int limit,
         CancellationToken ct)
     {
         var rows = await db.AgentSessionEvents.AsNoTracking()
-            .Where(e => sources.Contains(e.Source))
-            .Take(limit)
+            .Where(row => sources.Contains(row.Source))
             .ToListAsync(ct);
 
         return rows
-            .OrderByDescending(e => e.Time)
-            .ThenByDescending(e => e.Id)
-            .Select(ProjectEventEnvelope.FromAgentSession)
+            .OrderByDescending(row => row.Time)
+            .ThenByDescending(row => row.Id)
+            .Take(limit)
+            .Select(row => ProjectEventEnvelope.FromAgentSession(
+                row,
+                sessionById.GetValueOrDefault(ProjectEventEnvelope.ExtractAgentSessionId(row.Source))))
             .ToList();
     }
 
-    private static async Task<List<ProjectEventEnvelope>> LoadEpicEventsAsync(
+    private static IReadOnlyList<ProjectEventEnvelope> BuildSessionOpenedEvents(
+        IReadOnlyList<ProjectEventSessionContext> sessions) =>
+        sessions.Select((session, index) => ProjectEventEnvelope.SessionOpened(session, -1L - index)).ToList();
+
+    private static async Task<IReadOnlyList<ProjectEventEnvelope>> LoadSessionClosedEventsAsync(
         MohistDbContext db,
-        IReadOnlyList<string> sources,
-        int limit,
+        IReadOnlyDictionary<string, ProjectEventSessionContext> sessionById,
         CancellationToken ct)
     {
-        var rows = await db.EpicEvents.AsNoTracking()
-            .Where(e => sources.Contains(e.Source))
-            .Take(limit)
-            .ToListAsync(ct);
-
-        return rows
-            .OrderByDescending(e => e.Time)
-            .ThenByDescending(e => e.Id)
-            .Select(ProjectEventEnvelope.FromEpic)
+        var loaded = await TranscriptPartLoader.LoadAsync(db, sessionById.Keys, ct, TranscriptPartTypes.SessionClosed);
+        return loaded.Parts
+            .Where(part => loaded.SessionByTurnId.TryGetValue(part.TurnId, out var sessionId) && sessionById.ContainsKey(sessionId))
+            .Select(part => ProjectEventEnvelope.SessionClosed(sessionById[loaded.SessionByTurnId[part.TurnId]], part))
             .ToList();
+    }
+
+    private static int? ReadWorkflowIssueNumber(string state)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(state);
+            if (!document.RootElement.TryGetProperty("metadata", out var metadata)
+                || !metadata.TryGetProperty("annotations", out var annotations)
+                || !annotations.TryGetProperty("issueNumber", out var issueNumber))
+                return null;
+
+            return issueNumber.ValueKind switch
+            {
+                JsonValueKind.Number when issueNumber.TryGetInt32(out var number) => number,
+                JsonValueKind.String when int.TryParse(issueNumber.GetString(), out var number) => number,
+                _ => null,
+            };
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
     }
 
     private sealed record ProjectScope(
         IReadOnlyList<string> IssueSources,
         IReadOnlyList<string> WorkflowSources,
-        IReadOnlyList<string> AgentSessionSources,
-        IReadOnlyList<string> EpicSources)
+        IReadOnlyDictionary<string, int> WorkflowIssueNumbers,
+        IReadOnlyList<ProjectEventSessionContext> AgentSessions)
     {
+        public IReadOnlyList<string> AgentSessionSources => AgentSessions
+            .Select(session => AgentSessionEventPersistence.AgentSessionSource(session.SessionId))
+            .ToList();
+
         public bool IsEmpty =>
             IssueSources.Count == 0
             && WorkflowSources.Count == 0
-            && AgentSessionSources.Count == 0
-            && EpicSources.Count == 0;
+            && AgentSessions.Count == 0;
     }
 }
 
-/// <summary>
-/// Wire-level projection of a single recorded CloudEvent surfaced by the
-/// project-scoped read endpoint (<c>GET /api/projects/&#123;projectRef&#125;/events</c>).
-/// Carries the envelope identity (<see cref="Origin"/>, <see cref="Type"/>,
-/// <see cref="Time"/>, <see cref="SourceAggregateId"/>, <see cref="RunnerId"/>)
-/// the Web projection needs to classify entries as <c>issue-state</c>,
-/// <c>workflow-stage</c>, <c>agent-session</c>, <c>runner</c>, or
-/// <c>failure</c> evidence without re-reading the raw envelope.
-/// </summary>
-/// <remarks>
-/// <para>
-/// Origin names match the four per-aggregate tables so a single
-/// <see cref="Origin"/> value tells the Web layer which event class the
-/// row belongs to. The original CloudEvent envelope (<see cref="EnvelopeId"/>,
-/// <see cref="SpecVersion"/>, <see cref="Subject"/>, <see cref="Data"/>,
-/// <see cref="DataContentType"/>, <see cref="Extensions"/>) is preserved
-/// unchanged so the projection layer can opt into richer payload decoding
-/// later without a schema migration.
-/// </para>
-/// <para>
-/// Aggregate ids are derived from the <c>Source</c> URI-reference
-/// (<c>/mohist/&#123;kind&#125;/&#123;id&#125;</c>) and exposed as plain
-/// strings so JSON consumers can route the entry to the matching detail
-/// page. <see cref="RunnerId"/> is sourced from the row's <c>Subject</c>
-/// when the publisher stamped it; events without a runner binding surface
-/// <c>null</c>.
-/// </para>
-/// </remarks>
 public sealed record ProjectEventEnvelope(
     long Id,
     ProjectEventOrigin Origin,
@@ -251,21 +216,79 @@ public sealed record ProjectEventEnvelope(
     string SpecVersion,
     string? Subject,
     string? DataContentType,
-    System.Text.Json.JsonElement Data,
+    JsonElement Data,
     IReadOnlyDictionary<string, string> Extensions,
-    string? RunnerId)
+    string? RunnerId,
+    int? IssueNumber,
+    string? SessionSourceKind,
+    string? WorkflowRunId,
+    string? AgentId,
+    string? AgentName)
 {
     internal static ProjectEventEnvelope FromIssue(IssueEventRow row) =>
         Build(row.Id, row.Source, ProjectEventOrigin.Issue, "issue", row.Type, row.Time, row.EventId, row.SpecVersion, row.Subject, row.DataContentType, row.Data, row.ExtensionsJson);
 
-    internal static ProjectEventEnvelope FromWorkflowRun(WorkflowRunEventRow row) =>
-        Build(row.Id, row.Source, ProjectEventOrigin.WorkflowRun, "workflow-run", row.Type, row.Time, row.EventId, row.SpecVersion, row.Subject, row.DataContentType, row.Data, row.ExtensionsJson);
+    internal static ProjectEventEnvelope FromWorkflowRun(WorkflowRunEventRow row, int? issueNumber) =>
+        Build(row.Id, row.Source, ProjectEventOrigin.WorkflowRun, "workflow-run", row.Type, row.Time, row.EventId, row.SpecVersion, row.Subject, row.DataContentType, row.Data, row.ExtensionsJson, issueNumber: issueNumber);
 
-    internal static ProjectEventEnvelope FromAgentSession(AgentSessionEventRow row) =>
-        Build(row.Id, row.Source, ProjectEventOrigin.AgentSession, "agent-session", row.Type, row.Time, row.EventId, row.SpecVersion, row.Subject, row.DataContentType, row.Data, row.ExtensionsJson);
+    internal static ProjectEventEnvelope FromAgentSession(AgentSessionEventRow row, ProjectEventSessionContext? session) =>
+        Build(
+            row.Id,
+            row.Source,
+            ProjectEventOrigin.AgentSession,
+            "agent-session",
+            row.Type,
+            row.Time,
+            row.EventId,
+            row.SpecVersion,
+            row.Subject,
+            row.DataContentType,
+            row.Data,
+            row.ExtensionsJson,
+            runnerId: session?.RunnerId,
+            issueNumber: session?.IssueNumber,
+            sessionSourceKind: session?.SourceKind,
+            workflowRunId: session?.WorkflowRunId,
+            agentId: session?.AgentId,
+            agentName: session?.AgentName);
 
-    internal static ProjectEventEnvelope FromEpic(EpicEventRow row) =>
-        Build(row.Id, row.Source, ProjectEventOrigin.Epic, "epic", row.Type, row.Time, row.EventId, row.SpecVersion, row.Subject, row.DataContentType, row.Data, row.ExtensionsJson);
+    internal static ProjectEventEnvelope SessionOpened(ProjectEventSessionContext session, long id) =>
+        SessionLifecycle(session, id, "coder_session_started", ToData(new { status = "opened" }), ToOffset(session.CreatedAt), $"{session.SessionId}:opened");
+
+    internal static ProjectEventEnvelope SessionClosed(ProjectEventSessionContext session, AgentSessionTranscriptPartRow part) =>
+        SessionLifecycle(session, part.Id, "session.closed", ToData(part.PayloadJson), ToOffset(part.LastSeenAt), $"{session.SessionId}:closed:{part.Id}");
+
+    internal static string ExtractWorkflowRunId(string source) => ExtractAggregateId(source, "workflow-run");
+
+    internal static string ExtractAgentSessionId(string source) => ExtractAggregateId(source, "agent-session");
+
+    private static ProjectEventEnvelope SessionLifecycle(
+        ProjectEventSessionContext session,
+        long id,
+        string type,
+        JsonElement data,
+        DateTimeOffset time,
+        string envelopeId) =>
+        new(
+            id,
+            ProjectEventOrigin.AgentSession,
+            "agent-session",
+            session.SessionId,
+            AgentSessionEventPersistence.AgentSessionSource(session.SessionId),
+            type,
+            time,
+            envelopeId,
+            "1.0",
+            session.SessionId,
+            "application/json",
+            data,
+            new Dictionary<string, string>(),
+            session.RunnerId,
+            session.IssueNumber,
+            session.SourceKind,
+            session.WorkflowRunId,
+            session.AgentId,
+            session.AgentName);
 
     private static ProjectEventEnvelope Build(
         long id,
@@ -278,25 +301,34 @@ public sealed record ProjectEventEnvelope(
         string specVersion,
         string? subject,
         string? dataContentType,
-        System.Text.Json.JsonElement data,
-        string extensionsJson)
-    {
-        return new ProjectEventEnvelope(
-            Id: id,
-            Origin: origin,
-            SourceAggregateKind: aggregateKind,
-            SourceAggregateId: ExtractAggregateId(source, aggregateKind),
-            Source: source,
-            Type: type,
-            Time: time,
-            EnvelopeId: envelopeId,
-            SpecVersion: specVersion,
-            Subject: subject,
-            DataContentType: dataContentType,
-            Data: data,
-            Extensions: DeserializeExtensions(extensionsJson),
-            RunnerId: ResolveRunnerId(extensionsJson));
-    }
+        JsonElement data,
+        string extensionsJson,
+        string? runnerId = null,
+        int? issueNumber = null,
+        string? sessionSourceKind = null,
+        string? workflowRunId = null,
+        string? agentId = null,
+        string? agentName = null) =>
+        new(
+            id,
+            origin,
+            aggregateKind,
+            ExtractAggregateId(source, aggregateKind),
+            source,
+            type,
+            time,
+            envelopeId,
+            specVersion,
+            subject,
+            dataContentType,
+            data,
+            DeserializeExtensions(extensionsJson),
+            runnerId ?? ResolveRunnerId(extensionsJson),
+            issueNumber,
+            sessionSourceKind,
+            workflowRunId,
+            agentId,
+            agentName);
 
     private static string ExtractAggregateId(string source, string aggregateKind)
     {
@@ -305,13 +337,10 @@ public sealed record ProjectEventEnvelope(
             "issue" => IssueEventPersistence.SourcePrefix,
             "workflow-run" => WorkflowRunEventPersistence.SourcePrefix,
             "agent-session" => AgentSessionEventPersistence.SourcePrefix,
-            "epic" => EpicEventPersistence.SourcePrefix,
             _ => null,
         };
         if (prefix is null) return source;
-        return source.StartsWith(prefix, StringComparison.Ordinal)
-            ? source.Substring(prefix.Length)
-            : source;
+        return source.StartsWith(prefix, StringComparison.Ordinal) ? source[prefix.Length..] : source;
     }
 
     private static IReadOnlyDictionary<string, string> DeserializeExtensions(string json)
@@ -319,10 +348,10 @@ public sealed record ProjectEventEnvelope(
         if (string.IsNullOrWhiteSpace(json)) return new Dictionary<string, string>();
         try
         {
-            return System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(json, CloudEvent.JsonOptions)
-                   ?? new Dictionary<string, string>();
+            return JsonSerializer.Deserialize<Dictionary<string, string>>(json, CloudEvent.JsonOptions)
+                ?? new Dictionary<string, string>();
         }
-        catch (System.Text.Json.JsonException)
+        catch (JsonException)
         {
             return new Dictionary<string, string>();
         }
@@ -333,23 +362,38 @@ public sealed record ProjectEventEnvelope(
         if (string.IsNullOrWhiteSpace(extensionsJson)) return null;
         try
         {
-            using var doc = System.Text.Json.JsonDocument.Parse(extensionsJson);
-            if (doc.RootElement.ValueKind != System.Text.Json.JsonValueKind.Object) return null;
+            using var document = JsonDocument.Parse(extensionsJson);
+            if (document.RootElement.ValueKind != JsonValueKind.Object) return null;
             foreach (var name in new[] { "runnerid", "runnerId", "runner_id", "runner" })
             {
-                if (doc.RootElement.TryGetProperty(name, out var prop)
-                    && prop.ValueKind == System.Text.Json.JsonValueKind.String)
-                {
-                    var value = prop.GetString();
-                    if (!string.IsNullOrWhiteSpace(value)) return value;
-                }
+                if (document.RootElement.TryGetProperty(name, out var property)
+                    && property.ValueKind == JsonValueKind.String
+                    && !string.IsNullOrWhiteSpace(property.GetString()))
+                    return property.GetString();
             }
         }
-        catch (System.Text.Json.JsonException)
+        catch (JsonException)
         {
         }
         return null;
     }
+
+    private static JsonElement ToData(object value) => JsonSerializer.SerializeToElement(value, CloudEvent.JsonOptions);
+
+    private static JsonElement ToData(string json)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            return document.RootElement.Clone();
+        }
+        catch (JsonException)
+        {
+            return ToData(new { });
+        }
+    }
+
+    private static DateTimeOffset ToOffset(DateTime value) => new(DateTime.SpecifyKind(value, DateTimeKind.Utc));
 }
 
 public enum ProjectEventOrigin
@@ -357,5 +401,31 @@ public enum ProjectEventOrigin
     Issue,
     WorkflowRun,
     AgentSession,
-    Epic,
+}
+
+internal sealed record ProjectEventSessionContext(
+    string SessionId,
+    DateTime CreatedAt,
+    string? SourceKind,
+    string? WorkflowRunId,
+    int? IssueNumber,
+    string? AgentId,
+    string? AgentName,
+    string? RunnerId)
+{
+    public static ProjectEventSessionContext From(AgentSessionRow row)
+    {
+        var sourceKind = row.LabelSourceKind;
+        return new(
+            row.Id,
+            row.CreatedAt,
+            sourceKind,
+            string.Equals(sourceKind, "workflow", StringComparison.Ordinal) ? row.LabelSourceId : null,
+            ReadNumber(row.LabelIssueNumber) ?? ReadNumber(row.LabelAgentLaunchIssueNumber),
+            row.LabelAgentId,
+            row.LabelAgentName,
+            row.RunnerId);
+    }
+
+    private static int? ReadNumber(string? value) => int.TryParse(value, out var number) ? number : null;
 }

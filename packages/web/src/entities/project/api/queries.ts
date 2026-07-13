@@ -97,11 +97,16 @@ export function useDeleteProject() {
   })
 }
 
+export function projectEventsQueryKey(projectId: string | null | undefined, limit: number) {
+  return ['project-events', projectId, limit] as const
+}
+
 export function useProjectEvents(params?: { limit?: number }) {
   const { projectId } = useProject()
+  const limit = params?.limit ?? 200
   return useQuery<ProjectEventDto[]>({
-    queryKey: ['project-events', projectId],
-    queryFn: () => getProjectEvents({ projectId, limit: params?.limit ?? 200 }),
+    queryKey: projectEventsQueryKey(projectId, limit),
+    queryFn: () => getProjectEvents({ projectId, limit }),
     enabled: !!projectId,
     refetchInterval: 5000,
   })
