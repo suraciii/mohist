@@ -13,6 +13,7 @@ public static partial class IssueRoutes
             HttpContext ctx,
             string projectRef,
             IssueMetricsQuerier metricsQuery,
+            TimeProvider timeProvider,
             string? range,
             CancellationToken ct) =>
         {
@@ -23,7 +24,7 @@ public static partial class IssueRoutes
 
             var result = await metricsQuery.GetApprovalWaitAsync(
                 project.Id,
-                DateTimeOffset.UtcNow,
+                timeProvider.GetUtcNow(),
                 windowDays);
 
             return ApiResults.Ok(BuildResponse(result));

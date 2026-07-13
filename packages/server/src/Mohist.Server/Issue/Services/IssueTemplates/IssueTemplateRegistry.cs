@@ -19,8 +19,7 @@ public class IssueTemplateRegistry : IScopedService
     public IssueTemplateRegistry(IDbContextFactory<MohistDbContext> dbFactory)
     {
         _dbFactory = dbFactory;
-        var loader = new IssueTemplateFileLoader(
-            Path.Combine(AppContext.BaseDirectory, "Issue/Services/IssueTemplates/templates"));
+        var loader = IssueTemplateFileLoader.FromEmbeddedResources();
         _builtinData = loader.Discover();
     }
 

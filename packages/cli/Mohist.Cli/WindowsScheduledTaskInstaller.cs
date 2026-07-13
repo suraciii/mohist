@@ -11,8 +11,9 @@ internal sealed class WindowsScheduledTaskInstaller : IServiceInstaller
     private readonly IFileSystem _fileSystem;
     private readonly ICommandExecutor _commandExecutor;
     private readonly Func<ProcessStartInfo, Process?> _processLauncher;
-    private readonly Func<string, FileSystemWatcher> _watcherFactory;
+    private readonly Func<string, ILogChangeWatcher> _watcherFactory;
     private readonly Func<string, Task<bool>> _healthProbe;
+    private readonly Func<string> _getUserProfile;
 
     internal CancellationToken TestFollowToken { get; set; }
     internal Action? TestFollowStarted { get; set; }
@@ -29,23 +30,16 @@ internal sealed class WindowsScheduledTaskInstaller : IServiceInstaller
         IFileSystem? fileSystem = null,
         ICommandExecutor? commandExecutor = null,
         Func<ProcessStartInfo, Process?>? processLauncher = null,
-        Func<string, FileSystemWatcher>? watcherFactory = null,
-        Func<string, Task<bool>>? healthProbe = null)
+        Func<string, ILogChangeWatcher>? watcherFactory = null,
+        Func<string, Task<bool>>? healthProbe = null,
+        Func<string>? getUserProfile = null)
     {
         _out = output;
         _err = error;
         _fileSystem = fileSystem ?? RealFileSystem.Instance;
         _commandExecutor = commandExecutor ?? new SystemCommandExecutor();
         _processLauncher = processLauncher ?? (psi => Process.Start(psi));
-        _watcherFactory = watcherFactory ?? (path =>
-        {
-            var directory = Path.GetDirectoryName(path)!;
-            var fileName = Path.GetFileName(path);
-            return new FileSystemWatcher(directory, fileName)
-            {
-                NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.Size,
-            };
-        });
+        _watcherFactory = watcherFactory ?? (path => new FileSystemLogChangeWatcher(path));
         _healthProbe = healthProbe ?? (async url =>
         {
             try
@@ -59,6 +53,7 @@ internal sealed class WindowsScheduledTaskInstaller : IServiceInstaller
                 return false;
             }
         });
+        _getUserProfile = getUserProfile ?? (() => Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
     }
 
     public async Task<int> InstallServerAsync(ServiceInstallOptions options)
@@ -574,7 +569,7 @@ internal sealed class WindowsScheduledTaskInstaller : IServiceInstaller
         var tcs = new TaskCompletionSource<object?>();
         using (token.Register(() => tcs.TrySetCanceled()))
         {
-            FileSystemEventHandler handler = async (_, _) =>
+            Action handler = async () =>
             {
                 try
                 {
@@ -586,7 +581,7 @@ internal sealed class WindowsScheduledTaskInstaller : IServiceInstaller
                 }
             };
             watcher.Changed += handler;
-            watcher.EnableRaisingEvents = true;
+            watcher.Start();
             TestFollowStarted?.Invoke();
             try
             {
@@ -730,21 +725,21 @@ internal sealed class WindowsScheduledTaskInstaller : IServiceInstaller
         return Directory.GetCurrentDirectory();
     }
 
-    private static string UserProfilePath() => Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-    private static string ServiceDirectory() => Path.Combine(UserProfilePath(), ".mohist", "service");
-    private static string StartupDirectory() => Path.Combine(UserProfilePath(), "AppData", "Roaming", "Microsoft", "Windows", "Start Menu", "Programs", "Startup");
+    private string UserProfilePath() => _getUserProfile();
+    private string ServiceDirectory() => Path.Combine(UserProfilePath(), ".mohist", "service");
+    private string StartupDirectory() => Path.Combine(UserProfilePath(), "AppData", "Roaming", "Microsoft", "Windows", "Start Menu", "Programs", "Startup");
 
     private const string ServerTaskName = "Mohist_Server";
     private const string RunnerTaskName = "Mohist_Runner";
 
-    private static string ServerLauncherPath() => Path.Combine(ServiceDirectory(), "mohist-server.cmd");
-    private static string RunnerLauncherPath() => Path.Combine(ServiceDirectory(), "mohist-runner.cmd");
-    private static string ServerStartupPath() => Path.Combine(StartupDirectory(), "Mohist_Server.cmd");
-    private static string RunnerStartupPath() => Path.Combine(StartupDirectory(), "Mohist_Runner.cmd");
-    private static string ServerMetadataPath() => Path.Combine(ServiceDirectory(), "mohist-server.install.json");
-    private static string RunnerMetadataPath() => Path.Combine(ServiceDirectory(), "mohist-runner.install.json");
-    private static string ServerLogPath() => Path.Combine(UserProfilePath(), ".mohist", "server", "out.log");
-    private static string RunnerLogPath() => Path.Combine(UserProfilePath(), ".mohist", "runner", "out.log");
+    private string ServerLauncherPath() => Path.Combine(ServiceDirectory(), "mohist-server.cmd");
+    private string RunnerLauncherPath() => Path.Combine(ServiceDirectory(), "mohist-runner.cmd");
+    private string ServerStartupPath() => Path.Combine(StartupDirectory(), "Mohist_Server.cmd");
+    private string RunnerStartupPath() => Path.Combine(StartupDirectory(), "Mohist_Runner.cmd");
+    private string ServerMetadataPath() => Path.Combine(ServiceDirectory(), "mohist-server.install.json");
+    private string RunnerMetadataPath() => Path.Combine(ServiceDirectory(), "mohist-runner.install.json");
+    private string ServerLogPath() => Path.Combine(UserProfilePath(), ".mohist", "server", "out.log");
+    private string RunnerLogPath() => Path.Combine(UserProfilePath(), ".mohist", "runner", "out.log");
 
     internal string RenderServerLauncher(ServerLauncherSpec spec)
     {

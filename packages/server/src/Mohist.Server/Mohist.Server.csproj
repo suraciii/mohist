@@ -31,9 +31,9 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Content Include="Issue/Services/WorkflowProfiles/*.workflow.yaml" CopyToOutputDirectory="PreserveNewest" />
-    <Content Include="Workflow/Services/Prompts/builtins/*.prompt" CopyToOutputDirectory="PreserveNewest" />
-    <Content Include="Issue/Services/IssueTemplates/templates/*.md" CopyToOutputDirectory="PreserveNewest" />
+    <EmbeddedResource Include="Issue/Services/WorkflowProfiles/*.workflow.yaml" LogicalName="Mohist.Server.WorkflowProfiles.%(Filename)%(Extension)" />
+    <EmbeddedResource Include="Workflow/Services/Prompts/builtins/*.prompt" LogicalName="Mohist.Server.Prompts.%(Filename)%(Extension)" />
+    <EmbeddedResource Include="Issue/Services/IssueTemplates/templates/*.md" LogicalName="Mohist.Server.IssueTemplates.%(Filename)%(Extension)" />
   </ItemGroup>
 
   <Target Name="BuildWebAssets" BeforeTargets="Build" Condition="'$(SkipWebBuild)' != 'true'">

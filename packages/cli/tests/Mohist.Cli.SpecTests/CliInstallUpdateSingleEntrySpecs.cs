@@ -1,0 +1,279 @@
+using Mohist.Cli.TestSupport;
+using Xunit;
+
+namespace Mohist.Cli.SpecTests;
+
+// Converge install/update command surface to the verb-root only (T-001 of
+// issue #388). The three resource-group paths `mo server install`,
+// `mo server update`, `mo runner install` are removed because they were
+// double-entry aliases for the verb-root `mo install <component>` /
+// `mo update [component]`. The pre-existing `mo runner update` invariant
+// (it never existed) is preserved and pinned here as a regression guard.
+//
+// See:
+//   - openspec/changes/issue-388/specs/install-single-entry/spec.md
+//   - openspec/changes/issue-388/specs/update-single-entry/spec.md
+//   - openspec/changes/issue-388/design.md D1 (no-alias policy) and
+//     D3 (explicit `mo runner update` invariant).
+public class CliInstallUpdateSingleEntrySpecs
+{
+    [Fact]
+    public async Task LegacyServerInstall_FailsToResolveAndTriggersNoInstallerCall()
+    {
+        var (handler, http, output, error, fs, executor, installer) = CliTestFactory.CreateInternal();
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["server", "install"], output, error, fs, executor,
+            installer: installer);
+
+        Assert.NotEqual(0, exitCode);
+        Assert.Empty(installer.Calls);
+        Assert.Empty(installer.InstallServerCalls);
+    }
+
+    [Fact]
+    public async Task LegacyServerUpdate_FailsToResolveAndTriggersNoUpdaterCall()
+    {
+        var (handler, http, output, error, fs, executor, installer) = CliTestFactory.CreateInternal();
+        var updater = new FakeSourceCodeUpdater();
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["server", "update"], output, error, fs, executor,
+            installer: installer, updater: updater);
+
+        Assert.NotEqual(0, exitCode);
+        Assert.Empty(updater.Calls);
+    }
+
+    [Fact]
+    public async Task LegacyRunnerInstall_FailsToResolveAndTriggersNoInstallerCall()
+    {
+        var (handler, http, output, error, fs, executor, installer) = CliTestFactory.CreateInternal();
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["runner", "install"], output, error, fs, executor,
+            installer: installer);
+
+        Assert.NotEqual(0, exitCode);
+        Assert.Empty(installer.Calls);
+        Assert.Empty(installer.InstallRunnerCalls);
+    }
+
+    [Fact]
+    public async Task LegacyRunnerUpdate_FailsToResolveAndTriggersNoUpdaterCall()
+    {
+        // `mo runner update` was never a registered path. After this change
+        // it still isn't; the explicit guard prevents a future "symmetry"
+        // change from silently reintroducing it.
+        var (handler, http, output, error, fs, executor, installer) = CliTestFactory.CreateInternal();
+        var updater = new FakeSourceCodeUpdater();
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["runner", "update"], output, error, fs, executor,
+            installer: installer, updater: updater);
+
+        Assert.NotEqual(0, exitCode);
+        Assert.Empty(updater.Calls);
+    }
+
+    [Fact]
+    public async Task VerbRootInstallServer_StillInvokesInstallServerAsync()
+    {
+        var (handler, http, output, error, fs, executor, installer) = CliTestFactory.CreateInternal();
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http,
+            ["install", "server", "--repo-root", "/repo", "--listen-url", "http://127.0.0.1:3456", "--dry-run", "--unit-dir", "/etc/systemd/system"],
+            output, error, fs, executor,
+            installer: installer);
+
+        Assert.Equal(0, exitCode);
+        var call = Assert.Single(installer.InstallServerCalls);
+        Assert.Equal("/repo", call.RepoRoot);
+        Assert.Equal("http://127.0.0.1:3456", call.ListenUrl);
+        Assert.True(call.DryRun);
+        Assert.Equal("/etc/systemd/system", call.UnitDir);
+    }
+
+    [Fact]
+    public async Task VerbRootInstallServer_DefaultsAreUnchanged()
+    {
+        var (handler, http, output, error, fs, executor, installer) = CliTestFactory.CreateInternal();
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["install", "server"], output, error, fs, executor,
+            installer: installer);
+
+        Assert.Equal(0, exitCode);
+        var call = Assert.Single(installer.InstallServerCalls);
+        Assert.Null(call.RepoRoot);
+        Assert.Null(call.ListenUrl);
+        Assert.False(call.DryRun);
+        Assert.Null(call.UnitDir);
+        Assert.Null(call.ServerUrl);
+        Assert.Null(call.RunnerRoot);
+    }
+
+    [Fact]
+    public async Task VerbRootInstallRunner_StillInvokesInstallRunnerAsync()
+    {
+        var (handler, http, output, error, fs, executor, installer) = CliTestFactory.CreateInternal();
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http,
+            ["install", "runner", "--repo-root", "/repo", "--server-url", "http://127.0.0.1:3456", "--runner-root", "/var/lib/runner", "--dry-run", "--unit-dir", "/etc/systemd/system"],
+            output, error, fs, executor,
+            installer: installer);
+
+        Assert.Equal(0, exitCode);
+        var call = Assert.Single(installer.InstallRunnerCalls);
+        Assert.Equal("/repo", call.RepoRoot);
+        Assert.Equal("http://127.0.0.1:3456", call.ServerUrl);
+        Assert.Equal("/var/lib/runner", call.RunnerRoot);
+        Assert.True(call.DryRun);
+        Assert.Equal("/etc/systemd/system", call.UnitDir);
+    }
+
+    [Fact]
+    public async Task VerbRootInstallRunner_DefaultsAreUnchanged()
+    {
+        var (handler, http, output, error, fs, executor, installer) = CliTestFactory.CreateInternal();
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["install", "runner"], output, error, fs, executor,
+            installer: installer);
+
+        Assert.Equal(0, exitCode);
+        var call = Assert.Single(installer.InstallRunnerCalls);
+        Assert.Null(call.RepoRoot);
+        Assert.Null(call.ServerUrl);
+        Assert.Null(call.RunnerRoot);
+        Assert.False(call.DryRun);
+        Assert.Null(call.UnitDir);
+    }
+
+    [Fact]
+    public async Task VerbRootUpdate_InvokesUpdateAllAsync()
+    {
+        var (handler, http, output, error, fs, executor, installer) = CliTestFactory.CreateInternal();
+        var updater = new FakeSourceCodeUpdater();
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["update", "--dry-run"], output, error, fs, executor,
+            installer: installer, updater: updater);
+
+        Assert.Equal(0, exitCode);
+        Assert.Equal(new[] { nameof(FakeSourceCodeUpdater.UpdateAllAsync) }, updater.Calls);
+    }
+
+    [Fact]
+    public async Task VerbRootUpdateCli_InvokesUpdateCliAsync()
+    {
+        var (handler, http, output, error, fs, executor, installer) = CliTestFactory.CreateInternal();
+        var updater = new FakeSourceCodeUpdater();
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["update", "cli"], output, error, fs, executor,
+            installer: installer, updater: updater);
+
+        Assert.Equal(0, exitCode);
+        Assert.Equal(new[] { nameof(FakeSourceCodeUpdater.UpdateCliAsync) }, updater.Calls);
+    }
+
+    [Fact]
+    public async Task VerbRootUpdateServer_InvokesUpdateServerAsync()
+    {
+        var (handler, http, output, error, fs, executor, installer) = CliTestFactory.CreateInternal();
+        var updater = new FakeSourceCodeUpdater();
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["update", "server"], output, error, fs, executor,
+            installer: installer, updater: updater);
+
+        Assert.Equal(0, exitCode);
+        Assert.Equal(new[] { nameof(FakeSourceCodeUpdater.UpdateServerAsync) }, updater.Calls);
+    }
+
+    [Fact]
+    public async Task VerbRootUpdateRunner_InvokesUpdateRunnerAsync()
+    {
+        var (handler, http, output, error, fs, executor, installer) = CliTestFactory.CreateInternal();
+        var updater = new FakeSourceCodeUpdater();
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["update", "runner"], output, error, fs, executor,
+            installer: installer, updater: updater);
+
+        Assert.Equal(0, exitCode);
+        Assert.Equal(new[] { nameof(FakeSourceCodeUpdater.UpdateRunnerAsync) }, updater.Calls);
+    }
+
+    [Fact]
+    public async Task ServerHelp_DoesNotAdvertiseInstallOrUpdate()
+    {
+        var (handler, http, output, error, fs, executor, installer) = CliTestFactory.CreateInternal();
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["server", "--help"], output, error, fs, executor,
+            installer: installer);
+
+        Assert.Equal(0, exitCode);
+        var stdout = output.ToString();
+        foreach (var name in new[] { "start", "stop", "restart", "status", "logs", "health", "uninstall", "info" })
+            Assert.Contains($"\n  {name} ", stdout);
+        // Anchored on `\n  <name> ` to avoid false positives from substring
+        // matches inside descriptions (e.g. "info" appearing in unrelated
+        // prose).
+        Assert.DoesNotContain("\n  install ", stdout);
+        Assert.DoesNotContain("\n  update ", stdout);
+    }
+
+    [Fact]
+    public async Task RunnerHelp_DoesNotAdvertiseInstallOrUpdate()
+    {
+        var (handler, http, output, error, fs, executor, installer) = CliTestFactory.CreateInternal();
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["runner", "--help"], output, error, fs, executor,
+            installer: installer);
+
+        Assert.Equal(0, exitCode);
+        var stdout = output.ToString();
+        foreach (var name in new[] { "start", "stop", "restart", "service-status", "logs", "uninstall", "list", "show", "status" })
+            Assert.Contains($"\n  {name} ", stdout);
+        Assert.DoesNotContain("\n  install ", stdout);
+        Assert.DoesNotContain("\n  update ", stdout);
+    }
+
+    [Fact]
+    public async Task SurvivingServerSubcommands_StillResolve()
+    {
+        // Sanity check: deleting `install`/`update` from the server group
+        // must not break any other subcommand.
+        var (handler, http, output, error, fs, executor, installer) = CliTestFactory.CreateInternal();
+
+        foreach (var sub in new[] { "start", "stop", "restart", "status", "logs", "health", "uninstall", "info" })
+        {
+            var exitCode = await MohistCliCommands.RunAsync(
+                http, ["server", sub], output, error, fs, executor,
+                installer: installer);
+            Assert.Equal(0, exitCode);
+        }
+    }
+
+    [Fact]
+    public async Task SurvivingRunnerSubcommands_StillResolve()
+    {
+        var (handler, http, output, error, fs, executor, installer) = CliTestFactory.CreateInternal();
+        var env = new EnvironmentAbstractions.TestHelpers.MockEnvironmentVariableProvider(addExistingEnvironmentVariables: false);
+
+        foreach (var sub in new[] { "start", "stop", "restart", "service-status", "logs", "uninstall", "list", "status" })
+        {
+            var exitCode = await MohistCliCommands.RunAsync(
+                http, ["runner", sub], output, error, fs, executor,
+                environment: env,
+                installer: installer);
+            Assert.Equal(0, exitCode);
+        }
+    }
+}

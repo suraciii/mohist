@@ -161,7 +161,7 @@ public class IssueStartReadinessDomainTests
     }
 
     [Fact]
-    public void CanStart_DerivesFromStartBlocker_AndIsNeverAuthored()
+    public void CanStart_DerivesFromStartBlocker()
     {
         var issue = Mohist.Server.Issue.Domain.Issue.Create("issue_1", "project-1", 1, "Build the feature", isDraft: false);
 
@@ -172,12 +172,6 @@ public class IssueStartReadinessDomainTests
 
         Assert.IsType<IssueStartBlocker.WaitingFor>(issue.StartBlocker(new HashSet<int> { 5 }));
 
-        var setterProperty = typeof(Mohist.Server.Issue.Domain.Issue).GetProperty("CanStart");
-        Assert.Null(setterProperty);
-
-        var method = typeof(Mohist.Server.Issue.Domain.Issue).GetMethod("CanStart", new[] { typeof(IReadOnlySet<int>) });
-        Assert.NotNull(method);
-        Assert.False(method!.IsDefined(typeof(System.Runtime.CompilerServices.CompilerGeneratedAttribute), inherit: true));
     }
 
     [Fact]

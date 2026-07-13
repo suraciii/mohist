@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Mohist.Server.Infrastructure;
@@ -40,21 +39,31 @@ public sealed class FileLoggerProvider : ILoggerProvider
     private readonly string _logFilePath;
     private readonly TimeProvider _timeProvider;
     private readonly LogLevel _minimumLevel;
-    private StreamWriter? _writer;
-    private bool _directoryEnsured;
+    private readonly ILogFileSinkFactory _sinkFactory;
+    private ILogFileSink? _writer;
     private bool _disposed;
 
     public FileLoggerProvider(ILogPathResolver pathResolver, TimeProvider timeProvider)
-        : this(pathResolver, timeProvider, LogLevel.Information)
+        : this(pathResolver, timeProvider, LogLevel.Information, FileSystemLogFileSinkFactory.Instance)
     {
     }
 
     public FileLoggerProvider(ILogPathResolver pathResolver, TimeProvider timeProvider, LogLevel minimumLevel)
+        : this(pathResolver, timeProvider, minimumLevel, FileSystemLogFileSinkFactory.Instance)
+    {
+    }
+
+    internal FileLoggerProvider(
+        ILogPathResolver pathResolver,
+        TimeProvider timeProvider,
+        LogLevel minimumLevel,
+        ILogFileSinkFactory sinkFactory)
     {
         var directory = pathResolver.Resolve();
         _logFilePath = Path.Combine(directory, LogFileName);
         _timeProvider = timeProvider;
         _minimumLevel = minimumLevel;
+        _sinkFactory = sinkFactory;
     }
 
     /// <summary>Exposed for tests so they can drive the time field directly.</summary>
@@ -116,7 +125,7 @@ public sealed class FileLoggerProvider : ILoggerProvider
         }
     }
 
-    private StreamWriter EnsureWriter()
+    private ILogFileSink EnsureWriter()
     {
         if (_writer is { } outer)
         {
@@ -130,27 +139,7 @@ public sealed class FileLoggerProvider : ILoggerProvider
                 return inner;
             }
 
-            if (!_directoryEnsured)
-            {
-                var dir = Path.GetDirectoryName(_logFilePath);
-                if (!string.IsNullOrEmpty(dir))
-                {
-                    Directory.CreateDirectory(dir);
-                }
-                _directoryEnsured = true;
-            }
-
-            var stream = new FileStream(
-                _logFilePath,
-                FileMode.Append,
-                FileAccess.Write,
-                FileShare.ReadWrite | FileShare.Delete,
-                bufferSize: 4096,
-                options: FileOptions.WriteThrough);
-            _writer = new StreamWriter(stream, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false))
-            {
-                AutoFlush = false,
-            };
+            _writer = _sinkFactory.Open(_logFilePath);
             return _writer;
         }
     }

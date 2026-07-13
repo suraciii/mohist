@@ -2,6 +2,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Otel;
 using Mohist.Server.SpecTests.Support;
+using Mohist.Server.TestSupport;
 using Orleans.TestingHost;
 using Xunit;
 
@@ -32,10 +33,10 @@ public sealed class OtlpRoutesHostFixture : IAsyncLifetime
         var connectionString = $"Data Source=otel-int-{Guid.NewGuid():N};Mode=Memory;Cache=Shared";
         _keeper = new SqliteConnection(connectionString);
         await _keeper.OpenAsync();
+        MigratedSqliteTemplate.CopyTo(_keeper);
 
-        _runnerRoot = Path.Combine(Path.GetTempPath(), $"mohist-runner-otel-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(_runnerRoot);
-        _systemUpdateStatePath = Path.Combine(Path.GetTempPath(), $"mohist-sys-otel-{Guid.NewGuid():N}.json");
+        _runnerRoot = "/test/runner-otel";
+        _systemUpdateStatePath = "/test/system-update-otel.json";
 
         _portAllocator = new TestClusterPortAllocator();
         var (siloPort, gatewayPort) = _portAllocator.AllocateConsecutivePortPairs(1);
@@ -47,8 +48,6 @@ public sealed class OtlpRoutesHostFixture : IAsyncLifetime
             OtlpPort,
             siloPort,
             gatewayPort);
-        await Factory.EnsureSchemaAsync();
-
         // Force the server to materialize so middleware and routes are
         // registered (MohistWebApplicationFactory is lazy by default).
         _ = Factory.Services;
@@ -80,7 +79,5 @@ public sealed class OtlpRoutesHostFixture : IAsyncLifetime
         Factory?.Dispose();
         _portAllocator?.Dispose();
         await _keeper.DisposeAsync();
-        try { if (Directory.Exists(_runnerRoot)) Directory.Delete(_runnerRoot, recursive: true); } catch { }
-        try { if (File.Exists(_systemUpdateStatePath)) File.Delete(_systemUpdateStatePath); } catch { }
     }
 }

@@ -24,8 +24,6 @@ public class AgentSessionActivityVisibilitySpecs
         _client = fixture.Client;
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task ActivityCard_ForGenericAgentLaunchSession_CarriesAgentIdAndAgentName()
     {
@@ -47,8 +45,6 @@ public class AgentSessionActivityVisibilitySpecs
         Assert.Equal(agentName, card.GetProperty("agentName").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task ActivityCard_ForGenericSessionWithoutIssueRef_ProducesNoSyntheticIssueCard()
     {
@@ -71,8 +67,6 @@ public class AgentSessionActivityVisibilitySpecs
         Assert.Equal(agentName, card.GetProperty("agentName").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task ActivityCard_ForGenericSessionWithIssueRef_IsAssociatedButAgentAttributed()
     {
@@ -95,8 +89,6 @@ public class AgentSessionActivityVisibilitySpecs
         Assert.Equal(agentName, card.GetProperty("agentName").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task ActiveAgents_GenericSession_AppearsDespiteBlankWorkflowRunId()
     {
@@ -119,8 +111,6 @@ public class AgentSessionActivityVisibilitySpecs
         Assert.Equal(agentName, entry.GetProperty("agentName").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task WorkflowActivityCard_DoesNotLeakAgentIdOrAgentName()
     {
@@ -155,6 +145,7 @@ public class AgentSessionActivityVisibilitySpecs
         string agentName,
         int? issueNumber)
     {
+        var now = _fixture.TimeProvider.GetUtcNow().UtcDateTime;
         var labels = new Dictionary<string, string>(StringComparer.Ordinal)
         {
             [AgentSessionQueryMetadataKeys.ProjectId] = projectId,
@@ -171,7 +162,7 @@ public class AgentSessionActivityVisibilitySpecs
             Runtime = new AgentSessionRuntime("test-runner", null),
             Settings = new AgentSessionSettings("test-model"),
             Status = new AgentSessionStatusSnapshot(
-                CreatedAt: DateTime.UtcNow,
+                CreatedAt: now,
                 AgentRuntimeSessionId: sessionId),
             Metadata = new AgentSessionMetadata(labels),
         };
@@ -182,7 +173,7 @@ public class AgentSessionActivityVisibilitySpecs
         {
             Id = session.Id,
             State = JsonSerializer.Serialize(session, AgentSessionJson.JsonOptions),
-            CreatedAt = DateTime.UtcNow,
+            CreatedAt = now,
             Status = "opened",
             AgentSessionId = sessionId,
             RunnerId = "test-runner",
@@ -197,7 +188,8 @@ public class AgentSessionActivityVisibilitySpecs
         string agentName,
         string runnerId)
     {
-        var startedAt = DateTime.UtcNow.AddMinutes(-5);
+        var now = _fixture.TimeProvider.GetUtcNow().UtcDateTime;
+        var startedAt = now.AddMinutes(-5);
 
         var session = new AgentSession
         {
@@ -207,7 +199,7 @@ public class AgentSessionActivityVisibilitySpecs
             Status = new AgentSessionStatusSnapshot(
                 CreatedAt: startedAt,
                 BoundAt: startedAt.AddSeconds(1),
-                LastDataAt: DateTime.UtcNow,
+                LastDataAt: now,
                 AgentRuntimeSessionId: sessionId),
             Metadata = new AgentSessionMetadata(new Dictionary<string, string>(StringComparer.Ordinal)
             {
@@ -237,7 +229,8 @@ public class AgentSessionActivityVisibilitySpecs
         string sessionId,
         string runnerId)
     {
-        var startedAt = DateTime.UtcNow.AddMinutes(-10);
+        var now = _fixture.TimeProvider.GetUtcNow().UtcDateTime;
+        var startedAt = now.AddMinutes(-10);
         var workflowRunId = $"wf-{Guid.NewGuid():N}";
         var workId = $"work-{Guid.NewGuid():N}";
 
@@ -249,7 +242,7 @@ public class AgentSessionActivityVisibilitySpecs
             Status = new AgentSessionStatusSnapshot(
                 CreatedAt: startedAt,
                 BoundAt: startedAt.AddSeconds(1),
-                LastDataAt: DateTime.UtcNow,
+                LastDataAt: now,
                 AgentRuntimeSessionId: sessionId),
             Metadata = new AgentSessionMetadata(new Dictionary<string, string>(StringComparer.Ordinal)
             {

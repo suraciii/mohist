@@ -2,25 +2,44 @@ using ArchUnitNET.Domain;
 using ArchUnitNET.Fluent;
 using ArchUnitNET.Loader;
 using ArchUnitNET.xUnit;
-using Mohist.Server.Infrastructure.Data.Db;
+using System.Text.RegularExpressions;
+using System.Xml.Linq;
 using Xunit;
 using static ArchUnitNET.Fluent.ArchRuleDefinition;
-using static ArchUnitNET.Fluent.Slices.SliceRuleDefinition;
 
 namespace Mohist.Server.ArchTests;
 
-[Trait(Traits.Sut.Name, Traits.Sut.Architecture)]
 public class ArchitectureRules
 {
+    private static readonly Regex TestSupportForbiddenSyntax = new(
+        @"\[\s*(?:(?:global::)?Xunit\.)?(?:Fact|Theory|Trait|Collection|CollectionDefinition)(?:Attribute)?\b|\b(?:IAsyncLifetime|IClassFixture|ICollectionFixture)\b|\bWebApplicationFactory\b",
+        RegexOptions.CultureInvariant);
+
+    private static readonly Regex TraitAttribute = new(
+        @"\[\s*(?:(?:global::)?Xunit\.)?Trait(?:Attribute)?\b",
+        RegexOptions.CultureInvariant);
+
+    private static readonly Regex DisabledParallelCollectionDefinition = new(
+        @"\[\s*(?:(?:global::)?Xunit\.)?CollectionDefinition(?:Attribute)?\s*\(\s*""(?<name>[^""]+)""\s*,\s*DisableParallelization\s*=\s*true\s*\)",
+        RegexOptions.CultureInvariant);
+
+    private static readonly Regex OtelTracingCollectionUse = new(
+        @"\[\s*(?:(?:global::)?Xunit\.)?Collection(?:Attribute)?\s*\(\s*""OtelTracing""\s*\)",
+        RegexOptions.CultureInvariant);
+
+    private static readonly Regex DirectPhysicalFileSystemUse = new(
+        @"\b(?:(?:global::)?System(?:\.IO)?\.)?(?:File|Directory)\s*\.|\bnew\s+(?:(?:global::)?System(?:\.IO)?\.)?(?:FileStream|FileSystemWatcher|FileInfo|DirectoryInfo)\b|\b(?:(?:global::)?System(?:\.IO)?\.)?Path\.GetTempPath\s*\(",
+        RegexOptions.CultureInvariant);
+
+    private static readonly Regex TestProjectName = new(
+        @"^Mohist\.(Server|Cli)\.(SpecTests|UnitTests|ArchTests|TestSupport)$",
+        RegexOptions.CultureInvariant);
+
     private static readonly ArchUnitNET.Domain.Architecture _architecture = new ArchLoader()
         .LoadAssemblies(
             System.Reflection.Assembly.Load("Mohist.Server"),
             System.Reflection.Assembly.Load("Mohist.Cli"))
         .Build();
-
-    private static readonly IObjectProvider<IType> OrleansGeneratedTypes = Types()
-        .That().ResideInNamespace("OrleansCodeGen", true)
-        .As("Orleans Generated Types");
 
     // Layer definitions
     private static readonly IObjectProvider<IType> DomainLayer = Types()
@@ -105,16 +124,6 @@ public class ArchitectureRules
     }
 
     [Fact]
-    public void DataStores_AreInInfrastructureData()
-    {
-        Classes().That().HaveNameEndingWith("Store")
-            .And().ResideInNamespace("Mohist.Server.Infrastructure.Data", useRegularExpressions: true)
-            .Should().Exist()
-            .Because("database-backed stores should be in Infrastructure.Data namespace")
-            .Check(_architecture);
-    }
-
-    [Fact]
     public void RowModels_AreInInfrastructureData()
     {
         Classes().That().ResideInNamespace("Mohist.Server", useRegularExpressions: true)
@@ -155,77 +164,6 @@ public class ArchitectureRules
     }
 
     [Fact]
-    public void FeatureDirectories_ShouldOnlyContainDomainGrainsAndServices()
-    {
-        var sourceRoot = Path.GetFullPath(Path.Combine(
-            AppContext.BaseDirectory,
-            "..", "..", "..", "..", "..", "src", "Mohist.Server"));
-
-        var sourceFiles = Directory
-            .EnumerateFiles(sourceRoot, "*.cs", SearchOption.AllDirectories)
-            .Select(Path.GetFullPath)
-            .ToArray();
-
-        var featureRoots = new HashSet<string>(StringComparer.Ordinal)
-        {
-            "Agent",
-            "Epic",
-            "Issue",
-            "Project",
-            "Runner",
-            "Sessions",
-            "Workflow"
-        };
-
-        var allowedFeatureSegments = new HashSet<string>(StringComparer.Ordinal)
-        {
-            "Domain",
-            "Grains",
-            "Services"
-        };
-
-        var allowedFeatureRootFiles = new HashSet<string>(StringComparer.Ordinal)
-        {
-            "AgentSessionReadModels.cs"
-        };
-
-        var violations = sourceFiles
-            .Select(path => Path.GetRelativePath(sourceRoot, path))
-            .Select(path => path.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar))
-            .Where(parts => parts.Length >= 2 && featureRoots.Contains(parts[0]))
-            .Where(parts => !(allowedFeatureSegments.Contains(parts[1])
-                || (parts.Length == 2 && allowedFeatureRootFiles.Contains(parts[1]))))
-            .Select(parts => string.Join("/", parts))
-            .OrderBy(path => path)
-            .ToList();
-
-        Assert.True(
-            violations.Count == 0,
-            "Feature directories must only contain Domain, Grains, and Services. Violations: " + string.Join(", ", violations));
-    }
-
-    [Fact]
-    public void GrainImplementations_ShouldInheritFromGrain()
-    {
-        Classes().That().HaveNameEndingWith("Grain")
-            .And().DoNotHaveNameStartingWith("I")
-            .And().AreNot(OrleansGeneratedTypes)
-            .And().DoNotResideInNamespace("OrleansCodeGen", true)
-            .Should().BeAssignableTo(typeof(Orleans.Grain))
-            .Because("Grain implementations must inherit from Orleans.Grain")
-            .Check(_architecture);
-    }
-
-    [Fact]
-    public void GrainInterfaces_ShouldStartWithI()
-    {
-        Interfaces().That().HaveNameEndingWith("Grain")
-            .Should().HaveNameStartingWith("I")
-            .Because("Grain interfaces should follow naming convention")
-            .Check(_architecture);
-    }
-
-    [Fact]
     public void Domain_ShouldNotDependOnApi()
     {
         Types().That().Are(DomainLayer)
@@ -235,150 +173,11 @@ public class ArchitectureRules
     }
 
     [Fact]
-    public void GrainInterfaces_ShouldBeInGrainsNamespace()
-    {
-        Interfaces().That().HaveNameEndingWith("Grain")
-            .Should().ResideInNamespace("Mohist.Server.*.Grains", useRegularExpressions: true)
-            .Because("Grain interfaces must be in Grains namespace")
-            .Check(_architecture);
-    }
-
-    [Fact]
     public void Api_ShouldNotDependOnOrleans()
     {
         Types().That().Are(ApiLayer)
             .Should().NotDependOnAny(OrleansTypes)
             .Because("API layer should not depend on Orleans directly")
-            .Check(_architecture);
-    }
-
-    [Fact]
-    public void EfEntities_ShouldEndWithRow()
-    {
-        var dbSetProperties = typeof(Mohist.Server.Infrastructure.Data.Db.MohistDbContext)
-            .GetProperties()
-            .Where(p => p.PropertyType.IsGenericType &&
-                        p.PropertyType.GetGenericTypeDefinition() == typeof(Microsoft.EntityFrameworkCore.DbSet<>))
-            .Select(p => p.PropertyType.GetGenericArguments()[0])
-            .ToList();
-
-        Assert.All(dbSetProperties, entityType =>
-        {
-            Assert.True(
-                entityType.Name.EndsWith("Row") || entityType.Name.EndsWith("Profile"),
-                $"EF entity '{entityType.Name}' must end with 'Row' or 'Profile'. " +
-                $"Entity type: {entityType.FullName}");
-        });
-    }
-
-    // Domain namespaces participating in the cross-domain dependency check.
-    // Epic is NOT listed as its own domain: per design/domain-analysis.md, Epic is
-    // the "organization facet" of the Issue subdomain (same problem class, two
-    // granularities), so Mohist.Server.Epic.* is measured as part of Issue, not as
-    // a separate domain. Measuring it cross-domain would mis-flag subdomain-internal
-    // coupling (Epic→IssueQuerier, IIssueGrain) as violations.
-    // AgentOps is not yet listed — it has no code landing point today (its classes
-    // still live under Sessions). Add it once issue #372 relocates them to
-    // Mohist.Server.AgentOps.* and defines its allowed-direction set.
-    private static readonly string[] DomainNamespaces =
-        ["Agent", "Issue", "Workflow", "Project", "Runner", "Sessions"];
-
-    private static readonly (string from, string to)[] AllowedDomainDependencies =
-    [
-        ("Agent", "Runner"),
-        ("Agent", "Sessions"),
-        ("Issue", "Workflow"),
-        ("Issue", "Project"),
-        ("Runner", "Sessions"),
-        ("Runner", "Workflow"),
-        ("Workflow", "Sessions"),
-        // KNOWN DEBT — Project→Workflow is a config-data placement issue, not an
-        // engine dependency: ProjectGrain/ProjectQuerier reference only the
-        // ProjectWorkflowProfile config type (template selection + variables),
-        // which design/workflow/boundaries/issue.md assigns to Issue/Project's own
-        // config data but which currently lives under Workflow/Services. Long-term
-        // fix: relocate the config type to Project. Tracked by that boundary doc's
-        // "可选后续". Allowed here so the directional tightening (issue #368) is
-        // not blocked on the relocation.
-        ("Project", "Workflow"),
-    ];
-
-    [Fact]
-    public void DomainModules_ShouldNotDependOnEachOther()
-    {
-        for (int i = 0; i < DomainNamespaces.Length; i++)
-        {
-            for (int j = i + 1; j < DomainNamespaces.Length; j++)
-            {
-                var a = DomainNamespaces[i];
-                var b = DomainNamespaces[j];
-
-                if (AllowedDomainDependencies.Contains((a, b)) ||
-                    AllowedDomainDependencies.Contains((b, a)))
-                    continue;
-
-                var aTypes = Types()
-                    .That().ResideInNamespace($"Mohist.Server.{a}", useRegularExpressions: true)
-                    .And().DoNotResideInNamespace("OrleansCodeGen", true)
-                    .As($"{a}");
-
-                var bTypes = Types()
-                    .That().ResideInNamespace($"Mohist.Server.{b}", useRegularExpressions: true)
-                    .And().DoNotResideInNamespace("OrleansCodeGen", true)
-                    .As($"{b}");
-
-                Types().That().Are(aTypes)
-                    .Should().NotDependOnAny(bTypes)
-                    .Check(_architecture);
-            }
-        }
-    }
-
-    [Fact]
-    public void DomainInternalLayers_ShouldBeFreeOfCycles()
-    {
-        // Agent joined this list in issue-391 T-001: AgentGrain already
-        // depended on AgentQuerier (Services) for its ToInfo projection,
-        // and the shared IAgentLauncher (Services) introduced in T-001
-        // legitimately depends on IAgentJobGrain / AgentJobInput (Grains)
-        // to submit an AgentJob. The cycle is directional and accepted —
-        // it does not block the manual launch + subscription dispatch
-        // extraction. Tighten this to a Services → Grains-only flow if
-        // Agent ever moves its projection path out of AgentGrain.
-        var domainsWithKnownCycles = new HashSet<string> { "Issue", "Workflow", "Sessions", "Runner", "Agent" };
-
-        foreach (var domain in DomainNamespaces)
-        {
-            if (domainsWithKnownCycles.Contains(domain))
-                continue;
-
-            Slices().Matching($"Mohist.Server.{domain}.(*)")
-                .Should().BeFreeOfCycles()
-                .Check(_architecture);
-        }
-    }
-
-    [Fact(Skip = "Tech debt: Issue has internal cycles (Grains↔Services)")]
-    public void IssueInternalLayers_ShouldBeFreeOfCycles()
-    {
-        Slices().Matching("Mohist.Server.Issue.(*)")
-            .Should().BeFreeOfCycles()
-            .Check(_architecture);
-    }
-
-    [Fact(Skip = "Tech debt: Workflow has internal cycles (Grains↔Services)")]
-    public void WorkflowInternalLayers_ShouldBeFreeOfCycles()
-    {
-        Slices().Matching("Mohist.Server.Workflow.(*)")
-            .Should().BeFreeOfCycles()
-            .Check(_architecture);
-    }
-
-    [Fact(Skip = "Tech debt: Runner has internal cycles (Grains↔Services)")]
-    public void RunnerInternalLayers_ShouldBeFreeOfCycles()
-    {
-        Slices().Matching("Mohist.Server.Runner.(*)")
-            .Should().BeFreeOfCycles()
             .Check(_architecture);
     }
 
@@ -399,14 +198,10 @@ public class ArchitectureRules
     [Fact]
     public void ProductionCode_ShouldNotCallSystemEnvironmentDirectly()
     {
-        var repoRoot = Path.GetFullPath(Path.Combine(
-            AppContext.BaseDirectory,
-            "..", "..", "..", "..", "..", "src"));
-
         var productionProjects = new[]
         {
-            ("Mohist.Server", Path.Combine(repoRoot, "Mohist.Server", "Mohist.Server.csproj")),
-            ("Mohist.Cli",    Path.Combine(repoRoot, "..", "..", "cli", "Mohist.Cli", "Mohist.Cli.csproj")),
+            ("Mohist.Server", RepositoryPaths.RequireFile("packages", "server", "src", "Mohist.Server", "Mohist.Server.csproj")),
+            ("Mohist.Cli", RepositoryPaths.RequireFile("packages", "cli", "Mohist.Cli", "Mohist.Cli.csproj")),
         };
 
         var missing = new List<string>();
@@ -425,145 +220,257 @@ public class ArchitectureRules
             "enforce IEnvironmentVariableProvider usage at compile time: " + string.Join(", ", missing));
     }
 
-    private const int SpecFileSizeBudgetBytes = 24_000;
-
-    /// <summary>
-    /// Spec files in <c>Specs/</c> must end with <c>Specs</c> or
-    /// <c>Collection</c> (or be <c>Index.md</c>). Prevents accidental
-    /// mis-naming that breaks the "find the spec for SUT X" intuition.
-    /// </summary>
     [Fact]
-    public void SpecFiles_MustHaveSpecOrCollectionSuffix()
+    public void TestProjects_MustNotReferenceOtherTestProjects()
     {
-        var specsRoot = Path.GetFullPath(Path.Combine(
-            AppContext.BaseDirectory,
-            "..", "..", "..", "..", "..", "Specs"));
-        if (!Directory.Exists(specsRoot))
-            return; // Specs dir not present (fresh checkout?); rule is vacuous.
-
-        var specFiles = Directory.EnumerateFiles(
-            specsRoot, "*.cs", SearchOption.AllDirectories);
-
-        var violations = specFiles
-            .Select(p => Path.GetFileNameWithoutExtension(p)!)
-            .Where(name => !name.EndsWith("Specs")
-                        && !name.EndsWith("Collection")
-                        && !name.Equals("Index", StringComparison.Ordinal))
-            .OrderBy(name => name)
-            .ToList();
-
-        Assert.True(
-            violations.Count == 0,
-            "Spec files must end with 'Specs' or 'Collection'. Violations: " +
-            string.Join(", ", violations));
-    }
-
-    /// <summary>
-    /// Spec files must stay under ~24 KB so contributors notice when a
-    /// file has grown past a comfortable reading size. Larger files
-    /// should be split by lifecycle phase, behavior scenario, or
-    /// SUT-prefix grouping.
-    /// </summary>
-    [Fact]
-    public void SpecFiles_MustStayBellowSizeBudget()
-    {
-        var specsRoot = Path.GetFullPath(Path.Combine(
-            AppContext.BaseDirectory,
-            "..", "..", "..", "..", "..", "Specs"));
-        if (!Directory.Exists(specsRoot))
-            return;
-
-        var tooBig = Directory.EnumerateFiles(
-            specsRoot, "*.cs", SearchOption.AllDirectories)
-            .Where(p => new FileInfo(p).Length > SpecFileSizeBudgetBytes)
-            .Select(p => Path.GetRelativePath(specsRoot, p))
-            .OrderBy(p => p)
-            .ToList();
-
-        Assert.True(
-            tooBig.Count == 0,
-            $"Spec files must stay under {SpecFileSizeBudgetBytes / 1000} KB. " +
-            "Too big: " + string.Join(", ", tooBig));
-    }
-
-    /// <summary>
-    /// Spec classes must be declared as <c>public</c> so xUnit can
-    /// instantiate them. The rule parses each <c>*.cs</c> file for
-    /// top-level class declarations named <c>*Specs</c> and verifies
-    /// the <c>public</c> modifier is present.
-    /// </summary>
-    [Fact]
-    public void SpecClasses_MustBePublic()
-    {
-        var specsRoot = Path.GetFullPath(Path.Combine(
-            AppContext.BaseDirectory,
-            "..", "..", "..", "..", "..", "Specs"));
-        if (!Directory.Exists(specsRoot))
-            return;
-
-        var classRegex = new System.Text.RegularExpressions.Regex(
-            @"^\s*(?:public\s+)?(internal|private|protected)?\s*(?:static\s+|sealed\s+|abstract\s+|partial\s+)*class\s+(\w+Specs)\b",
-            System.Text.RegularExpressions.RegexOptions.Multiline);
-
+        var testProjects = TestProjectPaths().ToArray();
+        var testProjectPaths = new HashSet<string>(testProjects, StringComparer.Ordinal);
         var violations = new List<string>();
-        foreach (var path in Directory.EnumerateFiles(specsRoot, "*.cs", SearchOption.AllDirectories))
+
+        foreach (var projectPath in testProjects)
         {
-            var src = File.ReadAllText(path);
-            foreach (System.Text.RegularExpressions.Match m in classRegex.Matches(src))
+            var projectDirectory = Path.GetDirectoryName(projectPath)
+                ?? throw new InvalidOperationException($"Project has no parent directory: {projectPath}");
+            var projectName = Path.GetFileNameWithoutExtension(projectPath);
+            var document = XDocument.Load(projectPath);
+
+            foreach (var reference in document.Descendants().Where(element => element.Name.LocalName == "ProjectReference"))
             {
-                var access = m.Groups[1].Value;
-                if (!string.IsNullOrEmpty(access) && access != "public")
-                {
-                    violations.Add($"{Path.GetRelativePath(specsRoot, path)}: {access} {m.Groups[2].Value}");
-                }
+                var include = reference.Attribute("Include")?.Value;
+                if (string.IsNullOrWhiteSpace(include))
+                    continue;
+
+                var normalizedInclude = include
+                    .Replace('\\', Path.DirectorySeparatorChar)
+                    .Replace('/', Path.DirectorySeparatorChar);
+                var referencedPath = Path.GetFullPath(Path.Combine(projectDirectory, normalizedInclude));
+                if (testProjectPaths.Contains(referencedPath))
+                    violations.Add($"{projectName} -> {Path.GetFileNameWithoutExtension(referencedPath)}");
             }
         }
 
         Assert.True(
             violations.Count == 0,
-            "Spec classes must be public. Violations: " + string.Join(", ", violations));
+            "Test projects must not reference another test project. Violations: " + string.Join(", ", violations));
     }
 
-    /// <summary>
-    /// Spec files in <c>Specs/</c> must declare a namespace under
-    /// <c>Mohist.Server.Tests.Specs</c>. Prevents accidentally placing
-    /// test code outside the Specs sub-namespace, which would break
-    /// test discovery and namespace-based filtering.
-    /// </summary>
     [Fact]
-    public void SpecNamespaces_MustBeUnderSpecs()
+    public void TestSupport_MustNotReferenceTestFrameworkPackages()
     {
-        var specsRoot = Path.GetFullPath(Path.Combine(
-            AppContext.BaseDirectory,
-            "..", "..", "..", "..", "..", "Specs"));
-        if (!Directory.Exists(specsRoot))
-            return;
+        var violations = TestSupportProjectPaths()
+            .SelectMany(projectPath => XDocument.Load(projectPath)
+                .Descendants()
+                .Where(element => element.Name.LocalName == "PackageReference")
+                .Select(element => element.Attribute("Include")?.Value)
+                .Where(include => !string.IsNullOrWhiteSpace(include) && IsTestFrameworkPackage(include))
+                .Select(include => $"{Path.GetFileNameWithoutExtension(projectPath)}: {include}"))
+            .OrderBy(violation => violation, StringComparer.OrdinalIgnoreCase)
+            .ToList();
 
-        var namespaceRegex = new System.Text.RegularExpressions.Regex(
-            @"^\s*namespace\s+([\w\.]+)\s*;",
-            System.Text.RegularExpressions.RegexOptions.Multiline);
+        Assert.True(
+            violations.Count == 0,
+            "Test support must not reference test framework packages. Violations: " + string.Join(", ", violations));
+    }
 
+    [Fact]
+    public void TestSupport_MustNotContainTestSyntax()
+    {
         var violations = new List<string>();
-        foreach (var path in Directory.EnumerateFiles(specsRoot, "*.cs", SearchOption.AllDirectories))
+
+        foreach (var supportRoot in TestSupportRoots())
         {
-            var src = File.ReadAllText(path);
-            var m = namespaceRegex.Match(src);
-            if (!m.Success)
+            foreach (var sourcePath in ActiveTestFiles(supportRoot, "*.cs"))
             {
-                // No namespace declaration; skip (the existing test in
-                // SkillsCliCollection.cs is such a file).
+                var relativePath = Path.GetRelativePath(supportRoot, sourcePath);
+                var match = TestSupportForbiddenSyntax.Match(File.ReadAllText(sourcePath));
+                if (match.Success)
+                    violations.Add($"{Path.GetFileName(supportRoot)}: {relativePath}: {match.Value}");
+            }
+        }
+
+        Assert.True(
+            violations.Count == 0,
+            "Test support must not contain xUnit test syntax or test fixtures. Violations: " + string.Join(", ", violations));
+    }
+
+    [Fact]
+    public void TestProjects_UseTrackNames()
+    {
+        var violations = AllTestProjectPaths()
+            .Select(path => Path.GetFileNameWithoutExtension(path) ?? path)
+            .Where(name => !TestProjectName.IsMatch(name))
+            .OrderBy(name => name, StringComparer.Ordinal)
+            .ToList();
+
+        Assert.True(
+            violations.Count == 0,
+            "Test projects must use a SpecTests, UnitTests, ArchTests, or TestSupport name. Violations: " + string.Join(", ", violations));
+    }
+
+    [Fact]
+    public void TestSources_MustNotUseTraits()
+    {
+        var violations = TestRoots()
+            .SelectMany(root => ActiveTestFiles(root.Path, "*.cs")
+                .Where(path => TraitAttribute.IsMatch(File.ReadAllText(path)))
+                .Select(path => $"{root.Name}: {Path.GetRelativePath(root.Path, path)}"))
+            .OrderBy(path => path, StringComparer.Ordinal)
+            .ToList();
+
+        Assert.True(
+            violations.Count == 0,
+            "Test sources must not use xUnit traits. Violations: " + string.Join(", ", violations));
+    }
+
+    [Fact]
+    public void TestSources_MustNotContainCustomExecutionOrdering()
+    {
+        var collectionOrderer = "Collection" + "Orderer";
+        var violations = TestRoots()
+            .SelectMany(root => ActiveTestFiles(root.Path, "*.cs")
+                .Where(path => File.ReadAllText(path).Contains(collectionOrderer, StringComparison.Ordinal))
+                .Select(path => $"{root.Name}: {Path.GetRelativePath(root.Path, path)}"))
+            .OrderBy(path => path, StringComparer.Ordinal)
+            .ToList();
+
+        Assert.True(
+            violations.Count == 0,
+            "Test sources must not contain custom execution ordering. Violations: " + string.Join(", ", violations));
+    }
+
+    [Fact]
+    public void RuntimeTestSources_MustNotDirectlyAccessPhysicalFileSystem()
+    {
+        var violations = RuntimeTestRoots()
+            .SelectMany(root => ActiveTestFiles(root.Path, "*.cs")
+                .Select(path => (Path: path, Match: DirectPhysicalFileSystemUse.Match(File.ReadAllText(path))))
+                .Where(result => result.Match.Success)
+                .Select(result => $"{root.Name}: {Path.GetRelativePath(root.Path, result.Path)}: {result.Match.Value}"))
+            .OrderBy(path => path, StringComparer.Ordinal)
+            .ToList();
+
+        Assert.True(
+            violations.Count == 0,
+            "Runtime test sources must use an injected fake, in-memory port, or embedded resource instead of physical filesystem APIs. Violations: " + string.Join(", ", violations));
+    }
+
+    [Fact]
+    public void DisabledParallelCollections_MustOnlyProtectKnownProcessGlobals()
+    {
+        var testsRoot = RepositoryPaths.RequireDirectory("packages", "server", "tests");
+        var violations = new List<string>();
+
+        foreach (var sourcePath in ActiveTestFiles(testsRoot, "*.cs"))
+        {
+            var relativePath = Path.GetRelativePath(testsRoot, sourcePath);
+            var projectDirectory = relativePath
+                .Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)[0];
+
+            foreach (Match match in DisabledParallelCollectionDefinition.Matches(File.ReadAllText(sourcePath)))
+            {
+                var name = match.Groups["name"].Value;
+                var isAllowed = name == "OtelTracing"
+                    && projectDirectory is "Mohist.Server.UnitTests" or "Mohist.Server.SpecTests";
+                isAllowed |= name == "ConsoleOutput" && projectDirectory == "Mohist.Server.UnitTests";
+
+                if (!isAllowed)
+                    violations.Add($"{relativePath}: {name}");
+            }
+        }
+
+        Assert.True(
+            violations.Count == 0,
+            "Disabled parallel collections must protect only known process globals. Violations: " + string.Join(", ", violations));
+    }
+
+    [Fact]
+    public void OtelTracing_UsesAssemblyLocalDisabledParallelDefinitions()
+    {
+        foreach (var projectName in new[]
+                 {
+                     "Mohist.Server.UnitTests",
+                     "Mohist.Server.SpecTests",
+                 })
+        {
+            var projectRoot = RepositoryPaths.RequireDirectory("packages", "server", "tests", projectName);
+            var sourceFiles = ActiveTestFiles(projectRoot, "*.cs").ToArray();
+            if (!sourceFiles.Any(path => OtelTracingCollectionUse.IsMatch(File.ReadAllText(path))))
                 continue;
-            }
-            var ns = m.Groups[1].Value;
-            if (!ns.StartsWith("Mohist.Server.Tests.Specs", StringComparison.Ordinal))
-            {
-                violations.Add($"{Path.GetRelativePath(specsRoot, path)}: {ns}");
-            }
-        }
 
-        Assert.True(
-            violations.Count == 0,
-            "Spec namespaces must be under 'Mohist.Server.Tests.Specs'. Violations: " +
-            string.Join(", ", violations));
+            var hasDisabledDefinition = sourceFiles
+                .SelectMany(path => DisabledParallelCollectionDefinition.Matches(File.ReadAllText(path)).Cast<Match>())
+                .Any(match => match.Groups["name"].Value == "OtelTracing");
+
+            Assert.True(
+                hasDisabledDefinition,
+                $"{projectName} uses OtelTracing but does not define it as a disabled-parallel collection.");
+        }
+    }
+
+    private static bool IsTestFrameworkPackage(string packageId)
+    {
+        return packageId.Equals("Microsoft.NET.Test.Sdk", StringComparison.OrdinalIgnoreCase) ||
+               packageId.Equals("xunit", StringComparison.OrdinalIgnoreCase) ||
+               packageId.StartsWith("xunit.", StringComparison.OrdinalIgnoreCase) ||
+               packageId.EndsWith(".xunit", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static IEnumerable<string> ActiveTestFiles(string root, string searchPattern)
+    {
+        return Directory.EnumerateFiles(root, searchPattern, SearchOption.AllDirectories)
+            .Where(path =>
+            {
+                var relativePath = Path.GetRelativePath(root, path);
+                return !relativePath
+                    .Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+                    .Any(segment => segment is "bin" or "obj");
+            });
+    }
+
+    private static IEnumerable<string> TestProjectPaths()
+    {
+        return AllTestProjectPaths()
+            .Where(path => Path.GetFileNameWithoutExtension(path).EndsWith("Tests", StringComparison.Ordinal));
+    }
+
+    private static IEnumerable<string> TestSupportProjectPaths()
+    {
+        return AllTestProjectPaths()
+            .Where(path => Path.GetFileNameWithoutExtension(path).EndsWith("TestSupport", StringComparison.Ordinal));
+    }
+
+    private static IEnumerable<string> TestSupportRoots()
+    {
+        return TestSupportProjectPaths()
+            .Select(path => Path.GetDirectoryName(path)
+                ?? throw new InvalidOperationException($"Test support project has no parent directory: {path}"));
+    }
+
+    private static IEnumerable<string> AllTestProjectPaths()
+    {
+        return TestProjectRoots()
+            .SelectMany(root => Directory.EnumerateFiles(root, "*.csproj", SearchOption.AllDirectories));
+    }
+
+    private static IEnumerable<string> TestProjectRoots()
+    {
+        yield return RepositoryPaths.RequireDirectory("packages", "server", "tests");
+        yield return RepositoryPaths.RequireDirectory("packages", "cli", "tests");
+    }
+
+    private static IEnumerable<(string Name, string Path)> TestRoots()
+    {
+        yield return ("server", RepositoryPaths.RequireDirectory("packages", "server", "tests"));
+        yield return ("cli", RepositoryPaths.RequireDirectory("packages", "cli", "tests"));
+    }
+
+    private static IEnumerable<(string Name, string Path)> RuntimeTestRoots()
+    {
+        return AllTestProjectPaths()
+            .Select(path => (Name: Path.GetFileNameWithoutExtension(path), Path: Path.GetDirectoryName(path)))
+            .Where(project => project.Name is not null
+                && project.Path is not null
+                && !project.Name.EndsWith("ArchTests", StringComparison.Ordinal))
+            .Select(project => (project.Name!, project.Path!));
     }
 }

@@ -19,13 +19,18 @@ public sealed class RuntimeBuildInfo : IRuntimeBuildInfo, ISingletonService
     public DateTimeOffset StartedAt { get; }
 
     public RuntimeBuildInfo()
-        : this(SystemEnvironmentVariableProvider.Instance)
+        : this(SystemEnvironmentVariableProvider.Instance, TimeProvider.System)
     {
     }
 
     public RuntimeBuildInfo(IEnvironmentVariableProvider environment)
+        : this(environment, TimeProvider.System)
     {
-        StartedAt = DateTimeOffset.UtcNow;
+    }
+
+    public RuntimeBuildInfo(IEnvironmentVariableProvider environment, TimeProvider timeProvider)
+    {
+        StartedAt = timeProvider.GetUtcNow();
         (Version, GitHash) = ResolveIdentity(environment);
     }
 
@@ -93,7 +98,7 @@ public sealed class RuntimeBuildInfo : IRuntimeBuildInfo, ISingletonService
             if (root == null)
                 return null;
 
-            return TryReadGitHeadFile(root);
+            return TryReadGitHeadFile(new PhysicalFileSystem(), root);
         }
         catch
         {
@@ -101,21 +106,21 @@ public sealed class RuntimeBuildInfo : IRuntimeBuildInfo, ISingletonService
         }
     }
 
-    internal static string? TryReadGitHeadFile(string repoRoot)
+    internal static string? TryReadGitHeadFile(IFileSystem fileSystem, string repoRoot)
     {
         try
         {
             var headFile = Path.Combine(repoRoot, ".git", "HEAD");
-            if (!File.Exists(headFile))
+            if (!fileSystem.Exists(headFile))
                 return null;
 
-            var head = File.ReadAllText(headFile).Trim();
+            var head = fileSystem.ReadAllText(headFile).Trim();
             if (head.StartsWith("ref: ", StringComparison.Ordinal))
             {
                 var refPath = head[5..];
                 var refFile = Path.Combine(repoRoot, ".git", refPath);
-                if (File.Exists(refFile))
-                    return File.ReadAllText(refFile).Trim();
+                if (fileSystem.Exists(refFile))
+                    return fileSystem.ReadAllText(refFile).Trim();
                 return null;
             }
 

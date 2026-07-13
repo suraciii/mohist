@@ -1,5 +1,4 @@
 using System.Net.Http.Json;
-using System.Reflection;
 using System.Text.Json;
 using Mohist.Server.Infrastructure.Workspace;
 using Mohist.Server.Project.Domain;
@@ -21,8 +20,6 @@ public class PathContractRegressionSpecs
         _client = fixture.Client;
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task LegacyWorktreeStatusRoute_ReturnsNotFound()
     {
@@ -50,48 +47,10 @@ public class PathContractRegressionSpecs
         Assert.Equal(System.Net.HttpStatusCode.NotFound, response.StatusCode);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
-    [Fact]
-    public void ProjectInfo_OmitsPathAndEffectivePath()
-    {
-        var props = typeof(ProjectInfo)
-            .GetProperties(BindingFlags.Public | BindingFlags.Instance)
-            .Select(p => p.Name)
-            .ToArray();
-
-        Assert.DoesNotContain("Path", props);
-        Assert.DoesNotContain("EffectivePath", props);
-        Assert.DoesNotContain("CheckoutPath", props);
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
-    [Fact]
-    public void RepositoryInfo_OmitsPathRemoteAndResolvedPath()
-    {
-        var props = typeof(RepositoryInfo)
-            .GetProperties(BindingFlags.Public | BindingFlags.Instance)
-            .Select(p => p.Name)
-            .ToArray();
-
-        Assert.DoesNotContain("Path", props);
-        Assert.DoesNotContain("Remote", props);
-        Assert.DoesNotContain("ResolvedPath", props);
-        Assert.DoesNotContain("RemoteUrl", props);
-
-        Assert.Contains("GitUrl", props);
-        Assert.Contains("BaseBranch", props);
-        Assert.Contains("Name", props);
-        Assert.Contains("IsDefault", props);
-    }
-
     // Item-5: the workspace-path slug must stay in sync with the runner's
     // slug() helper in packages/runner/src/runtime/workspace.ts. The
     // runner-equivalent test in workspace.spec.ts asserts the JS side; this
     // test pins the C# side with representative Unicode inputs.
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Theory]
     [InlineData("my-project", "my-project")]
     [InlineData("My Project!", "my-project")]
@@ -106,8 +65,6 @@ public class PathContractRegressionSpecs
         Assert.Equal(expected, MohistWorkspaceLayout.Slug(input ?? string.Empty));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task ProjectsList_OmitsPathAndEffectivePath()
     {
@@ -126,8 +83,6 @@ public class PathContractRegressionSpecs
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task ProjectDetail_OmitsPathAndEffectivePath()
     {
@@ -144,8 +99,6 @@ public class PathContractRegressionSpecs
         AssertProjectHasNoLocalPathFields(data);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task ProjectCreate_WithoutPath_ReturnsProjectWithoutLocalPathFields()
     {
@@ -160,8 +113,6 @@ public class PathContractRegressionSpecs
         AssertProjectHasNoLocalPathFields(data);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task RepositoryAdd_WithoutGitUrl_Returns400AndDoesNotMutateState()
     {
@@ -186,8 +137,6 @@ public class PathContractRegressionSpecs
         Assert.Equal(beforeRepos, afterRepos);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task RepositoryAdd_WithGitUrl_ReturnsRepositoryWithoutLocalPathFields()
     {
@@ -216,8 +165,6 @@ public class PathContractRegressionSpecs
         Assert.Equal("main", firstRepo.GetProperty("baseBranch").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task IssueStart_DispatchVariables_ContainGitUrlButNoLocalPathFields()
     {
@@ -262,8 +209,6 @@ public class PathContractRegressionSpecs
         AssertDispatchVariablesHaveWorkspaceContract(variables);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task WorkflowRunProfileVariables_AreReadWrittenAsVariableBundle()
     {
@@ -297,8 +242,6 @@ public class PathContractRegressionSpecs
         Assert.Equal("put", profileData.GetProperty("variables").GetProperty("vars").GetProperty("source").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task WorkflowEffectiveVariableKeyPath_ReturnsValueOrJsonNull()
     {

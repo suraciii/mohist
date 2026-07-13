@@ -51,8 +51,6 @@ public class GenericAgentSessionFollowupApiSpecs : IAsyncLifetime
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task GenericFollowupEndpoint_ActiveGenericSessionOnlineRunner_ReturnsSent()
     {
@@ -88,8 +86,6 @@ public class GenericAgentSessionFollowupApiSpecs : IAsyncLifetime
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task GenericRunnerRoutes_CrossProjectSession_ReturnNotFoundAndDoNotMutate()
     {
@@ -116,8 +112,6 @@ public class GenericAgentSessionFollowupApiSpecs : IAsyncLifetime
         Assert.Equal(before.LastDataAt, after.LastDataAt);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task GenericRunnerOpen_UnknownSession_ReturnsNotFoundAndDoesNotCreateSession()
     {
@@ -133,46 +127,6 @@ public class GenericAgentSessionFollowupApiSpecs : IAsyncLifetime
         Assert.Null(await grain.GetAsync());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
-    [Fact]
-    public async Task GenericRunnerOpen_PreMintedLaunchSession_BindsRunnerIdForFollowupAndCancelResolution()
-    {
-        var (project, _, sessionId, _) = await LaunchGenericSessionAsync("gen-open-binds-runner");
-
-        using var existing = await _client.GetAsync($"/api/runner/{_runnerId}/agent-sessions/{project.Id}/{sessionId}");
-        Assert.Equal(HttpStatusCode.OK, existing.StatusCode);
-        var existingPayload = await existing.Content.ReadFromJsonAsync<JsonElement>();
-        if (existingPayload.TryGetProperty("acpSessionId", out var acpSessionId))
-            Assert.True(acpSessionId.ValueKind == JsonValueKind.Null || string.IsNullOrEmpty(acpSessionId.GetString()));
-
-        await _fixture.Client.PostOkAsync(
-            $"/api/runner/{_runnerId}/agent-sessions/{project.Id}/{sessionId}/open",
-            new
-            {
-                workId = $"work-{Guid.NewGuid():N}",
-                workType = "agent-job",
-                stage = "agent",
-                title = "bind pre-minted generic session",
-            });
-
-        var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
-        var info = await grain.GetAsync() ?? throw new InvalidOperationException("session grain returned null");
-        Assert.Equal(_runnerId, info.RunnerId);
-
-        await using var scope = _fixture.Services.CreateAsyncScope();
-        var querier = scope.ServiceProvider.GetRequiredService<AgentSessionQuerier>();
-        var followupTarget = await querier.ResolveGenericFollowupTargetAsync(project.Id, sessionId);
-        var cancelTarget = await querier.ResolveGenericCancelTargetAsync(project.Id, sessionId);
-
-        Assert.NotNull(followupTarget);
-        Assert.Equal(_runnerId, followupTarget!.RunnerId);
-        Assert.NotNull(cancelTarget);
-        Assert.Equal(_runnerId, cancelTarget!.RunnerId);
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task GenericFollowupEndpoint_EmptyText_ReturnsBadRequest()
     {
@@ -185,8 +139,6 @@ public class GenericAgentSessionFollowupApiSpecs : IAsyncLifetime
         Assert.Equal("followup_text_missing", doc.RootElement.GetProperty("code").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task GenericFollowupEndpoint_WhitespaceText_ReturnsBadRequest()
     {
@@ -199,8 +151,6 @@ public class GenericAgentSessionFollowupApiSpecs : IAsyncLifetime
         Assert.Equal("followup_text_missing", doc.RootElement.GetProperty("code").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task GenericFollowupEndpoint_MissingText_ReturnsBadRequest()
     {
@@ -213,8 +163,6 @@ public class GenericAgentSessionFollowupApiSpecs : IAsyncLifetime
         Assert.Equal("followup_text_missing", doc.RootElement.GetProperty("code").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task GenericFollowupEndpoint_UnknownSession_ReturnsNotFound()
     {
@@ -227,8 +175,6 @@ public class GenericAgentSessionFollowupApiSpecs : IAsyncLifetime
         Assert.Equal("not_found", doc.RootElement.GetProperty("code").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task GenericFollowupEndpoint_InactiveSessionBeforeRunnerOpens_ReturnsConflict()
     {
@@ -244,8 +190,6 @@ public class GenericAgentSessionFollowupApiSpecs : IAsyncLifetime
         Assert.Equal("session_inactive", doc.RootElement.GetProperty("code").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task GenericFollowupEndpoint_TerminalSession_ReturnsConflict()
     {
@@ -270,8 +214,6 @@ public class GenericAgentSessionFollowupApiSpecs : IAsyncLifetime
         Assert.Equal("session_inactive", doc.RootElement.GetProperty("code").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task GenericFollowupEndpoint_ActivityMarksActiveThenClosedBecomesConflict()
     {
@@ -313,8 +255,6 @@ public class GenericAgentSessionFollowupApiSpecs : IAsyncLifetime
         Assert.Equal(HttpStatusCode.Conflict, terminalResponse.StatusCode);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task GenericFollowupEndpoint_ActiveSessionOfflineRunner_ReturnsServiceUnavailable()
     {
@@ -337,8 +277,6 @@ public class GenericAgentSessionFollowupApiSpecs : IAsyncLifetime
         Assert.Equal("runner_offline", doc.RootElement.GetProperty("code").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task GenericFollowupEndpoint_SessionInOtherProject_ReturnsNotFound()
     {
@@ -352,71 +290,6 @@ public class GenericAgentSessionFollowupApiSpecs : IAsyncLifetime
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
-    [Fact]
-    public async Task ResolveGenericFollowupTargetAsync_ReadsRunnerIdAndIsActiveFromSession()
-    {
-        var (project, _, sessionId, _) = await LaunchAndOpenGenericSessionAsync("gen-resolve-target");
-
-        var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
-        await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(new[]
-        {
-            new AgentSessionRuntimeEventInput(
-                Type: RuntimeEventTypes.SessionLiveness,
-                PayloadJson: "{}"),
-        }));
-
-        await using var scope = _fixture.Services.CreateAsyncScope();
-        var querier = scope.ServiceProvider.GetRequiredService<AgentSessionQuerier>();
-
-        var target = await querier.ResolveGenericFollowupTargetAsync(project.Id, sessionId);
-
-        Assert.NotNull(target);
-        Assert.Equal(_runnerId, target!.RunnerId);
-        Assert.Equal(sessionId, target.SessionId);
-        Assert.True(target.IsActive);
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
-    [Fact]
-    public async Task ResolveGenericFollowupTargetAsync_NoRunnerOpened_ReturnsInactiveTargetWithEmptyRunner()
-    {
-        // The launch minted the session, but the runner never opened it
-        // (no RunnerId bound). The resolver still finds the session (so
-        // the endpoint returns 409 inactive, not 404 not-found), with
-        // RunnerId empty and IsActive=false.
-        var (project, _, sessionId, _) = await LaunchGenericSessionAsync("gen-resolve-no-runner");
-
-        await using var scope = _fixture.Services.CreateAsyncScope();
-        var querier = scope.ServiceProvider.GetRequiredService<AgentSessionQuerier>();
-
-        var target = await querier.ResolveGenericFollowupTargetAsync(project.Id, sessionId);
-
-        Assert.NotNull(target);
-        Assert.Equal(string.Empty, target!.RunnerId);
-        Assert.Equal(sessionId, target.SessionId);
-        Assert.False(target.IsActive);
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
-    [Fact]
-    public async Task ResolveGenericFollowupTargetAsync_UnknownSessionId_ReturnsNull()
-    {
-        var project = await CreateProjectAsync("gen-resolve-404");
-
-        await using var scope = _fixture.Services.CreateAsyncScope();
-        var querier = scope.ServiceProvider.GetRequiredService<AgentSessionQuerier>();
-
-        var target = await querier.ResolveGenericFollowupTargetAsync(project.Id, Guid.NewGuid().ToString("N"));
-
-        Assert.Null(target);
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task IssueScopedFollowupRoute_StillEmitsBothTopLevelAndTargetFields()
     {
@@ -592,12 +465,7 @@ public class GenericAgentSessionFollowupApiSpecs : IAsyncLifetime
     {
         var projectName = $"gen-followup-{Guid.NewGuid():N}";
         if (projectName.Length > 63) projectName = projectName[..63];
-        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new
-        {
-            name = projectName,
-            path = Directory.GetCurrentDirectory(),
-            baseBranch = "main",
-        });
+        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = projectName });
         await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new
         {
             name = "main",

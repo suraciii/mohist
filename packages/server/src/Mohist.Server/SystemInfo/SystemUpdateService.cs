@@ -15,6 +15,7 @@ public sealed class SystemUpdateService : ISingletonService
     private readonly IEnvironmentVariableProvider _environment;
     private readonly ILogger<SystemUpdateService> _logger;
     private readonly TimeProvider _time;
+    private readonly IManagedAssetInspector _managedAssets;
 
     public SystemUpdateService(
         SystemInfoService systemInfoService,
@@ -23,8 +24,19 @@ public sealed class SystemUpdateService : ISingletonService
         ISystemReadinessProbe readinessProbe,
         IConfiguration configuration,
         IEnvironmentVariableProvider environment,
-        ILogger<SystemUpdateService> logger)
-        : this(_ => systemInfoService.GetSystemInfoAsync(), store, commandRunner, readinessProbe, configuration, environment, logger, TimeProvider.System)
+        ILogger<SystemUpdateService> logger,
+        TimeProvider time,
+        IManagedAssetInspector managedAssets)
+        : this(
+            _ => systemInfoService.GetSystemInfoAsync(),
+            store,
+            commandRunner,
+            readinessProbe,
+            configuration,
+            environment,
+            logger,
+            time,
+            managedAssets)
     {
     }
 
@@ -36,7 +48,8 @@ public sealed class SystemUpdateService : ISingletonService
         IConfiguration configuration,
         IEnvironmentVariableProvider environment,
         ILogger<SystemUpdateService> logger,
-        TimeProvider time)
+        TimeProvider time,
+        IManagedAssetInspector? managedAssets = null)
     {
         _getSystemInfo = getSystemInfo;
         _store = store;
@@ -46,6 +59,7 @@ public sealed class SystemUpdateService : ISingletonService
         _environment = environment;
         _logger = logger;
         _time = time;
+        _managedAssets = managedAssets ?? FileSystemManagedAssetInspector.Instance;
     }
 
     public async Task<(bool Started, string? Error, string? Code, SystemUpdateStatusResponse? Status)> StartAsync(SystemUpdateRequest request, CancellationToken cancellationToken = default)
@@ -387,23 +401,9 @@ public sealed class SystemUpdateService : ISingletonService
     private RuntimeConsistencyComponent BuildManagedAssetsComponent(SystemInfoResponse info)
     {
         var assetRoot = ResolveManagedAssetRoot();
-        if (string.IsNullOrWhiteSpace(assetRoot) || !Directory.Exists(assetRoot))
-        {
-            return new RuntimeConsistencyComponent(
-                "managed-assets",
-                "mismatched",
-                "Managed skill asset directory is missing or unreadable.");
-        }
-
         try
         {
-            var hasSkill = Directory.EnumerateFiles(assetRoot, "SKILL.md", new EnumerationOptions
-            {
-                RecurseSubdirectories = true,
-                IgnoreInaccessible = true,
-            }).Any();
-
-            if (!hasSkill)
+            if (!_managedAssets.HasSkill(assetRoot))
             {
                 return new RuntimeConsistencyComponent(
                     "managed-assets",

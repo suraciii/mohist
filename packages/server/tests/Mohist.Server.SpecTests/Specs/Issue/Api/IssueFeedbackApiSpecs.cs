@@ -42,8 +42,8 @@ public class IssueFeedbackApiSpecs
         _connectionString = fixture.ConnectionString;
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    private DateTimeOffset Now => _fixture.TimeProvider.GetUtcNow();
+
     [Fact]
     public async Task CreateFeedback_AtAwaitingApprovalStage_ResumesStageAndPersistsFeedback()
     {
@@ -79,8 +79,6 @@ public class IssueFeedbackApiSpecs
         Assert.Null(current.ApprovalStatus);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task CreateFeedback_OnNonAwaitingStage_Returns409()
     {
@@ -93,8 +91,6 @@ public class IssueFeedbackApiSpecs
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task CreateFeedback_WithoutStageOrBody_Returns400()
     {
@@ -111,8 +107,6 @@ public class IssueFeedbackApiSpecs
         Assert.Equal(HttpStatusCode.BadRequest, missingStage.StatusCode);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task ListFeedback_ReturnsAllFeedbackForRun_OrderedByCreatedAtDesc()
     {
@@ -122,7 +116,7 @@ public class IssueFeedbackApiSpecs
         // distinct createdAt timestamps. The DB is the source of truth for the
         // list query, so this avoids needing to drive the workflow grain back to
         // approval multiple times.
-        var baseTime = DateTimeOffset.UtcNow.AddMinutes(-2);
+        var baseTime = Now.AddMinutes(-2);
         var run = await LoadWorkflowRunAsync(wrId);
         Assert.NotNull(run);
         run!.Feedback.Add(new ApprovalFeedback(
@@ -149,8 +143,6 @@ public class IssueFeedbackApiSpecs
         Assert.Equal("first feedback", list[1].Body);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task ListFeedback_WithStageFilter_ReturnsOnlyMatchingStage()
     {
@@ -170,8 +162,6 @@ public class IssueFeedbackApiSpecs
         Assert.Empty(checkOnly);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task ListFeedback_WithoutAnyFeedback_ReturnsEmptyArray()
     {
@@ -184,8 +174,6 @@ public class IssueFeedbackApiSpecs
         Assert.Empty(list);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetFeedback_ReturnsFullFeedbackRecord()
     {
@@ -206,8 +194,6 @@ public class IssueFeedbackApiSpecs
         Assert.Null(single.Resolution);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetFeedback_JsonWireShape_ExposesNestedResolutionObject()
     {
@@ -222,9 +208,9 @@ public class IssueFeedbackApiSpecs
             Stage: "plan",
             Body: "live server shape",
             Status: ApprovalFeedbackStatus.Resolved,
-            CreatedAt: DateTimeOffset.UtcNow.AddMinutes(-5),
+            CreatedAt: Now.AddMinutes(-5),
             ResolutionTaskId: "apply-feedback.1",
-            ResolvedAt: DateTimeOffset.UtcNow.AddMinutes(-1),
+            ResolvedAt: Now.AddMinutes(-1),
             ResolutionSummary: "Addressed live"));
         await SaveWorkflowRunAsync(wrId, run);
 
@@ -259,8 +245,6 @@ public class IssueFeedbackApiSpecs
         Assert.Equal("Addressed live", resolution.GetProperty("resolutionSummary").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task ListFeedback_JsonWireShape_ExposesNestedResolutionObject()
     {
@@ -286,8 +270,6 @@ public class IssueFeedbackApiSpecs
             "list entries must not flatten 'resolutionSummary' to the top level");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetFeedback_UnknownId_Returns404()
     {
@@ -299,20 +281,55 @@ public class IssueFeedbackApiSpecs
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
-    [Fact(Skip = "Reject endpoint guard (04413cc4ae) validates controllability via the issue grain, but SeedAwaitingApprovalIssueAsync binds the workflow run by writing persisted state directly — the issue grain's cached state goes stale. Needs rework to drive the issue to awaiting-approval through the grain. Tracked for follow-up.")]
-    public async Task RejectEndpoint_RejectsAwaitingApprovalIssue()
+    [Fact]
+    public async Task RejectEndpoint_AtAwaitingApproval_RecordsFeedbackAndReturnsStageToWork()
     {
-        var (project, issueNumber, _, _) = await SeedAwaitingApprovalIssueAsync();
+        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"reject-feedback-{Guid.NewGuid():N}" });
+        await _client.PostOkAsync(
+            $"/api/projects/{project.Id}/repositories",
+            new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
+        var issue = await _client.PostDataAsync<IssueDto>(
+            $"/api/projects/{project.Id}/issues",
+            new { title = "Reject feedback", projectId = project.Id, isDraft = false });
+
+        await _client.PutAsJsonOkAsync(
+            $"/api/projects/{project.Id}/issues/{issue.Number}/workflow-profile/template",
+            new
+            {
+                yaml = """
+                    id: reject-feedback
+                    stages:
+                      - stage: plan
+                        requiresApproval: true
+                        tasks: []
+                        checks: []
+                    """
+            });
+        await _client.PostOkAsync($"/api/projects/{project.Id}/issues/{issue.Number}/start", null);
+
+        var awaitingApproval = await _client.GetDataAsync<IssueWorkflowStatusDto>(
+            $"/api/projects/{project.Id}/issues/{issue.Number}/workflow/status");
+        Assert.Equal("awaiting-approval", awaitingApproval.Workflow!.Status);
+        Assert.Equal("plan", awaitingApproval.Workflow.CurrentStage);
 
         await _client.PostOkAsync(
-            $"/api/projects/{project.Id}/issues/{issueNumber}/reject",
+            $"/api/projects/{project.Id}/issues/{issue.Number}/reject",
             new { message = "send back" });
+
+        var returnedToWork = await _client.GetDataAsync<IssueWorkflowStatusDto>(
+            $"/api/projects/{project.Id}/issues/{issue.Number}/workflow/status");
+        Assert.Equal("plan", returnedToWork.Workflow!.CurrentStage);
+        Assert.NotEqual("awaiting-approval", returnedToWork.Workflow.Status);
+
+        var feedback = Assert.Single(await _client.GetDataAsync<FeedbackDto[]>(
+            $"/api/projects/{project.Id}/issues/{issue.Number}/feedback"));
+        Assert.Equal("plan", feedback.Stage);
+        Assert.Equal("send back", feedback.Body);
+        Assert.Equal("open", feedback.Status);
+
+        await _client.PostOkAsync($"/api/projects/{project.Id}/issues/{issue.Number}/stop", null);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task IssueDetail_IncludesFeedbackArray()
     {
@@ -332,8 +349,6 @@ public class IssueFeedbackApiSpecs
         Assert.Equal("open", detail.Feedback[0].Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task IssueDetail_WithoutFeedback_IncludesEmptyFeedbackArray()
     {
@@ -346,13 +361,11 @@ public class IssueFeedbackApiSpecs
         Assert.Empty(detail.Feedback);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task IssueDetail_FeedbackArrayOrderedByCreatedAtDesc()
     {
         var (project, issueNumber, _, wrId) = await SeedAwaitingApprovalIssueAsync();
-        var baseTime = DateTimeOffset.UtcNow.AddMinutes(-10);
+        var baseTime = Now.AddMinutes(-10);
 
         var run = await LoadWorkflowRunAsync(wrId);
         Assert.NotNull(run);
@@ -388,8 +401,6 @@ public class IssueFeedbackApiSpecs
         Assert.Equal("fb_first", detail.Feedback[2].Id);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task IssueDetail_ResolvesFeedbackRecords()
     {
@@ -405,9 +416,9 @@ public class IssueFeedbackApiSpecs
             Stage: "plan",
             Body: "old feedback",
             Status: ApprovalFeedbackStatus.Resolved,
-            CreatedAt: DateTimeOffset.UtcNow.AddMinutes(-5),
+            CreatedAt: Now.AddMinutes(-5),
             ResolutionTaskId: "apply-feedback.1",
-            ResolvedAt: DateTimeOffset.UtcNow,
+            ResolvedAt: Now,
             ResolutionSummary: "Addressed"));
         await SaveWorkflowRunAsync(wrId, run);
 
@@ -421,8 +432,6 @@ public class IssueFeedbackApiSpecs
         Assert.Equal("apply-feedback.1", resolved.Resolution.ResolutionTaskId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task StageState_IncludesFeedbackScopedToStage()
     {
@@ -437,14 +446,14 @@ public class IssueFeedbackApiSpecs
             Stage: "plan",
             Body: "plan feedback",
             Status: ApprovalFeedbackStatus.Open,
-            CreatedAt: DateTimeOffset.UtcNow.AddMinutes(-2)));
+            CreatedAt: Now.AddMinutes(-2)));
         run.Feedback.Add(new ApprovalFeedback(
             Id: $"fb_{Guid.NewGuid():N}",
             WorkflowRunId: wrId,
             Stage: "check",
             Body: "check feedback",
             Status: ApprovalFeedbackStatus.Open,
-            CreatedAt: DateTimeOffset.UtcNow.AddMinutes(-1)));
+            CreatedAt: Now.AddMinutes(-1)));
         await SaveWorkflowRunAsync(wrId, run);
         await _grains.GetGrain<IIssueGrain>(issueId).DeactivateForTestAsync();
 
@@ -459,8 +468,6 @@ public class IssueFeedbackApiSpecs
         Assert.Equal("open", stageFeedback.Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task StageState_DistinguishesOpenAndResolvedFeedback()
     {
@@ -476,16 +483,16 @@ public class IssueFeedbackApiSpecs
             Stage: "plan",
             Body: "still needs work",
             Status: ApprovalFeedbackStatus.Open,
-            CreatedAt: DateTimeOffset.UtcNow.AddMinutes(-3)));
+            CreatedAt: Now.AddMinutes(-3)));
         run.Feedback.Add(new ApprovalFeedback(
             Id: resolvedId,
             WorkflowRunId: wrId,
             Stage: "plan",
             Body: "completed feedback",
             Status: ApprovalFeedbackStatus.Resolved,
-            CreatedAt: DateTimeOffset.UtcNow.AddMinutes(-5),
+            CreatedAt: Now.AddMinutes(-5),
             ResolutionTaskId: "apply-feedback.1",
-            ResolvedAt: DateTimeOffset.UtcNow.AddMinutes(-1),
+            ResolvedAt: Now.AddMinutes(-1),
             ResolutionSummary: "Done"));
         await SaveWorkflowRunAsync(wrId, run);
         await _grains.GetGrain<IIssueGrain>(issueId).DeactivateForTestAsync();
@@ -508,8 +515,6 @@ public class IssueFeedbackApiSpecs
         Assert.Equal("apply-feedback.1", resolved.Resolution.ResolutionTaskId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task StageState_WithoutFeedback_OmitsOrEmptyFeedbackArray()
     {
@@ -608,7 +613,7 @@ public class IssueFeedbackApiSpecs
             ? new
             {
                 result = (string?)null,
-                requestedAt = DateTimeOffset.UtcNow.ToString("o"),
+                requestedAt = Now.ToString("o"),
                 respondedAt = (string?)null,
             }
             : null;
@@ -621,7 +626,7 @@ public class IssueFeedbackApiSpecs
             metadata = new
             {
                 name = "test-run",
-                createdAt = DateTimeOffset.UtcNow.ToString("o"),
+                createdAt = Now.ToString("o"),
                 labels = new Dictionary<string, string>(),
                 annotations = new Dictionary<string, string>
                 {
@@ -703,6 +708,7 @@ public class IssueFeedbackApiSpecs
     }
 
     private sealed record ProjectDto(string Id, string Name, string Path, string BaseBranch);
+    private sealed record IssueDto(int Number);
 
     private sealed record FeedbackEnvelopeDto(bool Success, FeedbackDto? Data, string? Error = null);
     private sealed record FeedbackDto(

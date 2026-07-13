@@ -11,7 +11,7 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Issue.Profile;
 
-[Collection("IntegrationIssue3")]
+[Collection("IntegrationIssueConfiguration")]
 public class IssueWorkflowProfileApiSpecs : IAsyncLifetime
 {
     private readonly MohistIntegrationFixture _fixture;
@@ -41,8 +41,6 @@ public class IssueWorkflowProfileApiSpecs : IAsyncLifetime
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetWorkflowProfileYaml_ReturnsNormalizedYaml_ForBacklogIssue()
     {
@@ -61,8 +59,6 @@ public class IssueWorkflowProfileApiSpecs : IAsyncLifetime
         Assert.False(string.IsNullOrWhiteSpace(data.GetProperty("updatedAt").GetString()));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetWorkflowProfileYaml_ExposesTemplateSourceLabel_ForInheritedProjectAndCustomModes()
     {
@@ -118,8 +114,6 @@ public class IssueWorkflowProfileApiSpecs : IAsyncLifetime
         Assert.False(clearedData.TryGetProperty("yaml", out _));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task SaveWorkflowProfileYaml_UpdatesIssueProfile_WithoutMutatingProjectProfile()
     {
@@ -170,8 +164,6 @@ public class IssueWorkflowProfileApiSpecs : IAsyncLifetime
         Assert.Equal(savedData.GetProperty("updatedAt").GetString(), reloadedData.GetProperty("updatedAt").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task SaveWorkflowProfileYaml_RejectsInvalidYamlSyntax()
     {
@@ -204,8 +196,6 @@ public class IssueWorkflowProfileApiSpecs : IAsyncLifetime
         Assert.DoesNotContain("broken", yaml ?? "");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task SaveWorkflowProfileYaml_RejectsInvalidWorkflowShape()
     {
@@ -231,8 +221,6 @@ public class IssueWorkflowProfileApiSpecs : IAsyncLifetime
         Assert.Equal("reference", stateData.GetProperty("updateMode").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task SaveWorkflowProfileYaml_SynchronizesActiveRunProfile_AndPreservesInitializedStageWork()
     {
@@ -302,15 +290,13 @@ public class IssueWorkflowProfileApiSpecs : IAsyncLifetime
         Assert.Contains(buildStage.Checks, c => c.Name == "new-build-check");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
-    [Fact(Skip = "Computed column SQL changed to camelCase; needs fresh DB or data migration verification.")]
+    [Fact]
     public async Task NextStageInitialization_UsesUpdatedDefinition_AfterProfileSave()
     {
         var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"profile-next-stage-{Guid.NewGuid():N}" });
 
         await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
-        var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Next stage init issue", projectId = project.Id });
+        var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Next stage init issue", projectId = project.Id, isDraft = false });
         await StartWorkflowWithRunnerAsync(project.Id, issue.Number, $"profile-next-stage-runner-{Guid.NewGuid():N}");
 
         await DrainUntilApprovalAsync(project.Id, issue.Number, "plan");
@@ -338,14 +324,9 @@ public class IssueWorkflowProfileApiSpecs : IAsyncLifetime
         Assert.Equal(HttpStatusCode.OK, saveResponse.StatusCode);
 
         await _client.PostOkAsync($"/api/projects/{project.Id}/issues/{issue.Number}/approve");
-        var buildStatus = await TestWait.ForAsync(
-            () => _client.GetDataAsync<IssueWorkflowEnvelopeDto>($"/api/projects/{project.Id}/issues/{issue.Number}/workflow/status"),
-            status => status.Workflow?.Stages.FirstOrDefault(s => s.Stage == "build")?.Tasks.Any(t => t.Id == "brand-new-build-task") == true,
-            TimeSpan.FromSeconds(3),
-            TimeSpan.FromMilliseconds(20),
-            "build stage to reflect rewritten issue template");
+        var buildStatus = await _client.GetDataAsync<IssueWorkflowEnvelopeDto>($"/api/projects/{project.Id}/issues/{issue.Number}/workflow/status");
         var buildStage = Assert.Single(buildStatus.Workflow!.Stages, s => s.Stage == "build");
-        Assert.Contains(buildStage.Tasks, t => t.Id == "brand-new-build-task");
+        Assert.Contains(buildStage.Tasks, t => t.Id.StartsWith("brand-new-build-task.", StringComparison.Ordinal));
         Assert.Contains(buildStage.Checks, c => c.Name == "build-definition-check");
     }
 
@@ -434,9 +415,7 @@ public class IssueWorkflowProfileApiSpecs : IAsyncLifetime
             new { templateId = "mohist-test-noartifacts-profile" });
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
-    [Fact(Skip = "Integration test host cannot boot due to pre-existing pending EF migration unrelated to this change.")]
+    [Fact]
     public async Task GetSystemTemplates_ReturnsDescriptionAndIsDefaultFlag()
     {
         using var response = await _client.GetAsync("/api/workflow-templates/system");
@@ -451,9 +430,7 @@ public class IssueWorkflowProfileApiSpecs : IAsyncLifetime
         Assert.Equal(MohistWorkflow.ResolveDescription(MohistWorkflow.Definition), description);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
-    [Fact(Skip = "Integration test host cannot boot due to pre-existing pending EF migration unrelated to this change.")]
+    [Fact]
     public async Task GetSystemTemplateDetail_ReturnsDescriptionFromYaml()
     {
         using var response = await _client.GetAsync("/api/workflow-templates/system/mohist/local");
@@ -467,18 +444,14 @@ public class IssueWorkflowProfileApiSpecs : IAsyncLifetime
         Assert.Equal(MohistWorkflow.ResolveDescription(MohistWorkflow.Definition), data.GetProperty("description").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
-    [Fact(Skip = "Integration test host cannot boot due to pre-existing pending EF migration unrelated to this change.")]
+    [Fact]
     public async Task GetSystemTemplateDetail_UnknownId_ReturnsNotFound()
     {
         using var response = await _client.GetAsync("/api/workflow-templates/system/does/not/exist");
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
-    [Fact(Skip = "Integration test host cannot boot due to pre-existing pending EF migration unrelated to this change.")]
+    [Fact]
     public async Task GetSystemTemplateDetail_EmittedYamlRoundTripsBackToSameDescription()
     {
         using var response = await _client.GetAsync("/api/workflow-templates/system/mohist/local");

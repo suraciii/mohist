@@ -14,6 +14,61 @@ public interface ISystemUpdateStore
     Task<bool> SaveIfCurrentAsync(SystemUpdateJobState expected, SystemUpdateJobState next, CancellationToken cancellationToken = default);
 }
 
+internal interface ISystemUpdateStateFiles
+{
+    void EnsureParentDirectory(string path);
+    bool Exists(string path);
+    Stream OpenRead(string path);
+    Stream Create(string path);
+    bool TryCreate(string path, string contents);
+    string ReadAllText(string path);
+    void Move(string source, string destination, bool overwrite);
+    void Delete(string path);
+}
+
+internal sealed class PhysicalSystemUpdateStateFiles : ISystemUpdateStateFiles
+{
+    public static readonly PhysicalSystemUpdateStateFiles Instance = new();
+
+    private PhysicalSystemUpdateStateFiles()
+    {
+    }
+
+    public void EnsureParentDirectory(string path)
+    {
+        var directory = Path.GetDirectoryName(path);
+        if (!string.IsNullOrWhiteSpace(directory))
+            Directory.CreateDirectory(directory);
+    }
+
+    public bool Exists(string path) => File.Exists(path);
+
+    public Stream OpenRead(string path) => File.OpenRead(path);
+
+    public Stream Create(string path) => File.Create(path);
+
+    public bool TryCreate(string path, string contents)
+    {
+        try
+        {
+            using var stream = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+            using var writer = new StreamWriter(stream);
+            writer.Write(contents);
+            return true;
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+    }
+
+    public string ReadAllText(string path) => File.ReadAllText(path);
+
+    public void Move(string source, string destination, bool overwrite) => File.Move(source, destination, overwrite);
+
+    public void Delete(string path) => File.Delete(path);
+}
+
 public sealed class FileSystemSystemUpdateStore : ISystemUpdateStore
 {
     public const string HomeEnvironmentVariable = "HOME";
@@ -22,22 +77,30 @@ public sealed class FileSystemSystemUpdateStore : ISystemUpdateStore
     private readonly string _lockPath;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly IEnvironmentVariableProvider _environment;
+    private readonly ISystemUpdateStateFiles _files;
     private bool _locked;
     private string? _lockOwnerJobId;
 
     public FileSystemSystemUpdateStore(IConfiguration configuration)
-        : this(configuration, SystemEnvironmentVariableProvider.Instance)
+        : this(configuration, SystemEnvironmentVariableProvider.Instance, PhysicalSystemUpdateStateFiles.Instance)
     {
     }
 
     public FileSystemSystemUpdateStore(IConfiguration configuration, IEnvironmentVariableProvider environment)
+        : this(configuration, environment, PhysicalSystemUpdateStateFiles.Instance)
+    {
+    }
+
+    internal FileSystemSystemUpdateStore(
+        IConfiguration configuration,
+        IEnvironmentVariableProvider environment,
+        ISystemUpdateStateFiles files)
     {
         _environment = environment;
+        _files = files;
         _statePath = ResolveStatePath(configuration);
         _lockPath = _statePath + ".lock";
-        var dir = Path.GetDirectoryName(_statePath);
-        if (!string.IsNullOrWhiteSpace(dir))
-            Directory.CreateDirectory(dir);
+        _files.EnsureParentDirectory(_statePath);
     }
 
     public async Task<SystemUpdateJobState?> GetLatestAsync(CancellationToken cancellationToken = default)
@@ -45,10 +108,10 @@ public sealed class FileSystemSystemUpdateStore : ISystemUpdateStore
         await _gate.WaitAsync(cancellationToken);
         try
         {
-            if (!File.Exists(_statePath))
+            if (!_files.Exists(_statePath))
                 return null;
 
-            await using var stream = File.OpenRead(_statePath);
+            await using var stream = _files.OpenRead(_statePath);
             return await JsonSerializer.DeserializeAsync<SystemUpdateJobState>(stream, JSON.Options, cancellationToken);
         }
         finally
@@ -119,12 +182,12 @@ public sealed class FileSystemSystemUpdateStore : ISystemUpdateStore
         try
         {
             var tempPath = _statePath + ".tmp";
-            await using (var stream = File.Create(tempPath))
+            await using (var stream = _files.Create(tempPath))
             {
                 await JsonSerializer.SerializeAsync(stream, state, JSON.Options, cancellationToken);
             }
 
-            File.Move(tempPath, _statePath, overwrite: true);
+            _files.Move(tempPath, _statePath, overwrite: true);
         }
         finally
         {
@@ -147,12 +210,12 @@ public sealed class FileSystemSystemUpdateStore : ISystemUpdateStore
             }
 
             var tempPath = _statePath + ".tmp";
-            await using (var stream = File.Create(tempPath))
+            await using (var stream = _files.Create(tempPath))
             {
                 await JsonSerializer.SerializeAsync(stream, next, JSON.Options, cancellationToken);
             }
 
-            File.Move(tempPath, _statePath, overwrite: true);
+            _files.Move(tempPath, _statePath, overwrite: true);
             return true;
         }
         finally
@@ -163,41 +226,31 @@ public sealed class FileSystemSystemUpdateStore : ISystemUpdateStore
 
     private async Task<SystemUpdateJobState?> ReadLatestUnlockedAsync(CancellationToken cancellationToken)
     {
-        if (!File.Exists(_statePath))
+        if (!_files.Exists(_statePath))
             return null;
 
-        await using var stream = File.OpenRead(_statePath);
+        await using var stream = _files.OpenRead(_statePath);
         return await JsonSerializer.DeserializeAsync<SystemUpdateJobState>(stream, JSON.Options, cancellationToken);
     }
 
     private bool TryCreateLockFile(string jobId)
     {
-        try
-        {
-            using var stream = new FileStream(_lockPath, FileMode.CreateNew, FileAccess.Write, FileShare.None);
-            using var writer = new StreamWriter(stream);
-            writer.Write(jobId);
-            return true;
-        }
-        catch (IOException)
-        {
-            return false;
-        }
+        return _files.TryCreate(_lockPath, jobId);
     }
 
     private bool ReleaseLockFile(string jobId)
     {
-        if (!File.Exists(_lockPath))
+        if (!_files.Exists(_lockPath))
             return true;
 
         try
         {
-            var owner = File.ReadAllText(_lockPath);
+            var owner = _files.ReadAllText(_lockPath);
             if (owner != jobId)
                 return false;
 
-            File.Delete(_lockPath);
-            return !File.Exists(_lockPath);
+            _files.Delete(_lockPath);
+            return !_files.Exists(_lockPath);
         }
         catch (IOException)
         {
@@ -212,14 +265,14 @@ public sealed class FileSystemSystemUpdateStore : ISystemUpdateStore
 
     private void ReleaseLockFileOwnedByCurrentProcess(string jobId)
     {
-        if (!File.Exists(_lockPath))
+        if (!_files.Exists(_lockPath))
             return;
 
         try
         {
-            var owner = File.ReadAllText(_lockPath);
+            var owner = _files.ReadAllText(_lockPath);
             if (owner == jobId)
-                File.Delete(_lockPath);
+                _files.Delete(_lockPath);
         }
         catch (IOException)
         {

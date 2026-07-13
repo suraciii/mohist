@@ -964,10 +964,12 @@ internal sealed class MohistCliApi
 
     internal string ProjectStatePath => ProjectStatePathOverride is not null
         ? ProjectStatePathOverride()
-        : Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            ".mohist",
-            "cli-state.json");
+        : DefaultProjectStatePath();
+
+    internal static string DefaultProjectStatePath() => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+        ".mohist",
+        "cli-state.json");
 
     internal async Task<string?> TryReadActiveProjectIdAsync()
     {
