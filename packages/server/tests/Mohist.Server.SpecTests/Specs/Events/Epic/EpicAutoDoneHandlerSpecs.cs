@@ -25,6 +25,8 @@ namespace Mohist.Server.SpecTests.Specs.Events;
 
 public class EpicAutoDoneHandlerSpecs
 {
+    private static readonly DateTimeOffset EventTime = new(2026, 7, 1, 0, 0, 0, TimeSpan.Zero);
+
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
@@ -776,7 +778,7 @@ public class EpicAutoDoneHandlerSpecs
             id: Guid.NewGuid().ToString(),
             source: new Uri($"/mohist/epic/{epicId}", UriKind.Relative),
             type: EventCatalog.ReverseDns.EpicIssueLinked,
-            time: DateTimeOffset.UtcNow,
+            time: EventTime,
             data: new EpicIssueLinked(issueId, issueNumber),
             subject: epicId,
             extensions: new Dictionary<string, string>
@@ -792,7 +794,7 @@ public class EpicAutoDoneHandlerSpecs
             id: Guid.NewGuid().ToString(),
             source: new Uri($"/mohist/issue/{issueId}", UriKind.Relative),
             type: EventCatalog.ReverseDns.IssueDraftChanged,
-            time: DateTimeOffset.UtcNow,
+            time: EventTime,
             data: new IssueDraftChanged(oldIsDraft, newIsDraft),
             subject: "1",
             extensions: new Dictionary<string, string>
@@ -808,7 +810,7 @@ public class EpicAutoDoneHandlerSpecs
             id: Guid.NewGuid().ToString(),
             source: new Uri($"/mohist/issue/{issueId}", UriKind.Relative),
             type: EventCatalog.ReverseDns.IssuePrerequisiteRemoved,
-            time: DateTimeOffset.UtcNow,
+            time: EventTime,
             data: new IssuePrerequisiteRemoved(prereqNumber),
             subject: "1",
             extensions: new Dictionary<string, string>
@@ -824,7 +826,7 @@ public class EpicAutoDoneHandlerSpecs
             id: Guid.NewGuid().ToString(),
             source: new Uri($"/mohist/epic/{epicId}", UriKind.Relative),
             type: EventCatalog.ReverseDns.EpicStartAttemptFailed,
-            time: DateTimeOffset.UtcNow,
+            time: EventTime,
             data: new EpicStartAttemptFailed(issueId, issueNumber, "transient failure"),
             subject: epicId,
             extensions: new Dictionary<string, string>
@@ -868,7 +870,7 @@ public class EpicAutoDoneHandlerSpecs
             id: Guid.NewGuid().ToString(),
             source: new Uri($"/mohist/issue/{issueId}", UriKind.Relative),
             type: EventCatalog.ReverseDns.IssueCompleted,
-            time: DateTimeOffset.UtcNow,
+            time: EventTime,
             data: new IssueCompleted("wr_1"),
             subject: "1",
             extensions: new Dictionary<string, string>
@@ -883,7 +885,7 @@ public class EpicAutoDoneHandlerSpecs
             id: Guid.NewGuid().ToString(),
             source: new Uri($"/mohist/issue/{issueId}", UriKind.Relative),
             type: EventCatalog.ReverseDns.IssueCancelled,
-            time: DateTimeOffset.UtcNow,
+            time: EventTime,
             data: new IssueCancelled("cancel reason"),
             subject: "1",
             extensions: new Dictionary<string, string>

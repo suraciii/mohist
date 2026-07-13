@@ -527,13 +527,17 @@ public class EpicGrain : Grain, IEpicGrain
         domain.Start(now.UtcDateTime);
         MapToRow(domain, row, now);
         var pending = DrainPendingEvents(domain);
-        await db.SaveChangesAsync();
-        await PersistEpicEventsAsync(domain, pending, now);
-
+        // Append the status-changed event into the same transaction as the
+        // state transition, then call TryStartNextAsync before SaveChanges so
+        // a start-failure's EpicStartAttemptFailed event (if any) commits in
+        // the same transaction — no stranded running-but-idle epic without a
+        // recovery signal.
+        await PersistEpicEventsAsync(db, domain, pending, now);
         if (row.Status == EpicStatusName.Running && !wasAlreadyRunning)
         {
-            return await TryStartNextAsync(db, projectId, epicId, row, links);
+            await TryStartNextAsync(db, projectId, epicId, row, links);
         }
+        await db.SaveChangesAsync();
         return ToDto(row);
     }
 
@@ -826,7 +830,7 @@ public class EpicGrain : Grain, IEpicGrain
                     epicId, projectId, next.Id);
                 var now = _timeProvider.GetUtcNow();
                 var domain = Materialize(row, links);
-                domain.RecordStartAttemptFailure(next.Id, next.Number, ex.Message, now.UtcDateTime);
+                domain.RecordStartAttemptFailure(next.Id, next.Number, "start-failed", now.UtcDateTime);
                 MapToRow(domain, row, now);
                 var pending = DrainPendingEvents(domain);
                 // Append the start-attempt-failed event into the same
@@ -951,6 +955,31 @@ public class EpicGrain : Grain, IEpicGrain
             byNumber.Values
                 .Where(i => i.Status is not (IssueStatus.Done or IssueStatus.Cancelled))
                 .Select(i => i.Number));
+
+        // Also fetch external prerequisites (prerequisite numbers that are
+        // NOT epic members) so StartBlocker can detect them. Without this,
+        // a member blocked by an external prerequisite appears startable,
+        // gets selected by TryStartNext, and StartWorkAsync rejects it —
+        // producing spurious EpicStartAttemptFailed noise.
+        var allPrereqNumbers = byNumber.Values
+            .SelectMany(i => i.PrerequisiteNumbers)
+            .Distinct()
+            .Where(n => !undeliveredPrereqNumbers.Contains(n))
+            .ToArray();
+        if (allPrereqNumbers.Length > 0)
+        {
+            var prereqIssues = IssueRowMapper.ByNumber(
+                await db.Issues.AsNoTracking()
+                    .Where(row => row.ProjectId == projectId && row.Number != null && allPrereqNumbers.Contains(row.Number.Value))
+                    .ToListAsync(),
+                projectId,
+                allPrereqNumbers);
+            foreach (var prereqIssue in prereqIssues.Values)
+            {
+                if (prereqIssue.Status is not (IssueStatus.Done or IssueStatus.Cancelled))
+                    undeliveredPrereqNumbers.Add(prereqIssue.Number);
+            }
+        }
 
         return links
             .OrderBy(l => l.CreatedAt)

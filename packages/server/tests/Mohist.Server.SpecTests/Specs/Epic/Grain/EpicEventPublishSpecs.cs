@@ -240,21 +240,25 @@ public class EpicEventPublishSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
-    public async Task EventStoreFailure_DoesNotPropagateAndStateStillCommits()
+    public async Task EventStoreFailure_AtomicRollback_PreventsStrandedTransition()
     {
+        // With atomic event persistence, an event-store append failure during
+        // a state transition rolls back the entire transaction — the epic does
+        // not end up in a committed state without its event record. This is
+        // the safety improvement over the old best-effort path: recovery-
+        // critical events (EpicIssueLinked, EpicStartAttemptFailed) can never
+        // be lost relative to their state transition.
         var (database, _) = CreateDatabaseWithRecordingEventStore();
         var time = new FakeTimeProvider(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero));
         await SeedEpicAsync(database);
         var throwingStore = new ThrowingEventStore();
 
         var grain = CreateGrain(database.Factory, $"{ProjectId}:{EpicId}", throwingStore, time);
-        // Epic event writes stay on their existing best-effort path for this
-        // issue: epic producer convergence is explicitly out of scope.
-        await grain.StartAsync();
+        await Assert.ThrowsAsync<InvalidOperationException>(() => grain.StartAsync());
 
         await using var verify = database.CreateDbContext();
         var row = await verify.Epics.AsNoTracking().SingleAsync(e => e.Id == EpicId);
-        Assert.Equal("running", row.Status);
+        Assert.Equal("idle", row.Status);
         Assert.Equal(1, throwingStore.AppendCount);
     }
 
