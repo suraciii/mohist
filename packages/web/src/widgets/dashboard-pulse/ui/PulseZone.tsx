@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { Link } from 'react-router-dom'
-import { useActivityCards, type SessionCard } from '@/widgets/coder-session/model/activity-cards'
+import { useActivityCards, type SessionCard } from '@/entities/agent-ops'
 import { useProject, useProjectPath } from '@/entities/project'
 import { classifyIssueAttention, isRunningIssue, useIssues, type Issue } from '@/entities/issue'
 import { useAgentStatus, type ActiveAgentInfo, type AgentStatus } from '@/entities/agent'

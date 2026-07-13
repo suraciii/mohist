@@ -1,7 +1,7 @@
-import type { DiffLine, FileBlock } from '../../issue-changed-files/model/diffModel'
+import type { DiffLine, FileBlock } from '@/shared/lib/diff-model'
 import { parsePatchOperations } from './transcript-tool-utils'
 
-export type { DiffLine, FileBlock } from '../../issue-changed-files/model/diffModel'
+export type { DiffLine, FileBlock } from '@/shared/lib/diff-model'
 
 export function buildDiffFromEdit(filePath: string, oldStr: string, newStr: string): FileBlock[] {
   const oldLines = oldStr.split('\n')

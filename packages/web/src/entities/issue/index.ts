@@ -11,17 +11,29 @@ export type { DeliveryTimeMetricsResponse, DeliveryTimePointDto } from './api/de
 export { fetchStageDuration, stageDurationQueryKey, useStageDuration } from './api/stage-duration'
 export type { StageDurationMetricsResponse, StageDurationMetricsWindow, StageDurationStageDto, StageDurationWaitBreakoutDto } from './api/stage-duration'
 export { statusBadge, statusLabel } from './lib/status-badge'
+export { LabelEditor } from './lib/label-editor'
+export type { LabelEditorProps } from './lib/label-editor'
+export { IssuePrerequisitePicker } from './ui/IssuePrerequisitePicker'
+export type { IssuePrerequisitePickerProps } from './ui/IssuePrerequisitePicker'
+export {
+  deriveLabelPairsFromIssues,
+  formatLabelToken,
+  parseLabelSearchParams,
+  parseLabelToken,
+  serializeLabelSearchParams,
+} from './model/labels'
+export type { LabelMap } from './model/labels'
 export { deriveCompletionSnapshot, useCompletionSnapshot } from './lib/completion-snapshot'
 export type { CompletionSnapshot } from './lib/completion-snapshot'
 export { deriveRecentDigest, useRecentDigest, DIGEST_TOP_N } from './lib/recent-digest'
 export type { RecentDigest, UseRecentDigestResult } from './lib/recent-digest'
 export { dispatchRebaseEvent, onRebaseEvent } from './model/rebase-events'
+export type { RebaseConflictState } from './model/drift'
 export { dispatchTimelineEvent, onTimelineEvent } from './model/timeline-events'
 export type { TimelineLiveEvent } from './model/timeline-events'
 export { LiveTaskContext, useLiveTask } from './model/live-task'
 export type { LiveTaskState } from './model/live-task'
-export { classifyIssueAttention, deriveAttentionItems, isIntegrateFailure, isIssueAttentionItem, issueNeedsOwnerAction } from './model/attention'
-export type { AttentionItem, IssueAttentionItem } from './model/attention'
+export { classifyIssueAttention, isIntegrateFailure, issueNeedsOwnerAction } from './model/attention'
 export { isRunningIssue } from './model/running'
 export type { EventMap, EventName } from './@x/events'
 export * from './model/types'

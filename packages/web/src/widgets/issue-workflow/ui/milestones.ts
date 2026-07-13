@@ -1,5 +1,5 @@
-import type { TaskLogLine } from '../../../entities/issue/model/task-log'
-import type { WorkflowRunSession } from '../../../entities/coder-session/model/types'
+import type { TaskLogLine } from '../../../entities/issue'
+import type { WorkflowRunSession } from '../../../entities/coder-session'
 
 export type TaskLogMilestoneKind = 'model-bound' | 'session-ended'
 

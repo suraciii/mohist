@@ -1,5 +1,5 @@
-import type { IssueStartBlocker, IssueStatus } from '../../../entities/issue/@x/types'
-import type { LinkedIssue } from '../../../entities/epic/model/types'
+import type { IssueStartBlocker, IssueStatus } from '../../../entities/issue'
+import type { LinkedIssue } from '../../../entities/epic'
 
 export type Readiness = 'can-start' | 'waiting' | 'in-progress' | 'done'
 

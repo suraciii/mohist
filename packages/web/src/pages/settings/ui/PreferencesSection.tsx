@@ -5,7 +5,7 @@
  * genuinely controllable from the web (the light/dark/system theme
  * selector, backed by the ThemeProvider from T-001) and a read-only
  * keyboard-shortcut reference sourced from
- * `features/settings-search/keyboard-shortcuts.ts`. System facts (timezone,
+ * `shared/lib/keyboard-shortcuts.ts`. System facts (timezone,
  * CLI executable path) belong on the System tab; notification preferences
  * are deferred until a notification subsystem exists. The non-goal guard
  * in `PreferencesSection.test.tsx` fails the build if either creeps back in.
@@ -16,9 +16,9 @@ import { RadioGroup } from '@base-ui/react/radio-group'
 import { Radio as RadioPrimitive } from '@base-ui/react/radio'
 import { cn } from '@/shared/lib/utils'
 import { THEME_OPTIONS, type ThemeOption } from '@/shared/lib/theme/theme'
-import { useTheme } from '@/app/providers/ThemeProvider'
-import type { SettingsSearchEntry } from '@/features/settings-search'
-import { SHORTCUTS } from '@/features/settings-search/keyboard-shortcuts'
+import { useTheme } from '@/shared/lib/theme/ThemeProvider'
+import type { SettingsSearchEntry } from '../model/settings-search'
+import { SHORTCUTS } from '@/shared/lib/keyboard-shortcuts'
 import { getSectionMeta } from '../lib/sections'
 import { SettingsSection } from './SettingsSection'
 

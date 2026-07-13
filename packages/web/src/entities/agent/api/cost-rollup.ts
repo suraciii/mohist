@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { projectApiPath, request } from '../../../shared/api/client'
 import { useProject } from '../../project/@x/project-context'
-import type { InsightsRange } from '../../shared/insights-range'
+import type { InsightsRange } from '../../../shared/config/insights-range'
 
 export interface AgentCostMetricDto {
   amount: number | null

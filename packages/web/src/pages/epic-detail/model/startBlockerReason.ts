@@ -1,5 +1,5 @@
-import { IssueHealth, IssueStatus } from '../../../entities/issue/@x/types'
-import type { LinkedIssue } from '../../../entities/epic/model/types'
+import { IssueHealth, IssueStatus } from '../../../entities/issue'
+import type { LinkedIssue } from '../../../entities/epic'
 
 export interface StartBlockerReasonContext {
   issue: Pick<LinkedIssue, 'startBlocker' | 'health' | 'status'>

@@ -1,7 +1,7 @@
 import React from 'react'
 import { Button } from '@/shared/ui/components/button'
 import type { DisplayTurn, DisplayChangedFile } from '../model/session-transcript-display'
-import type { TurnRefsMap } from './SessionTranscriptLayout'
+import type { TurnRefsMap } from '../model/turn-refs'
 import { PromptBlock } from './PromptBlock'
 import { AssistantParts } from './AssistantParts'
 

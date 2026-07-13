@@ -11,7 +11,7 @@ import {
   useSystemTemplates,
 } from '../../../entities/template'
 import type { ProjectTemplate, SystemTemplate } from '../../../entities/template'
-import type { SettingsSearchEntry } from '@/features/settings-search'
+import type { SettingsSearchEntry } from '../model/settings-search'
 import { getSectionMeta } from '../lib/sections'
 import { NoProjectCard } from './NoProjectCard'
 import { SectionState } from './SectionState'

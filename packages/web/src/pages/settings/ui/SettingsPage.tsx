@@ -10,7 +10,7 @@ import { TemplatesSection } from './TemplatesSection'
 import { LabelCatalogSection } from './LabelCatalogSection'
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
 import { useProject } from '../../../entities/project'
-import { SettingsSearch } from '@/features/settings-search'
+import { SettingsSearch } from './SettingsSearch'
 import {
   getSectionMeta,
   isSettingsSectionKey,

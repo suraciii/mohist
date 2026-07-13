@@ -1,4 +1,4 @@
-import type { AgentSessionEventSummary, AgentSessionUsage } from '../../coder-session/model/types'
+import type { AgentSessionEventSummary, AgentSessionUsage } from '../../coder-session/@x/agent-session'
 
 export interface AgentProgress {
   stage: string
