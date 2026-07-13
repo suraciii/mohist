@@ -58,7 +58,7 @@ function buildSessionMetadata(
     lastDataAt: lastEventAt ?? meta.lastDataAt ?? meta.lastActivityAt ?? null,
     probeSentAt: null,
     probeDeadlineAt: null,
-    failureReason: null,
+    failureReason: meta.failureReason ?? null,
     partCount: meta.metadata.partCount,
     toolCount: meta.metadata.toolCount,
     turnCount,
@@ -137,13 +137,30 @@ export function useIssueSessionDataSource(
     ? (s.sessionName ?? s.executionId ?? s.id) === decodedSessionName
     : s.id === decodedSessionId)
 
+  // Resolve the route's sessionId segment to the canonical sessionName
+  // when the legacy `/issues/:number/session/:sessionId` route is used.
+  // Sessions are keyed by sessionName in the workflow-run API; using the
+  // raw sessionId as a key would cause a metadata miss for any session
+  // whose id and name differ (e.g. compacted/reset sessions). Falls back
+  // to the sessionName segment when already on the workflow-sessions route.
+  const resolvedSessionName = decodedSessionName
+    ?? (decodedSessionId
+      ? sessions.find((s) => s.id === decodedSessionId)?.sessionName ?? undefined
+      : undefined)
+
   const siblingNavHook = useSiblingSessionsHook(issue?.workflowRunId ?? null, {
-    currentKey: decodedSessionName ?? decodedSessionId ?? null,
+    currentKey: resolvedSessionName ?? decodedSessionId ?? null,
   })
 
-  const lookupKey = decodedSessionName ?? decodedSessionId
+  const lookupKey = resolvedSessionName ?? decodedSessionId
 
-  const hasRoute = !!lookupKey && !!projectId && issueNumber > 0
+  // When the legacy `/issues/:number/session/:sessionId` route is used, wait
+  // for the sessions list to resolve so the canonical sessionName is known
+  // before any detail query is fired; otherwise the metadata fetch would
+  // race the resolver and use the raw sessionId as the key.
+  const isLegacyIdRoute = decodedSessionName == null && decodedSessionId != null
+  const sessionsResolved = !sessionsLoading || resolvedSessionName != null
+  const hasRoute = !!lookupKey && !!projectId && issueNumber > 0 && (!isLegacyIdRoute || sessionsResolved)
   const metadataQueryKey = useMemo(
     () => ['issues', issueNumber, projectId, 'agent-session-metadata', lookupKey] as const,
     [issueNumber, projectId, lookupKey],
@@ -255,7 +272,7 @@ export function useIssueSessionDataSource(
   const hasRecoveryActions = !!recoverySessionName
   const recoverySessionNameStr = recoverySessionName
 
-  const currentSiblingKey = decodedSessionName ?? decodedSessionId ?? null
+  const currentSiblingKey = resolvedSessionName ?? decodedSessionId ?? null
 
   const siblingNav = (
     <SiblingNavigation
@@ -274,6 +291,14 @@ export function useIssueSessionDataSource(
   )
 
   const isDetailError = metadataError || (!metadata && !session)
+  // Activity-origin links pass `?from=activity`; honor that as a return-to-Activity back target.
+  const fromActivity = searchParams.get('from') === 'activity'
+  const backPath = fromActivity
+    ? toProjectPath('/activity')
+    : toProjectPath(`/issues/${issueNumber}`)
+  const backLabel = fromActivity ? 'Activity' : `Issue #${issueNumber}`
+  const workflowContextPath = toProjectPath(`/issues/${issueNumber}`)
+  const workflowContextLabel = 'Workflow context'
   return {
     isLoading: sessionsLoading || metadataLoading,
     isError: isDetailError,
@@ -300,9 +325,11 @@ export function useIssueSessionDataSource(
     metadataQueryKey,
     transcriptQueryKey,
     handleRecoverySuccess,
-    backPath: toProjectPath(`/issues/${issueNumber}`),
-    backLabel: `Issue #${issueNumber}`,
+    backPath,
+    backLabel,
     issueTitle: issue?.title,
+    workflowContextPath,
+    workflowContextLabel,
     siblingNav,
     siblingSidebar,
     sessionTurns: turns,
@@ -333,7 +360,7 @@ function SiblingNavigation({
       {previous ? (
         <Link
           to={toProjectPath(`/issues/${issueNumber}/workflow/sessions/${encodeURIComponent(previous.sessionName)}`)}
-          className="inline-flex max-w-full min-w-0 items-center gap-1 rounded border border-gray-200 bg-white px-2 py-1 text-xs font-medium text-gray-700 transition-colors hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700"
+          className="inline-flex max-w-full min-w-0 items-center gap-1 rounded border border-border bg-background px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:border-info-border hover:bg-info-subtle hover:text-info"
           data-testid="session-sibling-prev"
           title={`Previous session: ${previous.sessionName}`}
           aria-label={`Previous session: ${previous.sessionName}`}
@@ -343,7 +370,7 @@ function SiblingNavigation({
         </Link>
       ) : (
         <span
-          className="inline-flex items-center gap-1 rounded border border-gray-100 bg-gray-50 px-2 py-1 text-xs font-medium text-gray-300 cursor-not-allowed"
+          className="inline-flex items-center gap-1 rounded border border-border bg-muted px-2 py-1 text-xs font-medium text-muted-foreground/60 cursor-not-allowed"
           data-testid="session-sibling-prev-disabled"
           aria-disabled="true"
           title="No previous session"
@@ -355,7 +382,7 @@ function SiblingNavigation({
       {next ? (
         <Link
           to={toProjectPath(`/issues/${issueNumber}/workflow/sessions/${encodeURIComponent(next.sessionName)}`)}
-          className="inline-flex max-w-full min-w-0 items-center gap-1 rounded border border-gray-200 bg-white px-2 py-1 text-xs font-medium text-gray-700 transition-colors hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700"
+          className="inline-flex max-w-full min-w-0 items-center gap-1 rounded border border-border bg-background px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:border-info-border hover:bg-info-subtle hover:text-info"
           data-testid="session-sibling-next"
           title={`Next session: ${next.sessionName}`}
           aria-label={`Next session: ${next.sessionName}`}
@@ -365,7 +392,7 @@ function SiblingNavigation({
         </Link>
       ) : (
         <span
-          className="inline-flex items-center gap-1 rounded border border-gray-100 bg-gray-50 px-2 py-1 text-xs font-medium text-gray-300 cursor-not-allowed"
+          className="inline-flex items-center gap-1 rounded border border-border bg-muted px-2 py-1 text-xs font-medium text-muted-foreground/60 cursor-not-allowed"
           data-testid="session-sibling-next-disabled"
           aria-disabled="true"
           title="No next session"
@@ -396,11 +423,11 @@ function SiblingSessionsSidebar({
 
   return (
     <aside
-      className="hidden xl:flex w-64 shrink-0 flex-col border-l border-gray-200 bg-white"
+      className="hidden xl:flex w-64 shrink-0 flex-col border-l border-border bg-background"
       data-testid="session-sibling-sidebar"
       aria-label="Sibling sessions"
     >
-      <div className="px-3 py-2 border-b border-gray-200 text-xs font-semibold uppercase tracking-wide text-gray-500">
+      <div className="px-3 py-2 border-b border-border text-xs font-semibold uppercase tracking-wide text-muted-foreground">
         Sibling sessions
       </div>
       <nav className="flex-1 overflow-y-auto p-1">
@@ -411,29 +438,45 @@ function SiblingSessionsSidebar({
             <Link
               key={sibling.id}
               to={path}
-              className={`flex items-center gap-2 rounded px-2 py-1.5 text-xs transition-colors min-w-0 ${
-                isCurrent ? 'bg-blue-50 text-blue-800 font-medium' : 'text-gray-700 hover:bg-gray-100'
-              }`}
               data-testid="session-sibling-sidebar-entry"
               data-current={isCurrent ? 'true' : 'false'}
+              data-tone={isCurrent ? 'info' : 'neutral'}
               title={`Open ${sibling.sessionName} transcript`}
               aria-current={isCurrent ? 'page' : undefined}
+              className={`flex items-center gap-2 rounded px-2 py-1.5 text-xs transition-colors min-w-0 ${
+                isCurrent ? 'bg-info-subtle text-info font-medium border border-info-border' : 'text-muted-foreground hover:bg-muted border border-transparent'
+              }`}
             >
               <span
+                data-testid="session-sibling-status-dot"
+                data-tone={
+                  sibling.status === 'completed'
+                    ? 'success'
+                    : sibling.status === 'failed' || sibling.status === 'cancelled'
+                      ? 'danger'
+                      : sibling.status === 'running' || sibling.status === 'active' || sibling.status === 'probing'
+                        ? 'info'
+                        : 'neutral'
+                }
                 className={`inline-block h-1.5 w-1.5 shrink-0 rounded-full ${
                   sibling.status === 'completed'
-                    ? 'bg-green-500'
+                    ? 'bg-success'
                     : sibling.status === 'failed' || sibling.status === 'cancelled'
-                      ? 'bg-red-500'
+                      ? 'bg-danger'
                       : sibling.status === 'running' || sibling.status === 'active' || sibling.status === 'probing'
-                        ? 'bg-blue-500'
-                        : 'bg-gray-400'
+                        ? 'bg-info'
+                        : 'bg-muted-foreground/60'
                 }`}
                 aria-hidden="true"
               />
               <span className="min-w-0 flex-1 truncate font-mono">{sibling.sessionName}</span>
               {isCurrent && (
-                <span className="shrink-0 text-[10px] uppercase tracking-wide text-blue-700">current</span>
+                <span
+                  data-testid="session-sibling-current-label"
+                  className="shrink-0 text-[10px] uppercase tracking-wide text-info"
+                >
+                  current
+                </span>
               )}
             </Link>
           )

@@ -55,6 +55,83 @@ describe('ContextHealthIndicator', () => {
     })
   })
 
+  describe('green (healthy) threshold is quiet', () => {
+    it('renders with data-status="green" and a simple percent tooltip', () => {
+      render(
+        <ContextHealthIndicator
+          contextWindowUsed={450_000}
+          contextWindowSize={1_000_000}
+          contextUsagePercent={45}
+          healthStatus="green"
+        />,
+      )
+      const indicator = screen.getByTestId('context-health-indicator')
+      expect(indicator).toHaveAttribute('data-status', 'green')
+      expect(indicator).toHaveAttribute('data-severity', 'ok')
+      expect(indicator).toHaveTextContent('45%')
+      expect(indicator).toHaveAttribute('aria-label', 'Context usage 45%')
+      expect(indicator).toHaveAttribute('title', 'Context usage 45%')
+    })
+
+    it('does not render an alert role or aria-live', () => {
+      render(
+        <ContextHealthIndicator
+          contextWindowUsed={450_000}
+          contextWindowSize={1_000_000}
+          contextUsagePercent={45}
+          healthStatus="green"
+        />,
+      )
+      const indicator = screen.getByTestId('context-health-indicator')
+      expect(indicator).not.toHaveAttribute('role')
+      expect(indicator).not.toHaveAttribute('aria-live')
+    })
+
+    it('does not render a severity glyph', () => {
+      render(
+        <ContextHealthIndicator
+          contextWindowUsed={450_000}
+          contextWindowSize={1_000_000}
+          contextUsagePercent={45}
+          healthStatus="green"
+        />,
+      )
+      expect(screen.queryByTestId('context-health-glyph')).toBeNull()
+    })
+
+    it('uses neutral gray text (no warning color)', () => {
+      render(
+        <ContextHealthIndicator
+          contextWindowUsed={450_000}
+          contextWindowSize={1_000_000}
+          contextUsagePercent={45}
+          healthStatus="green"
+        />,
+      )
+      const indicator = screen.getByTestId('context-health-indicator')
+      expect(indicator.className).toContain('text-muted-foreground')
+      expect(indicator.className).not.toContain('text-green-')
+      expect(indicator.className).not.toContain('text-yellow-')
+      expect(indicator.className).not.toContain('text-red-')
+    })
+
+    it('uses neutral gray dot (no warning color)', () => {
+      render(
+        <ContextHealthIndicator
+          contextWindowUsed={450_000}
+          contextWindowSize={1_000_000}
+          contextUsagePercent={45}
+          healthStatus="green"
+        />,
+      )
+      const dot = screen.getByTestId('context-health-indicator').querySelector('span[aria-hidden="true"]')
+      expect(dot?.className).toContain('bg-muted-foreground/60')
+      expect(dot?.className).not.toContain('bg-yellow-')
+      expect(dot?.className).not.toContain('bg-red-')
+      expect(dot?.className).not.toContain('bg-green-')
+    })
+  })
+
   describe('yellow (warning) threshold', () => {
     it('renders with data-status="yellow" and data-severity="warning"', () => {
       render(
@@ -69,6 +146,36 @@ describe('ContextHealthIndicator', () => {
       expect(indicator).toHaveAttribute('data-status', 'yellow')
       expect(indicator).toHaveAttribute('data-severity', 'warning')
       expect(indicator).toHaveTextContent('72%')
+    })
+
+    it('uses yellow text color and yellow dot color', () => {
+      render(
+        <ContextHealthIndicator
+          contextWindowUsed={720_000}
+          contextWindowSize={1_000_000}
+          contextUsagePercent={72}
+          healthStatus="yellow"
+        />,
+      )
+      const indicator = screen.getByTestId('context-health-indicator')
+      expect(indicator.className).toContain('text-warning')
+      const dot = indicator.querySelector('span[aria-hidden="true"]')
+      expect(dot?.className).toContain('bg-warning')
+    })
+
+    it('renders a warning glyph', () => {
+      render(
+        <ContextHealthIndicator
+          contextWindowUsed={720_000}
+          contextWindowSize={1_000_000}
+          contextUsagePercent={72}
+          healthStatus="yellow"
+        />,
+      )
+      const glyph = screen.getByTestId('context-health-glyph')
+      expect(glyph).toBeInTheDocument()
+      expect(glyph).toHaveAttribute('aria-hidden', 'true')
+      expect(glyph.tagName.toLowerCase()).toBe('svg')
     })
 
     it('uses role="status" without aria-live', () => {
@@ -130,6 +237,36 @@ describe('ContextHealthIndicator', () => {
       expect(indicator).toHaveAttribute('data-status', 'red')
       expect(indicator).toHaveAttribute('data-severity', 'critical')
       expect(indicator).toHaveTextContent('95%')
+    })
+
+    it('uses red text color and red dot color', () => {
+      render(
+        <ContextHealthIndicator
+          contextWindowUsed={950_000}
+          contextWindowSize={1_000_000}
+          contextUsagePercent={95}
+          healthStatus="red"
+        />,
+      )
+      const indicator = screen.getByTestId('context-health-indicator')
+      expect(indicator.className).toContain('text-danger')
+      const dot = indicator.querySelector('span[aria-hidden="true"]')
+      expect(dot?.className).toContain('bg-danger')
+    })
+
+    it('renders an error glyph', () => {
+      render(
+        <ContextHealthIndicator
+          contextWindowUsed={950_000}
+          contextWindowSize={1_000_000}
+          contextUsagePercent={95}
+          healthStatus="red"
+        />,
+      )
+      const glyph = screen.getByTestId('context-health-glyph')
+      expect(glyph).toBeInTheDocument()
+      expect(glyph).toHaveAttribute('aria-hidden', 'true')
+      expect(glyph.tagName.toLowerCase()).toBe('svg')
     })
 
     it('uses role="alert" and aria-live="polite"', () => {

@@ -443,9 +443,9 @@ describe('SessionPage header and states', () => {
       setupSessionPage({ detail })
 
       renderWithQueryClient(<SessionPage />)
-
       await waitFor(() => {
-        expect(screen.getByText('Session failed')).toBeInTheDocument()
+        expect(screen.getByTestId('session-status-badge')).toHaveAttribute('data-status-kind', 'failed')
+        expect(screen.getByTestId('session-status-badge').textContent).toContain('Session failed')
       })
     })
   })
@@ -921,7 +921,7 @@ describe('SessionPage header and states', () => {
       expect(current).toBeDefined()
       expect(current?.getAttribute('aria-current')).toBe('page')
       expect(current?.textContent).toContain('current')
-      expect(current?.className).toContain('bg-blue-50')
+      expect(current?.className).toContain('bg-info-subtle')
 
       // Non-current entries are not marked current.
       const others = entries.filter((node) => node.getAttribute('data-current') !== 'true')

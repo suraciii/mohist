@@ -47,7 +47,11 @@ export function ToolRowView({ part }: ToolRowViewProps) {
   const renderSemanticContent = () => {
     if (part.error) {
       return (
-        <div className="px-3 text-xs text-red-600 bg-red-50">
+        <div
+          data-testid="tool-row-error"
+          data-tone="danger"
+          className="px-3 text-xs text-danger bg-danger-subtle"
+        >
           {part.error}
         </div>
       )
@@ -63,8 +67,8 @@ export function ToolRowView({ part }: ToolRowViewProps) {
           <ReadContentView input={part.input} output={part.output} />
           {part.input && (
             <div className="px-3 pb-2">
-              <div className="font-medium text-xs text-gray-500 mb-1">Input</div>
-              <pre data-scrollable="" className="whitespace-pre-wrap break-all text-xs text-gray-700 bg-gray-50 rounded p-2 max-h-24 overflow-auto">
+              <div className="font-medium text-xs text-muted-foreground mb-1">Input</div>
+              <pre data-scrollable="" className="whitespace-pre-wrap break-all text-xs text-muted-foreground bg-muted rounded p-2 max-h-24 overflow-auto">
                 {part.input}
               </pre>
             </div>
@@ -101,16 +105,16 @@ export function ToolRowView({ part }: ToolRowViewProps) {
       <>
         {part.input && (
           <div className="px-3 pt-2">
-            <div className="font-medium text-xs text-gray-500 mb-1">Input</div>
-            <pre data-scrollable="" className="whitespace-pre-wrap break-all text-xs text-gray-700 bg-gray-50 rounded p-2 max-h-32 overflow-auto">
+            <div className="font-medium text-xs text-muted-foreground mb-1">Input</div>
+            <pre data-scrollable="" className="whitespace-pre-wrap break-all text-xs text-muted-foreground bg-muted rounded p-2 max-h-32 overflow-auto">
               {part.input}
             </pre>
           </div>
         )}
         {part.output && (
           <div className="px-3">
-            <div className="font-medium text-xs text-gray-500 mb-1">Output</div>
-            <pre data-scrollable="" className="whitespace-pre-wrap break-all text-xs text-gray-700 bg-gray-50 rounded p-2 max-h-32 overflow-auto">
+            <div className="font-medium text-xs text-muted-foreground mb-1">Output</div>
+            <pre data-scrollable="" className="whitespace-pre-wrap break-all text-xs text-muted-foreground bg-muted rounded p-2 max-h-32 overflow-auto">
               {part.output}
             </pre>
           </div>
@@ -120,49 +124,63 @@ export function ToolRowView({ part }: ToolRowViewProps) {
   }
 
   return (
-    <div className={`rounded-md border overflow-hidden ${part.hasError ? 'border-red-200' : 'border-gray-200'}`}>
+    <div
+      data-testid="tool-row"
+      data-tone={part.hasError ? 'danger' : 'neutral'}
+      className={`rounded-md border overflow-hidden ${part.hasError ? 'border-danger-border' : 'border-border'}`}
+    >
       <Button
         variant="ghost"
         size="sm"
         onClick={showExpandableDetails ? () => setExpanded(!expanded) : undefined}
-        className={`flex h-auto items-center justify-start gap-2 w-full text-left px-3 py-1.5 rounded-none transition-colors ${showExpandableDetails ? 'hover:bg-gray-50 cursor-pointer' : 'cursor-default'}`}
+        className={`flex h-auto items-center justify-start gap-2 w-full text-left px-3 py-1.5 rounded-none transition-colors ${showExpandableDetails ? 'hover:bg-muted cursor-pointer' : 'cursor-default'}`}
       >
         <ToolStatusDot status={part.status} />
         <ToolIcon normalizedName={part.normalizedName} />
-        <span className="text-xs font-medium text-gray-700">{toolLabel}</span>
+        <span className="text-xs font-medium text-foreground">{toolLabel}</span>
         {toolArgs.length > 0 && !part.displayTitle && !part.displaySubtitle && (
           <span className="flex gap-1 shrink-0">
             {toolArgs.slice(0, 2).map((arg, i) => (
-              <span key={i} className="inline-flex items-center px-1 py-0.5 rounded bg-gray-100 text-xs text-gray-500 font-mono">
+              <span key={i} className="inline-flex items-center px-1 py-0.5 rounded bg-muted text-xs text-muted-foreground font-mono">
                 {arg}
               </span>
             ))}
           </span>
         )}
         {registrySubtitle && !part.displayTitle && !part.displaySubtitle && (
-          <span className="text-xs text-gray-400 truncate max-w-[150px]">{registrySubtitle}</span>
+          <span className="text-xs text-muted-foreground/70 truncate max-w-[150px]">{registrySubtitle}</span>
         )}
         {fallbackSubtitle && !part.displayTitle && !part.displaySubtitle && !registrySubtitle && (
-          <span className="text-xs text-gray-400 truncate max-w-[150px]">{fallbackSubtitle}</span>
+          <span className="text-xs text-muted-foreground/70 truncate max-w-[150px]">{fallbackSubtitle}</span>
         )}
         {part.hasError && (
-          <span className="text-xs text-red-500">failed</span>
+          <span
+            data-testid="tool-row-failed-label"
+            data-tone="danger"
+            className="text-xs text-danger"
+          >
+            failed
+          </span>
         )}
         {displayChangedFilesInline && (
-          <span className="text-xs text-green-600">
+          <span
+            data-testid="tool-row-changed-files-label"
+            data-tone="success"
+            className="text-xs text-success"
+          >
             {part.changedFiles!.length === 1
               ? part.changedFiles![0].path.split('/').pop()
               : `${part.changedFiles!.length} files`}
           </span>
         )}
         {showExpandableDetails && (
-          <svg className={`h-3 w-3 text-gray-400 shrink-0 ml-auto transition-transform ${expanded ? 'rotate-90' : ''}`} viewBox="0 0 20 20" fill="currentColor">
+          <svg className={`h-3 w-3 text-muted-foreground/70 shrink-0 ml-auto transition-transform ${expanded ? 'rotate-90' : ''}`} viewBox="0 0 20 20" fill="currentColor">
             <path fillRule="evenodd" d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z" clipRule="evenodd" />
           </svg>
         )}
       </Button>
       {expanded && showExpandableDetails && (
-        <div className="border-t border-gray-100">
+        <div className="border-t border-border">
           {renderSemanticContent()}
           {displayChangedFilesInline && (
             <PatchDiffView changedFiles={part.changedFiles!} />
@@ -188,50 +206,56 @@ export function ContextGroupView({ title, tools, hasError }: ContextGroupViewPro
   const singleContextToolArgs = singleContextTool ? getToolDisplayArgs(singleContextTool.normalizedName, singleContextTool.input) : []
 
   return (
-    <div className="rounded-md border border-gray-200 overflow-hidden">
+    <div className="rounded-md border border-border overflow-hidden" data-tone={hasError ? 'danger' : 'neutral'}>
       <Button
         variant="ghost"
         size="sm"
         onClick={() => setExpanded(!expanded)}
-        className="flex h-auto items-center justify-start gap-2 w-full text-left px-3 py-1.5 rounded-none hover:bg-gray-50 transition-colors"
+        className="flex h-auto items-center justify-start gap-2 w-full text-left px-3 py-1.5 rounded-none hover:bg-muted transition-colors"
       >
-        <svg className="h-3.5 w-3.5 text-gray-400 shrink-0" viewBox="0 0 20 20" fill="currentColor">
+        <svg className="h-3.5 w-3.5 text-muted-foreground/70 shrink-0" viewBox="0 0 20 20" fill="currentColor">
           <path d="M10 3a1.5 1.5 0 110 3 1.5 1.5 0 010-3zM7.5 4.5a1.5 1.5 0 110 3 1.5 1.5 0 010-3zm5 0a1.5 1.5 0 110 3 1.5 1.5 0 010-3z" />
         </svg>
-        <span className="text-xs font-medium text-gray-700">{titlePrefix}</span>
+        <span className="text-xs font-medium text-foreground">{titlePrefix}</span>
         {titleDetail && (
-          <span className="text-xs text-gray-500 truncate max-w-[240px]">{titleDetail}</span>
+          <span className="text-xs text-muted-foreground truncate max-w-[240px]">{titleDetail}</span>
         )}
         {hasError && (
-          <span className="text-xs text-red-500">failed</span>
+          <span
+            data-testid="context-group-failed-label"
+            data-tone="danger"
+            className="text-xs text-danger"
+          >
+            failed
+          </span>
         )}
-        <svg className={`h-3 w-3 text-gray-400 shrink-0 ml-auto transition-transform ${expanded ? 'rotate-90' : ''}`} viewBox="0 0 20 20" fill="currentColor">
+        <svg className={`h-3 w-3 text-muted-foreground/70 shrink-0 ml-auto transition-transform ${expanded ? 'rotate-90' : ''}`} viewBox="0 0 20 20" fill="currentColor">
           <path fillRule="evenodd" d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z" clipRule="evenodd" />
         </svg>
       </Button>
       {expanded && (
-        <div className="px-3 pb-2 border-t border-gray-100 space-y-1.5">
+        <div className="px-3 pb-2 border-t border-border space-y-1.5">
           {singleContextTool && canExpandSingleContextTool ? (
-            <div className="px-3 py-2 text-xs text-gray-600">
-              <div className="font-medium text-xs text-gray-500 mb-1">
+            <div className="px-3 py-2 text-xs text-muted-foreground">
+              <div className="font-medium text-xs text-muted-foreground mb-1">
                 {singleContextTool.normalizedName === 'read' || singleContextTool.normalizedName === 'read_file' ? 'Reading' : singleContextToolLabel}
               </div>
               {singleContextToolArgs.length > 0 && (
                 <div className="flex flex-wrap gap-1 mb-2">
                   {singleContextToolArgs.map((arg) => (
-                    <span key={arg} className="rounded bg-gray-100 px-1 py-0.5 font-mono text-gray-500">{arg}</span>
+                    <span key={arg} className="rounded bg-muted px-1 py-0.5 font-mono text-muted-foreground">{arg}</span>
                   ))}
                 </div>
               )}
               {singleContextTool.output && (
-                <pre data-scrollable="" className="whitespace-pre-wrap break-all text-xs text-gray-700 bg-gray-50 rounded p-2 max-h-24 overflow-auto">
+                <pre data-scrollable="" className="whitespace-pre-wrap break-all text-xs text-muted-foreground bg-muted rounded p-2 max-h-24 overflow-auto">
                   {singleContextTool.output}
                 </pre>
               )}
               {singleContextTool.input && (
                 <div className="mt-2">
-                  <div className="font-medium text-xs text-gray-500 mb-1">Input</div>
-                  <pre data-scrollable="" className="whitespace-pre-wrap break-all text-xs text-gray-700 bg-gray-50 rounded p-2 max-h-24 overflow-auto">
+                  <div className="font-medium text-xs text-muted-foreground mb-1">Input</div>
+                  <pre data-scrollable="" className="whitespace-pre-wrap break-all text-xs text-muted-foreground bg-muted rounded p-2 max-h-24 overflow-auto">
                     {singleContextTool.input}
                   </pre>
                 </div>

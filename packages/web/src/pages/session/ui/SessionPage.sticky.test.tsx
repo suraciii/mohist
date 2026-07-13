@@ -254,7 +254,7 @@ describe('SessionPage sticky recovery bar', () => {
     expect(recoveryBar).not.toBeNull()
 
     const className = recoveryBar!.className
-    expect(className).toContain('bg-white')
+    expect(className).toContain('bg-background')
     expect(className).toMatch(/\bz-\d+/)
     expect(className).toContain('top-9')
   })
@@ -293,7 +293,7 @@ describe('SessionPage sticky recovery bar', () => {
     const className = stickyTitle!.className
     expect(className).toContain('sticky')
     expect(className).toContain('top-0')
-    expect(className).toContain('bg-white')
+    expect(className).toContain('bg-background')
 
     expect(stickyTitle!.textContent).toContain('session-1')
     expect(stickyTitle!.textContent).toContain('Completed')

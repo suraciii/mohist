@@ -125,3 +125,124 @@ project-scoped recorded-event prerequisite for T-002.
 - New specs: 10 passed.
 - No event-recording / event-emission / event-subscription changes;
   the read path queries the existing per-aggregate tables only.
+
+## T-001 — Reorganize Coder Session into a structured execution-evidence view
+
+Goal: formalize the Coder Session shell into stable, scannable evidence
+regions (task identity + status, usage, errors, transcript, follow-up,
+siblings) and migrate all session status surfaces to the shared theme-token
+families from issue 398. Preserve existing transcript, cancel, recovery,
+follow-up, sibling, and lineage behavior; add the read-only errors region,
+workflow-context navigation, Activity return orientation, and reliable
+resolution of `/issues/:number/session/:sessionId`.
+
+### Codebase Patterns
+
+- The session shell is driven by a single `SessionDataSourceResult` produced
+  by `useIssueSessionDataSource` and `useGenericSessionDataSource`. Both
+  data sources now expose `workflowContextPath`/`workflowContextLabel` and
+  honor `?from=activity` as a project-scoped Activity back target.
+- The legacy `/issues/:number/session/:sessionId` route is resolved by
+  looking up the session id in the `useCoderSessions` list and using the
+  canonical `sessionName` as the detail-query key. The route waits for the
+  sessions list to resolve (`isLegacyIdRoute && sessionsResolved`) before
+  enabling metadata/transcript fetches.
+- Status presentation is implemented as small inline records
+  (`sessionStatusPresentation`, `stageChipPresentation`,
+  `ERROR_SURFACE_CLASS`) that map semantic kinds to the shared token
+  utilities (`success`/`warning`/`info`/`danger` + `-subtle`/`-border`).
+  No `shared/status-presentation/` helper module was reintroduced.
+- The errors region is a compact read-only strip (`SessionErrorsEvidence`)
+  rendered between `SessionUsageSummary` and the transcript scroll
+  container; it is omitted when `statusKind !== failed`, no failure
+  category, and no tool errors are present. The sticky recovery bar
+  remains inside the transcript scroll container to preserve existing
+  gating and `SessionPage.sticky.test.tsx` anchors.
+
+### Decisions
+
+- **Region order**: header → usage summary → errors → transcript scroll
+  container (sticky title + recovery bar + turns/tool calls) → follow-up
+  composer → optional sibling sidebar. This matches design D4 and degrades
+  gracefully: when usage/errors/siblings are absent, remaining regions keep
+  their places.
+- **Issue-session ID resolution**: the `sessionId` segment is decoded and
+  matched against `s.id` in the `useCoderSessions` result; the resolved
+  `sessionName` is used as `lookupKey` for metadata and transcript queries.
+  This fixes misses for compacted/reset sessions whose id and name differ.
+- **Activity return orientation**: both issue-bound and generic data sources
+  read `?from=activity`, set `backPath` to the project-scoped Activity page,
+  and label it "Activity". Direct entries continue to fall back to issue or
+  agent context.
+- **Workflow-context entry point**: issue-bound sessions link to the issue
+  detail (`/issues/:number`) because the WorkflowSessionsPanel lives there.
+  Generic sessions do not fabricate workflow links.
+- **Token migration**: all session status surfaces (badges, errors, recovery,
+  context-health, usage, follow-up, sibling dots, transcript tool accents,
+  timeline category/marker styles) now use the shared token families. Diff
+  syntax colors are out of scope per the Files/Diff non-goal.
+
+### Gotchas
+
+- The `sessionTurns` used by `SessionDetailShell` for the empty-vs-main
+  branch decision comes from `useSessionTranscript`, which is initialized
+  after the transcript query resolves. Tests that assert both the errors
+  region and the scroll container must wait for the transcript container to
+  appear, not just the errors region.
+- `SessionUsageSummary` renders `null` when no usage fields are present,
+  but the `SessionHeader` still displays a compact summary strip for
+  `failureCategory`, `toolCallCount`, and any available usage/cost/context.
+  This is existing behavior; the dedicated usage-summary region is the
+  authoritative home for usage evidence.
+- The test-file size budget requires keeping `.spec.tsx` files under 800
+  lines and respecting baseline allowances for existing larger files. Added
+  focused spec coverage was trimmed to fit the budget.
+
+### Files touched
+
+- `packages/web/src/pages/session/ui/SessionDetailShell.tsx` — reorganized
+  layout, `SessionErrorsEvidence`, inline `sessionStatusPresentation`/`stageChipPresentation`,
+  `headerWithRecovery`/`headerWithoutRecovery` branches.
+- `packages/web/src/pages/session/data/SessionDataSource.ts` — added
+  `workflowContextPath`/`workflowContextLabel` and `issueNumber` to the
+  result shape.
+- `packages/web/src/pages/session/data/useIssueSessionDataSource.tsx` —
+  issue-session ID resolution, `from=activity` back target, workflow-context
+  link, project-scoped sibling navigation.
+- `packages/web/src/pages/session/data/useGenericSessionDataSource.ts` —
+  `from=activity` back target, agent-context fallback, no fabricated workflow
+  link.
+- `packages/web/src/pages/session/ui/SessionUsageSummary.tsx` — migrated
+  health/context accents to shared tokens.
+- `packages/web/src/widgets/session-health/ui/ContextHealthBar.tsx`,
+  `ContextHealthIndicator.tsx` — token-based surfaces.
+- `packages/web/src/widgets/coder-session/ui/SessionRecoveryActions.tsx`,
+  `SessionFollowupComposer.tsx`, `SessionCard.tsx`, `SessionTimeline.tsx`,
+  `UsageSnapshotLabel.tsx`, `model/anomaly.tsx` — token migration.
+- `packages/web/src/widgets/issue-event-timeline/model/types.ts`,
+  `ui/EventTimelineRow.tsx`, `ui/EventTimelinePanel.test.tsx` — category
+  styles and marker accents moved to tokens.
+- `packages/web/src/widgets/session-transcript/ui/*` (`AssistantParts`,
+  `SessionTranscriptLayout`, `SessionTranscriptView`, `ToolCallCard`,
+  `tool-views/*`) — tool success/failure accents and status surfaces use
+  tokens.
+- `packages/web/src/shared/ui/StatusBar.tsx` — status counts use tokens.
+- `packages/web/src/pages/session/ui/SessionPage.sticky.test.tsx` — updated
+  expectations to match token classes.
+- `packages/web/tests/SessionPageHeader.spec.tsx` — updated assertions for
+  shared tokens and issue-session ID resolution.
+- `packages/web/tests/CoderSessionEvidence.spec.tsx` (new) — region order
+  and degradation, errors presence/absence, issue-session ID resolution,
+  Activity return orientation, project-scoped navigation, action
+  preservation, and shared token classes in light/dark mode.
+
+### Verification
+
+- `npm run typecheck -w packages/web`: passed.
+- `npm run test:run -w packages/web`: 323 files, 4623 tests passed.
+- `npm run check:test-boundaries -w packages/web`: passed.
+- `dotnet test Mohist.Server.SpecTests --filter ...` for the single Epic
+  spec that failed during root `npm test`: passed in isolation; the root
+  failure appears to be a cross-test ordering/flakiness issue unrelated to
+  these Web changes.
+

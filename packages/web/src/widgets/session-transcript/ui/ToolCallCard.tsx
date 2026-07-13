@@ -251,7 +251,13 @@ function PatchFilesView({ changes }: { changes: FileChangeSummary[] }) {
 function StatusIcon({ state }: { state: ToolCallEntry['state'] }) {
   if (state === 'started') {
     return (
-      <svg className="h-3.5 w-3.5 text-blue-500 animate-spin" viewBox="0 0 24 24" fill="none">
+      <svg
+        data-testid="tool-call-card-status-icon"
+        data-tone="info"
+        className="h-3.5 w-3.5 text-info animate-spin"
+        viewBox="0 0 24 24"
+        fill="none"
+      >
         <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
         <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
       </svg>
@@ -259,13 +265,25 @@ function StatusIcon({ state }: { state: ToolCallEntry['state'] }) {
   }
   if (state === 'completed') {
     return (
-      <svg className="h-3.5 w-3.5 text-green-500" viewBox="0 0 20 20" fill="currentColor">
+      <svg
+        data-testid="tool-call-card-status-icon"
+        data-tone="success"
+        className="h-3.5 w-3.5 text-success"
+        viewBox="0 0 20 20"
+        fill="currentColor"
+      >
         <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z" clipRule="evenodd" />
       </svg>
     )
   }
   return (
-    <svg className="h-3.5 w-3.5 text-red-500" viewBox="0 0 20 20" fill="currentColor">
+    <svg
+      data-testid="tool-call-card-status-icon"
+      data-tone="danger"
+      className="h-3.5 w-3.5 text-danger"
+      viewBox="0 0 20 20"
+      fill="currentColor"
+    >
       <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.28 7.22a.75.75 0 00-1.06 1.06L8.94 10l-1.72 1.72a.75.75 0 101.06 1.06L10 11.06l1.72 1.72a.75.75 0 101.06-1.06L11.06 10l1.72-1.72a.75.75 0 00-1.06-1.06L10 8.94 8.28 7.22z" clipRule="evenodd" />
     </svg>
   )
@@ -282,16 +300,20 @@ function EditToolCard({ entry }: { entry: ToolCallEntry }) {
 
   if (entry.state === 'started') {
     return (
-      <div className="rounded-md border border-blue-200 bg-blue-50/30 overflow-hidden">
-        <div className="flex items-center gap-2 px-3 py-1.5 border-b border-blue-100">
+      <div
+        data-testid="edit-tool-card-running"
+        data-tone="info"
+        className="rounded-md border border-info-border bg-info-subtle/30 overflow-hidden"
+      >
+        <div className="flex items-center gap-2 px-3 py-1.5 border-b border-info-border">
           <StatusIcon state="started" />
-          <span className="text-xs font-medium text-blue-700">
+          <span className="text-xs font-medium text-info">
             {isNewFile ? 'Creating' : 'Editing'} {parsed?.filePath ? parsed.filePath.split('/').pop() : '...'}
           </span>
-          <span className="text-xs text-blue-500">editing...</span>
+          <span className="text-xs text-info">editing...</span>
         </div>
         {parsed?.filePath && (
-          <div className="px-3 py-1 text-xs text-gray-500 font-mono border-b border-gray-100 bg-gray-50/50">
+          <div className="px-3 py-1 text-xs text-muted-foreground font-mono border-b border-border bg-muted/50">
             {parsed.filePath}
           </div>
         )}
@@ -308,21 +330,24 @@ function EditToolCard({ entry }: { entry: ToolCallEntry }) {
   }
 
   return (
-    <div className={`rounded-md border overflow-hidden ${entry.state === 'failed' ? 'border-red-200' : 'border-gray-200'}`}>
-      <div className="flex items-center gap-2 px-3 py-1.5 border-b border-gray-100 bg-gray-50/50">
+    <div
+      data-tone={entry.state === 'failed' ? 'danger' : 'neutral'}
+      className={`rounded-md border overflow-hidden ${entry.state === 'failed' ? 'border-danger-border' : 'border-border'}`}
+    >
+      <div className="flex items-center gap-2 px-3 py-1.5 border-b border-border bg-muted/50">
         <StatusIcon state={entry.state} />
-        <span className="text-xs font-medium text-gray-700">
+        <span className="text-xs font-medium text-foreground">
           {isNewFile ? 'Created' : 'Edited'}
         </span>
         {hasFileSummary ? (
-          <span className="text-xs text-gray-500">
+          <span className="text-xs text-muted-foreground">
             {allChangedFiles.length} file{allChangedFiles.length !== 1 ? 's' : ''}
           </span>
         ) : (
-          <span className="text-xs text-gray-500 font-mono truncate">{parsed?.filePath.split('/').pop() ?? parsed?.filePath ?? ''}</span>
+          <span className="text-xs text-muted-foreground font-mono truncate">{parsed?.filePath.split('/').pop() ?? parsed?.filePath ?? ''}</span>
         )}
         {entry.duration != null && (
-          <span className="text-xs text-gray-400 ml-auto">{formatDuration(entry.duration)}</span>
+          <span className="text-xs text-muted-foreground/70 ml-auto">{formatDuration(entry.duration)}</span>
         )}
       </div>
 
@@ -366,14 +391,18 @@ function EditToolCard({ entry }: { entry: ToolCallEntry }) {
         <Button
           variant="link"
           onClick={() => setShowRaw(!showRaw)}
-          className="h-auto w-full rounded-none text-xs text-blue-500 hover:text-blue-700 py-1 text-center border-t border-gray-100 hover:bg-gray-50 transition-colors"
+          className="h-auto w-full rounded-none text-xs text-info hover:text-info py-1 text-center border-t border-border hover:bg-muted transition-colors"
         >
           {showRaw ? 'Hide raw' : 'Show raw patch'}
         </Button>
       )}
 
       {entry.state === 'failed' && entry.error && (
-        <div className="px-3 py-1.5 text-xs text-red-600 bg-red-50 border-t border-red-100">
+        <div
+          data-testid="edit-tool-card-error"
+          data-tone="danger"
+          className="px-3 py-1.5 text-xs text-danger bg-danger-subtle border-t border-danger-border"
+        >
           {entry.error}
         </div>
       )}
@@ -392,35 +421,42 @@ function BashToolCard({ entry }: { entry: ToolCallEntry }) {
 
   if (entry.state === 'started') {
     return (
-      <div className="rounded-md border border-blue-200 bg-blue-50/30 overflow-hidden">
+      <div
+        data-testid="bash-tool-card-running"
+        data-tone="info"
+        className="rounded-md border border-info-border bg-info-subtle/30 overflow-hidden"
+      >
         <div className="flex items-center gap-2 px-3 py-1.5">
           <StatusIcon state="started" />
-          <span className="text-xs text-gray-400 select-none mr-1">$</span>
-          <span className="text-xs font-mono text-gray-700 truncate">{parsed?.command ?? '...'}</span>
-          <span className="text-xs text-blue-500">running...</span>
+          <span className="text-xs text-muted-foreground/70 select-none mr-1">$</span>
+          <span className="text-xs font-mono text-foreground truncate">{parsed?.command ?? '...'}</span>
+          <span className="text-xs text-info">running...</span>
         </div>
       </div>
     )
   }
 
   return (
-    <div className={`rounded-md border overflow-hidden ${isFailed ? 'border-red-200' : 'border-gray-200'}`}>
-      <div className={`flex items-center gap-2 px-3 py-1.5 ${isFailed ? 'bg-red-50/50' : 'bg-gray-100'}`}>
+    <div
+      data-tone={isFailed ? 'danger' : 'neutral'}
+      className={`rounded-md border overflow-hidden ${isFailed ? 'border-danger-border' : 'border-border'}`}
+    >
+      <div className={`flex items-center gap-2 px-3 py-1.5 ${isFailed ? 'bg-danger-subtle/50' : 'bg-muted'}`}>
         <StatusIcon state={entry.state} />
-        <span className="text-xs text-gray-400 select-none mr-1">$</span>
-        <span className="text-xs font-mono text-gray-700 truncate flex-1">{parsed?.command ?? 'bash'}</span>
+        <span className="text-xs text-muted-foreground/70 select-none mr-1">$</span>
+        <span className="text-xs font-mono text-foreground truncate flex-1">{parsed?.command ?? 'bash'}</span>
         {entry.duration != null && (
-          <span className="text-xs text-gray-400">{formatDuration(entry.duration)}</span>
+          <span className="text-xs text-muted-foreground/70">{formatDuration(entry.duration)}</span>
         )}
       </div>
       {output && (
-        <div className={isFailed ? 'border-l-2 border-red-400' : ''}>
+        <div className={isFailed ? 'border-l-2 border-danger-border' : ''}>
           <TerminalBlock output={output} collapsed={expanded} />
           {shouldCollapse && !expanded && (
             <Button
               variant="link"
               onClick={() => setExpanded(true)}
-              className="h-auto w-full rounded-none text-xs text-blue-500 hover:text-blue-700 py-1 text-center bg-gray-800 hover:bg-gray-700 transition-colors"
+              className="h-auto w-full rounded-none text-xs text-info hover:text-info py-1 text-center bg-muted-foreground hover:bg-muted-foreground/80 transition-colors"
             >
               Show more ({outputLines.length - COLLAPSE_THRESHOLD} more lines)
             </Button>
@@ -429,7 +465,7 @@ function BashToolCard({ entry }: { entry: ToolCallEntry }) {
             <Button
               variant="link"
               onClick={() => setExpanded(false)}
-              className="h-auto w-full rounded-none text-xs text-blue-500 hover:text-blue-700 py-1 text-center bg-gray-800 hover:bg-gray-700 transition-colors"
+              className="h-auto w-full rounded-none text-xs text-info hover:text-info py-1 text-center bg-muted-foreground hover:bg-muted-foreground/80 transition-colors"
             >
               Show less
             </Button>
@@ -437,7 +473,11 @@ function BashToolCard({ entry }: { entry: ToolCallEntry }) {
         </div>
       )}
       {isFailed && entry.error && !output && (
-        <div className="px-3 py-1.5 text-xs text-red-600 bg-red-50 border-l-2 border-red-400">
+        <div
+          data-testid="bash-tool-card-error"
+          data-tone="danger"
+          className="px-3 py-1.5 text-xs text-danger bg-danger-subtle border-l-2 border-danger-border"
+        >
           {entry.error}
         </div>
       )}
@@ -462,13 +502,17 @@ function SummaryToolCard({ entry }: { entry: ToolCallEntry }) {
 
   if (entry.state === 'started') {
     return (
-      <div className="flex items-center gap-2 px-2 py-1 text-xs">
+      <div
+        data-testid="summary-tool-card-running"
+        data-tone="info"
+        className="flex items-center gap-2 px-2 py-1 text-xs"
+      >
         <StatusIcon state="started" />
-        <span className="font-mono text-gray-600">{entry.toolName}</span>
+        <span className="font-mono text-muted-foreground">{entry.toolName}</span>
         {label ? (
-          <span className="text-blue-500 truncate max-w-[200px]">{label}</span>
+          <span className="text-info truncate max-w-[200px]">{label}</span>
         ) : (
-          <span className="text-blue-500">running...</span>
+          <span className="text-info">running...</span>
         )}
       </div>
     )
@@ -517,7 +561,13 @@ function SummaryToolCard({ entry }: { entry: ToolCallEntry }) {
             </div>
           )}
           {entry.state === 'failed' && entry.error && (
-            <div className="text-red-600">{entry.error}</div>
+            <div
+              data-testid="summary-tool-card-error"
+              data-tone="danger"
+              className="text-danger"
+            >
+              {entry.error}
+            </div>
           )}
         </div>
       )}
@@ -611,14 +661,18 @@ function GenericToolCard({ entry }: { entry: ToolCallEntry }) {
 
   if (entry.state === 'started') {
     return (
-      <div className="flex items-center gap-2 px-2 py-1 text-xs">
+      <div
+        data-testid="generic-tool-card-running"
+        data-tone="info"
+        className="flex items-center gap-2 px-2 py-1 text-xs"
+      >
         <StatusIcon state="started" />
-        <ToolIcon toolName={entry.toolName} className="h-3.5 w-3.5 text-gray-400" />
-        <span className="font-mono text-gray-600">Called {entry.toolName}</span>
+        <ToolIcon toolName={entry.toolName} className="h-3.5 w-3.5 text-muted-foreground/70" />
+        <span className="font-mono text-muted-foreground">Called {entry.toolName}</span>
         {label ? (
-          <span className="text-blue-500 truncate max-w-[200px]">{label}</span>
+          <span className="text-info truncate max-w-[200px]">{label}</span>
         ) : (
-          <span className="text-blue-500">running...</span>
+          <span className="text-info">running...</span>
         )}
       </div>
     )
@@ -627,36 +681,43 @@ function GenericToolCard({ entry }: { entry: ToolCallEntry }) {
   const isFailed = entry.state === 'failed'
 
   return (
-    <div className={`rounded-md border overflow-hidden ${isFailed ? 'border-red-200' : 'border-gray-200'}`}>
+    <div
+      data-tone={isFailed ? 'danger' : 'neutral'}
+      className={`rounded-md border overflow-hidden ${isFailed ? 'border-danger-border' : 'border-border'}`}
+    >
       <Button
         variant="ghost"
         size="sm"
         onClick={() => setExpanded(!expanded)}
-        className="flex h-auto items-center justify-start gap-2 w-full text-left px-3 py-1.5 rounded-none hover:bg-gray-50 transition-colors"
+        className="flex h-auto items-center justify-start gap-2 w-full text-left px-3 py-1.5 rounded-none hover:bg-muted transition-colors"
       >
         <StatusIcon state={entry.state} />
-        <ToolIcon toolName={entry.toolName} className="h-3.5 w-3.5 text-gray-400 shrink-0" />
-        <span className="text-xs font-medium text-gray-700">Called {entry.toolName}</span>
+        <ToolIcon toolName={entry.toolName} className="h-3.5 w-3.5 text-muted-foreground/70 shrink-0" />
+        <span className="text-xs font-medium text-foreground">Called {entry.toolName}</span>
         {label && (
-          <span className="text-xs text-gray-500 truncate max-w-[200px]">{label}</span>
+          <span className="text-xs text-muted-foreground truncate max-w-[200px]">{label}</span>
         )}
         {args.length > 0 && (
           <span className="flex gap-1 shrink-0">
             {args.slice(0, 3).map((arg, i) => (
-              <span key={i} className="inline-flex items-center px-1.5 py-0.5 rounded bg-gray-100 text-xs text-gray-500 font-mono">
+              <span key={i} className="inline-flex items-center px-1.5 py-0.5 rounded bg-muted text-xs text-muted-foreground font-mono">
                 {arg}
               </span>
             ))}
           </span>
         )}
         {entry.duration != null && (
-          <span className="text-xs text-gray-400 ml-auto shrink-0">{formatDuration(entry.duration)}</span>
+          <span className="text-xs text-muted-foreground/70 ml-auto shrink-0">{formatDuration(entry.duration)}</span>
         )}
         <ChevronIcon expanded={expanded} />
       </Button>
 
       {isFailed && entry.error && (
-        <div className="px-3 py-1.5 text-xs text-red-600 bg-red-50 border-t border-red-100">
+        <div
+          data-testid="generic-tool-card-error"
+          data-tone="danger"
+          className="px-3 py-1.5 text-xs text-danger bg-danger-subtle border-t border-danger-border"
+        >
           {entry.error}
         </div>
       )}
@@ -690,11 +751,15 @@ export function ToolCallCard({ entry, compact = false }: { entry: ToolCallEntry;
 
   if (compact) {
     return (
-      <div className={`flex items-center gap-2 px-2 py-1 text-xs rounded border border-gray-100 bg-gray-50/50 ${entry.state === 'failed' ? 'border-red-200' : ''}`}>
+      <div
+        data-testid="tool-call-card-compact"
+        data-tone={entry.state === 'failed' ? 'danger' : 'neutral'}
+        className={`flex items-center gap-2 px-2 py-1 text-xs rounded border border-border bg-muted/50 ${entry.state === 'failed' ? 'border-danger-border' : ''}`}
+      >
         <StatusIcon state={entry.state} />
-        <span className="font-mono text-gray-600">{entry.toolName}</span>
+        <span className="font-mono text-muted-foreground">{entry.toolName}</span>
         {entry.duration != null && (
-          <span className="text-xs text-gray-400">{formatDuration(entry.duration)}</span>
+          <span className="text-xs text-muted-foreground/70">{formatDuration(entry.duration)}</span>
         )}
       </div>
     )

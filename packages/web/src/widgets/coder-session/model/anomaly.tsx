@@ -41,7 +41,11 @@ export function computeWaitingAnomalies(card: WaitingCard, now: number): string[
 
 export function AnomalyBadge({ label }: { label: string }) {
   return (
-    <span className="inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[10px] font-semibold bg-amber-100 text-amber-700 whitespace-nowrap">
+    <span
+      data-testid="anomaly-badge"
+      data-tone="warning"
+      className="inline-flex items-center gap-0.5 rounded-full border border-warning-border bg-warning-subtle px-1.5 py-0.5 text-[10px] font-semibold text-warning whitespace-nowrap"
+    >
       <svg className="w-2.5 h-2.5 shrink-0" viewBox="0 0 16 16" fill="currentColor">
         <path fillRule="evenodd" d="M8.893 1.5c-.183-.31-.52-.5-.887-.5s-.703.19-.886.5L.138 13.499a.98.98 0 0 0 0 1.001c.193.31.53.501.886.501h13.964c.367 0 .704-.19.877-.5a1.03 1.03 0 0 0 .01-1.002L8.893 1.5zm.133 11.497H6.987v-2.003h2.039v2.003zm0-3.004H6.987V5.987h2.039v4.006z" />
       </svg>
