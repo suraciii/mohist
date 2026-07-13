@@ -527,17 +527,18 @@ public class EpicGrain : Grain, IEpicGrain
         domain.Start(now.UtcDateTime);
         MapToRow(domain, row, now);
         var pending = DrainPendingEvents(domain);
-        // Append the status-changed event into the same transaction as the
-        // state transition, then call TryStartNextAsync before SaveChanges so
-        // a start-failure's EpicStartAttemptFailed event (if any) commits in
-        // the same transaction — no stranded running-but-idle epic without a
-        // recovery signal.
-        await PersistEpicEventsAsync(db, domain, pending, now);
+        // Commit the parent running transition BEFORE starting child work so
+        // a later epic SaveChanges failure cannot orphan a started issue. A
+        // start failure's EpicStartAttemptFailed event is persisted best-effort
+        // in TryStartNextAsync's catch — if it is lost, the epic converges on
+        // the next readiness event (draft undraft, prereq removed, terminal).
+        await db.SaveChangesAsync();
+        await PersistEpicEventsAsync(domain, pending, now);
+
         if (row.Status == EpicStatusName.Running && !wasAlreadyRunning)
         {
-            await TryStartNextAsync(db, projectId, epicId, row, links);
+            return await TryStartNextAsync(db, projectId, epicId, row, links);
         }
-        await db.SaveChangesAsync();
         return ToDto(row);
     }
 
@@ -566,15 +567,13 @@ public class EpicGrain : Grain, IEpicGrain
         domain.Resume(now.UtcDateTime);
         MapToRow(domain, row, now);
         var pending = DrainPendingEvents(domain);
-        // Same atomic pattern as StartAsync: persist events into the DbContext,
-        // run recompute (which may append its own EpicStartAttemptFailed event),
-        // then commit everything in one SaveChangesAsync.
-        await PersistEpicEventsAsync(db, domain, pending, now);
+        await db.SaveChangesAsync();
+        await PersistEpicEventsAsync(domain, pending, now);
+
         if (row.Status == EpicStatusName.Running && !wasAlreadyRunning)
         {
-            await RecomputeProgressInternalAsync(db, projectId, epicId, row, links);
+            return await RecomputeProgressInternalAsync(db, projectId, epicId, row, links);
         }
-        await db.SaveChangesAsync();
         return ToDto(row);
     }
 
@@ -835,12 +834,13 @@ public class EpicGrain : Grain, IEpicGrain
                 domain.RecordStartAttemptFailure(next.Id, next.Number, "start-failed", now.UtcDateTime);
                 MapToRow(domain, row, now);
                 var pending = DrainPendingEvents(domain);
-                // Append the start-attempt-failed event into the same
-                // transaction as the epic state, so the durable retry trigger
-                // survives or rolls back atomically — a failed append must
-                // not lose the only recovery signal for a running-but-idle epic.
-                await PersistEpicEventsAsync(db, domain, pending, now);
-                await db.SaveChangesAsync();
+                // The parent running transition is already committed by the
+                // caller (StartAsync/ResumeAsync). Persist the recovery event
+                // best-effort: if it is lost, the epic converges on the next
+                // readiness event. We do NOT hold the start-failed event in a
+                // deferred SaveChanges here because the parent is already
+                // committed — an orphaned child issue is the worse failure.
+                await PersistEpicEventsAsync(domain, pending, now);
                 return ToDto(row);
             }
             throw;

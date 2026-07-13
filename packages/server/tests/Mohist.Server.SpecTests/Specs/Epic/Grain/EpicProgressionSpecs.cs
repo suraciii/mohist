@@ -336,8 +336,15 @@ public class EpicProgressionSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
-    public async Task ResumeAsync_StartFailureEventAppendFailure_RollsBackTransitionAndRetryAdvancesIssue()
+    public async Task ResumeAsync_StartFailureWithEventAppendFailure_LeavesEpicRunningButIdle()
     {
+        // Parent-before-child: the paused-to-running transition is committed
+        // before TryStartNextAsync. If StartWorkAsync fails and the
+        // best-effort EpicStartAttemptFailed append also fails, the epic
+        // stays running-but-idle (state committed, recovery event lost).
+        // This is an accepted trade-off: orphaned child work (from deferred
+        // commit) is the worse failure mode. The epic converges on the next
+        // readiness event.
         var database = CreateDatabase();
         await SeedEpicAsync(database, status: "paused");
         await SeedIssueAsync(database, projectId: "project_1", epicId: "epic_1", issueId: "issue_1", issueNumber: 1, status: IssueStatus.Done, canStart: true);
@@ -352,24 +359,15 @@ public class EpicProgressionSpecs
         var grains = new RecordingGrainFactory(database.Factory, eventStore) { ThrowOnStart = true };
         var grain = grains.GetEpicGrain("project_1:epic_1");
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() => grain.ResumeAsync());
-
-        await using (var verify = database.CreateDbContext())
-        {
-            var stored = await verify.Epics.AsNoTracking().SingleAsync();
-            Assert.Equal("paused", stored.Status);
-        }
-
-        eventStore.ThrowOnAppend = null;
-        grains.ThrowOnStart = false;
-
+        // ResumeAsync commits the running transition, then TryStartNextAsync
+        // fails (ThrowOnStart) and the recovery event append fails (ThrowOnAppend).
+        // The best-effort persistence swallows the append error.
         var resumed = await grain.ResumeAsync();
 
         Assert.Equal("running", resumed.Status);
-        Assert.Equal(["issue_2", "issue_2"], grains.IssueStartCalls);
-        await using var afterRetry = database.CreateDbContext();
-        var afterRetryStored = await afterRetry.Epics.AsNoTracking().SingleAsync();
-        Assert.Equal("running", afterRetryStored.Status);
+        await using var verify = database.CreateDbContext();
+        var stored = await verify.Epics.AsNoTracking().SingleAsync();
+        Assert.Equal("running", stored.Status);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
