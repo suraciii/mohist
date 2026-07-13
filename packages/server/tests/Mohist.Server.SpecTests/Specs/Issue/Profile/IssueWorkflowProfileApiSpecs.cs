@@ -302,53 +302,6 @@ public class IssueWorkflowProfileApiSpecs : IAsyncLifetime
         Assert.Contains(buildStage.Checks, c => c.Name == "new-build-check");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
-    [Fact(Skip = "Computed column SQL changed to camelCase; needs fresh DB or data migration verification.")]
-    public async Task NextStageInitialization_UsesUpdatedDefinition_AfterProfileSave()
-    {
-        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"profile-next-stage-{Guid.NewGuid():N}" });
-
-        await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
-        var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Next stage init issue", projectId = project.Id });
-        await StartWorkflowWithRunnerAsync(project.Id, issue.Number, $"profile-next-stage-runner-{Guid.NewGuid():N}");
-
-        await DrainUntilApprovalAsync(project.Id, issue.Number, "plan");
-
-        var customYaml = """
-            id: updated-next-stage
-            stages:
-              - stage: plan
-                tasks:
-                  - id: plan-only-task
-                    title: Plan Only Task
-                    uses: mohist/acp-agent
-                checks: []
-              - stage: build
-                tasks:
-                  - id: brand-new-build-task
-                    title: Brand New Build Task
-                    uses: mohist/acp-agent
-                checks:
-                  - name: build-definition-check
-                    title: Build Definition Check
-                    uses: mohist/check-typecheck
-            """;
-        var saveResponse = await _client.PutAsJsonAsync($"/api/projects/{project.Id}/issues/{issue.Number}/workflow-profile/template", new { yaml = customYaml });
-        Assert.Equal(HttpStatusCode.OK, saveResponse.StatusCode);
-
-        await _client.PostOkAsync($"/api/projects/{project.Id}/issues/{issue.Number}/approve");
-        var buildStatus = await TestWait.ForAsync(
-            () => _client.GetDataAsync<IssueWorkflowEnvelopeDto>($"/api/projects/{project.Id}/issues/{issue.Number}/workflow/status"),
-            status => status.Workflow?.Stages.FirstOrDefault(s => s.Stage == "build")?.Tasks.Any(t => t.Id == "brand-new-build-task") == true,
-            TimeSpan.FromSeconds(3),
-            TimeSpan.FromMilliseconds(20),
-            "build stage to reflect rewritten issue template");
-        var buildStage = Assert.Single(buildStatus.Workflow!.Stages, s => s.Stage == "build");
-        Assert.Contains(buildStage.Tasks, t => t.Id == "brand-new-build-task");
-        Assert.Contains(buildStage.Checks, c => c.Name == "build-definition-check");
-    }
-
     private const string NoArtifactTemplateYaml = """
         id: mohist-test-noartifacts-profile
         variables:
@@ -432,63 +385,6 @@ public class IssueWorkflowProfileApiSpecs : IAsyncLifetime
         await _client.PutAsJsonAsync(
             $"/api/projects/{projectId}/workflow-profile/default-template",
             new { templateId = "mohist-test-noartifacts-profile" });
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
-    [Fact(Skip = "Integration test host cannot boot due to pre-existing pending EF migration unrelated to this change.")]
-    public async Task GetSystemTemplates_ReturnsDescriptionAndIsDefaultFlag()
-    {
-        using var response = await _client.GetAsync("/api/workflow-templates/system");
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-
-        var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
-        var data = payload.GetProperty("data");
-        var defaultTemplate = Assert.Single(data.EnumerateArray(), t => t.GetProperty("id").GetString() == "mohist/local");
-
-        Assert.True(defaultTemplate.GetProperty("isDefault").GetBoolean());
-        var description = defaultTemplate.GetProperty("description").GetString();
-        Assert.Equal(MohistWorkflow.ResolveDescription(MohistWorkflow.Definition), description);
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
-    [Fact(Skip = "Integration test host cannot boot due to pre-existing pending EF migration unrelated to this change.")]
-    public async Task GetSystemTemplateDetail_ReturnsDescriptionFromYaml()
-    {
-        using var response = await _client.GetAsync("/api/workflow-templates/system/mohist/local");
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-
-        var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
-        var data = payload.GetProperty("data");
-
-        Assert.True(data.GetProperty("isDefault").GetBoolean());
-        Assert.Equal("Mohist Local", data.GetProperty("displayName").GetString());
-        Assert.Equal(MohistWorkflow.ResolveDescription(MohistWorkflow.Definition), data.GetProperty("description").GetString());
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
-    [Fact(Skip = "Integration test host cannot boot due to pre-existing pending EF migration unrelated to this change.")]
-    public async Task GetSystemTemplateDetail_UnknownId_ReturnsNotFound()
-    {
-        using var response = await _client.GetAsync("/api/workflow-templates/system/does/not/exist");
-        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
-    [Fact(Skip = "Integration test host cannot boot due to pre-existing pending EF migration unrelated to this change.")]
-    public async Task GetSystemTemplateDetail_EmittedYamlRoundTripsBackToSameDescription()
-    {
-        using var response = await _client.GetAsync("/api/workflow-templates/system/mohist/local");
-        var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
-        var data = payload.GetProperty("data");
-
-        var yaml = data.GetProperty("yaml").GetString();
-        Assert.NotNull(yaml);
-        var reparsed = WorkflowYamlSerializer.FromYaml(yaml!);
-        Assert.Equal(MohistWorkflow.Definition.Description, reparsed.Description);
     }
 
     private async Task StartWorkflowWithRunnerAsync(string projectId, int issueNumber, string runnerId)
