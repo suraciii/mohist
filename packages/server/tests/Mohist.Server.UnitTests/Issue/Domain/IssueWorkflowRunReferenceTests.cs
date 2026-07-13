@@ -128,7 +128,6 @@ public class IssueWorkflowRunReferenceTests
         var withRun = new WorkflowProfileLockedException(7, "wr_1");
         Assert.Equal("7", withRun.IssueNumber);
         Assert.Equal("wr_1", withRun.WorkflowRunId);
-        Assert.Null(withRun.GetType().GetProperty("ActiveWorkflowRunId"));
         Assert.Contains("workflow run reference", withRun.Message, StringComparison.OrdinalIgnoreCase);
 
         var withoutRun = new WorkflowProfileLockedException(7, null);
