@@ -1,7 +1,7 @@
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { createDefaultRegistry } from "../../src/actions/registry.js"
 import type { RenderedWorkItem, WorkItemResult } from "../../src/core/types.js"
 import { WorkExecutor } from "../../src/runtime/executor.js"
@@ -9,8 +9,11 @@ import { setExecutorGitRunnerForTest, type GitRunner } from "../../src/runtime/g
 import { TaskLogCollector } from "../../src/runtime/task-log.js"
 import type { WorkspaceManager } from "../../src/runtime/workspace.js"
 import { verifyOnlyWorkspaceManager } from "../support/workspace-mock.js"
+import { FakeProcessSpawner } from "../support/fake-process.js"
+import { setProcessSpawnerForTest } from "../../src/system/process.js"
 
 let workDir: string
+let processSpawner: FakeProcessSpawner
 
 const nonGitRunner: GitRunner = async () => ({
   success: false,
@@ -23,11 +26,14 @@ const nonGitRunner: GitRunner = async () => ({
 beforeEach(async () => {
   workDir = await mkdtemp(join(tmpdir(), "mohist-task-log-executor-"))
   setExecutorGitRunnerForTest(nonGitRunner)
+  processSpawner = new FakeProcessSpawner()
+  setProcessSpawnerForTest(processSpawner.spawn)
 })
 
 afterEach(async () => {
   await rm(workDir, { recursive: true, force: true })
   setExecutorGitRunnerForTest(null)
+  setProcessSpawnerForTest(null)
 })
 
 function buildExecutor(workspaceManager: WorkspaceManager = verifyOnlyWorkspaceManager({ path: workDir, branch: null, changeDir: null })): WorkExecutor {
@@ -63,13 +69,19 @@ async function runWith(work: RenderedWorkItem): Promise<{ result: WorkItemResult
 
 describe("WorkExecutor task-log process forwarding", () => {
   it("ForwardsCoreProcessStdoutAndStderrToTaskLogSink", async () => {
-    const { result, collector } = await runWith(buildWork({
+    const running = runWith(buildWork({
       uses: "core/process",
       with: {
-        command: process.execPath,
-        args: ["-e", "process.stdout.write('process-out\\n'); process.stderr.write('process-err\\n')"],
+        command: "fake-command",
+        args: [],
       },
     }))
+    await vi.waitFor(() => expect(processSpawner.children).toHaveLength(1))
+    const child = processSpawner.children[0]!
+    child.writeStdout("process-out\n")
+    child.writeStderr("process-err\n")
+    child.close(0)
+    const { result, collector } = await running
 
     expect(result.status).toBe("completed")
     const entries = collector.flush().entries.filter((entry) => entry.source === "action:process")
@@ -77,13 +89,19 @@ describe("WorkExecutor task-log process forwarding", () => {
   })
 
   it("ForwardsCoreScriptStdoutAndStderrToTaskLogSink", async () => {
-    const { result, collector } = await runWith(buildWork({
+    const running = runWith(buildWork({
       uses: "core/script",
       with: {
-        shell: process.execPath,
-        run: "process.stdout.write('script-out\\n'); process.stderr.write('script-err\\n')",
+        shell: "fake-shell",
+        run: "ignored",
       },
     }))
+    await vi.waitFor(() => expect(processSpawner.children).toHaveLength(1))
+    const child = processSpawner.children[0]!
+    child.writeStdout("script-out\n")
+    child.writeStderr("script-err\n")
+    child.close(0)
+    const { result, collector } = await running
 
     expect(result.status).toBe("completed")
     const entries = collector.flush().entries.filter((entry) => entry.source === "action:script")

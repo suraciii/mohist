@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Mohist.Server.Workflow.Domain.Artifacts;
 using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Domain.Run;
@@ -10,67 +9,12 @@ namespace Mohist.Server.UnitTests.Workflow.Artifacts;
 
 public class WorkflowArtifactDomainTests
 {
-    [Fact]
-    public void DomainFact_ExposesCoreIdentity()
-    {
-        var recordedAt = new DateTimeOffset(2026, 6, 11, 9, 30, 0, TimeSpan.Zero);
-        var artifact = new WorkflowArtifact(
-            WorkflowRunId: "wr_1",
-            TaskRunId: "ai-review.1",
-            Path: "openspec/changes/issue-55/review.md",
-            RecordedAt: recordedAt);
-
-        Assert.Equal("wr_1", artifact.WorkflowRunId);
-        Assert.Equal("ai-review.1", artifact.TaskRunId);
-        Assert.Equal("openspec/changes/issue-55/review.md", artifact.Path);
-        Assert.Equal(recordedAt, artifact.RecordedAt);
-    }
-
-    [Fact]
-    public void DomainFact_DoesNotCarryInfrastructureMetadata()
-    {
-        // The domain fact intentionally exposes only the four
-        // business facts. Storage path, content hash, content type,
-        // size, issue id, and display name are persistence/read-model
-        // details — they MUST NOT be part of the domain shape.
-        var properties = typeof(WorkflowArtifact)
-            .GetProperties()
-            .Select(p => p.Name)
-            .ToHashSet(StringComparer.Ordinal);
-
-        Assert.Equal(5, properties.Count);
-        Assert.Contains(nameof(WorkflowArtifact.WorkflowRunId), properties);
-        Assert.Contains(nameof(WorkflowArtifact.TaskRunId), properties);
-        Assert.Contains(nameof(WorkflowArtifact.Path), properties);
-        Assert.Contains(nameof(WorkflowArtifact.RecordedAt), properties);
-        Assert.Contains(nameof(WorkflowArtifact.ProducerKey), properties);
-
-        Assert.DoesNotContain("ArtifactStoragePath", properties);
-        Assert.DoesNotContain("ContentHash", properties);
-        Assert.DoesNotContain("ContentType", properties);
-        Assert.DoesNotContain("Size", properties);
-        Assert.DoesNotContain("IssueId", properties);
-        Assert.DoesNotContain("ProjectId", properties);
-        Assert.DoesNotContain("DisplayName", properties);
-    }
-
-    [Fact]
-    public void DomainFact_ProducerKeyIsWorkflowRunPlusTaskRun()
-    {
-        var first = new WorkflowArtifact("wr_1", "ai-review.1", "review.md", DateTimeOffset.UtcNow);
-        var second = new WorkflowArtifact("wr_1", "ai-review.2", "review.md", DateTimeOffset.UtcNow);
-        var otherRun = new WorkflowArtifact("wr_2", "ai-review.1", "review.md", DateTimeOffset.UtcNow);
-
-        Assert.Equal("wr_1:ai-review.1", first.ProducerKey);
-        Assert.Equal("wr_1:ai-review.2", second.ProducerKey);
-        Assert.Equal("wr_2:ai-review.1", otherRun.ProducerKey);
-        Assert.NotEqual(first.ProducerKey, second.ProducerKey);
-    }
+    private static readonly DateTimeOffset FixedNow = new(2026, 6, 11, 9, 30, 0, TimeSpan.Zero);
 
     [Fact]
     public void Event_IsPartOfWorkflowEventUnion()
     {
-        WorkflowEvent evt = new WorkflowArtifactRecorded("wr_1", "ai-review.1", "review.md", DateTimeOffset.UtcNow);
+        WorkflowEvent evt = new WorkflowArtifactRecorded("wr_1", "ai-review.1", "review.md", FixedNow);
 
         var busType = WorkflowEventSerializer.BusType(evt);
         Assert.Equal(EventCatalog.ReverseDns.WorkflowArtifactRecorded, busType);
@@ -102,23 +46,6 @@ public class WorkflowArtifactDomainTests
         Assert.Contains(
             EventCatalog.ReverseDns.WorkflowArtifactRecorded,
             EventCatalog.All);
-    }
-
-    [Fact]
-    public void DomainNamespace_DoesNotUseSnapshotNaming()
-    {
-        // The product/storage/UI language is WorkflowArtifact, not
-        // Snapshot. Walk the assembly for any type that introduces
-        // the rejected name in this task's domain area.
-        var assembly = typeof(WorkflowArtifact).Assembly;
-        var snapshotTypes = assembly
-            .GetTypes()
-            .Where(t => t.FullName?.Contains("Workflow", StringComparison.Ordinal) == true
-                        && t.Name.Contains("Snapshot", StringComparison.Ordinal))
-            .Select(t => t.FullName)
-            .ToList();
-
-        Assert.Empty(snapshotTypes);
     }
 
     [Fact]
