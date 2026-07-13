@@ -38,8 +38,7 @@ public class TaskLogServiceSpecs : IAsyncLifetime
             new NoopTaskLogDeltaPublisher(),
             NullLogger<TaskLogService>.Instance);
 
-        using var db = new MohistDbContext(_options);
-        db.Database.EnsureCreated();
+        MigratedSqliteTemplate.CopyTo(_keeper);
     }
 
     public Task InitializeAsync() => Task.CompletedTask;

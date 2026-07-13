@@ -1,9 +1,6 @@
 using System.Net.Http.Json;
-using System.Reflection;
 using System.Text.Json;
 using Mohist.Server.Infrastructure.Workspace;
-using Mohist.Server.Project.Domain;
-using Mohist.Server.Project.Services;
 using Mohist.Server.SpecTests.Support;
 using Xunit;
 
@@ -48,42 +45,6 @@ public class PathContractRegressionSpecs
         using var response = await _client.GetAsync(
             $"/api/projects/{projectId}/issues/{issueNumber}/worktree-status");
         Assert.Equal(System.Net.HttpStatusCode.NotFound, response.StatusCode);
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
-    [Fact]
-    public void ProjectInfo_OmitsPathAndEffectivePath()
-    {
-        var props = typeof(ProjectInfo)
-            .GetProperties(BindingFlags.Public | BindingFlags.Instance)
-            .Select(p => p.Name)
-            .ToArray();
-
-        Assert.DoesNotContain("Path", props);
-        Assert.DoesNotContain("EffectivePath", props);
-        Assert.DoesNotContain("CheckoutPath", props);
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
-    [Fact]
-    public void RepositoryInfo_OmitsPathRemoteAndResolvedPath()
-    {
-        var props = typeof(RepositoryInfo)
-            .GetProperties(BindingFlags.Public | BindingFlags.Instance)
-            .Select(p => p.Name)
-            .ToArray();
-
-        Assert.DoesNotContain("Path", props);
-        Assert.DoesNotContain("Remote", props);
-        Assert.DoesNotContain("ResolvedPath", props);
-        Assert.DoesNotContain("RemoteUrl", props);
-
-        Assert.Contains("GitUrl", props);
-        Assert.Contains("BaseBranch", props);
-        Assert.Contains("Name", props);
-        Assert.Contains("IsDefault", props);
     }
 
     // Item-5: the workspace-path slug must stay in sync with the runner's

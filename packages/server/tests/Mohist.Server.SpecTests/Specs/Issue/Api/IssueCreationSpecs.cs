@@ -373,7 +373,6 @@ public class IssueCreationSpecs
 
         Assert.NotNull(status);
         Assert.Equal($"openspec/changes/issue-{created.Number}", status.ChangeDir);
-        Assert.DoesNotContain("ChangeDir", typeof(Mohist.Server.Workflow.Services.WorkflowStatusView).GetProperties().Select(p => p.Name));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]

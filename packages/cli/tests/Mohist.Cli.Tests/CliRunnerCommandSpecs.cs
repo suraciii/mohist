@@ -10,6 +10,7 @@ namespace Mohist.Cli.Tests;
 public class CliRunnerCommandSpecs
 {
     private const string ActiveProjectId = "proj_test";
+    private static readonly DateTimeOffset FixedNow = new(2026, 6, 30, 0, 0, 0, TimeSpan.Zero);
 
     private static (HttpClient http, RecordingHttpHandler handler, StringWriter output, StringWriter error, FakeFileSystem fileSystem, FakeCommandExecutor executor, MockEnvironmentVariableProvider env) SetupEnv(
         Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> responder,
@@ -168,7 +169,7 @@ public class CliRunnerCommandSpecs
     {
         var runners = new[]
         {
-            Runner("r-1", "agent", "host-x", "idle", "global", Capacity(0, 4), lastHeartbeatAt: DateTimeOffset.UtcNow.ToString("o")),
+            Runner("r-1", "agent", "host-x", "idle", "global", Capacity(0, 4), lastHeartbeatAt: FixedNow.ToString("o")),
         };
         var (http, handler, output, error, fileSystem, executor, env) = SetupEnv((_, _) =>
             Task.FromResult(RecordingHttpHandler.Json(new
@@ -746,7 +747,7 @@ public class CliRunnerCommandSpecs
             scope,
             status = capacity is null ? "offline" : "online",
             registeredAt = "2026-06-20T11:00:00Z",
-            lastHeartbeatAt = lastHeartbeatAt ?? DateTimeOffset.UtcNow.AddSeconds(-5).ToString("o"),
+            lastHeartbeatAt = lastHeartbeatAt ?? FixedNow.AddSeconds(-5).ToString("o"),
             connectionState = capacity is null ? "disconnected" : "connected",
             capabilities = new[] { "agent-run" },
             coderModels = new[] { "openai/gpt-5.5" },

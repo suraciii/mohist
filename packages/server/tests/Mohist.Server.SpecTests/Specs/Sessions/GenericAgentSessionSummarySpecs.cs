@@ -29,8 +29,7 @@ public sealed class FakeAgentSessionSummaryDbContextFactory : IDbContextFactory<
     {
         _connection = new SqliteConnection("Data Source=:memory:");
         _connection.Open();
-        using var db = CreateDbContext();
-        db.Database.EnsureCreated();
+        MigratedSqliteTemplate.CopyTo(_connection);
     }
 
     public MohistDbContext CreateDbContext()

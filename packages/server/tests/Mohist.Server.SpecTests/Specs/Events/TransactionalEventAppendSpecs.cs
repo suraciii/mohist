@@ -47,10 +47,7 @@ public class TransactionalEventAppendSpecs : IAsyncLifetime
             .Options;
         _dbFactory = new Factory(_options);
 
-        using (var db = new MohistDbContext(_options))
-        {
-            db.Database.EnsureCreated();
-        }
+        MigratedSqliteTemplate.CopyTo(_keeper);
         _eventStore = new EventStore(_dbFactory, NullLogger<EventStore>.Instance);
     }
 
