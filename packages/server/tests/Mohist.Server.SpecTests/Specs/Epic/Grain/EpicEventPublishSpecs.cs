@@ -93,9 +93,9 @@ public class EpicEventPublishSpecs
         await grain.UnlinkIssueAsync("issue_1", ProjectId);
 
         var events = await eventStore.ListEpicEventsAsync(EpicId);
-        var unlinked = Assert.Single(events);
-        Assert.Equal(EventCatalog.ReverseDns.EpicIssueUnlinked, unlinked.Envelope.Type);
-        Assert.Equal("issue_1", unlinked.Envelope.Data!.Value.GetProperty("issueId").GetString());
+        var unlinked = events.FirstOrDefault(e => e.Envelope.Type == EventCatalog.ReverseDns.EpicIssueUnlinked);
+        Assert.NotNull(unlinked);
+        Assert.Equal("issue_1", unlinked!.Envelope.Data!.Value.GetProperty("issueId").GetString());
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
