@@ -1,5 +1,6 @@
 using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Services;
+using Mohist.Server.Infrastructure;
 
 namespace Mohist.Server.Issue.Services.WorkflowProfiles;
 
@@ -32,28 +33,20 @@ public static class MohistWorkflow
 
     private static WorkflowDefinition LoadLocalDefinition()
     {
-        var path = ResolveDefinitionPath(LocalDefinitionFileName);
-        if (path is null)
-            throw new FileNotFoundException($"Local Mohist workflow definition not found: {LocalDefinitionFileName}");
-        return WorkflowYamlSerializer.FromYaml(File.ReadAllText(path), IssueWorkflowProfiles.LocalId);
+        return WorkflowYamlSerializer.FromYaml(
+            ReadDefinitionResource(LocalDefinitionFileName),
+            IssueWorkflowProfiles.LocalId);
     }
 
     private static WorkflowDefinition LoadGithubPrDefinition()
     {
-        var path = ResolveDefinitionPath(GithubPrDefinitionFileName);
-        if (path is null)
-            throw new FileNotFoundException($"Mohist GitHub PR workflow definition not found: {GithubPrDefinitionFileName}");
-        return WorkflowYamlSerializer.FromYaml(File.ReadAllText(path), IssueWorkflowProfiles.GithubPrId);
+        return WorkflowYamlSerializer.FromYaml(
+            ReadDefinitionResource(GithubPrDefinitionFileName),
+            IssueWorkflowProfiles.GithubPrId);
     }
 
-    private static string? ResolveDefinitionPath(string fileName)
-    {
-        var primary = Path.Combine(AppContext.BaseDirectory, "Issue", "Services", "WorkflowProfiles", fileName);
-        if (File.Exists(primary)) return primary;
-
-        var sourceProbe = Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "Issue", "Services", "WorkflowProfiles", fileName);
-        if (File.Exists(sourceProbe)) return Path.GetFullPath(sourceProbe);
-
-        return null;
-    }
+    private static string ReadDefinitionResource(string fileName) =>
+        AssemblyTextResources.Read(
+            typeof(MohistWorkflow).Assembly,
+            $"Mohist.Server.WorkflowProfiles.{fileName}");
 }

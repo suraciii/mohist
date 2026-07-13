@@ -1,19 +1,6 @@
-using System.Net;
-using System.Net.Http.Json;
-using System.Text.Json;
-using Microsoft.Data.Sqlite;
-using Microsoft.EntityFrameworkCore;
-using Mohist.Server.Infrastructure.Events;
-using Mohist.Server.Infrastructure.Data.Db;
-using Mohist.Server.Issue.Domain;
-using Issue = Mohist.Server.Issue.Domain.Issue;
-using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Services.WorkflowProfiles;
-using Mohist.Server.UnitTests.Support;
 using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Services;
-using Mohist.Server.Workflow.Services.Prompts;
-using Mohist.Server.Infrastructure.Data.Workflow;
 using Xunit;
 
 namespace Mohist.Server.UnitTests.Issue.Profile;
@@ -161,38 +148,4 @@ public class MohistLocalWorkflowProfileApprovalTests
         Assert.Null(reparsed.Approval);
     }
 
-    [Fact]
-    public void BuiltInApplyFeedbackPrompt_HasRequiredFrontmatterFields()
-    {
-        var loader = new FilePromptLoader();
-        var prompts = loader.LoadAll();
-
-        Assert.True(prompts.ContainsKey("apply-feedback"), "apply-feedback prompt must be loaded from builtins");
-        var body = prompts["apply-feedback"];
-        Assert.Contains("mo issue feedback show", body, StringComparison.Ordinal);
-        Assert.Contains("${{ issue.number }}", body, StringComparison.Ordinal);
-        Assert.Contains("${{ project.id }}", body, StringComparison.Ordinal);
-        Assert.Contains("${{ approvalFeedback.id }}", body, StringComparison.Ordinal);
-        Assert.Contains("${{ approvalFeedback.command }}", body, StringComparison.Ordinal);
-        Assert.Contains("${{ stage.name }}", body, StringComparison.Ordinal);
-        Assert.Contains("Do not approve the stage", body, StringComparison.Ordinal);
-        Assert.Contains("required input", body, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("resolution summary", body, StringComparison.OrdinalIgnoreCase);
-    }
-
-    [Fact]
-    public void BuiltInApplyFeedbackPrompt_FrontmatterParsesCleanly()
-    {
-        var loader = new FilePromptLoader();
-        var templates = loader.LoadAllTemplates();
-        var template = templates["apply-feedback"];
-
-        Assert.Equal("apply-feedback", template.Key);
-        Assert.Equal("Apply Approval Feedback", template.DisplayName);
-        Assert.Contains("approval feedback", template.Description, StringComparison.OrdinalIgnoreCase);
-        Assert.NotEmpty(template.Tags);
-        Assert.Equal("approval", template.Stage);
-        Assert.Contains("mo issue feedback show", template.Body, StringComparison.Ordinal);
-        Assert.Contains("Do not approve the stage", template.Body, StringComparison.Ordinal);
-    }
 }

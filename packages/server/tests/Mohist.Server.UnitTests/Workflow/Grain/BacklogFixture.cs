@@ -33,6 +33,18 @@ public class BacklogFixture : IAsyncLifetime
         return Cluster.DeployAsync();
     }
 
+    public async Task ResetClusterAsync()
+    {
+        var oldCluster = Cluster;
+        var builder = new InProcessTestClusterBuilder();
+        builder.Options.InitialSilosCount = 1;
+        ConfigureCluster(builder, ConnectionString);
+        var replacement = builder.Build();
+        await replacement.DeployAsync();
+        Cluster = replacement;
+        oldCluster.Dispose();
+    }
+
     public Task DisposeAsync()
     {
         Cluster?.Dispose();

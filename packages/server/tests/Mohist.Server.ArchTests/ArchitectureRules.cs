@@ -27,6 +27,10 @@ public class ArchitectureRules
         @"\[\s*(?:(?:global::)?Xunit\.)?Collection(?:Attribute)?\s*\(\s*""OtelTracing""\s*\)",
         RegexOptions.CultureInvariant);
 
+    private static readonly Regex DirectPhysicalFileSystemUse = new(
+        @"\b(?:(?:global::)?System(?:\.IO)?\.)?(?:File|Directory)\s*\.|\bnew\s+(?:(?:global::)?System(?:\.IO)?\.)?(?:FileStream|FileSystemWatcher|FileInfo|DirectoryInfo)\b|\b(?:(?:global::)?System(?:\.IO)?\.)?Path\.GetTempPath\s*\(",
+        RegexOptions.CultureInvariant);
+
     private static readonly Regex TestProjectName = new(
         @"^Mohist\.(Server|Cli)\.(SpecTests|UnitTests|ArchTests|TestSupport)$",
         RegexOptions.CultureInvariant);
@@ -335,6 +339,22 @@ public class ArchitectureRules
     }
 
     [Fact]
+    public void RuntimeTestSources_MustNotDirectlyAccessPhysicalFileSystem()
+    {
+        var violations = RuntimeTestRoots()
+            .SelectMany(root => ActiveTestFiles(root.Path, "*.cs")
+                .Select(path => (Path: path, Match: DirectPhysicalFileSystemUse.Match(File.ReadAllText(path))))
+                .Where(result => result.Match.Success)
+                .Select(result => $"{root.Name}: {Path.GetRelativePath(root.Path, result.Path)}: {result.Match.Value}"))
+            .OrderBy(path => path, StringComparer.Ordinal)
+            .ToList();
+
+        Assert.True(
+            violations.Count == 0,
+            "Runtime test sources must use an injected fake, in-memory port, or embedded resource instead of physical filesystem APIs. Violations: " + string.Join(", ", violations));
+    }
+
+    [Fact]
     public void DisabledParallelCollections_MustOnlyProtectKnownProcessGlobals()
     {
         var testsRoot = RepositoryPaths.RequireDirectory("packages", "server", "tests");
@@ -442,5 +462,15 @@ public class ArchitectureRules
     {
         yield return ("server", RepositoryPaths.RequireDirectory("packages", "server", "tests"));
         yield return ("cli", RepositoryPaths.RequireDirectory("packages", "cli", "tests"));
+    }
+
+    private static IEnumerable<(string Name, string Path)> RuntimeTestRoots()
+    {
+        return AllTestProjectPaths()
+            .Select(path => (Name: Path.GetFileNameWithoutExtension(path), Path: Path.GetDirectoryName(path)))
+            .Where(project => project.Name is not null
+                && project.Path is not null
+                && !project.Name.EndsWith("ArchTests", StringComparison.Ordinal))
+            .Select(project => (project.Name!, project.Path!));
     }
 }

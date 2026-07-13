@@ -16,36 +16,25 @@ public class SystemUpdateStoreTests
     [Fact]
     public async Task FileSystemStore_TryAcquireLockAsync_IsDurableAcrossStoreInstances()
     {
-        var statePath = Path.Combine(Path.GetTempPath(), $"mohist-system-update-{Guid.NewGuid():N}.json");
-        try
-        {
-            var first = CreateFileSystemStore(statePath);
-            var second = CreateFileSystemStore(statePath);
+        var files = new InMemorySystemUpdateStateFiles();
+        const string statePath = "/test/system-update.json";
+        var first = CreateFileSystemStore(files, statePath);
+        var second = CreateFileSystemStore(files, statePath);
 
-            Assert.True(await first.TryAcquireLockAsync("job-1"));
-            Assert.False(await second.TryAcquireLockAsync("job-2"));
+        Assert.True(await first.TryAcquireLockAsync("job-1"));
+        Assert.False(await second.TryAcquireLockAsync("job-2"));
 
-            await first.ReleaseLockAsync("job-1");
-            Assert.True(await second.TryAcquireLockAsync("job-2"));
-        }
-        finally
-        {
-            if (File.Exists(statePath))
-                File.Delete(statePath);
-            if (File.Exists(statePath + ".lock"))
-                File.Delete(statePath + ".lock");
-        }
+        await first.ReleaseLockAsync("job-1");
+        Assert.True(await second.TryAcquireLockAsync("job-2"));
     }
 
     [Fact]
     public async Task FileSystemStore_TryAcquireLockAsync_RejectsPersistedActiveJobAfterRestart()
     {
-        var statePath = Path.Combine(Path.GetTempPath(), $"mohist-system-update-{Guid.NewGuid():N}.json");
-        try
-        {
-            var now = DateTimeOffset.UnixEpoch;
-            var first = CreateFileSystemStore(statePath);
-            await first.SaveAsync(new SystemUpdateJobState(
+        var files = new InMemorySystemUpdateStateFiles();
+        var now = DateTimeOffset.UnixEpoch;
+        var first = CreateFileSystemStore(files);
+        await first.SaveAsync(new SystemUpdateJobState(
                 "job-1",
                 "waiting-for-reconnect",
                 "Waiting for reconnect",
@@ -59,116 +48,72 @@ public class SystemUpdateStoreTests
                 [new SystemUpdateLogEntry(now, "Waiting for reconnect", "Waiting")],
                 now,
                 now,
-                null));
+            null));
 
-            var restarted = CreateFileSystemStore(statePath);
+        var restarted = CreateFileSystemStore(files);
 
-            Assert.False(await restarted.TryAcquireLockAsync("job-2"));
-        }
-        finally
-        {
-            if (File.Exists(statePath))
-                File.Delete(statePath);
-            if (File.Exists(statePath + ".lock"))
-                File.Delete(statePath + ".lock");
-        }
+        Assert.False(await restarted.TryAcquireLockAsync("job-2"));
     }
 
     [Fact]
     public async Task FileSystemStore_ReleaseStaleLockAsync_DeletesStaleLockFileAndAllowsReacquisitionOnFreshInstance()
     {
-        var statePath = Path.Combine(Path.GetTempPath(), $"mohist-system-update-{Guid.NewGuid():N}.json");
-        try
-        {
-            var first = CreateFileSystemStore(statePath);
-            Assert.True(await first.TryAcquireLockAsync("stale-job"));
+        var files = new InMemorySystemUpdateStateFiles();
+        const string statePath = "/test/system-update.json";
+        var first = CreateFileSystemStore(files, statePath);
+        Assert.True(await first.TryAcquireLockAsync("stale-job"));
 
-            var refreshed = CreateFileSystemStore(statePath);
-            Assert.False(await refreshed.TryAcquireLockAsync("new-job"));
+        var refreshed = CreateFileSystemStore(files, statePath);
+        Assert.False(await refreshed.TryAcquireLockAsync("new-job"));
 
-            await refreshed.ReleaseStaleLockAsync("stale-job");
+        await refreshed.ReleaseStaleLockAsync("stale-job");
 
-            Assert.False(File.Exists(statePath + ".lock"));
+        Assert.False(files.Exists(statePath + ".lock"));
 
-            Assert.True(await refreshed.TryAcquireLockAsync("new-job"));
-        }
-        finally
-        {
-            if (File.Exists(statePath))
-                File.Delete(statePath);
-            if (File.Exists(statePath + ".lock"))
-                File.Delete(statePath + ".lock");
-        }
+        Assert.True(await refreshed.TryAcquireLockAsync("new-job"));
     }
 
     [Fact]
     public async Task FileSystemStore_ReleaseStaleLockAsync_IsIdempotentWhenLockFileAbsent()
     {
-        var statePath = Path.Combine(Path.GetTempPath(), $"mohist-system-update-{Guid.NewGuid():N}.json");
-        try
-        {
-            var store = CreateFileSystemStore(statePath);
+        var files = new InMemorySystemUpdateStateFiles();
+        const string statePath = "/test/system-update.json";
+        var store = CreateFileSystemStore(files, statePath);
 
-            await store.ReleaseStaleLockAsync("any-job");
+        await store.ReleaseStaleLockAsync("any-job");
 
-            Assert.False(File.Exists(statePath + ".lock"));
-        }
-        finally
-        {
-            if (File.Exists(statePath))
-                File.Delete(statePath);
-            if (File.Exists(statePath + ".lock"))
-                File.Delete(statePath + ".lock");
-        }
+        Assert.False(files.Exists(statePath + ".lock"));
     }
 
     [Fact]
     public async Task FileSystemStore_ReleaseStaleLockAsync_LeavesLockHeldByDifferentOwner()
     {
-        var statePath = Path.Combine(Path.GetTempPath(), $"mohist-system-update-{Guid.NewGuid():N}.json");
-        try
-        {
-            var first = CreateFileSystemStore(statePath);
-            Assert.True(await first.TryAcquireLockAsync("real-owner"));
+        var files = new InMemorySystemUpdateStateFiles();
+        const string statePath = "/test/system-update.json";
+        var first = CreateFileSystemStore(files, statePath);
+        Assert.True(await first.TryAcquireLockAsync("real-owner"));
 
-            var refreshed = CreateFileSystemStore(statePath);
-            await refreshed.ReleaseStaleLockAsync("someone-else");
+        var refreshed = CreateFileSystemStore(files, statePath);
+        await refreshed.ReleaseStaleLockAsync("someone-else");
 
-            Assert.True(File.Exists(statePath + ".lock"));
+        Assert.True(files.Exists(statePath + ".lock"));
 
-            Assert.False(await refreshed.TryAcquireLockAsync("new-job"));
-        }
-        finally
-        {
-            if (File.Exists(statePath))
-                File.Delete(statePath);
-            if (File.Exists(statePath + ".lock"))
-                File.Delete(statePath + ".lock");
-        }
+        Assert.False(await refreshed.TryAcquireLockAsync("new-job"));
     }
 
     [Fact]
     public async Task FileSystemStore_ReleaseLockAsync_StillNoOpsAfterRestart()
     {
-        var statePath = Path.Combine(Path.GetTempPath(), $"mohist-system-update-{Guid.NewGuid():N}.json");
-        try
-        {
-            var first = CreateFileSystemStore(statePath);
-            Assert.True(await first.TryAcquireLockAsync("stale-job"));
+        var files = new InMemorySystemUpdateStateFiles();
+        const string statePath = "/test/system-update.json";
+        var first = CreateFileSystemStore(files, statePath);
+        Assert.True(await first.TryAcquireLockAsync("stale-job"));
 
-            var refreshed = CreateFileSystemStore(statePath);
+        var refreshed = CreateFileSystemStore(files, statePath);
 
-            await refreshed.ReleaseLockAsync("stale-job");
+        await refreshed.ReleaseLockAsync("stale-job");
 
-            Assert.True(File.Exists(statePath + ".lock"));
-        }
-        finally
-        {
-            if (File.Exists(statePath))
-                File.Delete(statePath);
-            if (File.Exists(statePath + ".lock"))
-                File.Delete(statePath + ".lock");
-        }
+        Assert.True(files.Exists(statePath + ".lock"));
     }
 
     [Fact]

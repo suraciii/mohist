@@ -44,15 +44,13 @@ public class ProjectApiSpecs
     }
 
     [Fact]
-    public async Task GetProjects_ListReturnsProjectsWithoutPathFields()
+    public async Task GetProjects_ListIncludesCreatedProject()
     {
         var created = await _client.PostDataAsync<ProjectInfo>("/api/projects", new { name = "list-test" });
 
         var list = await _client.GetDataAsync<List<ProjectInfo>>("/api/projects");
         var project = list.Single(p => p.Id == created.Id);
         Assert.Equal("list-test", project.Name);
-        Assert.Null(project.GetType().GetProperty("Path"));
-        Assert.Null(project.GetType().GetProperty("BaseBranch"));
     }
 
     [Fact]

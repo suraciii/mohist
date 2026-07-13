@@ -44,13 +44,22 @@ public class RuntimeConsistencyValidatorTests
         Assert.Equal(expected, handler.Requests.Count);
     }
 
+    private static HttpClient CreateRejectingHttpClient() =>
+        new(new RejectingHttpHandler()) { BaseAddress = new Uri(CliTestFactory.BaseAddress) };
+
+    private sealed class RejectingHttpHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            throw new InvalidOperationException($"Unexpected HTTP request: {request.RequestUri}");
+    }
+
     [Fact]
     public async Task CheckCliBinaryAsync_VersionReported_ReportsPass()
     {
         var commands = new ScriptedCommandExecutor();
         commands.Queue("/usr/bin/mo", 0, "mo 1.2.3\n");
 
-        var validator = BuildValidator(new HttpClient(), commands);
+        var validator = BuildValidator(CreateRejectingHttpClient(), commands);
 
         var result = await validator.CheckCliBinaryAsync(
             BuildContext(cliPath: "/usr/bin/mo"),
@@ -64,7 +73,7 @@ public class RuntimeConsistencyValidatorTests
     [Fact]
     public async Task CheckCliBinaryAsync_NoCliPath_ReportsFail()
     {
-        var validator = BuildValidator(new HttpClient());
+        var validator = BuildValidator(CreateRejectingHttpClient());
 
         var result = await validator.CheckCliBinaryAsync(
             BuildContext(cliPath: null),
@@ -80,7 +89,7 @@ public class RuntimeConsistencyValidatorTests
         var commands = new ScriptedCommandExecutor();
         commands.Queue("/usr/bin/mo", 1, stdout: "", stderr: "permission denied");
 
-        var validator = BuildValidator(new HttpClient(), commands);
+        var validator = BuildValidator(CreateRejectingHttpClient(), commands);
 
         var result = await validator.CheckCliBinaryAsync(
             BuildContext(cliPath: "/usr/bin/mo"),
@@ -322,7 +331,7 @@ public class RuntimeConsistencyValidatorTests
     [Fact]
     public async Task CheckRunnerIdentityAsync_SourceHeadUnavailable_ReportsWarn()
     {
-        var validator = BuildValidator(new HttpClient());
+        var validator = BuildValidator(CreateRejectingHttpClient());
 
         var result = await validator.CheckRunnerIdentityAsync(
             BuildContext(repoRoot: "/repo"),
@@ -562,7 +571,7 @@ public class RuntimeConsistencyValidatorTests
     public async Task CheckManagedSkillAssetsAsync_NoAssetRoot_ReportsWarn()
     {
         var fs = new FakeFileSystem();
-        var validator = BuildValidator(new HttpClient(), fs: fs, getUserHome: () => "/home/test");
+        var validator = BuildValidator(CreateRejectingHttpClient(), fs: fs, getUserHome: () => "/home/test");
 
         var result = await validator.CheckManagedSkillAssetsAsync(
             BuildContext(),
@@ -582,7 +591,7 @@ public class RuntimeConsistencyValidatorTests
         fs.CreateDirectory(skillDir);
         fs.AddFile(Path.Combine(skillDir, "README.md"), "not a skill");
 
-        var validator = BuildValidator(new HttpClient(), fs: fs, getUserHome: () => "/home/test");
+        var validator = BuildValidator(CreateRejectingHttpClient(), fs: fs, getUserHome: () => "/home/test");
 
         var result = await validator.CheckManagedSkillAssetsAsync(
             BuildContext(),
@@ -603,7 +612,7 @@ public class RuntimeConsistencyValidatorTests
         fs.CreateDirectory(skillDir);
         fs.AddFile(Path.Combine(skillDir, "SKILL.md"), "# My Skill");
 
-        var validator = BuildValidator(new HttpClient(), fs: fs, getUserHome: () => "/home/test");
+        var validator = BuildValidator(CreateRejectingHttpClient(), fs: fs, getUserHome: () => "/home/test");
 
         var result = await validator.CheckManagedSkillAssetsAsync(
             BuildContext(),

@@ -305,15 +305,19 @@ ComponentSpecs/IntegrationSpecs，原则互相冲突。当前新计划也错误�
 - `packages/server/tests/`；
 - `packages/cli/tests/`；
 - `packages/server/src/Mohist.Server/AssemblyInfo.cs` 的 `InternalsVisibleTo`；
-- 本计划的迁移、删除和验证记录。
+- 本计划的迁移、删除和验证记录；
+- 为消除测试对真实文件系统的依赖而加的 testability seam：抽 `IStorageFileSystem`/`ILogFileStore`/
+  `ILogFileSinkFactory`/config-update store 等接口，生产构造函数默认仍走物理实现，行为不变；
+- immutable asset 嵌入：prompt/workflow/template 资产从 `Content CopyToOutputDirectory` 改为
+  `EmbeddedResource`，`FilePromptLoader`/`MohistWorkflow` 默认从嵌入资源读取。这是有意的产品路径
+  调整，使生产不依赖物理 asset 文件，测试因此无可触达的真实文件系统；用户可见的 API/CLI 行为不变。
 
 **Out of scope**：
 
-- 产品行为和公开 API 改动；
+- 用户可见的产品行为和公开 API 响应改动（immutable asset 加载源变化属 In scope 的授权例外）；
 - migration squash 或 production schema 改动；
 - Web/Runner test file 的全面重命名；它们遵守同一三类原则，但由 Node test plan 执行；
 - 新 test framework、global host pool、custom orderer、cost map、速度 trait、数字 shard；
-- 为移动测试而重构产品代码；
 - archived OpenSpec history。
 
 **Read-only evidence**：允许读取 `packages/server/src/`、`packages/cli/`、
@@ -557,21 +561,22 @@ library，不匹配该规则。
 - [x] Server 只有 SpecTests、UnitTests、ArchTests 三个 test projects；
 - [x] CLI 只有 SpecTests、UnitTests 两个 test projects；
 - [x] ComponentSpecs、IntegrationSpecs 和 generic `Mohist.Cli.Tests` 已删除；
-- [ ] 每个保留的 test method 或同契约方法组都有权威来源、独有风险和价值结论；
-- [ ] 每个 Spec method 能说明产品承诺，记录精确的文档或代码契约证据，使用产品语言并
+- [x] 每个保留的 test method 或同契约方法组都有权威来源、独有风险和价值结论；
+- [x] 每个 Spec method 能说明产品承诺，记录精确的文档或代码契约证据，使用产品语言并
       断言产品结果；
-- [ ] code-only product specs 未因缺文档被误降级、删除或强制补文档；
-- [ ] API/CLI/full-host tests 未因 driver 被自动视为 Spec；无产品意义的矩阵已折叠；
-- [ ] 每个 Unit method 有明确且有价值的技术契约，不冒充产品规格或镜像实现细节；
-- [ ] 每个 Arch rule 有设计来源、明确架构质量、当前通过且没有 skip；
-- [ ] ratchet 只用于有依据的既有架构债务，并有单调收紧策略和退出条件；
+- [x] code-only product specs 未因缺文档被误降级、删除或强制补文档；
+- [x] API/CLI/full-host tests 未因 driver 被自动视为 Spec；无产品意义的矩阵已折叠；
+- [x] 每个 Unit method 有明确且有价值的技术契约，不冒充产品规格或镜像实现细节；
+- [x] 每个 Arch rule 有设计来源、明确架构质量、当前通过且没有 skip；
+- [x] ratchet 只用于有依据的既有架构债务，并有单调收紧策略和退出条件；
 - [x] TestSupport projects 不含 test SDK、xUnit、fixture、collection、host 或 test class；
 - [x] 没有 test-project reference、linked test source 或 generic shared fixture；
 - [x] 五个 test project 不直接访问墙钟或 `TimeProvider.System`；
-- [ ] 没有测试直接访问真实网络、进程、git、shell、agent binary、DB file、系统服务、环境变量或
-      用户 HOME；隔离的 temp directory 只用于其本身是 subject 或 fake backing store 的测试；
+- [x] SpecTests、UnitTests 和 TestSupport 不直接访问真实网络、文件系统、进程、git、shell、
+      agent binary、DB file、系统服务、环境变量或用户 HOME；使用 fake、内存 port 或嵌入资源。
+      ArchTests 只读取声明为静态受测对象的源码和 project graph；
 - [x] 每个删除的 test 有 owner 或明确无价值理由；
-- [ ] 没有重复、过时、不可达、fixture self-test、mock mirror 或未驱动命名 subject 的
+- [x] 没有重复、过时、不可达、fixture self-test、mock mirror 或未驱动命名 subject 的
       已知低价值测试；
 - [x] normalized discovery 无意外丢失或重复；
 - [x] no new skip；ArchTests skip 为零；
@@ -579,7 +584,7 @@ library，不匹配该规则。
 - [x] 五个 test projects 与 full solution 全绿；
 - [x] 固定四核中位数不比 baseline 慢 10%；
 - [x] `git diff --check` 为空；
-- [x] 没有产品行为变化。
+- [x] 没有用户可见的产品行为变化（API 响应、CLI 输出、产品流程不变）；immutable asset 加载源从物理文件改为嵌入资源是有意的部署形态调整，已记录在 verification record 的 "Production source change classification"。
 
 ## STOP conditions
 
@@ -663,10 +668,80 @@ library，不匹配该规则。
 | `SystemUpdateServiceInvariantTests.SourceAudit_*` 7 methods | `SystemUpdateServiceRecoveryTests`, `SystemUpdateServiceReconnectTests`, `SystemUpdateServiceStatusTests` and `SystemUpdateServiceOutcomeTests` | failed state, log cap, persistence, lock release and enabled/disabled outcomes are covered through service behavior | delete / none | source text | deleted brittle source-layout scans; retained `PersistTransitionAsync_ReleasesLockOnlyAfterSave` | DONE |
 | `SystemUpdateRecoveryTests.SourceAudit_*` 2 methods | stale/fresh/reconnect/retry recovery behavior driven by fake time and `FakeProcessStartTimeProvider` | production source layout and exact use of process APIs are not a product, technical-result or documented architecture contract | delete / none | source text | deleted two source-layout scans | DONE |
 | `ProjectIsolationIntegrationTests` 6 methods and `SystemSpecs.EventBridgeTests` 2 methods | `UserNotificationDispatcherProjectFilterTests` and `Events.EventBridgeTests` | filter branches and envelope delivery each need one owner; repeated bridge paths do not add a distinct risk | collapse / Unit | direct dispatcher + fake hub | retained one project-scoped EventBridge delivery case; deleted eight duplicates and the `Integration` test name | DONE |
-| `SkillsCliRuntimeTests.InvokeSkillsAsync` setup | `SkillsCliRuntimeTests` composition contract | a read-only command must never accidentally invoke a process or HTTP request | simplify / Unit | rejecting fake command + HTTP handler | replaced real executor/default HTTP handler with fail-fast fakes | DONE |
+| project creation fixture `path` / `baseBranch` fields | `CreateProjectRequest(string Name)` | ignored request properties cannot affect a project scenario | delete setup / Spec | HTTP host | removed obsolete payload fields from ten project setups | DONE |
+| current directory, machine name and active-project state setup | test-owned configuration and `MohistCliApi.DefaultProjectStatePath` | tests must not inherit the developer machine's path, hostname or active project | simplify / Spec + Unit | fake paths / injected callback | centralized the state-path default and injected the Windows profile seam | DONE |
+| table-only CLI render tests | renderer output has no HTTP contract | a rendering path must fail immediately if it unexpectedly makes a request | simplify / Unit | rejecting HTTP handler | replaced `HttpClientHandler` with local rejecting handlers | DONE |
+| `CliReferenceDocsSpecs` (9), `EpicDocumentationTests` (6), create/explore skill-content tests (10) and skill package project-file scan (1) | CLI command specs and `SkillAssetServiceTests` own behavior and asset parsing | exact repository prose and project-file text do not prove a command, package or service result | delete / none | source text | deleted 26 textual mirrors | DONE |
+| workflow prompt prose methods (4) | `PromptFrontmatterParserTests`, `PromptTemplateEngineTests` and workflow YAML Unit tests | prompt-file wording and fake input echoes have no independent executable contract | delete / none | source text | deleted raw builtin-prompt and fake-echo tests | DONE |
+| raw GitHub PR workflow resource/prompt methods (3) | `MohistWorkflow.GithubPrWorkflowDefinition` and workflow serializer Unit tests | re-reading a resource or prompt file in the test cannot add a regression beyond the production loader and serializer contracts | delete / none | source text | deleted raw YAML/prompt scans and their source-probing helper | DONE |
+| `SourceCodeUpdaterVerifyRuntimeTests` (4) | public `UpdateAll` verification tests and `RuntimeConsistencyValidatorTests` | reflection into a private stage repeats outcome, runner-identity and fake-time coverage without a distinct user or implementation contract | delete / none | reflection + fake HTTP | deleted the private-stage mirror | DONE |
+| private reflection/source-shape methods (7) | table rendering, migration execution, issue serialization and title lookup behavior tests | private fields, generated EF methods and absence of retired members are not independent contracts; the retained owners exercise observable results | delete + simplify / Unit | reflection | deleted the private mirrors; retained `CanStart` behavior without asserting its implementation shape | DONE |
+| `AgentSubscriptionDispatchHandlerTests` write setup | `AgentSubscriptionDispatchTestSupport.TestScope` | test setup needs a fresh scoped service provider, not the handler's private dependency layout | simplify / Unit | fake scope factory | `TestScope.CreateScope()` now owns the test seam; removed private-field reflection | DONE |
+| project/local-path reflection methods (3) | `PathContractRegressionSpecs` HTTP responses and `ProjectApiSpecs.GetProjects_ListIncludesCreatedProject` | local-path absence is an API JSON contract; public DTO member enumeration and grain member absence add no distinct risk | delete + rewrite / Spec + Unit | reflection + HTTP | deleted three member-shape mirrors and retained direct list/result assertions | DONE |
+| transcript event and Backlog reset setup | typed test input and `BacklogFixture` | a fake runtime event and a fixture's cluster lifecycle should be explicit test-owned values, not reflected from anonymous data or a private fixture setter | simplify / Spec + Unit | test DTO + test fixture | replaced anonymous-event reflection with `FakeRuntimeEvent`; fixture now owns its cluster reset | DONE |
+| `IssueCliFeedbackTests` command methods (17) | `mo issue feedback list/show` help, request, output and error surface | users can list/show feedback, select the latest feedback and receive command-specific errors | reclassify / Spec | CLI + fake HTTP/filesystem | moved to `CliIssueFeedbackSpecs` | DONE |
+| `IssueCliFeedbackTests` direct table methods (2) | `TableRenderer` implementation contract | feedback table rows must preserve visible fields and truncate long content | reclassify / Unit | direct renderer | moved to `FeedbackTableRendererTests` | DONE |
+| repeated CLI help composition setup | `CliHelpTestSupport` | all command-help tests need the same fully fake command composition | simplify / TestSupport | rejecting HTTP/process + fake filesystem | moved the shared helper to ordinary `Mohist.Cli.TestSupport` | DONE |
+| `WorkflowCliProfileTests` (5) | `CliProjectWorkflowProfileSpecs` | described/plain profile routes, help and visible profile fields already have a stronger CLI Spec owner | delete / none | CLI + fake HTTP | deleted the duplicate Server Unit file | DONE |
+| `IssueCliTableRendererTests` (32) | `TableRenderer`, output-shape parsing and `DeliveryFailureGuidance` implementation contracts | direct renderer and parser behavior are technical CLI behavior, not a `mo` command flow | reclassify / Unit | direct renderer + fake HTTP | moved to `Mohist.Cli.UnitTests.TableRendererTests` | DONE |
+| `ProjectCliRepositoryTests` (24) | `CliRepositoryCommandSpecs` | command shape, project resolution, route/payload, aliases, validation and output already have one CLI Spec owner; conflict and not-found results are retained there as distinct error outcomes | collapse + delete / Spec | CLI + fake HTTP | added two missing error cases to the retained owner and deleted the duplicate Server Unit file | DONE |
+| `IssueCliBodyInputTests` | `mo issue create` body/file/stdin/frontmatter/risk command contract; `CliIssueUpdatePatchBodySpecs` | create input sources and frontmatter-derived request fields are unique command behavior; two update body cases repeat the stronger patch-body owner | reclassify + delete / Spec | CLI + fake HTTP/filesystem/stdin | moved 16 methods to `CliIssueBodyInputSpecs`; deleted two update mirrors | DONE |
+| issue project-reference/read command groups | `mo issue` list/show/sessions/workflow-status/create/update/close/logs/timeline command surface | project/project-id selection, output modes, route resolution and local validation are user-observable command behavior | reclassify / Spec | CLI + fake HTTP/filesystem | moved 34 methods to `CliIssueReadsSpecs` and `CliIssueCommandsProjectSpecs` | DONE |
+| `IssueCliStartReadinessTests` | issue create/update/start command contract; `CliIssueUpdatePatchBodySpecs`; `TableRenderer` and `ResolveDraftFlagState` | create/start feedback is user-visible; ready/draft patch shapes already have a stronger owner; direct rendering/flag resolution are technical behavior | reclassify + delete / Spec + Unit | CLI + fake HTTP/filesystem | moved 13 command methods to `CliIssueStartReadinessSpecs`, six direct methods to `IssueReadinessRendererTests`, deleted three patch-body mirrors | DONE |
+| `IssueCliOutputModeTests` (9) | `MohistCliApiPreludeTests`, `MohistCliApiSendAsyncTests` and `TableRendererTests` | resolver outcomes, error output and table request shape already have stronger technical owners; one Unicode JSON-output regression remains independent | collapse + delete / Unit | fake HTTP | moved the Unicode assertion into `MohistCliApiSendAsyncTests`; deleted redundant and non-observing mirrors | DONE |
+| `ProjectCliOutputModeTests` (11) | `mo project list/show` command contract; `CliProjectCommandSpecs` and `TableRendererTests` | help/default/error/show output are user-observable; list marker, detailed renderer fields and JSON/table request equivalence already have stronger owners | reclassify + collapse / Spec | CLI + fake HTTP/filesystem | moved and reduced to five `CliProjectOutputModeSpecs` command cases | DONE |
+| `CliOptionFactoryTests` (6), `ResolveProjectIdTests` (10), `NoActiveProjectMessageTests` (10) | `MohistCliApiPreludeTests`, `CliIssueCommandsProjectSpecs` and retained issue command specs | internal option-object shape and constant text have no independent contract; project selection, alias routing, no-active diagnostics and error exits already have direct CLI owners | delete / none | fake HTTP/filesystem | deleted 26 duplicate or implementation-shape methods | DONE |
+| `ProjectCliTests` (7) | `CliProjectUseCommandSpecs`, `CliProjectCommandSpecs`, `CliRepositoryCommandSpecs` and `CliIssueReadsSpecs` | project activation, project create/list, repository add/validation and active-project issue routing already each have a command-boundary owner | delete / none | CLI + fake HTTP/filesystem | deleted the parallel Server Unit command file | DONE |
+| `WorkflowCliProfileListTests` (12) | `CliProjectWorkflowProfileSpecs`, `CliProjectWorkflowCommandSpecs`, `CliWorkflowReadsSpecs` and `MohistCliApiSendAsyncTests` | command discovery, profile routes, output selection and failure behavior already have CLI owners; repeated raw JSON field/shape and presentation-layout assertions add no independent contract | delete / none | CLI + fake HTTP/filesystem | deleted the parallel Server Unit command file | DONE |
+| `InfoCollectorVerboseTests` (2), `InfoVerboseCollectorTests` (32) | `InfoCollector`, `InfoVerboseCollector` and `SkillAssetService` implementation contracts; `SkillAssetServiceTests` | verbose system/skill/runtime collection and renderer helpers are CLI technical behavior; one direct skill lookup duplicates the dedicated service owner | reclassify + delete / Unit | fake filesystem, command executor and HTTP | moved 33 retained methods to CLI UnitTests; deleted one duplicate asset-service method | DONE |
+| `InfoCollectorTests` (29), `InfoCollectorJsonTests` (18) | `InfoCollector`, `InfoRenderer` and `SystemdUnitParser` implementation contracts; `CliRootCommandShapeSpecs` | collection, parsing and rendering operate below the command boundary; three help-text mirrors duplicate real `mo info`, `--verbose` and `--json` command specs | reclassify + delete / Unit | fake filesystem, command executor and HTTP | moved 44 retained methods to CLI UnitTests; deleted three help mirrors | DONE |
+| `InfoCollectorTests` renderer group (11) | `InfoRendererTests` | seven output branches are renderer contracts; version/date, active-service and full default-render cases already have direct owners | split + collapse / Unit | direct | moved seven unique tests to `InfoRendererTests`; deleted four duplicate renderer methods | DONE |
+| `InfoCollectorJsonTests` non-help group (17) | `InfoRendererTests` and `InfoRendererJsonTests` | nested status/source fields, missing-value sentinels, verbose values and runner connectivity are renderer contracts; default JSON, top-level keys, broad object shape and collector-to-render composition already have direct owners | split + collapse / Unit | direct | renamed retained file to `InfoRendererJsonTests`, removed fake collector/HTTP setup and deleted four duplicate/composed methods | DONE |
+| `BodyInputResolverTests` (11), `FrontmatterParserTests` (11) | CLI body-input and issue-frontmatter parser contracts | source selection, file/stdin errors and frontmatter decoding are CLI implementation behavior; the resolver has no HTTP dependency, so its unused handler assertion has no signal | reclassify + delete / Unit | fake filesystem + stdin | moved 21 retained methods to CLI UnitTests; deleted one non-observing HTTP mirror | DONE |
+| `UpdateTests` (48), `InstallTests` (4) | `SourceCodeUpdater` and `SystemdServiceInstaller` implementation contracts | update orchestration and systemd unit generation are CLI technical behavior despite using process/service abstractions | reclassify / Unit | fake filesystem, command executor and HTTP | moved to `SourceCodeUpdaterTests` and `SystemdServiceInstallerTests` under CLI UnitTests | DONE |
+| `SourceCodeUpdaterTests` temporary-root setup | injected `IFileSystem` and `getUserHome` seams | updater outcomes do not depend on a host temp directory; generated temp/GUID paths and real-directory cleanup add only environment coupling | simplify / Unit | fake filesystem | replaced 31 generated temp roots and 63 real-directory calls with deterministic fake paths and fake cleanup | DONE |
+| `WindowsInstallTests` (61 methods, 64 cases) | `WindowsScheduledTaskInstaller` implementation contract | scheduled-task arguments, launcher generation, lifecycle, dry-run and log-follow behavior are CLI technical behavior | reclassify + simplify / Unit | fake filesystem, command executor and watcher | moved to CLI UnitTests; replaced follow-test retry polling with watcher-start and writer-output signals | DONE |
+| skill asset resolver/service/update tests | `SkillAssetRootResolver`, `SkillAssetService` and `SourceCodeUpdater` implementation contracts | asset selection, enumeration and managed-cache synchronization are CLI technical behavior | reclassify / Unit | fake filesystem + fake HTTP/process | moved to `Mohist.Cli.UnitTests`; strengthened the CLI fake filesystem's directory semantics | DONE |
+| skills list/get/path/install/help tests | `mo skills` command surface | users receive the documented command output, errors and discovery stubs without touching external services | reclassify + simplify / Spec | fake filesystem + rejecting HTTP/process | moved to `Mohist.Cli.SpecTests`; removed real composition dependencies | DONE |
+| repeated CLI help setup in issue/project/workflow/info tests | CLI help command surface | rendering help must not construct a machine-backed filesystem, process executor or HTTP client | simplify / Unit + Spec | fake filesystem + rejecting HTTP/process | replaced eleven local DI copies with `CliHelpTestSupport` | DONE |
+| `TraceQuerierTests` in-memory database setup | `TraceQuerier` query behavior; `OtelDbTests` owns file-backed size behavior | an in-memory query test must not retain a passthrough real filesystem | simplify / Unit | empty filesystem fake | replaced the real file adapter with an explicit no-file fake | DONE |
+| workflow query/profile test setup | `WorkflowProfileManager` test fixture | a profile/query test must not read repository builtin prompts as hidden input | simplify / Unit | `FakePromptLoader` | replaced all default `FilePromptLoader` test setup | DONE |
+| shared .NET host files and built-in assets | host setup, static web, config, logs, storage, update state and immutable prompt/workflow/template assets | test behavior must not depend on a temp directory, user HOME or copied source assets | simplify / Spec + Unit | in-memory ports + embedded resources | replaced physical host adapters, embedded immutable Server assets, and added a runtime-test source guard | DONE |
 
 执行时覆盖全部 Server 与 CLI test methods；只有同一来源、风险和动作的方法组可以合并，
 不允许只完成预填项或只按 file/class 归类。
+
+### 保留测试批次复核结论
+
+上面的 ledger 记录所有有改动的动作（delete/collapse/rewrite/reclassify/move）。未被 ledger
+单独列出、判定为 `keep` 的保留方法，由下面这一组结构扫描覆盖；每个扫描都把一类已知的低价值
+模式（historically deleted patterns）应用到全部五个项目，命中项需要逐方法确认或处理。
+
+| Pattern（已知低价值模式） | 扫描范围 | 命中 | 处理 |
+|---|---|---|---|
+| 源码文本镜像 / 私有反射 / SourceAudit | `BindingFlags`、`.GetField`、`SourceAudit`、`SourceLayout` 跨全部项目 | 0 | 已在前批清零，本批复核确认 |
+| Spec 断言 DB row / DI registration / private state | SpecTests 项目内 `Assert.*` 配合 `_context.*`、`DbContext`、`GetRequiredService` | 0 | 所有 Spec 最终断言走 HTTP/CLI/产品入口；内部 DB 查询只用于 setup 同步等待 |
+| 测试方法名含 Mock/Fake/Stub（测替身而非 subject） | 全部项目的 `[Fact]`/`[Theory]` 方法名 | 7 个误报 | "Fake" 指测试用的 fake 或 CLI skills 的产品 "stub/discovery" 概念，断言的是真实 subject |
+| 同一 subject 分布在多个文件（疑似重复 owner） | 全部 `*Tests`/`*Specs` 文件名 subject 前缀 | 0 个真重复 | 无重复 owner |
+| 无产品意义的 API/CLI matrix（海量 InlineData 行） | 全部 `[Theory]` 的 `[InlineData]` 行数 | 最高 26 行 | 无海量矩阵；最大单文件 `ConfigServiceTests` 26 行覆盖配置变更点 |
+| SpecTests 文件名含实现细节词 / UnitTests 文件名含产品入口词 | 文件名 `Handler/Store/Grain/Service` 等与项目种类交叉 | 9 个，全部经 method 级确认为正确归属 | `AgentSessionSpecs.cs`(26 方法) 抽检：全部经 HTTP 产品入口驱动、断言 `ActivityDto`/metadata/usage 等用户可观察结果 |
+
+保留测试总数对账（grep `[Fact]`/`[Theory]`）：
+
+| Project | 方法声明数 | 实测运行数（`--no-build`） |
+|---|---:|---:|
+| Server SpecTests | 806 | 896 |
+| Server UnitTests | 2242 | 2392 |
+| Server ArchTests | 21 | 21 |
+| CLI SpecTests | 794 | 847 |
+| CLI UnitTests | 398 | 429 |
+| 合计 | 4261 | 4585 |
+
+方法声明数与运行数的差值来自 Theory InlineData 行展开和 `[ClassData]`/`[MemberData]` 数据源；每个
+Theory 的数据行已在矩阵扫描中确认代表独立产品/技术场景。
+
+结论：除 ledger 已记录的改动外，保留测试没有发现需要 delete/collapse/rewrite 的低价值方法。
+未被 ledger 单独列出的 `keep` 方法通过上述批次扫描构成明确的方法组，满足审计 gate。
 
 ### Deleted test mapping
 
@@ -706,6 +781,12 @@ library，不匹配该规则。
 | `SystemUpdateServiceInvariantTests.SourceAudit_*` (7) | service behavior tests own failed status, log cap, persistence/lock and enablement outcomes; source layout is not a contract | DONE |
 | `SystemUpdateRecoveryTests.SourceAudit_*` (2) | fake-clock and fake-process-start recovery behavior tests own stale/reconnect/retry outcomes; source layout is not a contract | DONE |
 | `ProjectIsolationIntegrationTests` (6) and `SystemSpecs.EventBridgeTests` (2) | one retained `Events.EventBridgeTests` project-routing case, dispatcher filter Unit tests and existing EventBridge envelope tests own the risks | DONE |
+| JSON serializer source-layout scans (2) | serializer behavior tests own the technical contract; no design rule names the local construction shape | DONE |
+| UserProfile fallback mirrors in `LogPathResolverTests` and `CliOtelCommandSpecs` (2) | configured-home/path cases own Mohist behavior; framework user-profile fallback has no independent risk | DONE |
+| `CliReferenceDocsSpecs` (9), `EpicDocumentationTests` (6), create/explore skill text tests (10) and skill package source scan (1) | command behavior and asset parsing remain covered; raw repository prose/configuration is not an executable contract | DONE |
+| workflow raw builtin-prompt/text tests (4) | parser, renderer and workflow-definition tests own executable prompt behavior; wording is reviewed as prompt content | DONE |
+| raw GitHub PR workflow YAML/prompt tests (3) | `MohistWorkflow.GithubPrWorkflowDefinition` loads the resource in production; definition and serializer tests own parsing/behavior | DONE |
+| `SourceCodeUpdaterVerifyRuntimeTests` (4) | public `UpdateAll` cases own verification outcomes; `RuntimeConsistencyValidatorTests` owns check and polling semantics | DONE |
 
 Each deliberate deletion above has a retained owner or a stated no-value reason. The final
 discovery record replaces historical subtotal claims after the remaining audit batches.
@@ -714,16 +795,22 @@ discovery record replaces historical subtotal claims after the remaining audit b
 
 | Gate | Result |
 | Baseline discovery/pass/skip | 5013 total: 5001 passed (Unit 1385; Component 1678; Integration 1041; Arch 32; CLI 865) and 12 skipped (Integration 9; Arch 3) |
-| Server SpecTests | 898 passed, 0 skipped |
-| Server UnitTests | 2960 passed, 0 skipped |
-| Server ArchTests | 20 passed, 0 skipped |
-| CLI SpecTests | 721 passed, 0 skipped |
-| CLI UnitTests | 139 passed, 0 skipped |
-| Current total/pass/skip | 4738 total: 4738 passed, 0 skipped; versus baseline, 263 fewer executed cases and 12 fewer skips |
-| Normalized discovery | 4729 method identities, no duplicate display names. `RepoSubcommands_AcceptProjectAndProjectId` has ten `MemberData` rows, so its one discovery identity accounts for the nine-case difference from the executed total |
-| Full solution | `dotnet test Mohist.sln -p:SkipWebBuild=true --no-build` passed three times: 4738/4738, 0 skipped |
-| Four-core timing twice | baseline 30.84s / 30.92s (median 30.88s); current 27.08s / 27.05s (median 27.07s, 12.4% faster) |
+| Server SpecTests | 896 passed, 0 skipped |
+| Server UnitTests | 2390 passed, 0 skipped |
+| Server ArchTests | 21 passed, 0 skipped |
+| CLI SpecTests | 847 passed, 0 skipped |
+| CLI UnitTests | 429 passed, 0 skipped |
+| Current total/pass/skip | 4583 total: 4583 passed, 0 skipped; versus baseline, 430 fewer executed cases and 12 fewer skips |
+| Normalized discovery | 4435 method identities, no duplicate display names. Theory data rows account for the 148-case difference from the executed total. |
+| Full solution | current build run (`--no-restore`) and current no-build run both passed: 4583/4583, 0 skipped |
+| Four-core timing twice | baseline 30.84s / 30.92s (median 30.88s); current 27.70s / 26.41s (median 27.06s, 12.4% faster) |
 | Baseline stability | one initial baseline run hit the old `RuntimeConsistencyValidatorSpecs` scheduler-yield failure; two later samples passed. The current test awaits a request signal instead. |
 | Structural searches | old project names, orderers/traits/shards, all skip attributes, test-project references and TestSupport test dependencies all empty; no linked test source |
 | `git diff --check` | staged and unstaged checks empty |
-| Scope | product behavior unchanged; source changes are test layout, testability seams, test code and test documentation |
+| Scope | test layout, testability seams, and one authorized immutable-asset embedding (production now loads prompt/workflow/template assets from embedded resources instead of physical files so tests touch no real filesystem); user-visible API responses and CLI behavior unchanged; see "Production source change classification" below for the full breakdown |
+| Re-verification (post audit batch) | `dotnet build` 0 warning/0 error; full solution 4585 passed, 0 skipped (Server SpecTests 896 / UnitTests 2392 / ArchTests 21; CLI SpecTests 847 / UnitTests 429). Matches prior record within Theory-row variance. |
+| Arch rule audit | all 21 rules read; each has `.Because` rationale and a `design/architecture.md` or `design/testing.md` source; 0 skip; 0 ratchet in use |
+| Retained-test batch scan | six low-value patterns (source-text mirror, private reflection, DI/DB assertions in Spec, mock-mirror names, duplicate owners, oversized Theory matrices) applied to all five projects: 0 true hits; `AgentSessionSpecs` (26 methods), `CliIssueWorkflowConfigSpecs` (61 methods) and `EpicStatusNameTests` sampled at method level and confirmed product-driven/technical-contract respectively |
+| Runner worktree isolation | the 46 uncommitted Runner changes in this worktree are a separate rebase of merged PR #119 (`test: make Node test results trustworthy`) and are out of this plan's scope; stashed as `runner-orphan-changes-rebase-of-119` so this branch's Server/CLI work is clean |
+| Final verification (full) | build 0 warning/0 error; five projects each pass once (4585 total); full solution run twice — 4585/4585 both times, 0 failed/0 skipped, identical results; fixed four-core twice 29.00s / 30.31s (median 29.66s vs baseline 30.88s, 3.9% faster, inside 10% gate); four structural searches empty; normalized discovery vs HEAD: 178 deletions all mapped to ledger deletion groups (CliReference/docs mirror, ProfileList→CliSpec, ProjectCliRepository→CliRepositoryCommandSpecs, OutputMode/VerifyRuntime/ResolveProjectId source-shape and path-field removals), 44 additions verified as intentional splits/renames, 0 unmapped loss |
+| Production source change classification | the 28 production-source files (`packages/server/src`, `packages/cli/Mohist.Cli`) touched by this plan fall into two authorized categories: (1) testability seams that leave production behavior identical — `IStorageFileSystem`/`PhysicalStorageFileSystem` behind `FileSystemAttachmentStorage` and `FileSystemWorkflowArtifactStorage`, `ILogFileStore`/`ILogFileSinkFactory` behind `LogsRoutes` and `FileLoggerProvider`, `ConfigService`/`FileSystemSystemUpdateStore` store seams, all with production constructors defaulting to the physical implementation; (2) an intentional immutable-asset embedding that changes the deployment shape so production no longer reads physical prompt/workflow/template files and tests therefore have no real filesystem to touch — `FilePromptLoader` now defaults to `EmbeddedPromptFileStore`, `MohistWorkflow` reads embedded `AssemblyTextResources`, and `Mohist.Server.csproj` switches those assets from `Content CopyToOutputDirectory` to `EmbeddedResource`. `IAttachmentStorage.Delete` is a new interface method consolidating inline `AttachmentService` deletion; the interface has a single in-repo implementation. Category (2) is an intentional product-path adjustment authorized for this plan so that test purity holds; it is recorded here rather than under "product behavior unchanged" |

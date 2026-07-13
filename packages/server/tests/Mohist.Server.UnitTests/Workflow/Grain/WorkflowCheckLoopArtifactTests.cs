@@ -16,30 +16,17 @@ using Xunit;
 namespace Mohist.Server.UnitTests.Workflow.Grain;
 
 [Collection("WorkflowGrain")]
-public class WorkflowCheckLoopArtifactTests : WorkflowGrainTests, IDisposable
+public class WorkflowCheckLoopArtifactTests : WorkflowGrainTests
 {
-    private readonly string _storageRoot;
+    private readonly InMemoryStorageFileSystem _files = new();
     private readonly FileSystemWorkflowArtifactStorage _storage;
 
     public WorkflowCheckLoopArtifactTests(WorkflowGrainFixture fixture) : base(fixture)
     {
-        _storageRoot = Path.Combine(Path.GetTempPath(), $"mohist-check-loop-{Guid.NewGuid():N}");
         _storage = new FileSystemWorkflowArtifactStorage(
-            _storageRoot,
-            NullLogger<FileSystemWorkflowArtifactStorage>.Instance);
-    }
-
-    public void Dispose()
-    {
-        try
-        {
-            if (Directory.Exists(_storageRoot))
-                Directory.Delete(_storageRoot, recursive: true);
-        }
-        catch
-        {
-            // best-effort cleanup
-        }
+            "/test/check-loop-artifacts",
+            NullLogger<FileSystemWorkflowArtifactStorage>.Instance,
+            _files);
     }
 
     private static RecoveryDefinition ReviewRecovery() =>

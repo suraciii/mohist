@@ -442,6 +442,45 @@ public class CliRepositoryCommandSpecs
     }
 
     [Fact]
+    public async Task RepoAdd_ConflictResponse_SurfacesServerError()
+    {
+        var (_, http, output, error, fs, executor) = SetupEnv(req =>
+            req.Method == HttpMethod.Post
+                ? RecordingHttpHandler.Json(
+                    new { success = false, error = "Repository 'origin' already exists" },
+                    HttpStatusCode.Conflict)
+                : null!);
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http,
+            ["repo", "add", "origin", "--git-url", "git@example.com:repo.git"],
+            output, error, fs, executor);
+
+        Assert.Equal(1, exitCode);
+        Assert.Contains("origin", error.ToString());
+        Assert.Contains("already exists", error.ToString());
+    }
+
+    [Fact]
+    public async Task RepoDelete_NotFoundResponse_SurfacesNotFound()
+    {
+        var (_, http, output, error, fs, executor) = SetupEnv(req =>
+            req.Method == HttpMethod.Delete
+                ? RecordingHttpHandler.Json(
+                    new { success = false, error = "Project or repository not found" },
+                    HttpStatusCode.NotFound)
+                : null!);
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http,
+            ["repo", "delete", "missing"],
+            output, error, fs, executor);
+
+        Assert.Equal(4, exitCode);
+        Assert.Contains("not found", error.ToString(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task RepoAdd_InvalidOutput_FailsWithoutDispatch()
     {
         var (handler, http, output, error, fs, executor) = SetupEnv();

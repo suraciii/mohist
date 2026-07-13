@@ -4,38 +4,32 @@ using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
 using Mohist.Server.Infrastructure.Config;
 using Mohist.Server.Infrastructure.Hosting;
+using Mohist.Server.UnitTests.Support;
 using Xunit;
 
 namespace Mohist.Server.UnitTests.SystemSpecs;
 
 [Collection("ConsoleOutput")]
-public class MohistConfigurationExtensionsTests : IDisposable
+public class MohistConfigurationExtensionsTests
 {
-    private readonly List<string> _tempFiles = [];
+    private readonly InMemoryFileProvider _files = new();
 
-    public void Dispose()
+    private string CreateJsonc(string content)
     {
-        foreach (var file in _tempFiles)
-        {
-            try { if (File.Exists(file)) File.Delete(file); } catch { /* best effort */ }
-        }
-    }
-
-    private string CreateTempJsonc(string content)
-    {
-        var path = Path.Combine(Path.GetTempPath(), $"mohist-config-ext-{Guid.NewGuid():N}.jsonc");
-        File.WriteAllText(path, content);
-        _tempFiles.Add(path);
+        const string path = "config.jsonc";
+        _files.SetFile(path, content);
         return path;
     }
+
+    private IConfigurationBuilder CreateBuilder() => new ConfigurationBuilder().SetFileProvider(_files);
 
     [Fact]
     public void AddMohistUserConfigFile_WhenEnvironmentIsTesting_DoesNotRegisterJsonSource()
     {
-        var path = CreateTempJsonc("""{ "Mohist": { "Host": "from-user-file" } }""");
+        var path = CreateJsonc("""{ "Mohist": { "Host": "from-user-file" } }""");
         var environment = new TestHostEnvironment(MohistHostEnvironment.Testing);
 
-        var builder = new ConfigurationBuilder();
+        var builder = CreateBuilder();
         builder.AddMohistUserConfigFile(environment, path: path, optional: true, reloadOnChange: true);
         var cfg = builder.Build();
 
@@ -46,10 +40,10 @@ public class MohistConfigurationExtensionsTests : IDisposable
     [Fact]
     public void AddMohistUserConfigFile_WhenEnvironmentIsNotTesting_RegistersJsonSource()
     {
-        var path = CreateTempJsonc("""{ "Mohist": { "Host": "from-user-file" } }""");
+        var path = CreateJsonc("""{ "Mohist": { "Host": "from-user-file" } }""");
         var environment = new TestHostEnvironment(Environments.Production);
 
-        var builder = new ConfigurationBuilder();
+        var builder = CreateBuilder();
         builder.AddMohistUserConfigFile(environment, path: path, optional: true, reloadOnChange: false);
         var cfg = builder.Build();
 
@@ -60,9 +54,9 @@ public class MohistConfigurationExtensionsTests : IDisposable
     [Fact]
     public void AddMohistConfigFile_RegistersJsonConfigurationSourceWithReloadOnChangeTrue()
     {
-        var path = CreateTempJsonc("""{ "Mohist": { "Host": "h" } }""");
+        var path = CreateJsonc("""{ "Mohist": { "Host": "h" } }""");
 
-        var builder = new ConfigurationBuilder();
+        var builder = CreateBuilder();
         builder.AddMohistConfigFile(path: path, optional: true, reloadOnChange: true);
 
         var jsonSource = builder.Sources.OfType<JsonConfigurationSource>().SingleOrDefault();
@@ -75,7 +69,7 @@ public class MohistConfigurationExtensionsTests : IDisposable
     [Fact]
     public void AddMohistConfigFile_JsoncWithLineAndBlockCommentsAndTrailingCommas_LoadsEveryConfiguredKey()
     {
-        var path = CreateTempJsonc("""
+        var path = CreateJsonc("""
             // top-level line comment
             {
               /* block comment before Mohist */
@@ -91,7 +85,7 @@ public class MohistConfigurationExtensionsTests : IDisposable
             }
             """);
 
-        var cfg = new ConfigurationBuilder()
+        var cfg = CreateBuilder()
             .AddMohistConfigFile(path: path, optional: true, reloadOnChange: false)
             .Build();
 
@@ -103,9 +97,9 @@ public class MohistConfigurationExtensionsTests : IDisposable
     [Fact]
     public void AddMohistConfigFile_MissingFile_BuildsWithoutThrowing()
     {
-        var missing = Path.Combine(Path.GetTempPath(), $"mohist-missing-{Guid.NewGuid():N}.jsonc");
+        const string missing = "missing.jsonc";
 
-        var cfg = new ConfigurationBuilder()
+        var cfg = CreateBuilder()
             .AddMohistConfigFile(path: missing, optional: true, reloadOnChange: false)
             .Build();
 
@@ -122,9 +116,9 @@ public class MohistConfigurationExtensionsTests : IDisposable
         Console.SetError(capturedErr);
         try
         {
-            var path = CreateTempJsonc("{ not valid jsonc");
+            var path = CreateJsonc("{ not valid jsonc");
 
-            var builder = new ConfigurationBuilder();
+            var builder = CreateBuilder();
             builder.AddMohistConfigFile(path: path, optional: true, reloadOnChange: false);
             var cfg = builder.Build();
 
@@ -144,9 +138,9 @@ public class MohistConfigurationExtensionsTests : IDisposable
     [Fact]
     public void AddMohistConfigFile_ReloadOnChangeFalse_PassesThroughToJsonSource()
     {
-        var path = CreateTempJsonc("""{ "Mohist": { "Host": "h" } }""");
+        var path = CreateJsonc("""{ "Mohist": { "Host": "h" } }""");
 
-        var builder = new ConfigurationBuilder();
+        var builder = CreateBuilder();
         builder.AddMohistConfigFile(path: path, optional: true, reloadOnChange: false);
 
         var jsonSource = builder.Sources.OfType<JsonConfigurationSource>().Single();
@@ -157,7 +151,7 @@ public class MohistConfigurationExtensionsTests : IDisposable
     {
         public string EnvironmentName { get; set; } = environmentName;
         public string ApplicationName { get; set; } = "Mohist.Server.UnitTests";
-        public string ContentRootPath { get; set; } = Directory.GetCurrentDirectory();
+        public string ContentRootPath { get; set; } = "/test/content-root";
         public IFileProvider ContentRootFileProvider { get; set; } = new NullFileProvider();
     }
 }

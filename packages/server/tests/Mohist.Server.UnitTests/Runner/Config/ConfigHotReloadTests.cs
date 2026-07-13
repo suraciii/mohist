@@ -14,11 +14,10 @@ namespace Mohist.Server.UnitTests.Runner.Config;
 /// IOptionsSnapshot re-binds in a new request scope instead of returning a
 /// startup-time value.
 /// </summary>
-public sealed class ConfigHotReloadTests : IDisposable
+public sealed class ConfigHotReloadTests
 {
-    private readonly string _configPath = Path.Combine(
-        Path.GetTempPath(),
-        $"mohist-hot-reload-{Guid.NewGuid():N}.jsonc");
+    private const string ConfigPath = "config.jsonc";
+    private readonly InMemoryFileProvider _files = new();
 
     [Fact]
     public async Task CleanupPolicyOptionsSnapshot_AfterConfigSourceReload_NextScopeReturnsUpdatedBudget()
@@ -94,7 +93,8 @@ public sealed class ConfigHotReloadTests : IDisposable
             // forces reload deterministically through IConfigurationRoot, so a
             // watcher is unnecessary and would make the test environment do
             // extra OS-level work unrelated to T-002's options behavior.
-            .AddJsonFile(_configPath, optional: false, reloadOnChange: false)
+            .SetFileProvider(_files)
+            .AddJsonFile(ConfigPath, optional: false, reloadOnChange: false)
             .Build();
         var services = new ServiceCollection();
         services.AddOptions();
@@ -131,12 +131,9 @@ public sealed class ConfigHotReloadTests : IDisposable
         }
     }
 
-    private Task WriteConfigAsync(string content) =>
-        File.WriteAllTextAsync(_configPath, content);
-
-    public void Dispose()
+    private Task WriteConfigAsync(string content)
     {
-        if (File.Exists(_configPath))
-            File.Delete(_configPath);
+        _files.SetFile(ConfigPath, content);
+        return Task.CompletedTask;
     }
 }

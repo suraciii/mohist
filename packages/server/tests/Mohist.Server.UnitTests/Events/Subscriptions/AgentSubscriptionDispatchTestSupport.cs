@@ -34,7 +34,7 @@ internal static class AgentSubscriptionDispatchTestSupport
         var handler = new AgentSubscriptionDispatchHandler(
             scopeFactory,
             NullLogger<AgentSubscriptionDispatchHandler>.Instance);
-        return (recording, new TestScope(database, handler));
+        return (recording, new TestScope(database, scopeFactory, handler));
     }
 
     public static async Task SeedProjectAsync(TestScope scope, string projectId)
@@ -128,13 +128,20 @@ internal static class AgentSubscriptionDispatchTestSupport
     public sealed class TestScope : IAsyncDisposable
     {
         private readonly TestDatabase _database;
-        public TestScope(TestDatabase database, AgentSubscriptionDispatchHandler handler)
+        private readonly IServiceScopeFactory _scopeFactory;
+
+        public TestScope(
+            TestDatabase database,
+            IServiceScopeFactory scopeFactory,
+            AgentSubscriptionDispatchHandler handler)
         {
             _database = database;
+            _scopeFactory = scopeFactory;
             Handler = handler;
         }
         public TestDatabase Database => _database;
         public AgentSubscriptionDispatchHandler Handler { get; }
+        public IServiceScope CreateScope() => _scopeFactory.CreateScope();
         public async ValueTask DisposeAsync() => await _database.DisposeAsync();
     }
 

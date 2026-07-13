@@ -192,22 +192,6 @@ public class BackfillIssueLegacyArrayLabelsMigrationTests
         Assert.Equal("""{"kind":"feature"}""", await ReadLabelsRawAsync(verify, "issue_real_dict"));
     }
 
-    [Fact]
-    public void MigrationClass_DoesNotOverrideBuildTargetModel()
-    {
-        // Pure data backfill: the migration must not modify the EF model,
-        // so BuildTargetModel is intentionally not overridden. Guards the
-        // invariant — any future override would imply a model change, which
-        // would need a Designer partial and a snapshot update.
-        var method = typeof(BackfillIssueLegacyArrayLabels).GetMethod(
-            "BuildTargetModel",
-            System.Reflection.BindingFlags.Instance
-            | System.Reflection.BindingFlags.Public
-            | System.Reflection.BindingFlags.NonPublic);
-        Assert.NotNull(method);
-        Assert.Equal(typeof(Microsoft.EntityFrameworkCore.Migrations.Migration), method!.DeclaringType);
-    }
-
     private static async Task RunMigrationUpAsync(TestDatabase database)
     {
         await using var ctx = database.CreateDbContext();

@@ -48,7 +48,7 @@ public static class CliTestFactory
         if (activeProjectId is not null)
         {
             fs.AddFile(
-                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".mohist", "cli-state.json"),
+                MohistCliApi.DefaultProjectStatePath(),
                 $"{{\"activeProjectId\":\"{activeProjectId}\"}}");
         }
         return (handler, http, output, error, fs, new FakeCommandExecutor(), installer ?? new FakeServiceInstaller());

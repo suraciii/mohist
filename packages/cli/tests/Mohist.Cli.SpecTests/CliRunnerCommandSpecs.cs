@@ -268,7 +268,7 @@ public class CliRunnerCommandSpecs
         var error = new StringWriter();
         var fileSystem = new FakeFileSystem();
         fileSystem.AddFile(
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".mohist", "cli-state.json"),
+            global::Mohist.Cli.MohistCliApi.DefaultProjectStatePath(),
             $"{{\"activeProjectId\":\"{ActiveProjectId}\"}}");
         var executor = new FakeCommandExecutor();
         var api = new MohistCliApi(http, output, error, fileSystem, executor);
@@ -413,7 +413,7 @@ public class CliRunnerCommandSpecs
         var error = new StringWriter();
         var fileSystem = new FakeFileSystem();
         fileSystem.AddFile(
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".mohist", "cli-state.json"),
+            global::Mohist.Cli.MohistCliApi.DefaultProjectStatePath(),
             $"{{\"activeProjectId\":\"{ActiveProjectId}\"}}");
         var executor = new FakeCommandExecutor();
         var api = new MohistCliApi(http, output, error, fileSystem, executor);

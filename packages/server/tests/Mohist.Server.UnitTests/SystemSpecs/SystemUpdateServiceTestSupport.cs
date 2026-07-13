@@ -1,4 +1,5 @@
 using System.Net;
+using System.Text;
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -34,13 +35,18 @@ internal static class SystemUpdateServiceTestSupport
         return CreateService(new SequencedSystemInfo(systemInfo), store, commandRunner, readinessProbe, enabled, includeEnabled);
     }
 
-    internal static FileSystemSystemUpdateStore CreateFileSystemStore(string statePath)
+    internal static FileSystemSystemUpdateStore CreateFileSystemStore(
+        InMemorySystemUpdateStateFiles files,
+        string statePath = "/test/system-update.json")
     {
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
         {
             ["Mohist:SystemUpdate:StatePath"] = statePath
         }).Build();
-        return new FileSystemSystemUpdateStore(configuration);
+        return new FileSystemSystemUpdateStore(
+            configuration,
+            new MockEnvironmentVariableProvider(),
+            files);
     }
 
     internal static SystemUpdateService CreateService(
@@ -122,9 +128,15 @@ internal static class SystemUpdateServiceTestSupport
         ISystemUpdateStore store,
         ISystemUpdateCommandRunner commandRunner,
         ISystemReadinessProbe readinessProbe,
-        string managedAssetsPath)
+        bool hasManagedAssets = true)
     {
-        return CreateConsistencyService(systemInfo, store, commandRunner, readinessProbe, managedAssetsPath, new FakeTimeProvider(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero))).Service;
+        return CreateConsistencyService(
+            systemInfo,
+            store,
+            commandRunner,
+            readinessProbe,
+            hasManagedAssets,
+            new FakeTimeProvider(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero))).Service;
     }
 
     internal static (SystemUpdateService Service, FakeTimeProvider Time) CreateConsistencyService(
@@ -132,13 +144,13 @@ internal static class SystemUpdateServiceTestSupport
         ISystemUpdateStore store,
         ISystemUpdateCommandRunner commandRunner,
         ISystemReadinessProbe readinessProbe,
-        string managedAssetsPath,
+        bool hasManagedAssets,
         FakeTimeProvider time)
     {
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
         {
             ["Mohist:SystemUpdate:Enabled"] = "true",
-            ["Mohist:CliSkillDataPath"] = managedAssetsPath
+            ["Mohist:CliSkillDataPath"] = "/test/skill-data"
         }).Build();
 
         var service = new SystemUpdateService(
@@ -149,7 +161,8 @@ internal static class SystemUpdateServiceTestSupport
             configuration,
             new MockEnvironmentVariableProvider(),
             NullLogger<SystemUpdateService>.Instance,
-            time);
+            time,
+            new ManagedAssetInspector(hasManagedAssets));
         return (service, time);
     }
 
@@ -357,6 +370,97 @@ internal static class SystemUpdateServiceTestSupport
                 waiter.Complete();
             }
         }
+    }
+
+    internal sealed class InMemorySystemUpdateStateFiles : ISystemUpdateStateFiles
+    {
+        private readonly object _gate = new();
+        private readonly Dictionary<string, byte[]> _files = new(StringComparer.Ordinal);
+
+        public void EnsureParentDirectory(string path)
+        {
+        }
+
+        public bool Exists(string path)
+        {
+            lock (_gate)
+                return _files.ContainsKey(path);
+        }
+
+        public Stream OpenRead(string path)
+        {
+            lock (_gate)
+            {
+                if (!_files.TryGetValue(path, out var contents))
+                    throw new FileNotFoundException($"No state file at '{path}'.");
+                return new MemoryStream(contents, writable: false);
+            }
+        }
+
+        public Stream Create(string path) => new CommitStream(this, path);
+
+        public bool TryCreate(string path, string contents)
+        {
+            lock (_gate)
+            {
+                if (_files.ContainsKey(path))
+                    return false;
+                _files[path] = Encoding.UTF8.GetBytes(contents);
+                return true;
+            }
+        }
+
+        public string ReadAllText(string path) => Encoding.UTF8.GetString(ReadAllBytes(path));
+
+        public byte[] ReadAllBytes(string path)
+        {
+            lock (_gate)
+            {
+                if (!_files.TryGetValue(path, out var contents))
+                    throw new FileNotFoundException($"No state file at '{path}'.");
+                return contents.ToArray();
+            }
+        }
+
+        public void Move(string source, string destination, bool overwrite)
+        {
+            lock (_gate)
+            {
+                if (!_files.TryGetValue(source, out var contents))
+                    throw new FileNotFoundException($"No state file at '{source}'.");
+                if (!overwrite && _files.ContainsKey(destination))
+                    throw new IOException($"State file already exists at '{destination}'.");
+                _files.Remove(source);
+                _files[destination] = contents;
+            }
+        }
+
+        public void Delete(string path)
+        {
+            lock (_gate)
+                _files.Remove(path);
+        }
+
+        private void Save(string path, byte[] contents)
+        {
+            lock (_gate)
+                _files[path] = contents;
+        }
+
+        private sealed class CommitStream(InMemorySystemUpdateStateFiles owner, string path) : MemoryStream
+        {
+            protected override void Dispose(bool disposing)
+            {
+                if (disposing)
+                    owner.Save(path, ToArray());
+                base.Dispose(disposing);
+            }
+        }
+    }
+
+    internal sealed class ManagedAssetInspector(bool hasSkill) : IManagedAssetInspector
+    {
+        public bool HasSkill(string assetRoot) => hasSkill;
     }
 
     internal sealed class RecordingCommandRunner : ISystemUpdateCommandRunner

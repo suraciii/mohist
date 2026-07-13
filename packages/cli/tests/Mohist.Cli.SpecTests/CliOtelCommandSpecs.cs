@@ -319,24 +319,9 @@ public class CliOtelCommandSpecs
     }
 
     [Fact]
-    public void ResolveDatabasePath_NullOrEmpty_ReturnsHomeDirPath()
-    {
-        var environment = new FakeEnvironment();
-        var resolved = OtelCommands.ResolveDatabasePath(null, environment);
-        var expected = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            ".mohist",
-            "otel.db");
-        Assert.Equal(expected, resolved);
-
-        var empty = OtelCommands.ResolveDatabasePath("  ", environment);
-        Assert.Equal(expected, empty);
-    }
-
-    [Fact]
     public void ResolveDatabasePath_DefaultUsesMainDbPathDirectory()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), "mohist-main-db-" + Guid.NewGuid().ToString("N"));
+        var tempDir = Path.Combine("/test", "mohist-main-db-" + Guid.NewGuid().ToString("N"));
         var mainDbPath = Path.Combine(tempDir, "mohist.db");
         var environment = new FakeEnvironment();
         environment[OtelCommands.MainDbPathEnvironmentVariable] = mainDbPath;

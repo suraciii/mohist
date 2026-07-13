@@ -12,27 +12,22 @@ using Xunit;
 namespace Mohist.Server.UnitTests.Issue.Services;
 
 [Collection("MohistDb")]
-public sealed class AttachmentServiceTests : IDisposable
+public sealed class AttachmentServiceTests
 {
     private static readonly DateTimeOffset Now = new(2026, 7, 11, 12, 0, 0, TimeSpan.Zero);
+    private const string Root = "/test/attachment-service";
 
     private readonly MohistDbFixture _fixture;
-    private readonly string _root;
+    private readonly InMemoryStorageFileSystem _files = new();
     private readonly FileSystemAttachmentStorage _storage;
 
     public AttachmentServiceTests(MohistDbFixture fixture)
     {
         _fixture = fixture;
-        _root = Path.Combine(Path.GetTempPath(), $"mohist-attachment-service-{Guid.NewGuid():N}");
         _storage = new FileSystemAttachmentStorage(
-            _root,
-            NullLogger<FileSystemAttachmentStorage>.Instance);
-    }
-
-    public void Dispose()
-    {
-        if (Directory.Exists(_root))
-            Directory.Delete(_root, recursive: true);
+            Root,
+            NullLogger<FileSystemAttachmentStorage>.Instance,
+            _files);
     }
 
     [Fact]
@@ -47,7 +42,7 @@ public sealed class AttachmentServiceTests : IDisposable
         var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
         await using var db = await dbFactory.CreateDbContextAsync();
         Assert.False(await db.Attachments.AnyAsync(a => a.ProjectId == "proj_limit"));
-        Assert.Empty(Directory.EnumerateFileSystemEntries(_root));
+        Assert.True(_files.IsDirectoryEmpty(Root));
     }
 
     [Fact]
@@ -84,7 +79,7 @@ public sealed class AttachmentServiceTests : IDisposable
         Assert.Equal(1, removed);
         await using var verify = await dbFactory.CreateDbContextAsync();
         Assert.False(await verify.Attachments.AnyAsync(a => a.Id == "att_cleanup"));
-        Assert.False(File.Exists(_storage.ResolveAbsolutePath(storagePath)));
+        Assert.False(_files.FileExists(_storage.ResolveAbsolutePath(storagePath)));
     }
 
     private AttachmentService CreateService(AttachmentStorageOptions? options = null)

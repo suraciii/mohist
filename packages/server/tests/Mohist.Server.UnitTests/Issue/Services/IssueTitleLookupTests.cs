@@ -223,29 +223,6 @@ public class IssueTitleLookupTests
         Assert.Equal(fromQuerierPath[33], fromAssemblerPath[33]);
     }
 
-    [Fact]
-    public void AgentSessionQuerier_NoLongerExposesLoadIssueTitlesAsyncOrIssueTitle()
-    {
-        // The issue-370 T-004 acceptance criterion: the core query class
-        // no longer declares LoadIssueTitlesAsync or IssueTitle as
-        // internal static members. Pin by reflection so a future
-        // regression (someone adding the static back) trips the spec.
-        var type = typeof(AgentSessionQuerier);
-        var loadTitles = type.GetMethod(
-            "LoadIssueTitlesAsync",
-            System.Reflection.BindingFlags.Static
-                | System.Reflection.BindingFlags.Public
-                | System.Reflection.BindingFlags.NonPublic);
-        var issueTitle = type.GetMethod(
-            "IssueTitle",
-            System.Reflection.BindingFlags.Static
-                | System.Reflection.BindingFlags.Public
-                | System.Reflection.BindingFlags.NonPublic);
-
-        Assert.Null(loadTitles);
-        Assert.Null(issueTitle);
-    }
-
     private static async Task InsertGenericSessionAsync(
         MohistDbContext db,
         string projectId,

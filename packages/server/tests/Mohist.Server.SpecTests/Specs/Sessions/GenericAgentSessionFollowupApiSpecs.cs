@@ -465,12 +465,7 @@ public class GenericAgentSessionFollowupApiSpecs : IAsyncLifetime
     {
         var projectName = $"gen-followup-{Guid.NewGuid():N}";
         if (projectName.Length > 63) projectName = projectName[..63];
-        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new
-        {
-            name = projectName,
-            path = Directory.GetCurrentDirectory(),
-            baseBranch = "main",
-        });
+        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = projectName });
         await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new
         {
             name = "main",

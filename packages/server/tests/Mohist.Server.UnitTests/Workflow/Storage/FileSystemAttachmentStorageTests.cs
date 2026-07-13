@@ -7,29 +7,18 @@ using Xunit;
 
 namespace Mohist.Server.UnitTests.Workflow.Storage;
 
-public class FileSystemAttachmentStorageTests : IDisposable
+public class FileSystemAttachmentStorageTests
 {
-    private readonly string _root;
+    private const string Root = "/test/attachments";
+    private readonly InMemoryStorageFileSystem _files = new();
     private readonly FileSystemAttachmentStorage _storage;
 
     public FileSystemAttachmentStorageTests()
     {
-        _root = Path.Combine(Path.GetTempPath(), $"mohist-attachments-{Guid.NewGuid():N}");
         _storage = new FileSystemAttachmentStorage(
-            _root,
-            NullLogger<FileSystemAttachmentStorage>.Instance);
-    }
-
-    public void Dispose()
-    {
-        try
-        {
-            if (Directory.Exists(_root))
-                Directory.Delete(_root, recursive: true);
-        }
-        catch
-        {
-        }
+            Root,
+            NullLogger<FileSystemAttachmentStorage>.Instance,
+            _files);
     }
 
     private static Stream Bytes(byte[] data) => new MemoryStream(data, writable: false);
@@ -51,7 +40,7 @@ public class FileSystemAttachmentStorageTests : IDisposable
 
         Assert.Equal("proj_1/att_42/content", path);
         Assert.Equal(
-            Path.GetFullPath(Path.Combine(_root, "proj_1", "att_42", "content")),
+            Path.GetFullPath(Path.Combine(Root, "proj_1", "att_42", "content")),
             _storage.ResolveAbsolutePath(path));
     }
 
@@ -85,9 +74,9 @@ public class FileSystemAttachmentStorageTests : IDisposable
 
         var contentAbsolute = _storage.ResolveAbsolutePath(storagePath);
         var collection = Path.GetDirectoryName(contentAbsolute)!;
-        Assert.True(File.Exists(contentAbsolute));
-        Assert.True(File.Exists(Path.Combine(collection, "metadata.json")));
-        Assert.False(File.Exists(contentAbsolute + ".tmp"));
+        Assert.True(_files.FileExists(contentAbsolute));
+        Assert.True(_files.FileExists(Path.Combine(collection, "metadata.json")));
+        Assert.False(_files.FileExists(contentAbsolute + ".tmp"));
 
         using var reader = new StreamReader(_storage.OpenFileContent(storagePath));
         Assert.Equal("PNG", await reader.ReadToEndAsync());
@@ -127,9 +116,9 @@ public class FileSystemAttachmentStorageTests : IDisposable
                 WriteFor("bad.txt", 99),
                 SampleRecordedAt));
 
-        Assert.False(File.Exists(contentAbsolute));
-        Assert.False(File.Exists(contentAbsolute + ".tmp"));
-        Assert.False(Directory.Exists(Path.GetDirectoryName(contentAbsolute)!));
+        Assert.False(_files.FileExists(contentAbsolute));
+        Assert.False(_files.FileExists(contentAbsolute + ".tmp"));
+        Assert.False(_files.DirectoryExists(Path.GetDirectoryName(contentAbsolute)!));
     }
 
     [Fact]
@@ -143,28 +132,13 @@ public class FileSystemAttachmentStorageTests : IDisposable
     }
 
     [Fact]
-    public void OpenFileContent_RejectsSymlinkedAttachmentDirectory()
+    public void OpenFileContent_RejectsReparsePointAttachmentDirectory()
     {
         var storagePath = _storage.GenerateStoragePath("proj_link", "att_link");
         var contentAbsolute = _storage.ResolveAbsolutePath(storagePath);
         var collection = Path.GetDirectoryName(contentAbsolute)!;
-        var outside = Path.Combine(_root, $"outside-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(Path.GetDirectoryName(collection)!);
-        Directory.CreateDirectory(outside);
-        File.WriteAllText(Path.Combine(outside, "content"), "secret");
-
-        try
-        {
-            Directory.CreateSymbolicLink(collection, outside);
-        }
-        catch (PlatformNotSupportedException)
-        {
-            return;
-        }
-        catch (UnauthorizedAccessException)
-        {
-            return;
-        }
+        _files.CreateDirectory(collection);
+        _files.MarkReparsePoint(collection);
 
         var ex = Assert.Throws<AttachmentStorageException>(() => _storage.OpenFileContent(storagePath));
         Assert.Contains("symlink", ex.Message);
@@ -175,7 +149,7 @@ public class FileSystemAttachmentStorageTests : IDisposable
     {
         var storagePath = _storage.GenerateStoragePath("proj_none", "att_none");
         var contentAbsolute = _storage.ResolveAbsolutePath(storagePath);
-        Directory.CreateDirectory(Path.GetDirectoryName(contentAbsolute)!);
+        _files.CreateDirectory(Path.GetDirectoryName(contentAbsolute)!);
 
         var metadata = await _storage.ReadMetadataAsync(storagePath);
 
@@ -194,13 +168,14 @@ public class FileSystemAttachmentStorageTests : IDisposable
     [Fact]
     public void OptionsRoot_UsesConfiguredRootBeforeEnvironmentRoot()
     {
-        var configuredRoot = Path.Combine(_root, "configured");
-        var environmentRoot = Path.Combine(_root, "environment");
+        var configuredRoot = Path.Combine(Root, "configured");
+        var environmentRoot = Path.Combine(Root, "environment");
         var environment = new AttachmentStorageEnvironment(environmentRoot);
         var storage = new FileSystemAttachmentStorage(
             Options.Create(new AttachmentStorageOptions { Root = configuredRoot }),
             NullLogger<FileSystemAttachmentStorage>.Instance,
-            environment);
+            environment,
+            _files);
 
         Assert.Equal(Path.GetFullPath(configuredRoot), storage.StorageRoot);
     }
@@ -208,12 +183,13 @@ public class FileSystemAttachmentStorageTests : IDisposable
     [Fact]
     public void OptionsRoot_UsesEnvironmentRootWhenConfigurationRootMissing()
     {
-        var environmentRoot = Path.Combine(_root, "environment-only");
+        var environmentRoot = Path.Combine(Root, "environment-only");
         var environment = new AttachmentStorageEnvironment(environmentRoot);
         var storage = new FileSystemAttachmentStorage(
             Options.Create(new AttachmentStorageOptions()),
             NullLogger<FileSystemAttachmentStorage>.Instance,
-            environment);
+            environment,
+            _files);
 
         Assert.Equal(Path.GetFullPath(environmentRoot), storage.StorageRoot);
     }

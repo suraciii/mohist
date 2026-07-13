@@ -290,6 +290,24 @@ public class MohistCliApiSendAsyncTests
     }
 
     [Fact]
+    public async Task PrintWithOutputAsync_JsonMode_PreservesUnicodeCharacters()
+    {
+        var (api, _) = CreateApi((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new { title = "[Dashboard] 视图", body = "中文内容测试" },
+            })));
+
+        var exit = await api.PrintWithOutputAsync("/api/anything", "json");
+
+        Assert.Equal(0, exit);
+        Assert.Contains("视图", api.Output.ToString());
+        Assert.Contains("中文内容测试", api.Output.ToString());
+        Assert.DoesNotContain("\\u", api.Output.ToString());
+    }
+
+    [Fact]
     public async Task PrintPatchWithOutputAsync_JsonMode_ServerReachable_PrintsJson()
     {
         var (api, handler) = CreateApi((_, _) =>

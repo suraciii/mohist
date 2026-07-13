@@ -57,18 +57,6 @@ public class BacklogTests : IClassFixture<BacklogFixture>
         return runnerId;
     }
 
-    private async Task ResetClusterAsync()
-    {
-        var oldCluster = _fixture.Cluster;
-        var builder = new InProcessTestClusterBuilder();
-        builder.Options.InitialSilosCount = 1;
-        BacklogFixture.ConfigureCluster(builder, _fixture.ConnectionString);
-        var newCluster = builder.Build();
-        await newCluster.DeployAsync();
-        oldCluster?.Dispose();
-        _fixture.GetType().GetProperty("Cluster")!.SetValue(_fixture, newCluster);
-    }
-
     private static WorkflowDefinition SingleStage(
         List<TaskDefinition>? tasks = null,
         List<CheckDefinition>? checks = null)
@@ -151,7 +139,7 @@ public class BacklogTests : IClassFixture<BacklogFixture>
     [Fact]
     public async Task WorkflowInBacklog_RunnerAssignsOnFirstPoll()
     {
-        await ResetClusterAsync();
+        await _fixture.ResetClusterAsync();
         var workflow = await CreateAndStartAsync(SingleStage());
 
         var runnerId = await RegisterRunnerAsync();
@@ -176,7 +164,7 @@ public class BacklogTests : IClassFixture<BacklogFixture>
     [Fact]
     public async Task PausedWorkflowInBacklog_RunnerAssignsButNoWork()
     {
-        await ResetClusterAsync();
+        await _fixture.ResetClusterAsync();
         var workflow = await CreateAndStartAsync(SingleStage());
         await workflow.PauseAsync("hold");
 
@@ -190,7 +178,7 @@ public class BacklogTests : IClassFixture<BacklogFixture>
     [Fact]
     public async Task FailedWorkflow_ReleasedFromBacklog()
     {
-        await ResetClusterAsync();
+        await _fixture.ResetClusterAsync();
         var workflow = await CreateAndStartAsync(SingleStage());
 
         var runnerId = await RegisterRunnerAsync();
@@ -212,7 +200,7 @@ public class BacklogTests : IClassFixture<BacklogFixture>
     [Fact]
     public async Task RetryAfterFailure_ReRegisteredToBacklog()
     {
-        await ResetClusterAsync();
+        await _fixture.ResetClusterAsync();
         var workflow = await CreateAndStartAsync(SingleStage());
 
         var runnerId = await RegisterRunnerAsync();
@@ -239,7 +227,7 @@ public class BacklogTests : IClassFixture<BacklogFixture>
     [Fact]
     public async Task NoRunner_WorkflowWaitsInBacklog()
     {
-        await ResetClusterAsync();
+        await _fixture.ResetClusterAsync();
         var workflow = await CreateAndStartAsync(SingleStage());
 
         var status = await workflow.GetRunStatusAsync();
@@ -259,7 +247,7 @@ public class BacklogTests : IClassFixture<BacklogFixture>
     [Fact]
     public async Task CompletedWorkflow_ReleasedFromBacklog()
     {
-        await ResetClusterAsync();
+        await _fixture.ResetClusterAsync();
         var workflow = await CreateAndStartAsync(SingleStage());
 
         var runnerId = await RegisterRunnerAsync();

@@ -364,7 +364,7 @@ public class RunnerStatusApiSpecs
     [Fact]
     public async Task RegisterRunner_WithBuildGitHash_ExposesHashInStatus()
     {
-        var projectResponse = await _fixture.Client.PostAsJsonAsync("/api/projects", new { name = $"proj-{Guid.NewGuid():N}", path = "/tmp/project", baseBranch = "main" });
+        var projectResponse = await _fixture.Client.PostAsJsonAsync("/api/projects", new { name = $"proj-{Guid.NewGuid():N}" });
         var projectJson = await projectResponse.Content.ReadFromJsonAsync<global::System.Text.Json.JsonElement>();
         var projectId = projectJson.GetProperty("data").GetProperty("id").GetString()!;
 

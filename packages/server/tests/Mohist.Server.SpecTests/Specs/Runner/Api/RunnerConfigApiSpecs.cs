@@ -385,9 +385,8 @@ public class RunnerConfigFixture : IAsyncLifetime
         _keeper = new SqliteConnection(connectionString);
         await _keeper.OpenAsync();
         MigratedSqliteTemplate.CopyTo(_keeper);
-        _runnerRoot = Path.Combine(Path.GetTempPath(), $"mohist-runner-config-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(_runnerRoot);
-        _systemUpdateStatePath = Path.Combine(Path.GetTempPath(), $"mohist-sys-config-{Guid.NewGuid():N}.json");
+        _runnerRoot = "/test/runner-config";
+        _systemUpdateStatePath = "/test/system-update-config.json";
 
         _portAllocator = new TestClusterPortAllocator();
         var (siloPort, gatewayPort) = _portAllocator.AllocateConsecutivePortPairs(1);
@@ -457,14 +456,6 @@ public class RunnerConfigFixture : IAsyncLifetime
         _factory?.Dispose();
         await _keeper.DisposeAsync();
         _portAllocator?.Dispose();
-        if (Directory.Exists(_runnerRoot))
-            Directory.Delete(_runnerRoot, recursive: true);
-        if (File.Exists(_systemUpdateStatePath))
-            File.Delete(_systemUpdateStatePath);
-        if (!string.IsNullOrWhiteSpace(_factory?.ArtifactStorageRoot) && Directory.Exists(_factory.ArtifactStorageRoot))
-            Directory.Delete(_factory.ArtifactStorageRoot, recursive: true);
-        if (!string.IsNullOrWhiteSpace(_factory?.LogsPath) && Directory.Exists(_factory.LogsPath))
-            Directory.Delete(_factory.LogsPath, recursive: true);
     }
 
     /// <summary>

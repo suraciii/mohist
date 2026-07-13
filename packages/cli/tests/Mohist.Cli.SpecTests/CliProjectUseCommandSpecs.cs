@@ -25,8 +25,7 @@ namespace Mohist.Cli.SpecTests;
 //      state.
 public class CliProjectUseCommandSpecs
 {
-    private static string ProjectStatePath() =>
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".mohist", "cli-state.json");
+    private static string ProjectStatePath() => global::Mohist.Cli.MohistCliApi.DefaultProjectStatePath();
 
     [Fact]
     public async Task Root_Help_NoLongerListsUseSubcommand()

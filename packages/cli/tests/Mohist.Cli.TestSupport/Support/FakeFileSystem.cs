@@ -14,6 +14,10 @@ public sealed class FakeFileSystem : IFileSystem
         set => _currentDirectory = value;
     }
 
+    public string Cwd => CurrentDirectory;
+
+    public void SetCurrentDirectory(string path) => CurrentDirectory = path;
+
     public IReadOnlyDictionary<string, string> Files => _files;
 
     public void AddFile(string path, string content)
@@ -21,9 +25,19 @@ public sealed class FakeFileSystem : IFileSystem
         _files[Normalize(path)] = content;
     }
 
+    public void AddDirectory(string path) => CreateDirectory(path);
+
+    public bool HasFile(string path) => _files.ContainsKey(Normalize(path));
+
     public bool Exists(string path) => _files.ContainsKey(Normalize(path)) || _directories.Contains(Normalize(path));
 
-    public bool DirectoryExists(string path) => _directories.Contains(Normalize(path));
+    public bool DirectoryExists(string path)
+    {
+        var normalized = Normalize(path);
+        return _directories.Contains(normalized)
+            || _directories.Any(directory => StartsWithDirectory(directory, normalized))
+            || _files.Keys.Any(file => StartsWithDirectory(file, normalized));
+    }
 
     public void CreateDirectory(string path)
     {
@@ -62,7 +76,7 @@ public sealed class FakeFileSystem : IFileSystem
             return;
         }
 
-        if (_directories.Contains(sourceKey))
+        if (DirectoryExists(sourceKey))
         {
             var sourcePrefix = sourceKey.EndsWith(Path.DirectorySeparatorChar)
                 ? sourceKey
@@ -78,10 +92,10 @@ public sealed class FakeFileSystem : IFileSystem
                 _files.Remove(file);
             }
 
-            foreach (var dir in _directories.Where(d => d.StartsWith(sourcePrefix, StringComparison.OrdinalIgnoreCase)).ToArray())
+            foreach (var dir in _directories.Where(d => d == sourceKey || d.StartsWith(sourcePrefix, StringComparison.OrdinalIgnoreCase)).ToArray())
             {
-                var suffix = dir.Substring(sourcePrefix.Length);
-                _directories.Add(destFilePrefix + suffix);
+                var suffix = dir == sourceKey ? string.Empty : dir[sourcePrefix.Length..];
+                _directories.Add(string.IsNullOrEmpty(suffix) ? destKey : destFilePrefix + suffix);
                 _directories.Remove(dir);
             }
 
@@ -150,6 +164,14 @@ public sealed class FakeFileSystem : IFileSystem
     public Stream OpenWrite(string path) => new RecordingStream(this, path);
 
     private static string Normalize(string path) => Path.GetFullPath(path);
+
+    private static bool StartsWithDirectory(string path, string directory)
+    {
+        var prefix = directory.EndsWith(Path.DirectorySeparatorChar)
+            ? directory
+            : directory + Path.DirectorySeparatorChar;
+        return path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase);
+    }
 
     private sealed class RecordingStream : MemoryStream
     {

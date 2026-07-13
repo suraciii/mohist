@@ -78,7 +78,10 @@ public class InfoRendererTests
         var writer = new StringWriter();
         renderer.RenderJson(writer, result);
 
-        var node = JsonNode.Parse(writer.ToString()) as JsonObject;
+        var json = writer.ToString();
+        Assert.Single(json.Split('\n', StringSplitOptions.RemoveEmptyEntries));
+
+        var node = JsonNode.Parse(json) as JsonObject;
         Assert.NotNull(node);
         var keys = node!.Select(kv => kv.Key).ToHashSet();
         Assert.Contains("cli", keys);
@@ -156,5 +159,74 @@ public class InfoRendererTests
         Assert.Equal("412 MB", (string?)dataDir["size"]);
 
         Assert.Null((string?)root["platformNotice"]);
+    }
+
+    [Fact]
+    public void BuildCliLine_IncludesBinaryPath()
+    {
+        var line = InfoRenderer.BuildCliLine(new InfoCli("1.0.0", "/usr/bin/mo"));
+
+        Assert.Contains("1.0.0", line);
+        Assert.Contains("/usr/bin/mo", line);
+    }
+
+    [Fact]
+    public void BuildServiceLine_Inactive_ShowsNotRunning()
+    {
+        var line = InfoRenderer.BuildServiceLine(
+            "Server",
+            new InfoService(new InfoServiceStatus("inactive", 0, null), null),
+            includeSource: false);
+
+        Assert.Contains(SystemdUnitParser.NotRunning, line);
+    }
+
+    [Fact]
+    public void BuildSourceLine_WithoutGitMetadata_ShowsSentinel()
+    {
+        var line = InfoRenderer.BuildSourceLine("  source", new InfoSource("/repo", null, null));
+
+        Assert.Contains("/repo", line);
+        Assert.Contains(SystemdUnitParser.NotAGitRepo, line);
+    }
+
+    [Fact]
+    public void BuildSourceLine_WithCommit_IncludesShaAndSubject()
+    {
+        var line = InfoRenderer.BuildSourceLine(
+            "  source",
+            new InfoSource("/repo", "a1b2c3d", "Add info command"));
+
+        Assert.Contains("/repo", line);
+        Assert.Contains("a1b2c3d", line);
+        Assert.Contains("Add info command", line);
+    }
+
+    [Fact]
+    public void BuildProjectLine_IncludesIssueCounts()
+    {
+        var line = InfoRenderer.BuildProjectLine(new InfoProject("proj_1", "mohist-local", 96, 22));
+
+        Assert.Contains("mohist-local", line);
+        Assert.Contains("96", line);
+        Assert.Contains("22", line);
+    }
+
+    [Fact]
+    public void BuildDataDirLine_IncludesPathAndSize()
+    {
+        var line = InfoRenderer.BuildDataDirLine(new InfoDataDir("/home/.mohist", "412 MB"));
+
+        Assert.Contains("/home/.mohist", line);
+        Assert.Contains("412 MB", line);
+    }
+
+    [Fact]
+    public void BuildDataDirLine_WithoutSize_ShowsUnknown()
+    {
+        var line = InfoRenderer.BuildDataDirLine(new InfoDataDir("/home/.mohist", null));
+
+        Assert.Contains("/home/.mohist", line);
+        Assert.Contains(SystemdUnitParser.Unknown, line);
     }
 }

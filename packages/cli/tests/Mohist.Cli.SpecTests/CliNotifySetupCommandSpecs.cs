@@ -15,7 +15,7 @@ public class CliNotifySetupCommandSpecs : IDisposable
 
     public CliNotifySetupCommandSpecs()
     {
-        _configPath = Path.Combine(Path.GetTempPath(), $"mohist-notify-{Guid.NewGuid():N}", "config.jsonc");
+        _configPath = Path.Combine("/test", $"mohist-notify-{Guid.NewGuid():N}", "config.jsonc");
         _previousProbe = NotifyCommands.HealthProbeOverride;
         _previousConfigPath = NotifyCommands.ConfigPathOverride;
         _previousSecretGenerator = NotifyCommands.SecretGeneratorOverride;

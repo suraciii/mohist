@@ -63,18 +63,16 @@ public sealed class MohistDbFixture : IAsyncLifetime
         _keeper = new SqliteConnection(_connectionString);
         _keeper.Open();
 
-        var runnerRoot = Path.Combine(Path.GetTempPath(), $"mohist-runner-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(runnerRoot);
-        var systemUpdateStatePath = Path.Combine(Path.GetTempPath(), $"mohist-sys-{Guid.NewGuid():N}.json");
-        var artifactStorageRoot = Path.Combine(Path.GetTempPath(), $"mohist-artifacts-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(artifactStorageRoot);
+        const string runnerRoot = "/test/runner";
+        const string systemUpdateStatePath = "/test/system-update.json";
+        const string artifactStorageRoot = "/test/artifacts";
 
         var config = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
                 ["Mohist:SqliteConnectionString"] = _connectionString,
                 ["Mohist:RunnerRoot"] = runnerRoot,
-                ["Mohist:WebRoot"] = Path.Combine(Path.GetTempPath(), $"mohist-web-{Guid.NewGuid():N}"),
+                ["Mohist:WebRoot"] = "/test/web",
                 ["Mohist:SystemUpdate:StatePath"] = systemUpdateStatePath,
                 ["Mohist:ArtifactStorage:Root"] = artifactStorageRoot,
                 ["Mohist:ServerUrl"] = "http://127.0.0.1:3456",

@@ -28,7 +28,7 @@ internal sealed class WorkflowProfileManagerTestContext : IDisposable
             .Options;
 
         var factory = CreateDbContextFactory();
-        var promptLoader = new FilePromptLoader();
+        var promptLoader = new FakePromptLoader();
         var registry = new Mohist.Server.Issue.Services.WorkflowProfiles.IssueWorkflowProfileRegistry(promptLoader, factory);
         Manager = new WorkflowProfileManager(
             factory,

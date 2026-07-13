@@ -196,7 +196,7 @@ public class ApiContractSpecs
 
         try
         {
-            var project = await _fixture.Client.PostDataAsync<ProjectDto>("/api/projects", new { name = UniqueProjectName("global-models"), path = "/tmp/project", baseBranch = "main" });
+            var project = await _fixture.Client.PostDataAsync<ProjectDto>("/api/projects", new { name = UniqueProjectName("global-models") });
             var response = await _fixture.Client.GetDataAsync<OpencodeModelsDto>($"/api/projects/{project.Id}/opencode/models");
 
             Assert.Contains("openai/gpt-5.5", response.Models);

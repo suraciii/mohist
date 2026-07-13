@@ -319,7 +319,7 @@ public class CliIssueWorkflowProfileSpecs
         var error = new StringWriter();
         var fs = new FakeFileSystem();
         fs.AddFile(
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".mohist", "cli-state.json"),
+            global::Mohist.Cli.MohistCliApi.DefaultProjectStatePath(),
             "{\"activeProjectId\":\"proj_abc\"}");
 
         var updateExit = await MohistCliCommands.RunAsync(

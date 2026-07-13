@@ -1,3 +1,4 @@
+using System.Text;
 using Microsoft.Extensions.Logging.Abstractions;
 using Mohist.Server.UnitTests.Support;
 using Mohist.Server.Workflow.Storage;
@@ -5,30 +6,18 @@ using Xunit;
 
 namespace Mohist.Server.UnitTests.Workflow.Storage;
 
-public class FileSystemWorkflowArtifactStorageTests : IDisposable
+public class FileSystemWorkflowArtifactStorageTests
 {
-    private readonly string _root;
+    private const string Root = "/test/artifacts";
+    private readonly InMemoryStorageFileSystem _files = new();
     private readonly FileSystemWorkflowArtifactStorage _storage;
 
     public FileSystemWorkflowArtifactStorageTests()
     {
-        _root = Path.Combine(Path.GetTempPath(), $"mohist-artifacts-{Guid.NewGuid():N}");
         _storage = new FileSystemWorkflowArtifactStorage(
-            _root,
-            NullLogger<FileSystemWorkflowArtifactStorage>.Instance);
-    }
-
-    public void Dispose()
-    {
-        try
-        {
-            if (Directory.Exists(_root))
-                Directory.Delete(_root, recursive: true);
-        }
-        catch
-        {
-            // best-effort cleanup; tmpfs may be flaky on CI
-        }
+            Root,
+            NullLogger<FileSystemWorkflowArtifactStorage>.Instance,
+            _files);
     }
 
     private static Stream Bytes(byte[] data) => new MemoryStream(data, writable: false);
@@ -108,8 +97,8 @@ public class FileSystemWorkflowArtifactStorageTests : IDisposable
 
         var contentAbsolute = _storage.ResolveAbsolutePath(storagePath);
         var collection = Path.GetDirectoryName(contentAbsolute)!;
-        Assert.True(File.Exists(contentAbsolute));
-        Assert.True(File.Exists(Path.Combine(collection, "metadata.json")));
+        Assert.True(_files.FileExists(contentAbsolute));
+        Assert.True(_files.FileExists(Path.Combine(collection, "metadata.json")));
 
         using var reader = new StreamReader(_storage.OpenFileContent(storagePath));
         var read = await reader.ReadToEndAsync();
@@ -144,7 +133,7 @@ public class FileSystemWorkflowArtifactStorageTests : IDisposable
         var absolute = _storage.ResolveAbsolutePath(storagePath);
         // The resolved absolute is the `content` file path; the
         // collection directory is its parent.
-        Assert.True(Directory.Exists(Path.GetDirectoryName(absolute)!));
+        Assert.True(_files.DirectoryExists(Path.GetDirectoryName(absolute)!));
 
         var metadata = await _storage.ReadMetadataAsync(storagePath);
         Assert.Equal(unusualPath, metadata!.Path);
@@ -170,7 +159,7 @@ public class FileSystemWorkflowArtifactStorageTests : IDisposable
         // workflows/wr_p/tasks/t_p/artifacts/a_p/content regardless
         // of the dangerous source path.
         Assert.Equal(
-            Path.GetFullPath(Path.Combine(_root, "workflows", "wr_p", "tasks", "t_p", "artifacts", "a_p", "content")),
+            Path.GetFullPath(Path.Combine(Root, "workflows", "wr_p", "tasks", "t_p", "artifacts", "a_p", "content")),
             absolute);
     }
 
@@ -196,8 +185,8 @@ public class FileSystemWorkflowArtifactStorageTests : IDisposable
         // open and surface a WorkflowArtifactNotFoundException.
         var contentAbsolute = _storage.ResolveAbsolutePath(storagePath);
         var collection = Path.GetDirectoryName(contentAbsolute)!;
-        Directory.CreateDirectory(collection);
-        File.WriteAllText(Path.Combine(collection, "metadata.json"), "{}");
+        _files.CreateDirectory(collection);
+        _files.AddFile(Path.Combine(collection, "metadata.json"), "{}"u8.ToArray());
 
         Assert.Throws<WorkflowArtifactNotFoundException>(() => _storage.OpenFileContent(storagePath));
     }
@@ -253,8 +242,8 @@ public class FileSystemWorkflowArtifactStorageTests : IDisposable
         Assert.Equal(3, result.FileCount);
 
         var absolute = _storage.ResolveAbsolutePath(storagePath);
-        Assert.True(Directory.Exists(absolute));
-        Assert.True(File.Exists(Path.Combine(Path.GetDirectoryName(absolute)!, "metadata.json")));
+        Assert.True(_files.DirectoryExists(absolute));
+        Assert.True(_files.FileExists(Path.Combine(Path.GetDirectoryName(absolute)!, "metadata.json")));
 
         var listing = await _storage.ListDirectoryEntriesAsync(storagePath);
         Assert.Equal(new[] { "index.md", "specs/auth.md", "specs/data.md" },
@@ -275,19 +264,10 @@ public class FileSystemWorkflowArtifactStorageTests : IDisposable
     }
 
     [Fact]
-    public async Task WriteDirectoryAsync_RefusesToFollowSymlinkInCollection()
+    public async Task WriteDirectoryAsync_ExcludesReparsePointInCollection()
     {
-        // The runner is responsible for not sending symlinked
-        // entries. The server re-validates the final filesystem
-        // shape by refusing to walk any reparse point when listing.
-        // We pre-create a directory with a symlink to outside and
-        // assert that ListDirectoryEntriesAsync refuses it.
         var storagePath = _storage.GenerateStoragePath(
             "wr_s", "t_s", "a_s", WorkflowArtifactStorageKind.Directory);
-
-        var outside = Path.Combine(_root, $"outside-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(outside);
-        File.WriteAllText(Path.Combine(outside, "secret.txt"), "top-secret");
 
         await _storage.WriteDirectoryAsync(
             storagePath,
@@ -298,21 +278,9 @@ public class FileSystemWorkflowArtifactStorageTests : IDisposable
             new WorkflowArtifactFileWrite { SourcePath = "specs/", Size = 2 },
             SampleRecordedAt);
 
-        // Inject a symlink into the recorded collection.
         var filesRoot = _storage.ResolveAbsolutePath(storagePath);
         var linkPath = Path.Combine(filesRoot, "leak.md");
-        try
-        {
-            File.CreateSymbolicLink(linkPath, Path.Combine(outside, "secret.txt"));
-        }
-        catch (PlatformNotSupportedException)
-        {
-            // Windows without developer mode cannot create symlinks.
-            // The traversal-refusal path is still covered by the
-            // other specs that inject `..` segments, which is the
-            // primary concern from the design.
-            return;
-        }
+        _files.AddFile(linkPath, "top-secret"u8.ToArray(), isReparsePoint: true);
 
         var listing = await _storage.ListDirectoryEntriesAsync(storagePath);
         var relativePaths = listing.Entries.Select(e => e.RelativePath).ToHashSet(StringComparer.Ordinal);
@@ -392,9 +360,10 @@ public class FileSystemWorkflowArtifactStorageTests : IDisposable
             "wr_c", "t_c", "a_c", WorkflowArtifactStorageKind.Directory);
         var limits = new WorkflowArtifactDirectoryLimits { MaxFileCount = 2, MaxTotalBytes = 1024, MaxFileBytes = 1024 };
         var storage = new FileSystemWorkflowArtifactStorage(
-            _root,
+            Root,
             NullLogger<FileSystemWorkflowArtifactStorage>.Instance,
-            limits);
+            limits,
+            _files);
 
         var entries = Enumerable.Range(0, 5)
             .Select(i => new WorkflowArtifactDirectoryEntryInput
@@ -421,9 +390,10 @@ public class FileSystemWorkflowArtifactStorageTests : IDisposable
             "wr_s2", "t_s2", "a_s2", WorkflowArtifactStorageKind.Directory);
         var limits = new WorkflowArtifactDirectoryLimits { MaxFileCount = 100, MaxTotalBytes = 5, MaxFileBytes = 5 };
         var storage = new FileSystemWorkflowArtifactStorage(
-            _root,
+            Root,
             NullLogger<FileSystemWorkflowArtifactStorage>.Instance,
-            limits);
+            limits,
+            _files);
 
         var entries = new List<WorkflowArtifactDirectoryEntryInput>
         {
@@ -447,9 +417,10 @@ public class FileSystemWorkflowArtifactStorageTests : IDisposable
             "wr_s3", "t_s3", "a_s3", WorkflowArtifactStorageKind.Directory);
         var limits = new WorkflowArtifactDirectoryLimits { MaxFileCount = 10, MaxTotalBytes = 1024, MaxFileBytes = 4 };
         var storage = new FileSystemWorkflowArtifactStorage(
-            _root,
+            Root,
             NullLogger<FileSystemWorkflowArtifactStorage>.Instance,
-            limits);
+            limits,
+            _files);
 
         var entries = new List<WorkflowArtifactDirectoryEntryInput>
         {
@@ -520,7 +491,7 @@ public class FileSystemWorkflowArtifactStorageTests : IDisposable
         var storagePath = _storage.GenerateStoragePath(
             "wr_nm", "t_nm", "a_nm", WorkflowArtifactStorageKind.File);
         var dir = _storage.ResolveAbsolutePath(storagePath);
-        Directory.CreateDirectory(dir);
+        _files.CreateDirectory(dir);
 
         var metadata = await _storage.ReadMetadataAsync(storagePath);
         Assert.Null(metadata);
@@ -537,23 +508,16 @@ public class FileSystemWorkflowArtifactStorageTests : IDisposable
     [Fact]
     public void Constructor_CreatesStorageRootIfMissing()
     {
-        var root = Path.Combine(Path.GetTempPath(), $"mohist-mkdir-{Guid.NewGuid():N}");
-        try
-        {
-            var storage = new FileSystemWorkflowArtifactStorage(
-                root,
-                NullLogger<FileSystemWorkflowArtifactStorage>.Instance);
-            Assert.True(Directory.Exists(root));
-            Assert.Equal(Path.GetFullPath(root), storage.StorageRoot);
-        }
-        finally
-        {
-            if (Directory.Exists(root))
-                Directory.Delete(root, recursive: true);
-        }
+        const string root = "/test/mkdir";
+        var storage = new FileSystemWorkflowArtifactStorage(
+            root,
+            NullLogger<FileSystemWorkflowArtifactStorage>.Instance,
+            _files);
+        Assert.True(_files.DirectoryExists(root));
+        Assert.Equal(Path.GetFullPath(root), storage.StorageRoot);
     }
 
-[Fact]
+    [Fact]
     public async Task WriteFileAsync_RollsBackWhenContentSizeDoesNotMatchDeclaredSize()
     {
         // The destination is a normal file that is unwriteable in a
@@ -564,7 +528,7 @@ public class FileSystemWorkflowArtifactStorageTests : IDisposable
             "wr_atomic", "t_atomic", "a_atomic", WorkflowArtifactStorageKind.File);
         var contentAbsolute = _storage.ResolveAbsolutePath(storagePath);
         var collection = Path.GetDirectoryName(contentAbsolute)!;
-        Directory.CreateDirectory(collection);
+        _files.CreateDirectory(collection);
 
         await Assert.ThrowsAsync<WorkflowArtifactStorageException>(() =>
             _storage.WriteFileAsync(
@@ -573,16 +537,13 @@ public class FileSystemWorkflowArtifactStorageTests : IDisposable
                 WriteFor("a", 99),         // declares 99 bytes
                 SampleRecordedAt));
 
-        Assert.False(File.Exists(contentAbsolute));
-        Assert.False(File.Exists(contentAbsolute + ".tmp"));
+        Assert.False(_files.FileExists(contentAbsolute));
+        Assert.False(_files.FileExists(contentAbsolute + ".tmp"));
     }
 
     [Fact]
-    public async Task WriteFileAsync_MetadataWithChineseSourcePath_PersistsVerbatimOnDisk()
+    public async Task WriteFileAsync_MetadataWithChineseSourcePath_PersistsVerbatim()
     {
-        // T-004 acceptance: a persisted artifact containing Chinese characters
-        // is readable on disk (the JSON.Options.Encoder passes non-ASCII through
-        // while the indented serializer is used for human-readable files).
         const string sourcePath = "中文目录/工件.md";
         var storagePath = _storage.GenerateStoragePath(
             "wr_zh", "t_zh", "a_zh", WorkflowArtifactStorageKind.File);
@@ -605,9 +566,9 @@ public class FileSystemWorkflowArtifactStorageTests : IDisposable
         var contentAbsolute = _storage.ResolveAbsolutePath(storagePath);
         var collection = Path.GetDirectoryName(contentAbsolute)!;
         var metadataPath = Path.Combine(collection, "metadata.json");
-        Assert.True(File.Exists(metadataPath));
+        Assert.True(_files.FileExists(metadataPath));
 
-        var rawJson = await File.ReadAllTextAsync(metadataPath);
+        var rawJson = Encoding.UTF8.GetString(_files.ReadAllBytes(metadataPath));
         Assert.Contains(sourcePath, rawJson);
         Assert.Contains("中文目录/工件.md", rawJson);
         Assert.DoesNotContain("\\u4e2d", rawJson);

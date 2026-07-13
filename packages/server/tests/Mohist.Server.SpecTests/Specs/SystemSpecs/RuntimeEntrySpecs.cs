@@ -41,7 +41,7 @@ public class RuntimeEntrySpecs
     public async Task AgentStatus_WhenRunnerRegisteredWithoutActiveWork_ReportsIdleRuntime()
     {
         var projectName = $"runtime-status-{Guid.NewGuid():N}";
-        var project = await _fixture.Client.PostDataAsync<ProjectDto>("/api/projects", new { name = projectName, path = Directory.GetCurrentDirectory(), baseBranch = "main" });
+        var project = await CreateProjectAsync(projectName);
 
         // Capacity is summed across every online runner in the global registry,
         // which is shared across the integration collection. Drain it so the
@@ -80,7 +80,7 @@ public class RuntimeEntrySpecs
     public async Task AgentStatus_WhenGlobalRunnerRegistered_ReportsRunnerAvailableForProject()
     {
         var projectName = $"runtime-global-runner-{Guid.NewGuid():N}";
-        var project = await _fixture.Client.PostDataAsync<ProjectDto>("/api/projects", new { name = projectName, path = Directory.GetCurrentDirectory(), baseBranch = "main" });
+        var project = await CreateProjectAsync(projectName);
         var runnerId = $"runtime-global-runner-{Guid.NewGuid():N}";
 
         try
@@ -103,7 +103,7 @@ public class RuntimeEntrySpecs
     public async Task AgentStatus_WhenRunnerRegisteredButOffline_DoesNotReportAvailableCapacity()
     {
         var projectName = $"runtime-offline-runner-{Guid.NewGuid():N}";
-        var project = await _fixture.Client.PostDataAsync<ProjectDto>("/api/projects", new { name = projectName, path = Directory.GetCurrentDirectory(), baseBranch = "main" });
+        var project = await CreateProjectAsync(projectName);
         var runnerId = $"runtime-offline-runner-{Guid.NewGuid():N}";
 
         var registry = _fixture.Grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
@@ -126,7 +126,7 @@ public class RuntimeEntrySpecs
     public async Task RunnerHeartbeat_WithNoBody_RefreshesRegisteredRunner()
     {
         var projectName = $"runtime-empty-heartbeat-{Guid.NewGuid():N}";
-        var project = await _fixture.Client.PostDataAsync<ProjectDto>("/api/projects", new { name = projectName, path = Directory.GetCurrentDirectory(), baseBranch = "main" });
+        var project = await CreateProjectAsync(projectName);
         var runnerId = $"runtime-empty-heartbeat-{Guid.NewGuid():N}";
 
         try
@@ -154,7 +154,7 @@ public class RuntimeEntrySpecs
         // /agent/status.capacity.active must follow the runner active-works
         // count, not the (smaller) AgentSession count.
         var projectName = $"runtime-divergence-{Guid.NewGuid():N}";
-        var project = await _fixture.Client.PostDataAsync<ProjectDto>("/api/projects", new { name = projectName, path = Directory.GetCurrentDirectory(), baseBranch = "main" });
+        var project = await CreateProjectAsync(projectName);
         var registry = _fixture.Grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
         foreach (var staleId in await registry.ListRunnerIdsAsync())
             await registry.UnregisterAsync(staleId);
@@ -210,6 +210,9 @@ public class RuntimeEntrySpecs
             await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
         }
     }
+
+    private Task<ProjectDto> CreateProjectAsync(string name) =>
+        _fixture.Client.PostDataAsync<ProjectDto>("/api/projects", new { name });
 
     private async Task SeedRuntimeDivergenceTemplateAsync(string projectId)
     {

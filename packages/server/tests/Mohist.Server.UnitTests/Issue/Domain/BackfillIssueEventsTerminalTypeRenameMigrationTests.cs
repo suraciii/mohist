@@ -284,28 +284,6 @@ public class BackfillIssueEventsTerminalTypeRenameMigrationTests
         Assert.Contains(applied, m => m == MigrationId);
     }
 
-    [Fact]
-    public void MigrationClass_DoesNotOverrideBuildTargetModel()
-    {
-        // Pure data backfill: the migration must not modify the EF model,
-        // so BuildTargetModel is intentionally not overridden. (The
-        // virtual method is defined on the EF Migration base, so we check
-        // for an override on the derived type — not for the method's
-        // mere presence.) This test guards the invariant — any future
-        // override would imply a model change, which would need a
-        // Designer partial and a snapshot update.
-        var method = typeof(BackfillIssueEventsTerminalTypeRename).GetMethod(
-            "BuildTargetModel",
-            System.Reflection.BindingFlags.Instance
-            | System.Reflection.BindingFlags.Public
-            | System.Reflection.BindingFlags.NonPublic);
-        // BuildTargetModel is virtual on the base Migration class, so it
-        // resolves to the base. A genuine override would resolve to the
-        // derived class — guarded by DeclaringType.
-        Assert.NotNull(method);
-        Assert.Equal(typeof(Microsoft.EntityFrameworkCore.Migrations.Migration), method!.DeclaringType);
-    }
-
     private static async Task RunMigrationUpAsync(TestDatabase database)
     {
         await using var ctx = database.CreateDbContext();

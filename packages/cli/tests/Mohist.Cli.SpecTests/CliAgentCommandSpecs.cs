@@ -431,7 +431,7 @@ public class CliAgentCommandSpecs
     {
         var fileSystem = new FakeFileSystem();
         fileSystem.AddFile(
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".mohist", "cli-state.json"),
+            global::Mohist.Cli.MohistCliApi.DefaultProjectStatePath(),
             "{\"activeProjectId\":\"proj_123\"}");
         return fileSystem;
     }

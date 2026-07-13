@@ -6,6 +6,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="EnvironmentAbstractions.TestHelpers" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\Mohist.Cli\Mohist.Cli.csproj" />
   </ItemGroup>
 

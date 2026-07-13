@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Agent.Grains;
@@ -109,14 +110,13 @@ public class GenericAgentSessionTranscriptAxisSpecs : IAsyncLifetime
                 project.Id,
                 sessionId,
                 polledWork,
-                new object[]
+                new[]
                 {
-                    new { type = "session.input", payload = new { text = "transcript-axis events", kind = "task" } },
-                    new { type = "message.delta", payload = new { content = new { text = "Hello transcript axis." } } },
-                    new
-                    {
-                        type = "tool_call.started",
-                        payload = new
+                    new FakeRuntimeEvent("session.input", new { text = "transcript-axis events", kind = "task" }),
+                    new FakeRuntimeEvent("message.delta", new { content = new { text = "Hello transcript axis." } }),
+                    new FakeRuntimeEvent(
+                        "tool_call.started",
+                        new
                         {
                             toolCallId = "tx-tool-1",
                             toolName = "Read",
@@ -124,12 +124,10 @@ public class GenericAgentSessionTranscriptAxisSpecs : IAsyncLifetime
                             status = "in_progress",
                             title = "Read README",
                             rawInput = new { filePath = "README.md" }
-                        }
-                    },
-                    new
-                    {
-                        type = "tool_call.completed",
-                        payload = new
+                        }),
+                    new FakeRuntimeEvent(
+                        "tool_call.completed",
+                        new
                         {
                             toolCallId = "tx-tool-1",
                             toolName = "Read",
@@ -138,12 +136,10 @@ public class GenericAgentSessionTranscriptAxisSpecs : IAsyncLifetime
                             title = "Read README",
                             rawInput = new { filePath = "README.md" },
                             rawOutput = new { text = "README contents" }
-                        }
-                    },
-                    new
-                    {
-                        type = "usage.updated",
-                        payload = new
+                        }),
+                    new FakeRuntimeEvent(
+                        "usage.updated",
+                        new
                         {
                             inputTokens = 220,
                             outputTokens = 80,
@@ -152,8 +148,7 @@ public class GenericAgentSessionTranscriptAxisSpecs : IAsyncLifetime
                             contextWindowUsed = 300,
                             costAmount = 0.0011,
                             costCurrency = "USD"
-                        }
-                    }
+                        })
                 });
 
             var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
@@ -239,10 +234,10 @@ public class GenericAgentSessionTranscriptAxisSpecs : IAsyncLifetime
                 project.Id,
                 sessionId,
                 polledWork,
-                new object[]
+                new[]
                 {
-                    new { type = "session.input", payload = new { text = "transcript-axis first turn", kind = "task" } },
-                    new { type = "message.delta", payload = new { content = new { text = "first reply" } } }
+                    new FakeRuntimeEvent("session.input", new { text = "transcript-axis first turn", kind = "task" }),
+                    new FakeRuntimeEvent("message.delta", new { content = new { text = "first reply" } })
                 });
 
             var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
@@ -421,7 +416,7 @@ public class GenericAgentSessionTranscriptAxisSpecs : IAsyncLifetime
         string projectId,
         string sessionId,
         PollResult polledWork,
-        object[] runtimeEvents)
+        FakeRuntimeEvent[] runtimeEvents)
     {
         Assert.Equal(sessionId, polledWork.AgentSessionId);
         Assert.Equal(projectId, polledWork.ProjectId);
@@ -448,16 +443,12 @@ public class GenericAgentSessionTranscriptAxisSpecs : IAsyncLifetime
             polledWork.WorkId,
             polledWork.WorkType,
             polledWork.Stage,
-            runtimeEvents.Select(ReadRuntimeEventType).ToArray());
+            runtimeEvents.Select(runtimeEvent => runtimeEvent.Type).ToArray());
     }
 
-    private static string ReadRuntimeEventType(object runtimeEvent)
-    {
-        var type = runtimeEvent.GetType().GetProperty("type")?.GetValue(runtimeEvent) as string;
-        if (string.IsNullOrWhiteSpace(type))
-            throw new InvalidOperationException("Fake runtime event is missing a type");
-        return type;
-    }
+    private sealed record FakeRuntimeEvent(
+        [property: JsonPropertyName("type")] string Type,
+        [property: JsonPropertyName("payload")] object Payload);
 
     private async Task ReportDispatchCompletedAsync(string runnerId, PollResult polledWork)
     {
@@ -624,12 +615,7 @@ public class GenericAgentSessionTranscriptAxisSpecs : IAsyncLifetime
     {
         var projectName = $"generic-transcript-{Guid.NewGuid():N}";
         if (projectName.Length > 63) projectName = projectName[..63];
-        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new
-        {
-            name = projectName,
-            path = Directory.GetCurrentDirectory(),
-            baseBranch = "main",
-        });
+        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = projectName });
         await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new
         {
             name = "main",

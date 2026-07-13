@@ -457,18 +457,7 @@ public class AgentSubscriptionDispatchHandlerTests
         await store.ArchiveAsync(id);
     }
 
-    private static IServiceScope NewWriteScope(TestScope scope) =>
-        BuildScope(scope);
-
-    private static IServiceScope BuildScope(TestScope scope)
-    {
-        if (scope.Handler is null)
-            throw new InvalidOperationException("handler missing");
-        // Reflection-free access to the scope factory via test support.
-        return ((IServiceScopeFactory)typeof(AgentSubscriptionDispatchHandler)
-                .GetField("_scopeFactory", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
-                .GetValue(scope.Handler)!).CreateScope();
-    }
+    private static IServiceScope NewWriteScope(TestScope scope) => scope.CreateScope();
 
     private static CloudEvent BuildWorkflowEvent(
         string type,

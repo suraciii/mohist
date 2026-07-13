@@ -13,8 +13,7 @@ public class MohistCliApiPreludeTests
         return (api, output, error);
     }
 
-    private static string CliStatePath() =>
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".mohist", "cli-state.json");
+    private static string CliStatePath() => MohistCliApi.DefaultProjectStatePath();
 
     [Fact]
     public void ResolveOutputMode_Unset_ReturnsJsonAndExitZero()

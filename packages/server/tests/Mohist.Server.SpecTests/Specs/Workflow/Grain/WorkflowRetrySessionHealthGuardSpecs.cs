@@ -263,12 +263,7 @@ public class WorkflowRetrySessionHealthGuardSpecs
     private async Task<(string ProjectId, int IssueNumber, string IssueId, string WorkflowRunId, string SessionName)> SeedProjectIssueWorkflowAsync()
     {
         var projectId = $"retry-guard-{Guid.NewGuid():N}";
-        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new
-        {
-            name = projectId,
-            path = Directory.GetCurrentDirectory(),
-            baseBranch = "main",
-        });
+        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = projectId });
 
         await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
 

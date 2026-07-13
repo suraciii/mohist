@@ -21,19 +21,6 @@ public class ProjectGrainTests : IClassFixture<WorkflowGrainFixture>
         _grains.GetGrain<IProjectGrain>(id ?? Guid.NewGuid().ToString());
 
     [Fact]
-    public async Task CreateProject_NameOnly_ReturnsProjectWithoutPathFields()
-    {
-        var grain = NewProjectGrain();
-        var project = await grain.CreateAsync("my-app");
-
-        Assert.NotNull(project);
-        Assert.Equal("my-app", project.Name);
-        Assert.Null(project.GetType().GetProperty("Path"));
-        Assert.Null(project.GetType().GetProperty("BaseBranch"));
-        Assert.Null(project.GetType().GetProperty("EffectivePath"));
-    }
-
-    [Fact]
     public async Task CreateProject_DoesNotCreateDefaultRepository()
     {
         var grain = NewProjectGrain();

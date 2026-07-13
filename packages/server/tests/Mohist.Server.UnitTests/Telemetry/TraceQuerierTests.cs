@@ -20,7 +20,7 @@ public class TraceQuerierTests : IDisposable
         (_db, _keeper) = InMemoryOtelDb.Create();
         _ingester = new TraceIngester(_db, NullLogger<TraceIngester>.Instance);
         _status = new OtelCollectorStatus();
-        _querier = new TraceQuerier(_db, _status, new PassthroughFileSystem());
+        _querier = new TraceQuerier(_db, _status, new EmptyFileSystem());
     }
 
     public void Dispose()
@@ -345,10 +345,11 @@ public class TraceQuerierTests : IDisposable
         cmd.ExecuteNonQuery();
     }
 
-    private sealed class PassthroughFileSystem : IFileSystem
+    private sealed class EmptyFileSystem : Mohist.Server.SystemInfo.IFileSystem
     {
-        public bool Exists(string path) => File.Exists(path) || Directory.Exists(path);
+        public bool Exists(string path) => false;
 
-        public string ReadAllText(string path) => File.ReadAllText(path);
+        public string ReadAllText(string path) => throw new FileNotFoundException(path);
     }
+
 }

@@ -14,32 +14,19 @@ using Xunit;
 namespace Mohist.Server.UnitTests.Workflow.Artifacts;
 
 [Collection("MohistDb")]
-public class WorkflowArtifactUploadServiceTests : IDisposable
+public class WorkflowArtifactUploadServiceTests
 {
     private readonly MohistDbFixture _fixture;
-    private readonly string _storageRoot;
+    private readonly InMemoryStorageFileSystem _files = new();
     private readonly FileSystemWorkflowArtifactStorage _storage;
 
     public WorkflowArtifactUploadServiceTests(MohistDbFixture fixture)
     {
         _fixture = fixture;
-        _storageRoot = Path.Combine(Path.GetTempPath(), $"mohist-artifacts-{Guid.NewGuid():N}");
         _storage = new FileSystemWorkflowArtifactStorage(
-            _storageRoot,
-            NullLogger<FileSystemWorkflowArtifactStorage>.Instance);
-    }
-
-    public void Dispose()
-    {
-        try
-        {
-            if (Directory.Exists(_storageRoot))
-                Directory.Delete(_storageRoot, recursive: true);
-        }
-        catch
-        {
-            // best-effort cleanup
-        }
+            "/test/artifacts",
+            NullLogger<FileSystemWorkflowArtifactStorage>.Instance,
+            _files);
     }
 
     private WorkflowArtifactUploadService BuildService(StubWorkContextResolver? resolver = null)
@@ -102,8 +89,8 @@ public class WorkflowArtifactUploadServiceTests : IDisposable
         Assert.Equal("review.md", row.Path);
 
         var storedAbsolute = _storage.ResolveAbsolutePath(row.StoragePath);
-        Assert.True(File.Exists(storedAbsolute));
-        var readBack = await File.ReadAllBytesAsync(storedAbsolute);
+        Assert.True(_files.FileExists(storedAbsolute));
+        var readBack = _files.ReadAllBytes(storedAbsolute);
         Assert.Equal(payload, readBack);
     }
 
@@ -200,7 +187,7 @@ public class WorkflowArtifactUploadServiceTests : IDisposable
         var row = await db.WorkflowArtifactPendingUploads
             .AsNoTracking()
             .FirstAsync(p => p.WorkflowRunId == workflowRunId);
-        var stored = await File.ReadAllBytesAsync(_storage.ResolveAbsolutePath(row.StoragePath));
+        var stored = _files.ReadAllBytes(_storage.ResolveAbsolutePath(row.StoragePath));
         Assert.Equal(firstPayload, stored);
     }
 
@@ -376,15 +363,14 @@ public class WorkflowArtifactUploadServiceTests : IDisposable
         Assert.EndsWith("/files", row.StoragePath);
         Assert.DoesNotContain("specs", row.StoragePath);
 
-        // The contained files must be on disk under {storagePath}/{relativePath}.
         var filesRoot = _storage.ResolveAbsolutePath(row.StoragePath);
-        Assert.True(Directory.Exists(filesRoot));
+        Assert.True(_files.DirectoryExists(filesRoot));
         var aPath = Path.Combine(filesRoot, "a.md");
         var bPath = Path.Combine(filesRoot, "sub", "b.md");
-        Assert.True(File.Exists(aPath));
-        Assert.True(File.Exists(bPath));
-        Assert.Equal(fileA, await File.ReadAllBytesAsync(aPath));
-        Assert.Equal(fileB, await File.ReadAllBytesAsync(bPath));
+        Assert.True(_files.FileExists(aPath));
+        Assert.True(_files.FileExists(bPath));
+        Assert.Equal(fileA, _files.ReadAllBytes(aPath));
+        Assert.Equal(fileB, _files.ReadAllBytes(bPath));
 
         // The metadata file describes the directory kind.
         var metadata = await _storage.ReadMetadataAsync(row.StoragePath);

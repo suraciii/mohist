@@ -31,10 +31,9 @@ public sealed class EventPublishingIntegrationFixture : IAsyncLifetime
     public EventPublishingIntegrationFixture()
     {
         _connectionString = $"Data Source=event-publishing-{Guid.NewGuid():N};Mode=Memory;Cache=Shared";
-        _runnerRoot = Path.Combine(Path.GetTempPath(), $"mohist-runner-evp-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(_runnerRoot);
-        _systemUpdateStatePath = Path.Combine(Path.GetTempPath(), $"mohist-sys-evp-{Guid.NewGuid():N}.json");
-        _logsPath = Path.Combine(Path.GetTempPath(), $"mohist-logs-evp-{Guid.NewGuid():N}");
+        _runnerRoot = "/test/runner-event-publishing";
+        _systemUpdateStatePath = "/test/system-update-event-publishing.json";
+        _logsPath = "/test/logs-event-publishing";
         _portAllocator = new TestClusterPortAllocator();
         var (siloPort, gatewayPort) = _portAllocator.AllocateConsecutivePortPairs(1);
         _factory = new EventPublishingWebApplicationFactory(_connectionString, _runnerRoot, _systemUpdateStatePath, _logsPath, siloPort, gatewayPort);
@@ -61,12 +60,6 @@ public sealed class EventPublishingIntegrationFixture : IAsyncLifetime
         _factory.Dispose();
         if (_keeper is not null)
             await _keeper.DisposeAsync();
-        if (Directory.Exists(_runnerRoot))
-            Directory.Delete(_runnerRoot, recursive: true);
-        if (File.Exists(_systemUpdateStatePath))
-            File.Delete(_systemUpdateStatePath);
-        if (!string.IsNullOrWhiteSpace(_logsPath) && Directory.Exists(_logsPath))
-            Directory.Delete(_logsPath, recursive: true);
         _portAllocator.Dispose();
         await Task.CompletedTask;
     }

@@ -1,8 +1,8 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
-using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Infrastructure.Workspace;
+using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Project.Grains;
 using Mohist.Server.Runner.Grains;
@@ -237,9 +237,6 @@ public class IssueWorkspaceRepositoryResolutionSpecs
         var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
         await runner.PollAsync(_fixture.Services);
 
-        var project = await _fixture.Grains.GetGrain<IProjectGrain>(projectId).GetAsync();
-        var path = Mohist.Server.Infrastructure.Workspace.MohistWorkspaceLayout.IssueWorkspacePath(_fixture.RunnerRoot, project!.Name, number);
-        Directory.CreateDirectory(path);
     }
 
     private sealed record IssueDto(string Id, int Number);
