@@ -18,8 +18,8 @@ namespace Mohist.Server.Events.Subscriptions;
 /// resolves the workflow run id from the CloudEvent source URI
 /// (<c>/mohist/workflow-runs/{id}</c>).
 ///
-/// The handler awaits the dispatcher's <see cref="ICloudEventHandler.HandleAsync"/>
-/// invocation, which resolves the target <see cref="IWorkflowGrain"/> and
+/// The durable dispatcher awaits this handler's <see cref="ICloudEventHandler.HandleAsync"/>
+/// invocation. The handler resolves the target <see cref="IWorkflowGrain"/> and
 /// calls <c>ReleaseStageLocksAsync</c> on the await stack. Failures escape
 /// into the durable dispatcher's retry / dead-letter pipeline.
 /// </summary>

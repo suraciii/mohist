@@ -368,6 +368,27 @@ public class RunnerGrainConcurrencySpecs : IAsyncLifetime
         var acceptedWorkId = assignments[0].Status == RunnerWorkAssignmentStatus.Assigned
             ? workIdA
             : workIdB;
+        var acceptedAgentJobId = assignments[0].Status == RunnerWorkAssignmentStatus.Assigned
+            ? agentJobIdA
+            : agentJobIdB;
         Assert.Contains(runtime.ActiveWorks, w => w.WorkId == acceptedWorkId);
+
+        await runner.DeactivateForTestAsync();
+        await Grains.GetGrain<IManagementGrain>(0).ForceActivationCollection(TimeSpan.Zero);
+
+        var reactivated = Grains.GetGrain<IRunnerGrain>(runnerId);
+        var reactivatedRuntime = await reactivated.GetRuntimeStateAsync();
+        var reactivatedWork = Assert.Single(reactivatedRuntime.ActiveWorks);
+        Assert.Equal(acceptedWorkId, reactivatedWork.WorkId);
+        Assert.Equal(WorkDispatchOwnerKinds.AgentJob, reactivatedWork.OwnerKind);
+        Assert.Equal(acceptedAgentJobId, reactivatedWork.OwnerId);
+
+        var persistedWork = await FindRunnerWorkAsync(
+            runnerId,
+            WorkDispatchOwnerKinds.AgentJob,
+            acceptedAgentJobId,
+            acceptedWorkId);
+        Assert.NotNull(persistedWork);
+        Assert.Equal("outstanding", persistedWork!.Status);
     }
 }

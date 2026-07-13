@@ -1,9 +1,11 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Epic.Grains;
 using Mohist.Server.Epic.Services;
+using Mohist.Server.Events.Grains;
 using Mohist.Server.Events.Subscriptions;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Epic;
@@ -11,6 +13,8 @@ using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Domain.Events;
+using Mohist.Server.Issue.Grains;
+using Mohist.Server.Issue.Services;
 using Mohist.Server.SpecTests.Support;
 using Orleans;
 using System.Text.Json;
@@ -214,6 +218,88 @@ public class EpicAutoDoneHandlerSpecs
         // The row was persisted for the future dispatcher to pick up.
         var row = Assert.Single(store.Appended);
         Assert.Equal(EventCatalog.ReverseDns.IssueCompleted, row.Envelope.Type);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task DispatchAsync_CompletedEventSelectedIssueStartFailure_RetriesThenDeadLetters()
+    {
+        await using var database = CreateDatabase();
+        await SeedEpicAsync(database, status: "running");
+        await SeedIssueAsync(database, projectId: "project_1", issueId: "issue_completed", issueNumber: 1, status: IssueStatus.Done);
+        await SeedIssueAsync(database, projectId: "project_1", issueId: "issue_next", issueNumber: 2, status: IssueStatus.Backlog);
+        await SeedLinkAsync(database, epicId: "epic_1", issueId: "issue_completed", issueNumber: 1);
+        await SeedLinkAsync(database, epicId: "epic_1", issueId: "issue_next", issueNumber: 2);
+
+        var grains = new TestEpicGrainFactory(database.Factory) { ThrowOnIssueStart = true };
+        var handler = new EpicAutoDoneHandler(
+            new EpicQuerier(database.Factory, null!),
+            grains,
+            NullLogger<EpicAutoDoneHandler>.Instance);
+        var events = new CapturingEventStore();
+        var deadLetters = new CapturingDeadLetterStore(events);
+        var time = new FakeTimeProvider(new DateTimeOffset(2026, 7, 1, 0, 0, 0, TimeSpan.Zero));
+        var dispatcher = new EventDispatcherService(
+            events,
+            [new Subscription(
+                EventCatalog.ReverseDns.IssueCompleted,
+                handler,
+                (rawHandler, rawEvent, ct) =>
+                {
+                    var typedHandler = (ICloudEventHandler<IssueCompleted>)rawHandler;
+                    var typedEvent = new CloudEvent<IssueCompleted>(
+                        rawEvent.Id,
+                        rawEvent.Source,
+                        rawEvent.Type,
+                        rawEvent.Time,
+                        rawEvent.Data!.Value.Deserialize<IssueCompleted>(CloudEvent.JsonOptions)!,
+                        rawEvent.DataContentType,
+                        rawEvent.Subject,
+                        rawEvent.SpecVersion,
+                        rawEvent.Extensions);
+                    return typedHandler.HandleAsync(typedEvent, ct);
+                })],
+            deadLetters,
+            time,
+            Options.Create(new EventDispatcherOptions
+            {
+                BatchSize = 10,
+                MaxAttempts = 2,
+                BaseBackoff = TimeSpan.FromSeconds(1),
+                MaxBackoff = TimeSpan.FromSeconds(1),
+            }),
+            NullLogger<EventDispatcherService>.Instance);
+
+        await events.AppendAsync(new CloudEvent(
+            id: "evt_terminal_start_failure",
+            source: new Uri("/mohist/issues/issue_completed", UriKind.Relative),
+            type: EventCatalog.ReverseDns.IssueCompleted,
+            time: time.GetUtcNow(),
+            data: JsonSerializer.SerializeToElement(new IssueCompleted("wr_1"), CloudEvent.JsonOptions),
+            subject: "1",
+            extensions: new Dictionary<string, string>
+            {
+                ["projectid"] = "project_1",
+                ["issueid"] = "issue_completed",
+            }));
+
+        await dispatcher.DispatchAsync(CancellationToken.None);
+
+        Assert.Equal(["issue_next"], grains.IssueStartCalls);
+        Assert.Equal(1, events.PendingCount);
+        Assert.Empty(deadLetters.Written);
+
+        time.Advance(TimeSpan.FromSeconds(1));
+        await dispatcher.DispatchAsync(CancellationToken.None);
+
+        Assert.Equal(["issue_next", "issue_next"], grains.IssueStartCalls);
+        var deadLetter = Assert.Single(deadLetters.Written);
+        Assert.Equal("evt_terminal_start_failure", deadLetter.EventId);
+        Assert.Equal(2, deadLetter.AttemptCount);
+        Assert.Contains(nameof(EpicAutoDoneHandler), deadLetter.FailingHandler);
+        Assert.Contains("selected issue start failure", deadLetter.ErrorMessage);
+        Assert.Equal(0, events.PendingCount);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
@@ -628,6 +714,8 @@ public class EpicAutoDoneHandlerSpecs
     {
         private readonly IDbContextFactory<MohistDbContext> _dbFactory;
         public List<RecordedGrainCall> Calls { get; } = [];
+        public List<string> IssueStartCalls { get; } = [];
+        public bool ThrowOnIssueStart { get; init; }
 
         public TestEpicGrainFactory(IDbContextFactory<MohistDbContext> dbFactory)
         {
@@ -645,11 +733,15 @@ public class EpicAutoDoneHandlerSpecs
                 NullLogger<EpicGrain>.Instance) { GrainKeyForTest = grainKey };
         }
 
+        private IIssueGrain GetIssueGrain(string issueId) => new TestIssueGrain(this, issueId);
+
         public TGrainInterface GetGrain<TGrainInterface>(string primaryKey, string? grainClassNamePrefix = null)
             where TGrainInterface : IGrainWithStringKey
         {
             if (typeof(TGrainInterface) == typeof(IEpicGrain))
                 return (TGrainInterface)(object)GetEpicGrain(primaryKey);
+            if (typeof(TGrainInterface) == typeof(IIssueGrain))
+                return (TGrainInterface)(object)GetIssueGrain(primaryKey);
             throw new NotSupportedException(typeof(TGrainInterface).FullName);
         }
 
@@ -669,6 +761,8 @@ public class EpicAutoDoneHandlerSpecs
         {
             if (grainInterfaceType == typeof(IEpicGrain))
                 return GetEpicGrain(grainPrimaryKey);
+            if (grainInterfaceType == typeof(IIssueGrain))
+                return GetIssueGrain(grainPrimaryKey);
             throw new NotSupportedException(grainInterfaceType.FullName);
         }
         public IGrain GetGrain(Type grainInterfaceType, Guid grainPrimaryKey) => throw new NotSupportedException();
@@ -680,6 +774,42 @@ public class EpicAutoDoneHandlerSpecs
         public IAddressable GetGrain(GrainId grainId, GrainInterfaceType interfaceType) => throw new NotSupportedException();
         public IAddressable GetGrain(Type interfaceType, IdSpan grainKey, string? grainClassNamePrefix = null) => throw new NotSupportedException();
         public IAddressable GetGrain(Type interfaceType, IdSpan grainKey) => throw new NotSupportedException();
+    }
+
+    private sealed class TestIssueGrain : IIssueGrain
+    {
+        private readonly TestEpicGrainFactory _owner;
+        private readonly string _issueId;
+
+        public TestIssueGrain(TestEpicGrainFactory owner, string issueId)
+        {
+            _owner = owner;
+            _issueId = issueId;
+        }
+
+        public Task<string> CreateAsync(string projectId, int number, string title, string? body, IReadOnlyDictionary<string, string>? labels, string? priority, string? repositoryRef = null, string? issueId = null, string? risk = null, bool isDraft = false, string[]? attachmentIds = null, string? workflowProfileId = null, int[]? prerequisiteNumbers = null) => throw new NotSupportedException();
+
+        public Task<string> StartWorkAsync(WorkflowProjectContext? project = null)
+        {
+            _owner.IssueStartCalls.Add(_issueId);
+            return _owner.ThrowOnIssueStart
+                ? Task.FromException<string>(new InvalidOperationException("selected issue start failure"))
+                : Task.FromResult("wr_test");
+        }
+
+        public Task CompleteWorkAsync(string workflowRunId) => throw new NotSupportedException();
+        public Task CancelAsync() => throw new NotSupportedException();
+        public Task UpdateAsync(string title, string? body) => throw new NotSupportedException();
+        public Task UpdateFullAsync(UpdateIssueData data) => throw new NotSupportedException();
+        public Task ArchiveAsync() => throw new NotSupportedException();
+        public Task UnarchiveAsync() => throw new NotSupportedException();
+        public Task ReopenAsync() => throw new NotSupportedException();
+        public Task<IssueWorkflowStatus?> GetWorkflowStatusAsync() => throw new NotSupportedException();
+        public Task<IssuePrerequisiteResult> AddPrerequisiteAsync(int prerequisiteNumber) => throw new NotSupportedException();
+        public Task RemovePrerequisiteAsync(int prerequisiteNumber) => throw new NotSupportedException();
+        public Task<IssueStartReadiness> GetStartReadinessAsync() => throw new NotSupportedException();
+        public Task<IssueCommentResult> AddCommentAsync(string body, string[]? attachmentIds = null) => throw new NotSupportedException();
+        public Task DeactivateForTestAsync() => throw new NotSupportedException();
     }
 
     public sealed record RecordedGrainCall(string GrainKey);
