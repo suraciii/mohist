@@ -16,8 +16,6 @@ public class TemplateRoutesSpecs
         _fixture = fixture;
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task ListSystemTemplates_ReturnsAllBuiltInTemplatesSortedByKey()
     {
@@ -59,8 +57,6 @@ public class TemplateRoutesSpecs
         Assert.Equal(expectedKeys, keys);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task ListSystemTemplates_ProposalExposesFrontmatterAndBody()
     {
@@ -89,8 +85,6 @@ public class TemplateRoutesSpecs
         Assert.Contains("artifact", body, StringComparison.OrdinalIgnoreCase);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task ExtractVariables_WithValidBody_ReturnsSortedUniquePaths()
     {
@@ -111,8 +105,6 @@ public class TemplateRoutesSpecs
         Assert.Equal(new[] { "issue.number", "openspecChangeDir" }, variables);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task ExtractVariables_WithUnresolvableRefs_StillReturnsSortedPaths()
     {
@@ -131,8 +123,6 @@ public class TemplateRoutesSpecs
         Assert.Equal(new[] { "another.missing", "does.not.exist" }, variables);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task ExtractVariables_WithEmptyBody_ReturnsBadRequest()
     {
@@ -147,8 +137,6 @@ public class TemplateRoutesSpecs
         Assert.Equal("bad_request", payload.GetProperty("code").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task ExtractVariables_WithWhitespaceBody_ReturnsBadRequest()
     {
@@ -163,8 +151,6 @@ public class TemplateRoutesSpecs
         Assert.Equal("bad_request", payload.GetProperty("code").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task ExtractVariables_WithMissingBody_ReturnsBadRequest()
     {

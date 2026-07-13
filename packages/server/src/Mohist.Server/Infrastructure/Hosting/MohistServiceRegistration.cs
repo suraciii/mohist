@@ -95,11 +95,14 @@ public static class MohistServiceRegistration
         services.AddHostedService<SystemUpdateRecoveryService>();
         services.AddSingleton<IRuntimeBuildInfo>(sp => sp.GetRequiredService<RuntimeBuildInfo>());
         services.TryAddSingleton(TimeProvider.System);
+        services.AddSingleton<IWebContentProvider, FileSystemWebContentProvider>();
         services.AddSingleton<IFileSystem, PhysicalFileSystem>();
         services.AddSingleton<IEnvironmentVariableProvider>(SystemEnvironmentVariableProvider.Instance);
         services.AddSingleton<ILogPathResolver, LogPathResolver>();
+        services.AddSingleton<ILogFileStore, FileSystemLogFileStore>();
         services.AddSingleton<IGitSourceInspector, GitSourceInspector>();
         services.AddSingleton<IServiceStatusChecker, SystemdServiceStatusChecker>();
+        services.AddSingleton<IManagedAssetInspector>(FileSystemManagedAssetInspector.Instance);
         services.AddSingleton<ISystemUpdateStore, FileSystemSystemUpdateStore>();
         services.AddSingleton<ISystemUpdateCommandRunner, ProcessSystemUpdateCommandRunner>();
         services.AddHttpClient<ISystemReadinessProbe, HttpSystemReadinessProbe>(client =>

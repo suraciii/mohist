@@ -37,8 +37,6 @@ public class EpicBatchMembershipApiSpecs
         _grains = fixture.Grains;
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task BatchLink_NewIssues_AllLinked()
     {
@@ -63,8 +61,6 @@ public class EpicBatchMembershipApiSpecs
         Assert.Equal(3, detail.LinkedIssues.Length);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task BatchLink_MixedNumberAndId_AllLinked()
     {
@@ -84,8 +80,6 @@ public class EpicBatchMembershipApiSpecs
         Assert.All(results.EnumerateArray(), r => Assert.Equal("linked", r.GetProperty("status").GetString()));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task BatchLink_IssueAlreadyInOtherNonTerminalEpic_ReportedAsConflict_AndOthersStillLink()
     {
@@ -117,8 +111,6 @@ public class EpicBatchMembershipApiSpecs
         Assert.Equal(clean.Id, detail.LinkedIssues[0].Id);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task BatchLink_IssueAlreadyMember_ReportedAsAlreadyLinked()
     {
@@ -137,8 +129,6 @@ public class EpicBatchMembershipApiSpecs
         Assert.Equal("already-linked", results[0].GetProperty("status").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task BatchLink_UnknownIdentifier_ReportedAsNotFound()
     {
@@ -159,8 +149,6 @@ public class EpicBatchMembershipApiSpecs
         Assert.Equal("linked", arr[1].GetProperty("status").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task BatchLink_DuplicateIdentifierInOneRequest_LinkedAtMostOnce()
     {
@@ -188,8 +176,6 @@ public class EpicBatchMembershipApiSpecs
         Assert.Single(detail.LinkedIssues);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task BatchLink_MixedNumberAndIdResolvingToSameIssue_LinkedAtMostOnce()
     {
@@ -219,8 +205,6 @@ public class EpicBatchMembershipApiSpecs
         Assert.Single(detail.LinkedIssues);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task BatchUnlink_RemovesOnlyRequestedMembers_RemainingIntact()
     {
@@ -248,8 +232,6 @@ public class EpicBatchMembershipApiSpecs
         Assert.Equal(c.Id, detail.LinkedIssues[0].Id);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task BatchUnlink_NotMember_ReportedAsWasNotAMember_AndOthersUnlinked()
     {
@@ -272,8 +254,6 @@ public class EpicBatchMembershipApiSpecs
         Assert.Equal("was-not-a-member", arr[1].GetProperty("status").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task BatchUnlink_UnknownIdentifier_ReportedAsWasNotAMember()
     {
@@ -296,8 +276,6 @@ public class EpicBatchMembershipApiSpecs
         Assert.Equal("unlinked", arr[1].GetProperty("status").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task BatchUnlink_DuplicateIdentifier_ReturnsOutcomePerRequestedIdentifier()
     {
@@ -323,8 +301,6 @@ public class EpicBatchMembershipApiSpecs
         Assert.Empty(detail.LinkedIssues);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task BatchLink_EmptyArray_ReturnsOkWithEmptyResults()
     {
@@ -341,8 +317,6 @@ public class EpicBatchMembershipApiSpecs
         Assert.Equal(0, results.GetArrayLength());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task BatchLink_OnUnknownEpic_Returns404()
     {
@@ -355,8 +329,6 @@ public class EpicBatchMembershipApiSpecs
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task BatchLink_OnClosedEpic_Returns409EpicClosedCannotLink_NoPerItemOutcomes()
     {
@@ -393,8 +365,6 @@ public class EpicBatchMembershipApiSpecs
         Assert.Equal(issueA.Id, detail.LinkedIssues[0].Id);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task SingleLinkEndpoint_RemainsUnchanged_AfterBatchEndpointAdded()
     {

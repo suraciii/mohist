@@ -3,24 +3,19 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
-using Mohist.Server.Api;
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Runner.Grains;
-using Mohist.Server.Runner.Services;
-using Mohist.Server.Infrastructure.Data.Sessions;
-using Mohist.Server.Sessions.Domain;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Workflow.Services;
-using Mohist.Server.Sessions.Services;
 using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.SystemSpecs;
 
-[Collection("MohistIntegration2")]
+[Collection("IntegrationMisc")]
 public class RuntimeEntrySpecs
 {
     private readonly MohistIntegrationFixture _fixture;
@@ -30,8 +25,6 @@ public class RuntimeEntrySpecs
         _fixture = fixture;
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task WebRoot_WhenConfigured_ServesIndexAndSpaFallback()
     {
@@ -44,13 +37,11 @@ public class RuntimeEntrySpecs
         Assert.Contains("Mohist Test Web", workflowSession);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task AgentStatus_WhenRunnerRegisteredWithoutActiveWork_ReportsIdleRuntime()
     {
         var projectName = $"runtime-status-{Guid.NewGuid():N}";
-        var project = await _fixture.Client.PostDataAsync<ProjectDto>("/api/projects", new { name = projectName, path = Directory.GetCurrentDirectory(), baseBranch = "main" });
+        var project = await CreateProjectAsync(projectName);
 
         // Capacity is summed across every online runner in the global registry,
         // which is shared across the integration collection. Drain it so the
@@ -85,13 +76,11 @@ public class RuntimeEntrySpecs
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task AgentStatus_WhenGlobalRunnerRegistered_ReportsRunnerAvailableForProject()
     {
         var projectName = $"runtime-global-runner-{Guid.NewGuid():N}";
-        var project = await _fixture.Client.PostDataAsync<ProjectDto>("/api/projects", new { name = projectName, path = Directory.GetCurrentDirectory(), baseBranch = "main" });
+        var project = await CreateProjectAsync(projectName);
         var runnerId = $"runtime-global-runner-{Guid.NewGuid():N}";
 
         try
@@ -110,13 +99,11 @@ public class RuntimeEntrySpecs
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task AgentStatus_WhenRunnerRegisteredButOffline_DoesNotReportAvailableCapacity()
     {
         var projectName = $"runtime-offline-runner-{Guid.NewGuid():N}";
-        var project = await _fixture.Client.PostDataAsync<ProjectDto>("/api/projects", new { name = projectName, path = Directory.GetCurrentDirectory(), baseBranch = "main" });
+        var project = await CreateProjectAsync(projectName);
         var runnerId = $"runtime-offline-runner-{Guid.NewGuid():N}";
 
         var registry = _fixture.Grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
@@ -135,54 +122,11 @@ public class RuntimeEntrySpecs
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
-    [Fact]
-    public async Task AgentStatus_WhenRunnerUnregistered_HeartbeatRefreshesInfoButPollRestoresPresence()
-    {
-        var projectName = $"runtime-presence-repair-{Guid.NewGuid():N}";
-        var project = await _fixture.Client.PostDataAsync<ProjectDto>("/api/projects", new { name = projectName, path = Directory.GetCurrentDirectory(), baseBranch = "main" });
-        var runnerId = $"runtime-presence-repair-{Guid.NewGuid():N}";
-
-        try
-        {
-            var registry = _fixture.Grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
-
-            // Global runners from earlier integration tests can leak into this test's
-            // registry assertions; clear them so we start from a known empty state.
-            var existingIds = await registry.ListRunnerIdsAsync();
-            foreach (var id in existingIds)
-                await registry.UnregisterAsync(id);
-
-            await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new { capabilities = Array.Empty<string>(), hostname = "test-host", projectId = project.Id });
-            await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/unregister", null);
-
-            var runnersAfterUnregister = await registry.ListRunnersAsync();
-            Assert.Empty(runnersAfterUnregister);
-
-            await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/heartbeat", new { capabilities = Array.Empty<string>(), hostname = "test-host", projectId = project.Id });
-            var runnersAfterHeartbeat = await registry.ListRunnersAsync();
-            Assert.Empty(runnersAfterHeartbeat);
-
-            using var poll = await _fixture.Client.PostAsync($"/api/runner/{runnerId}/poll", content: null);
-            Assert.True(poll.IsSuccessStatusCode);
-
-            var runnersAfterPoll = await registry.ListRunnersAsync();
-            Assert.Contains(runnersAfterPoll, r => r.RunnerId == runnerId);
-        }
-        finally
-        {
-            await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
-        }
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task RunnerHeartbeat_WithNoBody_RefreshesRegisteredRunner()
     {
         var projectName = $"runtime-empty-heartbeat-{Guid.NewGuid():N}";
-        var project = await _fixture.Client.PostDataAsync<ProjectDto>("/api/projects", new { name = projectName, path = Directory.GetCurrentDirectory(), baseBranch = "main" });
+        var project = await CreateProjectAsync(projectName);
         var runnerId = $"runtime-empty-heartbeat-{Guid.NewGuid():N}";
 
         try
@@ -202,26 +146,6 @@ public class RuntimeEntrySpecs
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
-    [Fact]
-    public async Task AgentStatus_WhenNoRunnerConnected_ReportsUnavailableRuntime()
-    {
-        var status = AgentStatusResponse.Create(
-            activeAgents: [],
-            runners: Array.Empty<RunnerStatusView>(),
-            capacity: new RunnerCapacityView(0, 0));
-
-        Assert.False(status.Running);
-        Assert.False(status.RunnerAvailable);
-        Assert.False(status.EmbeddedRunnerEnabled);
-        Assert.Equal(0, status.Capacity.Active);
-        Assert.Equal(0, status.Capacity.Max);
-        Assert.Equal("No runner is connected. Start the Mohist runner process.", status.RunnerMessage);
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task AgentStatus_WhenRunnerActiveWorksExceedVisibleSessions_CapacityReflectsRunner()
     {
@@ -230,7 +154,7 @@ public class RuntimeEntrySpecs
         // /agent/status.capacity.active must follow the runner active-works
         // count, not the (smaller) AgentSession count.
         var projectName = $"runtime-divergence-{Guid.NewGuid():N}";
-        var project = await _fixture.Client.PostDataAsync<ProjectDto>("/api/projects", new { name = projectName, path = Directory.GetCurrentDirectory(), baseBranch = "main" });
+        var project = await CreateProjectAsync(projectName);
         var registry = _fixture.Grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
         foreach (var staleId in await registry.ListRunnerIdsAsync())
             await registry.UnregisterAsync(staleId);
@@ -251,7 +175,7 @@ public class RuntimeEntrySpecs
             var workflowBGrain = _fixture.Grains.GetGrain<IWorkflowGrain>(workflowB);
             var startInput = new WorkflowStartInput(Metadata: new WorkflowRunMetadata(
                 Name: null,
-                CreatedAt: DateTimeOffset.UtcNow,
+                CreatedAt: _fixture.TimeProvider.GetUtcNow(),
                 Annotations: new Dictionary<string, string>(StringComparer.Ordinal)
                 {
                     ["projectId"] = workflowProjectId,
@@ -287,6 +211,9 @@ public class RuntimeEntrySpecs
         }
     }
 
+    private Task<ProjectDto> CreateProjectAsync(string name) =>
+        _fixture.Client.PostDataAsync<ProjectDto>("/api/projects", new { name });
+
     private async Task SeedRuntimeDivergenceTemplateAsync(string projectId)
     {
         var options = new DbContextOptionsBuilder<MohistDbContext>()
@@ -316,7 +243,7 @@ public class RuntimeEntrySpecs
         else
         {
             existing.Template = templateJson;
-            existing.UpdatedAt = DateTimeOffset.UtcNow;
+            existing.UpdatedAt = _fixture.TimeProvider.GetUtcNow();
         }
         if (await db.ProjectWorkflowProfiles.FindAsync(projectId) is null)
         {
@@ -329,8 +256,6 @@ public class RuntimeEntrySpecs
         await db.SaveChangesAsync();
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task AgentStatus_OnLegacyRoute_ReturnsNotFound()
     {
@@ -339,8 +264,6 @@ public class RuntimeEntrySpecs
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task ApiFallback_WhenUnknownApiPath_ReturnsNotFound()
     {
@@ -353,25 +276,4 @@ public class RuntimeEntrySpecs
     private sealed record AgentCapacityDto(int Active, int Max);
     private sealed record RunnerDto(string Id, string? Kind = null, int Active = 0, int Max = 0);
     private sealed record ProjectDto(string Id, string Name, string Path, string BaseBranch);
-    private sealed record IssueDto(int Number, string Title);
-    private sealed record ApiErrorDto(bool Success, string? Error);
-
-    private static AgentSessionRow CreateRunningSessionRow(string projectId, int issueNumber, string workflowRunId, string workId, string runnerId, string title)
-    {
-        var now = DateTime.UtcNow;
-        var metadata = new AgentSessionMetadata()
-            .WithLabel(AgentSessionQueryMetadataKeys.ProjectId, projectId)
-            .WithLabel(AgentSessionQueryMetadataKeys.IssueNumber, issueNumber.ToString())
-            .WithLabel(AgentSessionQueryMetadataKeys.SourceKind, "workflow")
-            .WithLabel(AgentSessionQueryMetadataKeys.WorkflowRunId, workflowRunId)
-            .WithLabel(AgentSessionQueryMetadataKeys.SessionName, workId);
-        var session = AgentSession.Create(
-            $"session-{Guid.NewGuid():N}",
-            runnerId,
-            null,
-            metadata: metadata,
-            now: now);
-        session.AttachPhysicalSession($"acp-{Guid.NewGuid():N}", null, null, null, null, now);
-        return AgentSessionJson.ToRow(session, now);
-    }
 }

@@ -2,19 +2,6 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Support;
 
-/// <summary>
-/// Poll-based wait helpers for tests. The retry budget is computed from the
-/// supplied timeout/step pair but does not use wall-clock timers; each retry
-/// yields to let queued async work run, or invokes the supplied fake-time
-/// advance hook when time progression is part of the behavior under test.
-/// </summary>
-/// <remarks>
-/// Prefer a deterministic signal (<c>TaskCompletionSource</c>, event await,
-/// injected <c>TimeProvider</c> advance) whenever one exists. Use these only
-/// for asynchronous convergence that has no single signal to hook (e.g. grain
-/// state settling across Orleans turns, multi-hop event-bus delivery). The
-/// <paramref name="description"/> is surfaced on timeout so failures are loud.
-/// </remarks>
 public static class TestWait
 {
     public static async Task<T> ForAsync<T>(
@@ -25,10 +12,6 @@ public static class TestWait
         string description,
         Func<Task>? advance = null)
     {
-        if (advance is not null)
-        {
-        }
-
         var attempts = Attempts(timeout, step);
         T current = default!;
         for (var i = 0; i <= attempts; i++)

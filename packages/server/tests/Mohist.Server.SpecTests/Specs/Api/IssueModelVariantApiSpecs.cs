@@ -16,8 +16,6 @@ public class IssueModelVariantApiSpecs
         _fixture = fixture;
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task CreateIssue_WithModelAndVariant_ReturnsBothInDetail()
     {
@@ -38,8 +36,6 @@ public class IssueModelVariantApiSpecs
         Assert.Equal("high", detail.GetProperty("modelVariant").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task CreateIssue_WithStageModelsAndStageVariants_RoundTripsPerStageOverrides()
     {
@@ -73,8 +69,6 @@ public class IssueModelVariantApiSpecs
         Assert.Equal("max", stageVariants.GetProperty("build").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task ListIssues_IncludesModelAndVariantForIssueWithMetadata()
     {
@@ -95,8 +89,6 @@ public class IssueModelVariantApiSpecs
         Assert.Equal("low", issue.GetProperty("modelVariant").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task PatchIssue_WithModelAndVariant_UpdatesAndReturns()
     {
@@ -118,8 +110,6 @@ public class IssueModelVariantApiSpecs
         Assert.Equal("high", detail.GetProperty("modelVariant").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task PatchIssue_ClearingModel_ClearsVariantAtomically()
     {
@@ -146,8 +136,6 @@ public class IssueModelVariantApiSpecs
         Assert.False(detail.TryGetProperty("modelVariant", out _));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task PatchIssue_ClearingStageModels_ClearsStageVariants()
     {
@@ -180,8 +168,6 @@ public class IssueModelVariantApiSpecs
         Assert.False(detail.TryGetProperty("stageModelVariants", out _));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task CreateIssue_WithInvalidModelFormat_ReturnsBadRequest()
     {
@@ -196,8 +182,6 @@ public class IssueModelVariantApiSpecs
         Assert.Equal("invalid_model_metadata", payload.GetProperty("code").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task PatchIssue_WithInvalidModelFormat_ReturnsBadRequest()
     {
@@ -217,8 +201,6 @@ public class IssueModelVariantApiSpecs
         Assert.Equal("invalid_model_metadata", payload.GetProperty("code").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Theory]
     [InlineData("{\"model\":123}")]
     [InlineData("{\"modelVariant\":false}")]
@@ -244,8 +226,6 @@ public class IssueModelVariantApiSpecs
         Assert.Equal("invalid_model_metadata", payload.GetProperty("code").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task CreateIssue_WithInvalidStageModelFormat_ReturnsBadRequest()
     {
@@ -267,8 +247,6 @@ public class IssueModelVariantApiSpecs
         Assert.Equal("invalid_model_metadata", payload.GetProperty("code").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task PatchIssue_WithStageModelsAndVariants_RoundTripsPerStageOverrides()
     {
@@ -307,8 +285,6 @@ public class IssueModelVariantApiSpecs
         Assert.Equal("max", stageVariants.GetProperty("build").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task PatchIssue_SwitchingModel_DropsStaleVariant()
     {
@@ -338,8 +314,6 @@ public class IssueModelVariantApiSpecs
         Assert.False(detail.TryGetProperty("modelVariant", out _));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task CreateIssue_WithEmptyModel_ClearsStaleVariantOnDetail()
     {

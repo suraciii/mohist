@@ -31,9 +31,6 @@ public static class MohistConfigurationExtensions
             ".mohist",
             "config.jsonc");
 
-        if (!File.Exists(configPath))
-            return builder;
-
         // Use the configureSource overload so we have a direct reference to the
         // JsonConfigurationSource and can wire OnLoadException at registration
         // time. Set OnLoadException to ignore failures: a malformed config or a

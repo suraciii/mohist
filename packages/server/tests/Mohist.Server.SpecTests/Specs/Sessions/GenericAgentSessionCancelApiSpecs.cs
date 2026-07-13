@@ -46,8 +46,6 @@ public class GenericAgentSessionCancelApiSpecs : IAsyncLifetime
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task Cancel_ActiveSessionRunnerReportsCancelled_ReturnsCancelledState()
     {
@@ -83,8 +81,6 @@ public class GenericAgentSessionCancelApiSpecs : IAsyncLifetime
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task Cancel_ActiveSessionRunnerReportsNotCancellable_ReturnsNotCancellableState()
     {
@@ -111,8 +107,6 @@ public class GenericAgentSessionCancelApiSpecs : IAsyncLifetime
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task Cancel_AlreadyTerminalSession_ShortCircuitsWithoutCallingRunner()
     {
@@ -153,8 +147,6 @@ public class GenericAgentSessionCancelApiSpecs : IAsyncLifetime
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Theory]
     [InlineData("completed")]
     [InlineData("failed")]
@@ -179,8 +171,6 @@ public class GenericAgentSessionCancelApiSpecs : IAsyncLifetime
         Assert.Equal(terminalStatus, doc.RootElement.GetProperty("data").GetProperty("state").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task Cancel_UnknownSession_ReturnsNotFound()
     {
@@ -193,8 +183,6 @@ public class GenericAgentSessionCancelApiSpecs : IAsyncLifetime
         Assert.Equal("not_found", doc.RootElement.GetProperty("code").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task Cancel_SessionInOtherProject_ReturnsNotFound()
     {
@@ -206,8 +194,6 @@ public class GenericAgentSessionCancelApiSpecs : IAsyncLifetime
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task Cancel_ActiveSessionButRunnerOffline_ReturnsNotCancellableState()
     {
@@ -227,8 +213,6 @@ public class GenericAgentSessionCancelApiSpecs : IAsyncLifetime
         Assert.Empty(runnerHub.Invocations);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task Cancel_RunnerRepliesWithTerminalState_MirrorsThatTerminalState()
     {
@@ -255,64 +239,6 @@ public class GenericAgentSessionCancelApiSpecs : IAsyncLifetime
         {
             tracker.Unregister(_runnerId);
         }
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
-    [Fact]
-    public async Task ResolveGenericCancelTargetAsync_UnknownSessionId_ReturnsNull()
-    {
-        var project = await CreateProjectAsync("gen-cancel-resolve-404");
-
-        await using var scope = _fixture.Services.CreateAsyncScope();
-        var querier = scope.ServiceProvider.GetRequiredService<AgentSessionQuerier>();
-
-        var target = await querier.ResolveGenericCancelTargetAsync(project.Id, Guid.NewGuid().ToString("N"));
-
-        Assert.Null(target);
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
-    [Fact]
-    public async Task ResolveGenericCancelTargetAsync_ActiveSession_ReturnsNullTerminalState()
-    {
-        var (project, _, sessionId, _) = await LaunchAndOpenGenericSessionAsync("gen-cancel-resolve-active");
-
-        await using var scope = _fixture.Services.CreateAsyncScope();
-        var querier = scope.ServiceProvider.GetRequiredService<AgentSessionQuerier>();
-
-        var target = await querier.ResolveGenericCancelTargetAsync(project.Id, sessionId);
-
-        Assert.NotNull(target);
-        Assert.Equal(_runnerId, target!.RunnerId);
-        Assert.Equal(sessionId, target.SessionId);
-        Assert.Null(target.TerminalState);
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
-    [Fact]
-    public async Task ResolveGenericCancelTargetAsync_TerminalSession_ReturnsTerminalState()
-    {
-        var (project, _, sessionId, _) = await LaunchAndOpenGenericSessionAsync("gen-cancel-resolve-terminal");
-
-        var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
-        await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(new[]
-        {
-            new AgentSessionRuntimeEventInput(
-                Type: RuntimeEventTypes.SessionClosed,
-                PayloadJson: "{\"status\":\"failed\"}"),
-        }));
-        await grain.FlushForTestAsync();
-
-        await using var scope = _fixture.Services.CreateAsyncScope();
-        var querier = scope.ServiceProvider.GetRequiredService<AgentSessionQuerier>();
-
-        var target = await querier.ResolveGenericCancelTargetAsync(project.Id, sessionId);
-
-        Assert.NotNull(target);
-        Assert.Equal("failed", target!.TerminalState);
     }
 
     private Task<HttpResponseMessage> PostGenericCancelAsync(string projectId, string sessionId) =>
@@ -372,12 +298,7 @@ public class GenericAgentSessionCancelApiSpecs : IAsyncLifetime
     {
         var projectName = $"gen-cancel-{Guid.NewGuid():N}";
         if (projectName.Length > 63) projectName = projectName[..63];
-        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new
-        {
-            name = projectName,
-            path = Directory.GetCurrentDirectory(),
-            baseBranch = "main",
-        });
+        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = projectName });
         await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new
         {
             name = "main",

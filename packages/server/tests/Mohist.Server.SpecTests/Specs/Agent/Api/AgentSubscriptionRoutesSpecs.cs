@@ -18,8 +18,6 @@ public class AgentSubscriptionRoutesSpecs
         _client = fixture.Client;
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task Create_PersistsActiveSubscriptionAndReturnsIdentity()
     {
@@ -43,8 +41,6 @@ public class AgentSubscriptionRoutesSpecs
         Assert.False(string.IsNullOrWhiteSpace(created.UpdatedAt));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task Create_AcceptsMissingFilterSourceAndSubjectAsNullConstraint()
     {
@@ -64,8 +60,6 @@ public class AgentSubscriptionRoutesSpecs
         Assert.Null(created.Filter.Subject);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task Create_PriorityOptional_AbsentStoredAsNull()
     {
@@ -84,8 +78,6 @@ public class AgentSubscriptionRoutesSpecs
         Assert.Null(created.Priority);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task Create_RequiredFields_RejectsMissingNameFilterTypeResponsePrompt()
     {
@@ -107,8 +99,6 @@ public class AgentSubscriptionRoutesSpecs
         Assert.Equal(HttpStatusCode.BadRequest, missingPrompt.StatusCode);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task Create_DuplicateNameOnSameAgent_Returns409AndLeavesOriginal()
     {
@@ -129,8 +119,6 @@ public class AgentSubscriptionRoutesSpecs
         Assert.Equal("shared", stillThere.Name);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task Create_UnknownAgent_Returns404()
     {
@@ -143,8 +131,6 @@ public class AgentSubscriptionRoutesSpecs
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task Create_UnknownProject_Returns404()
     {
@@ -155,8 +141,6 @@ public class AgentSubscriptionRoutesSpecs
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task Create_ArchivedAgent_Returns409WithAgentArchivedCode()
     {
@@ -177,8 +161,6 @@ public class AgentSubscriptionRoutesSpecs
         Assert.Empty(listed);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task Create_SameNameOnDifferentAgents_BothPersist()
     {
@@ -196,9 +178,6 @@ public class AgentSubscriptionRoutesSpecs
         Assert.NotEqual(onA.Id, onB.Id);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task Create_ResolvesAgentByName()
     {
@@ -212,8 +191,6 @@ public class AgentSubscriptionRoutesSpecs
         Assert.Equal(agent.Id, created.AgentId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task List_ReturnsAllSubscriptionsIncludingArchived()
     {
@@ -235,8 +212,6 @@ public class AgentSubscriptionRoutesSpecs
         Assert.Contains(listed, s => s.Id == second.Id && s.Status == "archived");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task List_UnknownAgent_Returns404()
     {
@@ -248,8 +223,6 @@ public class AgentSubscriptionRoutesSpecs
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task List_OnlyIncludesOwningAgent()
     {
@@ -272,8 +245,6 @@ public class AgentSubscriptionRoutesSpecs
         Assert.Equal("on-b", onB[0].Name);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task Show_ResolvesOwnedSubscription()
     {
@@ -290,8 +261,6 @@ public class AgentSubscriptionRoutesSpecs
         Assert.Equal(created.Name, shown.Name);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task Show_CrossProject_Returns404()
     {
@@ -308,8 +277,6 @@ public class AgentSubscriptionRoutesSpecs
         Assert.Equal(HttpStatusCode.NotFound, wrongProject.StatusCode);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task Show_WrongAgent_Returns404()
     {
@@ -326,8 +293,6 @@ public class AgentSubscriptionRoutesSpecs
         Assert.Equal(HttpStatusCode.NotFound, wrongAgent.StatusCode);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task Patch_UpdatesFilterResponsePromptAndAdvancesUpdatedAt()
     {
@@ -362,8 +327,6 @@ public class AgentSubscriptionRoutesSpecs
         Assert.Equal("will-patch", patched.Name);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task Patch_OmittedFields_AreUnchanged()
     {
@@ -382,8 +345,6 @@ public class AgentSubscriptionRoutesSpecs
         Assert.Equal("new-prompt", patched.ResponsePrompt);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task Patch_PriorityResetToNull_StoresAsNull()
     {
@@ -400,8 +361,6 @@ public class AgentSubscriptionRoutesSpecs
         Assert.Null(patched.Priority);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task Patch_DuplicateNameOnSameAgent_Returns409AndOriginalUnchanged()
     {
@@ -423,8 +382,6 @@ public class AgentSubscriptionRoutesSpecs
         Assert.Equal("free", reFetched.Name);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task Archive_TogglesStatusToArchivedAndAdvancesUpdatedAt()
     {
@@ -443,8 +400,6 @@ public class AgentSubscriptionRoutesSpecs
         Assert.True(DateTimeOffset.Parse(archived.UpdatedAt) > beforeUpdatedAt);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task Archive_IsIdempotentForAlreadyArchived()
     {
@@ -465,8 +420,6 @@ public class AgentSubscriptionRoutesSpecs
         Assert.Equal(snapshot, DateTimeOffset.Parse(again.UpdatedAt));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task Restore_TogglesStatusToActiveAndAdvancesUpdatedAt()
     {
@@ -489,8 +442,6 @@ public class AgentSubscriptionRoutesSpecs
         Assert.Equal("restore-me", restored.Name);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task Archive_Restore_CrossOwnershipReturns404()
     {
@@ -512,8 +463,6 @@ public class AgentSubscriptionRoutesSpecs
         Assert.Equal(HttpStatusCode.NotFound, wrongAgentRestore.StatusCode);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task Delete_RemovesSubscriptionFromListAndShow()
     {
@@ -537,8 +486,6 @@ public class AgentSubscriptionRoutesSpecs
         Assert.Equal(first.Id, only.Id);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task Delete_WrongAgent_Returns404()
     {
@@ -555,8 +502,6 @@ public class AgentSubscriptionRoutesSpecs
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task ArchiveIndependentSubscription_DoesNotMutateSiblingOrAgent()
     {

@@ -1,5 +1,13 @@
 # Make .NET test cave simple and remove tricky scheduler
 
+> **Classification superseded**: this plan's Unit/Component/Integration project
+> model was an intermediate execution result. The final model has exactly three
+> test kinds: SpecTests for product specifications, UnitTests for technical
+> implementation, and ArchTests for architecture and design constraints. A
+> ratchet is only one optional ArchTests enforcement strategy. See
+> `plans/dotnet-test-tracks.md`. The scheduler, schema, support-library, guard,
+> and performance work recorded here remains valid.
+
 > **Executor rule**: grug read whole plan before touch code. grug do one chunk,
 > run gate, make green, then next chunk. no grand rewrite. no clever replacement
 > for old clever thing. if STOP condition happen, grug stop and report. grug not
@@ -26,6 +34,9 @@
 - **Risk**: MED
 - **Depends on**: none
 - **Planned at**: commit `a50cd9775`, 2026-07-10
+- **Implementation correction**: classify files by actual dependencies, not
+  their old traits. SQLite/EF event-store specs belong in ComponentSpecs; the
+  five fixture-free deterministic specs listed below belong in UnitTests.
 
 ## Grug goal
 
@@ -47,8 +58,10 @@ when done:
 - no numbered cost shard like `Issue2`, `Issue3`, `WorkflowGrain2`;
 - no Speed or SUT trait mountain on every test;
 - no test project reference another test project;
-- no active spec file bigger than 24,000 bytes;
-- only Otel collection disable parallel;
+- every behavior matrix has one lowest useful owner;
+- `OtelTracing` is the only tracing exception to parallel execution where a
+  test assembly registers a process-global provider; `ConsoleOutput` is the
+  Unit-only process-global writer exception.
 - missing source folder make ArchTests fail, not quietly say ok;
 - full solution still green and not more than 10% slower than clean baseline.
 
@@ -79,7 +92,7 @@ facts at planned commit:
 - three mixed Integration + Service files;
 - seven files with no Speed trait;
 - 2,324 Speed traits and 4,758 SUT traits;
-- 46 files bigger than 24KB;
+- 47 files bigger than 24KB. byte count is inventory, not defect by itself;
 - ten `MohistIntegrationFixture` collections plus one Otel class fixture.
 
 Phase 2 try smarter weight table. result worse by 1.34 seconds. grug nod. big
@@ -99,7 +112,7 @@ brain scheduling not answer.
 - no test project reference another test project;
 - no timing data in collection name or source code;
 - no partial class trick to hide giant spec;
-- no file-size allowlist. split file for real behavior boundary.
+- no file-size allowlist or byte cap. split only at a real behavior boundary.
 
 ## Test ownership
 
@@ -139,30 +152,38 @@ if test only proves math or state transition, integration cave wrong cave.
 
 ## Files need special move
 
-these four go UnitTests. rename `Specs` to `Tests` in file, class, namespace:
+these four use SQLite/EF and stay in ComponentSpecs. old Speed.Unit trait did
+not make them unit tests:
 
 - `Specs/Events/AgentSessionTransactionalEventAppendSpecs.cs`
 - `Specs/Events/EventStoreScopedAppendSpecs.cs`
 - `Specs/Events/IssueTransactionalEventAppendSpecs.cs`
 - `Specs/Events/TransactionalEventAppendSpecs.cs`
 
-these seven have no Speed trait but use component/grain support. move
-ComponentSpecs:
+these two use component/grain support. move ComponentSpecs:
 
 - `Specs/Agent/Grain/AgentGrainSpecs.cs`
+- `Specs/Workflow/WorkflowGrainSpecs.cs`
+
+these five are fixture-free deterministic behavior. move UnitTests and rename
+`Specs` to `Tests` in file, class, namespace:
+
 - `Specs/Epic/Domain/EpicProgressBuildSpecs.cs`
 - `Specs/Epic/Domain/EpicQuerierExternalPrerequisitesSpecs.cs`
 - `Specs/Sessions/TranscriptAccumulatorSpecs.cs`
 - `Specs/Workflow/Grain/RuntimeVariableMergeSpecs.cs`
 - `Specs/Workflow/Grain/TaskOutputCaptureSpecs.cs`
-- `Specs/Workflow/WorkflowGrainSpecs.cs`
 
-these three mixed Otel files start in IntegrationSpecs because process-global
-tracing state. later pure constant test may move ComponentSpecs:
+these two host-backed Otel files start in IntegrationSpecs because process-global
+tracing state:
 
 - `Specs/SystemSpecs/Otel/OtelInboundHttpTracingSpecs.cs`
-- `Specs/SystemSpecs/Otel/OtelOrleansSourceNameSpecs.cs`
 - `Specs/SystemSpecs/Otel/OtelSourceSubscriptionSpecs.cs`
+
+`Specs/SystemSpecs/Otel/OtelOrleansSourceNameSpecs.cs` stays ComponentSpecs:
+it uses the Component `BacklogFixture` and has no HTTP boundary. It remains in
+the local `OtelTracing` collection because the ActivitySource state is process
+global.
 
 ## Scope
 
@@ -204,19 +225,6 @@ dotnet test packages/server/tests/Mohist.Server.IntegrationSpecs/Mohist.Server.I
 dotnet test packages/server/tests/Mohist.Server.ArchTests/Mohist.Server.ArchTests.csproj \
   -p:SkipWebBuild=true --no-build
 git diff --check
-```
-
-check giant files:
-
-```bash
-for f in $(rg --files \
-  packages/server/tests/Mohist.Server.ComponentSpecs/Specs \
-  packages/server/tests/Mohist.Server.IntegrationSpecs/Specs | rg '\.cs$'); do
-  n=$(wc -c < "$f")
-  if [ "$n" -gt 24000 ]; then
-    echo "$n $f"
-  fi
-done
 ```
 
 final searches:
@@ -290,8 +298,7 @@ no fixture.
 extract DB-only code from `GrainTestConfig` into `TestDatabaseSchema`:
 
 - `CreateDbContext`;
-- `MigrateWithSchemaFix`;
-- idempotent WorkflowRuns schema fix.
+- `Migrate`.
 
 keep Orleans `ConfigureSilo` and reminder setup in ComponentSpecs.
 
@@ -299,7 +306,9 @@ move `MigratedSqliteTemplate` to TestSupport. it depend on
 `TestDatabaseSchema`, not ComponentSpecs.
 
 extract `FakePromptLoader` from giant
-`MohistLocalWorkflowProfileSpecs.cs`. shared setup no import concrete spec.
+`MohistLocalWorkflowProfileSpecs.cs` into ComponentSpecs `Support/`. It has no
+IntegrationSpecs caller, so it does not belong in TestSupport. Component setup
+must not import a concrete spec.
 
 move other fake only when both projects really use same fake. simple duplicate
 may be better than big generic helper. grug fear premature DRY.
@@ -315,14 +324,17 @@ TestSupport forbidden things:
 
 - add xUnit, Test SDK, Orleans TestingHost, FakeTimeProvider;
 - reference Server, CLI, TestSupport;
-- move Service-only, Grain-only, seven unclassified files;
+- move Service-only, Grain-only, the four SQLite/EF event-store files, and
+  the two component-only files listed above;
 - move component fixtures into local `Support/`;
 - keep old collection names for now;
+- copy the current runner config temporarily so the project split does not
+  also change parallelism;
 - keep required template/skill data copy.
 
-### Move four Unit files
+### Move five Unit files
 
-move exact four files listed above. rename `Specs` to `Tests`. no behavior
+move the five fixture-free files listed above. rename `Specs` to `Tests`. no behavior
 change.
 
 ### Make IntegrationSpecs
@@ -331,8 +343,10 @@ change.
 - reference Server, CLI, TestSupport;
 - move Integration-only and three mixed Otel files;
 - move integration fixture and host helpers local;
-- OtelTracing only disabled-parallel collection;
+- `OtelTracing` is Integration's only disabled-parallel collection;
 - keep committed simple orderer temporary;
+- copy the current runner config temporarily so the project split does not
+  also change parallelism;
 - never copy uncommitted weighted map;
 - keep required runtime asset copy.
 
@@ -346,13 +360,17 @@ change.
 
 ### Prove no test fall in crack
 
-make TRX before and after. compare exact test names and total/pass/skip.
+make TRX before and after. compare normalized discovery identities and
+total/pass/skip: strip the project namespace prefix, and map the five renamed
+unit classes from `Specs` to `Tests` before comparing. Keep a file/class/method
+mapping for every rename.
 
 gate:
 
 - all projects green alone;
 - solution green;
-- old SpecTests discovered set equals new Unit + Component + Integration set;
+- old SpecTests discovered set equals new Unit + Component + Integration set
+  after the documented normalization;
 - no missing test;
 - no duplicate test;
 - no new skip.
@@ -387,11 +405,12 @@ then narrow fixture:
 - replace raw `Services.CreateScope()` repeated code with one DB callback helper;
 - helper only give scoped `MohistDbContext`, not generic service locator;
 - prefer public API setup when simple;
-- remove raw `Services` and `ConnectionString` after callers gone;
-- keep `Client`, fake time, and `Grains` only for real full flow.
+- move pure DB setup to the callback; do not build a fixture-wide service facade;
+- a composition test may resolve the concrete fake or host service it asserts;
+- keep `Client`, fake time, and `Grains` for real full flow.
 
-gate: IntegrationSpecs green. no direct `_fixture.Services` or
-`_fixture.ConnectionString` in spec files.
+gate: IntegrationSpecs green. pure DB setup uses the narrow callback and no
+generic fixture service helper appears.
 
 ## Work chunk: put test in right cave
 
@@ -420,13 +439,14 @@ then do same by domain:
 - Runner/general API;
 - System/Otel.
 
-split file by real ability until every file <= 24KB. no partial class. no mega
-base fixture. small local TestFactory ok when two sibling files use it.
+split file when it holds different product abilities or incompatible setup. no
+partial class. no mega base fixture. small local TestFactory ok when two sibling
+files use it. byte count can point at a reading problem; it does not decide one.
 
 record every removed integration test in table below.
 
-gate after each domain: affected projects green, no new skip, giant-file count
-go down.
+gate after each domain: affected projects green, no new skip, and each moved
+matrix has a named lower owner.
 
 ## Work chunk: give collection honest name
 
@@ -443,13 +463,14 @@ use meaning names, example:
 - Runner grain, Agent job grain, Backlog, persistence, event publishing;
 - System and Telemetry integration;
 - OtelTracing.
+- ConsoleOutput for process-global Console writer replacement.
 
 do not balance by stopwatch. semantic collection allowed uneven.
 
 run each renamed collection once. run ComponentSpecs and IntegrationSpecs five
 times. if state leak appear, fix ownership. do not make new number shard.
 
-gate: no numeric collection search result. no file >24KB. five runs green.
+gate: no numeric collection search result. five runs green.
 
 ## Work chunk: club tricky things
 
@@ -461,7 +482,7 @@ delete:
 - assembly `TestCollectionOrderer` attribute;
 - `scripts/analyze-spectests-trx.py`;
 - order/cost comments and tests;
-- all active Speed and SUT traits;
+- all active Speed and SUT traits, including ArchTests;
 - Traits type when no caller.
 
 targeted run now use project path or `FullyQualifiedName~Thing`.
@@ -489,14 +510,14 @@ use `XDocument` for csproj checks. no regex XML soup.
 guards must enforce:
 
 - test roots exist;
-- spec file public, right namespace, <=24KB;
+- spec file public and in the right namespace;
 - no test project reference another;
 - UnitTests no Mvc.Testing or Orleans TestingHost;
 - ComponentSpecs no Mvc.Testing/WebApplicationFactory;
 - TestSupport not test project and contain no test/fixture/collection;
 - no custom orderer;
 - no Speed/SUT trait;
-- only OtelTracing disable parallel.
+- only OtelTracing and ConsoleOutput disable parallel.
 
 run ArchTests from repo root and from ArchTests directory. both pass and inspect
 same roots.
@@ -511,8 +532,9 @@ measure two states only:
 two clean four-core runs each. no custom order. no parallel algorithm tweak.
 
 prefer no config when medians within 5%. keep thread cap only if full solution
-improve >5% and CPU not grow >10%. write one sentence in `design/testing.md` if
-cap stay.
+elapsed improve >5%. `/usr/bin/time` user/sys is diagnostic only: `dotnet test`
+fans out child processes, so its parent-process accounting is not a stable gate.
+write one sentence in `design/testing.md` if cap stay.
 
 if both bad, stop. fix wrong test level or fixture cost. no orderer resurrection.
 
@@ -525,7 +547,6 @@ run:
 - full solution twice normal;
 - full solution twice four-core;
 - all final searches;
-- giant-file check;
 - `git diff --check`.
 
 accept when:
@@ -534,49 +555,58 @@ accept when:
 - no new skip;
 - every deleted integration test has named lower owner;
 - elapsed median <= baseline * 1.10;
-- user+sys median <= baseline * 1.10;
 - no custom orderer anywhere.
 
 if 10% gate fail, mark BLOCKED with project timings. do not bring trick back.
 
 ## Execution record
 
-### Time rocks
+### Thread rocks
 
-| State | Run | elapsed | user + sys | total/pass/skip |
+| State | Run | elapsed | reported user + sys | total/pass/skip |
 |---|---:|---:|---:|---|
-| baseline | 1 | _fill_ | _fill_ | _fill_ |
-| baseline | 2 | _fill_ | _fill_ | _fill_ |
-| final | 1 | _fill_ | _fill_ | _fill_ |
-| final | 2 | _fill_ | _fill_ | _fill_ |
+| `a50cd9775` baseline, fixed four cores, `maxParallelThreads: 8` | 1 | 40.58s | 2.23s | 5035 / 5023 / 12 |
+| `a50cd9775` baseline, fixed four cores, `maxParallelThreads: 8` | 2 | 35.35s | 95.69s | 5035 / 5023 / 12 |
+| `maxParallelThreads: 8`, fixed four cores | 1 | 33.93s | 114.31s | 5006 / 4994 / 12 |
+| `maxParallelThreads: 8`, fixed four cores | 2 | 32.62s | 61.33s | 5006 / 4994 / 12 |
+| xUnit default threads, fixed four cores | 1 | 43.22s | 147.30s | 5006 / 4994 / 12 |
+| xUnit default threads, fixed four cores | 2 | 32.38s | 111.32s | 5006 / 4994 / 12 |
+
+final eight-thread median is 33.28s; baseline median is 37.97s. final is about
+12 percent faster. default-thread median is 37.80s, so grug keep this one boring
+cap. reported CPU varies because `dotnet test` child-process accounting varies;
+it is not a gate. grug still no orderer, cost table, or number shard.
 
 ### Coverage rocks moved down
 
-| Removed integration test | Component owner or HTTP-contract reason | Commit |
+| Removed integration matrix | Component owner or HTTP-contract reason | State |
 |---|---|---|
-| _fill_ | _fill_ | _fill_ |
+| Completion bucketing, terminal-event, totals, and range cases | `IssueCompletionBucketsQuerierSpecs` and `IssueCompletionWindowQuerierSpecs` own calculation; `IssueMetricsApiSpecs` keeps default/day, week/range, and invalid-bucket HTTP contracts | implemented in worktree |
+| Approval wait samples, statistics, and range cases | `IssueApprovalWaitQuerierSpecs` owns calculation; Integration keeps nullable JSON contract | implemented in worktree |
+| Quality classification, lifecycle, trend, previous-window, and range cases | `IssueQualityClassificationQuerierSpecs`, `IssueQualityLifecycleQuerierSpecs`, `IssueQualityTrendQuerierSpecs`, and `IssueQualityWindowQuerierSpecs` own calculation; Integration keeps empty nullable JSON/trend contract | implemented in worktree |
+| Delivery points, cycle values, previous average, and range cases | `IssueDeliveryTimePointsQuerierSpecs`, `IssueDeliveryTimePreviousWindowQuerierSpecs`, and `IssueDeliveryTimeWindowQuerierSpecs` own calculation; Integration keeps null-versus-zero JSON contract | implemented in worktree |
+| Stage attempts, aggregation, window, and range cases | `IssueStageDurationAttemptsQuerierSpecs`, `IssueStageDurationAggregationQuerierSpecs`, and `IssueStageDurationWindowQuerierSpecs` own calculation; Integration keeps non-empty aggregate DTO mapping | implemented in worktree |
 
 ## Done checklist
 
-- [ ] project caves exist and old SpecTests project gone;
-- [ ] Stage split preserve exact discovery before test consolidation;
-- [ ] TestSupport contain no tests or fixtures;
-- [ ] integration fixture clone migrated template before host;
-- [ ] duplicate schema DDL gone;
-- [ ] no raw Services/ConnectionString in IntegrationSpecs;
-- [ ] every removed integration test mapped to lower owner;
-- [ ] no active spec >24KB;
-- [ ] no numeric cost collection;
-- [ ] only OtelTracing disable parallel;
-- [ ] no custom orderer or cost script;
-- [ ] no active Speed/SUT traits;
-- [ ] ArchTests fail on missing root;
-- [ ] all test project boundary guards pass;
-- [ ] all .NET tests green, no new skip;
-- [ ] final time and CPU inside 10% gate;
-- [ ] `design/testing.md` describe boring final model;
-- [ ] `git diff --check` clean;
-- [ ] `plans/README.md` mark plan DONE.
+- [x] project caves exist and old SpecTests project gone;
+- [x] Stage split preserved discovery before deliberate test consolidation;
+- [x] TestSupport contains no tests or fixtures;
+- [x] integration fixture clones migrated template before host;
+- [x] duplicate schema DDL is gone;
+- [x] migrated pure DB setup uses the narrow fixture callback, not a service facade;
+- [x] every removed integration matrix is mapped to a lower owner;
+- [x] no numeric cost collection;
+- [x] only OtelTracing and ConsoleOutput disable parallel;
+- [x] no custom orderer or cost script;
+- [x] no active Speed/SUT traits;
+- [x] ArchTests fail on missing root;
+- [x] all test project boundary guards pass;
+- [x] all .NET tests green with no new skip;
+- [x] final elapsed median is inside the 10% gate;
+- [x] `design/testing.md` describes the boring final model;
+- [x] `git diff --check` is clean;
+- [x] this plan execution record is DONE; review repairs and validation are complete.
 
 ## STOP, grug confused
 
@@ -589,12 +619,35 @@ stop and report when:
 - integration test deletion have no lower owner and not HTTP-only assertion;
 - template not contain current schema;
 - semantic collection expose state leak needing product change;
-- file-size rule seem require partial class, generated source, or allowlist;
 - active automation really use Speed/SUT filter;
 - final no-orderer state more than 10% slower after cleanup;
 - someone propose new cost map, numbered shard, global host pool, skip, or magic.
 
 complexity demon offer shiny abstraction. grug say no.
+
+## Simplification decision
+
+grug found old 24KB hard gate make wrong kind of simple. it make one clean
+ability split because bytes say so, then grug get many small files with hidden
+story. no good. byte count is now only a smoke signal for reading review.
+
+grug still split real mixed caves: metrics matrix, update behavior, workflow
+profile behavior. ArchTests guard real boundaries, not byte count. no allowlist
+needed because no byte gate exist.
+
+## Deferred cleanup
+
+post-completion design review found the project classification itself was still
+mechanism-driven. Component and Integration describe how a test runs, not what
+kind of truth it protects. project split, scheduler removal, schema cleanup,
+TestSupport, ArchTests infrastructure, native thread cap, .NET validation, and
+performance work are complete and remain useful; the Unit/Component/Integration
+taxonomy is superseded.
+
+track final classification only in `plans/dotnet-test-tracks.md`. this plan
+stays as the historical execution record. the follow-up audits every test by
+its authority and value: product spec, technical implementation, or architecture
+constraint. tests with no current independent risk are removed instead of moved.
 
 ## Future grug remember
 

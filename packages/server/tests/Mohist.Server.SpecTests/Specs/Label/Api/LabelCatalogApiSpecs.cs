@@ -16,8 +16,6 @@ public class LabelCatalogApiSpecs
         _client = fixture.Client;
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, "Label")]
     [Fact]
     public async Task GetCatalog_EmptyProject_ReturnsEmpty()
     {
@@ -29,8 +27,6 @@ public class LabelCatalogApiSpecs
         Assert.Empty(definitions);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, "Label")]
     [Fact]
     public async Task GetCatalog_WithUserDefinitions_ReturnsThem()
     {
@@ -50,8 +46,6 @@ public class LabelCatalogApiSpecs
         Assert.Contains("ui", module.SupportedValues);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, "Label")]
     [Fact]
     public async Task PostCatalog_CreatesDefinition_Returns201()
     {
@@ -73,8 +67,6 @@ public class LabelCatalogApiSpecs
         Assert.Equal(2, envelope.Data.SupportedValues.Count);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, "Label")]
     [Fact]
     public async Task PostCatalog_DuplicateKey_Returns409()
     {
@@ -93,8 +85,6 @@ public class LabelCatalogApiSpecs
         Assert.Contains("already exists", body, StringComparison.OrdinalIgnoreCase);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, "Label")]
     [Fact]
     public async Task PostCatalog_InvalidKey_Returns400()
     {
@@ -109,8 +99,6 @@ public class LabelCatalogApiSpecs
         Assert.Contains("invalid", body, StringComparison.OrdinalIgnoreCase);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, "Label")]
     [Fact]
     public async Task PostCatalog_EmptyDescription_Returns400()
     {
@@ -125,8 +113,6 @@ public class LabelCatalogApiSpecs
         Assert.Contains("non-empty", body, StringComparison.OrdinalIgnoreCase);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, "Label")]
     [Fact]
     public async Task PatchCatalog_UpdatesDescription_Returns200()
     {
@@ -149,8 +135,6 @@ public class LabelCatalogApiSpecs
         Assert.Equal("Updated description", envelope.Data.Description);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, "Label")]
     [Fact]
     public async Task PatchCatalog_UpdatesSupportedValuesOnly_PreservesDescription()
     {
@@ -172,8 +156,6 @@ public class LabelCatalogApiSpecs
         Assert.Equal(new[] { "ui", "data" }, envelope.Data.SupportedValues);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, "Label")]
     [Fact]
     public async Task PatchCatalog_ClearsSupportedValuesOnly_PreservesDescription()
     {
@@ -194,8 +176,6 @@ public class LabelCatalogApiSpecs
         Assert.Null(envelope.Data.SupportedValues);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, "Label")]
     [Fact]
     public async Task PatchCatalog_EmptyDescription_Returns400AndDoesNotMutate()
     {
@@ -221,8 +201,6 @@ public class LabelCatalogApiSpecs
         Assert.Equal(new[] { "auth" }, module.SupportedValues);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, "Label")]
     [Fact]
     public async Task PatchCatalog_EmptySupportedValue_Returns400AndDoesNotMutate()
     {
@@ -248,8 +226,6 @@ public class LabelCatalogApiSpecs
         Assert.Equal(new[] { "auth" }, module.SupportedValues);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, "Label")]
     [Fact]
     public async Task PatchCatalog_MissingKey_Returns404()
     {
@@ -262,8 +238,6 @@ public class LabelCatalogApiSpecs
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, "Label")]
     [Fact]
     public async Task DeleteCatalog_RemovesDefinition_Returns204()
     {
@@ -283,8 +257,6 @@ public class LabelCatalogApiSpecs
         Assert.DoesNotContain(definitions, d => d.Key == "module");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, "Label")]
     [Fact]
     public async Task DeleteCatalog_MissingKey_Returns204Idempotent()
     {
@@ -296,8 +268,6 @@ public class LabelCatalogApiSpecs
         Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, "Label")]
     [Fact]
     public async Task Catalog_IsProjectScoped()
     {
@@ -317,8 +287,6 @@ public class LabelCatalogApiSpecs
         Assert.DoesNotContain(catalogB, d => d.Key == "module");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, "Label")]
     [Fact]
     public async Task DistinctKeysEndpoint_IsUnchanged()
     {
@@ -342,8 +310,6 @@ public class LabelCatalogApiSpecs
         Assert.Equal(new[] { "module", "stream" }, labels);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, "Label")]
     [Fact]
     public async Task PostCatalog_WithEmptySupportedValue_Returns400()
     {
@@ -358,8 +324,6 @@ public class LabelCatalogApiSpecs
         Assert.Contains("non-empty", body, StringComparison.OrdinalIgnoreCase);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, "Label")]
     [Fact]
     public async Task PostCatalog_WithSupportedValues_PersistsThem()
     {

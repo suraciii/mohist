@@ -165,8 +165,6 @@ public class TaskLogRouteSpecs
         truncated = false,
     };
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task UploadEndpoint_StoresEntriesAndReturnsAcceptedCount()
     {
@@ -205,8 +203,6 @@ public class TaskLogRouteSpecs
         Assert.Equal("Stable", rows[1].Text);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task UploadEndpoint_AgentJobRoute_StoresUnderAgentJobOwnerKind()
     {
@@ -238,8 +234,6 @@ public class TaskLogRouteSpecs
         Assert.Equal(0, workflowCollision);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task UploadEndpoint_RejectsMalformedJson()
     {
@@ -254,8 +248,6 @@ public class TaskLogRouteSpecs
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task UploadEndpoint_RejectsDuplicateSeqValues()
     {
@@ -278,8 +270,6 @@ public class TaskLogRouteSpecs
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task UploadEndpoint_RejectsInvalidMetadataAndOversizedText()
     {
@@ -302,8 +292,6 @@ public class TaskLogRouteSpecs
         Assert.Equal(HttpStatusCode.BadRequest, hugeText.StatusCode);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task UploadEndpoint_DoesNotInvokeAnyGrain()
     {
@@ -339,8 +327,6 @@ public class TaskLogRouteSpecs
         Assert.Null(runRow);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task UploadEndpoint_UnknownOwnerWork_ReturnsNotFoundAndDoesNotPersist()
     {
@@ -360,8 +346,6 @@ public class TaskLogRouteSpecs
         Assert.Equal(0, count);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task UploadEndpoint_CrossOwnerOverwrite_IsRejectedAndExistingLogStaysIntact()
     {
@@ -393,8 +377,6 @@ public class TaskLogRouteSpecs
         Assert.Equal(0, forgedCount);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task UploadEndpoint_SecondRunnerCannotReplaceAnotherRunnersLog()
     {
@@ -423,8 +405,6 @@ public class TaskLogRouteSpecs
         Assert.Equal("from assigned runner", row.Text);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetEndpoint_TaskWithoutCapturedLines_ReturnsEmptyPage()
     {
@@ -445,8 +425,6 @@ public class TaskLogRouteSpecs
         Assert.False(data.GetProperty("truncated").GetBoolean());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetEndpoint_ReturnsPaginatedLinesInSeqOrder()
     {
@@ -506,8 +484,6 @@ public class TaskLogRouteSpecs
         Assert.False(finalData.GetProperty("truncated").GetBoolean());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetEndpoint_TruncatedBatch_ReportsTruncatedTrueAndRetainedTail()
     {
@@ -544,8 +520,6 @@ public class TaskLogRouteSpecs
         Assert.Equal("tail 3", lines[^1].GetProperty("text").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetEndpoint_UnknownTaskId_ReturnsEmptyPage()
     {
@@ -564,8 +538,6 @@ public class TaskLogRouteSpecs
         Assert.False(data.GetProperty("truncated").GetBoolean());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetEndpoint_IssueWithoutWorkflowRun_ReturnsEmptyPage()
     {

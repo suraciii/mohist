@@ -124,8 +124,6 @@ public class WorkflowArtifactQueryRouteSpecs
         return (projectId, issueNumber, workflowRunId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task ArtifactList_ReturnsLatestPerPathByDefault()
     {
@@ -147,8 +145,6 @@ public class WorkflowArtifactQueryRouteSpecs
         Assert.True(review.TryGetProperty("recordedAt", out _));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task ArtifactList_PathHistoryReturnsAllVersionsInOrder()
     {
@@ -166,8 +162,6 @@ public class WorkflowArtifactQueryRouteSpecs
         Assert.Equal("ai-review.2", data[1].GetProperty("taskRunId").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task ArtifactList_PathWithoutHistoryReturnsOnlyLatestVersion()
     {
@@ -189,8 +183,6 @@ public class WorkflowArtifactQueryRouteSpecs
         Assert.Equal("ai-review.2", single.GetProperty("taskRunId").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task ArtifactList_TaskRunFilterReturnsProducedArtifacts()
     {
@@ -208,8 +200,6 @@ public class WorkflowArtifactQueryRouteSpecs
         Assert.Equal("review.md", single.GetProperty("path").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task ArtifactList_EmptyForIssueWithoutWorkflow()
     {
@@ -240,8 +230,6 @@ public class WorkflowArtifactQueryRouteSpecs
         Assert.Empty(data.EnumerateArray());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task ArtifactContent_ReturnsFileContentStream()
     {
@@ -260,8 +248,6 @@ public class WorkflowArtifactQueryRouteSpecs
         Assert.Equal("# Proposal\n\nExample proposal content", body);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task ArtifactContent_RejectsArtifactOutsideIssueContext()
     {
@@ -273,8 +259,6 @@ public class WorkflowArtifactQueryRouteSpecs
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task ArtifactContent_DirectoryListingReturnsContainedFiles()
     {
@@ -298,8 +282,6 @@ public class WorkflowArtifactQueryRouteSpecs
         Assert.Contains("sub/b.md", paths);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task ArtifactContent_DirectoryEntryReturnsRecordedBytes()
     {
@@ -365,8 +347,6 @@ public class WorkflowArtifactQueryRouteSpecs
         return row.ArtifactId;
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task ArtifactList_DirectoryAppearsAsCollection()
     {
@@ -384,8 +364,6 @@ public class WorkflowArtifactQueryRouteSpecs
         Assert.Equal("directory", specs[0].GetProperty("kind").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task ArtifactList_DtoUsesWorkflowArtifactNaming()
     {

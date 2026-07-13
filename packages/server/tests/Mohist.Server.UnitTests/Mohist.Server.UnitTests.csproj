@@ -7,16 +7,27 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="Microsoft.Orleans.TestingHost" />
     <PackageReference Include="xunit" />
     <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" />
     <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" />
     <PackageReference Include="EnvironmentAbstractions" />
     <PackageReference Include="EnvironmentAbstractions.TestHelpers" />
   </ItemGroup>
 
   <ItemGroup>
+    <Using Include="System.Net.Http.Json" />
+    <Using Include="Mohist.Server.TestSupport" />
+
     <ProjectReference Include="..\..\src\Mohist.Server\Mohist.Server.csproj" />
     <ProjectReference Include="..\..\..\cli\Mohist.Cli\Mohist.Cli.csproj" />
+    <ProjectReference Include="..\..\..\cli\tests\Mohist.Cli.TestSupport\Mohist.Cli.TestSupport.csproj" />
+    <ProjectReference Include="..\Mohist.Server.TestSupport\Mohist.Server.TestSupport.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

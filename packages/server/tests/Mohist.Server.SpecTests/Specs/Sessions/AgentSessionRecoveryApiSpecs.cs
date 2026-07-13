@@ -1,5 +1,4 @@
 using System.Net;
-using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -10,7 +9,6 @@ using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.Workflow.Domain.Run;
-using Mohist.Server.Sessions.Services;
 using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Sessions;
@@ -28,8 +26,6 @@ public class AgentSessionRecoveryApiSpecs
         _client = fixture.Client;
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task CompactEndpoint_InactiveSession_ReturnsUpdatedMetrics()
     {
@@ -46,8 +42,6 @@ public class AgentSessionRecoveryApiSpecs
         Assert.True(data.GetProperty("wasCompacted").GetBoolean());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task CompactEndpoint_ActiveSession_ReturnsConflict()
     {
@@ -62,8 +56,6 @@ public class AgentSessionRecoveryApiSpecs
         Assert.Contains("active", doc.RootElement.GetProperty("error").GetString() ?? string.Empty, StringComparison.OrdinalIgnoreCase);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task CompactEndpoint_NonexistentSession_ReturnsNotFound()
     {
@@ -74,8 +66,6 @@ public class AgentSessionRecoveryApiSpecs
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task ResetEndpoint_InactiveSession_ReturnsClearedMetrics()
     {
@@ -92,8 +82,6 @@ public class AgentSessionRecoveryApiSpecs
         Assert.False(data.GetProperty("wasCompacted").GetBoolean());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task ResetEndpoint_ActiveSession_ReturnsConflict()
     {
@@ -107,8 +95,6 @@ public class AgentSessionRecoveryApiSpecs
         Assert.Equal("session_active", doc.RootElement.GetProperty("code").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task ResetEndpoint_NonexistentSession_ReturnsNotFound()
     {
@@ -119,8 +105,6 @@ public class AgentSessionRecoveryApiSpecs
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task CompactEndpoint_PersistsCompactionEventAndUpdatesCoderSessionRecord()
     {
@@ -146,50 +130,6 @@ public class AgentSessionRecoveryApiSpecs
         var row = await db.AgentSessions.AsNoTracking()
             .SingleAsync(r => r.Id == currentSession.Id);
         Assert.False(string.IsNullOrEmpty(row.AgentSessionId));
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
-    [Fact]
-    public async Task SessionMetadataEndpoint_AfterCompact_ExposesContextUsagePercent()
-    {
-        var (project, issue, _, _) = await CreateAndStartSessionAsync("compact-dto", sessionName: "plan");
-
-        using var compactResponse = await _client.PostAsync($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/plan/compact", content: null);
-        Assert.Equal(HttpStatusCode.OK, compactResponse.StatusCode);
-
-        var raw = await _client.GetRawAsync($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/plan");
-        using var doc = JsonDocument.Parse(raw);
-        var root = doc.RootElement.GetProperty("data");
-        var usage = root.GetProperty("usage");
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
-    [Fact]
-    public async Task CompactEndpoint_AfterClosedSession_EmitsContextExhaustionCategoryOnMetadata()
-    {
-        var (project, issue, _, currentSession) = await CreateAndStartSessionAsync("compact-after-close", sessionName: "plan");
-
-        using var compactResponse = await _client.PostAsync($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/plan/compact", content: null);
-        Assert.Equal(HttpStatusCode.OK, compactResponse.StatusCode);
-
-        var raw = await _client.GetRawAsync($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/plan");
-        using var doc = JsonDocument.Parse(raw);
-        var root = doc.RootElement.GetProperty("data");
-        Assert.Equal(currentSession.Id, root.GetProperty("id").GetString());
-        var usage = root.GetProperty("usage");
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
-    [Fact]
-    public async Task AgentSessionGrain_Compact_RecoversAfterRuntimeEventsMakeSessionActive()
-    {
-        var (project, issue, _, currentSession) = await CreateAndStartSessionAsync("compact-deactivate", sessionName: "plan");
-
-        using var response = await _client.PostAsync($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/plan/compact", content: null);
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
 
     private async Task<(ProjectDto Project, IssueDto Issue, WorkDispatch Work, CreatedSession Session)> CreateAndStartSessionAsync(
@@ -223,7 +163,7 @@ public class AgentSessionRecoveryApiSpecs
     private async Task<(ProjectDto Project, IssueDto Issue)> CreateProjectAndIssueAsync(string name)
     {
         var projectName = $"recovery-api-{Guid.NewGuid():N}";
-        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = projectName, path = Directory.GetCurrentDirectory(), baseBranch = "main" });
+        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = projectName });
         await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
 var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = $"Recovery api {name}", body = "track sessions", labels = new Dictionary<string, string>(StringComparer.Ordinal), priority = "p1", projectId = project.Id, isDraft = false });
         return (project, issue);
@@ -256,9 +196,6 @@ var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/i
 
     private string RunnerAgentSessionAttachPath(CreatedSession session) =>
         $"{RunnerSessionPath(session)}/attach";
-
-    private string RunnerAgentSessionRuntimeEventsPath(CreatedSession session) =>
-        $"{RunnerSessionPath(session)}/runtime-events";
 
     private string RunnerSessionPath(CreatedSession session) =>
         $"/api/runner/{_runnerId}/sessions/{Uri.EscapeDataString(session.ProjectId)}/{Uri.EscapeDataString(session.WorkflowRunId)}/{Uri.EscapeDataString(session.SessionName)}";

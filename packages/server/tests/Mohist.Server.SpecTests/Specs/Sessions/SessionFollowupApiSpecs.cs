@@ -29,8 +29,6 @@ public class SessionFollowupApiSpecs
         _client = fixture.Client;
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task FollowupEndpoint_ActiveSessionOnlineRunner_ReturnsSent()
     {
@@ -63,8 +61,6 @@ public class SessionFollowupApiSpecs
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task FollowupEndpoint_EmptyText_ReturnsBadRequest()
     {
@@ -77,8 +73,6 @@ public class SessionFollowupApiSpecs
         Assert.Equal("followup_text_missing", doc.RootElement.GetProperty("code").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task FollowupEndpoint_WhitespaceText_ReturnsBadRequest()
     {
@@ -91,8 +85,6 @@ public class SessionFollowupApiSpecs
         Assert.Equal("followup_text_missing", doc.RootElement.GetProperty("code").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task FollowupEndpoint_MissingText_ReturnsBadRequest()
     {
@@ -105,8 +97,6 @@ public class SessionFollowupApiSpecs
         Assert.Equal("followup_text_missing", doc.RootElement.GetProperty("code").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task FollowupEndpoint_UnknownSession_ReturnsNotFound()
     {
@@ -117,8 +107,6 @@ public class SessionFollowupApiSpecs
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task FollowupEndpoint_InactiveSession_ReturnsConflict()
     {
@@ -131,8 +119,6 @@ public class SessionFollowupApiSpecs
         Assert.Equal("session_inactive", doc.RootElement.GetProperty("code").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task FollowupEndpoint_RunnerOffline_ReturnsServiceUnavailable()
     {
@@ -143,25 +129,6 @@ public class SessionFollowupApiSpecs
         Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
         using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         Assert.Equal("runner_offline", doc.RootElement.GetProperty("code").GetString());
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
-    [Fact]
-    public async Task ResolveFollowupTargetAsync_ReadsRunnerIdAndWorkflowRunIdFromSession()
-    {
-        var (project, issue, workflowRunId, _) = await CreateAndStartSessionAsync("followup-target", sessionName: "plan");
-
-        await using var scope = _fixture.Services.CreateAsyncScope();
-        var querier = scope.ServiceProvider.GetRequiredService<Mohist.Server.Sessions.Services.AgentSessionQuerier>();
-
-        var target = await querier.ResolveFollowupTargetAsync(project.Id, issue.Number, "plan");
-
-        Assert.NotNull(target);
-        Assert.Equal(_runnerId, target!.RunnerId);
-        Assert.Equal(workflowRunId, target.WorkflowRunId);
-        Assert.Equal("plan", target.SessionName);
-        Assert.False(target.IsActive);
     }
 
     private Task<HttpResponseMessage> PostFollowupAsync(string projectId, int issueNumber, string sessionName, object body) =>
@@ -200,7 +167,7 @@ public class SessionFollowupApiSpecs
     private async Task<(ProjectDto Project, IssueDto Issue)> CreateProjectAndIssueAsync(string name)
     {
         var projectName = $"followup-api-{Guid.NewGuid():N}";
-        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = projectName, path = Directory.GetCurrentDirectory(), baseBranch = "main" });
+        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = projectName });
         await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
         var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = $"Followup api {name}", body = "followup sessions", labels = new Dictionary<string, string>(StringComparer.Ordinal), priority = "p1", projectId = project.Id, isDraft = false });
         return (project, issue);

@@ -44,8 +44,6 @@ public class WorkflowArtifactUploadRouteSpecs
         return form;
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task UploadEndpoint_AcceptsMultipartAndReturnsUploadId()
     {
@@ -98,8 +96,6 @@ public class WorkflowArtifactUploadRouteSpecs
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task UploadEndpoint_SameKeySameHashIsIdempotent()
     {
@@ -146,8 +142,6 @@ public class WorkflowArtifactUploadRouteSpecs
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task UploadEndpoint_SameKeyDifferentHashReturnsConflict()
     {
@@ -193,8 +187,6 @@ public class WorkflowArtifactUploadRouteSpecs
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task UploadEndpoint_UnknownWorkItemReturnsNotFound()
     {
@@ -205,8 +197,6 @@ public class WorkflowArtifactUploadRouteSpecs
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task UploadEndpoint_NonMultipartReturnsBadRequest()
     {
@@ -217,8 +207,6 @@ public class WorkflowArtifactUploadRouteSpecs
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task UploadEndpoint_MissingPathFieldReturnsBadRequest()
     {
@@ -245,8 +233,6 @@ public class WorkflowArtifactUploadRouteSpecs
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task UploadEndpoint_MalformedDirectoryEnvelopeReturnsBadRequest()
     {
@@ -276,8 +262,6 @@ public class WorkflowArtifactUploadRouteSpecs
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task AgentJobUploadEndpoint_AcceptsMultipartForRunningJob()
     {

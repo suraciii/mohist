@@ -57,9 +57,9 @@ public class WorkflowArtifactDomainTests
     [Fact]
     public void DomainFact_ProducerKeyIsWorkflowRunPlusTaskRun()
     {
-        var first = new WorkflowArtifact("wr_1", "ai-review.1", "review.md", DateTimeOffset.UtcNow);
-        var second = new WorkflowArtifact("wr_1", "ai-review.2", "review.md", DateTimeOffset.UtcNow);
-        var otherRun = new WorkflowArtifact("wr_2", "ai-review.1", "review.md", DateTimeOffset.UtcNow);
+        var first = new WorkflowArtifact("wr_1", "ai-review.1", "review.md", DateTimeOffset.UnixEpoch);
+        var second = new WorkflowArtifact("wr_1", "ai-review.2", "review.md", DateTimeOffset.UnixEpoch);
+        var otherRun = new WorkflowArtifact("wr_2", "ai-review.1", "review.md", DateTimeOffset.UnixEpoch);
 
         Assert.Equal("wr_1:ai-review.1", first.ProducerKey);
         Assert.Equal("wr_1:ai-review.2", second.ProducerKey);
@@ -70,7 +70,7 @@ public class WorkflowArtifactDomainTests
     [Fact]
     public void Event_IsPartOfWorkflowEventUnion()
     {
-        WorkflowEvent evt = new WorkflowArtifactRecorded("wr_1", "ai-review.1", "review.md", DateTimeOffset.UtcNow);
+        WorkflowEvent evt = new WorkflowArtifactRecorded("wr_1", "ai-review.1", "review.md", DateTimeOffset.UnixEpoch);
 
         var busType = WorkflowEventSerializer.BusType(evt);
         Assert.Equal(EventCatalog.ReverseDns.WorkflowArtifactRecorded, busType);

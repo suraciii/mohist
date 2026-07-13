@@ -15,7 +15,8 @@ public static class LogsRoutes
             long? cursor,
             int? limit,
             int? maxBytes,
-            ILogPathResolver pathResolver) =>
+            ILogPathResolver pathResolver,
+            ILogFileStore logFiles) =>
         {
             if (cursor is < 0)
             {
@@ -48,11 +49,11 @@ public static class LogsRoutes
             // present yet but an older log file is. Source identity is
             // the active file name so the Web renders it as the
             // `File:` line.
-            string? activeFile = ResolveActiveFile(logDir, expectedFile);
+            string? activeFile = ResolveActiveFile(logFiles, logDir, expectedFile);
 
             if (activeFile is null)
             {
-                var unavailableReason = Directory.Exists(logDir)
+                var unavailableReason = logFiles.DirectoryExists(logDir)
                     ? $"Log file '{FileLoggerProvider.LogFileName}' is missing at {expectedFile}."
                     : $"Log directory does not exist at {logDir}.";
                 return ApiResults.Ok(BuildUnavailable(expectedFile, unavailableReason));
@@ -61,7 +62,8 @@ public static class LogsRoutes
             var sourceName = Path.GetFileName(activeFile);
             var readLimit = limit ?? DefaultTailLimit;
             var readMaxBytes = maxBytes ?? DefaultTailMaxBytes;
-            var fileLength = new FileInfo(activeFile).Length;
+            using var stream = logFiles.OpenRead(activeFile);
+            var fileLength = stream.Length;
 
             // reset semantics: first read (no cursor) OR the file shrank
             // below the supplied cursor (rotation/truncation). In both
@@ -73,7 +75,7 @@ public static class LogsRoutes
             var startPosition = shouldReset ? 0L : cursor!.Value;
 
             var (entries, nextCursor, truncated) = await ReadTailAsync(
-                activeFile, startPosition, readLimit, readMaxBytes);
+                stream, startPosition, readLimit, readMaxBytes);
 
             // Both `cursor` and `nextCursor` carry the same byte offset:
             // the position the client should pass back to continue.
@@ -105,22 +107,22 @@ public static class LogsRoutes
     /// transitional fallback for environments that have not yet
     /// produced a <c>server.log</c>.
     /// </summary>
-    private static string? ResolveActiveFile(string logDir, string expectedFile)
+    private static string? ResolveActiveFile(ILogFileStore logFiles, string logDir, string expectedFile)
     {
-        if (File.Exists(expectedFile))
+        if (logFiles.FileExists(expectedFile))
         {
             return expectedFile;
         }
 
-        if (!Directory.Exists(logDir))
+        if (!logFiles.DirectoryExists(logDir))
         {
             return null;
         }
 
-        var newest = Directory.GetFiles(logDir, "*.log")
-            .OrderByDescending(File.GetLastWriteTimeUtc)
+        return logFiles.EnumerateLogFiles(logDir)
+            .OrderByDescending(file => file.LastWriteTime)
+            .Select(file => file.Path)
             .FirstOrDefault();
-        return newest;
     }
 
     private static LogTailResponse BuildUnavailable(string expectedFile, string reason)
@@ -155,7 +157,7 @@ public static class LogsRoutes
     /// position whenever the file fits in a single buffer read.
     /// </remarks>
     private static async Task<(IReadOnlyList<LogEntry> Entries, long NextCursor, bool Truncated)> ReadTailAsync(
-        string path,
+        Stream stream,
         long startPosition,
         int limit,
         int maxBytes)
@@ -164,7 +166,6 @@ public static class LogsRoutes
         long bytesRead = 0;
         long nextCursor = startPosition;
 
-        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
         stream.Seek(startPosition, SeekOrigin.Begin);
 
         while (entries.Count < limit && bytesRead < maxBytes)
@@ -196,7 +197,7 @@ public static class LogsRoutes
         return (entries, nextCursor, nextCursor < stream.Length);
     }
 
-    private static async Task<BoundedLineRead> ReadLineWithinBudgetAsync(FileStream stream, long byteBudget)
+    private static async Task<BoundedLineRead> ReadLineWithinBudgetAsync(Stream stream, long byteBudget)
     {
         var lineBytes = new List<byte>(capacity: (int)Math.Min(byteBudget, 4096));
         var consumed = 0L;
@@ -232,7 +233,7 @@ public static class LogsRoutes
         }
     }
 
-    private static async Task<long> DrainUntilLineEndAsync(FileStream stream)
+    private static async Task<long> DrainUntilLineEndAsync(Stream stream)
     {
         var consumed = 0L;
         var buffer = new byte[4096];
