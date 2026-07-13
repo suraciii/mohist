@@ -12,9 +12,12 @@ public interface IRunnerGrain : IGrainWithStringKey
     Task HeartbeatAsync();
     /// <summary>Refreshes runner information. Does not refresh presence.</summary>
     Task HeartbeatRepairAsync(RunnerInfo info);
-    // Agent-job assignment stays push-based because the job grain owns the
-    // dispatch snapshot. Poll delivery reconciles that stable work against the
-    // runner's process-lifetime reported set.
+    /// <summary>
+    /// Agent-job assignment stays push-based because the job grain owns the
+    /// dispatch snapshot. Poll delivery reconciles that stable work against the
+    /// runner's process-lifetime reported set.
+    /// </summary>
+    [AlwaysInterleave]
     Task<RunnerWorkAssignmentResult> AssignAgentJobAsync(WorkDispatch work);
     Task<RunnerWorkReportResult> ReportAgentJobResultAsync(string agentJobId, string workId, WorkResult result);
     /// <summary>Atomically admits one reconciliation round and captures its capacity.</summary>
@@ -30,6 +33,8 @@ public interface IRunnerGrain : IGrainWithStringKey
     /// to an info-refresh channel.
     /// </summary>
     Task TouchPresenceAsync();
+
+    [AlwaysInterleave]
     Task<RunnerRuntimeState> GetRuntimeStateAsync();
     Task UpdateBuildGitHashAsync(string? buildGitHash);
     Task<RunnerInfo?> GetInfoAsync();

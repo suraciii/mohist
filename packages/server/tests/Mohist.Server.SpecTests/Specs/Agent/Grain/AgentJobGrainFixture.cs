@@ -59,6 +59,7 @@ public sealed class ControllableAgentJobDispatchObserver : IAgentJobDispatchObse
 {
     private TaskCompletionSource _assignmentPrepared = NewSignal();
     private TaskCompletionSource _runnerAccepted = NewSignal();
+    private TaskCompletionSource? _assignmentPreparedBlock;
 
     public bool FailAssignmentPrepared { get; set; }
     public bool FailRunnerAccepted { get; set; }
@@ -66,6 +67,8 @@ public sealed class ControllableAgentJobDispatchObserver : IAgentJobDispatchObse
     public Task AssignmentPreparedAsync(string agentJobId, string runnerId, string workId)
     {
         _assignmentPrepared.TrySetResult();
+        if (_assignmentPreparedBlock is not null)
+            return _assignmentPreparedBlock.Task;
         return FailAssignmentPrepared
             ? Task.FromException(new InvalidOperationException("simulated activation loss after assignment preparation"))
             : Task.CompletedTask;
@@ -83,10 +86,16 @@ public sealed class ControllableAgentJobDispatchObserver : IAgentJobDispatchObse
 
     public Task WaitForAssignmentPreparedAsync() => _assignmentPrepared.Task;
 
+    public void BlockAssignmentPrepared() => _assignmentPreparedBlock ??= NewSignal();
+
+    public void ReleaseAssignmentPrepared() => _assignmentPreparedBlock?.TrySetResult();
+
     public void Reset()
     {
         FailAssignmentPrepared = false;
         FailRunnerAccepted = false;
+        _assignmentPreparedBlock?.TrySetResult();
+        _assignmentPreparedBlock = null;
         _assignmentPrepared = NewSignal();
         _runnerAccepted = NewSignal();
     }

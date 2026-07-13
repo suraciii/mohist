@@ -214,3 +214,75 @@
   `packages/server/tests` (grep returns zero matches). The
   workflow-scheduling `DispatchService` reconcile (out of scope per #363)
   remains untouched.
+
+# T-004 progress
+
+## Decisions
+- Removed `[Reentrant]` attribute from `RunnerGrain.cs` and dropped the
+  `using Orleans.Concurrency;` directive (the namespace is unused in the
+  implementation after the attribute drops; `[AlwaysInterleave]` lives on
+  `IRunnerGrain`).
+- Removed `_worksStateWriteGate` and `_pollAdmissionGate` from `RunnerGrain`;
+  `PersistAsync` now calls `_worksState.WriteStateAsync()` directly. Turn
+  serialization provides the necessary write ordering for non-interleaved
+  callers; `AssignAgentJobAsync`'s `PersistAsync` is protected by
+  `_lifecycleGate`.
+- Kept `_pollAdmitted` as a boolean flag only: `TryBeginPollAsync` sets it,
+  `EndPollAsync` clears it, and `AssignAgentJobAsync` rejects with
+  `runner-reconciling` while it is true.
+- Removed `_pollAdmissionGate` Wait/Release from `UnregisterAsync`,
+  `UpdateAsync`, and `AssignAgentJobAsync`; these methods now acquire only
+  `_lifecycleGate` for state mutations.
+- Moved `CloseoutLostAsync()` outside `_lifecycleGate` in `HandleTimeoutAsync`,
+  matching the existing `UnregisterAsync` pattern: set offline + unregister
+  inside the gate, release, then closeout.
+- Added `[AlwaysInterleave]` to `GetRuntimeStateAsync` and `AssignAgentJobAsync`
+  on `IRunnerGrain`; `GetSlotsAsync` already had it. This lets
+  `AgentJobGrain.TryAssignToRunnerAsync` proceed when `RunnerGrain`'s turn is
+  held by `HandleTimeoutAsync`/`UnregisterAsync` during closeout.
+- Updated `RunnerDefinitionStateSpecs` tests that asserted the old
+  `_pollAdmissionGate` blocking semantics:
+  - `UpdateAsync_WaitsForAdmittedPollAndNextAdmissionUsesNewCapacity` →
+    `UpdateAsync_DoesNotWaitForAdmittedPollAndNextAdmissionUsesNewCapacity`
+  - `UnregisterAsync_WaitsForAdmittedPollBeforeClearingRegistration` →
+    `UnregisterAsync_DoesNotWaitForAdmittedPollBeforeClearingRegistration`
+- Added `BlockAssignmentPrepared()` / `ReleaseAssignmentPrepared()` to
+  `ControllableAgentJobDispatchObserver` so the deadlock spec can pause the
+  agent job inside `TryAssignToRunnerAsync` while forcing the runner presence
+  timer to fire. The blocking is opt-in and reset between tests.
+
+## Codebase Patterns
+- RunnerGrain concurrency specs use the `AgentJobGrainFixture`
+  (`[Collection("AgentJobGrain")]`) because it provides the
+  `ControllableAgentJobDispatchObserver` needed to reproduce the reciprocal
+  Runner↔AgentJob deadlock scenario. The fixture still gives us
+  `InProcessTestCluster` + `MigratedSqliteTemplate.CopyTo` + `FakeTimeProvider`.
+- Poll admission remains single-writer: `TryBeginPollAsync` checks the
+  `_pollAdmitted` flag; with turn serialization, two concurrent calls execute
+  serially and exactly one wins.
+- `HandleTimeoutAsync` releasing `_lifecycleGate` before `CloseoutLostAsync`
+  is the critical fix: `AssignAgentJobAsync` (now `[AlwaysInterleave]`) can
+  acquire the gate during closeout, see the runner is offline, reject, and
+  free the AgentJob turn so `ReportResultAsync` can complete.
+
+## Gotchas
+- The deadlock spec's final agent-job failure reason depends on timing.
+  The test config sets `AgentJobOptions.DispatchRetryBound` to 5 s, while the
+  runner `PresenceTimeout` is 2 min. Advancing time to trigger the timeout
+  therefore also exceeds the dispatch retry bound, so the agent job may
+  self-fail with `runner-unavailable` before the closeout's `ReportResultAsync`
+  can set it to `runner-lost`. The spec asserts only the settled state:
+  runner offline, active works empty, agent job terminal. Do not assert the
+  exact failure reason.
+- `using Orleans.Concurrency` must be removed from `RunnerGrain.cs` after
+  `[Reentrant]` is dropped; the implementation does not reference
+  `[AlwaysInterleave]` (the attribute lives on the interface).
+- `RunnerDefinitionStateSpecs` used to assert the old hold-and-wait behavior
+  of `_pollAdmissionGate`. After removal, `UpdateAsync` and `UnregisterAsync`
+  proceed while a poll is admitted; the specs now verify that outcome.
+
+## Verification
+- `npm run build` succeeds (0 warnings, 0 errors).
+- `npm test` passes: 2874 server specs (+6 new `RunnerGrainConcurrencySpecs`;
+  the two renamed `RunnerDefinitionStateSpecs` still pass), 1390 unit tests,
+  24 arch tests, 875 CLI tests, 4596 web tests, 1007 runner tests — all green.

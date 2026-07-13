@@ -168,7 +168,7 @@ public class RunnerDefinitionStateSpecs : WorkflowGrainSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
-    public async Task UpdateAsync_WaitsForAdmittedPollAndNextAdmissionUsesNewCapacity()
+    public async Task UpdateAsync_DoesNotWaitForAdmittedPollAndNextAdmissionUsesNewCapacity()
     {
         var projectId = $"test-project-{Guid.NewGuid():N}";
         var runnerId = await RegisterRunnerForProjectAsync(projectId, maxWorkflowSlots: 2);
@@ -177,17 +177,10 @@ public class RunnerDefinitionStateSpecs : WorkflowGrainSpecs
         Assert.True(admission.Admitted);
         Assert.Equal(2, admission.Slots);
 
-        var update = runner.UpdateAsync(1);
-        try
-        {
-            Assert.False(update.IsCompleted);
-        }
-        finally
-        {
-            await runner.EndPollAsync();
-        }
+        await runner.UpdateAsync(1);
 
-        await update;
+        await runner.EndPollAsync();
+
         var nextAdmission = await runner.TryBeginPollAsync();
         try
         {
@@ -203,7 +196,7 @@ public class RunnerDefinitionStateSpecs : WorkflowGrainSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
-    public async Task UnregisterAsync_WaitsForAdmittedPollBeforeClearingRegistration()
+    public async Task UnregisterAsync_DoesNotWaitForAdmittedPollBeforeClearingRegistration()
     {
         var projectId = $"test-project-{Guid.NewGuid():N}";
         var runnerId = await RegisterRunnerForProjectAsync(projectId);
@@ -211,18 +204,10 @@ public class RunnerDefinitionStateSpecs : WorkflowGrainSpecs
         var admission = await runner.TryBeginPollAsync();
         Assert.True(admission.Admitted);
 
-        var unregister = runner.UnregisterAsync();
-        try
-        {
-            Assert.False(unregister.IsCompleted);
-            Assert.NotNull(await runner.GetInfoAsync());
-        }
-        finally
-        {
-            await runner.EndPollAsync();
-        }
+        await runner.UnregisterAsync();
 
-        await unregister;
+        await runner.EndPollAsync();
+
         Assert.Null(await runner.GetInfoAsync());
         Assert.Empty(await runner.PollAllAsync(Services));
     }
