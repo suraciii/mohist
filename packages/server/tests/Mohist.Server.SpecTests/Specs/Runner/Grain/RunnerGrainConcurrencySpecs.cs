@@ -35,6 +35,7 @@ public class RunnerGrainConcurrencySpecs : IAsyncLifetime
     public Task InitializeAsync()
     {
         _fixture.DispatchObserver.Reset();
+        _fixture.RunnerAssignmentObserver.Reset();
         return Task.CompletedTask;
     }
 
@@ -390,5 +391,113 @@ public class RunnerGrainConcurrencySpecs : IAsyncLifetime
             acceptedWorkId);
         Assert.NotNull(persistedWork);
         Assert.Equal("outstanding", persistedWork!.Status);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
+    [Fact]
+    public async Task PollAdmittedAfterAssignmentStarts_RejectsAssignmentWithoutPersistingWork()
+    {
+        var (runnerId, _) = await RegisterRunnerAsync($"assignment-poll-race-{Guid.NewGuid():N}");
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        var agentJobId = $"assignment-poll-job-{Guid.NewGuid():N}";
+        var workId = $"assignment-poll-work-{Guid.NewGuid():N}";
+        var dispatch = new WorkDispatch(
+            WorkflowRunId: string.Empty,
+            WorkId: workId,
+            AgentJobId: agentJobId,
+            OwnerKind: WorkDispatchOwnerKinds.AgentJob);
+
+        _fixture.RunnerAssignmentObserver.BlockAssignmentAdmission();
+        var assignment = runner.AssignAgentJobAsync(dispatch);
+        await _fixture.RunnerAssignmentObserver.WaitForAssignmentAdmissionAsync();
+
+        var admission = await runner.TryBeginPollAsync();
+        Assert.True(admission.Admitted);
+
+        try
+        {
+            _fixture.RunnerAssignmentObserver.ReleaseAssignmentAdmission();
+            var result = await assignment;
+
+            Assert.Equal(RunnerWorkAssignmentStatus.Rejected, result.Status);
+            Assert.Equal("runner-reconciling", result.Reason);
+            Assert.Empty((await runner.GetRuntimeStateAsync()).ActiveWorks);
+            Assert.Null(await FindRunnerWorkAsync(
+                runnerId,
+                WorkDispatchOwnerKinds.AgentJob,
+                agentJobId,
+                workId));
+        }
+        finally
+        {
+            _fixture.RunnerAssignmentObserver.ReleaseAssignmentAdmission();
+            await runner.EndPollAsync();
+        }
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
+    [Fact]
+    public async Task ConcurrentReportAndAssignment_PreserveRunnerStateAndWorkLedgerAcrossReactivation()
+    {
+        var (runnerId, _) = await RegisterRunnerAsync(
+            $"report-assignment-race-{Guid.NewGuid():N}",
+            maxWorkflowSlots: 2);
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        var reportedAgentJobId = $"reported-job-{Guid.NewGuid():N}";
+        var reportedWorkId = $"reported-work-{Guid.NewGuid():N}";
+        var reportedDispatch = new WorkDispatch(
+            WorkflowRunId: string.Empty,
+            WorkId: reportedWorkId,
+            AgentJobId: reportedAgentJobId,
+            OwnerKind: WorkDispatchOwnerKinds.AgentJob);
+        Assert.Equal(
+            RunnerWorkAssignmentStatus.Assigned,
+            (await runner.AssignAgentJobAsync(reportedDispatch)).Status);
+        await Grains.GetGrain<IAgentJobGrain>(reportedAgentJobId)
+            .AssignRunnerAsync(runnerId, reportedWorkId);
+
+        var assignedAgentJobId = $"assigned-job-{Guid.NewGuid():N}";
+        var assignedWorkId = $"assigned-work-{Guid.NewGuid():N}";
+        var assignedDispatch = new WorkDispatch(
+            WorkflowRunId: string.Empty,
+            WorkId: assignedWorkId,
+            AgentJobId: assignedAgentJobId,
+            OwnerKind: WorkDispatchOwnerKinds.AgentJob);
+
+        var report = runner.ReportAgentJobResultAsync(
+            reportedAgentJobId,
+            reportedWorkId,
+            new WorkResult("completed"));
+        var assignment = runner.AssignAgentJobAsync(assignedDispatch);
+        await Task.WhenAll(report, assignment);
+
+        Assert.True((await report).Tracked);
+        Assert.Equal(RunnerWorkAssignmentStatus.Assigned, (await assignment).Status);
+
+        await runner.DeactivateForTestAsync();
+        await Grains.GetGrain<IManagementGrain>(0).ForceActivationCollection(TimeSpan.Zero);
+
+        var reactivated = Grains.GetGrain<IRunnerGrain>(runnerId);
+        var activeWork = Assert.Single((await reactivated.GetRuntimeStateAsync()).ActiveWorks);
+        Assert.Equal(assignedWorkId, activeWork.WorkId);
+        Assert.Equal(assignedAgentJobId, activeWork.OwnerId);
+
+        var completedRow = await FindRunnerWorkAsync(
+            runnerId,
+            WorkDispatchOwnerKinds.AgentJob,
+            reportedAgentJobId,
+            reportedWorkId);
+        Assert.NotNull(completedRow);
+        Assert.Equal("completed", completedRow!.Status);
+
+        var outstandingRow = await FindRunnerWorkAsync(
+            runnerId,
+            WorkDispatchOwnerKinds.AgentJob,
+            assignedAgentJobId,
+            assignedWorkId);
+        Assert.NotNull(outstandingRow);
+        Assert.Equal("outstanding", outstandingRow!.Status);
     }
 }
