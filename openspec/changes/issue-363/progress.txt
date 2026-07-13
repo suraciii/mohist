@@ -55,3 +55,72 @@
   (`InProcessTestCluster`) using `FakeTimeProvider` and
   `MigratedSqliteTemplate.CopyTo`; no wall-clock waits, no order
   dependencies.
+
+# T-002 progress
+
+## Decisions
+- `AgentSubscriptionDispatchHandler.HandleAsync` (`Events/Subscriptions/AgentSubscriptionDispatchHandler.cs:77-80`)
+  collapsed to a direct `await DispatchAsync(evt, ct)`. The previously swallow
+  try-catch was removed; envelope-level no-ops (no projectid on the envelope,
+  no active matched subscription, empty rendered prompt) survive as `return`
+  in `DispatchAsync` itself, and `OperationCanceledException`-when-cancelled
+  propagates by virtue of `DispatchAsync` simply throwing. `DeliveryFailure`
+  semantics now reach the durable dispatcher for retry/DLQ.
+- `HermesIssueNotificationHandler.HandleAsync` (`Events/Subscriptions/HermesIssueNotificationHandler.cs:48-60`)
+  lost its outer setup try-catch. The two `Task.CompletedTask` no-op returns
+  (no webhook configured / not a recognised notification type, and
+  notification type disabled in options) and the cooperative
+  `ct.ThrowIfCancellationRequested()` rethrow stay. The two-phase model is
+  preserved: `DeliverAsync`'s own try-catch (`DeliverAsync`, lines 62-86)
+  and `BackgroundHermesIssueNotificationDispatcher`'s `Task.Run` catch keep
+  the best-effort UI push channel's local error handling intact.
+- `RunnerWorkflowTerminalStatusHandler.HandleAsync` was already awaiting
+  `IRunnerWorkflowStatusRouter.RouteAsync` synchronously on the dispatch
+  stack (line 68). XML doc at lines 32-34 already describes the
+  awaited-delivery model with failures propagating to the durable dispatcher.
+  No stale detach/in-stack delivery/synchronous-callback deadlock wording
+  remains in the handler (verified via grep).
+
+## Codebase Patterns
+- For test fakes of `IHermesIssueNotificationDispatcher` that want to model
+  a setup-phase failure (dispatcher unavailable), add a `ThrowOnDispatch`
+  knob to the recording fake and throw synchronously from
+  `Dispatch(...)` — that gives a throwing-enqueue test variant while
+  preserving the default no-throw enqueue behaviour used elsewhere.
+- `RunnerWorkflowTerminalStatusHandler` is directly instantiable in unit
+  specs: `new RunnerWorkflowTerminalStatusHandler(router, NullLogger<...>.
+  Instance)` with a hand-rolled `IRunnerWorkflowStatusRouter` (the
+  production `RunnerWorkflowStatusRouter` swallows everything internally, so
+  propagate-only verification cannot use it). The "shared" existing
+  `[Collection("IntegrationRunner")]`-driven specs already exercise the
+  production router.
+
+## Gotchas
+- After dead-lettering in `EventDispatcherSpecs`, the dispatcher marks
+  the source row DispatchedAt; so an assertion `Assert.Empty(events.Marked)`
+  AFTER retry exhaustion will fail. Use
+  `Assert.Single(events.Marked)` + an empty `events.PendingUndelivered`
+  + a second tick that observes no double-fire to assert durable semantics.
+- The `_dispatcher.Dispatch(...)` call in `HermesIssueNotificationHandler`
+  is synchronous (void). Adding `ThrowOnDispatch` to the recording fake
+  works because the dispatcher throws synchronously and the handler
+  returns `Task.CompletedTask` immediately. The pattern under test is
+  "Throw in the synchronous dispatch enqueue path"; the test uses
+  `Assert.ThrowsAsync` because the handler's `HandleAsync` method is
+  returned synchronously but its async surface still propagates the
+  exception via the Task it returns.
+
+## Verification
+- `npm run build` succeeds (TreatWarningsAsErrors catches the missing
+  `using Mohist.Server.Events.Subscriptions;` in
+  `RunnerWorkflowTerminalStatusHandlerSpecs` after the new direct-instantiation
+  tests were added).
+- `npm test` passes: 2865 server specs (+2 new direct-instantiation
+  `RunnerWorkflowTerminalStatusHandlerSpecs.HandleAsync_*` specs;
+  +1 from the renamed `HandleAsync_LaunchFailure_PropagatesToDispatcher`
+  minus 0 removed), 1390 unit tests (+2 new `EventDispatcherSpecs` —
+  `DispatchAsync_AgentSubscriptionFailure_PropagatesToDispatcher_RetriesUntilDeadLetter`
+  and `DispatchAsync_AgentSubscriptionFailure_RangeEnvelopeIsStillNoOp`;
+  +1 new `HermesIssueNotificationTests.SetupFailure_PropagatesToDispatcher`),
+  24 arch tests, 875 CLI tests, 4596 web tests, 1007 runner tests — all
+  green.
