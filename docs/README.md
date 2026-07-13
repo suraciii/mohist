@@ -37,7 +37,7 @@
 
 > 执行后端怎么配，怎么用外部 agent 探索需求、产出 ready issue。
 
-- [`mohist/opencode` Action](opencode-action.md) —— Workflow 直接使用 OpenCode 的输入、Session 与失败语义
+- [Action 契约](actions/README.md) —— Workflow Action 的输入、输出与行为；当前包括 `mohist/opencode`
 - [Runner 指南](runner.md) —— 执行平面怎么跑、怎么调并发
 - [Skill 机制](skills.md) —— 用 OpenCode / Claude Code 探索需求，再交给 Mohist
 
@@ -61,6 +61,7 @@
 - **命令自包含**：文档会被 agent 读取并直接执行，所有 shell / CLI 示例必须能独立复制运行，不依赖"把上面那个替换一下"。
 - **改前先核对差距**：动手修改任何事实陈述前，先看文内「实装差距」小节是否已标注该处未对齐——避免把 spec 改回现状。
 - **WIP 产品方案**：尚未对齐需求、还在探索方向的产品方案收录在「板块 7」，用 frontmatter `status: wip-not-implemented` 标注，用「将支持 / 计划 / （开放）」等表述。需求对齐、spec 定稿后搬到对应板块，移除 WIP 标记。
+- **语言统一**：正文使用中文；产品规范术语、配置字段、命令和代码符号保留原名。
 - **术语一致**：Project / Issue / Workflow / Epic / Inline Agent / Mohist Agent / AgentSession / Skill 等术语在各篇保持一致。
 
 发现过时描述欢迎提 issue。

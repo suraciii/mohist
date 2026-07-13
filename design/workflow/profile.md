@@ -1,80 +1,83 @@
 # Workflow Profile
 
-profile = **template** (which `WorkflowDefinition`) + **variables** (`VariableBundle`).
+Profile = **template**（选择哪个 `WorkflowDefinition`）+ **variables**（`VariableBundle`）。
 
-Prompts NOT in profile → `prompt-management.md`.
-Action input/output → `actions.md`. Builtin workflows → `builtin-workflows/`.
+Prompt 不属于 Profile，见 [`../prompt-management.md`](../prompt-management.md)。Action
+输入输出见 [`actions.md`](actions.md)，内置 Workflow 见 [`builtin-workflows/`](builtin-workflows/README.md)。
 
-## Architecture
+## 架构
 
+```text
+Issue -> Workflow（单向依赖）
+WorkflowGrain -> IWorkflowProfileProvider（port，只使用 Workflow 类型）
+                    ^
+            WorkflowProfileProvider（adapter，实时读取配置）
+                    |
+    global / project / issue / run profiles / project templates
 ```
-Issue → Workflow (one-way)
-WorkflowGrain → IWorkflowProfileProvider (port, Workflow-only types)
-                    ▲
-            WorkflowProfileProvider (adapter, live reads config)
-                    │
-    global · project · issue · run profiles · project templates
-```
 
-- Workflow zero Issue dependency. Resolution in adapter, live (no snapshot).
-- `WorkflowRun` stores execution state + profile identity. No profile body. No `RuntimeVariables`.
-- `TaskRun.Output` = `JsonElement?` (matches `WithInput`).
+- Workflow 不依赖 Issue。解析发生在 adapter，并实时读取，不保存 snapshot。
+- `WorkflowRun` 保存执行状态与 Profile 身份，不保存 Profile body，也没有
+  `RuntimeVariables`。
+- `TaskRun.Output` = `JsonElement?`，与 `WithInput` 对齐。
 
 ## VariableBundle
 
-`{ vars, stages: { "plan": { vars } } }`. Set = replace. Patch = deep merge.
+形状为 `{ vars, stages: { "plan": { vars } } }`。Set 表示替换，Patch 表示 deep merge。
 
-## Profile layers
+## Profile 层次
 
-```
+```text
 project_workflow_profile    ProjectId, DefaultTemplateId, Variables
 issue_workflow_profile      IssueId, SourceTemplateId, Template, Variables
 workflow_run_profile        WorkflowRunId, Variables
 ```
 
-Run profile = highest priority. Stores runtime facts (`vars.change.id`, etc.). Not part of `WorkflowRun` aggregate — linked by `WorkflowRunId`, profile service reads/writes.
+Run Profile 优先级最高，保存 `vars.change.id` 等运行事实。它不属于 `WorkflowRun`
+aggregate，只通过 `WorkflowRunId` 关联，由 Profile service 读写。
 
-## Merge
+## 合并
 
-Three-phase merge. Template lane: fallback selection, no deep merge. Variable lane: layered deep merge. Stage overlay: final deep merge of stage variables.
+合并分三步：Template lane 只做 fallback 选择，不 deep merge；Variable lane 分层 deep
+merge；最后叠加 Stage variables。
 
-```
-Template lane (fallback, no deep merge):
-  issue custom template? → else issue source template? → else project default? → else system default
-  → CurrentTemplateVariables
+```text
+Template lane（fallback，不 deep merge）：
+  issue custom template? -> issue source template? -> project default? -> system default
+  -> CurrentTemplateVariables
 
-Variable lane (layered deep merge):
-  global → project → issue → run
-  → ProfileVariables
+Variable lane（分层 deep merge）：
+  global -> project -> issue -> run
+  -> ProfileVariables
 
 Effective:
-  deepMerge(CurrentTemplateVariables, ProfileVariables) → WorkflowEffectiveVariables
+  deepMerge(CurrentTemplateVariables, ProfileVariables) -> WorkflowEffectiveVariables
 
 Stage:
   deepMerge(WorkflowEffectiveVariables.vars, WorkflowEffectiveVariables.stages[stage].vars)
-  → WorkflowStageEffectiveVariables
+  -> WorkflowStageEffectiveVariables
 ```
 
-Deep merge: recursive object, latter wins on conflict. `null` values in storage layer are ignored (no null-overwrite semantic).
+Deep merge 递归合并 object，后者覆盖冲突字段。存储层的 `null` 被忽略，不提供
+null-overwrite 语义。
 
 ## ExpandTaskWith
 
-```
+```text
 for (k,v) in taskWith:
-  "${{...}}" whole-string → vars replace, else keep (runner expands)
-  object && k∈vars → deepMerge (vars overwrite)
-  else → preserve
+  "${{...}}" 占据整个字符串 -> 替换为 vars 值，否则保留给 Runner 展开
+  object && k in vars -> deepMerge（vars 覆盖）
+  其他 -> 原样保留
 ```
 
-Whole-value expansion preserves the resolved JSON type. This is how Workflow variables
-select OpenCode options without creating a second configuration path:
+整值展开保留解析后的 JSON 类型。现有 `vars.agent` 因此可以选择 OpenCode 模型选项，
+而不需要第二条配置通路。该变量名在此 Action 契约中不携带 Agent 身份：
 
 ```yaml
 variables:
   agent:
-    model:
-      providerID: anthropic
-      id: claude-sonnet-4
+    model: anthropic/claude-sonnet-4
+    variant: high
 
 tasks:
   - uses: mohist/opencode
@@ -83,36 +86,39 @@ tasks:
       options: ${{ vars.agent }}
 ```
 
-After expansion, `options` is an object in Action Input. The action must not read the
-effective variable bundle or merge `vars.agent` again.
+展开后，Action Input 中的 `options` 仍是 object。Action 不能再次读取 effective
+variables，也不能重新 merge `vars.agent`。
 
-Task-level `expect` uses the same template lookup rules but is expanded separately. It never
-deep-merges into `with` and never becomes Action Input.
+Task-level `expect` 使用相同的 template lookup 规则，但单独展开；它不会 deep merge
+进 `with`，也不会成为 Action Input。
 
-## Runtime writes: setVars
+## Runtime 写入：setVars
 
-Task success → action output projected to run profile via `setVars`:
+Task 成功后，通过 `setVars` 把 Action output 投影到 Run Profile：
 
 ```yaml
 setVars:
   change.id: output.changeId
 ```
 
-- Left = path under `vars`. Right = JSON path in action output.
-- Only patches `workflow_run_profile.Variables`. Never project/issue profile. Never `WorkflowRun` execution state.
-- Runner executes: extracts from output → `PATCH /api/workflow-runs/{id}/workflow-profile/variables` → then reports task complete. Failure = task failed.
+- 左侧是 `vars` 下的 path，右侧是 Action output 的 JSON path。
+- 只 patch `workflow_run_profile.Variables`，不修改 Project / Issue Profile，也不修改
+  `WorkflowRun` 执行状态。
+- Runner 先从 output 提取值，再调用
+  `PATCH /api/workflow-runs/{id}/workflow-profile/variables`，最后报告 task complete；
+  任一步失败都让 task 失败。
 
-## Read API
+## 读取 API
 
+```text
+GET /workflow-runs/:id/variables/effective           -> WorkflowEffectiveVariables.vars
+GET /workflow-runs/:id/variables/effective?stage=X   -> WorkflowStageEffectiveVariables
+GET /workflow-runs/:id/variables/effective/:keyPath  -> keyPath 对应的值
 ```
-GET /workflow-runs/:id/variables/effective           → WorkflowEffectiveVariables.vars
-GET /workflow-runs/:id/variables/effective?stage=X   → WorkflowStageEffectiveVariables
-GET /workflow-runs/:id/variables/effective/:keyPath  → value at keyPath
-```
 
-## Write API
+## 写入 API
 
-```
+```text
 system templates    GET /workflow-templates/system
 project templates   /projects/:p/workflow-templates
 project profile     /projects/:p/workflow-profile

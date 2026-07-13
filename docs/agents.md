@@ -34,7 +34,7 @@ Inline Agent 是一种使用方式，不是持久化实体。Workflow task 直�
 
 - 用哪个执行后端 Action，例如 `mohist/opencode`；
 - 这次执行的 prompt；
-- 可选的 Session 名称和 OpenCode options。
+- 可选的 Session 名称和 OpenCode 模型选项。
 
 它适合 Workflow 中的规划、实现、审查和修复。它没有名称、Instructions、Skills、
 订阅或 Agent ID，也不能被 `mo agent` 命令查找。
@@ -108,5 +108,5 @@ Compact 或 Reset 也不会重新启动 Mohist Agent。具体执行方式由当�
 当前阶段只推进 `mohist/opencode`。`mohist/agent` 不在本次范围内；它保留给后续
 Mohist Agent 专项设计，本篇不定义它的输入、复用或等待语义。
 
-`mohist/opencode` 的具体配置见 [`mohist/opencode` Action](opencode-action.md)。Mohist Agent
+`mohist/opencode` 的具体配置见 [`mohist/opencode` Action](actions/opencode.md)。Mohist Agent
 事件响应见 [Agent 事件订阅](agent-subscriptions.md)。

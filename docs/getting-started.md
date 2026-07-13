@@ -62,7 +62,7 @@ opencode --help
 不指定模型时，Inline Agent 使用 OpenCode 的默认模型。需要显式选择时，可以
 直接写在 task 的 `options`，也可以在 Workflow variables 中配置后通过
 `options: ${{ vars.agent }}` 传入。完整配置见
-[`mohist/opencode` Action](opencode-action.md)。
+[`mohist/opencode` Action](actions/opencode.md)。
 
 ## 5. 创建你的第一个项目
 

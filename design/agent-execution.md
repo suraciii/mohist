@@ -1,42 +1,38 @@
-# Agent Execution Model
+# Agent 执行模型
 
-This document defines the abstraction boundaries shared by Workflow, Agent, Session, Runner,
-and runtime adapters. Runtime-specific behavior belongs in files such as
-[`opencode-runtime.md`](opencode-runtime.md).
+本文定义 Workflow、Agent、Session、Runner 与 Runtime adapter 共享的抽象边界。
+Runtime 特有行为放在 [`runtimes/`](runtimes/README.md)，例如
+[`runtimes/opencode.md`](runtimes/opencode.md)。
 
-## Layers
+## 层次
 
-| Layer | Concept | Owner | Authoritative state |
+| 层次 | 概念 | 所有者 | 权威状态 |
 |---|---|---|---|
-| Definition | Mohist Agent | Agent context | identity, instructions, config, skills, subscriptions, status |
-| Work | TaskRun | Workflow context | Workflow task lifecycle, result, output, recovery |
-| Work | AgentJob | Agent context | one Mohist Agent execution lifecycle and result |
-| Execution contract | Action | Workflow context | `uses`/`with` input and output contract for one work dispatch |
-| Conversation | AgentSession | Session context | transcript, context, usage, runtime binding, lineage |
-| Runtime | Runtime Session | external runtime | physical conversation and provider execution state |
-| Adapter | OpenCodeRuntime, future Pi adapter | runner process | protocol, process, events, reconciliation, errors |
+| 定义 | Mohist Agent | Agent context | 身份、instructions、config、skills、subscriptions、状态 |
+| 工作 | TaskRun | Workflow context | Workflow task 生命周期、结果、输出、恢复 |
+| 工作 | AgentJob | Agent context | 一次 Mohist Agent 执行的生命周期与结果 |
+| 执行契约 | Action | Workflow context | 一次工作 dispatch 的 `uses` / `with` 输入输出契约 |
+| 对话 | AgentSession | Session context | transcript、context、usage、Runtime binding、lineage |
+| Runtime | Runtime Session | 外部 Runtime | 物理对话与 provider 执行状态 |
+| Adapter | OpenCodeRuntime、未来的 Pi adapter | Runner 进程 | protocol、进程、事件、状态核对、错误 |
 
-`Inline Agent` is a product usage mode, not another entity or bounded context. It means a
-Workflow TaskRun directly selects a runtime-specific Action and supplies its input without
-resolving a Mohist Agent.
+`Inline Agent` 是产品使用方式，不是另一个实体或 bounded context。它表示 Workflow
+TaskRun 直接选择 Runtime 特有的 Action 并提供输入，不解析 Mohist Agent。
 
-## Canonical terms
+## 规范术语
 
-- **Mohist Agent (Named Agent)**: project-scoped reusable definition with stable Agent ID.
-- **Inline Agent**: direct Action invocation configured by a Workflow task; no Agent ID.
-- **AgentJob**: one execution of a Mohist Agent, using a launch-time snapshot of the Agent.
-- **AgentSession**: stable logical conversation and audit record; never the Agent identity or
-  work lifecycle owner.
-- **Runtime Session**: physical conversation owned by OpenCode, Pi, or another backend.
-- **OpenCode runtime agent**: OpenCode's native `agent` selection. It is configuration inside
-  the OpenCode adapter, not a Mohist Agent.
+- **Mohist Agent（Named Agent）**：Project 范围内可复用的预定义资源，有稳定 Agent ID。
+- **Inline Agent**：Workflow task 直接配置并调用 Action，没有 Agent ID。
+- **AgentJob**：Mohist Agent 的一次执行，使用启动时固定的 Agent snapshot。
+- **AgentSession**：稳定的逻辑对话与审计记录；不是 Agent 身份，也不拥有工作生命周期。
+- **Runtime Session**：OpenCode、Pi 或其他执行后端拥有的物理对话。
 
-## Invocation paths
+## 调用路径
 
-| Path | Work owner | Runner entry | AgentSession origin |
+| 路径 | 工作所有者 | Runner 入口 | AgentSession 来源 |
 |---|---|---|---|
-| Workflow direct action | TaskRun | `mohist/opencode` Action adapter | Workflow |
-| Mohist Agent launch | AgentJob | AgentJob executor | Agent launch |
+| Workflow 直接调用 | TaskRun | `mohist/opencode` Action adapter | Workflow |
+| 启动 Mohist Agent | AgentJob | AgentJob executor | Agent launch |
 
 ```text
 Workflow: TaskRun -> mohist/opencode Action adapter --+
@@ -44,84 +40,77 @@ Workflow: TaskRun -> mohist/opencode Action adapter --+
 Agent: Mohist Agent -> AgentJob -> AgentJob executor --+
 ```
 
-The paths share Runner execution and Session infrastructure. They do not share work owners:
-TaskRun remains authoritative for Workflow work; AgentJob remains authoritative for Mohist
-Agent work. Each entry passes its already resolved AgentSession target to `OpenCodeRuntime`,
-which reports runtime facts to that Session. Shared runtime code must not create a
-Workflow -> Agent domain dependency.
+两条路径共享 Runner 执行能力和 Session 基础设施，但不共享工作所有者：TaskRun 对
+Workflow 工作负责，AgentJob 对 Mohist Agent 工作负责。每个入口把已经解析好的
+AgentSession 目标交给 `OpenCodeRuntime`，Runtime 事实写回该 Session。共享 Runtime
+代码不能制造 Workflow -> Agent 的领域依赖。
 
-## Action semantics
+## Action 语义
 
-`mohist/opencode` is a runtime-specific Action. It answers "execute this turn with OpenCode."
-It does not accept an Agent ID, resolve an Agent name, read Agent definitions, or create an
-AgentJob. Direct Workflow use is therefore Inline Agent execution.
+`mohist/opencode` 是 Runtime 特有的 Action，回答“用 OpenCode 执行这个回合”。它不接收
+Agent ID，不解析 Agent 名称，不读取 Agent 定义，也不创建 AgentJob。因此 Workflow
+直接使用它时形成 Inline Agent。
 
-Future runtime Actions such as `mohist/pi` sit at the same layer. This design intentionally
-does not define a `mohist/agent` contract. That name is reserved for the later Mohist Agent
-design and must not be introduced here as a runtime alias or generic wrapper around
-`mohist/opencode`.
+未来的 `mohist/pi` 等 Runtime Action 与它处于同一层。本设计有意不定义
+`mohist/agent` 契约；该名称留给后续 Mohist Agent 专项设计，不能在这里充当 Runtime
+别名或 `mohist/opencode` 的通用包装。
 
-The AgentJob path must not dispatch through the public `mohist/opencode` Action contract.
-Its executor receives an Agent-owned execution request after the Agent definition has been
-resolved and snapshotted. The Workflow Action adapter and AgentJob executor may both call the
-same `OpenCodeRuntime` deep module. Runtime implementation is the reuse point; Action is not.
+AgentJob 路径不能通过公开的 `mohist/opencode` Action 契约 dispatch。Agent 定义完成
+解析和 snapshot 后，其 executor 接收由 Agent 拥有的 execution request。Workflow Action
+adapter 与 AgentJob executor 都可以调用同一个 `OpenCodeRuntime` 深模块。复用点是
+Runtime 实现，不是 Action。
 
-## Work lifecycle versus conversation
+## 工作生命周期与对话
 
-TaskRun and AgentJob own decisions:
+TaskRun 与 AgentJob 拥有以下决策：
 
-- pending/running/terminal state;
-- success/failure and result;
-- retry, recovery, or Workflow advancement.
+- pending / running / terminal 状态；
+- 成功、失败与结果；
+- retry、recovery 或 Workflow 推进。
 
-AgentSession owns facts:
+AgentSession 拥有以下事实：
 
-- user/agent messages and tool calls;
-- context and usage;
-- model/runtime observations;
-- current Runtime Session binding and lineage.
+- 用户 / agent 消息和 tool calls；
+- context 与 usage；
+- model / Runtime observations；
+- 当前 Runtime Session 绑定与会话沿革（lineage）。
 
-The Workflow Action adapter reports a work result to TaskRun. The AgentJob executor reports a
-work result to AgentJob. Both report runtime facts to AgentSession. AgentSession events never
-advance Workflow and never make an AgentJob terminal. A failed AgentSession operation may be
-evidence used by the work owner, but Session is not the judge.
+Workflow Action adapter 向 TaskRun 报告工作结果，AgentJob executor 向 AgentJob 报告
+工作结果；两者都向 AgentSession 报告 Runtime 事实。AgentSession 事件不会推进 Workflow，
+也不会让 AgentJob 进入终态。失败的 AgentSession 操作可以成为工作所有者判断的证据，
+但 Session 不是裁判。
 
-A Session command is not a work dispatch. Follow-up during an active work-owned turn becomes
-input to that turn. Follow-up while idle starts a user-initiated conversation turn and records
-only command/runtime facts; it does not create a TaskRun or AgentJob. Compact and Reset follow
-the same Session-only ownership rule.
+Session 命令不是工作 dispatch。执行中提交的 Follow-up 成为当前回合输入；空闲时提交
+Follow-up 会启动一个用户发起的对话回合，只记录命令和 Runtime 事实，不创建 TaskRun
+或 AgentJob。Compact 与 Reset 遵循相同的 Session-only 所有权规则。
 
-## AgentSession origins
+## AgentSession 来源
 
-Every AgentSession has exactly one immutable origin.
+每个 AgentSession 有且只有一个不可变来源。
 
-### Workflow origin
+### Workflow 来源
 
-Addressed by `(projectId, workflowRunId, sessionName)`. Reusing the same name within the same
-WorkflowRun continues the logical conversation. Omitting an explicit name uses Work ID, so
-unrelated tasks do not share context accidentally.
+使用 `(projectId, workflowRunId, sessionName)` 寻址。同一 WorkflowRun 内复用相同名称
+会继续逻辑对话。省略显式名称时使用 Work ID，避免无关 task 意外共享 context。
 
-### Agent launch origin
+### Agent launch 来源
 
-Minted for one Mohist Agent launch and associated with the resolved Agent ID. One Mohist
-Agent can create many AgentJobs and AgentSessions. Editing or archiving the Agent later does
-not change the origin or launch-time execution snapshot.
+每次启动 Mohist Agent 时创建，并关联已解析的 Agent ID。一个 Mohist Agent 可以创建
+多个 AgentJob 和 AgentSession。之后编辑或归档 Agent，不改变 Session 来源或启动时的
+执行 snapshot。
 
-Equal prompt, model, runtime, workspace, or configuration never merges two origins. A Session
-cannot move from Workflow origin to Agent origin or vice versa.
+相同 prompt、model、Runtime、workspace 或配置不会合并两个来源。Session 不能从
+Workflow 来源迁移为 Agent 来源，反之亦然。
 
-Origin-specific routes are lookup/convenience surfaces. Both resolve to the canonical
-AgentSession resource keyed by `sessionId`; neither `(workflowRunId, sessionName)` nor
-`agentId` replaces Session identity.
+来源特有的 route 只是查询和便利入口，最终都解析为以 `sessionId` 标识的规范
+AgentSession 资源；`(workflowRunId, sessionName)` 和 `agentId` 都不能替代 Session 身份。
 
-Follow-up, Compact, Reset, transcript, and query operate on that canonical resource. Origin-
-specific CLI or API paths may resolve it first, but must not implement a second Session
-lifecycle.
+Follow-up、Compact、Reset、transcript 与查询都作用于该规范资源。来源特有的 CLI 或
+API 可以先解析它，但不能实现第二套 Session 生命周期。
 
-## Logical and physical Session identity
+## 逻辑与物理 Session 身份
 
-AgentSession ID is stable for the logical conversation. Runtime Session identity is an
-external physical facet:
+AgentSession ID 是逻辑对话的稳定身份。Runtime Session 身份是外部物理维度：
 
 ```json
 {
@@ -130,58 +119,54 @@ external physical facet:
 }
 ```
 
-Runtime or work-directory change and Reset may replace the physical binding and append
-lineage without changing AgentSession identity or origin. Compact and model/runtime-agent
-selection changes do not replace the physical binding.
+Runtime 变化、工作目录变化和 Reset 可以替换物理绑定并追加 lineage，但不能改变
+AgentSession 身份或来源。Compact 和 model / variant 选择变化不会替换物理绑定。
 
-The persisted current binding contains the minimum control data required after Runner
-restart: `runtime`, `runtimeSessionId`, `runnerId`, and `workDir`. Lineage records `runtime`,
-`runtimeSessionId`, and `boundAt`.
+持久化的当前绑定只保留 Runner 重启后继续控制所需的最小数据：`runtime`、
+`runtimeSessionId`、`runnerId` 与 `workDir`。Lineage 记录 `runtime`、
+`runtimeSessionId` 与 `boundAt`。
 
-## Mohist Agent launch
+## Mohist Agent 启动
 
-The Agent context owns launch composition:
+Agent context 负责组装启动请求：
 
-1. resolve the active Mohist Agent by ID or name;
-2. snapshot Agent ID, instructions, config, and launch prompt into AgentJob input;
-3. mint and open an AgentSession with Agent-launch origin;
-4. dispatch the AgentJob to an eligible Runner;
-5. let the runtime executor operate only on the composed turn input and Session binding.
+1. 按 ID 或名称解析 active Mohist Agent；
+2. 把 Agent ID、instructions、config 与 launch prompt 固定到 AgentJob input；
+3. 创建并打开 Agent launch 来源的 AgentSession；
+4. 把 AgentJob dispatch 给合适的 Runner；
+5. Runtime executor 只处理已经组装好的回合输入与 Session 绑定。
 
-The runtime adapter never fetches the Agent definition. This prevents concurrent Agent edits
-from changing in-flight bytes and keeps runtime modules independent from the Agent context.
+Runtime adapter 不再查询 Agent 定义。这样并发修改 Agent 不会改变执行中的输入字节，
+Runtime 模块也不依赖 Agent context。
 
-## Module boundaries
+## 模块边界
 
-- Workflow owns TaskRun and `uses`/`with` Action contracts.
-- Agent owns Mohist Agent, AgentJob, launch composition, AgentJob execution request, and
-  report validation.
-- Session owns AgentSession identity, metadata, transcript, usage, and lineage.
-- Runner context owns resource presence and capacity, not Agent or Session semantics.
-- runner process executes dispatches and adapts external runtimes; it owns no business entity.
+- Workflow 拥有 TaskRun 与 `uses` / `with` Action 契约。
+- Agent 拥有 Mohist Agent、AgentJob、启动组装、AgentJob execution request 与报告校验。
+- Session 拥有 AgentSession 身份、metadata、transcript、usage 与 lineage。
+- Runner context 只记录执行资源是否在线及其容量，不拥有 Agent 或 Session 语义。
+- Runner 进程执行 dispatch 并适配外部 Runtime，不拥有业务实体。
 
-Runtime adapters accept Mohist-owned turn/session requests and return normalized facts. They
-must not expose SDK types, resolve Agent definitions, decide Workflow transitions, or own job
-status.
+Runtime adapter 接收由 Mohist 定义的回合 / Session 请求并返回规范化事实。它不能
+暴露 SDK 类型、解析 Agent 定义、决定 Workflow transition 或拥有 job status。
 
-## Invariants
+## 不变量
 
-- An Action is not an Agent.
-- AgentSession is not an Agent and not a work owner.
-- Inline Agent has no Agent ID or reusable definition.
-- Mohist Agent has stable identity and can own many executions and Sessions.
-- TaskRun and AgentJob are mutually exclusive work owners for a dispatch.
-- Every AgentSession has one immutable origin.
-- Runtime Session replacement never changes AgentSession origin or logical identity.
-- OpenCode's `agent` option never refers to a Mohist Agent.
-- AgentJob execution never depends on a Workflow Action name or Action Input contract.
-- Sharing `OpenCodeRuntime` never creates a Workflow -> Agent context dependency.
+- Action 不是 Agent。
+- AgentSession 不是 Agent，也不是工作所有者。
+- Inline Agent 没有 Agent ID 或可复用定义。
+- Mohist Agent 有稳定身份，可以拥有多次执行和多个 Session。
+- 一次 dispatch 的工作所有者只能是 TaskRun 或 AgentJob 之一。
+- 每个 AgentSession 只有一个不可变来源。
+- 替换 Runtime Session 不改变 AgentSession 来源或逻辑身份。
+- `mohist/opencode` 不暴露 OpenCode 原生 agent 选择。
+- AgentJob 执行不依赖 Workflow Action 名称或 Action Input 契约。
+- 共享 `OpenCodeRuntime` 不制造 Workflow -> Agent context 依赖。
 
-## Implementation gap
+## 实装差距
 
-Current code already has separate Agent, AgentJob, and AgentSession aggregates, and dispatch
-distinguishes Workflow from AgentJob ownership. Terminology and adapter boundaries still
-leak the old model: `GenericAgentSession` means Agent-launch Session, AgentJob defaults to
-the Workflow-owned `mohist/acp-agent` Action, and the ACP action itself branches on both owner
-kinds. The OpenCode replacement must route AgentJob through an Agent-owned execution request
-while both paths share `OpenCodeRuntime`.
+当前代码已经分离 Agent、AgentJob 与 AgentSession aggregate，dispatch 也区分 Workflow
+和 AgentJob 所有权，但术语和 adapter 边界仍泄漏旧模型：`GenericAgentSession` 表示
+Agent launch 来源的 Session，AgentJob 默认使用由 Workflow 拥有的 `mohist/acp-agent`
+Action，ACP Action 自身还按两种所有者分支。OpenCode 替换必须让 AgentJob 走由 Agent
+拥有的 execution request，同时让两条路径共享 `OpenCodeRuntime`。

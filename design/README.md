@@ -2,6 +2,9 @@
 
 `design/` 面向开发者和 agent，记录架构边界、领域划分、workflow 机制和跨模块设计约定。面向使用者的文档在 [`../docs/`](../docs/)。
 
+新增或重写的设计正文使用中文；领域标识、字段名、API 和代码符号保留原名。现有英文
+设计文档在后续修改时逐步收敛，避免语言迁移与无关设计改动混在一起。
+
 ## 全局基础
 
 - [architecture.md](architecture.md) — 运行时边界、控制平面/执行平面职责、放置规则。
@@ -14,8 +17,11 @@
 ## Agent 与执行
 
 - [agent-execution.md](agent-execution.md) — Action、Inline Agent、Mohist Agent、AgentJob、AgentSession 与 Runtime Session 的分层和生命周期所有权。
-- [opencode-runtime.md](opencode-runtime.md) — `mohist/opencode`、OpenCode SDK v2、物理 Session、事件补偿与 Session 命令边界。
 - [agent-subscriptions.md](agent-subscriptions.md) — Mohist Agent 事件订阅（**WIP**）：Named Agent 监听 CloudEvent、按订阅响应提示词自动启动。
+
+## Runtime 集成
+
+- [runtimes/](runtimes/README.md) — 外部执行后端的进程、SDK、物理 Session、事件与兼容性边界；当前包括 OpenCode。
 
 ## Workflow 核心域
 

@@ -207,7 +207,7 @@ mo issue session followup <编号> <名称> [--text <文本>|--text-file <路径
 `compact` 使用当前执行后端的原生压缩并保持底层 Session 身份；`reset` 建立
 没有旧上下文的新 Session 并保留会话沿革；`followup` 在执行中进入当前回合，空闲
 时开始下一回合。会话身份与来源见 [Agent 与 AgentSession](agents.md)；OpenCode 的
-具体行为见 [`mohist/opencode` Action](opencode-action.md)。
+具体行为见 [`mohist/opencode` Action](actions/opencode.md)。
 
 常用示例：
 
