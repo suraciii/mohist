@@ -1,0 +1,57 @@
+# T-001 progress
+
+## Decisions
+- Removed `[Reentrant]` attribute and the `using Orleans.Concurrency;` line
+  from `WorkflowGrain.cs` (the namespace symbol is unused after the
+  attribute drops). `WorkflowGrain` had no scheduler-mediated self-call
+  (verified: only direct intra-grain helpers: `WorkflowStageLockCoordinator`,
+  `WorkflowStageInitializer`, `WorkflowWorkLifecycle`).
+- Replaced the stale `[Reentrant]` paragraph in
+  `WorkflowStageLockReleaseHandler.cs` (lines 21-23) with prose describing
+  the awaited dispatch model: the handler awaits the durable dispatcher's
+  `HandleAsync` invocation; failures escape into the retry/dead-letter
+  pipeline.
+
+## Codebase Patterns
+- WorkflowGrain uses the `WorkflowGrainFixture` (`InProcessTestCluster`
+  + `MigratedSqliteTemplate.CopyTo` + `FakeTimeProvider` + `RecordingEventStore`
+  + `InMemoryEventBus`), declared via
+  `[Collection("WorkflowGrain3")]` (loads balanced by name). Shared
+  setup lives in `WorkflowGrainSpecs` (e.g. `StartWorkflowAsync`,
+  `LoadRunAsync`, `DeactivateWorkflowAsync`).
+- Spec concurrency collection partitions reuse the same fixture type,
+  so a new concurrency spec file with `[Collection("WorkflowGrain3")]`
+  joins the existing serial class chain — that matches the
+  spec-sharding guidance in `design/testing.md`.
+- `IWorkflowRunStore.LoadAsync` returns the persisted `WorkflowRun`
+  directly; comparing it against `IWorkflowGrain.GetRunStatusAsync()`
+  (in-memory) gives the agreement assertion required by the spec.
+
+## Gotchas
+- `WorkflowRun.Start(Now())` will throw `InvalidOperationException` if
+  the run is not `Created`/`Paused`. The "started without a runner"
+  helper (`StartWorkflowWithoutRunnerAsync`) leaves the run in `Pending`,
+  which is the correct phase for `PauseAsync`/`StopAsync`/`ResumeAsync`
+  control races.
+- `StopAsync` throws `InvalidOperationException` when the run is
+  already `Stopped`; the catch helper `CatchAsync` makes this
+  assertable without exploding the test.
+- `PauseAsync` followed by `StopAsync` both succeed from `Pending`:
+  Pause moves to `Paused`; Stop is allowed from `Paused`. When fired
+  concurrently, exactly one ordering wins but both can succeed — the
+  spec asserts only that the final state is one of the two allowed
+  serialized outcomes, never on the order.
+- `dotnet test --no-build` runs only what's already built; if the
+  preceding `npm test` shows warnings about stale builds, the safe
+  re-run is `dotnet build <project>` first.
+
+## Verification
+- `npm run build` succeeds (Mohist.Server compiles with 0 warnings,
+  TreatWarningsAsErrors catches the dropped `using Orleans.Concurrency`).
+- `npm test` passes: 2863 server specs (including the 5 new
+  WorkflowGrainConcurrencySpecs), 1388 unit tests, 24 arch tests,
+  875 CLI tests, 4596 web tests, 1007 runner tests — all green.
+- All 5 new concurrency specs run through real Orleans runtime
+  (`InProcessTestCluster`) using `FakeTimeProvider` and
+  `MigratedSqliteTemplate.CopyTo`; no wall-clock waits, no order
+  dependencies.

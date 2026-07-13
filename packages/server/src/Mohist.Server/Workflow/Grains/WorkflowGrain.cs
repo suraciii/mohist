@@ -14,12 +14,10 @@ using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Services;
 using Mohist.Server.Workflow.Services.Artifacts;
 using Mohist.Server.Infrastructure.Data.Workflow;
-using Orleans.Concurrency;
 using Orleans.Runtime;
 
 namespace Mohist.Server.Workflow.Grains;
 
-[Reentrant]
 public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContext
 {
     private WorkflowRun? _run;
