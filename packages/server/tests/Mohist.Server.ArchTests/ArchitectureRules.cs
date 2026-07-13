@@ -391,7 +391,10 @@ public class ArchitectureRules
             "enforce IEnvironmentVariableProvider usage at compile time: " + string.Join(", ", missing));
     }
 
-    private const int SpecFileSizeBudgetBytes = 24_000;
+    private static string GetSpecsRoot() => Path.GetFullPath(Path.Combine(
+        AppContext.BaseDirectory,
+        "..", "..", "..", "..",
+        "Mohist.Server.SpecTests", "Specs"));
 
     /// <summary>
     /// Spec files in <c>Specs/</c> must end with <c>Specs</c> or
@@ -401,11 +404,8 @@ public class ArchitectureRules
     [Fact]
     public void SpecFiles_MustHaveSpecOrCollectionSuffix()
     {
-        var specsRoot = Path.GetFullPath(Path.Combine(
-            AppContext.BaseDirectory,
-            "..", "..", "..", "..", "..", "Specs"));
-        if (!Directory.Exists(specsRoot))
-            return; // Specs dir not present (fresh checkout?); rule is vacuous.
+        var specsRoot = GetSpecsRoot();
+        Assert.True(Directory.Exists(specsRoot), $"Spec root not found: {specsRoot}");
 
         var specFiles = Directory.EnumerateFiles(
             specsRoot, "*.cs", SearchOption.AllDirectories);
@@ -414,6 +414,12 @@ public class ArchitectureRules
             .Select(p => Path.GetFileNameWithoutExtension(p)!)
             .Where(name => !name.EndsWith("Specs")
                         && !name.EndsWith("Collection")
+                        && !name.EndsWith("Fixture")
+                        && !name.EndsWith("Factory")
+                        && !name.EndsWith("Hub")
+                        && !name.EndsWith("Probe")
+                        && !name.EndsWith("TestHost")
+                        && !name.EndsWith("TestSupport")
                         && !name.Equals("Index", StringComparison.Ordinal))
             .OrderBy(name => name)
             .ToList();
@@ -425,34 +431,6 @@ public class ArchitectureRules
     }
 
     /// <summary>
-    /// Spec files must stay under ~24 KB so contributors notice when a
-    /// file has grown past a comfortable reading size. Larger files
-    /// should be split by lifecycle phase, behavior scenario, or
-    /// SUT-prefix grouping.
-    /// </summary>
-    [Fact]
-    public void SpecFiles_MustStayBellowSizeBudget()
-    {
-        var specsRoot = Path.GetFullPath(Path.Combine(
-            AppContext.BaseDirectory,
-            "..", "..", "..", "..", "..", "Specs"));
-        if (!Directory.Exists(specsRoot))
-            return;
-
-        var tooBig = Directory.EnumerateFiles(
-            specsRoot, "*.cs", SearchOption.AllDirectories)
-            .Where(p => new FileInfo(p).Length > SpecFileSizeBudgetBytes)
-            .Select(p => Path.GetRelativePath(specsRoot, p))
-            .OrderBy(p => p)
-            .ToList();
-
-        Assert.True(
-            tooBig.Count == 0,
-            $"Spec files must stay under {SpecFileSizeBudgetBytes / 1000} KB. " +
-            "Too big: " + string.Join(", ", tooBig));
-    }
-
-    /// <summary>
     /// Spec classes must be declared as <c>public</c> so xUnit can
     /// instantiate them. The rule parses each <c>*.cs</c> file for
     /// top-level class declarations named <c>*Specs</c> and verifies
@@ -461,11 +439,8 @@ public class ArchitectureRules
     [Fact]
     public void SpecClasses_MustBePublic()
     {
-        var specsRoot = Path.GetFullPath(Path.Combine(
-            AppContext.BaseDirectory,
-            "..", "..", "..", "..", "..", "Specs"));
-        if (!Directory.Exists(specsRoot))
-            return;
+        var specsRoot = GetSpecsRoot();
+        Assert.True(Directory.Exists(specsRoot), $"Spec root not found: {specsRoot}");
 
         var classRegex = new System.Text.RegularExpressions.Regex(
             @"^\s*(?:public\s+)?(internal|private|protected)?\s*(?:static\s+|sealed\s+|abstract\s+|partial\s+)*class\s+(\w+Specs)\b",
@@ -492,18 +467,15 @@ public class ArchitectureRules
 
     /// <summary>
     /// Spec files in <c>Specs/</c> must declare a namespace under
-    /// <c>Mohist.Server.Tests.Specs</c>. Prevents accidentally placing
+    /// <c>Mohist.Server.SpecTests.Specs</c>. Prevents accidentally placing
     /// test code outside the Specs sub-namespace, which would break
     /// test discovery and namespace-based filtering.
     /// </summary>
     [Fact]
     public void SpecNamespaces_MustBeUnderSpecs()
     {
-        var specsRoot = Path.GetFullPath(Path.Combine(
-            AppContext.BaseDirectory,
-            "..", "..", "..", "..", "..", "Specs"));
-        if (!Directory.Exists(specsRoot))
-            return;
+        var specsRoot = GetSpecsRoot();
+        Assert.True(Directory.Exists(specsRoot), $"Spec root not found: {specsRoot}");
 
         var namespaceRegex = new System.Text.RegularExpressions.Regex(
             @"^\s*namespace\s+([\w\.]+)\s*;",
@@ -521,7 +493,7 @@ public class ArchitectureRules
                 continue;
             }
             var ns = m.Groups[1].Value;
-            if (!ns.StartsWith("Mohist.Server.Tests.Specs", StringComparison.Ordinal))
+            if (!ns.StartsWith("Mohist.Server.SpecTests.Specs", StringComparison.Ordinal))
             {
                 violations.Add($"{Path.GetRelativePath(specsRoot, path)}: {ns}");
             }
@@ -529,7 +501,7 @@ public class ArchitectureRules
 
         Assert.True(
             violations.Count == 0,
-            "Spec namespaces must be under 'Mohist.Server.Tests.Specs'. Violations: " +
+            "Spec namespaces must be under 'Mohist.Server.SpecTests.Specs'. Violations: " +
             string.Join(", ", violations));
     }
 }

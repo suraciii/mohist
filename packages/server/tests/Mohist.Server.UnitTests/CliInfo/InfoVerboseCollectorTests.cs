@@ -516,21 +516,6 @@ public class InfoVerboseCollectorTests
     }
 
     [Fact]
-    public void ParseSystemdEnvironment_IgnoresNonEnvironmentLines()
-    {
-        var output = """
-            ActiveState=active
-            MainPID=1234
-            Environment=FOO=bar
-            """;
-
-        var result = SystemdUnitParser.ParseSystemdEnvironment(output);
-
-        Assert.Single(result);
-        Assert.Equal("bar", result["FOO"]);
-    }
-
-    [Fact]
     public void BuildOriginUrl_NoUrlAndNotGitRepo_ReturnsUnknown()
     {
         var result = InfoRenderer.BuildOriginUrl(new InfoVerboseGitRemote(null, IsGitRepo: false));

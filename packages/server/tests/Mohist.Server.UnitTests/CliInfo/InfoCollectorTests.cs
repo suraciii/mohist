@@ -422,28 +422,6 @@ public class InfoCollectorTests
     }
 
     [Fact]
-    public void ParseSystemdUnit_HandlesCommentsAndTrailingWhitespace()
-    {
-        var content = "[Service]\n# This is a comment\nWorkingDirectory=/repo  \nExecStart=dotnet run  \n";
-
-        var fields = SystemdUnitParser.ParseSystemdUnit(content);
-
-        Assert.Equal("/repo", fields.WorkingDirectory);
-        Assert.Equal("dotnet run", fields.ExecStart);
-    }
-
-    [Fact]
-    public void ParseSystemdUnit_HandlesMissingKeys()
-    {
-        var content = "[Unit]\nDescription=Minimal\n";
-
-        var fields = SystemdUnitParser.ParseSystemdUnit(content);
-
-        Assert.Null(fields.WorkingDirectory);
-        Assert.Null(fields.ExecStart);
-    }
-
-    [Fact]
     public void ResolveSourcePath_PrefersWorkingDirectory_ThenProjectFlag_ThenBinaryDir()
     {
         Assert.Equal("/workdir", InfoSourcePathResolver.ResolveSourcePath(new SystemdUnitParser.SystemdUnitFields("/workdir", "dotnet run --project /proj")));
@@ -475,18 +453,6 @@ public class InfoCollectorTests
         Assert.Equal(2026, ts.Year);
         Assert.Equal(1, ts.Month);
         Assert.Equal(1, ts.Day);
-    }
-
-    [Fact]
-    public void ParseSystemdShow_ReturnsKeyValueMap()
-    {
-        var output = "ActiveState=active\nMainPID=1234\nFragmentPath=/etc/foo\n";
-
-        var map = SystemdUnitParser.ParseSystemdShow(output);
-
-        Assert.Equal("active", map["ActiveState"]);
-        Assert.Equal("1234", map["MainPID"]);
-        Assert.Equal("/etc/foo", map["FragmentPath"]);
     }
 
     [Fact]

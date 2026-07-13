@@ -12,6 +12,7 @@ namespace Mohist.Server.SpecTests.Specs.SystemSpecs;
 public class SystemUpdateServiceSpecs
 {
     private static readonly TimeSpan AsyncWaitTimeout = TimeSpan.FromSeconds(5);
+    private static readonly DateTimeOffset FixedNow = new(2026, 6, 30, 0, 0, 0, TimeSpan.Zero);
 
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.System)]
@@ -103,7 +104,7 @@ public class SystemUpdateServiceSpecs
     {
         var store = new InMemoryUpdateStore();
         var commands = new RecordingCommandRunner();
-        var now = DateTimeOffset.UtcNow;
+        var now = FixedNow;
         await store.SaveAsync(new SystemUpdateJobState(
             "job-1",
             "waiting-for-reconnect",
@@ -325,7 +326,7 @@ public class SystemUpdateServiceSpecs
     public async Task StartAsync_WhenPersistedActiveJobExistsAfterRestart_ReturnsConflict()
     {
         var store = new InMemoryUpdateStore();
-        var now = DateTimeOffset.UtcNow;
+        var now = FixedNow;
         await store.SaveAsync(new SystemUpdateJobState(
             "job-1",
             "waiting-for-reconnect",
@@ -390,7 +391,7 @@ public class SystemUpdateServiceSpecs
         var statePath = Path.Combine(Path.GetTempPath(), $"mohist-system-update-{Guid.NewGuid():N}.json");
         try
         {
-            var now = DateTimeOffset.UtcNow;
+            var now = FixedNow;
             var first = CreateFileSystemStore(statePath);
             await first.SaveAsync(new SystemUpdateJobState(
                 "job-1",
@@ -603,7 +604,7 @@ public class SystemUpdateServiceSpecs
     public async Task GetStatusEnvelopeAsync_DoesNotSucceedUntilReadinessAndHashMatch()
     {
         var store = new InMemoryUpdateStore();
-        var now = DateTimeOffset.UtcNow;
+        var now = FixedNow;
         await store.SaveAsync(new SystemUpdateJobState(
             "job-1",
             "waiting-for-reconnect",
@@ -646,7 +647,7 @@ public class SystemUpdateServiceSpecs
     public async Task GetStatusEnvelopeAsync_PersistsReadinessFailuresAcrossReconnectBoundary()
     {
         var store = new InMemoryUpdateStore();
-        var now = DateTimeOffset.UtcNow;
+        var now = FixedNow;
         await store.SaveAsync(new SystemUpdateJobState(
             "job-1",
             "waiting-for-reconnect",
@@ -682,7 +683,7 @@ public class SystemUpdateServiceSpecs
     public async Task AdvanceActiveJobAsync_DoesNotPersistDuplicateReadinessFailure()
     {
         var store = new InMemoryUpdateStore();
-        var now = DateTimeOffset.UtcNow;
+        var now = FixedNow;
         await store.SaveAsync(new SystemUpdateJobState(
             "job-1",
             "waiting-for-reconnect",
@@ -763,7 +764,7 @@ public class SystemUpdateServiceSpecs
     public async Task AdvanceActiveJobAsync_BoundsPersistedLogEntries()
     {
         var store = new InMemoryUpdateStore();
-        var now = DateTimeOffset.UtcNow;
+        var now = FixedNow;
         var logs = Enumerable.Range(0, 220)
             .Select(i => new SystemUpdateLogEntry(now.AddSeconds(i), "Waiting for reconnect", $"entry-{i}"))
             .ToArray();
@@ -803,7 +804,7 @@ public class SystemUpdateServiceSpecs
     public async Task AdvanceActiveJobAsync_StaleWaitingForReconnectIsSuperseded()
     {
         var store = new InMemoryUpdateStore();
-        var now = DateTimeOffset.UtcNow;
+        var now = FixedNow;
         await store.SaveAsync(new SystemUpdateJobState(
             "job-1",
             "waiting-for-reconnect",
@@ -886,7 +887,7 @@ public class SystemUpdateServiceSpecs
     public async Task GetStatusEnvelopeAsync_ActiveWaitingForReconnectIsPreservedWhenHashMatches()
     {
         var store = new InMemoryUpdateStore();
-        var now = DateTimeOffset.UtcNow;
+        var now = FixedNow;
         await store.SaveAsync(new SystemUpdateJobState(
             "job-1",
             "waiting-for-reconnect",
@@ -922,7 +923,7 @@ public class SystemUpdateServiceSpecs
     public async Task AdvanceActiveJobAsync_EmptyRunningHashDoesNotSupersede()
     {
         var store = new InMemoryUpdateStore();
-        var now = DateTimeOffset.UtcNow;
+        var now = FixedNow;
         await store.SaveAsync(new SystemUpdateJobState(
             "job-1",
             "waiting-for-reconnect",
@@ -957,7 +958,7 @@ public class SystemUpdateServiceSpecs
     public async Task SupersededStatus_DoesNotBlockNewUpdateStarts()
     {
         var store = new InMemoryUpdateStore();
-        var now = DateTimeOffset.UtcNow;
+        var now = FixedNow;
         await store.SaveAsync(new SystemUpdateJobState(
             "job-1",
             "superseded",
@@ -987,7 +988,7 @@ public class SystemUpdateServiceSpecs
     {
         var store = new InMemoryUpdateStore();
         var commands = new RecordingCommandRunner();
-        var now = DateTimeOffset.UtcNow;
+        var now = FixedNow;
         await store.SaveAsync(new SystemUpdateJobState(
             "job-1",
             "waiting-for-reconnect",
@@ -1031,7 +1032,7 @@ public class SystemUpdateServiceSpecs
         {
             var store = CreateFileSystemStore(statePath);
             var commands = new RecordingCommandRunner();
-            var now = DateTimeOffset.UtcNow;
+            var now = FixedNow;
             var initial = new SystemUpdateJobState(
                 "job-1",
                 "waiting-for-reconnect",
@@ -1081,7 +1082,7 @@ public class SystemUpdateServiceSpecs
     {
         var store = new InMemoryUpdateStore();
         var commands = new RecordingCommandRunner();
-        var now = DateTimeOffset.UtcNow;
+        var now = FixedNow;
         await store.SaveAsync(new SystemUpdateJobState(
             "job-1",
             "waiting-for-reconnect",
@@ -1131,7 +1132,7 @@ public class SystemUpdateServiceSpecs
             Stage: "Verifying workflow runtime",
             Outcome: "succeeded",
             UnavailableCapability: null,
-            Logs: [new SystemUpdateLogEntry(DateTimeOffset.UtcNow, "Verifying workflow runtime", "all checks passed")],
+            Logs: [new SystemUpdateLogEntry(FixedNow, "Verifying workflow runtime", "all checks passed")],
             SourceHead: "newhash",
             SourcePath: "/repo",
             ServerUnit: "mohist.service",
@@ -1162,7 +1163,7 @@ public class SystemUpdateServiceSpecs
             new RecordingCommandRunner(),
             new StubReadinessProbe(new(true, true, true, "/assets/app.js", null)));
 
-        var stageTime = DateTimeOffset.UtcNow;
+        var stageTime = FixedNow;
         var request = new SystemUpdateOutcomeRequest(
             JobId: "cli-job-logs",
             Status: "succeeded",
@@ -1196,7 +1197,7 @@ public class SystemUpdateServiceSpecs
     public async Task RecordCliOutcomeAsync_MarksStaleWebJobAsSuperseded()
     {
         var store = new InMemoryUpdateStore();
-        var now = DateTimeOffset.UtcNow;
+        var now = FixedNow;
         await store.SaveAsync(new SystemUpdateJobState(
             "web-job-1",
             "waiting-for-reconnect",
@@ -1239,7 +1240,7 @@ public class SystemUpdateServiceSpecs
     public async Task RecordCliOutcomeAsync_AlwaysPersistsWithoutAcquiringLock()
     {
         var store = new InMemoryUpdateStore(acquireLock: true);
-        var now = DateTimeOffset.UtcNow;
+        var now = FixedNow;
         await store.SaveAsync(new SystemUpdateJobState(
             "web-job-active",
             "running",
@@ -1282,7 +1283,7 @@ public class SystemUpdateServiceSpecs
     public async Task RecordCliOutcomeAsync_NewOutcomeReplacesPriorTerminalJob()
     {
         var store = new InMemoryUpdateStore();
-        var now = DateTimeOffset.UtcNow;
+        var now = FixedNow;
         await store.SaveAsync(new SystemUpdateJobState(
             "other-job-terminal",
             "succeeded",
@@ -1817,7 +1818,7 @@ public class SystemUpdateServiceSpecs
         string? runnerServiceStatus = "active")
     {
         return new SystemInfoResponse(
-            new RunningInfo("1.2.3", runningGitHash, DateTimeOffset.UtcNow),
+            new RunningInfo("1.2.3", runningGitHash, FixedNow),
             new SourceInfo(sourcePath, "main", sourceHead, sourceDirty),
             new InstallInfo(installMode, "systemd-user", "mohist.service", "mohist-runner.service", installMode),
             new UpdateInfo(updateStatus, available, updateStatus),

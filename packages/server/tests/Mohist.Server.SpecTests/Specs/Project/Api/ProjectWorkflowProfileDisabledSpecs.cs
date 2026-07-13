@@ -25,8 +25,7 @@ public class ProjectWorkflowProfileDisabledSpecs : IAsyncLifetime
             .Options;
         _manager = new ProjectWorkflowProfileManager(new Factory(_options), new StubPromptLoader(), new PromptTemplateEngine());
 
-        using var db = new MohistDbContext(_options);
-        db.Database.EnsureCreated();
+        MigratedSqliteTemplate.CopyModelSchemaTo(_keeper);
     }
 
     public Task InitializeAsync() => Task.CompletedTask;
