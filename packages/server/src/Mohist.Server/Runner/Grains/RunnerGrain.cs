@@ -342,9 +342,7 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
 
                 snapshot = new ReconcileCandidate(
                     candidate.OwnerId,
-                    candidate.WorkId,
-                    candidate.Status,
-                    candidate.DispatchSnapshot);
+                    candidate.WorkId);
             }
             finally
             {
@@ -398,9 +396,7 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
 
     private sealed record ReconcileCandidate(
         string AgentJobId,
-        string WorkId,
-        RunnerWorkStatus Status,
-        WorkDispatch? DispatchSnapshot);
+        string WorkId);
 
     public async Task<RunnerWorkReportResult> ReportAgentJobResultAsync(string agentJobId, string workId, WorkResult result)
     {

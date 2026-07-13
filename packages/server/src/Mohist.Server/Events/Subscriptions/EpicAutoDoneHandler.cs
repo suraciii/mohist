@@ -119,6 +119,42 @@ public sealed class EpicDraftChangedHandler : ICloudEventHandler<IssueDraftChang
 }
 
 /// <summary>
+/// Subscribes to <c>com.mohist.issue.prerequisite-removed</c> and triggers
+/// <see cref="IEpicGrain.RecomputeProgressAsync"/> on the owning epic.
+/// Removing a prerequisite can make a previously-blocked backlog member
+/// startable in a running-but-idle epic — a readiness transition the
+/// deleted periodic sweep used to converge. This subscription closes that
+/// gap with a durable, event-driven trigger.
+/// </summary>
+[Subscription(Type = EventCatalog.ReverseDns.IssuePrerequisiteRemoved)]
+public sealed class EpicPrerequisiteRemovedHandler : ICloudEventHandler<IssuePrerequisiteRemoved>
+{
+    private readonly EpicProgressRecomputeDispatcher _dispatcher;
+
+    [ActivatorUtilitiesConstructor]
+    public EpicPrerequisiteRemovedHandler(
+        IServiceScopeFactory scopes,
+        IGrainFactory grains,
+        ILogger<EpicPrerequisiteRemovedHandler> log)
+    {
+        _dispatcher = new EpicProgressRecomputeDispatcher(scopes, grains, log);
+    }
+
+    internal EpicPrerequisiteRemovedHandler(
+        EpicQuerier epicQuerier,
+        IGrainFactory grains,
+        ILogger<EpicPrerequisiteRemovedHandler> log)
+    {
+        _dispatcher = new EpicProgressRecomputeDispatcher(epicQuerier, grains, log);
+    }
+
+    public bool Filter(CloudEvent<IssuePrerequisiteRemoved> evt) => true;
+
+    public Task HandleAsync(CloudEvent<IssuePrerequisiteRemoved> evt, CancellationToken ct) =>
+        _dispatcher.DispatchAsync(evt.Id, evt.Extensions, evtType: "prerequisite-removed", includePrerequisiteLookup: false, ct);
+}
+
+/// <summary>
 /// Subscribes to <c>com.mohist.epic.issue-linked</c> and triggers
 /// <see cref="IEpicGrain.RecomputeProgressAsync"/> on the epic that
 /// linked the issue. This is the durable convergence path for link

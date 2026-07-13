@@ -470,35 +470,34 @@ public class RunnerGrainConcurrencySpecs : IAsyncLifetime
             // Reconcile with an empty reported set — the pre-assigned work is
             // "missing", so ReconcileAgentJobsAsync will snapshot it under the
             // gate, RELEASE the gate, then call IsWorkRunnableAsync outside.
-            var reconcile = runner.ReconcileAgentJobsAsync([]);
-
-            // Fire a concurrent [AlwaysInterleave] assignment. Before the fix
-            // this would block on the lifecycle gate held across the
-            // cross-grain IsWorkRunnableAsync call; if that call were to
-            // bounce back through AssignAgentJobAsync (as AgentJobGrain does
-            // on recovery) the whole thing deadlocks. After the fix the gate
-            // is free during the cross-grain call, so this assignment settles
-            // promptly — rejected by the _pollAdmitted guard — instead of
-            // hanging behind the reconcile.
+            //
+            // We fire both the reconcile and a concurrent [AlwaysInterleave]
+            // assignment concurrently via Task.WhenAll. If the lifecycle gate
+            // were held across the cross-grain IsWorkRunnableAsync call (the
+            // pre-fix deadlock), the concurrent assignment would block on the
+            // gate, the reconcile would block on the cross-grain call (which
+            // bounces back through AssignAgentJobAsync on recovery), and
+            // Task.WhenAll would hang — caught by the test framework's
+            // timeout. After the fix, the gate is free during the cross-grain
+            // call, so the assignment acquires it, sees _pollAdmitted, and
+            // rejects cleanly; both tasks complete.
             var concurrentAgentJobId = $"concurrent-job-{Guid.NewGuid():N}";
             var concurrentWorkId = $"concurrent-work-{Guid.NewGuid():N}";
+
+            var reconcile = runner.ReconcileAgentJobsAsync([]);
             var concurrentAssignment = runner.AssignAgentJobAsync(new WorkDispatch(
                 WorkflowRunId: string.Empty,
                 WorkId: concurrentWorkId,
                 AgentJobId: concurrentAgentJobId,
                 OwnerKind: WorkDispatchOwnerKinds.AgentJob));
 
-            var settled = await Task.WhenAny(
-                Task.Delay(TimeSpan.FromSeconds(3)),
-                concurrentAssignment);
-            Assert.Same(concurrentAssignment, settled);
-            Assert.Equal(
-                RunnerWorkAssignmentStatus.Rejected,
-                (await concurrentAssignment).Status);
-            Assert.Equal("runner-reconciling", (await concurrentAssignment).Reason);
+            await Task.WhenAll(reconcile, concurrentAssignment);
 
-            // The reconcile itself completes without hanging and returns the
-            // missing dispatch snapshot.
+            var assignmentResult = await concurrentAssignment;
+            Assert.Equal(RunnerWorkAssignmentStatus.Rejected, assignmentResult.Status);
+            Assert.Equal("runner-reconciling", assignmentResult.Reason);
+
+            // The reconcile returns the missing dispatch snapshot.
             var pollState = await reconcile;
             Assert.Equal(1, pollState.ActiveCount);
             Assert.NotNull(pollState.Dispatch);

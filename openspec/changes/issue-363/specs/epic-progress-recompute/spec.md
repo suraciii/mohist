@@ -75,7 +75,7 @@ The recompute path SHALL retain the completed-event handler (`EpicAutoDoneHandle
 
 ### Requirement: Link-time recompute preserves sweep readiness behavior
 
-When an issue is linked to a non-terminal epic without waking from done, the epic SHALL recompute progress after the link is committed by calling `RecomputeProgressInternalAsync` with `PreserveRunning` failure mode. This preserves the readiness behavior previously supplied by the poll-driven sweep: a startable issue linked to a running epic SHALL be advanced via `TryStartNext`, and an epic whose members are all complete SHALL be marked done. This trigger is a command-path operation within the epic grain, not a cross-aggregate event->command change. Wake-from-done links SHALL continue to call `TryStartNext` directly. Draft/prerequisite readiness is covered by durable delivery of the prerequisite's `completed` event, which triggers `RecomputeProgressAsync` via `EpicAutoDoneHandler`.
+When an issue is linked to a non-terminal epic without waking from done, the epic SHALL recompute progress after the link is committed by calling `RecomputeProgressInternalAsync` with `PreserveRunning` failure mode. This preserves the readiness behavior previously supplied by the poll-driven sweep: a startable issue linked to a running epic SHALL be advanced via `TryStartNext`, and an epic whose members are all complete SHALL be marked done. This trigger is a command-path operation within the epic grain, not a cross-aggregate event->command change. Wake-from-done links SHALL continue to call `TryStartNext` directly.
 
 #### Scenario: Startable issue linked to running epic advances
 
@@ -97,16 +97,58 @@ When an issue is linked to a non-terminal epic without waking from done, the epi
 - **WHEN** an open issue is linked, waking the epic to running
 - **THEN** the epic SHALL call `TryStartNext` directly (not the full recompute path)
 
-#### Scenario: Draft prerequisite readiness covered by durable delivery
+### Requirement: Durable event-driven recompute triggers replace every sweep readiness transition
 
-- **GIVEN** a running epic with a linked issue whose prerequisite is not yet complete
-- **WHEN** the prerequisite issue completes and `com.mohist.issue.completed` is delivered
-- **THEN** `EpicAutoDoneHandler` SHALL dispatch `RecomputeProgressAsync` on the owning epic
-- **AND** the dependent issue SHALL be advanced via `TryStartNext` if it is now startable
+The poll-driven sweep reevaluated readiness transitions beyond missed terminal events. Each transition the sweep covered SHALL have a durable, event-driven recompute trigger so convergence does not depend on a periodic scan:
+
+- **External prerequisite completes**: `EpicAutoDoneHandler` (completed) and `EpicCancelledHandler` (cancelled) SHALL reverse-look-up epics whose members depend on the event issue as an external prerequisite via `EpicQuerier.GetEpicIdsDependentOnPrerequisiteAsync`, and dispatch `RecomputeProgressAsync` to those epics in addition to the direct-member epic.
+- **Draft undraft**: `EpicDraftChangedHandler` subscribing `com.mohist.issue.draft-changed` SHALL dispatch `RecomputeProgressAsync` to the owning epic when a member transitions from draft to ready (`NewIsDraft == false`).
+- **Prerequisite removed**: `EpicPrerequisiteRemovedHandler` subscribing `com.mohist.issue.prerequisite-removed` SHALL dispatch `RecomputeProgressAsync` to the owning epic.
+- **Link commit/recompute crash**: `EpicIssueLinkedHandler` subscribing `com.mohist.epic.issue-linked` SHALL dispatch `RecomputeProgressAsync` to the epic that linked the issue. This is the durable convergence path for a crash between link commit and inline recompute.
+- **Command-path start failure**: `TryStartNextAsync` with `PreserveRunning` SHALL emit `EpicStartAttemptFailed` (persisted atomically with the epic state). `EpicStartRetryHandler` subscribing `com.mohist.epic.start-attempt-failed` SHALL re-drive `RecomputeProgressAsync` via the durable dispatcher with backoff, replacing the sweep's running-but-idle recovery loop. Permanent start failures SHALL be dead-lettered by the dispatcher.
+
+Recovery-critical events (`EpicIssueLinked`, `EpicStartAttemptFailed`) SHALL be persisted atomically with the epic state transition via `EventStore.AppendAsync(db, envelope)` into the caller's DbContext, so a crash or failed append between commit and event persistence cannot lose the only convergence signal.
+
+#### Scenario: External prerequisite completes recomputes dependent epic
+
+- **GIVEN** a running epic with a member whose external prerequisite (not an epic member) is not yet complete
+- **WHEN** the external prerequisite issue completes and `com.mohist.issue.completed` is delivered
+- **THEN** `EpicAutoDoneHandler` SHALL reverse-look-up the dependent epic
+- **AND** SHALL dispatch `RecomputeProgressAsync` to the dependent epic
+- **AND** the dependent member SHALL be advanced via `TryStartNext` if it is now startable
+
+#### Scenario: Draft undraft recomputes owning epic
+
+- **GIVEN** a running epic with a linked member that was a draft
+- **WHEN** the member is undrafted and `com.mohist.issue.draft-changed` with `NewIsDraft == false` is delivered
+- **THEN** `EpicDraftChangedHandler` SHALL dispatch `RecomputeProgressAsync` to the owning epic
+- **AND** the member SHALL be advanced via `TryStartNext` if it is now startable
+
+#### Scenario: Prerequisite removed recomputes owning epic
+
+- **GIVEN** a running epic with a linked member blocked by a prerequisite
+- **WHEN** the prerequisite is removed and `com.mohist.issue.prerequisite-removed` is delivered
+- **THEN** `EpicPrerequisiteRemovedHandler` SHALL dispatch `RecomputeProgressAsync` to the owning epic
+- **AND** the member SHALL be advanced via `TryStartNext` if it is now startable
+
+#### Scenario: Link event drives durable recompute convergence
+
+- **GIVEN** a running epic with a newly linked open issue
+- **WHEN** `com.mohist.epic.issue-linked` is delivered (including after a crash that prevented the inline recompute)
+- **THEN** `EpicIssueLinkedHandler` SHALL dispatch `RecomputeProgressAsync` to the epic
+- **AND** the epic SHALL converge to the correct progress state
+
+#### Scenario: Command-path start failure triggers durable retry
+
+- **GIVEN** a running epic whose `TryStartNextAsync` catches a transient `StartWorkAsync` failure under `PreserveRunning`
+- **THEN** the epic SHALL emit `EpicStartAttemptFailed` persisted atomically with its state
+- **WHEN** `com.mohist.epic.start-attempt-failed` is delivered
+- **THEN** `EpicStartRetryHandler` SHALL dispatch `RecomputeProgressAsync` to the epic
+- **AND** the dispatcher SHALL retry with backoff until success or dead-letter
 
 ### Requirement: The poll-driven terminal-recompute sweep is removed
 
-The poll-driven safety-net sweep for epic terminal recompute SHALL NOT exist. `EpicReconciliationService` (the `BackgroundService`), `EpicReconciliationOptions`, and the `AddHostedService<EpicReconciliationService>()` DI registration SHALL be removed. Durable at-least-once delivery of `com.mohist.issue.completed` and `com.mohist.issue.cancelled` SHALL be the reliable automatic trigger for recompute in response to member terminal events; `ResumeAsync` and link-time recompute remain explicit non-event triggers. The sweep's non-terminal-event readiness behavior (link-to-running, terminal-before-link, all-complete-idle) is preserved by the link-time recompute trigger; draft/prerequisite readiness is covered by durable delivery of the prerequisite's `completed` event. A terminal-event processing failure that escapes the handler remains retryable and, on exhaustion, dead-lettered for operator re-delivery rather than silently dropped.
+The poll-driven safety-net sweep for epic terminal recompute SHALL NOT exist. `EpicReconciliationService` (the `BackgroundService`), `EpicReconciliationOptions`, and the `AddHostedService<EpicReconciliationService>()` DI registration SHALL be removed. Durable at-least-once delivery of terminal events plus the event-driven readiness triggers specified above SHALL be the reliable automatic triggers for recompute; `ResumeAsync` and link-time recompute remain explicit non-event triggers. The sweep's readiness behavior is fully replaced by the link-time recompute trigger and the durable event-driven triggers (external-prerequisite completion, draft undraft, prerequisite removal, link convergence, start-failure retry). A terminal-event processing failure that escapes the handler remains retryable and, on exhaustion, dead-lettered for operator re-delivery rather than silently dropped.
 
 #### Scenario: No hosted sweep service is registered
 
@@ -127,8 +169,9 @@ The poll-driven safety-net sweep for epic terminal recompute SHALL NOT exist. `E
 - **THEN** the terminal-event processing failure SHALL reach the durable dispatcher
 - **AND** the dispatcher SHALL retry and, on exhaustion, dead-letter the handler delivery
 
-#### Scenario: Command-path start failure behavior is preserved
+#### Scenario: Command-path start failure emits durable retry trigger
 
-- **WHEN** `StartAsync`, a link operation, or `ResumeAsync` attempts to start the next issue and `IIssueGrain.StartWorkAsync` fails
-- **THEN** the epic SHALL retain its existing running-but-idle command behavior
-- **AND** the failure-propagation rule for terminal-event delivery SHALL NOT implicitly change those command contracts
+- **WHEN** `StartAsync`, a link operation, or `ResumeAsync` attempts to start the next issue and `IIssueGrain.StartWorkAsync` fails under `PreserveRunning`
+- **THEN** the epic SHALL emit `EpicStartAttemptFailed` persisted atomically with its state
+- **AND** `EpicStartRetryHandler` SHALL re-drive `RecomputeProgressAsync` via the durable dispatcher with backoff
+- **AND** on permanent failure the delivery SHALL be dead-lettered

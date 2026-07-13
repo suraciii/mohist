@@ -664,6 +664,40 @@ public class EpicAutoDoneHandlerSpecs
         Assert.False(handler.Filter(evt));
     }
 
+    // --- Fix item-4: EpicPrerequisiteRemovedHandler ---
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task PrerequisiteRemovedHandler_HasSubscriptionAttribute()
+    {
+        var attr = (SubscriptionAttribute?)Attribute.GetCustomAttribute(
+            typeof(EpicPrerequisiteRemovedHandler), typeof(SubscriptionAttribute));
+        Assert.NotNull(attr);
+        Assert.Equal(EventCatalog.ReverseDns.IssuePrerequisiteRemoved, attr!.Type);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task PrerequisiteRemovedHandler_RemovedPrereq_InvokesRecomputeOnOwningEpic()
+    {
+        await using var database = CreateDatabase();
+        await SeedEpicAsync(database, status: "running");
+        await SeedIssueAsync(database, projectId: "project_1", issueId: "issue_1", issueNumber: 1, status: Mohist.Server.Issue.Domain.IssueStatus.Backlog);
+        await SeedLinkAsync(database, epicId: "epic_1", issueId: "issue_1", issueNumber: 1);
+
+        var querier = new EpicQuerier(database.Factory, null!);
+        var grains = new TestEpicGrainFactory(database.Factory);
+        var handler = new EpicPrerequisiteRemovedHandler(querier, grains, NullLogger<EpicPrerequisiteRemovedHandler>.Instance);
+
+        var evt = BuildPrerequisiteRemovedEvent(projectId: "project_1", issueId: "issue_1", prereqNumber: 10);
+        await handler.HandleAsync(evt, CancellationToken.None);
+
+        var call = Assert.Single(grains.Calls);
+        Assert.Equal("project_1:epic_1", call.GrainKey);
+    }
+
     // --- Fix C-2: External prerequisite reverse lookup ---
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
@@ -760,6 +794,22 @@ public class EpicAutoDoneHandlerSpecs
             type: EventCatalog.ReverseDns.IssueDraftChanged,
             time: DateTimeOffset.UtcNow,
             data: new IssueDraftChanged(oldIsDraft, newIsDraft),
+            subject: "1",
+            extensions: new Dictionary<string, string>
+            {
+                ["projectid"] = projectId,
+                ["issueid"] = issueId,
+                ["issueno"] = "1",
+            });
+
+    private static CloudEvent<IssuePrerequisiteRemoved> BuildPrerequisiteRemovedEvent(
+        string projectId, string issueId, int prereqNumber) =>
+        new(
+            id: Guid.NewGuid().ToString(),
+            source: new Uri($"/mohist/issue/{issueId}", UriKind.Relative),
+            type: EventCatalog.ReverseDns.IssuePrerequisiteRemoved,
+            time: DateTimeOffset.UtcNow,
+            data: new IssuePrerequisiteRemoved(prereqNumber),
             subject: "1",
             extensions: new Dictionary<string, string>
             {

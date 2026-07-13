@@ -137,6 +137,12 @@ public class EpicGrain : Grain, IEpicGrain
         }
         MapToRow(domain, row, now);
         var pending = DrainPendingEvents(domain);
+        // Append the EpicIssueLinked event into the same transaction so the
+        // durable recompute trigger (EpicIssueLinkedHandler) is committed
+        // atomically with the membership row — a crash or failed append
+        // between commit and event persistence would otherwise lose the only
+        // convergence path for a link whose inline recompute never ran.
+        await PersistEpicEventsAsync(db, domain, pending, now);
         try
         {
             await db.SaveChangesAsync();
@@ -151,7 +157,6 @@ public class EpicGrain : Grain, IEpicGrain
             }
             throw;
         }
-        await PersistEpicEventsAsync(domain, pending, now);
 
         if (wakeUpEpic)
         {
@@ -311,6 +316,10 @@ public class EpicGrain : Grain, IEpicGrain
             }
             MapToRow(domain, row, now);
             var pending = DrainPendingEvents(domain);
+            // Append EpicIssueLinked atomically with the membership row so
+            // the durable recompute trigger is never lost on crash/append
+            // failure (same rationale as the single-link path above).
+            await PersistEpicEventsAsync(db, domain, pending, now);
             try
             {
                 await db.SaveChangesAsync();
@@ -339,7 +348,6 @@ public class EpicGrain : Grain, IEpicGrain
 
             existingLinks.Add(item.IssueId);
             outcomes.Add(BatchMembershipOutcome.Linked(item.Identifier, item.IssueId, item.IssueNumber));
-            await PersistEpicEventsAsync(domain, pending, now);
             hasLinkedAny = true;
         }
 
@@ -821,8 +829,12 @@ public class EpicGrain : Grain, IEpicGrain
                 domain.RecordStartAttemptFailure(next.Id, next.Number, ex.Message, now.UtcDateTime);
                 MapToRow(domain, row, now);
                 var pending = DrainPendingEvents(domain);
+                // Append the start-attempt-failed event into the same
+                // transaction as the epic state, so the durable retry trigger
+                // survives or rolls back atomically — a failed append must
+                // not lose the only recovery signal for a running-but-idle epic.
+                await PersistEpicEventsAsync(db, domain, pending, now);
                 await db.SaveChangesAsync();
-                await PersistEpicEventsAsync(domain, pending, now);
                 return ToDto(row);
             }
             throw;
@@ -1065,6 +1077,47 @@ public class EpicGrain : Grain, IEpicGrain
             _log.LogError(ex,
                 "Post-commit epic event persistence failed for epic {EpicId} ({ProjectId})",
                 epic.Id, epic.ProjectId);
+        }
+    }
+
+    /// <summary>
+    /// Atomically persists events into the caller's <paramref name="db"/>
+    /// context, so they survive or roll back with the epic state transition
+    /// in the same <c>SaveChangesAsync</c> call. Used for recovery-critical
+    /// events (<c>EpicIssueLinked</c>, <c>EpicStartAttemptFailed</c>) whose
+    /// loss would leave an epic stuck running-but-idle with no durable
+    /// recompute trigger.
+    /// </summary>
+    private async Task PersistEpicEventsAsync(
+        MohistDbContext db,
+        EpicAggregate epic,
+        IReadOnlyList<Epic.Domain.Events.EpicEvent> events,
+        DateTimeOffset now)
+    {
+        if (events.Count == 0) return;
+        var source = EpicEventPersistence.EpicSource(epic.Id);
+        var subject = epic.Number.ToString();
+        var extensions = new Dictionary<string, string>
+        {
+            ["projectid"] = epic.ProjectId,
+            ["epicid"] = epic.Id,
+            ["epicno"] = subject,
+        };
+
+        foreach (var evt in events)
+        {
+            var type = EpicEventSerializer.BusType(evt);
+            var dataJson = EpicEventSerializer.ToData(evt);
+            var envelope = new CloudEvent(
+                id: Guid.NewGuid().ToString(),
+                source: new Uri(source, UriKind.Relative),
+                type: type,
+                time: now,
+                data: dataJson,
+                subject: subject,
+                extensions: extensions);
+
+            await _eventStore.AppendAsync(db, envelope, CancellationToken.None);
         }
     }
 

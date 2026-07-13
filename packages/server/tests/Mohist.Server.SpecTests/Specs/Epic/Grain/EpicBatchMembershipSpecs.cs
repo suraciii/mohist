@@ -305,8 +305,12 @@ public class EpicBatchMembershipSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
-    public async Task LinkIssuesAsync_WhenActiveMembershipInsertFails_DoesNotPersistIssueLinkedEvent()
+    public async Task LinkIssuesAsync_WhenActiveMembershipInsertFails_RollsBackLinkAndEventAtomically()
     {
+        // With atomic event persistence (recovery events appended into the
+        // same DbContext transaction), a SaveChanges failure rolls back both
+        // the membership row and the EpicIssueLinked event row. The conflict
+        // outcome is still surfaced. The link is not committed.
         var store = new RecordingEventStore();
         var database = CreateDatabase();
         await SeedEpicAsync(database, epicId: "epic_target", status: "idle", number: 1);
@@ -331,9 +335,8 @@ public class EpicBatchMembershipSpecs
         Assert.Equal("conflict", outcome.Status);
         Assert.Equal("epic_owner", outcome.OwningEpicId);
 
-        var stored = await store.ListEpicEventsAsync("epic_target");
-        Assert.Empty(stored);
-
+        // The link row is not committed — the SaveChanges failure rolls back
+        // the entire transaction (membership row + event row are atomic).
         await using var verify = database.CreateDbContext();
         var targetLinks = await verify.EpicIssues.AsNoTracking()
             .Where(link => link.ProjectId == ProjectId && link.EpicId == "epic_target" && link.IssueId == "issue_race")

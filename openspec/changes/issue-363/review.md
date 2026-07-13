@@ -1,51 +1,57 @@
 # Review Report
 
-## Result: FAIL (original) → all blocking items repaired
+## Result: FAIL
 
-`npm run build` and `npm test` pass. The candidate removes both `[Reentrant]` attributes and Runner gates, propagates the covered handler failures, deletes the hosted sweep, and completes the recompute rename. The original snapshot had one Runner recovery deadlock and three lost epic-progress recovery paths; all four have been repaired with durable event-driven convergence replacing the deleted poll-driven sweep.
+Post-repair verification passed: `npm run build` and `npm test` (2,889 server specs, 1,390 server unit tests, 24 passing architecture tests, 875 CLI tests, 4,596 web tests, and 1,007 runner tests).
 
 ## Repaired Items
 
-- [item-1] Runner recovery deadlock: `ReconcileAgentJobsAsync` restructured to snapshot candidate under the gate, release the gate, do the cross-grain `IsWorkRunnableAsync` check outside, then re-acquire to mutate. The `_pollAdmitted` guard continues to reject `AssignAgentJobAsync` while the gate is released, so the works list is not mutated concurrently. Test: `ReconcileAgentJobsAsync_DuringCrossGrainCheck_DoesNotHoldLifecycleGate_AllowsConcurrentAssignment`.
+- [ID: item-1]
+  Severity: info
+  Scope: dead-code-removal
+  Evidence: `ReconcileCandidate` retained unused `Status` and `DispatchSnapshot` fields after live-state revalidation replaced snapshot use.
+  Verification: `npm run build`; `npm test`
+  Status: resolved
 
-- [item-2] Lost epic-progress recovery for external prerequisite and draft undraft: added `EpicDraftChangedHandler` (subscribes `com.mohist.issue.draft-changed`, recompute on undraft only) and extended `EpicProgressRecomputeDispatcher` to reverse-look-up epics whose members depend on the completed/cancelled issue as an external prerequisite via `EpicQuerier.GetEpicIdsDependentOnPrerequisiteAsync`. Tests: `DraftChangedHandler_Undraft_InvokesRecomputeOnOwningEpic`, `HandleAsync_ExternalPrerequisiteCompletes_DispatchesToDependentEpic`.
-
-- [item-3] Link commit/recompute gap: added `EpicIssueLinkedHandler` subscribing `com.mohist.epic.issue-linked`. The event is durable (persisted in the same `SaveChangesAsync` transaction as the link commit), so a crash between commit and inline recompute is recovered by the durable dispatcher redelivering the event. Test: `IssueLinkedHandler_LinkedEvent_InvokesRecomputeOnOwningEpic`.
-
-- [item-4] Command-path start failure: `TryStartNextAsync` now records an `EpicStartAttemptFailed` event on a `PreserveRunning` catch, and `EpicStartRetryHandler` (subscribes `com.mohist.epic.start-attempt-failed`) re-drives `RecomputeProgressAsync` with backoff from the durable dispatcher. Permanent failures dead-letter. Test: `StartRetryHandler_StartAttemptFailedEvent_InvokesRecomputeOnOwningEpic`.
+- [ID: item-2]
+  Severity: info
+  Scope: small-test-expectation-update
+  Evidence: `EpicEventPublishSpecs` claimed to cover every EpicEvent variant and catalog entry but omitted the new `EpicStartAttemptFailed` variant.
+  Verification: `dotnet test packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj --filter "FullyQualifiedName~EpicEventPublishSpecs"` (14 passed)
+  Status: resolved
 
 ## Blocking Items
 
-- [ID: item-1]
-  Severity: blocking
-  Scope: `packages/server/src/Mohist.Server/Runner/Grains/RunnerGrain.cs:227-232,315-332`; `packages/server/src/Mohist.Server/Agent/Grains/AgentJobGrain.cs:411-442`
-  Evidence: `ReconcileAgentJobsAsync` holds `_lifecycleGate` while awaiting `AgentJobGrain.IsWorkRunnableAsync`. After a crash between runner acceptance and the AgentJob's terminal assignment save, the recovered non-reentrant AgentJob retries `AssignAgentJobAsync` and waits for that same gate. Runner is then waiting on AgentJob while AgentJob waits on Runner, permanently blocking the poll and recovery. The added timeout spec blocks before Runner owns a work item and therefore does not exercise this cycle. [disallowed:concurrency behavior]
-  SuggestedAction: Restructure poll reconciliation and assignment admission so cross-grain validation cannot hold the lifecycle gate while an AgentJob waits to assign; preserve the poll admission invariant with a revalidation step.
-  Verification: Add a real-Orleans recovery test that pauses an AgentJob after its prepared assignment is persisted, starts `ReconcileAgentJobsAsync`, and proves the poll and retry both settle.
-  Status: unresolved
-
-- [ID: item-2]
-  Severity: blocking
-  Scope: `packages/server/src/Mohist.Server/Events/Subscriptions/EpicAutoDoneHandler.cs:16-17,53-54,141-155`; `packages/server/src/Mohist.Server/Epic/Services/EpicQuerier.cs:170-186`; `packages/server/src/Mohist.Server/Issue/Domain/Issue.Transitions.cs:105-113`
-  Evidence: The only epic-progress subscriptions are completed and cancelled. Their dispatcher looks up only the event issue's direct active membership. An external prerequisite has no direct membership, so its completion cannot recompute an epic containing its dependent; the dependent then remains running-but-idle after its prior start attempt is rejected by the actual IssueGrain prerequisite check. A linked draft member similarly remains idle after `IssueDraftChanged`, because no epic-progress subscriber receives that event. The deleted sweep handled both readiness transitions. Existing tests demonstrate external prerequisites but do not drive either transition. [disallowed:product behavior and event orchestration]
-  SuggestedAction: Add durable, targeted readiness triggers for draft and prerequisite changes, including reverse lookup of epics whose members depend on an external issue.
-  Verification: Add integration specs that complete an external prerequisite and undraft a linked member, then assert each newly eligible member starts in a running epic.
-  Status: unresolved
-
 - [ID: item-3]
   Severity: blocking
-  Scope: `packages/server/src/Mohist.Server/Epic/Grains/EpicGrain.cs:79-81,142-175,245-249,358-373`
-  Evidence: Link membership is committed before the new tail recompute. A crash or transient failure after that commit leaves a running epic idle or an all-terminal epic unfinished. Retrying the same single link immediately returns; retrying a batch containing only already-linked items skips the `hasLinkedAny` recompute guard. The removed sweep supplied the only later convergence path, and the candidate records no durable trigger for this gap. [disallowed:data safety and recovery behavior]
-  SuggestedAction: Make link-triggered recomputation recoverable, for example through an atomic durable trigger or an idempotent retry path that recomputes already-linked membership after a failed request.
-  Verification: Fault immediately after a successful link commit, retry the same request, and assert that the epic starts an eligible member or reaches `done`.
+  Scope: `packages/server/src/Mohist.Server/Epic/Grains/EpicGrain.cs:142-154,807-826,1023-1068`; `packages/server/src/Mohist.Server/Infrastructure/Data/Events/EventStore.cs:47-105`
+  Evidence: The new link and start-failure recovery handlers depend on `EpicIssueLinked` and `EpicStartAttemptFailed`, yet state is committed before `PersistEpicEventsAsync` and that helper deliberately catches append failures. A failed append leaves a command-path start failure permanently running-but-idle; a crash or failed append between link commit and inline recompute loses the only proposed recovery trigger. The event store already exposes an overload that appends into the caller's DbContext. [disallowed:data safety and recovery behavior]
+  SuggestedAction: Persist recovery events atomically with the affected epic transition, then add fault-injection specs for event-append failure and the post-commit crash window.
+  Verification: Force the epic-event append to fail and assert the transition rolls back or has a durable recovery record; restart after a committed link and assert the recompute still occurs.
   Status: unresolved
 
 - [ID: item-4]
   Severity: blocking
-  Scope: `packages/server/src/Mohist.Server/Epic/Grains/EpicGrain.cs:497-529,532-564,807-821`; `packages/server/tests/Mohist.Server.SpecTests/Specs/Epic/Grain/EpicProgressionSpecs.cs:279-300`
-  Evidence: Command-path `StartWorkAsync` failures are caught under `PreserveRunning`, but the now-running epic makes repeat `StartAsync` and `ResumeAsync` calls no-ops. Re-linking is also idempotently skipped. With `EpicReconciliationService` removed, no automatic re-drive remains unless an unrelated terminal event happens. The new test asserts only the stuck running state and not recovery after the transient failure clears. [disallowed:product behavior and recovery policy]
-  SuggestedAction: Provide a durable retry/recompute trigger for command-path start failures, or make an explicit retry command re-drive an already-running idle epic.
-  Verification: Make the first `StartWorkAsync` call fail, restore the dependency, invoke the intended recovery path, and assert a second start attempt occurs.
+  Scope: `packages/server/src/Mohist.Server/Issue/Domain/Issue.Prerequisites.cs:17-24`; `packages/server/src/Mohist.Server/Events/Subscriptions/EpicAutoDoneHandler.cs:19-118`
+  Evidence: Removing a prerequisite emits `IssuePrerequisiteRemoved`, which can make a linked backlog issue startable in a running-but-idle epic. The candidate subscribes only to completed, cancelled, and undraft events, so this transition never invokes recompute after the sweep is deleted. This was a readiness transition the prior periodic scan covered. [disallowed:product behavior and event orchestration]
+  SuggestedAction: Add a durable prerequisite-removal recompute trigger for the owning active epic and specify the readiness transition.
+  Verification: Start an epic with a member blocked only by a prerequisite, remove that prerequisite, dispatch the event, and assert the member starts.
+  Status: unresolved
+
+- [ID: item-5]
+  Severity: test-gap
+  Scope: `packages/server/tests/Mohist.Server.SpecTests/Specs/Runner/Grain/RunnerGrainConcurrencySpecs.cs:262-330,442-505`; `design/testing.md:53-59`
+  Evidence: The timeout test blocks AgentJob before it calls Runner, so Runner has no tracked work when `CloseoutLostAsync` enumerates it; the asserted closeout is conditional and the reciprocal `ReportResultAsync` cycle is never exercised. The suite also uses `TestWait.ForAsync` wall-clock timeouts and `Task.Delay`, violating the explicit no-wall-clock acceptance criterion.
+  SuggestedAction: Add deterministic grain-test signals that pause after Runner owns the work and while the same AgentJob retries assignment; assert the closeout report and retry both settle without wall-clock polling.
+  Verification: Run the new real-Orleans scenario with only awaitable signals and FakeTimeProvider advancement.
+  Status: unresolved
+
+- [ID: item-6]
+  Severity: warning
+  Scope: `openspec/changes/issue-363/{proposal.md,design.md,tasks.json,specs/}`; epic event subscriptions
+  Evidence: The reviewed implementation adds `EpicDraftChangedHandler`, prerequisite reverse lookup, `EpicIssueLinkedHandler`, `EpicStartRetryHandler`, and a new public event type. The approved artifacts instead specify link-time recompute and state that cross-aggregate event-to-command semantics do not change (`tasks.json:77,86`), with no scenarios for the new event contracts. This prevents the artifacts from serving as an accurate merge and regression specification. [disallowed:architectural and product-contract judgment]
+  SuggestedAction: Update the proposal, design, tasks, and delta specs to define the additional event triggers, their reliability contract, and their non-goals before merging.
+  Verification: Review the updated artifacts against the handler subscriptions and event catalog; add scenario coverage for each documented trigger.
   Status: unresolved
 
 ## Follow-up Items
@@ -54,17 +60,17 @@ No follow-up items.
 
 ## Pre-existing or Out-of-scope Items
 
-- [ID: item-5]
+- [ID: item-7]
   Severity: warning
-  Scope: `packages/server/src/Mohist.Server/Infrastructure/Events/EventDispatcherService.cs:17,157-205`; `packages/server/src/Mohist.Server/Infrastructure/Data/Events/EventStore.cs:239-268`
-  Evidence: Per-handler attempt counts and backoff exist only in the singleton's in-memory `_states` dictionary, while the event store persists only whether the event was dispatched. Restarting the server resets a permanently failing handler to attempt one, so repeated restarts can indefinitely postpone dead-lettering. `git blame` attributes this entirely to `fd8496067`, an ancestor of `master`, rather than this candidate.
-  SuggestedAction: Persist per-handler delivery state and add a restart test that verifies attempts, backoff, and eventual dead-lettering survive a new dispatcher instance.
+  Scope: `packages/server/src/Mohist.Server/Infrastructure/Events/EventDispatcherService.cs:17,157-205`
+  Evidence: Per-handler retry counts and backoff live only in the singleton `_states` dictionary. A process restart resets failures to attempt one, so repeated restarts can indefinitely defer dead-lettering. `git blame` attributes this to `fd8496067`, an ancestor of `master`.
+  SuggestedAction: Persist per-handler delivery state and add a dispatcher-restart test.
   Status: pre-existing
 
-- [ID: item-6]
+- [ID: item-8]
   Severity: info
   Scope: server architecture and spec suites
-  Evidence: The passing `npm test` run skipped 12 tests: 3 architecture tests and 9 server specs. None belongs to a changed candidate file.
+  Evidence: The passing full suite skipped 12 tests: 3 architecture tests and 9 server specs; none belongs to the candidate changes.
   SuggestedAction: Track skipped tests with their owning work.
   Status: pre-existing
 
