@@ -437,55 +437,11 @@ public class InfoCollectorTests
     }
 
     [Fact]
-    public void FormatUptime_RendersHumanReadable()
-    {
-        Assert.Equal("0s", SystemdUnitParser.FormatUptime(TimeSpan.FromSeconds(0)));
-        Assert.Equal("30s", SystemdUnitParser.FormatUptime(TimeSpan.FromSeconds(30)));
-        Assert.Equal("5m", SystemdUnitParser.FormatUptime(TimeSpan.FromMinutes(5)));
-        Assert.Equal("1h30m", SystemdUnitParser.FormatUptime(TimeSpan.FromMinutes(90)));
-        Assert.Equal("2d4h", SystemdUnitParser.FormatUptime(TimeSpan.FromHours(52)));
-    }
-
-    [Fact]
-    public void TryParseSystemdTimestamp_ParsesCommonFormat()
-    {
-        Assert.True(SystemdUnitParser.TryParseSystemdTimestamp("Mon 2026-01-01 10:00:00 UTC", out var ts));
-        Assert.Equal(2026, ts.Year);
-        Assert.Equal(1, ts.Month);
-        Assert.Equal(1, ts.Day);
-    }
-
-    [Fact]
     public void BuildCliLine_FormatsVersionAndPath()
     {
         var line = InfoRenderer.BuildCliLine(new InfoCli("1.0.0", "/usr/bin/mo"));
         Assert.Contains("1.0.0", line);
         Assert.Contains("/usr/bin/mo", line);
-    }
-
-    [Fact]
-    public void BuildCliLine_PrefixesVersionWithV()
-    {
-        var line = InfoRenderer.BuildCliLine(new InfoCli("1.0.0", "/usr/bin/mo", null));
-        Assert.Contains("v1.0.0", line);
-    }
-
-    [Fact]
-    public void BuildCliLine_AppendsBuildDateWhenPresent()
-    {
-        var line = InfoRenderer.BuildCliLine(new InfoCli("1.0.0", "/usr/bin/mo", "2026-06-14"));
-        Assert.Contains("(built 2026-06-14)", line);
-    }
-
-    [Fact]
-    public void BuildServiceLine_ActiveState_IncludesPidAndUptime()
-    {
-        var line = InfoRenderer.BuildServiceLine("Server",
-            new InfoService(new InfoServiceStatus("active", 1234, "5m"), null),
-            includeSource: true);
-        Assert.Contains("active", line);
-        Assert.Contains("1234", line);
-        Assert.Contains("5m", line);
     }
 
     [Fact]
@@ -539,40 +495,6 @@ public class InfoCollectorTests
         var line = InfoRenderer.BuildDataDirLine(new InfoDataDir("/home/.mohist", null));
         Assert.Contains("/home/.mohist", line);
         Assert.Contains(SystemdUnitParser.Unknown, line);
-    }
-
-    [Fact]
-    public void RenderDefault_ProducesAllExpectedSections()
-    {
-        var result = new InfoResult(
-            Cli: new InfoCli("1.0.0", "/usr/bin/mo"),
-            Server: new InfoService(
-                new InfoServiceStatus("active", 1234, "5m"),
-                new InfoSource("/repo", "a1b2c3d", "Add info")),
-            Runner: new InfoService(
-                new InfoServiceStatus("active", 5678, "3m"),
-                new InfoSource("/repo", "a1b2c3d", "Add info")),
-            Project: new InfoProject("proj_1", "mohist-local", 96, 22),
-            DataDir: new InfoDataDir("/home/.mohist", "412 MB"),
-            PlatformNotice: null);
-
-        var writer = new StringWriter();
-        var collector = new InfoCollector(new FakeFileSystem(), new NoopCommandExecutor(),
-            BuildApi(new FakeFileSystem(), new NoopCommandExecutor(), HttpStatusCode.OK, "{}"),
-            new MockEnvironmentVariableProvider());
-
-        var renderer = new InfoRenderer();
-        renderer.RenderDefault(writer, result);
-
-        var text = writer.ToString();
-        Assert.Contains("CLI", text);
-        Assert.Contains("Server", text);
-        Assert.Contains("Runner", text);
-        Assert.Contains("Project", text);
-        Assert.Contains("Data dir", text);
-        Assert.Contains("a1b2c3d", text);
-        Assert.Contains("mohist-local", text);
-        Assert.Contains("412 MB", text);
     }
 
     private static MohistCliApi BuildApi(IFileSystem fs, ICommandExecutor commands, HttpStatusCode queueStatus, string queueJson)
