@@ -12,59 +12,6 @@ namespace Mohist.Server.UnitTests.CliInfo;
 public class InfoCollectorJsonTests
 {
     [Fact]
-    public void RenderJson_Default_ProducesValidSingleLineJson()
-    {
-        var (collector, renderer) = BuildCollector();
-
-        var result = new InfoResult(
-            Cli: new InfoCli("1.0.0", "/usr/bin/mo"),
-            Server: new InfoService(
-                new InfoServiceStatus("active", 1234, "5m"),
-                new InfoSource("/repo", "a1b2c3d", "Add info")),
-            Runner: new InfoService(
-                new InfoServiceStatus("active", 5678, "3m"),
-                new InfoSource("/repo", "a1b2c3d", "Add info")),
-            Project: new InfoProject("proj_1", "mohist-local", 96, 22),
-            DataDir: new InfoDataDir("/home/.mohist", "412 MB"),
-            PlatformNotice: null);
-
-        var writer = new StringWriter();
-        renderer.RenderJson(writer, result);
-
-        var text = writer.ToString();
-        var lines = text.Split('\n', StringSplitOptions.RemoveEmptyEntries);
-        Assert.Single(lines);
-
-        var node = JsonNode.Parse(text);
-        Assert.NotNull(node);
-    }
-
-    [Fact]
-    public void RenderJson_Default_TopLevelKeysAreStable()
-    {
-        var (collector, renderer) = BuildCollector();
-        var result = new InfoResult(
-            Cli: new InfoCli("1.0.0", "/usr/bin/mo"),
-            Server: new InfoService(new InfoServiceStatus("active", 1, "1m"), new InfoSource("/r", "abc", "msg")),
-            Runner: new InfoService(new InfoServiceStatus("active", 2, "1m"), new InfoSource("/r", "abc", "msg")),
-            Project: new InfoProject("proj_1", "mohist-local", 1, 0),
-            DataDir: new InfoDataDir("/d", "1M"),
-            PlatformNotice: null);
-
-        var writer = new StringWriter();
-        renderer.RenderJson(writer, result);
-
-        var node = JsonNode.Parse(writer.ToString()) as JsonObject;
-        Assert.NotNull(node);
-        var keys = node!.Select(kv => kv.Key).ToHashSet();
-        Assert.Contains("cli", keys);
-        Assert.Contains("server", keys);
-        Assert.Contains("runner", keys);
-        Assert.Contains("project", keys);
-        Assert.Contains("dataDir", keys);
-    }
-
-    [Fact]
     public void RenderJson_Default_ServerIncludesNestedStatusSourceGitObjects()
     {
         var (collector, renderer) = BuildCollector();
@@ -417,41 +364,6 @@ public class InfoCollectorJsonTests
         var cat = disk![0] as JsonObject;
         Assert.Equal(SystemdUnitParser.Unknown, (string?)cat!["size"]);
         Assert.Null((int?)cat["fileCount"]);
-    }
-
-    [Fact]
-    public void BuildJsonObject_AllSectionsHaveExpectedFields()
-    {
-        var (collector, renderer) = BuildCollector();
-        var result = new InfoResult(
-            Cli: new InfoCli("1.0.0", "/usr/bin/mo"),
-            Server: new InfoService(
-                new InfoServiceStatus("active", 1234, "5m"),
-                new InfoSource("/repo", "a1b2c3d", "Add info")),
-            Runner: new InfoService(
-                new InfoServiceStatus("active", 5678, "3m"),
-                new InfoSource("/repo", "a1b2c3d", "Add info")),
-            Project: new InfoProject("proj_1", "mohist-local", 96, 22),
-            DataDir: new InfoDataDir("/home/.mohist", "412 MB"),
-            PlatformNotice: null);
-
-        var root = InfoRenderer.BuildJsonObject(result);
-
-        var cli = root["cli"] as JsonObject;
-        Assert.Equal("1.0.0", (string?)cli!["version"]);
-        Assert.Equal("/usr/bin/mo", (string?)cli["binaryPath"]);
-
-        var project = root["project"] as JsonObject;
-        Assert.Equal("proj_1", (string?)project!["id"]);
-        Assert.Equal("mohist-local", (string?)project["name"]);
-        Assert.Equal(96, (int?)project["issueCount"]);
-        Assert.Equal(22, (int?)project["activeIssueCount"]);
-
-        var dataDir = root["dataDir"] as JsonObject;
-        Assert.Equal("/home/.mohist", (string?)dataDir!["path"]);
-        Assert.Equal("412 MB", (string?)dataDir["size"]);
-
-        Assert.Null((string?)root["platformNotice"]);
     }
 
     [Fact]

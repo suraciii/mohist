@@ -31,37 +31,6 @@ namespace Mohist.Server.SpecTests.Specs.SystemSpecs.Otel;
 [Collection("OtelTracing")]
 public class OtelSourceSubscriptionSpecs
 {
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
-    [Fact(Skip = "Flaky in isolation: OtelTestHost's AspNetCore ActivitySource capture races the OTel pipeline when this test runs without the rest of the OtelTracing collection warming up the process-global ActivityListener state. Equivalent coverage with a deterministic signal (WaitForAsync) lives in OtelInboundHttpTracingSpecs.InboundHttpRequest_MappedRoute_ProducesExactlyOneAspNetCoreSpan.")]
-    public async Task ConfigureTracing_CapturesInboundAspNetCoreSpan()
-    {
-        // Stand up a minimal WebApplication wired through the
-        // production AddMohistOpenTelemetry + an extra in-memory
-        // capturing processor. Issuing an inbound HTTP request MUST
-        // be captured by both processors, which proves the production
-        // pipeline subscribes Microsoft.AspNetCore.
-        await using var host = new OtelTestHost(new OtelTestHostOptions { Enabled = true });
-
-        using var client = host.CreateClient();
-        client.Timeout = TimeSpan.FromSeconds(5);
-        var response = await client.GetAsync("/api/health");
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-
-        // The production pipeline's own OTLP exporter will try to
-        // POST to http://localhost:4318/otel — there is no listener,
-        // so the POST fails silently (BatchExportProcessor is
-        // non-blocking). What we DO capture is the inbound span,
-        // because the OtelTestHost attaches an in-memory processor
-        // for tests.
-        var inbound = host.Recorder.EndedActivities
-            .Where(a => a.Source?.Name == "Microsoft.AspNetCore")
-            .ToList();
-        Assert.Single(inbound);
-        Assert.Equal("/api/health", inbound[0].GetTagItem("http.route"));
-        Assert.Equal(200, inbound[0].GetTagItem("http.response.status_code"));
-    }
-
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]

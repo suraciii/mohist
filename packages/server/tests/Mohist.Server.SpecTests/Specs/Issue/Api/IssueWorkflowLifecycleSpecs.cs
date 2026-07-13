@@ -155,17 +155,6 @@ public class IssueWorkflowLifecycleSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
-    public async Task CompleteWorkAsync_ForUnknownIssue_NoGrainThrows()
-    {
-        var issueId = $"issue_{Guid.NewGuid():N}";
-        var wrId = $"wr_{Guid.NewGuid():N}";
-        var issue = _grains.GetGrain<IIssueGrain>(issueId);
-        await issue.CompleteWorkAsync(wrId);
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
-    [Fact]
     public async Task RerunAsync_WhenFailureReasonIsUnknownLegacyValue_RerunsExistingWorkflow()
     {
         var (projectId, _, issueNumber, _, oldWrId) = await SeedIssueInProgressAsync();

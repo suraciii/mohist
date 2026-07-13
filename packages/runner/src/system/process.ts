@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process"
-import type { ChildProcess } from "node:child_process"
+import type { ChildProcess, ChildProcessWithoutNullStreams, SpawnOptions } from "node:child_process"
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises"
 import { existsSync } from "node:fs"
 import { dirname } from "node:path"
@@ -21,6 +21,25 @@ export interface CommandResult {
    * The per-command timeout (ms) that fired. Absent on normal exit.
    */
   timeoutMs?: number
+}
+
+export type ProcessSpawner = (command: string, args: string[], options: SpawnOptions) => ChildProcessWithoutNullStreams
+type ProcessKiller = typeof process.kill
+
+const realProcessSpawner: ProcessSpawner = (command, args, options) =>
+  spawn(command, args, options) as ChildProcessWithoutNullStreams
+
+let processSpawner: ProcessSpawner = realProcessSpawner
+let processKiller: ProcessKiller = process.kill
+let usesExternalProcessSpawner = true
+
+export function setProcessSpawnerForTest(spawner: ProcessSpawner | null) {
+  processSpawner = spawner ?? realProcessSpawner
+  usesExternalProcessSpawner = spawner === null
+}
+
+export function setProcessKillerForTest(killer: ProcessKiller | null) {
+  processKiller = killer ?? process.kill
 }
 
 /**
@@ -88,7 +107,7 @@ export async function runCommand(
   env?: NodeJS.ProcessEnv,
   options?: CommandLineOptions,
 ) {
-  assertExternalProcessAllowed("system/process.runCommand")
+  if (usesExternalProcessSpawner) assertExternalProcessAllowed("system/process.runCommand")
   const timeoutMs = options?.timeoutMs
   const onLine = options?.onLine
   const onClose = options?.onClose
@@ -102,8 +121,8 @@ export async function runCommand(
     // process.kill(-pid) and reap helper processes (git-remote-http, ...)
     // alongside the direct child. We do NOT unref(): the parent still
     // awaits close, otherwise we'd race the spawn-error path.
-    const child = spawn(command, args, { cwd, env: { ...process.env, ...env }, signal: effectiveSignal, shell: false, detached: true })
-    registerExternalProcess(child)
+    const child = processSpawner(command, args, { cwd, env: { ...process.env, ...env }, signal: effectiveSignal, shell: false, detached: true })
+    if (usesExternalProcessSpawner) registerExternalProcess(child)
     const stdout: Buffer[] = []
     const stderr: Buffer[] = []
     const stdoutState: LineBufferState = { carry: "", decoder: new StringDecoder("utf8") }
@@ -217,7 +236,7 @@ export async function copyDirectory(source: string, destination: string) {
 export function killProcess(child: ChildProcess, signal: NodeJS.Signals = "SIGTERM") {
   if (child.pid !== undefined && process.platform !== "win32") {
     try {
-      process.kill(-child.pid, signal)
+      processKiller(-child.pid, signal)
       return
     } catch {
       // A non-detached child has no process group whose id equals child.pid;

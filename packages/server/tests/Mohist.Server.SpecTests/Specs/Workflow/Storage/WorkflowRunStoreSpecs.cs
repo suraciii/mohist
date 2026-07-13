@@ -29,8 +29,7 @@ public sealed class FakeWorkflowRunStoreDbContextFactory : IDbContextFactory<Moh
     {
         _connection = new SqliteConnection("Data Source=:memory:");
         _connection.Open();
-        using var db = CreateDbContext();
-        db.Database.EnsureCreated();
+        MigratedSqliteTemplate.CopyTo(_connection);
     }
 
     public MohistDbContext CreateDbContext()

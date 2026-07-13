@@ -54,8 +54,7 @@ public class WorkflowItemTranslatorSpecs : IAsyncLifetime
             factory, BindNullLogger, TimeProvider.System);
         _translator = new WorkflowItemTranslator(_profileManager, _bindService, TranslatorNullLogger);
 
-        using var initDb = new MohistDbContext(_options);
-        initDb.Database.EnsureCreated();
+        MigratedSqliteTemplate.CopyTo(_keeper);
     }
 
     private static Microsoft.Extensions.Logging.ILogger<WorkflowItemTranslator> TranslatorNullLogger =>

@@ -43,8 +43,8 @@ public sealed class FakeDbContextFactory : IDbContextFactory<MohistDbContext>
     {
         _connection = new SqliteConnection("Data Source=:memory:");
         _connection.Open();
+        MigratedSqliteTemplate.CopyTo(_connection);
         using var db = CreateDbContext();
-        db.Database.EnsureCreated();
         if (projectPrompts is { Count: > 0 } && projectId is not null)
         {
             db.ProjectWorkflowProfiles.Add(new ProjectWorkflowProfile

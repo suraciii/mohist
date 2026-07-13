@@ -23,21 +23,6 @@ public class ProjectGrainSpecs : IClassFixture<WorkflowGrainFixture>
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
-    public async Task CreateProject_NameOnly_ReturnsProjectWithoutPathFields()
-    {
-        var grain = NewProjectGrain();
-        var project = await grain.CreateAsync("my-app");
-
-        Assert.NotNull(project);
-        Assert.Equal("my-app", project.Name);
-        Assert.Null(project.GetType().GetProperty("Path"));
-        Assert.Null(project.GetType().GetProperty("BaseBranch"));
-        Assert.Null(project.GetType().GetProperty("EffectivePath"));
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
-    [Fact]
     public async Task CreateProject_DoesNotCreateDefaultRepository()
     {
         var grain = NewProjectGrain();

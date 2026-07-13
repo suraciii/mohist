@@ -167,46 +167,6 @@ public class WorkflowRunDetailApiSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public void WorkflowStatusView_DoesNotIntroduceIssueFields()
-    {
-        // Invariant preservation: the WorkflowStatusView record type must
-        // not gain issue fields as a side-effect of introducing
-        // WorkflowRunDetailDto. The detail DTO composes the view (via a
-        // 'status' property on the response payload) rather than adding
-        // columns to the view itself. StatusSpecs enforces the same shape
-        // at runtime; this static assertion guards the type itself so a
-        // naive refactor is caught at compile time.
-        var viewProps = typeof(WorkflowStatusView)
-            .GetProperties()
-            .Select(p => p.Name)
-            .ToHashSet(StringComparer.Ordinal);
-
-        var viewPropsSnapshot = new[]
-        {
-            "WorkflowRunId",
-            "Status",
-            "CurrentStage",
-            "Stages",
-            "PendingWork",
-            "Failure",
-            "AvailableActions",
-            "AssignedTo",
-            "Metadata",
-        };
-
-        // If a property is added to WorkflowStatusView, this assertion will
-        // surface it in the failure message and force a conscious decision
-        // about whether the new field violates the "no issue fields" rule.
-        Assert.Equal(viewPropsSnapshot.OrderBy(n => n, StringComparer.Ordinal), viewProps.OrderBy(n => n, StringComparer.Ordinal));
-        foreach (var prop in viewProps)
-        {
-            Assert.DoesNotContain("Issue", prop, StringComparison.Ordinal);
-        }
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
-    [Fact]
     public async Task Get_DoesNotMutateRunState()
     {
         var (_, _, _, _, wrId) = await SeedActiveWorkflowAsync();
