@@ -1,0 +1,87 @@
+{
+  "project": "mohist-local",
+  "description": "Remove reentrancy patches, collapse handler error handling to the durable dispatcher, and clean up the epic reconcile misnomer + poll-driven sweep after #362's durable delivery landed.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Restore turn-based serialization on authority grains and add concurrency specs",
+      "spec": "specs/grain-turn-serialization/spec.md#Authority grains rely solely on Orleans turn-based serialization",
+      "description": "Remove [Reentrant] from WorkflowGrain (WorkflowGrain.cs:22) and RunnerGrain (RunnerGrain.cs:33); remove RunnerGrain._worksStateWriteGate (RunnerGrain.cs:43) and simplify PersistAsync to call _worksState.WriteStateAsync() directly. Clean up stale [Reentrant] prose in WorkflowStageLockReleaseHandler.cs:21-23. Add two concurrency characteristic spec files (WorkflowGrainConcurrencySpecs, RunnerGrainConcurrencySpecs) mirroring the existing WorkflowGrainFixture pattern: InProcessTestCluster + MigratedSqliteTemplate + FakeTimeProvider, asserting final settled state consistency under multiple control/work-mutating operations without reentrancy.",
+      "acceptanceCriteria": [
+        "WorkflowGrain does not carry the [Reentrant] attribute and its `using Orleans.Concurrency` is dropped if no symbol from that namespace remains",
+        "RunnerGrain does not carry the [Reentrant] attribute and its `using Orleans.Concurrency` is dropped if no symbol from that namespace remains",
+        "RunnerGrain._worksStateWriteGate SemaphoreSlim field is removed; PersistAsync calls _worksState.WriteStateAsync() directly without gate acquisition/release",
+        "All 11 PersistAsync call sites (RunnerGrain.cs lines 116,145,167,194,273,341,355,382,484,645,706) compile and behave unchanged",
+        "WorkflowStageLockReleaseHandler.cs XML doc no longer references [Reentrant] or in-stack delivery; prose describes the awaited dispatch model",
+        "WorkflowGrainConcurrencySpecs exists under packages/server/tests/Mohist.Server.SpecTests/Specs/Workflow/ and issues multiple control operations (start/pause/resume/retry/rerun) against one activation, asserting in-memory run state and persisted snapshot remain internally consistent",
+        "RunnerGrainConcurrencySpecs exists under packages/server/tests/Mohist.Server.SpecTests/Specs/Runner/Grain/ and issues multiple work-mutating operations (assign work, report result, closeout on presence loss) against one activation without reentrancy and without a write gate, asserting works ledger and persisted state remain internally consistent",
+        "Both concurrency spec files use InProcessTestCluster + MigratedSqliteTemplate.CopyTo + FakeTimeProvider; no real clustering, no real DB, no wall-clock waits, no order dependencies",
+        "Concurrency specs assert only on final settled state, never on interleaving timing",
+        "npm run build succeeds (TreatWarningsAsErrors catches any missed reference)",
+        "npm test passes (server specs, including the two new concurrency spec files)"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Modified WorkflowGrain.cs, RunnerGrain.cs, WorkflowStageLockReleaseHandler.cs; new WorkflowGrainConcurrencySpecs.cs and RunnerGrainConcurrencySpecs.cs spec files",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Re-run the self-reentrancy audit at implementation time: verify no await path in either grain resolves a call back into the SAME grain activation via IGrainFactory/GrainFactory.GetGrain<SelfGrainType>. Verified absent today; the new concurrency specs are the running safety net."
+    },
+    {
+      "id": "T-002",
+      "title": "Collapse handler error handling to the durable dispatcher",
+      "spec": "specs/handler-error-propagation/spec.md#Event handlers propagate failures to the durable dispatcher",
+      "description": "Remove the catch-log-return wrapper in AgentSubscriptionDispatchHandler.HandleAsync (lines 79-92) so subscription dispatch failures propagate to the durable dispatcher; keep envelope-level no-op returns and OperationCanceledException rethrow. Remove the outer setup try-catch in HermesIssueNotificationHandler.HandleAsync (lines 50-74) so setup failures propagate; keep the background DeliverAsync try-catch (best-effort UI push channel) and the disabled-notification/unconfigured-webhook early returns. Verify RunnerWorkflowTerminalStatusHandler awaits the router synchronously and has no stale detach/in-stack prose.",
+      "acceptanceCriteria": [
+        "AgentSubscriptionDispatchHandler.HandleAsync no longer wraps its dispatch body in a try-catch that logs-and-returns on non-cancellation exceptions (the catch (Exception ex) block at lines 87-92 is removed)",
+        "AgentSubscriptionDispatchHandler.HandleAsync still rethrows OperationCanceledException when ct.IsCancellationRequested",
+        "AgentSubscriptionDispatchHandler.HandleAsync still returns a completed task for envelope-level no-ops (no projectid, no active matched subscription, empty rendered prompt) without throwing",
+        "HermesIssueNotificationHandler.HandleAsync no longer wraps its setup body in a try-catch that logs-and-returns on non-cancellation exceptions (the outer try-catch at lines 50-74 is removed)",
+        "HermesIssueNotificationHandler.HandleAsync still returns a completed task for disabled notification types and unconfigured webhooks without throwing",
+        "HermesIssueNotificationHandler.DeliverAsync retains its own try-catch (lines 79-101) and BackgroundHermesIssueNotificationDispatcher retains its Task.Run catch — the best-effort channel's own error handling is preserved",
+        "RunnerWorkflowTerminalStatusHandler.HandleAsync awaits IRunnerWorkflowStatusRouter.RouteAsync synchronously on the dispatch stack; no detach/fire-and-forget",
+        "RunnerWorkflowTerminalStatusHandler XML doc and prose describe the awaited-delivery model; no references to detach, in-stack delivery, or synchronous-callback deadlock workarounds remain",
+        "Handler tests updated to verify that non-cancellation exceptions thrown during HandleAsync propagate to the dispatcher (retry/DLQ path), and that envelope-level no-op outcomes still return without throwing",
+        "npm run build succeeds (TreatWarningsAsErrors)",
+        "npm test passes (server specs)"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Modified AgentSubscriptionDispatchHandler.cs, HermesIssueNotificationHandler.cs, RunnerWorkflowTerminalStatusHandler.cs; updated handler test files",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Do NOT remove the DeliverAsync try-catch in HermesIssueNotificationHandler — it is the best-effort UI-push channel's own error handling (design/architecture.md two-channel split), not a dispatcher-level swallow. Only the setup-phase try-catch propagates."
+    },
+    {
+      "id": "T-003",
+      "title": "Remove the poll-driven epic sweep and rename reconcile to recompute progress",
+      "spec": "specs/epic-progress-recompute/spec.md#Epic progress recomputation is named \"recompute progress\"",
+      "description": "Delete EpicReconciliationService.cs (contains the BackgroundService + EpicReconciliationOptions), remove the AddHostedService<EpicReconciliationService>() registration in MohistServiceRegistration.cs:98, and drop the using for Events.Hosting if it becomes unused. Then rename the full epic progress-recompute chain: IEpicGrain.ReconcileAfterTerminalAsync -> RecomputeProgressAsync, EpicGrain.ReconcileAfterTerminalInternalAsync -> RecomputeProgressInternalAsync (including the ResumeAsync:524 call site), EpicReconcileDispatcher -> EpicProgressRecomputeDispatcher, EpicCancelledReconcileHandler -> EpicCancelledHandler. Update all XML doc, <see cref>, and test method names referencing the old reconcile naming across EpicProgressionSpecs.cs, EpicAutoDoneSpecs.cs, and EpicAutoDoneHandlerSpecs.cs. Behavior is unchanged.",
+      "acceptanceCriteria": [
+        "EpicReconciliationService.cs file is deleted from Events/Hosting/",
+        "EpicReconciliationOptions type no longer exists in the codebase",
+        "AddHostedService<EpicReconciliationService>() registration is removed from MohistServiceRegistration.cs (line 98); the using Mohist.Server.Events.Hosting is dropped if no other symbol from it remains",
+        "IEpicGrain exposes RecomputeProgressAsync and exposes no method whose name contains 'Reconcile'",
+        "EpicGrain.ReconcileAfterTerminalInternalAsync is renamed to RecomputeProgressInternalAsync; the private method's behavior is unchanged (skip terminal/paused; MarkDone when no open linked issues remain; TryStartNext for running; no-op for idle; idempotent under redelivery)",
+        "EpicGrain.ResumeAsync call site (line 524) invokes RecomputeProgressInternalAsync",
+        "EpicReconcileDispatcher is renamed to EpicProgressRecomputeDispatcher; its DispatchAsync body is unchanged (resolves the epic and calls RecomputeProgressAsync)",
+        "EpicCancelledReconcileHandler is renamed to EpicCancelledHandler (no 'Reconcile' in the type name; style-aligned with EpicAutoDoneHandler)",
+        "All XML doc comments and <see cref> references across IEpicGrain, EpicGrain, EpicAutoDoneHandler, the renamed cancelled handler, and the dispatcher use 'recompute progress' and do not use 'reconcile' for this epic-domain action",
+        "Test method names in EpicProgressionSpecs.cs, EpicAutoDoneSpecs.cs, and EpicAutoDoneHandlerSpecs.cs are updated from ReconcileAfterTerminalAsync_* to RecomputeProgressAsync_* and type references from EpicCancelledReconcileHandler to EpicCancelledHandler",
+        "No remaining references to EpicReconciliation*, ReconcileAfterTerminal*, EpicReconcileDispatcher, or EpicCancelledReconcileHandler anywhere in the codebase (grep returns zero matches)",
+        "RecomputeProgressAsync is still invoked from exactly three call sites: EpicAutoDoneHandler (completed), EpicCancelledHandler (cancelled), and ResumeAsync (post-resume re-evaluation)",
+        "npm run build succeeds (TreatWarningsAsErrors catches any missed <see cref>/call-site reference)",
+        "npm test passes (epic specs: EpicProgressionSpecs, EpicAutoDoneSpecs, EpicAutoDoneHandlerSpecs)"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Deleted EpicReconciliationService.cs; modified IEpicGrain.cs, EpicGrain.cs, EpicAutoDoneHandler.cs (incl. EpicProgressRecomputeDispatcher + EpicCancelledHandler renames), MohistServiceRegistration.cs; updated EpicProgressionSpecs.cs, EpicAutoDoneSpecs.cs, EpicAutoDoneHandlerSpecs.cs",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Delete the sweep FIRST, then rename — this avoids throwaway work renaming the sweep's call site only to delete it. IEpicGrain is an Orleans grain contract with no external consumers; TreatWarningsAsErrors + <see cref> resolution make missed references a compile error. The renamed method's behavior is NOT changed — only the name and the sweep removal change. AutoMarkDoneIfReadyAsync is a separate readiness entry, not in the rename scope. Workflow-scheduling DispatchService reconcile (epic #44) is NOT touched."
+    }
+  ]
+}
