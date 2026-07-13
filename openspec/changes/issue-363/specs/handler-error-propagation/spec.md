@@ -1,6 +1,6 @@
-### Requirement: Event handlers propagate failures to the durable dispatcher
+### Requirement: Covered durable handler stages propagate failures to the dispatcher
 
-Every `ICloudEventHandler` / `ICloudEventHandler<TData>` implementation SHALL let non-cancellation exceptions thrown during event processing propagate to the durable event dispatcher. The dispatcher's unified per-handler retry, backoff, and dead-letter path (established by the durable dispatch contract) SHALL be the single place where handler failures are aggregated. A handler SHALL NOT swallow a delivery failure by catching a non-cancellation exception, logging it, and returning a completed task. A handler SHALL NOT detach its side effect from the dispatch call stack (fire-and-forget without awaiting) in order to hide a failure from the dispatcher.
+The durable processing stages covered by this change SHALL let non-cancellation exceptions propagate to the event dispatcher: `AgentSubscriptionDispatchHandler` processing, `HermesIssueNotificationHandler` setup/enqueue, and exceptions escaping the awaited `RunnerWorkflowTerminalStatusHandler` router invocation. The dispatcher's unified per-handler retry, backoff, and dead-letter path SHALL aggregate those failures. This requirement does not change intentionally best-effort UI delivery: Hermes background delivery, runner SignalR delivery inside the router, and `EventBridge` retain their local error handling.
 
 #### Scenario: Handler failure reaches the dispatcher
 
@@ -32,7 +32,7 @@ Every `ICloudEventHandler` / `ICloudEventHandler<TData>` implementation SHALL le
 - **THEN** `AgentSubscriptionDispatchHandler.HandleAsync` SHALL return a completed task without throwing
 - **AND** the dispatcher SHALL treat the event as delivered for this handler
 
-### Requirement: HermesIssueNotificationHandler does not swallow notification failures
+### Requirement: HermesIssueNotificationHandler does not swallow setup failures
 
 `HermesIssueNotificationHandler.HandleAsync` SHALL NOT wrap its body in a try-catch that logs-and-returns on non-cancellation exceptions. Notification setup failures (options resolution, notification-type resolution, dispatch enqueue) SHALL propagate to the durable dispatcher. Handler-level disabled-notifications and unconfigured-webhook outcomes SHALL remain no-ops (return a completed task without throwing) — those are valid skips, not failures.
 
@@ -48,9 +48,9 @@ Every `ICloudEventHandler` / `ICloudEventHandler<TData>` implementation SHALL le
 - **THEN** `HermesIssueNotificationHandler.HandleAsync` SHALL return a completed task without throwing
 - **AND** the dispatcher SHALL treat the event as delivered for this handler
 
-### Requirement: RunnerWorkflowTerminalStatusHandler awaits the router and propagates failures
+### Requirement: RunnerWorkflowTerminalStatusHandler awaits the router invocation
 
-`RunnerWorkflowTerminalStatusHandler.HandleAsync` SHALL await the runner workflow status router call synchronously on the dispatch stack. The handler SHALL NOT detach the router call from the dispatch stack. Delivery failures from the router SHALL propagate to the durable dispatcher for unified retry and dead-lettering. The handler SHALL NOT contain stale prose referencing a detach model or an in-stack delivery assumption.
+`RunnerWorkflowTerminalStatusHandler.HandleAsync` SHALL await the runner workflow status router call on the dispatch stack. The handler SHALL NOT detach the router invocation. Any exception that escapes `IRunnerWorkflowStatusRouter.RouteAsync` SHALL propagate to the durable dispatcher. The router's internal best-effort SignalR delivery and convergence-backstop semantics are unchanged. The handler SHALL NOT contain stale prose referencing a detach model or an in-stack delivery assumption.
 
 #### Scenario: Router delivery failure propagates
 
