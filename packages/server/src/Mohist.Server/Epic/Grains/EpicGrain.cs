@@ -566,13 +566,15 @@ public class EpicGrain : Grain, IEpicGrain
         domain.Resume(now.UtcDateTime);
         MapToRow(domain, row, now);
         var pending = DrainPendingEvents(domain);
-        await db.SaveChangesAsync();
-        await PersistEpicEventsAsync(domain, pending, now);
-
+        // Same atomic pattern as StartAsync: persist events into the DbContext,
+        // run recompute (which may append its own EpicStartAttemptFailed event),
+        // then commit everything in one SaveChangesAsync.
+        await PersistEpicEventsAsync(db, domain, pending, now);
         if (row.Status == EpicStatusName.Running && !wasAlreadyRunning)
         {
-            return await RecomputeProgressInternalAsync(db, projectId, epicId, row, links);
+            await RecomputeProgressInternalAsync(db, projectId, epicId, row, links);
         }
+        await db.SaveChangesAsync();
         return ToDto(row);
     }
 
