@@ -134,14 +134,14 @@ All status and surface presentation on the Activity page SHALL route through the
 - **THEN** its surface SHALL use the shared neutral/background theme tokens
 - **AND** it SHALL NOT use a hardcoded `bg-gray-*` palette class that diverges from the shared surface language
 
-### Requirement: Activity evidence is consumed from existing projections without changing event recording
+### Requirement: Activity evidence is consumed from recorded events without changing event recording
 
-The Activity evidence view SHALL consume existing data projections and endpoints. It SHALL NOT change how events or session transcripts are recorded, and SHALL NOT add new event subscription behavior. Event-type identity and attention level SHALL be derived from data already available to the view, not from new internal implementation fields exposed as product concepts.
+The Activity evidence view SHALL consume recorded events as its input. It SHALL NOT change how events or session transcripts are recorded, and SHALL NOT add new event subscription behavior. A project-scoped event read endpoint that queries already-recorded events is permitted; it does not change event recording or add subscription behavior. Event-type identity and attention level SHALL be derived from the recorded event data, not from new internal implementation fields exposed as product concepts.
 
 #### Scenario: No new event recording or subscription is introduced
 
 - **WHEN** the Activity evidence view is implemented
-- **THEN** it SHALL consume the existing activity and event projections
+- **THEN** it SHALL consume recorded events via a project-scoped read endpoint
 - **AND** no new event-recording, event-emission, or event-subscription behavior SHALL be added
 
 #### Scenario: Hidden internal fields are not exposed as product concepts
