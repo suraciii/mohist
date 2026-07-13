@@ -137,7 +137,7 @@ Runner 行为可通过环境变量或 config 文件调（看 `mo runner start --
 
 Runtime 后端不由 Runner 全局 `type` 选择；Workflow task 的 `uses` 决定执行
 `mohist/opencode`。模型等选项由 Action Input 提供，见
-[`mohist/opencode` Action](opencode-action.md)。
+[`mohist/opencode` Action](actions/opencode.md)。
 
 ## Self-host 场景
 

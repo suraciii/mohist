@@ -278,7 +278,8 @@ Inline Agent 自动修并重新合并；不依赖 stage hook 或隐式边界动�
 
 ### variables
 
-可复用变量。最常见的是 `agent`（传给 `mohist/opencode` 的 OpenCode options）。
+可复用变量。最常见的是 `agent`：这是现有变量名，值中的 `model` 和 `variant` 会作为
+`mohist/opencode` 的 `options`，不表示 Agent 身份。
 变量只有通过 `options: ${{ vars.agent }}` 绑定到 task 后才会影响执行。
 
 ### prompts
@@ -332,10 +333,8 @@ Settings → Workflows → 选 profile → 编辑 yaml。
     session: plan
     prompt: ${{ prompts.proposal }}
     options:
-      model:
-        providerID: anthropic
-        id: claude-sonnet-4
-        variant: high
+      model: anthropic/claude-sonnet-4
+      variant: high
 ```
 
 也可以把同一个 `options` 对象放进 project、issue 或 stage variables，再用
@@ -356,7 +355,7 @@ Settings → Workflows → 选 profile → 编辑 yaml。
 
 本文按目标接口使用 `mohist/opencode` 和 `options: ${{ vars.agent }}`。
 当前内置 profile 仍使用 `mohist/acp-agent` 和旧的 `agent` input；在
-[`mohist/opencode` Action](opencode-action.md) 所述替换完成前，自定义现有 profile 时仍需
+[`mohist/opencode` Action](actions/opencode.md) 所述替换完成前，自定义现有 profile 时仍需
 以当前可用 action 为准。当前 schema 还把 `expect` 放在 `with` 中；目标实现会把它
 提升为 Workflow task 的完成契约，使 OpenCode Action Input 保持最小。
 

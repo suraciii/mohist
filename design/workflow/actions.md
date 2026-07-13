@@ -1,19 +1,20 @@
-# Action Design
+# Action 设计
 
-Action = workflow task execution interface. `uses` selects the action. `with` passes input. Runner executes, reports result + output.
+Action 是 Workflow task 的执行接口。`uses` 选择 Action，`with` 传入输入，Runner 执行后
+报告结果与输出。
 
-## Boundaries
+## 边界
 
-- Action defines its own input and output.
-- Engine never maintains a unified action output schema.
-- Engine never defines global `FailureKind` / `ErrorKind`.
-- Engine never interprets action output semantics.
+- Action 定义自己的输入与输出。
+- Engine 不维护统一的 Action output schema。
+- Engine 不定义全局 `FailureKind` / `ErrorKind`。
+- Engine 不解释 Action output 的业务语义。
 
-Engine only: expands task input and Workflow-owned completion declarations, stores task
-output, projects output to workflow variables via `setVars`, matches `when` for recovery,
-and inserts recovery tasks mechanically.
+Engine 只负责：展开 task input 和由 Workflow 拥有的完成声明，保存 task output，通过
+`setVars` 把 output 投影到 Workflow variables，按 `when` 匹配 recovery，
+以及机械地插入 recovery task。
 
-## Input
+## 输入
 
 ```yaml
 - id: integrate:rebase
@@ -23,11 +24,11 @@ and inserts recovery tasks mechanically.
     remote: origin
 ```
 
-Workflow expands templates. Never interprets `baseBranch`, `remote` business meaning.
+Workflow 负责展开模板，不解释 `baseBranch`、`remote` 的业务含义。
 
-## Output
+## 输出
 
-`TaskRun.Output` = `JsonElement?`. Action's full JSON output, stored as-is.
+`TaskRun.Output` = `JsonElement?`，完整保存 Action 返回的 JSON output。
 
 ```json
 {
@@ -37,13 +38,13 @@ Workflow expands templates. Never interprets `baseBranch`, `remote` business mea
 }
 ```
 
-Fields like `errorCode` are the action's own interface, not platform enums.
+`errorCode` 等字段属于该 Action 的接口，不是平台 enum。
 
-Task output is available to downstream tasks: `${{ tasks.<id>.outputs.* }}`.
+下游 task 可以通过 `${{ tasks.<id>.outputs.* }}` 读取 task output。
 
 ## setVars
 
-Projects action output fields into workflow runtime profile:
+把 Action output 字段投影到 Workflow runtime profile：
 
 ```yaml
 setVars:
@@ -51,14 +52,14 @@ setVars:
   change.url: output.changeUrl
 ```
 
-- Left side = path under `vars`. Right side = JSON path in action output.
-- Runner executes `setVars` before reporting task complete. Failure = task failed.
-- Can only patch `vars.*`. Never `workflow`, `stage`, `work`, `issue`, `workspace`.
-- Recovery tasks can overwrite same `vars.*`.
+- 左侧是 `vars` 下的 path，右侧是 Action output 中的 JSON path。
+- Runner 在报告 task complete 前执行 `setVars`；投影失败则 task 失败。
+- 只能修改 `vars.*`，不能修改 `workflow`、`stage`、`work`、`issue`、`workspace`。
+- Recovery task 可以覆盖相同的 `vars.*`。
 
-## Artifacts
+## `artifacts`
 
-Declaration of outputs to capture. Best-effort: skip if missing, never fail task.
+声明需要采集的输出。采集是 best-effort：文件不存在时跳过，不让 task 失败。
 
 ```yaml
 artifacts:
@@ -68,9 +69,9 @@ artifacts:
 
 ## expect
 
-Workflow-owned task completion contract, separate from Action Input. The Runner's Workflow
-task executor receives it alongside the rendered input and applies it after Action execution;
-actions and runtime modules never interpret it. Only `expect` failure fails the task.
+`expect` 是由 Workflow 拥有的 task 完成契约，与 Action Input 分离。Runner 的
+Workflow task executor 同时接收展开后的 Action Input 和 `expect`，在 Action 执行后
+应用完成判断；Action 与 Runtime 模块都不解释它。只有 `expect` 失败才让 task 失败。
 
 ```yaml
 expect:
@@ -83,22 +84,23 @@ expect:
         - <promise>FAIL</promise>
 ```
 
-Path must exist = put in both `expect` + `artifacts`. Optional = `artifacts` only.
+必须存在的 path 同时放进 `expect` 与 `artifacts`；可选产物只放进 `artifacts`。
 
-## Error code & recovery
+## 错误字段与 recovery
 
-Action output's error fields (`errorCode`, `promise`, etc.) are the action's own contract.
+Action output 中的错误字段，例如 `errorCode`、`promise`，都属于 Action 自己的契约。
 
-Recovery `when` matches any field: `errorCode=base-moved`, `promise=FAIL`, `errorCode=conflict`.
+Recovery `when` 可以匹配任意字段，例如 `errorCode=base-moved`、`promise=FAIL`、
+`errorCode=conflict`。
 
-No global error enum. No engine understanding of specific error meanings.
-Recovery design: `recovery.md`.
+系统没有全局 error enum，Engine 也不理解具体错误含义。Recovery 设计见
+[`recovery.md`](recovery.md)。
 
-## OpenCode action
+## OpenCode Action
 
-`mohist/opencode` is a runtime-specific Action. Direct Workflow use is Inline Agent
-execution; the Action is not a Mohist Agent and does not resolve Agent definitions. Its
-runtime is selected by `uses`, so input has no `kind` or `type` discriminator.
+`mohist/opencode` 是 Runtime 特有的 Action。Workflow 直接使用时形成 Inline Agent；
+Action 本身不是 Mohist Agent，也不解析 Agent 定义。Runtime 已由 `uses` 选择，因此输入
+不需要 `kind` 或 `type` discriminator。
 
 ```yaml
 uses: mohist/opencode
@@ -108,29 +110,33 @@ with:
   options: ${{ vars.agent }}
 ```
 
-The action receives only the rendered `prompt`, optional logical `session` name, and optional
-OpenCode-native `options`. Workflow supplies `expect` separately as the task completion
-contract. The action never reads `vars.agent` as a hidden fallback. Output is `null` unless
-an expectation matches a promise marker, in which case it is only:
+Action 只接收展开后的 `prompt`、可选逻辑 `session` 名称和可选 OpenCode 模型
+`options`。Workflow 把 `expect` 作为 task 完成契约单独提供。Action 不会把
+`vars.agent` 当作隐藏 fallback。除非 expectation 命中 promise marker，否则 output 为
+`null`；命中时只返回：
 
 ```json
 { "promise": "PASS" }
 ```
 
-Runtime Session identity, model, usage, transcript, diagnostics, and expectation detail are
-stored in their owning models rather than duplicated in action output. Concept ownership:
-[`../agent-execution.md`](../agent-execution.md). OpenCode implementation:
-[`../opencode-runtime.md`](../opencode-runtime.md).
+Runtime Session 身份、model、usage、transcript、诊断信息和 expectation 明细保存在
+各自所属模型中，不复制到 Action output。概念所有权见
+[`../agent-execution.md`](../agent-execution.md)，OpenCode 实现见
+[`../runtimes/opencode.md`](../runtimes/opencode.md)。
 
-## GitHub PR actions
+## GitHub PR Action
 
-`mohist/create-github-pr`, `mark-github-pr-ready`, `push`, `merge-github-pr` are normal workflow actions.
+`mohist/create-github-pr`、`mark-github-pr-ready`、`push`、`merge-github-pr` 都是普通
+Workflow Action。
 
-- `create-github-pr`: pushes workflow branch, creates/updates draft PR. Outputs stable PR identity.
-- `mark-github-pr-ready`: marks draft PR ready. Idempotent if already ready.
-- `push`: syncs local branch to remote PR head. Can use `forceWithLease`.
-- `merge-github-pr`: squash-merges PR. Must wait for PR checks first.
+- `create-github-pr`：推送 Workflow branch，创建或更新 draft PR，输出稳定 PR 身份。
+- `mark-github-pr-ready`：把 draft PR 标记为 ready；已经 ready 时保持幂等。
+- `push`：把本地 branch 同步到远端 PR head，可以使用 `forceWithLease`。
+- `merge-github-pr`：以 squash 方式合并 PR；执行 merge 前必须等待 PR checks。
 
-PR checks wait = internal precondition of merge action, not a stage-level check. Polls `gh pr view --json statusCheckRollup`. Empty checks → wait with grace window (120s). Failed checks → `errorCode: pr-checks-failed`. No implicit auto-fix — profile must declare explicit recovery.
+等待 PR checks 是 merge Action 的内部前置条件，不是 stage-level check。它轮询
+`gh pr view --json statusCheckRollup`。checks 为空时在 120 秒 grace window 内等待；
+checks 失败时返回 `errorCode: pr-checks-failed`。Action 不做隐式自动修复，profile 必须
+声明显式 recovery。
 
-Full task graph: `builtin-workflows/github-pr.md`.
+完整 task graph 见 [`builtin-workflows/github-pr.md`](builtin-workflows/github-pr.md)。

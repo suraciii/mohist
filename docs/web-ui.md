@@ -129,7 +129,7 @@ URL: `/issues/<number>/files`
 Compact 不会创建一段伪装成原 Session 的新对话。Reset 才会建立新的底层 Session，
 并继续显示在同一个 AgentSession 下。Session 来源与身份见
 [Agent 与 AgentSession](agents.md)；OpenCode 操作语义见
-[`mohist/opencode` Action](opencode-action.md)。
+[`mohist/opencode` Action](actions/opencode.md)。
 
 ## Epics 页
 

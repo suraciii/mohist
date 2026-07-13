@@ -94,7 +94,7 @@ AgentSession 不是 Agent，也不是工作结果；它记录一段对话的消�
 会话与审计。
 
 完整关系见 [Agent 与 AgentSession](agents.md)；OpenCode Action 配置见
-[`mohist/opencode` Action](opencode-action.md)。
+[`mohist/opencode` Action](actions/opencode.md)。
 
 ## Approval（审批）
 
