@@ -1,0 +1,127 @@
+## T-000 — Project-scoped event read endpoint for Activity evidence
+
+Goal: deliver `GET /api/projects/{projectRef}/events` that reads recorded
+CloudEvents from `IssueEvents`, `WorkflowRunEvents`, `AgentSessionEvents`,
+and `EpicEvents` for a single project, sorted most-recent-first, without
+changing how events are recorded, emitted, or subscribed. Resolves the
+project-scoped recorded-event prerequisite for T-002.
+
+### Codebase Patterns
+
+- The per-aggregate event tables share the same row schema
+  (`Id`, `Source`, `EventId`, `Type`, `Time`, `SpecVersion`,
+  `Subject`, `DataContentType`, `Data`, `ExtensionsJson`, `DispatchedAt`)
+  with a `(Source, Id)` composite primary key. `Source` is the
+  CloudEvents URI-reference (`/mohist/{kind}/{id}`); `Id` is a
+  per-source monotonic sequence. Source prefixes are defined as
+  `SourcePrefix` constants on internal static classes
+  (`IssueEventPersistence`, `WorkflowRunEventPersistence`,
+  `AgentSessionEventPersistence`, `EpicEventPersistence`).
+- Existing per-aggregate event reads (`IEventStore.ListAsync` /
+  `ListIssueEventsAsync` / `ListEpicEventsAsync` /
+  `ListAgentSessionEventsAsync`) all filter by `Source` and ride the
+  index. They do not join — joins are done in code after the per-source
+  fetch.
+- The endpoint must mirror the existing
+  `StoredCloudEventDto` shape (id, eventId, source, type, specVersion,
+  subject, time, dataContentType, data, extensions) so the Web
+  projection layer can opt into richer payload decoding later without a
+  schema migration. Added `origin`, `sourceAggregateKind`,
+  `sourceAggregateId`, and `runnerId` projection fields on top of that
+  envelope.
+- Project-scoped querier pattern: `EpicEventQuerier` is the canonical
+  example — thin pass-through to `IEventStore.ListEpicEventsAsync` plus
+  DTO mapping. `ProjectEventQuerier` follows the same shape but reads
+  four tables instead of one.
+- `ProjectResolutionEndpointFilter` resolves `{projectRef}` and stashes
+  the resolved `ProjectInfo` in `HttpContext.Items`. Routes read it
+  via `context.GetResolvedProject()` and apply it directly — no extra
+  round-trip to the resolver.
+
+### Decisions
+
+- **Architecture**: kept `IEventStore` focused on per-aggregate reads;
+  the project-scoped query lives in a new
+  `ProjectEventQuerier` (scoped service) that fans out to the four
+  per-aggregate event tables. Mirrors the `EpicEventQuerier` precedent
+  and avoids growing the `IEventStore` surface for a single consumer.
+- **Source set construction**: one trip to each aggregate table
+  (`Issues.ProjectId`, `WorkflowRuns.MetadataProjectId`,
+  `AgentSessions.LabelProjectId`, `Epics.ProjectId`) translates the
+  aggregate id into its canonical CloudEvents `Source` prefix. The four
+  event reads use `Where(e => sources.Contains(e.Source))` so they ride
+  the existing `Source` indexes; an empty project short-circuits before
+  any event-table read.
+- **Order + cap**: per-table order is most-recent-first by `Time`
+  (with `Id` as a stable tiebreaker); the merged stream is sorted in
+  memory and capped at `limit`. SQLite's EF provider cannot translate
+  `ORDER BY` over `DateTimeOffset`, so per-table order is applied in
+  memory after `ToListAsync()` — matches the existing pattern in
+  `InboxQuerier.ListCoreAsync` and
+  `DeadLetterStore.ListByHandlerAsync`.
+- **Per-table cap = max(limit, 200)**: applied before the merge so
+  a project with concentrated issue activity cannot starve
+  sparse session evidence. The final `Take(limit)` on the merged
+  stream enforces the caller's cap on the output, not the per-table
+  reads.
+- **Aggregate id extraction**: pulled from the `Source` URI-reference
+  by stripping the kind-specific prefix (`/mohist/issues/`,
+  `/mohist/workflow-runs/`, etc.). The matching
+  `SourceAggregateKind` ("issue" / "workflow-run" / "agent-session" /
+  "epic") is a stable, lower-cased, hyphenated vocabulary the Web
+  projection layer can route on.
+- **Limit defaults**: route clamps to `[1, 1000]` and defaults to
+  `200` (matches the per-aggregate endpoints).
+- **RunnerId**: sourced from the event envelope's
+  `Extensions["runnerid" | "runnerId" | "runner_id" | "runner"]`
+  if any publisher stamps one. Today no producer stamps a runner id on
+  the event envelope (the runner-id binding lives on the
+  `AgentSessionRow` instead), so the field surfaces `null` for
+  every existing event — it is a forward-compatible hook for
+  `com.mohist.runner.disconnected` and friends once those events are
+  emitted.
+
+### Gotchas
+
+- **SQLite ORDER BY on DateTimeOffset**: silently fails with
+  `NotSupportedException` at query translation. Apply per-table order
+  after `ToListAsync()` and sort the merged stream in memory.
+- **Internal SourcePrefix classes**: `IssueEventPersistence`,
+  `WorkflowRunEventPersistence`, `AgentSessionEventPersistence`,
+  and `EpicEventPersistence` are `internal static`. They are
+  reachable from the `Mohist.Server.Project.Services` namespace
+  because both live in the same assembly.
+- **`IssueStore` namespace**: lives in
+  `Mohist.Server.Infrastructure.Data.Issue`, not
+  `Mohist.Server.Issue.Services` — easy to miss in tests when
+  serialising an `Issue` for direct DB seeding.
+- **Project ref resolution**: `MapGroup("/api/projects/{projectRef}/events")`
+  + `AddEndpointFilter<ProjectResolutionEndpointFilter>` is the
+  standard pattern; the route handler reads
+  `context.GetResolvedProject().Id` and never touches `projectRef`
+  directly.
+
+### Files touched
+
+- `packages/server/src/Mohist.Server/Project/Services/ProjectEventQuerier.cs`
+  (new) — scoped service that fans out to the four event tables and
+  merges the results in time order.
+- `packages/server/src/Mohist.Server/Api/ProjectEventsRoutes.cs`
+  (new) — `MapProjectEventsRoutes`, `ProjectEventDto`, `ProjectEventOrigin`.
+- `packages/server/src/Mohist.Server/Infrastructure/Hosting/MohistApiRegistration.cs`
+  — registers `MapProjectEventsRoutes` immediately after
+  `MapProjectRoutes`.
+- `packages/server/tests/Mohist.Server.SpecTests/Specs/Api/ProjectEventsApiSpecs.cs`
+  (new) — 10 specs covering cross-aggregate retrieval, time
+  ordering, default + explicit limit, project scoping for issues and
+  agent sessions, empty project, unknown project 404, payload /
+  extensions preservation, no-mutation, and absence of subscription /
+  dispatch markers.
+
+### Verification
+
+- `npm test` (server): 2868 passed, 9 skipped, 0 failed.
+- `dotnet test Mohist.Server.ArchTests`: 24 passed, 3 skipped, 0 failed.
+- New specs: 10 passed.
+- No event-recording / event-emission / event-subscription changes;
+  the read path queries the existing per-aggregate tables only.

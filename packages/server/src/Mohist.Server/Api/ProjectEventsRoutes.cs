@@ -1,0 +1,91 @@
+using System.Text.Json;
+using Microsoft.AspNetCore.Http;
+using Mohist.Server.Project.Services;
+
+namespace Mohist.Server.Api;
+
+/// <summary>
+/// Project-scoped read endpoint for the Activity evidence feed
+/// (issue-402 T-000). The route surfaces recorded CloudEvents from every
+/// per-aggregate event table owned by the resolved project
+/// (<c>IssueEvents</c>, <c>WorkflowRunEvents</c>, <c>AgentSessionEvents</c>,
+/// <c>EpicEvents</c>) without changing how events are recorded, emitted, or
+/// subscribed. The endpoint is read-only — it does not introduce any new
+/// event-subscription or event-stream behaviour.
+/// </summary>
+public static class ProjectEventsRoutes
+{
+    private const int DefaultLimit = 200;
+    private const int MaxLimit = 1000;
+
+    public static WebApplication MapProjectEventsRoutes(this WebApplication app)
+    {
+        var group = app.MapGroup("/api/projects/{projectRef}/events")
+            .AddEndpointFilter<ProjectResolutionEndpointFilter>();
+
+        group.MapGet("", async (HttpContext context, int? limit, ProjectEventQuerier events, CancellationToken ct) =>
+        {
+            var project = context.GetResolvedProject();
+            var effectiveLimit = ClampLimit(limit);
+            var eventsResult = await events.ListAsync(project.Id, effectiveLimit, ct);
+            var response = eventsResult.Select(ProjectEventDto.From).ToList();
+            return ApiResults.Ok(response);
+        });
+
+        return app;
+    }
+
+    private static int ClampLimit(int? requested)
+    {
+        if (requested is null || requested <= 0) return DefaultLimit;
+        return Math.Min(requested.Value, MaxLimit);
+    }
+}
+
+/// <summary>
+/// Wire-level DTO for the project-scoped event endpoint
+/// (<c>GET /api/projects/&#123;projectRef&#125;/events</c>). Carries the
+/// CloudEvent envelope identity plus the projection fields the Web layer
+/// needs to classify entries (<see cref="Origin"/>,
+/// <see cref="SourceAggregateKind"/>, <see cref="SourceAggregateId"/>,
+/// <see cref="RunnerId"/>) without re-reading the raw envelope.
+/// </summary>
+/// <remarks>
+/// Field names are the Web-facing contract: <c>origin</c>,
+/// <c>sourceAggregateKind</c>, <c>sourceAggregateId</c>, <c>runnerId</c>.
+/// Domain vocabulary is preserved as-is (no raw implementation field names
+/// such as internal column identifiers leak into the response).
+/// </remarks>
+public sealed record ProjectEventDto(
+    long Id,
+    string Origin,
+    string SourceAggregateKind,
+    string SourceAggregateId,
+    string Source,
+    string Type,
+    string Time,
+    string EnvelopeId,
+    string SpecVersion,
+    string? Subject,
+    string? DataContentType,
+    JsonElement Data,
+    Dictionary<string, string> Extensions,
+    string? RunnerId)
+{
+    public static ProjectEventDto From(ProjectEventEnvelope envelope) =>
+        new(
+            envelope.Id,
+            envelope.Origin.ToString().ToLowerInvariant(),
+            envelope.SourceAggregateKind,
+            envelope.SourceAggregateId,
+            envelope.Source,
+            envelope.Type,
+            envelope.Time.ToString("o"),
+            envelope.EnvelopeId,
+            envelope.SpecVersion,
+            envelope.Subject,
+            envelope.DataContentType,
+            envelope.Data,
+            new Dictionary<string, string>(envelope.Extensions),
+            envelope.RunnerId);
+}
