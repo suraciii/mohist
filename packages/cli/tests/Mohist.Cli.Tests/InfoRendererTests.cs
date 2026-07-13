@@ -78,7 +78,10 @@ public class InfoRendererTests
         var writer = new StringWriter();
         renderer.RenderJson(writer, result);
 
-        var node = JsonNode.Parse(writer.ToString()) as JsonObject;
+        var text = writer.ToString();
+        Assert.Single(text.Split('\n', StringSplitOptions.RemoveEmptyEntries));
+
+        var node = JsonNode.Parse(text) as JsonObject;
         Assert.NotNull(node);
         var keys = node!.Select(kv => kv.Key).ToHashSet();
         Assert.Contains("cli", keys);

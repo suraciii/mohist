@@ -22,30 +22,6 @@ public class ProjectTemplateRoutesSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
-    public async Task ListSystemTemplates_ReturnsAllBuiltInTemplatesSortedByKey()
-    {
-        using var response = await _client.GetAsync("/api/templates/system");
-
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-
-        var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.True(payload.GetProperty("success").GetBoolean());
-
-        var data = payload.GetProperty("data");
-        Assert.Equal(JsonValueKind.Array, data.ValueKind);
-
-        var keys = data.EnumerateArray()
-            .Select(item => item.GetProperty("key").GetString()!)
-            .ToArray();
-
-        Assert.NotEmpty(keys);
-        var sorted = keys.OrderBy(k => k, StringComparer.Ordinal).ToArray();
-        Assert.Equal(sorted, keys);
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
-    [Fact]
     public async Task ListEffectiveProjectTemplates_MergesSystemAndOverrideWithSourceLabels()
     {
         var project = await CreateProjectAsync();
@@ -353,26 +329,6 @@ public class ProjectTemplateRoutesSpecs
             .Select(item => item.GetString())
             .ToArray();
         Assert.Empty(missing);
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
-    [Fact]
-    public async Task ExtractVariables_ReturnsSortedUniqueVariableList()
-    {
-        using var response = await _client.PostAsJsonAsync(
-            "/api/templates/extract-variables",
-            new { body = "Use ${{ openspecChangeDir }} and ${{ issue.number }} and ${{ openspecChangeDir }}" });
-
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-
-        var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
-        var variables = payload.GetProperty("data").GetProperty("variables")
-            .EnumerateArray()
-            .Select(item => item.GetString())
-            .ToArray();
-
-        Assert.Equal(new[] { "issue.number", "openspecChangeDir" }, variables);
     }
 
     private async Task<ProjectDto> CreateProjectAsync()

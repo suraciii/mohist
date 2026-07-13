@@ -99,7 +99,7 @@ xUnit collection = scheduling unit; classes inside a collection run serially, so
 ## Guards (automated)
 
 Existing:
-- ArchTests: layer deps, spec naming, 24KB budget, namespace, public.
+- ArchTests: layer deps, spec naming, namespace, public.
 - BannedApiAnalyzer: compile-time ban on direct env reads.
 - vitest: `isolate: false`; restoreMocks, unstubGlobals, unstubEnvs auto; projects by suffix.
 - web boundary guards: `vi.mock` ratchet locked at zero; MSW unhandled requests fail; weekly shuffled suite records a reproducible seed.

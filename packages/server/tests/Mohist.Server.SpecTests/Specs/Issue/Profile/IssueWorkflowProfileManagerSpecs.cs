@@ -25,8 +25,7 @@ public class IssueWorkflowProfileManagerSpecs : IAsyncLifetime
             .Options;
         _manager = new IssueWorkflowProfileManager(new Factory(_options));
 
-        using var db = new MohistDbContext(_options);
-        db.Database.EnsureCreated();
+        MigratedSqliteTemplate.CopyModelSchemaTo(_keeper);
     }
 
     public Task InitializeAsync() => Task.CompletedTask;

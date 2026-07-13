@@ -1196,52 +1196,6 @@ public class AgentSessionSpecs
         Assert.Equal(4, card.TaskProgress.Total);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
-    [Fact(Skip = "Requires design decision: report-failed should close session, but current RunnerGrain.ReportAsync does not propagate to session")]
-    public async Task RunnerReport_WhenAgentWorkFailsBeforeTelemetry_ClosesCreatedSession()
-    {
-        var projectName = $"session-report-failure-{Guid.NewGuid():N}";
-        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = projectName });
-
-        await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
-        var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Report closes failed session", body = "track report failure", labels = new Dictionary<string, string>(StringComparer.Ordinal), priority = "p1", projectId = project.Id });
-        await _client.PostOkAsync($"/api/runner/{_runnerId}/register", new { capabilities = Array.Empty<string>(), projectId = project.Id });
-        await _client.PostOkAsync($"/api/projects/{project.Id}/issues/{issue.Number}/start", new { });
-        var work = await PollUntilAgentWorkAsync(issue.Number);
-
-        var sessionName = work.WorkId;
-        await _client.PostOkAsync($"/api/runner/{_runnerId}/sessions/{project.Id}/{work.WorkflowRunId}/{sessionName}/open", new
-        {
-            workId = work.WorkId,
-            workType = work.WorkType,
-            stage = work.Stage,
-            title = work.Title,
-            issueNumber = issue.Number,
-        });
-
-        await _client.PostOkAsync($"/api/runner/{_runnerId}/report", new
-        {
-            workId = work.WorkId,
-            workflowRunId = work.WorkflowRunId,
-            status = "failed",
-            projectId = project.Id,
-            message = "ACP agent requires 'prompt'",
-            exitCode = 1
-        });
-
-        var sessionId = await ResolveSessionIdAsync(work.WorkflowRunId, sessionName);
-        var grainSession = await _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId).GetAsync();
-        Assert.NotNull(grainSession);
-        Assert.Equal("failed", grainSession.Status);
-        Assert.Equal("prompt_missing", grainSession.FailureCategory);
-
-        var activity = await _client.GetDataAsync<ActivityDto>($"/api/projects/{project.Id}/agent/activity");
-        Assert.Equal(0, activity.Summary.Active);
-        Assert.Equal(1, activity.Summary.Failed);
-        Assert.Contains(activity.Sessions, s => s.IssueNumber == issue.Number && s.Status == "failed");
-    }
-
     private async Task<WorkDispatchDto> PollUntilAgentWorkAsync(int? expectedIssueNumber = null)
     {
         for (var attempt = 0; attempt < 100; attempt++)

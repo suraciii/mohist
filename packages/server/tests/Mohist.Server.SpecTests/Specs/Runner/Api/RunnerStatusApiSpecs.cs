@@ -17,6 +17,7 @@ namespace Mohist.Server.SpecTests.Specs.Runner.Api;
 [Collection("MohistIntegration2")]
 public class RunnerStatusApiSpecs
 {
+    private static readonly DateTimeOffset FixedNow = new(2026, 6, 30, 0, 0, 0, TimeSpan.Zero);
     private readonly MohistIntegrationFixture _fixture;
 
     public RunnerStatusApiSpecs(MohistIntegrationFixture fixture)
@@ -43,7 +44,7 @@ public class RunnerStatusApiSpecs
         await SeedWorkflowTemplateAsync(workflowId, definition, projectId);
         await workflow.StartAsync(new WorkflowStartInput(Metadata: new WorkflowRunMetadata(
             Name: null,
-            CreatedAt: DateTimeOffset.UtcNow,
+            CreatedAt: FixedNow,
             Annotations: new Dictionary<string, string>(StringComparer.Ordinal)
             {
                 ["projectId"] = projectId,
@@ -75,7 +76,7 @@ public class RunnerStatusApiSpecs
         else
         {
             template.Template = templateJson;
-            template.UpdatedAt = DateTimeOffset.UtcNow;
+            template.UpdatedAt = FixedNow;
         }
 
         var profile = await db.ProjectWorkflowProfiles.FindAsync("test-project");
@@ -90,7 +91,7 @@ public class RunnerStatusApiSpecs
         else
         {
             profile.DefaultTemplateId = definition.Id;
-            profile.UpdatedAt = DateTimeOffset.UtcNow;
+            profile.UpdatedAt = FixedNow;
         }
 
         await db.SaveChangesAsync();

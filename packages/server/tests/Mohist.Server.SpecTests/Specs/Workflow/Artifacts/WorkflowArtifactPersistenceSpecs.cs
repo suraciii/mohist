@@ -10,6 +10,8 @@ namespace Mohist.Server.SpecTests.Specs.Workflow.Artifacts;
 [Collection("MohistDb")]
 public class WorkflowArtifactPersistenceSpecs
 {
+    private static readonly DateTimeOffset FixedNow = new(2026, 6, 11, 9, 30, 0, TimeSpan.Zero);
+
     private readonly MohistDbFixture _fixture;
 
     public WorkflowArtifactPersistenceSpecs(MohistDbFixture fixture)
@@ -80,7 +82,7 @@ public class WorkflowArtifactPersistenceSpecs
             WorkflowRunId = wr,
             TaskRunId = tr,
             Path = "specs/",
-            RecordedAt = DateTimeOffset.UtcNow,
+            RecordedAt = FixedNow,
             ArtifactStoragePath = $"{wr}/tasks/{tr}/artifacts/{artifactId}/files",
             Kind = "directory",
         });
@@ -222,7 +224,7 @@ public class WorkflowArtifactPersistenceSpecs
                 WorkflowRunId = wr,
                 TaskRunId = firstTask,
                 Path = "review.md",
-                RecordedAt = DateTimeOffset.UtcNow,
+                RecordedAt = FixedNow,
                 ArtifactStoragePath = "a1",
             },
             new WorkflowArtifactRow
@@ -231,7 +233,7 @@ public class WorkflowArtifactPersistenceSpecs
                 WorkflowRunId = wr,
                 TaskRunId = secondTask,
                 Path = "review.md",
-                RecordedAt = DateTimeOffset.UtcNow,
+                RecordedAt = FixedNow,
                 ArtifactStoragePath = "a2",
             });
         await db.SaveChangesAsync();
@@ -254,7 +256,7 @@ public class WorkflowArtifactPersistenceSpecs
         var uploadId = $"artup_{Guid.NewGuid():N}";
         using var scope = _fixture.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-        var now = DateTimeOffset.UtcNow;
+        var now = FixedNow;
 
         db.WorkflowArtifactPendingUploads.Add(new WorkflowArtifactPendingUploadRow
         {
@@ -290,7 +292,7 @@ public class WorkflowArtifactPersistenceSpecs
         var workId = $"work_{Guid.NewGuid():N}";
         using var scope = _fixture.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-        var now = DateTimeOffset.UtcNow;
+        var now = FixedNow;
 
         db.WorkflowArtifactPendingUploads.Add(new WorkflowArtifactPendingUploadRow
         {

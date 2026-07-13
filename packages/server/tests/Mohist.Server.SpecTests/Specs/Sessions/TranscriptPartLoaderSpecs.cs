@@ -216,8 +216,7 @@ public sealed class TranscriptPartLoaderSpecs
             var dbName = $"loader-{Guid.NewGuid():N}";
             _connection = new SqliteConnection($"Data Source={dbName};Mode=Memory;Cache=Shared");
             _connection.Open();
-            using var db = CreateDbContext();
-            db.Database.EnsureCreated();
+            MigratedSqliteTemplate.CopyTo(_connection);
         }
 
         public MohistDbContext CreateDbContext()

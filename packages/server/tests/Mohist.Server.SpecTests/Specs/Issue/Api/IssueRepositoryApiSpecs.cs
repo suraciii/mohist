@@ -137,6 +137,29 @@ public class IssueRepositoryApiSpecs
         Assert.Null(fetched.RepositoryProblem);
     }
 
+    [Fact]
+    public async Task GetIssues_AfterRepositoryMetadataChange_ReturnsCurrentRepositoryContext()
+    {
+        var (projectId, _) = await SetupProjectWithRepositoriesAsync();
+        var created = await CreateIssueAsync(projectId, new { title = "Listed repository", repositoryName = "secondary" });
+
+        var projectGrain = _fixture.Grains.GetGrain<IProjectGrain>(projectId);
+        await projectGrain.RemoveRepositoryAsync("secondary");
+        await projectGrain.AddRepositoryAsync(
+            "secondary",
+            "git@secondary.example:repo-new.git",
+            "release");
+
+        var listed = await GetIssuesAsync(projectId);
+        var issue = Assert.Single(listed, item => item.Number == created.Data!.Number);
+
+        Assert.NotNull(issue.Repository);
+        Assert.Equal("secondary", issue.Repository!.Name);
+        Assert.Equal("git@secondary.example:repo-new.git", issue.Repository.GitUrl);
+        Assert.Equal("release", issue.Repository.BaseBranch);
+        Assert.Null(issue.RepositoryProblem);
+    }
+
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
@@ -181,6 +204,17 @@ public class IssueRepositoryApiSpecs
         var envelope = await response.Content.ReadFromJsonAsync<RepositoryApiEnvelope<IssueRepositoryDto>>(JsonOptions);
         Assert.NotNull(envelope);
         Assert.True(envelope!.Success);
+        return envelope.Data;
+    }
+
+    private async Task<IssueRepositoryDto[]> GetIssuesAsync(string projectId)
+    {
+        using var response = await _client.GetAsync($"/api/projects/{projectId}/issues");
+        response.EnsureSuccessStatusCode();
+        var envelope = await response.Content.ReadFromJsonAsync<RepositoryApiEnvelope<IssueRepositoryDto[]>>(JsonOptions);
+        Assert.NotNull(envelope);
+        Assert.True(envelope!.Success);
+        Assert.NotNull(envelope.Data);
         return envelope.Data;
     }
 

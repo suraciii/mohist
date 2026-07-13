@@ -27,6 +27,7 @@ const getConnectionId = vi.fn(() => "conn-1")
 const probeLiveness = vi.fn(async () => true)
 const workflowRunsStatus = vi.fn()
 const fetchConfig = vi.fn(async () => null)
+const FIXED_TIME = "2026-07-01T00:00:00.000Z"
 
 // Capture the onReconnected callback that RunnerHost passes into the
 // RunnerSignalRClient constructor. Each new RunnerSignalRClient instance
@@ -242,7 +243,7 @@ describe("RunnerHost converges active workflow runs", () => {
           workflowRunId,
           workspacePath,
           phase: "active",
-          materializedAt: new Date().toISOString(),
+          materializedAt: FIXED_TIME,
           terminalAt: null,
         },
       },
@@ -305,7 +306,7 @@ describe("RunnerHost converges active workflow runs", () => {
           workflowRunId: "wr-active",
           workspacePath: wsPathA,
           phase: "active",
-          materializedAt: new Date().toISOString(),
+          materializedAt: FIXED_TIME,
           terminalAt: null,
         },
         "wr-eligible": {
@@ -314,8 +315,8 @@ describe("RunnerHost converges active workflow runs", () => {
           workflowRunId: "wr-eligible",
           workspacePath: wsPathB,
           phase: "eligible",
-          materializedAt: new Date().toISOString(),
-          terminalAt: new Date().toISOString(),
+          materializedAt: FIXED_TIME,
+          terminalAt: FIXED_TIME,
         },
       },
     }))
@@ -350,12 +351,12 @@ describe("RunnerHost converges active workflow runs", () => {
         "wr-1": {
           issueId: "issue-1", issueNumber: 1, workflowRunId: "wr-1",
           workspacePath: wsPath1, phase: "active",
-          materializedAt: new Date().toISOString(), terminalAt: null,
+          materializedAt: FIXED_TIME, terminalAt: null,
         },
         "wr-2": {
           issueId: "issue-2", issueNumber: 2, workflowRunId: "wr-2",
           workspacePath: wsPath2, phase: "active",
-          materializedAt: new Date().toISOString(), terminalAt: null,
+          materializedAt: FIXED_TIME, terminalAt: null,
         },
       },
     }))

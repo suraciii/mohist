@@ -26,11 +26,7 @@ public sealed class FakeAgentSessionQueryDbContextFactory : IDbContextFactory<Mo
     {
         _connection = new SqliteConnection("Data Source=:memory:");
         _connection.Open();
-        using var db = CreateDbContext();
-        // EnsureCreated emits the production-shaped AgentSessions schema,
-        // including the 6 new stored computed columns added in T-001 and
-        // their indexes — the same plumbing EF migrations would create.
-        db.Database.EnsureCreated();
+        MigratedSqliteTemplate.CopyTo(_connection);
     }
 
     public MohistDbContext CreateDbContext()

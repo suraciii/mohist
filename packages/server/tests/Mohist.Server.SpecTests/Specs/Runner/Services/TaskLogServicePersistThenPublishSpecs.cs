@@ -22,6 +22,7 @@ namespace Mohist.Server.SpecTests.Specs.Runner.Services;
 [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
 public class TaskLogServicePersistThenPublishSpecs : IAsyncLifetime
 {
+    private static readonly DateTimeOffset FixedNow = new(2026, 6, 30, 0, 0, 0, TimeSpan.Zero);
     private readonly DbContextOptions<MohistDbContext> _options;
     private readonly FakeTimeProvider _timeProvider = new(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero));
     private readonly TaskLogStore _store;
@@ -42,8 +43,7 @@ public class TaskLogServicePersistThenPublishSpecs : IAsyncLifetime
         _runnerWorks = new RunnerWorkStore(factory);
         _runQuerier = new WorkflowRunQuerier(factory);
 
-        using var db = new MohistDbContext(_options);
-        db.Database.EnsureCreated();
+        MigratedSqliteTemplate.CopyTo(_keeper);
     }
 
     public Task InitializeAsync() => Task.CompletedTask;
@@ -355,7 +355,7 @@ public class TaskLogServicePersistThenPublishSpecs : IAsyncLifetime
 
     private static IReadOnlyList<TaskLogLine> NewEntries(long startSeq, int count)
     {
-        var now = DateTimeOffset.UtcNow;
+        var now = FixedNow;
         return Enumerable.Range(0, count)
             .Select(i => new TaskLogLine(startSeq + i, now.AddMilliseconds(i), "stdout", $"line-{startSeq + i}"))
             .ToList();

@@ -9,7 +9,6 @@ import {
 import { WorkspaceManager } from "../../src/runtime/workspace.js"
 import { WorkspaceRegistry, defaultWorkspaceRegistryFilePath } from "../../src/runtime/workspace-registry.js"
 import { exists, runCommand } from "../../src/system/process.js"
-import { clearedInheritedGitEnvironment } from "../support/git-environment.js"
 import { createTestTempDir } from "../support/temp-dir.js"
 
 interface CapturedBuilder {
@@ -18,28 +17,16 @@ interface CapturedBuilder {
 }
 
 const builders: CapturedBuilder[] = []
+const testGitUrl = "https://repo.test/mohist.git"
+const workspaceBranches = new Map<string, string>()
 let root: string
-let environment: GitEnvironment
-
-interface GitEnvironment extends NodeJS.ProcessEnv {
-  HOME: string
-  XDG_CONFIG_HOME: string
-  GIT_CONFIG_GLOBAL: string
-  GIT_CONFIG_COUNT: "0"
-  GIT_CONFIG_NOSYSTEM: "1"
-  GIT_TERMINAL_PROMPT: "0"
-  GIT_AUTHOR_NAME: string
-  GIT_AUTHOR_EMAIL: string
-  GIT_COMMITTER_NAME: string
-  GIT_COMMITTER_EMAIL: string
-}
 
 beforeEach(async () => {
   builders.length = 0
+  workspaceBranches.clear()
   setRunnerSignalRExistsCheckerForTest(existsSync)
   root = await createTestTempDir("mohist-workspace-registry-integration-")
-  environment = await createGitEnvironment(root)
-  isolateGitEnvironment(environment)
+  installGitFake()
 })
 
 afterEach(() => {
@@ -91,16 +78,41 @@ vi.mock("@microsoft/signalr", () => {
   }
 })
 
-async function makeRepo(root: string, environment: GitEnvironment) {
-  const repo = join(root, "repo")
-  await git(root, ["init", "--initial-branch=main", repo], environment)
-  await git(repo, ["config", "user.name", environment.GIT_AUTHOR_NAME], environment)
-  await git(repo, ["config", "user.email", environment.GIT_AUTHOR_EMAIL], environment)
-  await git(repo, ["config", "core.hooksPath", join(root, "hooks")], environment)
-  await writeFile(join(repo, "README.md"), "base\n")
-  await git(repo, ["add", "."], environment)
-  await git(repo, ["commit", "-m", "base"], environment)
-  return repo
+vi.mock("../../src/system/process.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/system/process.js")>()
+  return { ...actual, runCommand: vi.fn() }
+})
+
+function commandResult(stdout = "") {
+  return { exitCode: 0, stdout, stderr: "" }
+}
+
+function installGitFake() {
+  vi.mocked(runCommand).mockImplementation(async (command, args) => {
+    if (command !== "git") return commandResult()
+
+    const workDir = args[0] === "-C" ? args[1] : null
+    const gitArgs = workDir ? args.slice(2) : args
+
+    if (gitArgs[0] === "ls-remote") return commandResult("deadbeef\trefs/heads/main\n")
+
+    if (gitArgs[0] === "clone") {
+      const workspacePath = gitArgs.at(-1)!
+      await mkdir(join(workspacePath, ".git", "info"), { recursive: true })
+      return commandResult()
+    }
+
+    if (gitArgs[0] === "checkout" && gitArgs[1] === "-b" && workDir) {
+      workspaceBranches.set(workDir, gitArgs[2]!)
+      return commandResult()
+    }
+
+    if (gitArgs[0] === "rev-parse" && gitArgs.includes("--abbrev-ref") && workDir) {
+      return commandResult(`${workspaceBranches.get(workDir) ?? "main"}\n`)
+    }
+
+    return commandResult()
+  })
 }
 
 function work(workflowRunId: string, issueId: string, issueNumber: number, gitUrl: string) {
@@ -121,7 +133,7 @@ function work(workflowRunId: string, issueId: string, issueNumber: number, gitUr
 
 describe("workspace registry lifecycle", () => {
   it("materialization registers an active entry by workflow run", async () => {
-    const repo = await makeRepo(root, environment)
+    const repo = testGitUrl
     const runnerRoot = join(root, "runner")
     const registry = new WorkspaceRegistry(runnerRoot)
     await registry.load()
@@ -146,7 +158,7 @@ describe("workspace registry lifecycle", () => {
   })
 
   it("materialization writes only workspace identity to the marker", async () => {
-    const repo = await makeRepo(root, environment)
+    const repo = testGitUrl
     const runnerRoot = join(root, "runner")
     const registry = new WorkspaceRegistry(runnerRoot)
     await registry.load()
@@ -160,7 +172,7 @@ describe("workspace registry lifecycle", () => {
   })
 
   it("verification refreshes an existing entry", async () => {
-    const repo = await makeRepo(root, environment)
+    const repo = testGitUrl
     const runnerRoot = join(root, "runner")
     const first = new Date("2026-06-01T00:00:00.000Z")
     const second = new Date("2026-06-25T12:00:00.000Z")
@@ -181,7 +193,7 @@ describe("workspace registry lifecycle", () => {
   })
 
   it("verification does not create a missing registry entry", async () => {
-    const repo = await makeRepo(root, environment)
+    const repo = testGitUrl
     const runnerRoot = join(root, "runner")
     const registry = new WorkspaceRegistry(runnerRoot)
     await registry.load()
@@ -200,7 +212,7 @@ describe("workspace registry lifecycle", () => {
   })
 
   it("a fresh registry loads an active entry", async () => {
-    const repo = await makeRepo(root, environment)
+    const repo = testGitUrl
     const runnerRoot = join(root, "runner")
 
     // First host: materialize + register, then "die".
@@ -224,7 +236,7 @@ describe("workspace registry lifecycle", () => {
   })
 
   it("manual removal drops the matching registry entry", async () => {
-    const repo = await makeRepo(root, environment)
+    const repo = testGitUrl
     const runnerRoot = join(root, "runner")
     const registry = new WorkspaceRegistry(runnerRoot)
     await registry.load()
@@ -251,7 +263,7 @@ describe("workspace registry lifecycle", () => {
   })
 
   it("manual removal clears the entry when the workspace is already missing", async () => {
-    const repo = await makeRepo(root, environment)
+    const repo = testGitUrl
     const runnerRoot = join(root, "runner")
     const registry = new WorkspaceRegistry(runnerRoot)
     await registry.load()
@@ -270,7 +282,7 @@ describe("workspace registry lifecycle", () => {
   })
 
   it("manual removal refuses a path outside the runner root", async () => {
-    const repo = await makeRepo(root, environment)
+    const repo = testGitUrl
     const runnerRoot = join(root, "runner")
     const registry = new WorkspaceRegistry(runnerRoot)
     await registry.load()
@@ -320,35 +332,3 @@ describe("workspace registry lifecycle", () => {
     expect(exists(outsidePath)).toBe(true)
   })
 })
-
-async function createGitEnvironment(root: string): Promise<GitEnvironment> {
-  const home = join(root, "home")
-  const xdg = join(root, "xdg")
-  const globalConfig = join(root, "gitconfig")
-  const hooks = join(root, "hooks")
-  await Promise.all([mkdir(home, { recursive: true }), mkdir(xdg, { recursive: true }), mkdir(hooks, { recursive: true })])
-  await writeFile(globalConfig, "")
-  return {
-    ...clearedInheritedGitEnvironment,
-    HOME: home,
-    XDG_CONFIG_HOME: xdg,
-    GIT_CONFIG_GLOBAL: globalConfig,
-    GIT_CONFIG_COUNT: "0",
-    GIT_CONFIG_NOSYSTEM: "1",
-    GIT_TERMINAL_PROMPT: "0",
-    GIT_AUTHOR_NAME: "Mohist Integration Test",
-    GIT_AUTHOR_EMAIL: "mohist-integration@example.test",
-    GIT_COMMITTER_NAME: "Mohist Integration Test",
-    GIT_COMMITTER_EMAIL: "mohist-integration@example.test",
-  }
-}
-
-async function git(cwd: string, args: string[], environment: GitEnvironment) {
-  const result = await runCommand("git", args, cwd, new AbortController().signal, environment)
-  if (result.exitCode !== 0) throw new Error(result.stderr || result.stdout || `git ${args.join(" ")} failed`)
-  return result
-}
-
-function isolateGitEnvironment(environment: GitEnvironment) {
-  for (const [key, value] of Object.entries(environment)) vi.stubEnv(key, value)
-}

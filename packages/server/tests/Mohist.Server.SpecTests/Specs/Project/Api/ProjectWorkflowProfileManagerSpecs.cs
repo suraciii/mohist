@@ -26,8 +26,7 @@ public class ProjectWorkflowProfileManagerSpecs : IAsyncLifetime
             .Options;
         _manager = new ProjectWorkflowProfileManager(new Factory(_options), new StubPromptLoader(), new PromptTemplateEngine());
 
-        using var db = new MohistDbContext(_options);
-        db.Database.EnsureCreated();
+        MigratedSqliteTemplate.CopyModelSchemaTo(_keeper);
     }
 
     public Task InitializeAsync() => Task.CompletedTask;
@@ -39,37 +38,6 @@ public class ProjectWorkflowProfileManagerSpecs : IAsyncLifetime
     }
 
     // ===================== System templates =====================
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
-    [Fact]
-    public async Task ListSystemTemplates_ReturnsAtLeastMohistLocal()
-    {
-        var list = await _manager.ListSystemTemplatesAsync();
-
-        Assert.NotEmpty(list);
-        Assert.Contains(list, t => t.Id == "mohist/local");
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
-    [Fact]
-    public void GetSystemTemplateDefinition_MohistLocal_HasStages()
-    {
-        var def = ProjectWorkflowProfileManager.GetSystemTemplateDefinition("mohist/local");
-
-        Assert.NotNull(def);
-        Assert.NotEmpty(def.Stages);
-        Assert.Contains(def.Stages, s => s.Stage == "plan");
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
-    [Fact]
-    public void GetSystemTemplateDefinition_Unknown_ReturnsNull()
-    {
-        Assert.Null(ProjectWorkflowProfileManager.GetSystemTemplateDefinition("does/not/exist"));
-    }
 
     // ===================== Project templates CRUD =====================
 

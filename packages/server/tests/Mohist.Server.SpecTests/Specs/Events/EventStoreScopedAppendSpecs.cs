@@ -31,8 +31,7 @@ public class EventStoreScopedAppendSpecs : IAsyncLifetime
             .ConfigureWarnings(w => w.Ignore(RelationalEventId.PendingModelChangesWarning))
             .Options;
 
-        using var db = new MohistDbContext(_options);
-        db.Database.EnsureCreated();
+        MigratedSqliteTemplate.CopyTo(_keeper);
 
         _store = new EventStore(new Factory(_options), NullLogger<EventStore>.Instance);
     }

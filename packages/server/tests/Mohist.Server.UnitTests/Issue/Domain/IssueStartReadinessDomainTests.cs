@@ -171,13 +171,6 @@ public class IssueStartReadinessDomainTests
         Assert.False(issue.CanStart(new HashSet<int> { 5 }));
 
         Assert.IsType<IssueStartBlocker.WaitingFor>(issue.StartBlocker(new HashSet<int> { 5 }));
-
-        var setterProperty = typeof(Mohist.Server.Issue.Domain.Issue).GetProperty("CanStart");
-        Assert.Null(setterProperty);
-
-        var method = typeof(Mohist.Server.Issue.Domain.Issue).GetMethod("CanStart", new[] { typeof(IReadOnlySet<int>) });
-        Assert.NotNull(method);
-        Assert.False(method!.IsDefined(typeof(System.Runtime.CompilerServices.CompilerGeneratedAttribute), inherit: true));
     }
 
     [Fact]

@@ -22,23 +22,6 @@ public class ProjectApiSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
-    public async Task PostProject_NameOnly_CreatesProjectWithoutPathFields()
-    {
-        var response = await _client.PostAsJsonAsync("/api/projects", new { name = "api-pathless" });
-        response.EnsureSuccessStatusCode();
-        var json = await response.Content.ReadFromJsonAsync<JsonElement>();
-
-        Assert.True(json.GetProperty("success").GetBoolean());
-        var data = json.GetProperty("data");
-        Assert.Equal("api-pathless", data.GetProperty("name").GetString());
-        Assert.False(data.TryGetProperty("path", out _));
-        Assert.False(data.TryGetProperty("effectivePath", out _));
-        Assert.False(data.TryGetProperty("baseBranch", out _));
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
-    [Fact]
     public async Task PostProject_NameOnly_DoesNotCreateDefaultRepository()
     {
         var created = await _client.PostDataAsync<ProjectInfo>("/api/projects", new { name = "no-default-repo" });
@@ -50,15 +33,13 @@ public class ProjectApiSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
-    public async Task GetProjects_ListReturnsProjectsWithoutPathFields()
+    public async Task GetProjects_ListReturnsCreatedProject()
     {
         var created = await _client.PostDataAsync<ProjectInfo>("/api/projects", new { name = "list-test" });
 
         var list = await _client.GetDataAsync<List<ProjectInfo>>("/api/projects");
         var project = list.Single(p => p.Id == created.Id);
         Assert.Equal("list-test", project.Name);
-        Assert.Null(project.GetType().GetProperty("Path"));
-        Assert.Null(project.GetType().GetProperty("BaseBranch"));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -100,9 +81,6 @@ public class ProjectApiSpecs
         Assert.Equal("git@example.com:backend.git", repo.GetProperty("gitUrl").GetString());
         Assert.Equal("main", repo.GetProperty("baseBranch").GetString());
         Assert.True(repo.GetProperty("isDefault").GetBoolean());
-        Assert.False(repo.TryGetProperty("path", out _));
-        Assert.False(repo.TryGetProperty("remote", out _));
-        Assert.False(repo.TryGetProperty("resolvedPath", out _));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]

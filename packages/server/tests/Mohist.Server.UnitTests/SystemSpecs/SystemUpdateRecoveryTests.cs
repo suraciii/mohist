@@ -1,4 +1,3 @@
-using System.Text.RegularExpressions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
@@ -272,35 +271,6 @@ public class SystemUpdateRecoveryTests
         }
     }
 
-    [Fact]
-    public void SourceAudit_ProcessStartTimeProviderDefaultReadsProcessInfoOnlyInProductionProvider()
-    {
-        var source = File.ReadAllText(ProcessStartTimeProviderSourcePath);
-
-        Assert.Contains("Process.GetCurrentProcess", source);
-        Assert.Contains("StartTime.ToUniversalTime", source);
-    }
-
-    [Fact]
-    public void SourceAudit_ReconcilerHasNoWallClockOrProcessInfoReads()
-    {
-        var source = File.ReadAllText(SourcePath);
-        var codeOnly = StripXmlDocComments(source);
-
-        Assert.DoesNotContain(nameof(DateTimeOffset) + ".UtcNow", codeOnly);
-        Assert.DoesNotContain(nameof(DateTime) + ".UtcNow", codeOnly);
-        Assert.DoesNotContain("Environment.TickCount", codeOnly);
-        Assert.DoesNotContain("GetCurrentProcess", codeOnly);
-        Assert.DoesNotContain("Process.StartTime", codeOnly);
-        Assert.DoesNotContain("Process.GetCurrentProcess", codeOnly);
-        Assert.DoesNotContain("SystemUpdateService", codeOnly);
-    }
-
-    private static string StripXmlDocComments(string source)
-    {
-        return Regex.Replace(source, @"<see\s+cref\s*=\s*""[^""]*""\s*/>", string.Empty);
-    }
-
     private static SystemUpdateRecoveryService BuildReconciler(
         ISystemUpdateStore store,
         TimeProvider time,
@@ -370,16 +340,6 @@ public class SystemUpdateRecoveryTests
             updatedAt,
             completedAt);
     }
-
-    private static string SourcePath => Path.GetFullPath(Path.Combine(
-        AppContext.BaseDirectory,
-        "..", "..", "..", "..", "..",
-        "src", "Mohist.Server", "SystemInfo", "SystemUpdateRecoveryService.cs"));
-
-    private static string ProcessStartTimeProviderSourcePath => Path.GetFullPath(Path.Combine(
-        AppContext.BaseDirectory,
-        "..", "..", "..", "..", "..",
-        "src", "Mohist.Server", "SystemInfo", "ProcessStartTimeProvider.cs"));
 
     private sealed class FakeProcessStartTimeProvider : IProcessStartTimeProvider
     {

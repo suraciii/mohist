@@ -10,6 +10,8 @@ namespace Mohist.Server.SpecTests.Specs.Inbox;
 
 public class InboxQuerierSpecs
 {
+    private static readonly DateTimeOffset FixedNow = new(2026, 6, 30, 0, 0, 0, TimeSpan.Zero);
+
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
@@ -17,9 +19,9 @@ public class InboxQuerierSpecs
     {
         await using var database = CreateDatabase();
         var store = new InboxStore(database.Factory);
-        await SeedAsync(store, "proj_a", "evt-1", DateTimeOffset.UtcNow.AddMinutes(-30), 1, "Issue 1");
-        await SeedAsync(store, "proj_a", "evt-2", DateTimeOffset.UtcNow.AddMinutes(-10), 2, "Issue 2");
-        await SeedAsync(store, "proj_a", "evt-3", DateTimeOffset.UtcNow.AddMinutes(-20), 3, "Issue 3");
+        await SeedAsync(store, "proj_a", "evt-1", FixedNow.AddMinutes(-30), 1, "Issue 1");
+        await SeedAsync(store, "proj_a", "evt-2", FixedNow.AddMinutes(-10), 2, "Issue 2");
+        await SeedAsync(store, "proj_a", "evt-3", FixedNow.AddMinutes(-20), 3, "Issue 3");
         var querier = new InboxQuerier(database.Factory);
 
         var items = await querier.ListAsync("proj_a");
@@ -41,8 +43,8 @@ public class InboxQuerierSpecs
     {
         await using var database = CreateDatabase();
         var store = new InboxStore(database.Factory);
-        var keep = await SeedAsync(store, "proj_a", "evt-keep", DateTimeOffset.UtcNow, 1, "Keep me");
-        var drop = await SeedAsync(store, "proj_a", "evt-drop", DateTimeOffset.UtcNow, 2, "Drop me");
+        var keep = await SeedAsync(store, "proj_a", "evt-keep", FixedNow, 1, "Keep me");
+        var drop = await SeedAsync(store, "proj_a", "evt-drop", FixedNow, 2, "Drop me");
         await store.ArchiveAsync("proj_a", drop.Id);
         var querier = new InboxQuerier(database.Factory);
 
@@ -60,9 +62,9 @@ public class InboxQuerierSpecs
     {
         await using var database = CreateDatabase();
         var store = new InboxStore(database.Factory);
-        await SeedAsync(store, "proj_a", "evt-a-1", DateTimeOffset.UtcNow, 1, "A1");
-        await SeedAsync(store, "proj_a", "evt-a-2", DateTimeOffset.UtcNow, 2, "A2");
-        await SeedAsync(store, "proj_b", "evt-b-1", DateTimeOffset.UtcNow, 1, "B1");
+        await SeedAsync(store, "proj_a", "evt-a-1", FixedNow, 1, "A1");
+        await SeedAsync(store, "proj_a", "evt-a-2", FixedNow, 2, "A2");
+        await SeedAsync(store, "proj_b", "evt-b-1", FixedNow, 1, "B1");
         var querier = new InboxQuerier(database.Factory);
 
         var aItems = await querier.ListAsync("proj_a");
@@ -81,7 +83,7 @@ public class InboxQuerierSpecs
     {
         await using var database = CreateDatabase();
         var store = new InboxStore(database.Factory);
-        await SeedAsync(store, "proj_a", "evt-1", DateTimeOffset.UtcNow, 1, "A1");
+        await SeedAsync(store, "proj_a", "evt-1", FixedNow, 1, "A1");
         var querier = new InboxQuerier(database.Factory);
 
         var items = await querier.ListAsync("proj_zzz");
@@ -96,9 +98,9 @@ public class InboxQuerierSpecs
     {
         await using var database = CreateDatabase();
         var store = new InboxStore(database.Factory);
-        var read = await SeedAsync(store, "proj_a", "evt-read", DateTimeOffset.UtcNow, 1, "Read");
+        var read = await SeedAsync(store, "proj_a", "evt-read", FixedNow, 1, "Read");
         await store.MarkReadAsync("proj_a", read.Id);
-        await SeedAsync(store, "proj_a", "evt-unread", DateTimeOffset.UtcNow.AddMinutes(1), 2, "Unread");
+        await SeedAsync(store, "proj_a", "evt-unread", FixedNow.AddMinutes(1), 2, "Unread");
         var querier = new InboxQuerier(database.Factory);
 
         var items = await querier.ListAsync("proj_a");
@@ -147,7 +149,7 @@ public class InboxQuerierSpecs
         // Two items in the same millisecond must come back in a
         // stable order. We seed both rows directly with the same
         // CreatedAt to exercise the secondary sort key.
-        var same = DateTimeOffset.UtcNow;
+        var same = FixedNow;
         await using var database = CreateDatabase();
         await using (var db = database.CreateDbContext())
         {
