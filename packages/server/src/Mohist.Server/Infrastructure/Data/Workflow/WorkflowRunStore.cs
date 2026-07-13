@@ -1,10 +1,13 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
+using Mohist.Server.Events.Grains;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Workflow.Domain.Run;
+using Orleans;
 
 namespace Mohist.Server.Infrastructure.Data.Workflow;
 
@@ -21,13 +24,19 @@ public class WorkflowRunStore : IWorkflowRunStore
 
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly IEventStore _eventStore;
+    private readonly IGrainFactory _grainFactory;
+    private readonly ILogger<WorkflowRunStore> _log;
 
     public WorkflowRunStore(
         IDbContextFactory<MohistDbContext> dbFactory,
-        IEventStore eventStore)
+        IEventStore eventStore,
+        IGrainFactory grainFactory,
+        ILogger<WorkflowRunStore> log)
     {
         _dbFactory = dbFactory;
         _eventStore = eventStore;
+        _grainFactory = grainFactory;
+        _log = log;
     }
 
     public async Task SaveAsync(WorkflowRun run, CancellationToken ct = default)
@@ -62,7 +71,12 @@ public class WorkflowRunStore : IWorkflowRunStore
         {
             throw;
         }
+
+        PokeDispatcherBestEffort();
     }
+
+    private void PokeDispatcherBestEffort() =>
+        EventDispatcherPoke.PokeAfterCommit(_grainFactory, _log, nameof(WorkflowRunStore));
 
     private static CloudEvent ToCloudEvent(WorkflowEvent evt, string source, string? projectId, string? issueId)
     {

@@ -19,6 +19,11 @@ internal static class MohistCliCommands
         root.Subcommands.Add(UpdateCommands.Build(provider));
         root.Subcommands.Add(SkillsCommands.Build(provider));
         root.Subcommands.Add(WorkflowCommands.Build(api));
+        var environment = provider.GetService<IEnvironmentVariableProvider>()
+            ?? SystemEnvironmentVariableProvider.Instance;
+        var operatorCredential = provider.GetService<OperatorCredentialProvider>()
+            ?? new OperatorCredentialProvider(api.FileSystem, environment);
+        root.Subcommands.Add(EventCommands.Build(api, operatorCredential));
         root.Subcommands.Add(ProjectCommands.Build(api));
         root.Subcommands.Add(RepositoryCommands.Build(api));
         root.Subcommands.Add(IssueCommands.Build(api));
@@ -28,7 +33,7 @@ internal static class MohistCliCommands
         root.Subcommands.Add(OpencodeCommands.Build(api));
         root.Subcommands.Add(ConfigProvidersCommands.BuildConfig(api));
         root.Subcommands.Add(NotifyCommands.Build(api));
-        root.Subcommands.Add(OtelCommands.Build(api, provider.GetService<IEnvironmentVariableProvider>() ?? SystemEnvironmentVariableProvider.Instance, provider.GetService<IOtelQueryExecutor>() ?? new SqliteOtelQueryExecutor()));
+        root.Subcommands.Add(OtelCommands.Build(api, environment, provider.GetService<IOtelQueryExecutor>() ?? new SqliteOtelQueryExecutor()));
 
         return root;
     }
@@ -132,6 +137,7 @@ internal static class MohistCliCommands
         services.AddSingleton<IFileSystem>(fileSystem);
         services.AddSingleton<ICommandExecutor>(commandExecutor);
         services.AddSingleton<IEnvironmentVariableProvider>(environment);
+        services.AddSingleton<OperatorCredentialProvider>();
         services.AddSingleton(http);
         // Production callers leave queryExecutor null and the default
         // SqliteOtelQueryExecutor is used; tests inject a fake so otel query

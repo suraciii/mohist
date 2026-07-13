@@ -23,6 +23,8 @@ public class EpicLifecycleSpecs
         _services = fixture.Services;
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task MarkDone_WhenOpenLinkedIssuesRemain_Returns4xxAndLeavesStatusUnchanged()
     {
@@ -49,75 +51,84 @@ public class EpicLifecycleSpecs
         Assert.Equal("idle", after.Status);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task MarkDone_WhenAllLinkedIssuesCancelled_SucceedsAndChangesStatusToDone()
     {
         // cancelled is terminal for readiness but not counted as
         // delivered; an epic whose linked issues are all cancelled is
-        // ready to Mark Done.
+        // ready to Mark Done. Link the issues to the epic first so the
+        // dispatcher's auto-mark-done handler can find the epic when
+        // the cancellation events fire.
         var project = await CreateProjectAsync();
         var first = await CreateIssueAsync(project.Id, "First cancelled");
-        await CancelIssueAsync(project.Id, first);
         var second = await CreateIssueAsync(project.Id, "Second cancelled");
-        await CancelIssueAsync(project.Id, second);
         var epic = await CreateEpicAsync(project.Id, "All cancelled epic");
         await LinkIssueAsync(project.Id, epic.Id, first.Number);
         await LinkIssueAsync(project.Id, epic.Id, second.Number);
+        await CancelIssueAsync(project.Id, first);
+        await CancelIssueAsync(project.Id, second);
 
-        var marked = await _client.PostDataAsync<EpicDto>($"/api/projects/{project.Id}/epics/{epic.Id}/done", null);
+        var detail = await _client.WaitForStatusAsync<EpicDetailDto>(
+            $"/api/projects/{project.Id}/epics/{epic.Id}",
+            dto => dto.Status,
+            "done");
 
-        Assert.Equal("done", marked.Status);
-
-        var detail = await _client.GetDataAsync<EpicDetailDto>($"/api/projects/{project.Id}/epics/{epic.Id}");
-        Assert.Equal("done", detail.Status);
         Assert.Equal(0, detail.Progress.DeliveredCount);
         Assert.Equal(2, detail.Progress.TotalIssueCount);
         Assert.True(detail.Progress.ReadyToMarkDone);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task MarkDone_WithMixedDoneAndCancelledLinkedIssues_SucceedsAndDeliveredCountCountsOnlyDone()
     {
         // Epic #18 scenario: at least one done issue and at least one
         // cancelled issue; all linked issues are terminal so the epic
         // is ready to Mark Done. deliveredCount counts only the done
-        // issue.
+        // issue. Link the issues to the epic first so the dispatcher's
+        // auto-mark-done handler can find the epic when the terminal
+        // events fire.
         var project = await CreateProjectAsync();
         var done = await CreateIssueAsync(project.Id, "Done");
-        await CompleteIssueAsync(project.Id, done);
         var cancelled = await CreateIssueAsync(project.Id, "Cancelled");
-        await CancelIssueAsync(project.Id, cancelled);
         var epic = await CreateEpicAsync(project.Id, "Mixed done+cancelled epic");
         await LinkIssueAsync(project.Id, epic.Id, done.Number);
         await LinkIssueAsync(project.Id, epic.Id, cancelled.Number);
+        await CompleteIssueAsync(project.Id, done);
+        await CancelIssueAsync(project.Id, cancelled);
 
-        var detail = await _client.GetDataAsync<EpicDetailDto>($"/api/projects/{project.Id}/epics/{epic.Id}");
+        var detail = await _client.WaitForStatusAsync<EpicDetailDto>(
+            $"/api/projects/{project.Id}/epics/{epic.Id}",
+            dto => dto.Status,
+            "done");
+
         Assert.True(detail.Progress.ReadyToMarkDone);
         Assert.Equal(1, detail.Progress.DeliveredCount);
         Assert.Equal(2, detail.Progress.TotalIssueCount);
-
-        var marked = await _client.PostDataAsync<EpicDto>($"/api/projects/{project.Id}/epics/{epic.Id}/done", null);
-        Assert.Equal("done", marked.Status);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task MarkDone_WhenAllLinkedIssuesDelivered_SucceedsAndChangesStatusToDone()
     {
         var project = await CreateProjectAsync();
         var first = await CreateIssueAsync(project.Id, "First");
-        await CompleteIssueAsync(project.Id, first);
         var second = await CreateIssueAsync(project.Id, "Second");
-        await CompleteIssueAsync(project.Id, second);
         var epic = await CreateEpicAsync(project.Id, "Lifecycle success");
         await LinkIssueAsync(project.Id, epic.Id, first.Number);
         await LinkIssueAsync(project.Id, epic.Id, second.Number);
+        await CompleteIssueAsync(project.Id, first);
+        await CompleteIssueAsync(project.Id, second);
 
-        var marked = await _client.PostDataAsync<EpicDto>($"/api/projects/{project.Id}/epics/{epic.Id}/done", null);
+        var detail = await _client.WaitForStatusAsync<EpicDetailDto>(
+            $"/api/projects/{project.Id}/epics/{epic.Id}",
+            dto => dto.Status,
+            "done");
 
-        Assert.Equal("done", marked.Status);
-
-        var detail = await _client.GetDataAsync<EpicDetailDto>($"/api/projects/{project.Id}/epics/{epic.Id}");
-        Assert.Equal("done", detail.Status);
         Assert.Equal(2, detail.Progress.DeliveredCount);
         Assert.Equal(2, detail.Progress.TotalIssueCount);
         Assert.True(detail.Progress.ReadyToMarkDone);
@@ -128,15 +139,23 @@ public class EpicLifecycleSpecs
         Assert.Equal("done", detail.LinkedIssues[1].Status);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task MarkDone_RepeatedOnDoneEpic_ReturnsAlreadyTerminalEnvelope()
     {
         var project = await CreateProjectAsync();
         var issue = await CreateIssueAsync(project.Id, "Delivered");
-        await CompleteIssueAsync(project.Id, issue);
         var epic = await CreateEpicAsync(project.Id, "Repeated done");
         await LinkIssueAsync(project.Id, epic.Id, issue.Number);
-        await _client.PostOkAsync($"/api/projects/{project.Id}/epics/{epic.Id}/done", null);
+        await CompleteIssueAsync(project.Id, issue);
+        // The dispatcher's auto-mark-done handler reconciles the epic
+        // on the terminal-issue event; wait for that, then verify the
+        // duplicate /done call is rejected.
+        await _client.WaitForStatusAsync<EpicDetailDto>(
+            $"/api/projects/{project.Id}/epics/{epic.Id}",
+            dto => dto.Status,
+            "done");
 
         using var response = await _client.PostAsync($"/api/projects/{project.Id}/epics/{epic.Id}/done", null);
 
@@ -154,6 +173,8 @@ public class EpicLifecycleSpecs
         Assert.Equal("done", after.Status);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task MarkDone_OnClosedEpic_ReturnsAlreadyTerminalEnvelope()
     {
@@ -176,6 +197,8 @@ public class EpicLifecycleSpecs
         Assert.Equal("done", envelope.Details.RequestedStatus);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task Close_RepeatedOnClosedEpic_ReturnsAlreadyTerminalEnvelope()
     {
@@ -197,15 +220,20 @@ public class EpicLifecycleSpecs
         Assert.Equal("closed", envelope.Details.RequestedStatus);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task Close_RepeatedOnDoneEpic_ReturnsAlreadyTerminalEnvelope()
     {
         var project = await CreateProjectAsync();
         var issue = await CreateIssueAsync(project.Id, "Delivered");
-        await CompleteIssueAsync(project.Id, issue);
         var epic = await CreateEpicAsync(project.Id, "Done then close");
         await LinkIssueAsync(project.Id, epic.Id, issue.Number);
-        await _client.PostOkAsync($"/api/projects/{project.Id}/epics/{epic.Id}/done", null);
+        await CompleteIssueAsync(project.Id, issue);
+        await _client.WaitForStatusAsync<EpicDetailDto>(
+            $"/api/projects/{project.Id}/epics/{epic.Id}",
+            dto => dto.Status,
+            "done");
 
         using var response = await _client.PostAsync($"/api/projects/{project.Id}/epics/{epic.Id}/close", null);
 
@@ -220,6 +248,8 @@ public class EpicLifecycleSpecs
         Assert.Equal("closed", envelope.Details.RequestedStatus);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task Close_SetsStatusToClosedAndRetainsEpicIssueLinks()
     {
@@ -248,6 +278,8 @@ public class EpicLifecycleSpecs
         Assert.False(detail.Progress.ReadyToMarkDone);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task Close_DoesNotChangeIssueStatusOrPrerequisitesOrWorkflow()
     {
@@ -278,6 +310,8 @@ public class EpicLifecycleSpecs
         Assert.Equal(dependent.Id, detail.LinkedIssues[0].Id);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task UnlinkIssue_ByIssueNumber_RemovesMembershipAndDoesNotSilentNoOp()
     {
@@ -302,6 +336,8 @@ public class EpicLifecycleSpecs
         Assert.Equal(second.Id, detail.LinkedIssues[0].Id);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task UnlinkIssue_ByInternalIssueId_RemainsSupported()
     {
@@ -319,6 +355,8 @@ public class EpicLifecycleSpecs
         Assert.Empty(detail.LinkedIssues);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task MarkDone_AllDelivered_EpicIsNotMarkedDoneAutomaticallyUntilRequested()
     {
@@ -337,6 +375,8 @@ public class EpicLifecycleSpecs
         Assert.Equal(1, detail.Progress.TotalIssueCount);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task EpicDetail_LinkedIssue_ExposesPrerequisiteNumbers()
     {
@@ -359,6 +399,8 @@ public class EpicLifecycleSpecs
         Assert.Empty(upstreamRow.PrerequisiteNumbers);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task EpicDetail_LinkedIssue_ExposesExternalPrerequisitesSummary()
     {
@@ -381,6 +423,8 @@ public class EpicLifecycleSpecs
         Assert.False(string.IsNullOrEmpty(ghost.Status));
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task EpicDetail_LinkedIssue_InternalPrerequisiteIsNotExposedAsExternal()
     {
@@ -401,6 +445,8 @@ public class EpicLifecycleSpecs
         Assert.Empty(dependentRow.ExternalPrerequisites);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task EpicDetail_ProgressOutputsAreUnchangedByPrerequisiteData()
     {
@@ -431,6 +477,8 @@ public class EpicLifecycleSpecs
         Assert.Empty(secondRow.ExternalPrerequisites);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task Reopen_OnClosedEpic_ReturnsIdleEpic()
     {
@@ -446,21 +494,28 @@ public class EpicLifecycleSpecs
         Assert.Equal("idle", detail.Status);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task Reopen_OnDoneEpic_ReturnsIdleEpic()
     {
         var project = await CreateProjectAsync();
         var issue = await CreateIssueAsync(project.Id, "Done issue");
-        await CompleteIssueAsync(project.Id, issue);
         var epic = await CreateEpicAsync(project.Id, "Done epic");
         await LinkIssueAsync(project.Id, epic.Id, issue.Number);
-        await _client.PostOkAsync($"/api/projects/{project.Id}/epics/{epic.Id}/done", null);
+        await CompleteIssueAsync(project.Id, issue);
+        await _client.WaitForStatusAsync<EpicDetailDto>(
+            $"/api/projects/{project.Id}/epics/{epic.Id}",
+            dto => dto.Status,
+            "done");
 
         var reopened = await _client.PostDataAsync<EpicDto>($"/api/projects/{project.Id}/epics/{epic.Id}/reopen", null);
 
         Assert.Equal("idle", reopened.Status);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task Reopen_OnIdleEpic_Returns409EpIcNotTerminal()
     {
@@ -482,6 +537,8 @@ public class EpicLifecycleSpecs
         Assert.Equal("idle", after.Status);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task Reopen_OnRunningEpic_Returns409EpIcNotTerminal()
     {
@@ -502,6 +559,8 @@ public class EpicLifecycleSpecs
         Assert.Equal("running", after.Status);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task Reopen_OnMissingEpic_Returns404()
     {
@@ -512,6 +571,8 @@ public class EpicLifecycleSpecs
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task Reopen_AcceptsIssueNumberOrInternalId()
     {
@@ -528,6 +589,8 @@ public class EpicLifecycleSpecs
         Assert.Equal("idle", byId.Status);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task Reopen_OnClosedEpic_WithLinkedIssues_PreservesMembershipsAndUnblocksAdvancement()
     {

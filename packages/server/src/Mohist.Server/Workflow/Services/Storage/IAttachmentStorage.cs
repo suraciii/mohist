@@ -27,9 +27,6 @@ public interface IAttachmentStorage
         DateTimeOffset recordedAt,
         CancellationToken cancellationToken = default);
 
-    /// <summary>Removes the recorded attachment content and metadata.</summary>
-    void Delete(string storagePath);
-
     /// <summary>Returns a read-only stream over recorded content.</summary>
     Stream OpenFileContent(string storagePath);
 

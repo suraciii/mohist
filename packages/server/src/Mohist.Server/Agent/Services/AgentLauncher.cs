@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Sessions.Domain;
@@ -24,14 +26,13 @@ namespace Mohist.Server.Agent.Services;
 /// </para>
 ///
 /// <para>
-/// The two <c>OpenAsync</c> + <c>SubmitAsync</c> calls are awaited
-/// sequentially because both the manual launch path and the subscription
-/// path require the session to be open (and addressable by label) before
-/// the AgentJobGrain dispatches. The dispatch submission itself is
-/// fire-and-forget at the grain side — <see cref="IAgentJobGrain.SubmitAsync"/>
-/// mints an AgentJob and enqueues dispatch without blocking on a runner —
-/// so this launcher adds no new blocking surface beyond what the manual
-/// HTTP path already had.
+/// <c>OpenAsync</c> and <c>SubmitAsync</c> are awaited sequentially because
+/// both the manual launch path and the subscription path require the
+/// session, including trigger correlation labels, to be durable before the
+/// AgentJobGrain dispatches. The dispatch submission itself is
+/// durable at the grain side — <see cref="IAgentJobGrain.SubmitAsync"/>
+/// persists the job input before performing one dispatch attempt without
+/// waiting for Agent execution — so a replay resumes the same job record.
 /// </para>
 /// </summary>
 public sealed class AgentLauncher : IAgentLauncher, IScopedService
@@ -66,13 +67,15 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
                 nameof(prompt));
         }
 
-        var sessionId = _sessions.NewSessionId();
+        var triggerIdentity = BuildTriggerIdentity(context.ProjectId, triggerLabels);
+        var sessionId = triggerIdentity is null
+            ? _sessions.NewSessionId()
+            : StableId("agent-session", triggerIdentity);
         var sessionContext = BuildContext(context, agent);
         var metadata = GenericAgentSessionMetadata.Metadata(sessionContext);
-        if (triggerLabels is not null)
-        {
-            metadata = WithTriggerLabels(metadata, triggerLabels);
-        }
+        var durableMetadata = triggerIdentity is null
+            ? metadata
+            : WithTriggerLabels(metadata, triggerLabels!);
 
         var sessionGrain = _sessions.GetGrain(sessionId);
         await sessionGrain.OpenAsync(
@@ -80,21 +83,26 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
                 RunnerId: string.Empty,
                 AgentRuntime: "opencode",
                 WorkDir: context.WorkspacePath,
-                Metadata: metadata));
+                Metadata: durableMetadata));
 
-        var jobKey = $"agent-job-launch-{Guid.NewGuid():N}";
+        var jobKey = triggerIdentity is null
+            ? $"agent-job-launch-{Guid.NewGuid():N}"
+            : StableId("agent-job-trigger", triggerIdentity);
         var jobGrain = _grains.GetGrain<IAgentJobGrain>(jobKey);
-        await jobGrain.SubmitAsync(
-            new AgentJobInput(
-                Prompt: trimmedPrompt,
-                Model: null,
-                WorkspacePath: context.WorkspacePath,
-                ProjectId: context.ProjectId,
-                Uses: "mohist/acp-agent",
-                AgentId: agent.Id,
-                AgentInstructions: string.IsNullOrWhiteSpace(agent.Instructions) ? null : agent.Instructions,
-                AgentConfig: agent.AgentConfig?.Clone(),
-                AgentSessionId: sessionId));
+        var jobInput = new AgentJobInput(
+            Prompt: trimmedPrompt,
+            Model: null,
+            WorkspacePath: context.WorkspacePath,
+            ProjectId: context.ProjectId,
+            Uses: "mohist/acp-agent",
+            AgentId: agent.Id,
+            AgentInstructions: string.IsNullOrWhiteSpace(agent.Instructions) ? null : agent.Instructions,
+            AgentConfig: agent.AgentConfig?.Clone(),
+            AgentSessionId: sessionId);
+        if (triggerIdentity is null)
+            await jobGrain.SubmitAsync(jobInput);
+        else
+            await jobGrain.EnsureSubmittedAsync(jobInput);
 
         return new AgentLaunchResult(
             SessionId: sessionId,
@@ -112,6 +120,32 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
             Repository: context.Repository,
             WorkspacePath: context.WorkspacePath,
             Title: context.Title);
+
+    private static string? BuildTriggerIdentity(
+        string projectId,
+        IReadOnlyDictionary<string, string>? triggerLabels)
+    {
+        if (triggerLabels is null || triggerLabels.Count == 0)
+            return null;
+
+        if (!triggerLabels.TryGetValue(GenericAgentSessionMetadata.TriggerEventId, out var eventId)
+            || string.IsNullOrWhiteSpace(eventId)
+            || !triggerLabels.TryGetValue(GenericAgentSessionMetadata.TriggerSubscriptionId, out var subscriptionId)
+            || string.IsNullOrWhiteSpace(subscriptionId))
+        {
+            throw new ArgumentException(
+                "Trigger labels must include non-empty event and subscription ids.",
+                nameof(triggerLabels));
+        }
+
+        return $"{projectId}\n{eventId}\n{subscriptionId}";
+    }
+
+    private static string StableId(string prefix, string identity)
+    {
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(identity));
+        return $"{prefix}-{Convert.ToHexString(hash.AsSpan(0, 16)).ToLowerInvariant()}";
+    }
 
     /// <summary>
     /// Returns a new <see cref="AgentSessionMetadata"/> carrying

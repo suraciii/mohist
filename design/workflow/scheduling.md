@@ -16,6 +16,7 @@ AgentJobGrain
 
 RunnerGrain
   presence: lastSeen — register establishes, successful poll renews
+  registration profile: durable last-known identity lets poll restore presence after activation loss
   slots: capacity config (control-plane owned)
   closeout: presence loss → report FAILED("runner-lost") for Running works
   holds NO work records
@@ -55,6 +56,7 @@ Running ⟹ reconciled within one poll: reported ∨ re-dispatched ∨ closed ou
 runner process                  DispatchService                      store/grains
     | POST poll {inFlight, awaitingAck}                                  |
     |------------------------------>|                                    |
+    |                               | ⓪ BeginPoll: capture slots + gate  |
     |                               | ① TouchPresence (poll=heartbeat)   |
     |                               | ② desired ← Running WHERE assigned=me
     |                               | ③ redelivery = desired − reported  |
@@ -70,6 +72,7 @@ runner process                  DispatchService                      store/grain
     |                               |      → AssignWorker → ClaimNext    |
     | { dispatches[] }              |                                    |
     |<------------------------------|                                    |
+    |                               | EndPoll: release gate              |
     | inFlight.add(dispatches)      |                                    |
     | execute concurrently           |                                    |
 ```
@@ -108,7 +111,7 @@ Pluggable policy point: default pure FIFO, can extend to `Priority DESC, ReadySi
 
 ## Capacity
 
-`slots` bounds concurrently executing workflow works, not held assignments. Gate evaluated at claim time from store (`|Running assigned to me| < slots`). Process enforces nothing.
+`slots` bounds all concurrently executing work owned by a runner. `BeginPoll` captures the current capacity while holding the runner's poll-admission gate through reconciliation; `UpdateAsync` waits for that gate, so a poll is linearized entirely before or after a capacity change. Agent admission cannot interleave with the same claim window. Process enforces nothing.
 
 ## Report
 
@@ -132,7 +135,7 @@ Report producers are indistinguishable to the owner: executing process (normal o
 | runner gone | RunnerGrain | poll-freshness expiry → offline → closeout: synthesize FAILED("runner-lost") for Running works |
 | work timeout | none | work reported in-flight is alive; only process judges slow |
 
-Register establishes initial presence. HTTP heartbeat = info-refresh channel only and MUST NOT refresh presence. Successful poll renews presence and restores an expired runner. Registry written only on state/info change, never per poll.
+Register establishes initial presence and durably records the last registration profile. HTTP heartbeat = info-refresh channel only and MUST NOT refresh presence. After activation loss, the first successful poll uses that durable profile to restore presence and the registry without requiring a separate heartbeat. Explicit unregister clears the durable profile. Registry written only on state/info change, never per poll.
 
 `runner-lost` is a failure cause, not a WorkflowRun status. The owner records the affected work as failed, the WorkflowRun enters its existing `Failed` state, and Issue projects that as `blocked`. There is no `Interrupted` WorkflowRun state.
 

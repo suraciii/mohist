@@ -14,12 +14,39 @@ namespace Mohist.Server.Infrastructure.Events;
 ///   <item><c>prefix.*</c> as a standalone alternative to match the prefix
 ///         itself and any <c>prefix.&lt;anything&gt;</c> sub-type.</item>
 /// </list>
-/// No other wildcard positions are supported; the bus <c>ValidateType</c>
-/// path rejects malformed patterns at registration time so this matcher
-/// can assume its input is well-formed.
+/// No other wildcard positions are supported; <see cref="ValidatePattern"/>
+/// rejects malformed patterns at registration time so this matcher can
+/// assume its input is well-formed.
 /// </summary>
 public static class CloudEventTypeMatcher
 {
+    public static void ValidatePattern(string pattern)
+    {
+        if (string.IsNullOrWhiteSpace(pattern))
+            throw new ArgumentException("Subscription type must not be empty.", nameof(pattern));
+
+        var alternatives = pattern.Split('|', StringSplitOptions.TrimEntries);
+        if (alternatives.Any(string.IsNullOrEmpty))
+            throw InvalidPattern(pattern);
+
+        foreach (var alternative in alternatives)
+        {
+            if (alternative == "*")
+                continue;
+            if (alternative.EndsWith(".*", StringComparison.Ordinal))
+            {
+                if (alternative.Length == 2
+                    || alternative.IndexOf('*') != alternative.Length - 1)
+                {
+                    throw InvalidPattern(pattern);
+                }
+                continue;
+            }
+            if (alternative.Contains('*'))
+                throw InvalidPattern(pattern);
+        }
+    }
+
     /// <summary>
     /// Returns <c>true</c> when <paramref name="type"/> is matched by the
     /// supplied pipe-separated <paramref name="pattern"/>. Empty / whitespace
@@ -45,4 +72,9 @@ public static class CloudEventTypeMatcher
         }
         return false;
     }
+
+    private static ArgumentException InvalidPattern(string pattern) =>
+        new(
+            $"Invalid subscription type '{pattern}': wildcards are only allowed as a standalone '*' or '.*' suffix.",
+            nameof(pattern));
 }

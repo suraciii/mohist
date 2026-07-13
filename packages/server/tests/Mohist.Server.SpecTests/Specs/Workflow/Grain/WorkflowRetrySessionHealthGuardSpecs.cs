@@ -39,6 +39,8 @@ public class WorkflowRetrySessionHealthGuardSpecs
         _client = fixture.Client;
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task TaskFails_SessionContextAbove90Percent_RetryReturnsSessionContextExhausted()
     {
@@ -98,6 +100,8 @@ public class WorkflowRetrySessionHealthGuardSpecs
         }
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task TaskFails_SessionContextAbove90Percent_RunScopedRetryReturnsSessionContextExhausted()
     {
@@ -127,6 +131,8 @@ public class WorkflowRetrySessionHealthGuardSpecs
         }
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task TaskFails_SessionContextInWarnBand_RetrySucceedsAndStatusClears()
     {
@@ -159,6 +165,8 @@ public class WorkflowRetrySessionHealthGuardSpecs
         }
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task TaskFails_NoContextData_RetrySucceeds()
     {
@@ -182,6 +190,8 @@ public class WorkflowRetrySessionHealthGuardSpecs
         }
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task TaskFails_SessionAtHealthyUsage_RetrySucceeds()
     {
@@ -204,6 +214,8 @@ public class WorkflowRetrySessionHealthGuardSpecs
         }
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task TaskFails_RetryBlockedByContext_AfterCompact_RetrySucceeds()
     {
@@ -263,7 +275,12 @@ public class WorkflowRetrySessionHealthGuardSpecs
     private async Task<(string ProjectId, int IssueNumber, string IssueId, string WorkflowRunId, string SessionName)> SeedProjectIssueWorkflowAsync()
     {
         var projectId = $"retry-guard-{Guid.NewGuid():N}";
-        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = projectId });
+        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new
+        {
+            name = projectId,
+            path = Directory.GetCurrentDirectory(),
+            baseBranch = "main",
+        });
 
         await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
 

@@ -434,8 +434,8 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
 
                     b.HasKey("Source", "Id");
 
-                    b.HasIndex("Source", "Id")
-                        .HasDatabaseName("IX_EpicEvents_Undelivered")
+                    b.HasIndex("Source", "Id", "DispatchedAt")
+                        .HasDatabaseName("IX_EpicEvents_Source_Id_DispatchedAt")
                         .HasFilter("\"DispatchedAt\" IS NULL");
 
                     b.HasIndex("Type", "Source", "Id");
@@ -492,8 +492,8 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
 
                     b.HasKey("Source", "Id");
 
-                    b.HasIndex("Source", "Id")
-                        .HasDatabaseName("IX_IssueEvents_Undelivered")
+                    b.HasIndex("Source", "Id", "DispatchedAt")
+                        .HasDatabaseName("IX_IssueEvents_Source_Id_DispatchedAt")
                         .HasFilter("\"DispatchedAt\" IS NULL");
 
                     b.HasIndex("Type", "Time")
@@ -553,8 +553,8 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
 
                     b.HasKey("Source", "Id");
 
-                    b.HasIndex("Source", "Id")
-                        .HasDatabaseName("IX_WorkflowRunEvents_Undelivered")
+                    b.HasIndex("Source", "Id", "DispatchedAt")
+                        .HasDatabaseName("IX_WorkflowRunEvents_Source_Id_DispatchedAt")
                         .HasFilter("\"DispatchedAt\" IS NULL");
 
                     b.HasIndex("Type", "Time")

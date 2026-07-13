@@ -1,10 +1,10 @@
+using System.Text.RegularExpressions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.SystemInfo;
 using Xunit;
 using EnvironmentAbstractions.TestHelpers;
-using static Mohist.Server.UnitTests.SystemSpecs.SystemUpdateServiceTestSupport;
 
 namespace Mohist.Server.UnitTests.SystemSpecs;
 
@@ -204,32 +204,42 @@ public class SystemUpdateRecoveryTests
     [Fact]
     public async Task StartAsync_AfterFileSystemStoreRecovery_FreshStartAsyncAcquiresLock()
     {
-        var files = new InMemorySystemUpdateStateFiles();
-        const string statePath = "/test/system-update.json";
-        var first = CreateFileSystemStore(files, statePath);
-        Assert.True(await first.TryAcquireLockAsync("stale-job"));
+        var statePath = Path.Combine(Path.GetTempPath(), $"mohist-recovery-{Guid.NewGuid():N}.json");
+        try
+        {
+            var first = CreateFileSystemStore(statePath);
+            Assert.True(await first.TryAcquireLockAsync("stale-job"));
             var staleUpdatedAt = ProcessStart.AddMinutes(-5);
             await first.SaveAsync(BuildJob("stale-job", "running", staleUpdatedAt));
 
-        var refreshed = CreateFileSystemStore(files, statePath);
-        Assert.True(files.Exists(statePath + ".lock"));
-        Assert.False(await refreshed.TryAcquireLockAsync("new-job"));
+            var refreshed = CreateFileSystemStore(statePath);
+            Assert.True(File.Exists(statePath + ".lock"));
+            Assert.False(await refreshed.TryAcquireLockAsync("new-job"));
 
-        var reconciler = BuildReconciler(refreshed, new FakeTimeProvider(staleUpdatedAt.AddMinutes(10)), staleUpdatedAt.AddMinutes(1));
-        await reconciler.StartAsync(CancellationToken.None);
+            var reconciler = BuildReconciler(refreshed, new FakeTimeProvider(staleUpdatedAt.AddMinutes(10)), staleUpdatedAt.AddMinutes(1));
+            await reconciler.StartAsync(CancellationToken.None);
 
-        Assert.False(files.Exists(statePath + ".lock"));
+            Assert.False(File.Exists(statePath + ".lock"));
 
-        Assert.True(await refreshed.TryAcquireLockAsync("new-job"));
+            Assert.True(await refreshed.TryAcquireLockAsync("new-job"));
+        }
+        finally
+        {
+            if (File.Exists(statePath))
+                File.Delete(statePath);
+            if (File.Exists(statePath + ".lock"))
+                File.Delete(statePath + ".lock");
+        }
     }
 
     [Fact]
     public async Task StartAsync_WhenInterruptedRecoveryWasAlreadySaved_RetriesStaleLockRelease()
     {
-        var files = new InMemorySystemUpdateStateFiles();
-        const string statePath = "/test/system-update.json";
-        var first = CreateFileSystemStore(files, statePath);
-        Assert.True(await first.TryAcquireLockAsync("stale-job"));
+        var statePath = Path.Combine(Path.GetTempPath(), $"mohist-recovery-{Guid.NewGuid():N}.json");
+        try
+        {
+            var first = CreateFileSystemStore(statePath);
+            Assert.True(await first.TryAcquireLockAsync("stale-job"));
             var staleUpdatedAt = ProcessStart.AddMinutes(-5);
             await first.SaveAsync(BuildJob(
                 "stale-job",
@@ -238,20 +248,57 @@ public class SystemUpdateRecoveryTests
                 completedAt: staleUpdatedAt,
                 reason: SystemUpdateRecoveryService.InterruptedByProcessRestartReason));
 
-        var refreshed = CreateFileSystemStore(files, statePath);
-        Assert.True(files.Exists(statePath + ".lock"));
-        Assert.False(await refreshed.TryAcquireLockAsync("new-job"));
+            var refreshed = CreateFileSystemStore(statePath);
+            Assert.True(File.Exists(statePath + ".lock"));
+            Assert.False(await refreshed.TryAcquireLockAsync("new-job"));
 
-        var reconciler = BuildReconciler(refreshed, new FakeTimeProvider(FixtureNow), ProcessStart);
-        await reconciler.StartAsync(CancellationToken.None);
+            var reconciler = BuildReconciler(refreshed, new FakeTimeProvider(FixtureNow), ProcessStart);
+            await reconciler.StartAsync(CancellationToken.None);
 
-        Assert.False(files.Exists(statePath + ".lock"));
+            Assert.False(File.Exists(statePath + ".lock"));
 
-        Assert.True(await refreshed.TryAcquireLockAsync("new-job"));
-        var latest = await refreshed.GetLatestAsync();
-        Assert.NotNull(latest);
-        Assert.Equal("failed", latest!.Status);
-        Assert.Equal(SystemUpdateRecoveryService.InterruptedByProcessRestartReason, latest.Reason);
+            Assert.True(await refreshed.TryAcquireLockAsync("new-job"));
+            var latest = await refreshed.GetLatestAsync();
+            Assert.NotNull(latest);
+            Assert.Equal("failed", latest!.Status);
+            Assert.Equal(SystemUpdateRecoveryService.InterruptedByProcessRestartReason, latest.Reason);
+        }
+        finally
+        {
+            if (File.Exists(statePath))
+                File.Delete(statePath);
+            if (File.Exists(statePath + ".lock"))
+                File.Delete(statePath + ".lock");
+        }
+    }
+
+    [Fact]
+    public void SourceAudit_ProcessStartTimeProviderDefaultReadsProcessInfoOnlyInProductionProvider()
+    {
+        var source = File.ReadAllText(ProcessStartTimeProviderSourcePath);
+
+        Assert.Contains("Process.GetCurrentProcess", source);
+        Assert.Contains("StartTime.ToUniversalTime", source);
+    }
+
+    [Fact]
+    public void SourceAudit_ReconcilerHasNoWallClockOrProcessInfoReads()
+    {
+        var source = File.ReadAllText(SourcePath);
+        var codeOnly = StripXmlDocComments(source);
+
+        Assert.DoesNotContain(nameof(DateTimeOffset) + ".UtcNow", codeOnly);
+        Assert.DoesNotContain(nameof(DateTime) + ".UtcNow", codeOnly);
+        Assert.DoesNotContain("Environment.TickCount", codeOnly);
+        Assert.DoesNotContain("GetCurrentProcess", codeOnly);
+        Assert.DoesNotContain("Process.StartTime", codeOnly);
+        Assert.DoesNotContain("Process.GetCurrentProcess", codeOnly);
+        Assert.DoesNotContain("SystemUpdateService", codeOnly);
+    }
+
+    private static string StripXmlDocComments(string source)
+    {
+        return Regex.Replace(source, @"<see\s+cref\s*=\s*""[^""]*""\s*/>", string.Empty);
     }
 
     private static SystemUpdateRecoveryService BuildReconciler(
@@ -290,6 +337,15 @@ public class SystemUpdateRecoveryTests
             time);
     }
 
+    private static FileSystemSystemUpdateStore CreateFileSystemStore(string statePath)
+    {
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Mohist:SystemUpdate:StatePath"] = statePath
+        }).Build();
+        return new FileSystemSystemUpdateStore(configuration);
+    }
+
     private static SystemUpdateJobState BuildJob(
         string jobId,
         string status,
@@ -314,6 +370,16 @@ public class SystemUpdateRecoveryTests
             updatedAt,
             completedAt);
     }
+
+    private static string SourcePath => Path.GetFullPath(Path.Combine(
+        AppContext.BaseDirectory,
+        "..", "..", "..", "..", "..",
+        "src", "Mohist.Server", "SystemInfo", "SystemUpdateRecoveryService.cs"));
+
+    private static string ProcessStartTimeProviderSourcePath => Path.GetFullPath(Path.Combine(
+        AppContext.BaseDirectory,
+        "..", "..", "..", "..", "..",
+        "src", "Mohist.Server", "SystemInfo", "ProcessStartTimeProvider.cs"));
 
     private sealed class FakeProcessStartTimeProvider : IProcessStartTimeProvider
     {

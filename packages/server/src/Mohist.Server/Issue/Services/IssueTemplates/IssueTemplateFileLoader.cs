@@ -1,4 +1,3 @@
-using Mohist.Server.Infrastructure;
 using Mohist.Server.Workflow.Services.Prompts;
 
 namespace Mohist.Server.Issue.Services.IssueTemplates;
@@ -7,9 +6,9 @@ internal sealed record BuiltinTemplateEntry(
     string Name,
     string Description,
     string FilePath,
-    Func<string> ReadContent)
+    Func<string>? ReadContent = null)
 {
-    public string LoadContent() => ReadContent();
+    public string LoadContent() => ReadContent?.Invoke() ?? File.ReadAllText(FilePath);
 }
 
 internal sealed class IssueTemplateFileLoader
@@ -21,6 +20,11 @@ internal sealed class IssueTemplateFileLoader
     private readonly Func<string, TextReader> _openText;
     private readonly Func<string, string> _readAllText;
 
+    public IssueTemplateFileLoader(string directory)
+        : this(directory, Directory.EnumerateFiles, File.OpenText, File.ReadAllText)
+    {
+    }
+
     internal IssueTemplateFileLoader(
         string directory,
         Func<string, string, IEnumerable<string>> enumerateFiles,
@@ -31,29 +35,6 @@ internal sealed class IssueTemplateFileLoader
         _enumerateFiles = enumerateFiles;
         _openText = openText;
         _readAllText = readAllText;
-    }
-
-    public static IssueTemplateFileLoader FromEmbeddedResources()
-    {
-        const string root = "embedded://mohist-issue-templates";
-        const string prefix = "Mohist.Server.IssueTemplates.";
-        var assembly = typeof(IssueTemplateFileLoader).Assembly;
-        var files = assembly.GetManifestResourceNames()
-            .Where(name => name.StartsWith(prefix, StringComparison.Ordinal)
-                && name.EndsWith(".md", StringComparison.Ordinal))
-            .ToDictionary(
-                name => $"{root}/{name[prefix.Length..]}",
-                name => AssemblyTextResources.Read(assembly, name),
-                StringComparer.Ordinal);
-
-        if (files.Count == 0)
-            throw new InvalidOperationException("No embedded Mohist issue templates were found.");
-
-        return new IssueTemplateFileLoader(
-            root,
-            (_, _) => files.Keys.OrderBy(path => path, StringComparer.Ordinal),
-            path => new StringReader(files[path]),
-            path => files[path]);
     }
 
     public Dictionary<string, BuiltinTemplateEntry> Discover()

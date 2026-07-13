@@ -11,6 +11,7 @@ public interface IAgentJobGrain : IGrainWithStringKey
     Task<string?> GetCurrentWorkIdAsync();
     Task AssignRunnerAsync(string runnerId, string workId);
     Task SubmitAsync(AgentJobInput input);
+    Task EnsureSubmittedAsync(AgentJobInput input);
     Task CheckTimeoutsAsync();
     Task<AgentJobTerminalResult> GetTerminalResultAsync();
     Task<AgentJobRuntimeSnapshot> GetRuntimeSnapshotAsync();
@@ -36,7 +37,8 @@ public sealed record AgentJobRuntimeSnapshot(
     [property: Id(1)] string? RunnerId,
     [property: Id(2)] string? CurrentWorkId,
     [property: Id(3)] string? FailureReason,
-    [property: Id(4)] int DispatchAttempts = 0);
+    [property: Id(4)] int DispatchAttempts = 0,
+    [property: Id(5)] bool RunnerAccepted = false);
 
 public enum AgentJobStatus
 {

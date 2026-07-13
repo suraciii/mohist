@@ -303,6 +303,101 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.ToTable("AgentSessionEvents", (string)null);
                 });
 
+            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Events.DeadLetterRow", b =>
+                {
+                    b.Property<long>("DeadLetterId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("AttemptCount")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Data")
+                        .IsRequired()
+                        .HasColumnType("JSON");
+
+                    b.Property<string>("DataContentType")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("DeadLetteredAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ErrorMessage")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ErrorStack")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("EventId")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ExtensionsJson")
+                        .IsRequired()
+                        .HasColumnType("JSON");
+
+                    b.Property<string>("FailingHandler")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("Id")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Origin")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("RedeliveryAttemptedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("ResolvedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Source")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SpecVersion")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Subject")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("Time")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Type")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("DeadLetterId");
+
+                    b.HasIndex("DeadLetteredAt");
+
+                    b.HasIndex("FailingHandler", "DeadLetteredAt");
+
+                    b.HasIndex("Source", "Id", "FailingHandler")
+                        .IsUnique();
+
+                    b.ToTable("DeadLetters", (string)null);
+                });
+
             modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Events.EpicEventRow", b =>
                 {
                     b.Property<string>("Source")
@@ -351,6 +446,10 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasColumnType("TEXT");
 
                     b.HasKey("Source", "Id");
+
+                    b.HasIndex("Source", "Id", "DispatchedAt")
+                        .HasDatabaseName("IX_EpicEvents_Source_Id_DispatchedAt")
+                        .HasFilter("\"DispatchedAt\" IS NULL");
 
                     b.HasIndex("Type", "Source", "Id");
 
@@ -406,6 +505,10 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
 
                     b.HasKey("Source", "Id");
 
+                    b.HasIndex("Source", "Id", "DispatchedAt")
+                        .HasDatabaseName("IX_IssueEvents_Source_Id_DispatchedAt")
+                        .HasFilter("\"DispatchedAt\" IS NULL");
+
                     b.HasIndex("Type", "Source", "Id");
 
                     b.ToTable("IssueEvents", (string)null);
@@ -459,6 +562,10 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasColumnType("TEXT");
 
                     b.HasKey("Source", "Id");
+
+                    b.HasIndex("Source", "Id", "DispatchedAt")
+                        .HasDatabaseName("IX_WorkflowRunEvents_Source_Id_DispatchedAt")
+                        .HasFilter("\"DispatchedAt\" IS NULL");
 
                     b.HasIndex("Type", "Source", "Id");
 
@@ -1563,10 +1670,10 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.HasIndex("Status", "AssignedWorkerId")
                         .HasDatabaseName("IX_WorkflowRuns_Status");
 
+                    b.HasIndex("MetadataProjectId", "AssignedWorkerId", "CreatedAt");
+
                     b.HasIndex("Status", "AssignedWorkerId", "ReadySince")
                         .HasDatabaseName("IX_WorkflowRuns_Status_ReadySince");
-
-                    b.HasIndex("MetadataProjectId", "AssignedWorkerId", "CreatedAt");
 
                     b.ToTable("WorkflowRuns");
                 });

@@ -17,9 +17,4 @@
     <ProjectReference Include="..\..\..\cli\Mohist.Cli\Mohist.Cli.csproj" />
   </ItemGroup>
 
-  <ItemGroup>
-    <AssemblyMetadata Include="MohistRepositoryMarker"
-                      Value="$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)../../../../Directory.Packages.props'))" />
-  </ItemGroup>
-
 </Project>

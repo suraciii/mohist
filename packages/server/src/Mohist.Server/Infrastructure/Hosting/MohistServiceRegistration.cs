@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Mohist.Server.Events.Grains;
 using Mohist.Server.Events.Hosting;
 using Mohist.Server.Events.Hub;
 using Mohist.Server.Infrastructure.Events;
@@ -80,6 +81,9 @@ public static class MohistServiceRegistration
         services.AddScoped<IAgentSessionTranscriptStore, AgentSessionTranscriptStore>();
         services.AddSingleton<Mohist.Server.Workflow.Services.Prompts.IPromptLoader, Mohist.Server.Workflow.Services.Prompts.FilePromptLoader>();
         services.AddSingleton<IEventStore, EventStore>();
+        services.TryAddSingleton<IDeadLetterStore, DeadLetterStore>();
+        services.AddSingleton<EventDispatcherService>();
+        services.Configure<EventDispatcherOptions>(configuration.GetSection(EventDispatcherOptions.SectionName));
         services.Configure<HermesNotificationOptions>(configuration.GetSection(HermesNotificationOptions.SectionName));
         services.AddSingleton<HermesIssueNotificationRenderer>();
         services.AddSingleton<IHermesIssueNotificationDispatcher, BackgroundHermesIssueNotificationDispatcher>();
@@ -90,19 +94,17 @@ public static class MohistServiceRegistration
         services.AddSingleton<ITranscriptEventPublisher, SignalRTranscriptEventPublisher>();
         services.AddSingleton<ITaskLogDeltaPublisher, SignalRTaskLogDeltaPublisher>();
         services.AddHostedService<AttachmentCleanupService>();
+        services.AddHostedService<DispatcherActivationService>();
         services.AddHostedService<EpicReconciliationService>();
         services.TryAddSingleton<IProcessStartTimeProvider, ProcessStartTimeProvider>();
         services.AddHostedService<SystemUpdateRecoveryService>();
         services.AddSingleton<IRuntimeBuildInfo>(sp => sp.GetRequiredService<RuntimeBuildInfo>());
         services.TryAddSingleton(TimeProvider.System);
-        services.AddSingleton<IWebContentProvider, FileSystemWebContentProvider>();
         services.AddSingleton<IFileSystem, PhysicalFileSystem>();
         services.AddSingleton<IEnvironmentVariableProvider>(SystemEnvironmentVariableProvider.Instance);
         services.AddSingleton<ILogPathResolver, LogPathResolver>();
-        services.AddSingleton<ILogFileStore, FileSystemLogFileStore>();
         services.AddSingleton<IGitSourceInspector, GitSourceInspector>();
         services.AddSingleton<IServiceStatusChecker, SystemdServiceStatusChecker>();
-        services.AddSingleton<IManagedAssetInspector>(FileSystemManagedAssetInspector.Instance);
         services.AddSingleton<ISystemUpdateStore, FileSystemSystemUpdateStore>();
         services.AddSingleton<ISystemUpdateCommandRunner, ProcessSystemUpdateCommandRunner>();
         services.AddHttpClient<ISystemReadinessProbe, HttpSystemReadinessProbe>(client =>
@@ -120,6 +122,7 @@ public static class MohistServiceRegistration
         services.AddScoped<IWorkflowArtifactBindService, WorkflowArtifactBindService>();
         services.AddScoped<IWorkflowArtifactQuerier, WorkflowArtifactQuerier>();
         services.Configure<AgentJobOptions>(configuration.GetSection(AgentJobOptions.SectionName));
+        services.TryAddSingleton<IAgentJobDispatchObserver>(NoopAgentJobDispatchObserver.Instance);
         services.Configure<WorkflowOptions>(configuration.GetSection(WorkflowOptions.SectionName));
         services.Configure<CleanupPolicyOptions>(configuration.GetSection(CleanupPolicyOptions.SectionName));
         services.Configure<Mohist.Server.Otel.OtelOptions>(configuration.GetSection(Mohist.Server.Otel.OtelOptions.SectionName));

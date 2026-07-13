@@ -10,9 +10,9 @@ namespace Mohist.Server.Events.Hosting;
 
 /// <summary>
 /// Safety-net sweep for the event-driven terminal-reconcile path. The
-/// in-memory CloudEvent bus used to signal <c>com.mohist.issue.completed</c>
-/// and <c>com.mohist.issue.cancelled</c> is at-most-once and swallows
-/// publish failures, so a missed event would leave a ready epic in
+/// durable CloudEvent dispatcher signals <c>com.mohist.issue.completed</c>
+/// and <c>com.mohist.issue.cancelled</c>, but a dead-lettered event can still
+/// leave a ready epic in
 /// <c>idle</c> or a <c>running</c> epic stuck waiting for the
 /// in-progress slot to clear. This service periodically walks
 /// candidate epics (idle + running) and re-invokes

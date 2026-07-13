@@ -11,7 +11,8 @@ using Orleans;
 namespace Mohist.Server.Runner.Services;
 
 /// <summary>
-/// Poll-based workflow dispatcher. Workflow runs remain the dispatch ledger.
+/// Poll-based workflow and Agent-job reconciler. Workflow runs remain their
+/// dispatch ledger; Agent jobs retain a stable snapshot in the Runner grain.
 /// </summary>
 public sealed class DispatchService : IScopedService
 {
@@ -35,10 +36,30 @@ public sealed class DispatchService : IScopedService
     public async Task<RunnerPollResponse> PollAsync(
         string runnerId,
         RunnerPollRequest req,
-        int slots,
         CancellationToken ct = default)
     {
         var runner = _grains.GetGrain<IRunnerGrain>(runnerId);
+        var admission = await runner.TryBeginPollAsync();
+        if (!admission.Admitted)
+            return new RunnerPollResponse([]);
+
+        try
+        {
+            return await PollCoreAsync(runner, runnerId, req, admission.Slots, ct);
+        }
+        finally
+        {
+            await runner.EndPollAsync();
+        }
+    }
+
+    private async Task<RunnerPollResponse> PollCoreAsync(
+        IRunnerGrain runner,
+        string runnerId,
+        RunnerPollRequest req,
+        int slots,
+        CancellationToken ct)
+    {
         var workerId = runnerId;
         await runner.TouchPresenceAsync();
         var info = await runner.GetInfoAsync();
@@ -47,14 +68,13 @@ public sealed class DispatchService : IScopedService
             return new RunnerPollResponse([]);
 
         var dispatches = new List<WorkDispatch>();
-
-        var agentJob = await runner.DequeueAssignedAgentJobAsync();
-        if (agentJob is not null)
-            dispatches.Add(agentJob);
-
         var reportedWorkKeys = ReportedWorkKeys(req);
+        var agentJobs = await runner.ReconcileAgentJobsAsync(reportedWorkKeys.ToList());
+        if (agentJobs.Dispatch is not null)
+            dispatches.Add(agentJobs.Dispatch);
+
         var activeWorkKeys = await AddMissingRedeliveriesAsync(runnerId, workerId, reportedWorkKeys, dispatches, ct);
-        var spare = slots - activeWorkKeys.Count;
+        var spare = slots - activeWorkKeys.Count - agentJobs.ActiveCount;
         if (spare <= 0)
             return new RunnerPollResponse(dispatches);
 

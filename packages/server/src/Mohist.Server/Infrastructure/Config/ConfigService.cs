@@ -13,7 +13,6 @@ public class ConfigService : ISingletonService
     private readonly IEnvironmentVariableProvider _environment;
     private readonly ILogger<ConfigService> _log;
     private readonly string _configPath;
-    private readonly IConfigFileStore _files;
 
     private readonly Dictionary<string, (string type, object? defaultValue)> _schema = new()
     {
@@ -31,21 +30,10 @@ public class ConfigService : ISingletonService
     };
 
     public ConfigService(IConfiguration configuration, IEnvironmentVariableProvider environment, ILogger<ConfigService> log, string? configPath = null)
-        : this(configuration, environment, log, configPath, PhysicalConfigFileStore.Instance)
-    {
-    }
-
-    internal ConfigService(
-        IConfiguration configuration,
-        IEnvironmentVariableProvider environment,
-        ILogger<ConfigService> log,
-        string? configPath,
-        IConfigFileStore files)
     {
         _configuration = configuration;
         _environment = environment;
         _log = log;
-        _files = files;
         _configPath = configPath ?? Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
             ".mohist",
@@ -246,12 +234,12 @@ public class ConfigService : ISingletonService
     /// </summary>
     private Dictionary<string, JsonNode?> ReadConfigFile()
     {
-        if (!_files.Exists(_configPath))
+        if (!File.Exists(_configPath))
             return new Dictionary<string, JsonNode?>();
 
         try
         {
-            var json = _files.ReadAllText(_configPath);
+            var json = File.ReadAllText(_configPath);
             var doc = JsonDocument.Parse(json, JsoncDocumentOptions);
             var result = new Dictionary<string, JsonNode?>();
             FlattenJson(doc.RootElement, "", result);
@@ -266,12 +254,14 @@ public class ConfigService : ISingletonService
 
     private async Task WriteConfigFileAsync(string key, string? value)
     {
-        _files.EnsureParentDirectory(_configPath);
+        var dir = Path.GetDirectoryName(_configPath);
+        if (!string.IsNullOrWhiteSpace(dir))
+            Directory.CreateDirectory(dir);
 
         JsonObject? root;
-        if (_files.Exists(_configPath))
+        if (File.Exists(_configPath))
         {
-            var json = await _files.ReadAllTextAsync(_configPath);
+            var json = await File.ReadAllTextAsync(_configPath);
             try
             {
                 root = JsonNode.Parse(json, documentOptions: JsoncDocumentOptions)?.AsObject();
@@ -305,7 +295,7 @@ public class ConfigService : ISingletonService
         SetNestedValue(root, path, nodeValue);
 
         var options = JSON.Indented;
-        await _files.WriteAllTextAsync(_configPath, root.ToJsonString(options));
+        await File.WriteAllTextAsync(_configPath, root.ToJsonString(options));
     }
 
     private static void SetNestedValue(JsonObject root, string[] path, JsonNode? value)

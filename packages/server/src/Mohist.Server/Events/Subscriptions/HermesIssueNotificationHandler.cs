@@ -57,7 +57,6 @@ public sealed class HermesIssueNotificationHandler : ICloudEventHandler
                 return Task.CompletedTask;
 
             ct.ThrowIfCancellationRequested();
-
             _dispatcher.Dispatch(backgroundCt => DeliverAsync(evt, notificationType, backgroundCt));
             return Task.CompletedTask;
         }
@@ -194,28 +193,18 @@ public sealed class HermesIssueNotificationHandler : ICloudEventHandler
 
     private async Task<DomainIssue?> ResolveIssueAsync(ResolvedIdentity resolved, IStateStore<DomainIssue> issueStore)
     {
-        try
-        {
-            var issue = await issueStore.LoadAsync(resolved.IssueId).ConfigureAwait(false);
-            if (issue is null)
-                return null;
+        var issue = await issueStore.LoadAsync(resolved.IssueId).ConfigureAwait(false);
+        if (issue is null)
+            return null;
 
-            if (!string.Equals(issue.ProjectId, resolved.ProjectId, StringComparison.Ordinal)
-                || issue.Number != resolved.IssueNumber
-                || string.IsNullOrWhiteSpace(issue.Title))
-            {
-                return null;
-            }
-
-            return issue;
-        }
-        catch (Exception ex)
+        if (!string.Equals(issue.ProjectId, resolved.ProjectId, StringComparison.Ordinal)
+            || issue.Number != resolved.IssueNumber
+            || string.IsNullOrWhiteSpace(issue.Title))
         {
-            _log.LogDebug(ex,
-                "Hermes notification skipped: failed to load issue {IssueId}",
-                resolved.IssueId);
             return null;
         }
+
+        return issue;
     }
 
     private static T? DeserializeData<T>(CloudEvent evt) where T : class =>

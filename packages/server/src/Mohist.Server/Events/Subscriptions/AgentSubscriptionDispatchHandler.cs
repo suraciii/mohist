@@ -42,7 +42,7 @@ namespace Mohist.Server.Events.Subscriptions;
 /// and <see cref="IAgentLauncher"/> each see fresh per-event state.
 /// </para>
 /// <para>
-/// <b>Fire-and-forget.</b> <see cref="IAgentLauncher.LaunchAsync"/>
+/// <b>Launch boundary.</b> <see cref="IAgentLauncher.LaunchAsync"/>
 /// awaits the AgentJobGrain's mint + enqueue but does not block on a
 /// runner response, mirroring the manual HTTP launch path's behavior
 /// (issue-391 T-001). The dispatch call therefore only blocks for grain
@@ -86,10 +86,6 @@ public sealed class AgentSubscriptionDispatchHandler : ICloudEventHandler
         }
         catch (Exception ex)
         {
-            // Mirror the InboxProjectionHandler pattern: log and swallow
-            // so the source-of-truth events stay durable in the event
-            // store; a future replay would re-create the missed Agent
-            // launch opportunity. The dispatch is best-effort by design.
             _log.LogWarning(ex,
                 "Subscription dispatch failed for event {EventType} {EventId}",
                 evt.Type, evt.Id);

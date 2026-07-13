@@ -17,8 +17,7 @@ namespace Mohist.Server.SpecTests.Specs.SystemSpecs;
 
 public class ConfigRoutesSpecs : IAsyncLifetime
 {
-    private const string ConfigPath = "/test/config-routes.jsonc";
-    private readonly InMemoryConfigFileStore _files = new();
+    private readonly string _configPath = Path.Combine(Path.GetTempPath(), $"mohist-config-routes-{Guid.NewGuid():N}.jsonc");
     private WebApplication _app = null!;
     private HttpClient _client = null!;
 
@@ -39,8 +38,7 @@ public class ConfigRoutesSpecs : IAsyncLifetime
             sp.GetRequiredService<IConfiguration>(),
             sp.GetRequiredService<IEnvironmentVariableProvider>(),
             sp.GetRequiredService<ILogger<ConfigService>>(),
-            ConfigPath,
-            _files));
+            _configPath));
 
         _app = builder.Build();
         _app.MapConfigRoutes();
@@ -56,8 +54,12 @@ public class ConfigRoutesSpecs : IAsyncLifetime
             await _app.StopAsync();
             await _app.DisposeAsync();
         }
+        if (File.Exists(_configPath))
+            File.Delete(_configPath);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task GetConfig_ExposesLogLevelAndRuntimeSchedulingKeys()
     {
@@ -77,6 +79,8 @@ public class ConfigRoutesSpecs : IAsyncLifetime
         Assert.DoesNotContain(data.EnumerateObject(), p => LooksLikeSecret(p.Name));
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Theory]
     [InlineData("DEBUG")]
     [InlineData("INFO")]
@@ -92,6 +96,8 @@ public class ConfigRoutesSpecs : IAsyncLifetime
         Assert.Equal(level, read.Data.GetProperty("logLevel").GetString());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Theory]
     [InlineData("debug")]
     [InlineData("VERBOSE")]
@@ -116,6 +122,8 @@ public class ConfigRoutesSpecs : IAsyncLifetime
         Assert.Equal("WARN", read!.Data.GetProperty("logLevel").GetString());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Theory]
     [InlineData("maxConcurrentAgents", 7)]
     [InlineData("agentTimeout", 900)]
@@ -132,6 +140,8 @@ public class ConfigRoutesSpecs : IAsyncLifetime
         Assert.Equal(value, read!.Data.GetProperty(key).GetInt32());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task PutConfig_RejectsUnknownKey()
     {
@@ -145,6 +155,8 @@ public class ConfigRoutesSpecs : IAsyncLifetime
         Assert.Contains("Unknown", envelope.Error, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task PutConfigRuntimeKey_RejectsNonNumberValue()
     {
@@ -152,6 +164,8 @@ public class ConfigRoutesSpecs : IAsyncLifetime
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task PutConfig_MissingValue_ReturnsBadRequest()
     {

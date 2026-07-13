@@ -3,8 +3,10 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
+using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Infrastructure.Orleans;
@@ -26,6 +28,8 @@ public class AttachmentApiSpecs
         _fixture = fixture;
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task UploadBindServeAndRemove_IssueAttachmentLifecycle()
     {
@@ -72,6 +76,8 @@ public class AttachmentApiSpecs
         }
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task CommentAttachment_ServesSvgAsDownloadWithOriginalFilename()
     {
@@ -92,6 +98,8 @@ public class AttachmentApiSpecs
         Assert.Equal("image/svg+xml", response.Content.Headers.ContentType?.MediaType);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task UploadAndBind_RejectSizeAndCountLimit()
     {
@@ -125,6 +133,8 @@ public class AttachmentApiSpecs
         Assert.False(issue.TryGetProperty("body", out _));
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task RejectedCommentAttachmentBind_DoesNotCreateComment()
     {
@@ -140,6 +150,8 @@ public class AttachmentApiSpecs
         Assert.Empty(issue.GetProperty("comments").EnumerateArray());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task Attachment_IsScopedToProjectAndPersistsInDatabase()
     {
@@ -166,6 +178,8 @@ public class AttachmentApiSpecs
         Assert.False(string.IsNullOrWhiteSpace(persisted.StoragePath));
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task CreateIssue_BindsPendingAttachments()
     {
@@ -183,6 +197,82 @@ public class AttachmentApiSpecs
         Assert.Equal("issue", row.OwnerKind);
         Assert.Equal(issue.GetProperty("id").GetString(), row.OwnerId);
         Assert.Null(row.ExpiresAt);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
+    [Fact]
+    public async Task UploadAsync_RejectsStreamThatExceedsDeclaredSizeLimit()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"mohist-attachment-limit-{Guid.NewGuid():N}");
+        try
+        {
+            await using var scope = _fixture.Services.CreateAsyncScope();
+            var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<MohistDbContext>>();
+            var storage = new FileSystemAttachmentStorage(root, NullLogger<FileSystemAttachmentStorage>.Instance);
+            var service = new AttachmentService(dbFactory, storage, new AttachmentStorageOptions { MaxFileBytes = 4 }, TimeProvider.System);
+
+            await Assert.ThrowsAsync<AttachmentLimitException>(() => service.UploadAsync(
+                "proj_limit",
+                new TestFormFile("too-big.txt", "text/plain", declaredLength: 1, payload: "12345"u8.ToArray())));
+
+            await using var db = await dbFactory.CreateDbContextAsync();
+            Assert.False(await db.Attachments.AnyAsync(a => a.ProjectId == "proj_limit"));
+            Assert.Empty(Directory.EnumerateFileSystemEntries(root));
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
+    [Fact]
+    public async Task CleanupExpiredPending_RemovesRowsAndStoredContent()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"mohist-attachment-cleanup-{Guid.NewGuid():N}");
+        try
+        {
+            await using var scope = _fixture.Services.CreateAsyncScope();
+            var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<MohistDbContext>>();
+            var storage = new FileSystemAttachmentStorage(root, NullLogger<FileSystemAttachmentStorage>.Instance);
+            var service = new AttachmentService(dbFactory, storage, new AttachmentStorageOptions(), TimeProvider.System);
+            var storagePath = storage.GenerateStoragePath("proj_cleanup", "att_cleanup");
+            await storage.WriteFileAsync(storagePath, new MemoryStream("old"u8.ToArray()), new AttachmentFileWrite
+            {
+                OriginalFileName = "old.txt",
+                ContentType = "text/plain",
+                Size = 3,
+            }, DateTimeOffset.UtcNow);
+
+            await using (var db = await dbFactory.CreateDbContextAsync())
+            {
+                db.Attachments.Add(new AttachmentRow
+                {
+                    Id = "att_cleanup",
+                    ProjectId = "proj_cleanup",
+                    OriginalFileName = "old.txt",
+                    ContentType = "text/plain",
+                    Size = 3,
+                    StoragePath = storagePath,
+                    CreatedAt = DateTimeOffset.UtcNow.AddDays(-2),
+                    ExpiresAt = DateTimeOffset.UtcNow.AddDays(-1),
+                });
+                await db.SaveChangesAsync();
+            }
+
+            var removed = await service.CleanupExpiredPendingAsync();
+
+            Assert.Equal(1, removed);
+            await using var verify = await dbFactory.CreateDbContextAsync();
+            Assert.False(await verify.Attachments.AnyAsync(a => a.Id == "att_cleanup"));
+            Assert.False(File.Exists(storage.ResolveAbsolutePath(storagePath)));
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
     }
 
     private static MultipartFormDataContent Multipart(string fileName, string contentType, byte[] payload)
@@ -232,4 +322,26 @@ public class AttachmentApiSpecs
         long Size,
         string? ExpiresAt);
 
+    private sealed class TestFormFile : IFormFile
+    {
+        private readonly byte[] _payload;
+
+        public TestFormFile(string fileName, string contentType, long declaredLength, byte[] payload)
+        {
+            FileName = fileName;
+            ContentType = contentType;
+            Length = declaredLength;
+            _payload = payload;
+        }
+
+        public string ContentType { get; }
+        public string ContentDisposition { get; set; } = string.Empty;
+        public IHeaderDictionary Headers { get; set; } = new HeaderDictionary();
+        public long Length { get; }
+        public string Name => "file";
+        public string FileName { get; }
+        public void CopyTo(Stream target) => OpenReadStream().CopyTo(target);
+        public Task CopyToAsync(Stream target, CancellationToken cancellationToken = default) => OpenReadStream().CopyToAsync(target, cancellationToken);
+        public Stream OpenReadStream() => new MemoryStream(_payload, writable: false);
+    }
 }

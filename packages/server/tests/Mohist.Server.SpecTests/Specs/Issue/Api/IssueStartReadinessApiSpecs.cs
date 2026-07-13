@@ -11,7 +11,7 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Issue.Api;
 
-[Collection("IntegrationIssueLifecycle")]
+[Collection("IntegrationIssue2")]
 public class IssueStartReadinessApiSpecs
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
@@ -28,6 +28,8 @@ public class IssueStartReadinessApiSpecs
         _grains = fixture.Grains;
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task CreateIssue_DefaultsToDraft_WhenIsDraftOmitted()
     {
@@ -46,6 +48,8 @@ public class IssueStartReadinessApiSpecs
         Assert.Equal("draft", payload.Blocker!.Kind);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task CreateIssue_ExplicitReady_IsDraftFalse()
     {
@@ -63,6 +67,8 @@ public class IssueStartReadinessApiSpecs
         Assert.Null(payload.Blocker);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetIssue_OmitsStartEligibilityAndWaitingForDelivery_WhenReady()
     {
@@ -81,6 +87,8 @@ public class IssueStartReadinessApiSpecs
         Assert.Null(payload.Blocker);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task ListIssues_IncludesIsDraftCanStartBlocker_AndOmitsLegacyFields()
     {
@@ -106,6 +114,8 @@ public class IssueStartReadinessApiSpecs
         Assert.Null(ready.Blocker);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task StartIssue_OnDraftIssue_ReturnsDraftBlocker()
     {
@@ -126,6 +136,8 @@ public class IssueStartReadinessApiSpecs
         Assert.Equal("draft", blocker.GetProperty("kind").GetString());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task StartIssue_OnReadyIssueWithUndeliveredPrerequisite_ReturnsWaitingForBlocker()
     {
@@ -154,6 +166,8 @@ public class IssueStartReadinessApiSpecs
         Assert.Equal(prereq.Number, blocker.GetProperty("issue").GetProperty("number").GetInt32());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task StartIssue_OnReadyUnblockedIssue_StartsAndEnqueuesPipeline()
     {
@@ -169,6 +183,8 @@ public class IssueStartReadinessApiSpecs
         Assert.False(detail.IsDraft);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task UpdateIssue_IsDraftFalse_MarksReadyAndExposesBlocker()
     {
@@ -187,6 +203,8 @@ public class IssueStartReadinessApiSpecs
         Assert.Null(detail.Blocker);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task WaitingIssue_RemainsNormalBacklogWork_NotBlockedStatus()
     {
@@ -214,6 +232,8 @@ public class IssueStartReadinessApiSpecs
         Assert.Contains(waitingIssue.Prerequisites, p => p.Number == prereq.Number && !p.Completed);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task CircularPrerequisiteDeclaration_StillRejects_AndReturnsReadinessFields()
     {
@@ -234,6 +254,8 @@ public class IssueStartReadinessApiSpecs
         Assert.Empty(detail.Prerequisites);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task IssueStartReadiness_GrainReportsBlocker_ForDraftAndWaitingFor()
     {

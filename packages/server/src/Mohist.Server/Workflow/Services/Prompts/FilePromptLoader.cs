@@ -1,6 +1,5 @@
 using Mohist.Server.Workflow.Domain.Prompts;
 using Mohist.Server.Workflow.Services.Prompts;
-using Mohist.Server.Infrastructure;
 
 namespace Mohist.Server.Workflow.Services.Prompts;
 
@@ -12,22 +11,8 @@ public sealed class FilePromptLoader : IPromptLoader
 
     public FilePromptLoader(string? promptsDirectory = null, IPromptFileStore? files = null)
     {
-        if (files is not null)
-        {
-            _promptsDirectory = promptsDirectory ?? ResolveDefaultPromptsDirectory();
-            _files = files;
-            return;
-        }
-
-        if (!string.IsNullOrWhiteSpace(promptsDirectory))
-        {
-            _promptsDirectory = promptsDirectory;
-            _files = RealPromptFileStore.Instance;
-            return;
-        }
-
-        _promptsDirectory = EmbeddedPromptFileStore.Root;
-        _files = EmbeddedPromptFileStore.Instance;
+        _promptsDirectory = promptsDirectory ?? ResolveDefaultPromptsDirectory();
+        _files = files ?? RealPromptFileStore.Instance;
     }
 
     public Dictionary<string, string> LoadAll()
@@ -123,36 +108,4 @@ internal sealed class RealPromptFileStore : IPromptFileStore
     public IEnumerable<string> EnumeratePromptFiles(string path) => Directory.EnumerateFiles(path, "*.prompt");
 
     public string ReadAllText(string path) => File.ReadAllText(path);
-}
-
-internal sealed class EmbeddedPromptFileStore : IPromptFileStore
-{
-    public const string Root = "embedded://mohist-prompts";
-    private const string ResourcePrefix = "Mohist.Server.Prompts.";
-
-    public static readonly EmbeddedPromptFileStore Instance = new();
-
-    private readonly IReadOnlyDictionary<string, string> _files;
-
-    private EmbeddedPromptFileStore()
-    {
-        var assembly = typeof(FilePromptLoader).Assembly;
-        _files = assembly.GetManifestResourceNames()
-            .Where(name => name.StartsWith(ResourcePrefix, StringComparison.Ordinal)
-                && name.EndsWith(".prompt", StringComparison.Ordinal))
-            .ToDictionary(
-                name => $"{Root}/{name[ResourcePrefix.Length..]}",
-                name => AssemblyTextResources.Read(assembly, name),
-                StringComparer.Ordinal);
-
-        if (_files.Count == 0)
-            throw new InvalidOperationException("No embedded Mohist prompt resources were found.");
-    }
-
-    public bool DirectoryExists(string path) => string.Equals(path, Root, StringComparison.Ordinal);
-
-    public IEnumerable<string> EnumeratePromptFiles(string path) =>
-        DirectoryExists(path) ? _files.Keys.OrderBy(name => name, StringComparer.Ordinal) : [];
-
-    public string ReadAllText(string path) => _files[path];
 }

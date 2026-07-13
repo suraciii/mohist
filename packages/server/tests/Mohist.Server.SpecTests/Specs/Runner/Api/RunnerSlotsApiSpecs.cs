@@ -42,6 +42,8 @@ public class RunnerSlotsApiSpecs
         return row!.Slots;
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task PatchSlots_PositiveValue_PersistsAndReturnsUpdatedDefinition()
     {
@@ -72,6 +74,8 @@ public class RunnerSlotsApiSpecs
         }
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task PatchSlots_NextDispatchCycleHonorsNewCapacity()
     {
@@ -98,6 +102,8 @@ public class RunnerSlotsApiSpecs
         }
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task PatchSlots_Zero_Returns400AndPersistsValueUnchanged()
     {
@@ -126,6 +132,8 @@ public class RunnerSlotsApiSpecs
         }
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task PatchSlots_Negative_Returns400AndPersistsValueUnchanged()
     {
@@ -147,6 +155,8 @@ public class RunnerSlotsApiSpecs
         }
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task PatchSlots_OverwriteExistingValue_ResponseReflectsNewValue()
     {

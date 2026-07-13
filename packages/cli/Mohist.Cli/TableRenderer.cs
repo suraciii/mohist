@@ -159,6 +159,12 @@ internal sealed partial class TableRenderer
             case MohistCliApi.TableShape.WorkflowRunEvents:
                 RenderWorkflowRunEvents(data);
                 break;
+            case MohistCliApi.TableShape.DeadLetterList:
+                RenderDeadLetterList(data);
+                break;
+            case MohistCliApi.TableShape.DeadLetterRedelivery:
+                RenderDeadLetterRedelivery(data);
+                break;
             default:
                 _out.WriteLine(data?.ToJsonString() ?? "");
                 break;

@@ -18,11 +18,9 @@ namespace Mohist.Server.Events.Subscriptions;
 /// resolves the workflow run id from the CloudEvent source URI
 /// (<c>/mohist/workflow-runs/{id}</c>).
 ///
-/// The grain uses <c>[Reentrant]</c> so when the future dispatcher
-/// (issue-361 step 3) picks up the event row and re-enters the grain
-/// from the workflow-grain call stack, it does not deadlock. While the
-/// dispatcher is unimplemented the handler stays dormant — the rows
-/// are durable but the in-process notification is suspended.
+/// The grain uses <c>[Reentrant]</c> so the durable dispatcher can re-enter
+/// the grain without deadlocking when delivery overlaps the originating
+/// workflow call stack.
 /// </summary>
 [Subscription(Type = "com.mohist.workflow.stage.completed|com.mohist.workflow.stage.failed")]
 public sealed class WorkflowStageLockReleaseHandler : ICloudEventHandler
@@ -42,44 +40,27 @@ public sealed class WorkflowStageLockReleaseHandler : ICloudEventHandler
 
     public async Task HandleAsync(CloudEvent evt, CancellationToken ct)
     {
-        try
+        var workflowRunId = ExtractWorkflowRunId(evt.Source.ToString());
+        if (string.IsNullOrEmpty(workflowRunId))
         {
-            var workflowRunId = ExtractWorkflowRunId(evt.Source.ToString());
-            if (string.IsNullOrEmpty(workflowRunId))
-            {
-                _log.LogDebug(
-                    "Stage lock release skipped: event {EventId} source {Source} does not carry a workflow run id",
-                    evt.Id, evt.Source);
-                return;
-            }
-
-            var stage = ExtractStage(evt.Data);
-            if (string.IsNullOrEmpty(stage))
-            {
-                _log.LogDebug(
-                    "Stage lock release skipped: event {EventId} for workflow {WorkflowRunId} has no stage",
-                    evt.Id, workflowRunId);
-                return;
-            }
-
-            var reason = evt.Type == EventCatalog.ReverseDns.StageFailed ? "failed" : "completed";
-            var grain = _grains.GetGrain<IWorkflowGrain>(workflowRunId);
-            await grain.ReleaseStageLocksAsync(stage, reason).ConfigureAwait(false);
+            _log.LogDebug(
+                "Stage lock release skipped: event {EventId} source {Source} does not carry a workflow run id",
+                evt.Id, evt.Source);
+            return;
         }
-        catch (Exception ex)
+
+        var stage = ExtractStage(evt.Data);
+        if (string.IsNullOrEmpty(stage))
         {
-            // Failed handler dispatches are logged but never propagated. The
-            // publish path no longer invokes handlers (it only appends an
-            // event row); when a dispatcher drives this handler, its
-            // exceptions are isolated here. Lock-grain state is authoritative:
-            // a missed release only stalls the next workflow run until the
-            // lock holder times out or is stopped, and pull-scheduling
-            // rediscovery still picks up newly dispatched runs from persisted
-            // state.
-            _log.LogWarning(ex,
-                "Stage lock release failed for event {EventType} {EventId}",
-                evt.Type, evt.Id);
+            _log.LogDebug(
+                "Stage lock release skipped: event {EventId} for workflow {WorkflowRunId} has no stage",
+                evt.Id, workflowRunId);
+            return;
         }
+
+        var reason = evt.Type == EventCatalog.ReverseDns.StageFailed ? "failed" : "completed";
+        var grain = _grains.GetGrain<IWorkflowGrain>(workflowRunId);
+        await grain.ReleaseStageLocksAsync(stage, reason).ConfigureAwait(false);
     }
 
     internal static string ExtractWorkflowRunId(string source)

@@ -1,4 +1,3 @@
-using System.Linq.Expressions;
 using System.Reflection;
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
@@ -16,11 +15,15 @@ public static class CloudEventBusServiceCollectionExtensions
 
     public static IServiceCollection AddCloudEventHandlersFromAssembly(
         this IServiceCollection services, Assembly assembly)
+        => services.AddCloudEventHandlers(assembly.GetTypes());
+
+    internal static IServiceCollection AddCloudEventHandlers(
+        this IServiceCollection services,
+        IEnumerable<Type> discoveredTypes)
     {
-        var handlerTypes = assembly.GetTypes()
-            .Where(t => typeof(ICloudEventHandler<>).IsAssignableFrom(t) ||
-                         typeof(ICloudEventHandler).IsAssignableFrom(t))
+        var handlerTypes = discoveredTypes
             .Where(t => !t.IsAbstract && !t.IsInterface)
+            .Where(t => t.GetInterfaces().Any(IsCloudEventHandlerInterface))
             .ToList();
 
         foreach (var handlerType in handlerTypes)
@@ -28,6 +31,7 @@ public static class CloudEventBusServiceCollectionExtensions
             var attr = handlerType.GetCustomAttribute<SubscriptionAttribute>()
                 ?? throw new InvalidOperationException(
                     $"Handler {handlerType.FullName} must have [{nameof(SubscriptionAttribute)}] attribute");
+            CloudEventTypeMatcher.ValidatePattern(attr.Type);
 
             services.AddSingleton(handlerType);
 
@@ -65,6 +69,10 @@ public static class CloudEventBusServiceCollectionExtensions
         return services;
     }
 
+    private static bool IsCloudEventHandlerInterface(Type i) =>
+        i == typeof(ICloudEventHandler)
+        || (i.IsGenericType && i.GetGenericTypeDefinition() == typeof(ICloudEventHandler<>));
+
     private static DispatchDelegate MakeDelegate(object handler)
     {
         var handlerType = handler.GetType();
@@ -83,23 +91,13 @@ public static class CloudEventBusServiceCollectionExtensions
             return (DispatchDelegate)genericMethod.Invoke(null, null)!;
         }
 
-        var handleMethod = handlerType.GetMethod(
-            "HandleAsync",
-            new[] { typeof(CloudEvent), typeof(CancellationToken) })
-            ?? throw new InvalidOperationException(
-                $"Dynamic handler {handlerType.Name} must have HandleAsync(CloudEvent, CancellationToken) method");
-
-        var handlerParam = Expression.Parameter(typeof(object), "handler");
-        var evtParam = Expression.Parameter(typeof(CloudEvent), "evt");
-        var ctParam = Expression.Parameter(typeof(CancellationToken), "ct");
-
-        var call = Expression.Call(
-            Expression.Convert(handlerParam, handlerType),
-            handleMethod,
-            evtParam, ctParam);
-
-        return Expression.Lambda<DispatchDelegate>(
-            call, handlerParam, evtParam, ctParam).Compile();
+        return (instance, evt, ct) =>
+        {
+            var typedHandler = (ICloudEventHandler)instance;
+            return typedHandler.Filter(evt)
+                ? typedHandler.HandleAsync(evt, ct)
+                : Task.CompletedTask;
+        };
     }
 
     private static DispatchDelegate MakeTypedDelegate<TData>() where TData : class

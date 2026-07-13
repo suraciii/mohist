@@ -26,6 +26,8 @@ public class AgentUsageTimeseriesApiSpecs
 
     private DateTime Today => _fixture.TimeProvider.GetUtcNow().UtcDateTime.Date;
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetUsage_ReturnsSevenDailyBucketsWithCorrectStructure()
     {
@@ -43,6 +45,8 @@ public class AgentUsageTimeseriesApiSpecs
         Assert.Equal(response.Buckets, response.Buckets.OrderBy(b => b.BucketStart).ToList());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetUsage_BucketTotalsSumAdditiveFields()
     {
@@ -63,6 +67,8 @@ public class AgentUsageTimeseriesApiSpecs
         Assert.Equal(0.07, bucket.CostAmount);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetUsage_CompletedSessionsAreIncluded()
     {
@@ -81,6 +87,8 @@ public class AgentUsageTimeseriesApiSpecs
         Assert.Equal(700, bucket.TotalTokens);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetUsage_EmptyBucketHasZeroTotals()
     {
@@ -100,6 +108,8 @@ public class AgentUsageTimeseriesApiSpecs
         Assert.Equal(0, emptyBucket.CostAmount);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetUsage_SessionWithoutUsageIsSkipped()
     {
@@ -116,6 +126,8 @@ public class AgentUsageTimeseriesApiSpecs
         Assert.Equal(0, bucket.CostAmount);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetUsage_CostCurrencyIsEchoed()
     {
@@ -131,6 +143,8 @@ public class AgentUsageTimeseriesApiSpecs
         Assert.Equal("EUR", bucket.CostCurrency);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetUsage_UnknownProjectReturnsNotFound()
     {
@@ -138,6 +152,8 @@ public class AgentUsageTimeseriesApiSpecs
         Assert.Equal(System.Net.HttpStatusCode.NotFound, response.StatusCode);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetUsage_SessionsOutsideRangeAreNotIncluded()
     {
@@ -152,6 +168,8 @@ public class AgentUsageTimeseriesApiSpecs
         Assert.Equal(0, totalInput);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetUsage_RangeToBoundaryIsExclusive()
     {
@@ -168,6 +186,8 @@ public class AgentUsageTimeseriesApiSpecs
         Assert.Equal(0, totalInput);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetUsage_CumulativeSeriesHasSameLengthAsBuckets()
     {
@@ -182,6 +202,8 @@ public class AgentUsageTimeseriesApiSpecs
         Assert.Equal(response.Buckets.Count, response.CumulativeCostPerShip.Count);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetUsage_CumulativeSeriesComputesPrefixSums()
     {
@@ -234,6 +256,8 @@ public class AgentUsageTimeseriesApiSpecs
         Assert.Equal(0.07, response.CumulativeCostPerShip[6].CumulativeCost);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetUsage_CumulativeShippedCountsIssuesOnOrBeforeDayEnd()
     {
@@ -275,6 +299,8 @@ public class AgentUsageTimeseriesApiSpecs
         Assert.Equal(2, response.CumulativeCostPerShip[6].CumulativeShippedCount);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetUsage_CumulativeCostPerShipIsNullWhenNoShipped()
     {
@@ -295,6 +321,8 @@ public class AgentUsageTimeseriesApiSpecs
         }
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetUsage_CumulativeZeroCostWithShippedIsGenuineZero()
     {
@@ -322,6 +350,8 @@ public class AgentUsageTimeseriesApiSpecs
         Assert.Equal(0.0, dayWithShip.CostPerShip);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetUsage_CumulativeCostPerShipIsZeroWhenShippedExistsButNoUsageSamples()
     {
@@ -352,6 +382,8 @@ public class AgentUsageTimeseriesApiSpecs
         }
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetUsage_CumulativeSeriesIncludesPreWindowHistory()
     {
@@ -390,6 +422,8 @@ public class AgentUsageTimeseriesApiSpecs
         Assert.Equal(0.02, response.Buckets.Sum(bucket => bucket.CostAmount));
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetUsage_CumulativeZeroSampleProject_ReturnsDefinedEmptyResult()
     {
@@ -411,6 +445,8 @@ public class AgentUsageTimeseriesApiSpecs
         }
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetUsage_Range7d_Daily7Buckets()
     {
@@ -427,6 +463,8 @@ public class AgentUsageTimeseriesApiSpecs
         Assert.Equal(TimeSpan.FromDays(7), response.RangeTo - response.RangeFrom);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetUsage_Range30d_Daily30Buckets()
     {
@@ -443,6 +481,8 @@ public class AgentUsageTimeseriesApiSpecs
         Assert.Equal(TimeSpan.FromDays(30), response.RangeTo - response.RangeFrom);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetUsage_Range90d_Weekly13Buckets()
     {
@@ -464,6 +504,8 @@ public class AgentUsageTimeseriesApiSpecs
         Assert.Equal(response.Buckets.Count, response.CumulativeCostPerShip!.Count);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetUsage_OmittedRange_Reproduces7Day7BucketDaily()
     {
@@ -482,6 +524,8 @@ public class AgentUsageTimeseriesApiSpecs
         Assert.Equal(TimeSpan.FromDays(7), response.RangeTo - response.RangeFrom);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetUsage_UnknownRange_ReturnsBadRequest()
     {
@@ -491,6 +535,8 @@ public class AgentUsageTimeseriesApiSpecs
         Assert.Equal(System.Net.HttpStatusCode.BadRequest, response.StatusCode);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Theory]
     [InlineData("7d")]
     [InlineData("30d")]
@@ -503,6 +549,8 @@ public class AgentUsageTimeseriesApiSpecs
         Assert.Equal(System.Net.HttpStatusCode.OK, response.StatusCode);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetUsage_Range90d_BucketGranularityReportsWeekly()
     {

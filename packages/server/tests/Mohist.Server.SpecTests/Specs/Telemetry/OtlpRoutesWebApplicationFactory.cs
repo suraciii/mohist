@@ -9,13 +9,10 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
-using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Infrastructure.Workspace;
-using Mohist.Server.Logging;
 using Mohist.Server.Otel;
 using Mohist.Server.Runner.Services.SignalR;
 using Mohist.Server.SystemInfo;
@@ -43,9 +40,7 @@ public class OtlpRoutesWebApplicationFactory : WebApplicationFactory<Program>
     private readonly OtelDb _otelDb;
     private readonly int _siloPort;
     private readonly int _gatewayPort;
-    private readonly InMemoryHostFileDependencies _fileDependencies = new();
-    private readonly InMemoryLogFileStore _logFiles = new();
-    private readonly FakeTimeProvider _timeProvider = new(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero));
+    private string? _webRoot;
 
     public int OtlpPort { get; }
 
@@ -72,7 +67,8 @@ public class OtlpRoutesWebApplicationFactory : WebApplicationFactory<Program>
         // TraceQuerier only issues SELECTs (the read-only guard is a production
         // CLI safety constraint, not a behavior under test).
         (_otelDb, _otelKeeper) = InMemoryOtelDb.Create();
-        _artifactStorageRoot = "/test/artifacts-otel";
+        _artifactStorageRoot = Path.Combine(Path.GetTempPath(), $"mohist-artifacts-otel-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(_artifactStorageRoot);
     }
 
     /// <summary>The in-memory <see cref="OtelDb"/> shared by the integration specs.</summary>
@@ -81,7 +77,9 @@ public class OtlpRoutesWebApplicationFactory : WebApplicationFactory<Program>
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment(MohistHostEnvironment.Testing);
+        _webRoot ??= CreateWebRoot();
         builder.UseSetting("Mohist:SqliteConnectionString", _connectionString);
+        builder.UseSetting("Mohist:WebRoot", _webRoot);
         builder.UseSetting("Mohist:RunnerRoot", _runnerRoot);
         builder.UseSetting("Mohist:SystemUpdate:StatePath", _systemUpdateStatePath);
         builder.UseSetting("Mohist:ArtifactStorage:Root", _artifactStorageRoot);
@@ -95,10 +93,10 @@ public class OtlpRoutesWebApplicationFactory : WebApplicationFactory<Program>
             config.AddInMemoryCollection(new Dictionary<string, string?>
             {
                 ["Mohist:SqliteConnectionString"] = _connectionString,
+                ["Mohist:WebRoot"] = _webRoot,
                 ["Mohist:RunnerRoot"] = _runnerRoot,
                 ["Mohist:SystemUpdate:StatePath"] = _systemUpdateStatePath,
                 ["Mohist:ArtifactStorage:Root"] = _artifactStorageRoot,
-                ["Mohist:CliSkillDataPath"] = "/test/skill-data",
                 ["Mohist:Otel:Port"] = OtlpPort.ToString(),
                 ["Mohist:Silo:SiloPort"] = _siloPort.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 ["Mohist:Silo:GatewayPort"] = _gatewayPort.ToString(System.Globalization.CultureInfo.InvariantCulture),
@@ -123,21 +121,8 @@ public class OtlpRoutesWebApplicationFactory : WebApplicationFactory<Program>
             {
                 var env = new MockEnvironmentVariableProvider();
                 env[MohistWorkspaceLayout.RunnerRootEnvironmentVariable] = _runnerRoot;
-                env[SystemInfoService.HomeEnvironmentVariable] = "/test/home";
                 return env;
             });
-            services.RemoveAll<TimeProvider>();
-            services.AddSingleton<TimeProvider>(_timeProvider);
-            _fileDependencies.ReplaceServiceRegistrations(
-                services,
-                "/test/config-otel.jsonc",
-                _artifactStorageRoot,
-                "/test/attachments-otel",
-                _timeProvider);
-            services.RemoveAll<ILogFileStore>();
-            services.AddSingleton<ILogFileStore>(_logFiles);
-            services.RemoveAll<FileLoggerProvider>();
-            services.RemoveAll<ILoggerProvider>();
             services.RemoveAll<IDbContextFactory<MohistDbContext>>();
             services.AddDbContextFactory<MohistDbContext>(options =>
                 options
@@ -207,4 +192,33 @@ public class OtlpRoutesWebApplicationFactory : WebApplicationFactory<Program>
         }
     }
 
+    public async Task EnsureSchemaAsync()
+    {
+        await using var scope = Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        await db.Database.ExecuteSqlRawAsync("""
+            CREATE TABLE IF NOT EXISTS "Attachments" (
+                "Id" TEXT NOT NULL CONSTRAINT "PK_Attachments" PRIMARY KEY,
+                "ProjectId" TEXT NOT NULL,
+                "OwnerKind" TEXT NULL,
+                "OwnerId" TEXT NULL,
+                "OriginalFileName" TEXT NOT NULL,
+                "ContentType" TEXT NULL,
+                "Size" INTEGER NOT NULL,
+                "StoragePath" TEXT NOT NULL,
+                "CreatedAt" TEXT NOT NULL,
+                "ExpiresAt" TEXT NULL
+            );
+            """);
+        await db.Database.ExecuteSqlRawAsync("CREATE INDEX IF NOT EXISTS \"IX_Attachments_ExpiresAt\" ON \"Attachments\" (\"ExpiresAt\");");
+        await db.Database.ExecuteSqlRawAsync("CREATE INDEX IF NOT EXISTS \"IX_Attachments_ProjectId_Owner\" ON \"Attachments\" (\"ProjectId\", \"OwnerKind\", \"OwnerId\");");
+    }
+
+    private static string CreateWebRoot()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"mohist-web-otel-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        File.WriteAllText(Path.Combine(root, "index.html"), "<html><body>Mohist OTel Test Web</body></html>");
+        return root;
+    }
 }

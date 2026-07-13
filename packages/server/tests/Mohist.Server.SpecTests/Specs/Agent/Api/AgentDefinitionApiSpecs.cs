@@ -18,6 +18,8 @@ public class AgentDefinitionApiSpecs
         _client = fixture.Client;
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task Create_ReturnsCreatedActiveAgent()
     {
@@ -35,6 +37,8 @@ public class AgentDefinitionApiSpecs
         Assert.NotEqual(default, DateTimeOffset.Parse(created.UpdatedAt));
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task Create_RequiresResolvedProjectAndRejectsDuplicateName()
     {
@@ -50,6 +54,8 @@ public class AgentDefinitionApiSpecs
         Assert.Single(list);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task List_FiltersByStatusAndProject()
     {
@@ -72,6 +78,8 @@ public class AgentDefinitionApiSpecs
         Assert.Equal(archived.Id, onlyArchived.Id);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task Show_ReturnsArchivedByIdAndRejectsUnknownOrCrossProject()
     {
@@ -92,6 +100,8 @@ public class AgentDefinitionApiSpecs
         Assert.Equal(HttpStatusCode.NotFound, crossProject.StatusCode);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task Patch_UpdatesMutableFieldsAndRejectsImmutableUnknownAndRenameConflict()
     {
@@ -128,6 +138,8 @@ public class AgentDefinitionApiSpecs
         Assert.Equal("first-renamed", afterConflict.Name);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task Patch_ClearsExplicitNullOptionalFields()
     {
@@ -148,6 +160,8 @@ public class AgentDefinitionApiSpecs
         Assert.Null(patched.MaxConcurrentRuns);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task Delete_ArchivesAndKeepsNameOccupiedWithProjectIsolation()
     {
@@ -169,6 +183,8 @@ public class AgentDefinitionApiSpecs
         Assert.Equal(HttpStatusCode.NotFound, unknown.StatusCode);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task Unarchive_ReversesArchiveAndAdvancesUpdatedAt()
     {
@@ -192,6 +208,8 @@ public class AgentDefinitionApiSpecs
         Assert.Contains(defaultList, agent => agent.Id == created.Id);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task Unarchive_IsNoOpForActiveAgentAndReturnsNotFoundForUnknown()
     {
@@ -212,6 +230,8 @@ public class AgentDefinitionApiSpecs
         Assert.Equal(HttpStatusCode.NotFound, crossProject.StatusCode);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task Unarchive_DoesNotAlterPatchSemanticsForStatusField()
     {

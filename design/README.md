@@ -8,7 +8,7 @@
 - [domain-analysis.md](domain-analysis.md) — 领域分析与上下文映射：子域划分、限界上下文关系、依赖不变量。
 - [conventions.md](conventions.md) — 命名、分层、变量等约定。
 - [cli.md](cli.md) — 命令面设计契约：句法（资源在前）、命令树形状、资源命名（作用域用 flag、子资源挂父资源下）、动词一致性、唯一入口与全局 flag 约定。
-- [testing.md](testing.md) — SpecTests、UnitTests、ArchTests 三种测试，价值判断、硬规则和 fake 入口。
+- [testing.md](testing.md) — 测试两条轨道（spec/unit）、外部依赖、时间依赖、fake 入口速查。
 - [eventbus.md](eventbus.md) — 事件总线：CloudEvent 订阅契约 + 单分发器可靠 at-least-once 通知（分发器**未交付**）。
 
 ## Agent 与执行

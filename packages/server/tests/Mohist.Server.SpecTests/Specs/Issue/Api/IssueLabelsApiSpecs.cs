@@ -16,6 +16,8 @@ public class IssueLabelsApiSpecs
         _client = fixture.Client;
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task CreateIssue_WithKeyValueLabels_PersistsAndReturnsMap()
     {
@@ -42,6 +44,8 @@ public class IssueLabelsApiSpecs
         Assert.Equal("auth", detail.Labels["module"]);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task CreateIssue_WithInvalidLabelKey_ReturnsBadRequest()
     {
@@ -64,6 +68,8 @@ public class IssueLabelsApiSpecs
         Assert.Contains("Stream", body, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task CreateIssue_WithEmptyLabelValue_ReturnsBadRequest()
     {
@@ -86,6 +92,8 @@ public class IssueLabelsApiSpecs
         Assert.Contains("non-empty", body, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task UpdateIssue_WithKeyValueLabels_FullReplacesMap()
     {
@@ -119,6 +127,8 @@ public class IssueLabelsApiSpecs
         Assert.Equal("auth", updated.Labels["module"]);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task UpdateIssue_WithInvalidLabelKey_ReturnsBadRequest()
     {
@@ -141,6 +151,8 @@ public class IssueLabelsApiSpecs
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task ListLabels_ReturnsDistinctSortedKeysFromProjectIssues()
     {
@@ -184,6 +196,8 @@ public class IssueLabelsApiSpecs
         Assert.Equal(new[] { "module", "priority", "stream" }, labels);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task ListIssues_FilterByKeyValueLabel_OnlyReturnsMatching()
     {
@@ -213,6 +227,8 @@ public class IssueLabelsApiSpecs
         Assert.Equal(frontendIssue.Number, item.Number);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task ListIssues_FilterByMultipleKeyValueLabels_OnlyReturnsIssuesMatchingAll()
     {
@@ -250,6 +266,8 @@ public class IssueLabelsApiSpecs
         Assert.Equal(matching.Number, item.Number);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Theory]
     [InlineData("frontend", "key=value")]
     [InlineData("=frontend", "required")]

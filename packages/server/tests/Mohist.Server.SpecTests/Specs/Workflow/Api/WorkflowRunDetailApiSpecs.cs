@@ -54,6 +54,8 @@ public class WorkflowRunDetailApiSpecs
         _connectionString = fixture.ConnectionString;
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task Get_ReturnsFullDetailWithAssociatedIssue()
     {
@@ -84,6 +86,8 @@ public class WorkflowRunDetailApiSpecs
         _ = issueId;
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task Get_WhenIssueRowIsTerminal_IssueRefStillCarriesCorrelationContext()
     {
@@ -108,6 +112,8 @@ public class WorkflowRunDetailApiSpecs
         Assert.Equal("Workflow control test", issueRef.GetProperty("title").GetString());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task Get_WhenIssueRowIsMissing_IssueRefIsNull()
     {
@@ -127,6 +133,8 @@ public class WorkflowRunDetailApiSpecs
         Assert.Equal(JsonValueKind.Null, data.GetProperty("issueRef").ValueKind);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task Get_OnUnknownWorkflowRun_Returns404()
     {
@@ -138,24 +146,26 @@ public class WorkflowRunDetailApiSpecs
         Assert.Contains("wr_does_not_exist", payload.GetProperty("error").GetString());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Theory]
-    [InlineData("workflow YAML", "/api/workflow-runs/wr_does_not_exist/yaml")]
-    [InlineData("effective variables", "/api/workflow-runs/wr_does_not_exist/variables/effective")]
-    [InlineData("effective variable", "/api/workflow-runs/wr_does_not_exist/variables/effective/some.key")]
-    [InlineData("events", "/api/workflow-runs/wr_does_not_exist/events")]
-    [InlineData("sessions", "/api/workflow-runs/wr_does_not_exist/sessions")]
-    public async Task RunScopedReadSubresources_OnUnknownWorkflowRun_Return404(string subresource, string path)
+    [InlineData("/api/workflow-runs/wr_does_not_exist/yaml")]
+    [InlineData("/api/workflow-runs/wr_does_not_exist/variables/effective")]
+    [InlineData("/api/workflow-runs/wr_does_not_exist/variables/effective/some.key")]
+    [InlineData("/api/workflow-runs/wr_does_not_exist/events")]
+    [InlineData("/api/workflow-runs/wr_does_not_exist/sessions")]
+    public async Task RunScopedReadSubresources_OnUnknownWorkflowRun_Return404(string path)
     {
         var response = await _client.GetAsync(path);
 
-        Assert.True(
-            response.StatusCode == HttpStatusCode.NotFound,
-            $"{subresource} should return 404 for an unknown workflow run, but returned {(int)response.StatusCode}.");
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
         var payload = await response.Content.ReadFromJsonAsync<JsonElement>(ReadJsonOptions);
         Assert.Equal("not_found", payload.GetProperty("code").GetString());
         Assert.Contains("wr_does_not_exist", payload.GetProperty("error").GetString());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void WorkflowStatusView_DoesNotIntroduceIssueFields()
     {
@@ -194,6 +204,8 @@ public class WorkflowRunDetailApiSpecs
         }
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task Get_DoesNotMutateRunState()
     {
@@ -268,7 +280,7 @@ public class WorkflowRunDetailApiSpecs
         else
         {
             existingTemplate.Template = JsonSerializer.Serialize(definition, WorkflowYamlSerializer.JsonOptions);
-            existingTemplate.UpdatedAt = _fixture.TimeProvider.GetUtcNow();
+            existingTemplate.UpdatedAt = DateTimeOffset.UtcNow;
         }
 
         var profile = await db.ProjectWorkflowProfiles.FindAsync(projectId);
@@ -283,7 +295,7 @@ public class WorkflowRunDetailApiSpecs
         else
         {
             profile.DefaultTemplateId = definition.Id;
-            profile.UpdatedAt = _fixture.TimeProvider.GetUtcNow();
+            profile.UpdatedAt = DateTimeOffset.UtcNow;
         }
         await db.SaveChangesAsync();
     }

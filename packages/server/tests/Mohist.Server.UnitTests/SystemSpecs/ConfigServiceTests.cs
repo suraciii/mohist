@@ -1,28 +1,29 @@
 using System.Text.Json;
 using Microsoft.Extensions.Configuration;
 using Mohist.Server.Infrastructure.Config;
-using Mohist.Server.UnitTests.Support;
 using Mohist.Server.Workflow.Domain;
 using Xunit;
 using EnvironmentAbstractions.TestHelpers;
 
 namespace Mohist.Server.UnitTests.SystemSpecs;
 
-public class ConfigServiceTests
+public class ConfigServiceTests : IAsyncLifetime
 {
-    private const string ConfigPath = "/test/config.jsonc";
-    private readonly InMemoryConfigFileStore _files = new();
-    private readonly ConfigService _svc;
+    private ConfigService _svc = null!;
+    private string _configPath = null!;
 
-    public ConfigServiceTests()
+    public Task InitializeAsync()
     {
         var config = new ConfigurationBuilder().Build();
-        _svc = new ConfigService(
-            config,
-            new MockEnvironmentVariableProvider(),
-            Microsoft.Extensions.Logging.Abstractions.NullLogger<ConfigService>.Instance,
-            ConfigPath,
-            _files);
+        _configPath = Path.Combine(Path.GetTempPath(), $"mohist-config-{Guid.NewGuid():N}.jsonc");
+        _svc = new ConfigService(config, new MockEnvironmentVariableProvider(), Microsoft.Extensions.Logging.Abstractions.NullLogger<ConfigService>.Instance, _configPath);
+        return Task.CompletedTask;
+    }
+
+    public Task DisposeAsync()
+    {
+        if (File.Exists(_configPath)) File.Delete(_configPath);
+        return Task.CompletedTask;
     }
 
     [Fact]
@@ -87,7 +88,7 @@ public class ConfigServiceTests
     [Fact]
     public async Task GetVariables_OnlyModelSet_ReturnsEmptyBundle()
     {
-        await _files.WriteAllTextAsync(ConfigPath, """{ "Mohist": { "Config": { "model": "anthropic/claude" } } }""");
+        await File.WriteAllTextAsync(_configPath, """{ "Mohist": { "Config": { "model": "anthropic/claude" } } }""");
 
         var bundle = await _svc.GetVariables();
 
@@ -98,7 +99,7 @@ public class ConfigServiceTests
     [Fact]
     public async Task GetAgentConfig_OnlyModelSet_ReturnsNull()
     {
-        await _files.WriteAllTextAsync(ConfigPath, """{ "Mohist": { "Config": { "model": "anthropic/claude" } } }""");
+        await File.WriteAllTextAsync(_configPath, """{ "Mohist": { "Config": { "model": "anthropic/claude" } } }""");
 
         var agent = await _svc.GetAgentConfigAsync();
 
@@ -353,7 +354,7 @@ public class ConfigServiceTests
     public async Task ReadConfigFile_WithLineComments_ParsesAllKeys()
     {
         var jsonc = "// leading line comment\n{\n  \"Mohist\": {\n    // nested line comment\n    \"Config\": {\n      \"serverPort\": 8080,\n      \"serverHost\": \"example\"\n    }\n  }\n}\n";
-        await _files.WriteAllTextAsync(ConfigPath, jsonc);
+        await File.WriteAllTextAsync(_configPath, jsonc);
 
         var cfg = await _svc.GetConfigAsync();
 
@@ -364,7 +365,7 @@ public class ConfigServiceTests
     [Fact]
     public async Task ReadConfigFile_WithBlockCommentsAndTrailingCommas_ParsesAllKeys()
     {
-        await _files.WriteAllTextAsync(ConfigPath, """
+        await File.WriteAllTextAsync(_configPath, """
             /* file header block comment */
             {
               "Mohist": {
@@ -385,7 +386,7 @@ public class ConfigServiceTests
     [Fact]
     public async Task ReadConfigFile_GenuinelyMalformed_ReturnsEmptyDictionarySoDefaultsApply()
     {
-        await _files.WriteAllTextAsync(ConfigPath, "{ this is not jsonc ");
+        await File.WriteAllTextAsync(_configPath, "{ this is not jsonc ");
 
         var cfg = await _svc.GetConfigAsync();
 
@@ -397,7 +398,7 @@ public class ConfigServiceTests
     [Fact]
     public async Task WriteConfigFileAsync_RoundTripsCommentedConfig_AndAppliesNewValue()
     {
-        await _files.WriteAllTextAsync(ConfigPath, """
+        await File.WriteAllTextAsync(_configPath, """
             // user comment we should be able to load
             {
               "Mohist": {
@@ -417,7 +418,7 @@ public class ConfigServiceTests
     [Fact]
     public async Task WriteConfigFileAsync_OnMalformedExistingFile_FallsBackToFreshJsonObjectAndAppliesChange()
     {
-        await _files.WriteAllTextAsync(ConfigPath, "{ broken jsonc ");
+        await File.WriteAllTextAsync(_configPath, "{ broken jsonc ");
 
         await _svc.SetAsync("serverPort", 9090);
 

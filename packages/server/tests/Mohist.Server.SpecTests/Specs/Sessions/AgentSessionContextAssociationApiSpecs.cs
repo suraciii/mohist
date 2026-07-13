@@ -27,6 +27,8 @@ public class AgentSessionContextAssociationApiSpecs
         _client = fixture.Client;
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task IssueAssociation_ReturnsSessionsReferencingThatIssue()
     {
@@ -55,6 +57,8 @@ public class AgentSessionContextAssociationApiSpecs
         Assert.Contains(sessionId, entry.GetProperty("sessionLink").GetString()!);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task IssueAssociation_EmptyList_Returns200WithEmptyArray()
     {
@@ -70,6 +74,8 @@ public class AgentSessionContextAssociationApiSpecs
         Assert.Empty(body.GetProperty("data").EnumerateArray());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task EpicAssociation_ReturnsSessionsReferencingThatEpic()
     {
@@ -98,6 +104,8 @@ public class AgentSessionContextAssociationApiSpecs
         Assert.Contains(sessionId, entry.GetProperty("sessionLink").GetString()!);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task EpicAssociation_EmptyList_Returns200WithEmptyArray()
     {
@@ -113,6 +121,8 @@ public class AgentSessionContextAssociationApiSpecs
         Assert.Empty(body.GetProperty("data").EnumerateArray());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task EpicAssociation_ByEpicId_ResolvesCorrectly()
     {
@@ -134,6 +144,8 @@ public class AgentSessionContextAssociationApiSpecs
         Assert.Equal(sessionId, items[0].GetProperty("sessionId").GetString());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task EpicAssociation_UnknownEpicRef_Returns404()
     {
@@ -165,7 +177,7 @@ public class AgentSessionContextAssociationApiSpecs
         if (epicNumber is not null)
             labels[GenericAgentSessionMetadata.EpicNumber] = epicNumber;
 
-        var createdAt = _fixture.TimeProvider.GetUtcNow().UtcDateTime;
+        var createdAt = DateTime.UtcNow;
         var session = new AgentSession
         {
             Id = sessionId,

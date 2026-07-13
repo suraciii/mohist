@@ -19,6 +19,8 @@ public class ProjectApiSpecs
         _client = fixture.Client;
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task PostProject_NameOnly_CreatesProjectWithoutPathFields()
     {
@@ -34,6 +36,8 @@ public class ProjectApiSpecs
         Assert.False(data.TryGetProperty("baseBranch", out _));
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task PostProject_NameOnly_DoesNotCreateDefaultRepository()
     {
@@ -43,16 +47,22 @@ public class ProjectApiSpecs
         Assert.Empty(repos);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
-    public async Task GetProjects_ListIncludesCreatedProject()
+    public async Task GetProjects_ListReturnsProjectsWithoutPathFields()
     {
         var created = await _client.PostDataAsync<ProjectInfo>("/api/projects", new { name = "list-test" });
 
         var list = await _client.GetDataAsync<List<ProjectInfo>>("/api/projects");
         var project = list.Single(p => p.Id == created.Id);
         Assert.Equal("list-test", project.Name);
+        Assert.Null(project.GetType().GetProperty("Path"));
+        Assert.Null(project.GetType().GetProperty("BaseBranch"));
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task ProjectUse_AndDelete_RemainFunctional()
     {
@@ -70,6 +80,8 @@ public class ProjectApiSpecs
         Assert.DoesNotContain(list, p => p.Id == created.Id);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task PostRepository_WithGitUrl_CreatesRepositoryWithGitUrlMetadata()
     {
@@ -93,6 +105,8 @@ public class ProjectApiSpecs
         Assert.False(repo.TryGetProperty("resolvedPath", out _));
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task PostRepository_WithoutGitUrl_ReturnsBadRequestAndDoesNotMutate()
     {
@@ -110,6 +124,8 @@ public class ProjectApiSpecs
         Assert.Empty(repos);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task PatchRepository_UpdatesGitUrlAndBaseBranch()
     {
@@ -130,6 +146,8 @@ public class ProjectApiSpecs
         Assert.Equal("develop", repo.GetProperty("baseBranch").GetString());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task PatchRepository_WithoutGitUrl_ReturnsBadRequestAndDoesNotMutate()
     {
@@ -152,6 +170,8 @@ public class ProjectApiSpecs
         Assert.Equal("main", repo.BaseBranch);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task GetRepositories_ListReturnsRepositoriesWithoutPathFields()
     {

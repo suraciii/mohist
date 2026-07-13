@@ -5,7 +5,7 @@ namespace Mohist.Server.Runner.Grains;
 /// Status of a work item tracked by the runner grain.
 /// <list type="bullet">
 /// <item><term>Pending</term><description>Assigned but not yet picked up (agent-job works)</description></item>
-/// <item><term>Running</term><description>Picked up by the runner, actively being executed</description></item>
+/// <item><term>Running</term><description>Offered to the runner and reoffered until the process reports the stable work key</description></item>
 /// </list>
 /// </summary>
 [GenerateSerializer]
@@ -45,10 +45,12 @@ public sealed class RunnerWork
 }
 
 /// <summary>
-/// Orleans persistent state wrapper for the runner's work tracking list.
+/// Orleans persistent state for the runner's durable Agent work and the last
+/// registration profile needed to restore poll-driven presence after activation.
 /// </summary>
 [GenerateSerializer]
 public sealed class RunnerWorksState
 {
     [Id(0)] public List<RunnerWork> Works { get; set; } = [];
+    [Id(1)] public RunnerInfo? LastKnownInfo { get; set; }
 }
