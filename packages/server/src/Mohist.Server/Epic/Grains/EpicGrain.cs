@@ -405,8 +405,17 @@ public class EpicGrain : Grain, IEpicGrain
         await ReleaseActiveMembershipAsync(db, projectId, epicId, issueId);
         MapToRow(domain, row, now);
         var pending = DrainPendingEvents(domain);
+        await PersistEpicEventsAsync(db, domain, pending, now);
         await db.SaveChangesAsync();
-        await PersistEpicEventsAsync(domain, pending, now);
+        await RecomputeProgressInternalAsync(
+            db,
+            projectId,
+            epicId,
+            row,
+            await db.EpicIssues.AsNoTracking()
+                .Where(link => link.ProjectId == projectId && link.EpicId == epicId)
+                .ToListAsync(),
+            StartFailureMode.PreserveRunning);
     }
 
     public async Task<IReadOnlyList<BatchMembershipOutcome>> UnlinkIssuesAsync(
@@ -440,6 +449,7 @@ public class EpicGrain : Grain, IEpicGrain
             .ToHashSetAsync(StringComparer.Ordinal);
 
         var outcomes = new List<BatchMembershipOutcome>(dedupByIssueId.Count);
+        var hasUnlinkedAny = false;
         foreach (var item in dedupByIssueId.Values)
         {
             if (!existingLinks.Contains(item.IssueId))
@@ -462,10 +472,24 @@ public class EpicGrain : Grain, IEpicGrain
             await ReleaseActiveMembershipAsync(db, projectId, epicId, item.IssueId);
             MapToRow(domain, row, now);
             var pending = DrainPendingEvents(domain);
+            await PersistEpicEventsAsync(db, domain, pending, now);
             await db.SaveChangesAsync();
             existingLinks.Remove(item.IssueId);
             outcomes.Add(BatchMembershipOutcome.Unlinked(item.Identifier, item.IssueId, item.IssueNumber));
-            await PersistEpicEventsAsync(domain, pending, now);
+            hasUnlinkedAny = true;
+        }
+
+        if (hasUnlinkedAny)
+        {
+            await RecomputeProgressInternalAsync(
+                db,
+                projectId,
+                epicId,
+                row,
+                await db.EpicIssues.AsNoTracking()
+                    .Where(link => link.ProjectId == projectId && link.EpicId == epicId)
+                    .ToListAsync(),
+                StartFailureMode.PreserveRunning);
         }
 
         return outcomes;
@@ -527,13 +551,11 @@ public class EpicGrain : Grain, IEpicGrain
         domain.Start(now.UtcDateTime);
         MapToRow(domain, row, now);
         var pending = DrainPendingEvents(domain);
-        // Commit the parent running transition BEFORE starting child work so
-        // a later epic SaveChanges failure cannot orphan a started issue. A
-        // start failure's EpicStartAttemptFailed event is persisted best-effort
-        // in TryStartNextAsync's catch — if it is lost, the epic converges on
-        // the next readiness event (draft undraft, prereq removed, terminal).
+        // Commit the parent running transition and its status event together
+        // before starting child work. The durable running event is the
+        // recovery intent if the command-path start attempt fails or crashes.
+        await PersistEpicEventsAsync(db, domain, pending, now);
         await db.SaveChangesAsync();
-        await PersistEpicEventsAsync(domain, pending, now);
 
         if (row.Status == EpicStatusName.Running && !wasAlreadyRunning)
         {
@@ -567,8 +589,8 @@ public class EpicGrain : Grain, IEpicGrain
         domain.Resume(now.UtcDateTime);
         MapToRow(domain, row, now);
         var pending = DrainPendingEvents(domain);
+        await PersistEpicEventsAsync(db, domain, pending, now);
         await db.SaveChangesAsync();
-        await PersistEpicEventsAsync(domain, pending, now);
 
         if (row.Status == EpicStatusName.Running && !wasAlreadyRunning)
         {
@@ -834,13 +856,8 @@ public class EpicGrain : Grain, IEpicGrain
                 domain.RecordStartAttemptFailure(next.Id, next.Number, "start-failed", now.UtcDateTime);
                 MapToRow(domain, row, now);
                 var pending = DrainPendingEvents(domain);
-                // The parent running transition is already committed by the
-                // caller (StartAsync/ResumeAsync). Persist the recovery event
-                // best-effort: if it is lost, the epic converges on the next
-                // readiness event. We do NOT hold the start-failed event in a
-                // deferred SaveChanges here because the parent is already
-                // committed — an orphaned child issue is the worse failure.
-                await PersistEpicEventsAsync(domain, pending, now);
+                await PersistEpicEventsAsync(db, domain, pending, now);
+                await db.SaveChangesAsync();
                 return ToDto(row);
             }
             throw;

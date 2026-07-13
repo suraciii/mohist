@@ -700,6 +700,78 @@ public class EpicAutoDoneHandlerSpecs
         Assert.Equal("project_1:epic_1", call.GrainKey);
     }
 
+    // --- Fix: EpicIssueUnlinkedHandler + EpicIssueReopenedHandler ---
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task IssueUnlinkedHandler_HasSubscriptionAttribute()
+    {
+        var attr = (SubscriptionAttribute?)Attribute.GetCustomAttribute(
+            typeof(EpicIssueUnlinkedHandler), typeof(SubscriptionAttribute));
+        Assert.NotNull(attr);
+        Assert.Equal(EventCatalog.ReverseDns.EpicIssueUnlinked, attr!.Type);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task IssueUnlinkedHandler_UnlinkedEvent_InvokesRecomputeOnOwningEpic()
+    {
+        var grains = new TestEpicGrainFactory(CreateDatabase().Factory);
+        var handler = new EpicIssueUnlinkedHandler(grains, NullLogger<EpicIssueUnlinkedHandler>.Instance);
+
+        var evt = BuildEpicIssueUnlinkedEvent(projectId: "project_1", epicId: "epic_1", issueId: "issue_1", issueNumber: 1);
+        await handler.HandleAsync(evt, CancellationToken.None);
+
+        var call = Assert.Single(grains.Calls);
+        Assert.Equal("project_1:epic_1", call.GrainKey);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task IssueReopenedHandler_HasSubscriptionAttribute()
+    {
+        var attr = (SubscriptionAttribute?)Attribute.GetCustomAttribute(
+            typeof(EpicIssueReopenedHandler), typeof(SubscriptionAttribute));
+        Assert.NotNull(attr);
+        Assert.Equal(EventCatalog.ReverseDns.IssueReopened, attr!.Type);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task IssueReopenedHandler_ReopenedIssue_InvokesRecomputeOnOwningEpic()
+    {
+        await using var database = CreateDatabase();
+        await SeedEpicAsync(database, status: "running");
+        await SeedIssueAsync(database, projectId: "project_1", issueId: "issue_1", issueNumber: 1, status: Mohist.Server.Issue.Domain.IssueStatus.Backlog);
+        await SeedLinkAsync(database, epicId: "epic_1", issueId: "issue_1", issueNumber: 1);
+
+        var querier = new EpicQuerier(database.Factory, null!);
+        var grains = new TestEpicGrainFactory(database.Factory);
+        var handler = new EpicIssueReopenedHandler(querier, grains, NullLogger<EpicIssueReopenedHandler>.Instance);
+
+        var evt = new CloudEvent<IssueReopened>(
+            id: Guid.NewGuid().ToString(),
+            source: new Uri("/mohist/issue/issue_1", UriKind.Relative),
+            type: EventCatalog.ReverseDns.IssueReopened,
+            time: EventTime,
+            data: new IssueReopened(),
+            subject: "1",
+            extensions: new Dictionary<string, string>
+            {
+                ["projectid"] = "project_1",
+                ["issueid"] = "issue_1",
+                ["issueno"] = "1",
+            });
+        await handler.HandleAsync(evt, CancellationToken.None);
+
+        var call = Assert.Single(grains.Calls);
+        Assert.Equal("project_1:epic_1", call.GrainKey);
+    }
+
     // --- Fix C-2: External prerequisite reverse lookup ---
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
@@ -780,6 +852,22 @@ public class EpicAutoDoneHandlerSpecs
             type: EventCatalog.ReverseDns.EpicIssueLinked,
             time: EventTime,
             data: new EpicIssueLinked(issueId, issueNumber),
+            subject: epicId,
+            extensions: new Dictionary<string, string>
+            {
+                ["projectid"] = projectId,
+                ["epicid"] = epicId,
+                ["epicno"] = "1",
+            });
+
+    private static CloudEvent<EpicIssueUnlinked> BuildEpicIssueUnlinkedEvent(
+        string projectId, string epicId, string issueId, int issueNumber) =>
+        new(
+            id: Guid.NewGuid().ToString(),
+            source: new Uri($"/mohist/epic/{epicId}", UriKind.Relative),
+            type: EventCatalog.ReverseDns.EpicIssueUnlinked,
+            time: EventTime,
+            data: new EpicIssueUnlinked(issueId, issueNumber),
             subject: epicId,
             extensions: new Dictionary<string, string>
             {

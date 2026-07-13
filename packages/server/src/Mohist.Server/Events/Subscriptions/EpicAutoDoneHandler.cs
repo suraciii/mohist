@@ -119,7 +119,40 @@ public sealed class EpicDraftChangedHandler : ICloudEventHandler<IssueDraftChang
 }
 
 /// <summary>
-/// Subscribes to <c>com.mohist.issue.prerequisite-removed</c> and triggers
+/// Subscribes to <c>com.mohist.issue.reopened</c> and triggers
+/// <see cref="IEpicGrain.RecomputeProgressAsync"/> on the owning epic.
+/// Reopening a cancelled member returns it to backlog, potentially making
+/// it startable in a running-but-idle epic. This readiness transition was
+/// a convergence path the deleted sweep covered; this subscription closes
+/// the gap with a durable, event-driven trigger.
+/// </summary>
+[Subscription(Type = EventCatalog.ReverseDns.IssueReopened)]
+public sealed class EpicIssueReopenedHandler : ICloudEventHandler<IssueReopened>
+{
+    private readonly EpicProgressRecomputeDispatcher _dispatcher;
+
+    [ActivatorUtilitiesConstructor]
+    public EpicIssueReopenedHandler(
+        IServiceScopeFactory scopes,
+        IGrainFactory grains,
+        ILogger<EpicIssueReopenedHandler> log)
+    {
+        _dispatcher = new EpicProgressRecomputeDispatcher(scopes, grains, log);
+    }
+
+    internal EpicIssueReopenedHandler(
+        EpicQuerier epicQuerier,
+        IGrainFactory grains,
+        ILogger<EpicIssueReopenedHandler> log)
+    {
+        _dispatcher = new EpicProgressRecomputeDispatcher(epicQuerier, grains, log);
+    }
+
+    public bool Filter(CloudEvent<IssueReopened> evt) => true;
+
+    public Task HandleAsync(CloudEvent<IssueReopened> evt, CancellationToken ct) =>
+        _dispatcher.DispatchAsync(evt.Id, evt.Extensions, evtType: "reopened", includePrerequisiteLookup: false, ct);
+}
 /// <see cref="IEpicGrain.RecomputeProgressAsync"/> on the owning epic.
 /// Removing a prerequisite can make a previously-blocked backlog member
 /// startable in a running-but-idle epic — a readiness transition the
@@ -182,6 +215,117 @@ public sealed class EpicIssueLinkedHandler : ICloudEventHandler<Epic.Domain.Even
 
     public Task HandleAsync(CloudEvent<Epic.Domain.Events.EpicIssueLinked> evt, CancellationToken ct) =>
         _dispatcher.DispatchAsync(evt.Id, evt.Extensions, evtType: "issue-linked", ct);
+}
+
+/// <summary>
+/// Subscribes to <c>com.mohist.epic.issue-unlinked</c> and recomputes the
+/// owning epic after membership removal. The unlink command performs the
+/// same recompute inline; this durable path converges after a crash between
+/// the committed unlink and that inline call.
+/// </summary>
+[Subscription(Type = EventCatalog.ReverseDns.EpicIssueUnlinked)]
+public sealed class EpicIssueUnlinkedHandler : ICloudEventHandler<Epic.Domain.Events.EpicIssueUnlinked>
+{
+    private readonly EpicEventRecomputeDispatcher _dispatcher;
+
+    [ActivatorUtilitiesConstructor]
+    public EpicIssueUnlinkedHandler(
+        IGrainFactory grains,
+        ILogger<EpicIssueUnlinkedHandler> log)
+    {
+        _dispatcher = new EpicEventRecomputeDispatcher(grains, log);
+    }
+
+    public bool Filter(CloudEvent<Epic.Domain.Events.EpicIssueUnlinked> evt) => true;
+
+    public Task HandleAsync(CloudEvent<Epic.Domain.Events.EpicIssueUnlinked> evt, CancellationToken ct) =>
+        _dispatcher.DispatchAsync(evt.Id, evt.Extensions, evtType: "issue-unlinked", ct);
+}
+
+/// <summary>
+/// Subscribes to a transition into <c>running</c>. Starting or resuming an
+/// epic persists this event with the status transition before attempting child
+/// work, so it is the durable recovery intent for a command-path start
+/// failure.
+/// </summary>
+[Subscription(Type = EventCatalog.ReverseDns.EpicStatusChanged)]
+public sealed class EpicRunningStatusHandler : ICloudEventHandler<Epic.Domain.Events.EpicStatusChanged>
+{
+    private readonly EpicEventRecomputeDispatcher _dispatcher;
+
+    [ActivatorUtilitiesConstructor]
+    public EpicRunningStatusHandler(
+        IGrainFactory grains,
+        ILogger<EpicRunningStatusHandler> log)
+    {
+        _dispatcher = new EpicEventRecomputeDispatcher(grains, log);
+    }
+
+    public bool Filter(CloudEvent<Epic.Domain.Events.EpicStatusChanged> evt) =>
+        string.Equals(evt.Data.NewStatus, "running", StringComparison.Ordinal);
+
+    public Task HandleAsync(CloudEvent<Epic.Domain.Events.EpicStatusChanged> evt, CancellationToken ct) =>
+        _dispatcher.DispatchAsync(evt.Id, evt.Extensions, evtType: "status-changed", ct);
+}
+
+/// <summary>
+/// Subscribes to <c>com.mohist.issue.reopened</c> and recomputes the active
+/// owning epic. Reopening a cancelled member can make it the next startable
+/// issue in a running epic.
+/// </summary>
+[Subscription(Type = EventCatalog.ReverseDns.IssueReopened)]
+public sealed class EpicIssueReopenedHandler : ICloudEventHandler<IssueReopened>
+{
+    private readonly EpicProgressRecomputeDispatcher _dispatcher;
+
+    [ActivatorUtilitiesConstructor]
+    public EpicIssueReopenedHandler(
+        IServiceScopeFactory scopes,
+        IGrainFactory grains,
+        ILogger<EpicIssueReopenedHandler> log)
+    {
+        _dispatcher = new EpicProgressRecomputeDispatcher(scopes, grains, log);
+    }
+
+    internal EpicIssueReopenedHandler(
+        EpicQuerier epicQuerier,
+        IGrainFactory grains,
+        ILogger<EpicIssueReopenedHandler> log)
+    {
+        _dispatcher = new EpicProgressRecomputeDispatcher(epicQuerier, grains, log);
+    }
+
+    public bool Filter(CloudEvent<IssueReopened> evt) => true;
+
+    public Task HandleAsync(CloudEvent<IssueReopened> evt, CancellationToken ct) =>
+        _dispatcher.DispatchAsync(evt.Id, evt.Extensions, evtType: "reopened", includePrerequisiteLookup: false, ct);
+}
+
+/// <summary>
+/// Subscribes to <c>com.mohist.epic.issue-unlinked</c> and triggers
+/// <see cref="IEpicGrain.RecomputeProgressAsync"/> on the epic. Unlinking
+/// an in-progress member frees the serial slot, so the next startable member
+/// should advance. Unlinking the last open member should mark the epic done.
+/// Both were convergence paths the deleted sweep covered; this subscription
+/// closes the gap with a durable, event-driven trigger.
+/// </summary>
+[Subscription(Type = EventCatalog.ReverseDns.EpicIssueUnlinked)]
+public sealed class EpicIssueUnlinkedHandler : ICloudEventHandler<Epic.Domain.Events.EpicIssueUnlinked>
+{
+    private readonly EpicEventRecomputeDispatcher _dispatcher;
+
+    [ActivatorUtilitiesConstructor]
+    public EpicIssueUnlinkedHandler(
+        IGrainFactory grains,
+        ILogger<EpicIssueUnlinkedHandler> log)
+    {
+        _dispatcher = new EpicEventRecomputeDispatcher(grains, log);
+    }
+
+    public bool Filter(CloudEvent<Epic.Domain.Events.EpicIssueUnlinked> evt) => true;
+
+    public Task HandleAsync(CloudEvent<Epic.Domain.Events.EpicIssueUnlinked> evt, CancellationToken ct) =>
+        _dispatcher.DispatchAsync(evt.Id, evt.Extensions, evtType: "issue-unlinked", ct);
 }
 
 /// <summary>
