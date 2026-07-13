@@ -1,0 +1,317 @@
+using System.Text.Json;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using Mohist.Server.Events.Grains;
+using Mohist.Server.Infrastructure.Data.Events;
+
+namespace Mohist.Server.Infrastructure.Events;
+
+public sealed class EventDispatcherService
+{
+    private readonly IEventStore _events;
+    private readonly IReadOnlyList<Subscription> _subscriptions;
+    private readonly IDeadLetterStore _deadLetters;
+    private readonly TimeProvider _time;
+    private readonly EventDispatcherOptions _options;
+    private readonly ILogger<EventDispatcherService> _log;
+    private readonly Dictionary<EventKey, Dictionary<int, HandlerState>> _states = [];
+
+    public EventDispatcherService(
+        IEventStore events,
+        IEnumerable<Subscription> subscriptions,
+        IDeadLetterStore deadLetters,
+        TimeProvider time,
+        IOptions<EventDispatcherOptions> options,
+        ILogger<EventDispatcherService> log)
+    {
+        _events = events ?? throw new ArgumentNullException(nameof(events));
+        _subscriptions = (subscriptions ?? throw new ArgumentNullException(nameof(subscriptions))).ToList();
+        _deadLetters = deadLetters ?? throw new ArgumentNullException(nameof(deadLetters));
+        _time = time ?? throw new ArgumentNullException(nameof(time));
+        _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
+        _log = log;
+
+        if (_options.BatchSize <= 0)
+            throw new ArgumentOutOfRangeException(nameof(options), "BatchSize must be positive");
+        if (_options.MaxAttempts <= 0)
+            throw new ArgumentOutOfRangeException(nameof(options), "MaxAttempts must be positive");
+        if (_options.BaseBackoff < TimeSpan.Zero)
+            throw new ArgumentOutOfRangeException(nameof(options), "BaseBackoff must not be negative");
+        if (_options.MaxBackoff < TimeSpan.Zero)
+            throw new ArgumentOutOfRangeException(nameof(options), "MaxBackoff must not be negative");
+    }
+
+    public async Task DispatchAsync(CancellationToken ct)
+    {
+        var batch = await _events.ListUndeliveredAsync(_options.BatchSize, ct).ConfigureAwait(false);
+        foreach (var evt in batch)
+        {
+            ct.ThrowIfCancellationRequested();
+            var settled = await DispatchOneAsync(evt, ct).ConfigureAwait(false);
+            if (!settled)
+                break;
+        }
+    }
+
+    public async Task<DeadLetterRedeliveryResult> RedeliverAsync(long deadLetterId, CancellationToken ct)
+    {
+        var row = await _deadLetters.GetAsync(deadLetterId, ct).ConfigureAwait(false);
+        if (row is null)
+            return new DeadLetterRedeliveryResult(false, false, 0, "Dead-letter row not found");
+
+        var evt = new UndeliveredEvent(
+            ParseOrigin(row.Origin),
+            row.Id,
+            row.Source,
+            row.EventId,
+            row.Type,
+            row.Time,
+            row.SpecVersion,
+            row.Subject,
+            row.DataContentType,
+            row.Data,
+            row.ExtensionsJson);
+        var envelope = ReconstructEnvelope(evt);
+        var subscription = _subscriptions.FirstOrDefault(sub =>
+            string.Equals(HandlerName(sub), row.FailingHandler, StringComparison.Ordinal)
+            && CloudEventTypeMatcher.Matches(sub.Type, envelope.Type));
+        if (subscription is null)
+        {
+            return new DeadLetterRedeliveryResult(
+                true,
+                false,
+                0,
+                $"Handler '{row.FailingHandler}' is not registered for event type '{row.Type}'");
+        }
+
+        row = await _deadLetters
+            .StartRedeliveryAsync(deadLetterId, _time.GetUtcNow(), ct)
+            .ConfigureAwait(false);
+        if (row is null)
+            return new DeadLetterRedeliveryResult(true, false, 0, "Dead-letter row is already resolved");
+
+        try
+        {
+            await subscription.Dispatch(subscription.Handler, envelope, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            var error = OperatorDiagnostic.Summarize(ex) ?? "unknown";
+            await _deadLetters.RecordRedeliveryFailureAsync(
+                deadLetterId,
+                error,
+                ex.ToString(),
+                1,
+                _time.GetUtcNow(),
+                ct).ConfigureAwait(false);
+            return new DeadLetterRedeliveryResult(true, false, 1, error);
+        }
+
+        try
+        {
+            await _deadLetters.ResolveAsync(deadLetterId, _time.GetUtcNow(), ct).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(
+                ex,
+                "Dead-letter {DeadLetterId} handler succeeded but ResolveAsync failed; row remains Redelivering",
+                deadLetterId);
+            return new DeadLetterRedeliveryResult(
+                true,
+                false,
+                1,
+                "Handler succeeded but persistence failed; row remains in Redelivering state");
+        }
+
+        return new DeadLetterRedeliveryResult(true, true, 1, null);
+    }
+
+    public TimeSpan Backoff(int attemptCount)
+    {
+        if (attemptCount <= 0)
+            throw new ArgumentOutOfRangeException(nameof(attemptCount));
+
+        var multiplier = Math.Pow(2, Math.Min(attemptCount - 1, 62));
+        var ticks = Math.Min(_options.BaseBackoff.Ticks * multiplier, _options.MaxBackoff.Ticks);
+        return TimeSpan.FromTicks((long)ticks);
+    }
+
+    private async Task<bool> DispatchOneAsync(UndeliveredEvent evt, CancellationToken ct)
+    {
+        var envelope = ReconstructEnvelope(evt);
+        var matching = _subscriptions
+            .Select((subscription, index) => new IndexedSubscription(index, subscription))
+            .Where(item => CloudEventTypeMatcher.Matches(item.Subscription.Type, envelope.Type))
+            .ToList();
+        if (matching.Count == 0)
+        {
+            await MarkDispatchedAsync(evt, ct).ConfigureAwait(false);
+            return true;
+        }
+
+        var key = new EventKey(evt.Source, evt.Id);
+        if (!_states.TryGetValue(key, out var states))
+        {
+            states = [];
+            _states.Add(key, states);
+        }
+
+        var now = _time.GetUtcNow();
+        foreach (var item in matching)
+        {
+            if (!states.TryGetValue(item.Index, out var state))
+            {
+                state = new HandlerState();
+                states.Add(item.Index, state);
+            }
+            if (state.Status != HandlerStatus.Pending || state.NextAttemptTime > now)
+                continue;
+
+            try
+            {
+                await item.Subscription.Dispatch(item.Subscription.Handler, envelope, ct).ConfigureAwait(false);
+                state.Status = HandlerStatus.Completed;
+                state.NextAttemptTime = null;
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                state.AttemptCount++;
+                state.Error = ex;
+                if (state.AttemptCount >= _options.MaxAttempts)
+                {
+                    state.Status = HandlerStatus.DeadLettered;
+                }
+                else
+                {
+                    state.NextAttemptTime = now + Backoff(state.AttemptCount);
+                }
+                _log.LogWarning(
+                    ex,
+                    "Event dispatcher handler {Handler} failed for {Type} {EventId} on attempt {Attempt}/{MaxAttempts}",
+                    HandlerName(item.Subscription),
+                    envelope.Type,
+                    envelope.Id,
+                    state.AttemptCount,
+                    _options.MaxAttempts);
+            }
+        }
+
+        if (matching.Any(item => states[item.Index].Status == HandlerStatus.Pending))
+            return false;
+
+        var settledAt = _time.GetUtcNow();
+        var deadLetters = matching
+            .Where(item => states[item.Index].Status == HandlerStatus.DeadLettered)
+            .Select(item => BuildDeadLetter(evt, item.Subscription, states[item.Index], settledAt))
+            .ToList();
+        try
+        {
+            if (deadLetters.Count == 0)
+            {
+                await _events
+                    .MarkDispatchedAsync(evt.Origin, evt.Source, evt.Id, settledAt, ct)
+                    .ConfigureAwait(false);
+            }
+            else
+            {
+                await _deadLetters.SettleAsync(evt, deadLetters, settledAt, ct).ConfigureAwait(false);
+            }
+            _states.Remove(key);
+            return true;
+        }
+        catch
+        {
+            _states.Remove(key);
+            throw;
+        }
+    }
+
+    private Task MarkDispatchedAsync(UndeliveredEvent evt, CancellationToken ct) =>
+        _events.MarkDispatchedAsync(evt.Origin, evt.Source, evt.Id, _time.GetUtcNow(), ct);
+
+    private DeadLetterRow BuildDeadLetter(
+        UndeliveredEvent evt,
+        Subscription subscription,
+        HandlerState state,
+        DateTimeOffset settledAt) =>
+        new()
+        {
+            Origin = evt.Origin.ToString(),
+            Id = evt.Id,
+            Source = evt.Source,
+            EventId = evt.EventId,
+            Type = evt.Type,
+            Time = evt.Time,
+            SpecVersion = evt.SpecVersion,
+            Subject = evt.Subject,
+            DataContentType = evt.DataContentType,
+            Data = evt.Data,
+            ExtensionsJson = evt.ExtensionsJson,
+            FailingHandler = HandlerName(subscription),
+            ErrorMessage = state.Error is null ? "unknown" : OperatorDiagnostic.Summarize(state.Error) ?? "unknown",
+            ErrorStack = state.Error?.ToString(),
+            AttemptCount = state.AttemptCount,
+            DeadLetteredAt = settledAt,
+        };
+
+    private static CloudEvent ReconstructEnvelope(UndeliveredEvent evt)
+    {
+        var extensions = string.IsNullOrEmpty(evt.ExtensionsJson)
+            ? new Dictionary<string, string>()
+            : JsonSerializer.Deserialize<Dictionary<string, string>>(evt.ExtensionsJson, CloudEvent.JsonOptions)
+                ?? new Dictionary<string, string>();
+        return new CloudEvent(
+            evt.EventId,
+            new Uri(evt.Source, UriKind.RelativeOrAbsolute),
+            evt.Type,
+            evt.Time,
+            evt.Data,
+            evt.DataContentType,
+            evt.Subject,
+            evt.SpecVersion,
+            extensions);
+    }
+
+    private static EventOrigin ParseOrigin(string text) => text switch
+    {
+        nameof(EventOrigin.WorkflowRun) => EventOrigin.WorkflowRun,
+        nameof(EventOrigin.Issue) => EventOrigin.Issue,
+        nameof(EventOrigin.Epic) => EventOrigin.Epic,
+        nameof(EventOrigin.AgentSession) => EventOrigin.AgentSession,
+        _ => throw new InvalidOperationException($"Unknown event origin '{text}'."),
+    };
+
+    private static string HandlerName(Subscription subscription) =>
+        subscription.Handler.GetType().FullName ?? subscription.Handler.GetType().Name;
+
+    private readonly record struct EventKey(string Source, long Id);
+
+    private readonly record struct IndexedSubscription(int Index, Subscription Subscription);
+
+    private sealed class HandlerState
+    {
+        public int AttemptCount { get; set; }
+
+        public DateTimeOffset? NextAttemptTime { get; set; }
+
+        public HandlerStatus Status { get; set; }
+
+        public Exception? Error { get; set; }
+    }
+
+    private enum HandlerStatus
+    {
+        Pending,
+        Completed,
+        DeadLettered,
+    }
+}

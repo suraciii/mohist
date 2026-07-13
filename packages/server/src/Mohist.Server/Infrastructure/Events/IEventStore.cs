@@ -30,7 +30,18 @@ public interface IEventStore
     Task<IReadOnlyList<StoredCloudEvent>> ListIssueEventsAsync(string issueId, int limit = 200, CancellationToken ct = default);
     Task<IReadOnlyList<StoredCloudEvent>> ListEpicEventsAsync(string epicId, int limit = 200, CancellationToken ct = default);
     Task<IReadOnlyList<StoredCloudEvent>> ListAgentSessionEventsAsync(string sessionId, int limit = 200, CancellationToken ct = default);
-    Task MarkDispatchedAsync(string source, long id, DateTimeOffset dispatchedAt, CancellationToken ct = default);
+
+    /// <summary>
+    /// Marks the row in the truth table identified by the origin returned from
+    /// <see cref="ListUndeliveredAsync"/>. Source is the stream identity, not a
+    /// persistence-table discriminator.
+    /// </summary>
+    Task MarkDispatchedAsync(
+        EventOrigin origin,
+        string source,
+        long id,
+        DateTimeOffset dispatchedAt,
+        CancellationToken ct = default);
     Task<IReadOnlyList<UndeliveredEvent>> ListUndeliveredAsync(int limit = 100, CancellationToken ct = default);
 }
 

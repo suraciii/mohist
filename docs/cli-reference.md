@@ -46,6 +46,7 @@ mo repo         仓库
 mo issue        工作项
 mo epic         产品目标
 mo workflow     工作流执行（WorkflowRun）
+mo event        事件投递运维
 mo agent        智能体
 mo label        标签
 mo runner       执行器
@@ -92,6 +93,23 @@ mo info         CLI 本地诊断（受控例外：跨资源只读，不归任一
 | `mo workflow list-sessions <runId>` | 该执行的会话列表（关联资源，只列出） |
 
 `get` 的资源响应包含关联 issue 的 number 与 title，可直接用于把 run 关联回 issue，无需额外 lookup。单 session 子动作（get / transcript / compact / reset / followup）的 workflowRunId 直接入口不在本命令组，继续走 `mo issue session ...`。
+
+## Event（事件投递运维）
+
+事件投递失败并耗尽自动重试后进入 dead letter。运维入口只连接本机 Mohist 服务，查询结果默认显示恢复状态，避免把正在重投的记录误当成可再次重试的记录。
+
+| 命令 | 作用 |
+|---|---|
+| `mo event dead-letter list [--handler <处理者>] [--limit <1-500>] [-o table\|json]` | 列出尚未解决的 dead letter；table 包含 `status`、尝试次数和安全摘要 |
+| `mo event dead-letter redeliver <id> [-o table\|json]` | 只重投该记录中失败的处理者；成功后将记录标为已解决 |
+
+服务端与 `mo` 共用同一 operator credential，按以下顺序解析：
+
+1. `MOHIST_OPERATOR_TOKEN`；
+2. `~/.mohist/config.jsonc` 中的 `Mohist:OperatorToken`；
+3. `MOHIST_OPERATOR_TOKEN_PATH`、`Mohist:OperatorTokenPath` 或默认 `~/.mohist/operator-token` 指向的凭据文件。
+
+环境变量优先于配置文件。默认凭据文件由本机服务首次启动时创建；托管部署可通过配置文件指定共享路径，无需再为 CLI 配置第二份覆盖值。
 
 ## Workflow Profile（工作流运行配置）
 

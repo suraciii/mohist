@@ -1,9 +1,12 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
+using Mohist.Server.Events.Grains;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Infrastructure.Events;
+using Orleans;
 using DomainIssue = Mohist.Server.Issue.Domain.Issue;
 using DomainIssueEvent = Mohist.Server.Issue.Domain.Events.IssueEvent;
 
@@ -20,11 +23,19 @@ public class IssueStore : IIssueStore
 
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly IEventStore _eventStore;
+    private readonly IGrainFactory _grainFactory;
+    private readonly ILogger<IssueStore> _log;
 
-    public IssueStore(IDbContextFactory<MohistDbContext> dbFactory, IEventStore eventStore)
+    public IssueStore(
+        IDbContextFactory<MohistDbContext> dbFactory,
+        IEventStore eventStore,
+        IGrainFactory grainFactory,
+        ILogger<IssueStore> log)
     {
         _dbFactory = dbFactory;
         _eventStore = eventStore;
+        _grainFactory = grainFactory;
+        _log = log;
     }
 
     public async Task<DomainIssue?> LoadAsync(string key)
@@ -75,7 +86,12 @@ public class IssueStore : IIssueStore
         {
             throw;
         }
+
+        PokeDispatcherBestEffort();
     }
+
+    private void PokeDispatcherBestEffort() =>
+        EventDispatcherPoke.PokeAfterCommit(_grainFactory, _log, nameof(IssueStore));
 
     public Task DeleteAsync(string key) => throw new NotImplementedException();
 

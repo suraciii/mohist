@@ -97,6 +97,44 @@ public static class ApiTestClient
         return envelope.Data!;
     }
 
+    /// <summary>
+    /// Polls <paramref name="path"/> via GET until <paramref name="statusSelector"/>
+    /// returns <paramref name="expectedStatus"/>, or throws on timeout.
+    /// Used by spec tests that depend on the dispatcher's auto-mark-done
+    /// event handler firing after an issue completion — the handler is
+    /// eventually-consistent (Orleans reminder + best-effort poke), so
+    /// tests must wait for it rather than race it with an explicit call.
+    /// </summary>
+    public static async Task<T> WaitForStatusAsync<T>(
+        this HttpClient client,
+        string path,
+        Func<T, string?> statusSelector,
+        string expectedStatus,
+        TimeSpan? timeout = null,
+        TimeSpan? pollInterval = null)
+    {
+        var deadline = DateTime.UtcNow + (timeout ?? TimeSpan.FromSeconds(10));
+        var interval = pollInterval ?? TimeSpan.FromMilliseconds(50);
+        T? latest = default;
+        while (DateTime.UtcNow < deadline)
+        {
+            try
+            {
+                latest = await client.GetDataAsync<T>(path);
+                if (string.Equals(statusSelector(latest), expectedStatus, StringComparison.Ordinal))
+                    return latest;
+            }
+            catch
+            {
+            }
+            await Task.Delay(interval).ConfigureAwait(false);
+        }
+        throw new TimeoutException(
+            $"Resource at '{path}' did not reach status '{expectedStatus}' within " +
+            $"{(timeout ?? TimeSpan.FromSeconds(10)).TotalSeconds:0.##}s " +
+            $"(last seen: '{statusSelector(latest!)}').");
+    }
+
     private static async Task EnsureSuccessWithBodyAsync(HttpResponseMessage response)
     {
         if (response.IsSuccessStatusCode) return;

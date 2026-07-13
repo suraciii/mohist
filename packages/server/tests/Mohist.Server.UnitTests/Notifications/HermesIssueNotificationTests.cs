@@ -171,6 +171,7 @@ public sealed class HermesIssueNotificationTests
             "run_1",
             new StageApprovalRequested("plan")), CancellationToken.None);
         await fixture.Dispatcher.RunAllAsync();
+        Assert.Empty(fixture.Client.Sent);
     }
 
     [Fact]
@@ -191,9 +192,23 @@ public sealed class HermesIssueNotificationTests
         await fixture.Client.SendStarted.Task;
 
         Assert.False(delivery.IsCompleted);
+        Assert.Empty(fixture.Client.Sent);
         fixture.Client.ReleaseSend();
         await delivery;
         Assert.Single(fixture.Client.Sent);
+    }
+
+    [Fact]
+    public async Task IssueLoadFailure_IsSwallowed()
+    {
+        var fixture = CreateFixture();
+        fixture.Issues.LoadFailure = new InvalidOperationException("issue store unavailable");
+
+        await fixture.Handler.HandleAsync(IssueEvent(
+            EventCatalog.ReverseDns.IssueCompleted,
+            new IssueCompleted("run_1")), CancellationToken.None);
+        await fixture.Dispatcher.RunAllAsync();
+        Assert.Empty(fixture.Client.Sent);
     }
 
     [Fact]
@@ -393,10 +408,13 @@ public sealed class HermesIssueNotificationTests
     {
         public Dictionary<string, DomainIssue> Items { get; } = new(StringComparer.Ordinal);
         public int LoadCount { get; private set; }
+        public Exception? LoadFailure { get; set; }
 
         public Task<DomainIssue?> LoadAsync(string key)
         {
             LoadCount++;
+            if (LoadFailure is not null)
+                return Task.FromException<DomainIssue?>(LoadFailure);
             Items.TryGetValue(key, out var issue);
             return Task.FromResult(issue);
         }

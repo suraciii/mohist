@@ -19,18 +19,13 @@ public sealed class RuntimeBuildInfo : IRuntimeBuildInfo, ISingletonService
     public DateTimeOffset StartedAt { get; }
 
     public RuntimeBuildInfo()
-        : this(SystemEnvironmentVariableProvider.Instance, TimeProvider.System)
+        : this(SystemEnvironmentVariableProvider.Instance)
     {
     }
 
     public RuntimeBuildInfo(IEnvironmentVariableProvider environment)
-        : this(environment, TimeProvider.System)
     {
-    }
-
-    public RuntimeBuildInfo(IEnvironmentVariableProvider environment, TimeProvider timeProvider)
-    {
-        StartedAt = timeProvider.GetUtcNow();
+        StartedAt = DateTimeOffset.UtcNow;
         (Version, GitHash) = ResolveIdentity(environment);
     }
 
@@ -98,7 +93,7 @@ public sealed class RuntimeBuildInfo : IRuntimeBuildInfo, ISingletonService
             if (root == null)
                 return null;
 
-            return TryReadGitHeadFile(new PhysicalFileSystem(), root);
+            return TryReadGitHeadFile(root);
         }
         catch
         {
@@ -106,21 +101,21 @@ public sealed class RuntimeBuildInfo : IRuntimeBuildInfo, ISingletonService
         }
     }
 
-    internal static string? TryReadGitHeadFile(IFileSystem fileSystem, string repoRoot)
+    internal static string? TryReadGitHeadFile(string repoRoot)
     {
         try
         {
             var headFile = Path.Combine(repoRoot, ".git", "HEAD");
-            if (!fileSystem.Exists(headFile))
+            if (!File.Exists(headFile))
                 return null;
 
-            var head = fileSystem.ReadAllText(headFile).Trim();
+            var head = File.ReadAllText(headFile).Trim();
             if (head.StartsWith("ref: ", StringComparison.Ordinal))
             {
                 var refPath = head[5..];
                 var refFile = Path.Combine(repoRoot, ".git", refPath);
-                if (fileSystem.Exists(refFile))
-                    return fileSystem.ReadAllText(refFile).Trim();
+                if (File.Exists(refFile))
+                    return File.ReadAllText(refFile).Trim();
                 return null;
             }
 

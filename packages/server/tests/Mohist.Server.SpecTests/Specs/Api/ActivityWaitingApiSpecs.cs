@@ -22,6 +22,8 @@ public class ActivityWaitingApiSpecs
         _client = fixture.Client;
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetActivity_WhenIssuePausedOnApprovalGate_AppearsInWaitingArray()
     {
@@ -30,7 +32,7 @@ public class ActivityWaitingApiSpecs
             project.Id,
             number: 1,
             title: "Awaiting product review",
-            approvalRequestedAt: _fixture.TimeProvider.GetUtcNow().AddMinutes(-3));
+            approvalRequestedAt: DateTimeOffset.UtcNow.AddMinutes(-3));
 
         var response = await _client.GetDataAsync<ActivityResponseDto>(
             $"/api/projects/{project.Id}/agent/activity");
@@ -43,6 +45,8 @@ public class ActivityWaitingApiSpecs
         Assert.Equal(1, response.Summary.Waiting);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetActivity_WhenNoIssuePausedOnApprovalGate_HasEmptyWaitingArray()
     {
@@ -56,6 +60,8 @@ public class ActivityWaitingApiSpecs
         Assert.Equal(0, response.Summary.Waiting);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetActivity_OnlyIncludesInProgressIssues_NotBacklogOrDone()
     {
@@ -66,7 +72,7 @@ public class ActivityWaitingApiSpecs
             project.Id,
             number: 3,
             title: "Gated",
-            approvalRequestedAt: _fixture.TimeProvider.GetUtcNow());
+            approvalRequestedAt: DateTimeOffset.UtcNow);
 
         var response = await _client.GetDataAsync<ActivityResponseDto>(
             $"/api/projects/{project.Id}/agent/activity");
@@ -150,7 +156,7 @@ public class ActivityWaitingApiSpecs
         var runState = JsonSerializer.Serialize(new
         {
             Id = workflowRunId,
-            Metadata = new { CreatedAt = _fixture.TimeProvider.GetUtcNow(), Name = "test" },
+            Metadata = new { CreatedAt = DateTimeOffset.UtcNow, Name = "test" },
             Status = "AwaitingApproval",
             CurrentStageId = "plan",
             Stages = new[]

@@ -18,43 +18,23 @@ public sealed class FileSystemAttachmentStorage : IAttachmentStorage
 
     private readonly ILogger<FileSystemAttachmentStorage> _log;
     private readonly string _root;
-    private readonly IStorageFileSystem _files;
 
     public FileSystemAttachmentStorage(
         IOptions<AttachmentStorageOptions> options,
         ILogger<FileSystemAttachmentStorage> log,
         IEnvironmentVariableProvider environment)
-        : this(options, log, environment, PhysicalStorageFileSystem.Instance)
-    {
-    }
-
-    internal FileSystemAttachmentStorage(
-        IOptions<AttachmentStorageOptions> options,
-        ILogger<FileSystemAttachmentStorage> log,
-        IEnvironmentVariableProvider environment,
-        IStorageFileSystem files)
     {
         _log = log;
-        _files = files;
         _root = ResolveStorageRoot(options.Value, environment);
-        _files.CreateDirectory(_root);
+        Directory.CreateDirectory(_root);
     }
 
     /// <summary>Test-only constructor that bypasses the options pipeline.</summary>
     public FileSystemAttachmentStorage(string root, ILogger<FileSystemAttachmentStorage> log)
-        : this(root, log, PhysicalStorageFileSystem.Instance)
-    {
-    }
-
-    internal FileSystemAttachmentStorage(
-        string root,
-        ILogger<FileSystemAttachmentStorage> log,
-        IStorageFileSystem files)
     {
         _log = log;
-        _files = files;
         _root = ResolveStorageRoot(new AttachmentStorageOptions { Root = root }, null);
-        _files.CreateDirectory(_root);
+        Directory.CreateDirectory(_root);
     }
 
     public string StorageRoot => _root;
@@ -91,11 +71,11 @@ public sealed class FileSystemAttachmentStorage : IAttachmentStorage
         cancellationToken.ThrowIfCancellationRequested();
 
         var directory = EnsureStorageDirectoryForFile(storagePath);
-        if (_files.DirectoryExists(directory))
+        if (Directory.Exists(directory))
             throw new AttachmentStorageException(
                 $"Attachment storage directory '{directory}' already exists; refusing to overwrite a recorded attachment.");
 
-        _files.CreateDirectory(directory);
+        Directory.CreateDirectory(directory);
 
         var metadata = new AttachmentStorageMetadata
         {
@@ -131,21 +111,11 @@ public sealed class FileSystemAttachmentStorage : IAttachmentStorage
     public Stream OpenFileContent(string storagePath)
     {
         var contentPath = ResolveAbsoluteFileContentPath(storagePath);
-        if (!_files.FileExists(contentPath))
+        if (!File.Exists(contentPath))
             throw new AttachmentNotFoundException(
                 $"Recorded attachment content is missing at '{contentPath}'.");
         RejectReparsePoint(contentPath, $"Attachment content path '{storagePath}' must not be a symlink.");
-        return _files.OpenRead(contentPath);
-    }
-
-    public void Delete(string storagePath)
-    {
-        var contentPath = ResolveAbsoluteFileContentPath(storagePath);
-        var collectionRoot = Path.GetDirectoryName(contentPath)
-            ?? throw new AttachmentStorageException(
-                $"Storage path '{storagePath}' has no attachment directory.");
-        if (_files.DirectoryExists(collectionRoot))
-            _files.DeleteDirectory(collectionRoot);
+        return new FileStream(contentPath, FileMode.Open, FileAccess.Read, FileShare.Read);
     }
 
     public async Task<AttachmentStorageMetadata?> ReadMetadataAsync(
@@ -157,10 +127,10 @@ public sealed class FileSystemAttachmentStorage : IAttachmentStorage
         var collectionRoot = Path.GetDirectoryName(absolute) ?? absolute;
         RejectReparsePoint(collectionRoot, $"Attachment storage directory '{storagePath}' must not be a symlink.");
         var metadataPath = Path.Combine(collectionRoot, MetadataFileName);
-        if (!_files.FileExists(metadataPath))
+        if (!File.Exists(metadataPath))
             return null;
         RejectReparsePoint(metadataPath, $"Attachment metadata path '{storagePath}' must not be a symlink.");
-        await using var stream = _files.OpenRead(metadataPath);
+        await using var stream = File.OpenRead(metadataPath);
         return await JsonSerializer.DeserializeAsync<AttachmentStorageMetadata>(
             stream, JSON.Indented, cancellationToken).ConfigureAwait(false);
     }
@@ -187,7 +157,7 @@ public sealed class FileSystemAttachmentStorage : IAttachmentStorage
         if (Path.GetFileName(absolute) != FileContentName)
             throw new AttachmentStorageException(
                 $"Attachment storage path '{storagePath}' must end with '{FileContentName}'.");
-        if (_files.DirectoryExists(parent))
+        if (Directory.Exists(parent))
             RejectReparsePoint(parent, $"Attachment storage directory '{storagePath}' must not be a symlink.");
         return parent;
     }
@@ -199,12 +169,12 @@ public sealed class FileSystemAttachmentStorage : IAttachmentStorage
             throw new AttachmentStorageException(
                 $"Storage path '{storagePath}' does not point at attachment content.");
         var parent = Path.GetDirectoryName(absolute);
-        if (parent is not null && _files.DirectoryExists(parent))
+        if (parent is not null && Directory.Exists(parent))
             RejectReparsePoint(parent, $"Attachment storage directory '{storagePath}' must not be a symlink.");
         return absolute;
     }
 
-    private async Task<long> WriteStreamAsync(
+    private static async Task<long> WriteStreamAsync(
         string destination,
         Stream source,
         long declaredSize,
@@ -219,7 +189,13 @@ public sealed class FileSystemAttachmentStorage : IAttachmentStorage
         bool committed = false;
         try
         {
-            await using (var output = _files.OpenWrite(tempPath, FileMode.CreateNew))
+            await using (var output = new FileStream(
+                tempPath,
+                FileMode.CreateNew,
+                FileAccess.Write,
+                FileShare.None,
+                bufferSize: 81920,
+                useAsync: true))
             {
                 var buffer = new byte[81920];
                 int read;
@@ -237,21 +213,21 @@ public sealed class FileSystemAttachmentStorage : IAttachmentStorage
                 throw new AttachmentStorageException(
                     $"Content size mismatch for '{destination}': declared {declaredSize} bytes, wrote {written} bytes.");
 
-            _files.MoveFile(tempPath, destination, overwrite: false);
+            File.Move(tempPath, destination, overwrite: false);
             committed = true;
             return written;
         }
         finally
         {
-            if (!committed && _files.FileExists(tempPath))
+            if (!committed && File.Exists(tempPath))
             {
-                try { _files.DeleteFile(tempPath); }
+                try { File.Delete(tempPath); }
                 catch { /* best-effort cleanup */ }
             }
         }
     }
 
-    private async Task WriteMetadataAsync(
+    private static async Task WriteMetadataAsync(
         string directory,
         AttachmentStorageMetadata metadata,
         CancellationToken cancellationToken)
@@ -261,21 +237,27 @@ public sealed class FileSystemAttachmentStorage : IAttachmentStorage
         var committed = false;
         try
         {
-            await using (var output = _files.OpenWrite(tempPath, FileMode.CreateNew))
+            await using (var output = new FileStream(
+                tempPath,
+                FileMode.CreateNew,
+                FileAccess.Write,
+                FileShare.None,
+                bufferSize: 4096,
+                useAsync: true))
             {
                 await JsonSerializer.SerializeAsync(output, metadata, JSON.Indented, cancellationToken)
                     .ConfigureAwait(false);
                 await output.FlushAsync(cancellationToken).ConfigureAwait(false);
             }
 
-            _files.MoveFile(tempPath, metadataPath, overwrite: false);
+            File.Move(tempPath, metadataPath, overwrite: false);
             committed = true;
         }
         finally
         {
-            if (!committed && _files.FileExists(tempPath))
+            if (!committed && File.Exists(tempPath))
             {
-                try { _files.DeleteFile(tempPath); }
+                try { File.Delete(tempPath); }
                 catch { /* best-effort cleanup */ }
             }
         }
@@ -328,21 +310,22 @@ public sealed class FileSystemAttachmentStorage : IAttachmentStorage
         }
     }
 
-    private void RejectReparsePoint(string path, string message)
+    private static void RejectReparsePoint(string path, string message)
     {
-        if (_files.IsReparsePoint(path))
+        var attributes = File.GetAttributes(path);
+        if ((attributes & FileAttributes.ReparsePoint) != 0)
             throw new AttachmentStorageException(message);
     }
 
-    private void TryRemoveDirectory(string directory)
+    private static void TryRemoveDirectory(string directory)
     {
         try
         {
-            if (_files.DirectoryExists(directory))
-                _files.DeleteDirectory(directory);
-            var parent = Path.GetDirectoryName(directory);
-            if (parent is not null && _files.DirectoryExists(parent) && _files.IsDirectoryEmpty(parent))
-                _files.DeleteDirectory(parent);
+            if (Directory.Exists(directory))
+                Directory.Delete(directory, recursive: true);
+            var parent = Directory.GetParent(directory);
+            if (parent is not null && Directory.Exists(parent.FullName) && !Directory.EnumerateFileSystemEntries(parent.FullName).Any())
+                Directory.Delete(parent.FullName);
         }
         catch
         {

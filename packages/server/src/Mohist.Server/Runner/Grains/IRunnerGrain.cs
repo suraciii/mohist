@@ -12,18 +12,17 @@ public interface IRunnerGrain : IGrainWithStringKey
     Task HeartbeatAsync();
     /// <summary>Refreshes runner information. Does not refresh presence.</summary>
     Task HeartbeatRepairAsync(RunnerInfo info);
-    // Agent-job dispatch stays push-based (the job grain owns its single work
-    // item; there is no run to re-render from, and jobs are short-lived). The
-    // reconciliation model applies to workflow work; agent-job works are still
-    // pushed onto the runner and reported through this grain.
+    // Agent-job assignment stays push-based because the job grain owns the
+    // dispatch snapshot. Poll delivery reconciles that stable work against the
+    // runner's process-lifetime reported set.
     Task<RunnerWorkAssignmentResult> AssignAgentJobAsync(WorkDispatch work);
     Task<RunnerWorkReportResult> ReportAgentJobResultAsync(string agentJobId, string workId, WorkResult result);
-    /// <summary>
-    /// Dequeues the next pending agent-job work pushed onto this runner.
-    /// Called by the DispatchService on each poll (agent-jobs are served
-    /// before workflow redelivery/claim). Returns null when none is pending.
-    /// </summary>
-    Task<WorkDispatch?> DequeueAssignedAgentJobAsync();
+    /// <summary>Atomically admits one reconciliation round and captures its capacity.</summary>
+    Task<RunnerPollAdmission> TryBeginPollAsync();
+    /// <summary>Releases the reconciliation round admitted by <see cref="TryBeginPollAsync"/>.</summary>
+    Task EndPollAsync();
+    /// <summary>Returns active Agent capacity and at most one missing stable dispatch.</summary>
+    Task<AgentJobPollState> ReconcileAgentJobsAsync(List<string> reportedWorkKeys);
     /// <summary>
     /// Marks the runner present. Poll IS the heartbeat under the
     /// reconciliation model (design/workflow/scheduling.md §Supervision): the
@@ -128,6 +127,11 @@ public sealed record RunnerPollRequest(
     public RunnerPollRequest() : this([], []) { }
 }
 
+[GenerateSerializer]
+public sealed record RunnerPollAdmission(
+    [property: Id(0)] bool Admitted,
+    [property: Id(1)] int Slots);
+
 /// <summary>
 /// The dispatches rendered for this poll: redeliveries (desired − reported) plus
 /// new claims against spare capacity. Multiple dispatches per poll replace the
@@ -140,6 +144,11 @@ public sealed record RunnerPollResponse(
 {
     public RunnerPollResponse() : this([]) { }
 }
+
+[GenerateSerializer]
+public sealed record AgentJobPollState(
+    [property: Id(0)] int ActiveCount,
+    [property: Id(1)] WorkDispatch? Dispatch);
 
 [GenerateSerializer]
 public record WorkIssueRef(

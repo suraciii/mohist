@@ -1,8 +1,8 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
-using Mohist.Server.Infrastructure.Workspace;
 using Mohist.Server.Infrastructure.Orleans;
+using Mohist.Server.Infrastructure.Workspace;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Project.Grains;
 using Mohist.Server.Runner.Grains;
@@ -13,8 +13,8 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Issue.Api;
 
-[Collection("IntegrationIssueRepository")]
-public class IssueWorkspaceRepositoryResolutionSpecs
+[Collection("IntegrationIssue3")]
+public class IssueWorkspaceRepositoryResolutionSpecs : IAsyncLifetime
 {
     private readonly MohistIntegrationFixture _fixture;
     private readonly HttpClient _client;
@@ -25,6 +25,11 @@ public class IssueWorkspaceRepositoryResolutionSpecs
         _client = fixture.Client;
     }
 
+    public Task InitializeAsync() => Task.CompletedTask;
+    public Task DisposeAsync() => Task.CompletedTask;
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GivenProjectRepositoryConfigChanges_AfterIssueCreation_WhenUserOpensWorkspaceDiff_ThenPathAndBaseBranchComeFromCurrentProjectConfig()
     {
@@ -54,7 +59,7 @@ public class IssueWorkspaceRepositoryResolutionSpecs
             "release", "mohist/run-test", "merge-base", 1, 0, 1, 1, 1,
             [new DiffFile("a.txt", 1, 0, "@@ -1 +1 @@\n-x\n+y\n", false)]);
 
-        var projectId = await CreateProjectWithSecondaryRepositoryAsync("develop");
+        var projectId = await CreateProjectWithSecondaryRepositoryAsync("/proj/secondary-old", "develop");
         var issue = await CreateIssueAsync(projectId, "Repo path drifts", "secondary");
         await StartIssueAndAssignmentRunnerAsync(projectId, issue.Number);
 
@@ -78,13 +83,15 @@ public class IssueWorkspaceRepositoryResolutionSpecs
         Assert.NotEmpty(_fixture.Git.Diff.Files);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GivenReferencedRepositoryRemoved_WhenUserRequestsWorkspaceEndpoints_ThenApiReturnsRepositoryConfigurationProblem()
     {
         // Given an issue bound to a project repository whose configuration is later removed.
         _fixture.Git.Reset();
         _fixture.Git.BranchExists = true;
-        var projectId = await CreateProjectWithSecondaryRepositoryAsync("develop");
+        var projectId = await CreateProjectWithSecondaryRepositoryAsync("/proj/secondary", "develop");
         var issue = await CreateIssueAsync(projectId, "Repo gets removed", "secondary");
 
         var projectGrain = _fixture.Grains.GetGrain<IProjectGrain>(projectId);
@@ -116,11 +123,13 @@ public class IssueWorkspaceRepositoryResolutionSpecs
         Assert.Equal("repository_not_found", cleanupPayload.GetProperty("code").GetString());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GivenProjectRepositoryBaseBranchChanges_AfterIssueCreation_WhenUserRebasesWithoutBaseBranch_ThenRebaseUsesCurrentBaseBranch()
     {
         // Given an issue bound to a project repository whose base branch is later changed.
-        var projectId = await CreateProjectWithSecondaryRepositoryAsync("develop");
+        var projectId = await CreateProjectWithSecondaryRepositoryAsync("/proj/secondary", "develop");
         var issue = await CreateIssueAsync(projectId, "Base branch drifts", "secondary");
         await StartIssueAndAssignmentRunnerAsync(projectId, issue.Number);
 
@@ -140,11 +149,13 @@ public class IssueWorkspaceRepositoryResolutionSpecs
         Assert.Equal("release", payload.GetProperty("data").GetProperty("baseBranch").GetString());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GivenReferencedRepositoryRemoved_WhenUserRebases_ThenApiReturnsRepositoryConfigurationProblem()
     {
         // Given an issue bound to a project repository whose configuration is later removed.
-        var projectId = await CreateProjectWithSecondaryRepositoryAsync("develop");
+        var projectId = await CreateProjectWithSecondaryRepositoryAsync("/proj/secondary", "develop");
         var issue = await CreateIssueAsync(projectId, "Rebase orphan", "secondary");
         await StartIssueAndAssignmentRunnerAsync(projectId, issue.Number);
 
@@ -164,11 +175,13 @@ public class IssueWorkspaceRepositoryResolutionSpecs
         Assert.Contains("secondary", payload.GetProperty("error").GetString() ?? string.Empty);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GivenReferencedRepositoryRemoved_WhenUserArchivesIssue_ThenApiReturnsRepositoryConfigurationProblem()
     {
         // Given an issue bound to a project repository whose configuration is later removed.
-        var projectId = await CreateProjectWithSecondaryRepositoryAsync("develop");
+        var projectId = await CreateProjectWithSecondaryRepositoryAsync("/proj/secondary", "develop");
         var issue = await CreateIssueAsync(projectId, "Archive orphan", "secondary");
 
         var projectGrain = _fixture.Grains.GetGrain<IProjectGrain>(projectId);
@@ -186,7 +199,7 @@ public class IssueWorkspaceRepositoryResolutionSpecs
         Assert.Equal("repository_not_found", payload.GetProperty("code").GetString());
     }
 
-    private async Task<string> CreateProjectWithSecondaryRepositoryAsync(string secondaryBaseBranch)
+    private async Task<string> CreateProjectWithSecondaryRepositoryAsync(string secondaryPath, string secondaryBaseBranch)
     {
         var projectId = await CreateProjectAsync($"proj-{Guid.NewGuid():N}");
         var grain = _fixture.Grains.GetGrain<IProjectGrain>(projectId);
@@ -237,6 +250,9 @@ public class IssueWorkspaceRepositoryResolutionSpecs
         var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
         await runner.PollAsync(_fixture.Services);
 
+        var project = await _fixture.Grains.GetGrain<IProjectGrain>(projectId).GetAsync();
+        var path = Mohist.Server.Infrastructure.Workspace.MohistWorkspaceLayout.IssueWorkspacePath(_fixture.RunnerRoot, project!.Name, number);
+        Directory.CreateDirectory(path);
     }
 
     private sealed record IssueDto(string Id, int Number);

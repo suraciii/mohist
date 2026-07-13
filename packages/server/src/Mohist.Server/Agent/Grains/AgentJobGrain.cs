@@ -1,16 +1,19 @@
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Options;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Serialization;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Sessions.Grains;
+using Orleans.Runtime;
 
 namespace Mohist.Server.Agent.Grains;
 
 /// <summary>
 /// Authoritative owner of a standalone agent job's lifecycle and terminal result.
-/// In-memory only (no <c>[PersistentState]</c>); non-reentrant so the backoff timer
-/// and <see cref="ReportResultAsync"/> cannot race on the lifecycle fields. Dispatches
+/// Persisted and non-reentrant so the backoff timer and
+/// <see cref="ReportResultAsync"/> cannot race on the lifecycle state. Dispatches
 /// its work directly to an idle Runner via <see cref="IRunnerRegistryGrain"/>, never
 /// touching workflow assignment or workflow polling.
 ///
@@ -25,32 +28,46 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
     private readonly AgentJobOptions _options;
     private readonly AgentJobBackoffSchedule _backoff;
     private readonly TimeProvider _timeProvider;
-
-    private AgentJobStatus _status = AgentJobStatus.Pending;
-    private string? _runnerId;
-    private string? _workId;
-    private string? _failureReason;
-    private AgentJobTerminalResult? _terminalResult;
-
-    private AgentJobInput? _input;
-    private DateTimeOffset? _submittedAt;
-    private DateTimeOffset? _runningSince;
+    private readonly IPersistentState<AgentJobState> _state;
+    private readonly IAgentJobDispatchObserver _dispatchObserver;
     private IDisposable? _dispatchTimer;
     private IDisposable? _jobTimeoutTimer;
-    private TimeSpan _nextDispatchDelay;
-    private int _dispatchAttempts;
 
-    public AgentJobGrain(ILogger<AgentJobGrain> log, IOptions<AgentJobOptions> options, TimeProvider timeProvider)
+    public AgentJobGrain(
+        ILogger<AgentJobGrain> log,
+        IOptions<AgentJobOptions> options,
+        TimeProvider timeProvider,
+        [PersistentState("agent-job")] IPersistentState<AgentJobState> state,
+        IAgentJobDispatchObserver? dispatchObserver = null)
     {
         _log = log;
         _options = options.Value;
         _timeProvider = timeProvider;
+        _state = state;
+        _dispatchObserver = dispatchObserver ?? NoopAgentJobDispatchObserver.Instance;
         // The backoff schedule is captured at activation time from the current
         // snapshot of AgentJobOptions. Hot-reload of the configuration section
         // is not applied to an already-active grain; it takes effect on the
         // next activation. (Switching to IOptionsMonitor would not change this
         // because Orleans instantiates grains per-activation, not per-call.)
         _backoff = _options.ResolveBackoffSchedule();
+    }
+
+    public override async Task OnActivateAsync(CancellationToken ct)
+    {
+        if (!_state.RecordExists)
+            await _state.ReadStateAsync();
+
+        if (State.Input is null || IsTerminal)
+            return;
+
+        if (State.Status == AgentJobStatus.Running)
+        {
+            ArmJobTimeout();
+            return;
+        }
+
+        await TryDispatchAsync();
     }
 
     public override Task OnDeactivateAsync(DeactivationReason reason, CancellationToken ct)
@@ -63,13 +80,21 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
     }
 
     private string Key => this.GetPrimaryKeyString();
+    private AgentJobState State => _state.State;
+    private bool IsTerminal => State.Status is AgentJobStatus.Completed or AgentJobStatus.Failed;
 
-    public Task<AgentJobStatus> GetStatusAsync() => Task.FromResult(_status);
+    public Task<AgentJobStatus> GetStatusAsync() => Task.FromResult(State.Status);
 
-    public Task<string?> GetCurrentWorkIdAsync() => Task.FromResult(_workId);
+    public Task<string?> GetCurrentWorkIdAsync() => Task.FromResult(State.WorkId);
 
     public Task<AgentJobRuntimeSnapshot> GetRuntimeSnapshotAsync() =>
-        Task.FromResult(new AgentJobRuntimeSnapshot(_status, _runnerId, _workId, _failureReason, _dispatchAttempts));
+        Task.FromResult(new AgentJobRuntimeSnapshot(
+            State.Status,
+            State.RunnerId,
+            State.WorkId,
+            State.FailureReason,
+            State.DispatchAttempts,
+            State.RunnerAccepted));
 
     /// <summary>
     /// Returns the job's terminal result. Before the job has reached a terminal
@@ -84,64 +109,68 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
     /// </summary>
     public Task<AgentJobTerminalResult> GetTerminalResultAsync()
     {
-        if (_terminalResult is not null)
-            return Task.FromResult(_terminalResult);
+        if (State.TerminalResult is not null)
+            return Task.FromResult(State.TerminalResult);
 
         return Task.FromResult(new AgentJobTerminalResult(
-            _status, null, null, null, _failureReason, null));
+            State.Status, null, null, null, State.FailureReason, null));
     }
 
-    public Task AssignRunnerAsync(string runnerId, string workId)
+    public async Task AssignRunnerAsync(string runnerId, string workId)
     {
-        if (_status != AgentJobStatus.Pending)
+        if (State.Status != AgentJobStatus.Pending)
             throw new InvalidOperationException(
-                $"AgentJob '{Key}' cannot accept runner assignment in status {_status}");
+                $"AgentJob '{Key}' cannot accept runner assignment in status {State.Status}");
 
         AssignRunnerInternal(runnerId, workId);
-        return Task.CompletedTask;
+        State.RunnerAccepted = true;
+        State.Status = AgentJobStatus.Running;
+        State.RunningSince = _timeProvider.GetUtcNow();
+        await SaveAsync();
+        ArmJobTimeout();
     }
 
     private void AssignRunnerInternal(string runnerId, string workId)
     {
-        _status = AgentJobStatus.Running;
-        _runnerId = runnerId;
-        _workId = workId;
-        _runningSince = _timeProvider.GetUtcNow();
-        ArmJobTimeout();
+        State.RunnerId = runnerId;
+        State.WorkId = workId;
+        State.RunnerAccepted = false;
+        State.RunningSince = null;
     }
 
     public Task<bool> IsWorkRunnableAsync(string runnerId, string workId)
     {
         return Task.FromResult(
-            _status == AgentJobStatus.Running
-            && string.Equals(_runnerId, runnerId, StringComparison.Ordinal)
-            && string.Equals(_workId, workId, StringComparison.Ordinal));
+            !IsTerminal
+            && string.Equals(State.RunnerId, runnerId, StringComparison.Ordinal)
+            && string.Equals(State.WorkId, workId, StringComparison.Ordinal));
     }
 
     public async Task<AgentJobReportResult> ReportResultAsync(string runnerId, string workId, WorkResult result)
     {
-        if (_status == AgentJobStatus.Completed || _status == AgentJobStatus.Failed)
+        if (IsTerminal)
         {
             _log.LogDebug(
                 "AgentJob {Id} rejecting report from {Runner} for {Work}: already in terminal {Status}",
-                Key, runnerId, workId, _status);
+                Key, runnerId, workId, State.Status);
             return new AgentJobReportResult(false, "already-terminal");
         }
 
-        if (_status != AgentJobStatus.Running)
+        if (State.Status != AgentJobStatus.Running
+            && (State.RunnerId is null || State.WorkId is null))
         {
             _log.LogWarning(
                 "AgentJob {Id} rejecting report from {Runner} for {Work}: unexpected status {Status}",
-                Key, runnerId, workId, _status);
+                Key, runnerId, workId, State.Status);
             return new AgentJobReportResult(false, "not-running");
         }
 
-        if (!string.Equals(_runnerId, runnerId, StringComparison.Ordinal)
-            || !string.Equals(_workId, workId, StringComparison.Ordinal))
+        if (!string.Equals(State.RunnerId, runnerId, StringComparison.Ordinal)
+            || !string.Equals(State.WorkId, workId, StringComparison.Ordinal))
         {
             _log.LogWarning(
                 "AgentJob {Id} rejecting report from {Runner} for {Work}: expected {ExpectedRunner}/{ExpectedWork}",
-                Key, runnerId, workId, _runnerId, _workId);
+                Key, runnerId, workId, State.RunnerId, State.WorkId);
             return new AgentJobReportResult(false, "runner-or-work-mismatch");
         }
 
@@ -150,87 +179,172 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             || string.Equals(result.Status, "ok", StringComparison.OrdinalIgnoreCase)
             || string.Equals(result.Status, "success", StringComparison.OrdinalIgnoreCase);
 
-        _status = isSuccess ? AgentJobStatus.Completed : AgentJobStatus.Failed;
+        State.Status = isSuccess ? AgentJobStatus.Completed : AgentJobStatus.Failed;
         if (!isSuccess)
-            _failureReason = string.IsNullOrWhiteSpace(result.Message)
+            State.FailureReason = string.IsNullOrWhiteSpace(result.Message)
                 ? result.Status
                 : result.Message;
 
-        _terminalResult = new AgentJobTerminalResult(
-            _status,
+        State.TerminalResult = new AgentJobTerminalResult(
+            State.Status,
             result.Message,
             result.Output,
             result.ArtifactUploadIds,
-            _failureReason,
+            State.FailureReason,
             result.ExitCode);
+        State.RunningSince = null;
 
         DisposeDispatchTimer();
         DisposeJobTimeoutTimer();
+        await SaveAsync();
 
         _log.LogInformation(
             "AgentJob {Id} terminal: {Status} ({Reason})",
-            Key, _status, _failureReason ?? "ok");
+            Key, State.Status, State.FailureReason ?? "ok");
 
         if (isSuccess)
             await CloseGenericSessionAsync("completed", result.ExitCode ?? 0, null, null, null);
         else
-            await CloseGenericSessionAsync("failed", result.ExitCode ?? 1, _failureReason, result.Status, _failureReason);
+            await CloseGenericSessionAsync("failed", result.ExitCode ?? 1, State.FailureReason, result.Status, State.FailureReason);
 
         return new AgentJobReportResult(true);
     }
 
-    public Task FailAsync(string reason)
+    public async Task FailAsync(string reason)
     {
-        if (_status == AgentJobStatus.Completed || _status == AgentJobStatus.Failed)
-            return Task.CompletedTask;
+        if (IsTerminal)
+            return;
 
-        _status = AgentJobStatus.Failed;
-        _failureReason = reason;
-        _runningSince = null;
-        _terminalResult ??= new AgentJobTerminalResult(
-            _status, reason, null, null, reason, null);
+        State.Status = AgentJobStatus.Failed;
+        State.FailureReason = reason;
+        State.RunningSince = null;
+        State.TerminalResult ??= new AgentJobTerminalResult(
+            State.Status, reason, null, null, reason, null);
         DisposeDispatchTimer();
         DisposeJobTimeoutTimer();
+        await SaveAsync();
 
         _log.LogInformation(
             "AgentJob {Id} forced to failed: {Reason}",
             Key, reason);
-
-        return Task.CompletedTask;
     }
 
-    public Task SubmitAsync(AgentJobInput input)
+    public async Task SubmitAsync(AgentJobInput input)
     {
-        if (_status != AgentJobStatus.Pending)
+        if (State.Input is not null)
+        {
+            var existingInput = InputWithAgentConfig()!;
+            if (EquivalentInput(existingInput, input))
+            {
+                if (!IsTerminal && State.Status == AgentJobStatus.Pending)
+                    await TryDispatchAsync();
+                return;
+            }
             throw new InvalidOperationException(
-                $"AgentJob '{Key}' cannot be re-submitted; current status is {_status}");
+                $"AgentJob '{Key}' cannot accept a different submission after it has started " +
+                $"({DescribeInputDifferences(existingInput, input)})");
+        }
+
+        if (State.Status != AgentJobStatus.Pending)
+            throw new InvalidOperationException(
+                $"AgentJob '{Key}' cannot be re-submitted; current status is {State.Status}");
 
         if (input is null || string.IsNullOrWhiteSpace(input.Prompt))
             throw new ArgumentException("AgentJobInput.Prompt is required", nameof(input));
 
-        _input = input;
-        _submittedAt = _timeProvider.GetUtcNow();
-        _nextDispatchDelay = TimeSpan.Zero;
-        _dispatchAttempts = 0;
-        _ = TryDispatchAsync();
-        return Task.CompletedTask;
+        State.AgentConfigJson = SerializeAgentConfig(input.AgentConfig);
+        State.Input = input with { AgentConfig = null };
+        State.SubmittedAt = _timeProvider.GetUtcNow();
+        State.NextDispatchDelay = TimeSpan.Zero;
+        State.DispatchAttempts = 0;
+        await SaveAsync();
+        await TryDispatchAsync();
     }
+
+    public async Task EnsureSubmittedAsync(AgentJobInput input)
+    {
+        if (State.Input is not null)
+        {
+            if (!IsTerminal && State.Status == AgentJobStatus.Pending)
+                await TryDispatchAsync();
+            return;
+        }
+
+        await SubmitAsync(input);
+    }
+
+    private static bool EquivalentInput(AgentJobInput left, AgentJobInput right) =>
+        string.Equals(left.Prompt, right.Prompt, StringComparison.Ordinal)
+        && string.Equals(left.Model, right.Model, StringComparison.Ordinal)
+        && string.Equals(left.WorkspacePath, right.WorkspacePath, StringComparison.Ordinal)
+        && string.Equals(left.ProjectId, right.ProjectId, StringComparison.Ordinal)
+        && string.Equals(left.Uses, right.Uses, StringComparison.Ordinal)
+        && string.Equals(left.AgentId, right.AgentId, StringComparison.Ordinal)
+        && string.Equals(left.AgentInstructions, right.AgentInstructions, StringComparison.Ordinal)
+        && string.Equals(left.AgentSessionId, right.AgentSessionId, StringComparison.Ordinal)
+        && JsonEquals(left.AgentConfig, right.AgentConfig);
+
+    private static string DescribeInputDifferences(AgentJobInput left, AgentJobInput right)
+    {
+        var fields = new List<string>();
+        if (!string.Equals(left.Prompt, right.Prompt, StringComparison.Ordinal)) fields.Add(nameof(AgentJobInput.Prompt));
+        if (!string.Equals(left.Model, right.Model, StringComparison.Ordinal)) fields.Add(nameof(AgentJobInput.Model));
+        if (!string.Equals(left.WorkspacePath, right.WorkspacePath, StringComparison.Ordinal)) fields.Add(nameof(AgentJobInput.WorkspacePath));
+        if (!string.Equals(left.ProjectId, right.ProjectId, StringComparison.Ordinal)) fields.Add(nameof(AgentJobInput.ProjectId));
+        if (!string.Equals(left.Uses, right.Uses, StringComparison.Ordinal)) fields.Add(nameof(AgentJobInput.Uses));
+        if (!string.Equals(left.AgentId, right.AgentId, StringComparison.Ordinal)) fields.Add(nameof(AgentJobInput.AgentId));
+        if (!string.Equals(left.AgentInstructions, right.AgentInstructions, StringComparison.Ordinal)) fields.Add(nameof(AgentJobInput.AgentInstructions));
+        if (!string.Equals(left.AgentSessionId, right.AgentSessionId, StringComparison.Ordinal)) fields.Add(nameof(AgentJobInput.AgentSessionId));
+        if (!JsonEquals(left.AgentConfig, right.AgentConfig)) fields.Add(nameof(AgentJobInput.AgentConfig));
+        return string.Join(", ", fields);
+    }
+
+    private static bool JsonEquals(JsonElement? left, JsonElement? right)
+    {
+        var hasLeft = left is { ValueKind: not JsonValueKind.Undefined };
+        var hasRight = right is { ValueKind: not JsonValueKind.Undefined };
+        if (!hasLeft || !hasRight)
+            return hasLeft == hasRight;
+        return JsonElement.DeepEquals(left!.Value, right!.Value);
+    }
+
+    private AgentJobInput? InputWithAgentConfig() =>
+        State.Input is null
+            ? null
+            : State.Input with
+            {
+                AgentConfig = string.IsNullOrWhiteSpace(State.AgentConfigJson)
+                    ? null
+                    : JSON.DeserializeElement(State.AgentConfigJson),
+            };
+
+    private static string? SerializeAgentConfig(JsonElement? config) =>
+        config is { ValueKind: not JsonValueKind.Undefined } element
+            ? element.GetRawText()
+            : null;
 
     public async Task CheckTimeoutsAsync()
     {
-        if (_status == AgentJobStatus.Pending && DispatchRetryBoundExceeded())
+        if (State.Status == AgentJobStatus.Pending
+            && State.RunnerId is null
+            && DispatchRetryBoundExceeded())
         {
             await FailWithReasonAsync(AgentJobFailureReasons.RunnerUnavailable);
             return;
         }
 
-        if (_status == AgentJobStatus.Pending)
+        if (State.Status == AgentJobStatus.Pending)
         {
+            if (State.RunnerId is not null && JobTimeoutExceeded())
+            {
+                await OnJobTimeoutAsync();
+                return;
+            }
             await TryDispatchAsync();
             return;
         }
 
-        if (_status == AgentJobStatus.Running && JobTimeoutExceeded())
+        if (State.Status == AgentJobStatus.Running && JobTimeoutExceeded())
         {
             await OnJobTimeoutAsync();
         }
@@ -251,17 +365,30 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
 
     private async Task TryDispatchCoreAsync()
     {
-        if (_status != AgentJobStatus.Pending || _input is null || _submittedAt is null)
+        if (State.Status != AgentJobStatus.Pending || State.Input is null || State.SubmittedAt is null)
             return;
 
-        if (DispatchRetryBoundExceeded())
+        if (State.RunnerId is null && DispatchRetryBoundExceeded())
         {
             await FailWithReasonAsync(AgentJobFailureReasons.RunnerUnavailable);
             return;
         }
 
-        _dispatchAttempts++;
-        var projectId = _input.ProjectId ?? string.Empty;
+        State.DispatchAttempts++;
+        await SaveAsync();
+
+        if (State.RunnerId is not null)
+        {
+            if (await TryAssignToRunnerAsync(State.RunnerId))
+                return;
+            if (State.RunnerId is not null)
+            {
+                await ScheduleNextDispatchAsync();
+                return;
+            }
+        }
+
+        var projectId = State.Input.ProjectId ?? string.Empty;
         var registry = GrainFactory.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
         var runners = await registry.ListEligibleRunnersAsync(projectId);
         if (runners.Count == 0)
@@ -272,65 +399,79 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
 
         foreach (var runnerInfo in runners)
         {
-            if (_status != AgentJobStatus.Pending)
+            if (State.Status != AgentJobStatus.Pending)
                 return;
-            if (await TryAssignToRunnerAsync(runnerInfo))
+            if (await TryAssignToRunnerAsync(runnerInfo.RunnerId))
                 return;
         }
 
         await ScheduleNextDispatchAsync();
     }
 
-    private async Task<bool> TryAssignToRunnerAsync(RunnerInfo runnerInfo)
+    private async Task<bool> TryAssignToRunnerAsync(string runnerId)
     {
-        var runner = GrainFactory.GetGrain<IRunnerGrain>(runnerInfo.RunnerId);
-        var state = await runner.GetRuntimeStateAsync();
-        if (state.Status != RunnerStatus.Online)
-            return false;
-
-        // Slots are sourced from the runner grain's persisted definition state.
-        var maxSlots = await runner.GetSlotsAsync();
-        var activeWorkCount = state.ActiveWorks
-            .Select(w => w.OwnerId)
-            .Distinct(StringComparer.Ordinal)
-            .Count();
-        if (activeWorkCount >= maxSlots)
-            return false;
-
-        var workId = $"agent-work-{Guid.NewGuid():N}";
-
-        if (_status != AgentJobStatus.Pending)
-            return false;
-        AssignRunnerInternal(runnerInfo.RunnerId, workId);
-
-        RunnerWorkAssignmentResult result;
-        try
+        var runner = GrainFactory.GetGrain<IRunnerGrain>(runnerId);
+        var assignmentPrepared = string.Equals(State.RunnerId, runnerId, StringComparison.Ordinal)
+            && State.WorkId is not null;
+        if (!assignmentPrepared)
         {
-            var dispatch = BuildDispatch(workId);
-            result = await runner.AssignAgentJobAsync(dispatch);
+            var state = await runner.GetRuntimeStateAsync();
+            if (state.Status != RunnerStatus.Online)
+                return false;
+
+            var maxSlots = await runner.GetSlotsAsync();
+            var activeWorkCount = state.ActiveWorks
+                .Select(w => w.OwnerId)
+                .Distinct(StringComparer.Ordinal)
+                .Count();
+            if (activeWorkCount >= maxSlots)
+                return false;
         }
-        catch
+
+        if (State.Status != AgentJobStatus.Pending)
+            return false;
+
+        if (!assignmentPrepared)
         {
-            await FailWithReasonAsync(AgentJobFailureReasons.RunnerUnavailable);
-            throw;
+            AssignRunnerInternal(runnerId, StableWorkId(Key));
+            await SaveAsync();
+            await _dispatchObserver.AssignmentPreparedAsync(Key, runnerId, State.WorkId!);
         }
+
+        var dispatch = BuildDispatch(State.WorkId!);
+        var result = await runner.AssignAgentJobAsync(dispatch);
 
         if (result.Status != RunnerWorkAssignmentStatus.Assigned)
         {
-            await FailWithReasonAsync(AgentJobFailureReasons.RunnerUnavailable);
+            if (State.Status != AgentJobStatus.Pending)
+                return false;
+            if (string.Equals(result.Reason, "runner-reconciling", StringComparison.Ordinal))
+                return false;
+
+            State.RunnerId = null;
+            State.WorkId = null;
+            State.RunnerAccepted = false;
+            State.RunningSince = null;
+            await SaveAsync();
             return false;
         }
 
+        await _dispatchObserver.RunnerAcceptedAsync(Key, runnerId, State.WorkId!);
+        State.RunnerAccepted = true;
+        State.Status = AgentJobStatus.Running;
+        State.RunningSince = _timeProvider.GetUtcNow();
+        await SaveAsync();
         DisposeDispatchTimer();
+        ArmJobTimeout();
         _log.LogInformation(
             "AgentJob {Id} assigned to runner {Runner} as work {Work}",
-            Key, runnerInfo.RunnerId, workId);
+            Key, runnerId, State.WorkId);
         return true;
     }
 
     private WorkDispatch BuildDispatch(string workId)
     {
-        var input = _input!;
+        var input = InputWithAgentConfig()!;
         var payload = new Dictionary<string, JsonElement?>(StringComparer.Ordinal);
         if (!string.IsNullOrWhiteSpace(input.WorkspacePath))
             payload["workspace"] = JSON.SerializeToElement(
@@ -418,20 +559,26 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
 
     private async Task ScheduleNextDispatchAsync()
     {
-        if (_status != AgentJobStatus.Pending || _input is null || _submittedAt is null)
+        if (State.Status != AgentJobStatus.Pending || State.Input is null || State.SubmittedAt is null)
             return;
 
-        if (DispatchRetryBoundExceeded())
+        if (State.RunnerId is null && DispatchRetryBoundExceeded())
         {
             await FailWithReasonAsync(AgentJobFailureReasons.RunnerUnavailable);
             return;
         }
+        if (State.RunnerId is not null && JobTimeoutExceeded())
+        {
+            await OnJobTimeoutAsync();
+            return;
+        }
 
-        _nextDispatchDelay = _backoff.NextDelay(_nextDispatchDelay);
+        State.NextDispatchDelay = _backoff.NextDelay(State.NextDispatchDelay);
+        await SaveAsync();
         DisposeDispatchTimer();
         _dispatchTimer = this.RegisterGrainTimer(
             _ => TryDispatchAsync(),
-            _nextDispatchDelay,
+            State.NextDispatchDelay,
             TimeSpan.FromMilliseconds(-1));
     }
 
@@ -440,16 +587,23 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         if (_options.JobTimeout <= TimeSpan.Zero)
             return;
 
+        var dueTime = _options.JobTimeout;
+        if (State.RunningSince is { } runningSince)
+        {
+            var remaining = runningSince + _options.JobTimeout - _timeProvider.GetUtcNow();
+            dueTime = remaining > TimeSpan.Zero ? remaining : TimeSpan.Zero;
+        }
+
         DisposeJobTimeoutTimer();
         _jobTimeoutTimer = this.RegisterGrainTimer(
             _ => OnJobTimeoutAsync(),
-            _options.JobTimeout,
+            dueTime,
             TimeSpan.FromMilliseconds(-1));
     }
 
     private async Task OnJobTimeoutAsync()
     {
-        if (_status != AgentJobStatus.Running)
+        if (IsTerminal || State.RunnerId is null)
             return;
 
         _log.LogWarning(
@@ -473,7 +627,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         string? failureCategory,
         string? reason)
     {
-        var sessionId = _input?.AgentSessionId;
+        var sessionId = State.Input?.AgentSessionId;
         if (string.IsNullOrWhiteSpace(sessionId))
             return;
 
@@ -503,32 +657,41 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
 
     private bool DispatchRetryBoundExceeded()
     {
-        return _status == AgentJobStatus.Pending
-            && _submittedAt is not null
-            && _timeProvider.GetUtcNow() >= _submittedAt.Value + _backoff.TotalBound;
+        return State.Status == AgentJobStatus.Pending
+            && State.SubmittedAt is not null
+            && _timeProvider.GetUtcNow() >= State.SubmittedAt.Value + _backoff.TotalBound;
     }
 
     private bool JobTimeoutExceeded()
     {
-        return _status == AgentJobStatus.Running
-            && _runningSince is not null
+        return State.RunnerId is not null
+            && State.RunningSince is not null
             && _options.JobTimeout > TimeSpan.Zero
-            && _timeProvider.GetUtcNow() >= _runningSince.Value + _options.JobTimeout;
+            && _timeProvider.GetUtcNow() >= State.RunningSince.Value + _options.JobTimeout;
     }
 
     private async Task FailWithReasonAsync(string reason)
     {
-        if (_status == AgentJobStatus.Completed || _status == AgentJobStatus.Failed)
+        if (IsTerminal)
             return;
 
-        _status = AgentJobStatus.Failed;
-        _failureReason = reason;
-        _runningSince = null;
-        _terminalResult ??= new AgentJobTerminalResult(
-            _status, reason, null, null, reason, null);
+        State.Status = AgentJobStatus.Failed;
+        State.FailureReason = reason;
+        State.RunningSince = null;
+        State.TerminalResult ??= new AgentJobTerminalResult(
+            State.Status, reason, null, null, reason, null);
         DisposeDispatchTimer();
         DisposeJobTimeoutTimer();
+        await SaveAsync();
         await CloseGenericSessionOnFailureAsync(reason);
+    }
+
+    private Task SaveAsync() => _state.WriteStateAsync();
+
+    private static string StableWorkId(string key)
+    {
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(key));
+        return $"agent-work-{Convert.ToHexString(hash.AsSpan(0, 16)).ToLowerInvariant()}";
     }
 
     private void DisposeDispatchTimer()

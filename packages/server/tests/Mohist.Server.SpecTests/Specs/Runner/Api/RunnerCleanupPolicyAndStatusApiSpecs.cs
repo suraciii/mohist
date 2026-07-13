@@ -45,6 +45,8 @@ public class RunnerCleanupPolicyAndStatusApiSpecs : IAsyncLifetime
         return runnerId;
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public void CleanupPolicyDto_ConfiguredOptions_ArePropagatedToRunner()
     {
@@ -68,6 +70,8 @@ public class RunnerCleanupPolicyAndStatusApiSpecs : IAsyncLifetime
         Assert.Equal(536_870_912L, dto.StorageTargetWatermarkBytes);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task Status_UnknownRunIds_ReturnsEmptyDictionary()
     {
@@ -84,6 +88,8 @@ public class RunnerCleanupPolicyAndStatusApiSpecs : IAsyncLifetime
         Assert.Empty(statuses.EnumerateObject());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task Status_EmptyWorkflowRunIdsArray_Returns400()
     {
@@ -98,6 +104,8 @@ public class RunnerCleanupPolicyAndStatusApiSpecs : IAsyncLifetime
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task Status_WhitespaceRunIds_AreFilteredOut()
     {
@@ -114,6 +122,8 @@ public class RunnerCleanupPolicyAndStatusApiSpecs : IAsyncLifetime
         Assert.Empty(statuses.EnumerateObject());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task Status_ExistingNonTerminalRun_ReturnsRunningStatus()
     {
@@ -141,6 +151,8 @@ public class RunnerCleanupPolicyAndStatusApiSpecs : IAsyncLifetime
         Assert.Empty(body.GetProperty("statuses").EnumerateObject());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task Status_DuplicateRunIds_DeduplicatedInResponse()
     {

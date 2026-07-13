@@ -1,7 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
-using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Agent.Grains;
@@ -43,6 +42,10 @@ public class GenericAgentSessionTranscriptAxisSpecs : IAsyncLifetime
         }
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task GenericLaunch_PolledDispatch_CarriesMintedAgentSessionIdAndNoWorkflowRunId()
     {
@@ -81,6 +84,9 @@ public class GenericAgentSessionTranscriptAxisSpecs : IAsyncLifetime
         }
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task GenericLaunch_PolledDispatch_FakeAgentRunThroughRuntimeEventsEndpoint_PersistsNonEmptyTranscriptTurn()
     {
@@ -110,13 +116,14 @@ public class GenericAgentSessionTranscriptAxisSpecs : IAsyncLifetime
                 project.Id,
                 sessionId,
                 polledWork,
-                new[]
+                new object[]
                 {
-                    new FakeRuntimeEvent("session.input", new { text = "transcript-axis events", kind = "task" }),
-                    new FakeRuntimeEvent("message.delta", new { content = new { text = "Hello transcript axis." } }),
-                    new FakeRuntimeEvent(
-                        "tool_call.started",
-                        new
+                    new { type = "session.input", payload = new { text = "transcript-axis events", kind = "task" } },
+                    new { type = "message.delta", payload = new { content = new { text = "Hello transcript axis." } } },
+                    new
+                    {
+                        type = "tool_call.started",
+                        payload = new
                         {
                             toolCallId = "tx-tool-1",
                             toolName = "Read",
@@ -124,10 +131,12 @@ public class GenericAgentSessionTranscriptAxisSpecs : IAsyncLifetime
                             status = "in_progress",
                             title = "Read README",
                             rawInput = new { filePath = "README.md" }
-                        }),
-                    new FakeRuntimeEvent(
-                        "tool_call.completed",
-                        new
+                        }
+                    },
+                    new
+                    {
+                        type = "tool_call.completed",
+                        payload = new
                         {
                             toolCallId = "tx-tool-1",
                             toolName = "Read",
@@ -136,10 +145,12 @@ public class GenericAgentSessionTranscriptAxisSpecs : IAsyncLifetime
                             title = "Read README",
                             rawInput = new { filePath = "README.md" },
                             rawOutput = new { text = "README contents" }
-                        }),
-                    new FakeRuntimeEvent(
-                        "usage.updated",
-                        new
+                        }
+                    },
+                    new
+                    {
+                        type = "usage.updated",
+                        payload = new
                         {
                             inputTokens = 220,
                             outputTokens = 80,
@@ -148,7 +159,8 @@ public class GenericAgentSessionTranscriptAxisSpecs : IAsyncLifetime
                             contextWindowUsed = 300,
                             costAmount = 0.0011,
                             costCurrency = "USD"
-                        })
+                        }
+                    }
                 });
 
             var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
@@ -206,6 +218,9 @@ public class GenericAgentSessionTranscriptAxisSpecs : IAsyncLifetime
         }
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task GenericLaunch_FollowUpRuntimeEvents_AppendNonEmptyTranscriptContent()
     {
@@ -234,10 +249,10 @@ public class GenericAgentSessionTranscriptAxisSpecs : IAsyncLifetime
                 project.Id,
                 sessionId,
                 polledWork,
-                new[]
+                new object[]
                 {
-                    new FakeRuntimeEvent("session.input", new { text = "transcript-axis first turn", kind = "task" }),
-                    new FakeRuntimeEvent("message.delta", new { content = new { text = "first reply" } })
+                    new { type = "session.input", payload = new { text = "transcript-axis first turn", kind = "task" } },
+                    new { type = "message.delta", payload = new { content = new { text = "first reply" } } }
                 });
 
             var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
@@ -334,6 +349,9 @@ public class GenericAgentSessionTranscriptAxisSpecs : IAsyncLifetime
         }
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task GenericTranscript_IsReachable_SolelyBySessionId_WithoutWorkflowRunIdLookup()
     {
@@ -416,7 +434,7 @@ public class GenericAgentSessionTranscriptAxisSpecs : IAsyncLifetime
         string projectId,
         string sessionId,
         PollResult polledWork,
-        FakeRuntimeEvent[] runtimeEvents)
+        object[] runtimeEvents)
     {
         Assert.Equal(sessionId, polledWork.AgentSessionId);
         Assert.Equal(projectId, polledWork.ProjectId);
@@ -443,12 +461,16 @@ public class GenericAgentSessionTranscriptAxisSpecs : IAsyncLifetime
             polledWork.WorkId,
             polledWork.WorkType,
             polledWork.Stage,
-            runtimeEvents.Select(runtimeEvent => runtimeEvent.Type).ToArray());
+            runtimeEvents.Select(ReadRuntimeEventType).ToArray());
     }
 
-    private sealed record FakeRuntimeEvent(
-        [property: JsonPropertyName("type")] string Type,
-        [property: JsonPropertyName("payload")] object Payload);
+    private static string ReadRuntimeEventType(object runtimeEvent)
+    {
+        var type = runtimeEvent.GetType().GetProperty("type")?.GetValue(runtimeEvent) as string;
+        if (string.IsNullOrWhiteSpace(type))
+            throw new InvalidOperationException("Fake runtime event is missing a type");
+        return type;
+    }
 
     private async Task ReportDispatchCompletedAsync(string runnerId, PollResult polledWork)
     {
@@ -615,7 +637,12 @@ public class GenericAgentSessionTranscriptAxisSpecs : IAsyncLifetime
     {
         var projectName = $"generic-transcript-{Guid.NewGuid():N}";
         if (projectName.Length > 63) projectName = projectName[..63];
-        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = projectName });
+        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new
+        {
+            name = projectName,
+            path = Directory.GetCurrentDirectory(),
+            baseBranch = "main",
+        });
         await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new
         {
             name = "main",

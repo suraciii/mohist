@@ -35,14 +35,6 @@ User Project
 | architecture rules | design/architecture.md | OpenSpec |
 | builtin workflow content | *.workflow.yaml | design/ |
 
-## Server implementation boundaries
-
-- `*.Domain` owns business rules and does not depend on API, persistence, or Orleans.
-- API adapts public requests: writes use grain interfaces and reads use queriers, never persistence or Orleans directly.
-- Queriers read persisted state and do not call grain interfaces.
-- `Infrastructure.Data` owns EF rows, `DbContext`, migrations, model snapshot, and persistence adapters; it does not depend on application grains, services, or queriers.
-- Production code reads environment state through `IEnvironmentVariableProvider`, never `System.Environment` directly.
-
 ## Facts and decisions
 
 ```

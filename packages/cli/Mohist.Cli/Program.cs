@@ -38,6 +38,7 @@ internal static class CliProgram
         services.AddSingleton<IFileSystem>(fileSystem);
         services.AddSingleton<ICommandExecutor>(commandExecutor);
         services.AddSingleton<IEnvironmentVariableProvider>(environment);
+        services.AddSingleton<OperatorCredentialProvider>();
         services.AddSingleton<IServiceInstaller>(_ => OperatingSystem.IsWindows() ? new WindowsScheduledTaskInstaller(Console.Out, Console.Error, fileSystem, commandExecutor) : new SystemdServiceInstaller(Console.Out, Console.Error, fileSystem, commandExecutor));
         services.AddSingleton(updateOperations);
         services.AddSingleton<RuntimeConsistencyValidator>(validator);

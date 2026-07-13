@@ -123,11 +123,34 @@ public class IssueWorkflowRunReferenceTests
     }
 
     [Fact]
+    public void Domain_ExposesSingleWorkflowRunIdProperty_NoActiveAlias()
+    {
+        var propertyNames = typeof(Mohist.Server.Issue.Domain.Issue)
+            .GetProperties()
+            .Select(p => p.Name)
+            .ToHashSet(StringComparer.Ordinal);
+
+        Assert.Contains("WorkflowRunId", propertyNames);
+        Assert.DoesNotContain("ActiveWorkflowRunId", propertyNames);
+
+        var fieldNames = typeof(Mohist.Server.Issue.Domain.Issue)
+            .GetFields(System.Reflection.BindingFlags.Instance
+                | System.Reflection.BindingFlags.NonPublic
+                | System.Reflection.BindingFlags.Public)
+            .Select(f => f.Name)
+            .ToHashSet(StringComparer.Ordinal);
+
+        Assert.Contains("_workflowRunId", fieldNames);
+        Assert.DoesNotContain("_activeWorkflowRunId", fieldNames);
+    }
+
+    [Fact]
     public void WorkflowProfileLockedException_ReferencesRunIdNotActiveWorkflow()
     {
         var withRun = new WorkflowProfileLockedException(7, "wr_1");
         Assert.Equal("7", withRun.IssueNumber);
         Assert.Equal("wr_1", withRun.WorkflowRunId);
+        Assert.Null(withRun.GetType().GetProperty("ActiveWorkflowRunId"));
         Assert.Contains("workflow run reference", withRun.Message, StringComparison.OrdinalIgnoreCase);
 
         var withoutRun = new WorkflowProfileLockedException(7, null);

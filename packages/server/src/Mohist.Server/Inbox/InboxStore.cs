@@ -35,6 +35,19 @@ public sealed class InboxStore : IScopedService
     /// </summary>
     public async Task<InboxInsertResult> InsertAsync(InboxItemDraft draft, CancellationToken ct = default)
     {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        var result = await InsertAsync(db, draft, ct);
+        await transaction.CommitAsync(ct);
+        return result;
+    }
+
+    public async Task<InboxInsertResult> InsertAsync(
+        MohistDbContext db,
+        InboxItemDraft draft,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(db);
         if (draft is null) throw new ArgumentNullException(nameof(draft));
         ValidateDraft(draft);
 
@@ -53,7 +66,6 @@ public sealed class InboxStore : IScopedService
             CreatedAt = createdAt,
         };
 
-        await using var db = await _dbFactory.CreateDbContextAsync(ct);
         db.InboxItems.Add(row);
         try
         {
@@ -62,9 +74,7 @@ public sealed class InboxStore : IScopedService
         }
         catch (DbUpdateException ex) when (IsSourceEventConflict(ex))
         {
-            // The source-event unique index rejected the write. Return
-            // the existing row's id so the caller can log/reference it
-            // without re-inserting.
+            db.Entry(row).State = EntityState.Detached;
             var existing = await db.InboxItems.AsNoTracking()
                 .Where(r => r.SourceEventSource == draft.SourceEventSource
                     && r.SourceEventId == draft.SourceEventId)

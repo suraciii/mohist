@@ -1,0 +1,228 @@
+using Microsoft.Data.Sqlite;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
+using Mohist.Server.Infrastructure.Hosting;
+using Mohist.Server.Otel;
+using Mohist.Server.SystemInfo;
+using Mohist.Server.SpecTests.Support;
+using Xunit;
+
+namespace Mohist.Server.SpecTests.Specs.Telemetry;
+
+[Trait(Traits.Speed.Name, Traits.Speed.Service)]
+[Trait(Traits.Sut.Name, Traits.Sut.Telemetry)]
+public class OtelDbSpecs : IDisposable
+{
+    private readonly OtelDb _db;
+    // Keeper keeps the in-memory SQLite database alive for the test's lifetime.
+    private readonly SqliteConnection _keeper;
+
+    public OtelDbSpecs()
+    {
+        // The schema-creation specs exercise OtelDb.EnsureInitialized against an
+        // in-memory shared-cache database so no real otel.db file is touched
+        // (design/testing.md hard-constraint 1). File-specific contracts (WAL
+        // mode, physical read-only enforcement, file materialization) cannot be
+        // expressed against an in-memory database and are intentionally not
+        // tested here — see the historical rationale in the test-suite audit.
+        (_db, _keeper) = InMemoryOtelDb.Create();
+    }
+
+    public void Dispose()
+    {
+        _keeper.Dispose();
+    }
+
+    [Fact]
+    public void OpenReadWriteConnection_CreatesTracesAndSpansTables()
+    {
+        using var connection = _db.OpenReadWriteConnection();
+
+        Assert.True(TableExists(connection, OtelDb.TracesTable));
+        Assert.True(TableExists(connection, OtelDb.SpansTable));
+    }
+
+    [Fact]
+    public void OpenReadWriteConnection_CreatesExpectedColumns()
+    {
+        using var connection = _db.OpenReadWriteConnection();
+
+        Assert.True(ColumnExists(connection, OtelDb.TracesTable, OtelDb.TracesTraceIdColumn));
+        Assert.True(ColumnExists(connection, OtelDb.TracesTable, OtelDb.TracesServiceNameColumn));
+        Assert.True(ColumnExists(connection, OtelDb.TracesTable, OtelDb.TracesStartTimeColumn));
+        Assert.True(ColumnExists(connection, OtelDb.TracesTable, OtelDb.TracesEndTimeColumn));
+        Assert.True(ColumnExists(connection, OtelDb.TracesTable, OtelDb.TracesSpanCountColumn));
+
+        Assert.True(ColumnExists(connection, OtelDb.SpansTable, OtelDb.SpansTraceIdColumn));
+        Assert.True(ColumnExists(connection, OtelDb.SpansTable, OtelDb.SpansSpanIdColumn));
+        Assert.True(ColumnExists(connection, OtelDb.SpansTable, OtelDb.SpansParentSpanIdColumn));
+        Assert.True(ColumnExists(connection, OtelDb.SpansTable, OtelDb.SpansNameColumn));
+        Assert.True(ColumnExists(connection, OtelDb.SpansTable, OtelDb.SpansKindColumn));
+        Assert.True(ColumnExists(connection, OtelDb.SpansTable, OtelDb.SpansStartTimeColumn));
+        Assert.True(ColumnExists(connection, OtelDb.SpansTable, OtelDb.SpansEndTimeColumn));
+        Assert.True(ColumnExists(connection, OtelDb.SpansTable, OtelDb.SpansAttributesColumn));
+        Assert.True(ColumnExists(connection, OtelDb.SpansTable, OtelDb.SpansStatusCodeColumn));
+        Assert.True(ColumnExists(connection, OtelDb.SpansTable, OtelDb.SpansStatusMessageColumn));
+        Assert.True(ColumnExists(connection, OtelDb.SpansTable, OtelDb.SpansResourceAttributesColumn));
+    }
+
+    [Fact]
+    public void OpenReadWriteConnection_CreatesAllExpectedIndices()
+    {
+        using var connection = _db.OpenReadWriteConnection();
+
+        Assert.True(IndexExists(connection, OtelDb.TracesServiceStartIndex));
+        Assert.True(IndexExists(connection, OtelDb.TracesStartIndex));
+        Assert.True(IndexExists(connection, OtelDb.SpansTraceIndex));
+    }
+
+    [Fact]
+    public void OpenReadWriteConnection_CalledTwice_IsIdempotent()
+    {
+        using var first = _db.OpenReadWriteConnection();
+        using (var cmd = first.CreateCommand())
+        {
+            cmd.CommandText = "INSERT INTO traces (trace_id, service_name, start_time, end_time, span_count) VALUES ('t1', 'svc', '2026-01-01T00:00:00Z', '2026-01-01T00:00:01Z', 1);";
+            cmd.ExecuteNonQuery();
+        }
+        first.Dispose();
+
+        using var second = _db.OpenReadWriteConnection();
+        using (var cmd = second.CreateCommand())
+        {
+            cmd.CommandText = "SELECT COUNT(*) FROM traces;";
+            Assert.Equal(1L, (long)cmd.ExecuteScalar()!);
+        }
+    }
+
+    [Fact]
+    public void OpenReadOnlyConnection_OpensAndExposesSchema()
+    {
+        // EnsureInitialized has already run via the keeper; open a read-only
+        // connection and confirm it sees the schema. (The physical read-only
+        // enforcement is a file-specific contract not exercised here.)
+        using var readOnly = _db.OpenReadOnlyConnection();
+        Assert.True(TableExists(readOnly, OtelDb.TracesTable));
+        Assert.True(TableExists(readOnly, OtelDb.SpansTable));
+    }
+
+    // ---- Path resolution (pure static functions — no filesystem I/O) ----
+
+    [Fact]
+    public void ResolveDatabasePath_UsesConfiguredDbPath()
+    {
+        var options = new OtelOptions { DbPath = "/tmp/some-otel.db" };
+        var path = OtelDb.ResolveDatabasePath(options, new MockEnvironment());
+
+        Assert.Equal(Path.GetFullPath("/tmp/some-otel.db"), path);
+    }
+
+    [Fact]
+    public void ResolveDatabasePath_FallsBackToEnvVar()
+    {
+        var options = new OtelOptions();
+        var environment = new MockEnvironment();
+        environment[OtelOptions.DbPathEnvironmentVariable] = "/tmp/from-env-otel.db";
+
+        var path = OtelDb.ResolveDatabasePath(options, environment);
+
+        Assert.Equal(Path.GetFullPath("/tmp/from-env-otel.db"), path);
+    }
+
+    [Fact]
+    public void ResolveDatabasePath_DefaultUsesMainDbPathDirectory()
+    {
+        var mainDbPath = "/data/custom-main/mohist.db";
+        var options = new OtelOptions();
+        var environment = new MockEnvironment();
+        environment[OtelOptions.MainDbPathEnvironmentVariable] = mainDbPath;
+
+        var path = OtelDb.ResolveDatabasePath(options, environment);
+
+        Assert.Equal(
+            Path.GetFullPath(Path.Combine(Path.GetDirectoryName(mainDbPath)!, OtelDb.DefaultDatabaseFileName)),
+            path);
+    }
+
+    [Fact]
+    public void ResolveDatabasePath_FallsBackToDefaultHomeWhenNothingConfigured()
+    {
+        var options = new OtelOptions();
+        var environment = new MockEnvironment();
+        environment["HOME"] = "/home/testuser";
+
+        var path = OtelDb.ResolveDatabasePath(options, environment);
+
+        Assert.Equal(
+            Path.GetFullPath(Path.Combine("/home/testuser", OtelDb.DataDirectoryName, OtelDb.DefaultDatabaseFileName)),
+            path);
+    }
+
+    [Fact]
+    public void ResolveDatabasePath_ConfiguredOverridesEnvVar()
+    {
+        var options = new OtelOptions { DbPath = "/tmp/explicit-otel.db" };
+        var environment = new MockEnvironment();
+        environment[OtelOptions.DbPathEnvironmentVariable] = "/tmp/from-env-otel.db";
+
+        var path = OtelDb.ResolveDatabasePath(options, environment);
+
+        Assert.Equal(Path.GetFullPath("/tmp/explicit-otel.db"), path);
+    }
+
+    private static bool TableExists(SqliteConnection connection, string tableName)
+    {
+        using var cmd = connection.CreateCommand();
+        cmd.CommandText = "SELECT 1 FROM sqlite_master WHERE type='table' AND name=$name LIMIT 1;";
+        cmd.Parameters.AddWithValue("$name", tableName);
+        var result = cmd.ExecuteScalar();
+        return result != null;
+    }
+
+    private static bool ColumnExists(SqliteConnection connection, string tableName, string columnName)
+    {
+        using var cmd = connection.CreateCommand();
+        cmd.CommandText = $"PRAGMA table_info({tableName});";
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+        {
+            var name = reader.GetString(1);
+            if (string.Equals(name, columnName, StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+        return false;
+    }
+
+    private static bool IndexExists(SqliteConnection connection, string indexName)
+    {
+        using var cmd = connection.CreateCommand();
+        cmd.CommandText = "SELECT 1 FROM sqlite_master WHERE type='index' AND name=$name LIMIT 1;";
+        cmd.Parameters.AddWithValue("$name", indexName);
+        var result = cmd.ExecuteScalar();
+        return result != null;
+    }
+
+    private sealed class MockEnvironment : IEnvironmentVariableProvider
+    {
+        private readonly Dictionary<string, string> _values = new(StringComparer.Ordinal);
+
+        public string? this[string variable]
+        {
+            get => _values.TryGetValue(variable, out var v) ? v : null;
+            set
+            {
+                if (value is null) _values.Remove(variable);
+                else _values[variable] = value;
+            }
+        }
+
+        public string? GetEnvironmentVariable(string variable) => this[variable];
+        public string? GetEnvironmentVariable(string variable, EnvironmentVariableTarget target) => this[variable];
+        public IReadOnlyDictionary<string, string> GetEnvironmentVariables() => new Dictionary<string, string>(_values, StringComparer.Ordinal);
+        public IReadOnlyDictionary<string, string> GetEnvironmentVariables(EnvironmentVariableTarget target) => GetEnvironmentVariables();
+        public string ExpandEnvironmentVariables(string name) => name;
+        public void SetEnvironmentVariable(string variable, string? value) => this[variable] = value;
+        public void SetEnvironmentVariable(string variable, string? value, EnvironmentVariableTarget target) => this[variable] = value;
+    }
+}

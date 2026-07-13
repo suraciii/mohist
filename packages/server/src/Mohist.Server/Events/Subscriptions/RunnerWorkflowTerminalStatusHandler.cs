@@ -29,15 +29,9 @@ namespace Mohist.Server.Events.Subscriptions;
 /// types — the public CloudEvents bus wildcard syntax does not match
 /// these two names with a single <c>.*</c> suffix.
 ///
-/// The router call is fired on a detached background task: the row is
-/// persisted from inside the workflow-grain state transaction
-/// (WorkflowRunStore.SaveAsync appends the event row before commit),
-/// and after step 3 (the dispatcher) lands the same delivery path
-/// will resolve the workflow grain again. Detaching preserves
-/// correctness (push failures are logged, never propagated) and
-/// avoids blocking the lifecycle commit. Until the dispatcher lands
-/// this handler is dormant — the row is durable but no in-process
-/// notification reaches it.
+/// The router call is awaited. Delivery failures propagate to the durable
+/// dispatcher, which retries without affecting the workflow transaction that
+/// already committed the source event.
 /// </summary>
 [Subscription(Type = "com.mohist.workflow.run.completed|com.mohist.workflow.run.stopped")]
 public sealed class RunnerWorkflowTerminalStatusHandler : ICloudEventHandler
@@ -57,10 +51,10 @@ public sealed class RunnerWorkflowTerminalStatusHandler : ICloudEventHandler
         evt is not null &&
         TryResolve(evt.Type, out _);
 
-    public Task HandleAsync(CloudEvent evt, CancellationToken ct)
+    public async Task HandleAsync(CloudEvent evt, CancellationToken ct)
     {
         if (!TryResolve(evt.Type, out var status))
-            return Task.CompletedTask;
+            return;
 
         var (workflowRunId, _) = WorkflowEventSerializer.ExtractContextFromSource(evt.Source.ToString());
         if (string.IsNullOrWhiteSpace(workflowRunId))
@@ -68,28 +62,10 @@ public sealed class RunnerWorkflowTerminalStatusHandler : ICloudEventHandler
             _log.LogDebug(
                 "Terminal status handler: cloud event {EventId} has empty source, skipping",
                 evt.Id);
-            return Task.CompletedTask;
+            return;
         }
 
-        // Detach so the workflow-grain commit that triggered this event
-        // returns immediately. The runner's convergence backstop is the
-        // correctness backstop if the detached push fails.
-        _ = RouteDetachedAsync(workflowRunId, status);
-        return Task.CompletedTask;
-    }
-
-    private async Task RouteDetachedAsync(string workflowRunId, WorkflowRunStatus status)
-    {
-        try
-        {
-            await _router.RouteAsync(workflowRunId, status, CancellationToken.None);
-        }
-        catch (Exception ex)
-        {
-            _log.LogWarning(ex,
-                "Terminal status handler: router failed for {WorkflowRunId} ({Status})",
-                workflowRunId, status);
-        }
+        await _router.RouteAsync(workflowRunId, status, ct);
     }
 
     private static bool TryResolve(string? type, out WorkflowRunStatus status)

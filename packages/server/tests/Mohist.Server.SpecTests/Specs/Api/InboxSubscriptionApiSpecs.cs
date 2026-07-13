@@ -19,6 +19,9 @@ public class InboxSubscriptionApiSpecs
         _client = fixture.Client;
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task Get_NoStoredPreferences_ReturnsAllFourEnabled()
     {
@@ -33,6 +36,9 @@ public class InboxSubscriptionApiSpecs
         Assert.True(sub.GetProperty("issue_completed").GetBoolean());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task Put_PersistsAndReRead_ReturnsUpdatedState()
     {
@@ -59,6 +65,9 @@ public class InboxSubscriptionApiSpecs
         Assert.False(sub.GetProperty("issue_completed").GetBoolean());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task Put_UnknownKey_ReturnsBadRequest()
     {
@@ -87,6 +96,9 @@ public class InboxSubscriptionApiSpecs
         Assert.True(sub.GetProperty("issue_completed").GetBoolean());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task Put_MissingKey_ReturnsBadRequest()
     {
@@ -113,6 +125,9 @@ public class InboxSubscriptionApiSpecs
         Assert.True(sub.GetProperty("issue_completed").GetBoolean());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Theory]
     [InlineData("[]")]
     [InlineData("true")]
@@ -129,6 +144,9 @@ public class InboxSubscriptionApiSpecs
         await AssertDefaultSubscriptionAsync(projectId);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task Put_NonBooleanProperty_ReturnsBadRequestAndPersistsNothing()
     {
@@ -150,6 +168,9 @@ public class InboxSubscriptionApiSpecs
         await AssertDefaultSubscriptionAsync(projectId);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task Subscription_ProjectIsolation_ScopedByProject()
     {
@@ -181,6 +202,9 @@ public class InboxSubscriptionApiSpecs
         Assert.True(subB.GetProperty("issue_completed").GetBoolean());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task Subscription_UnknownProject_Returns404()
     {

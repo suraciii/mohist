@@ -1,20 +1,8 @@
 using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
-using Mohist.Server.Agent.Grains;
-using Mohist.Server.Infrastructure.Data;
-using Mohist.Server.Infrastructure.Data.Events;
-using Mohist.Server.Infrastructure.Data.Issue;
-using Mohist.Server.Infrastructure.Data.Workflow;
-using Mohist.Server.Infrastructure.Events;
-using Mohist.Server.Inbox;
-using Mohist.Server.Notifications;
-using Mohist.Server.Workflow.Domain.Run;
-using Mohist.Server.Workflow.Grains;
+using Mohist.Server.Events.Grains;
 using Orleans.Configuration;
 using Orleans.Hosting;
-using DomainIssue = Mohist.Server.Issue.Domain.Issue;
 
 namespace Mohist.Server.Infrastructure.Hosting;
 
@@ -47,21 +35,23 @@ public static class MohistSiloRegistration
             logging.AddConsole();
         });
 
-        // Orleans silo has its own DI container (separate from the web/api one).
-        // Handlers are registered there too, since grains need them.
-        silo.Services.AddCloudEventBus();
-        silo.Services.AddSingleton<IEventStore, EventStore>();
-        silo.Services.AddScoped<InboxStore>();
-        silo.Services.AddScoped<IStateStore<DomainIssue>>(sp => sp.GetRequiredService<IIssueStore>());
-        silo.Services.AddScoped<IIssueStore, IssueStore>();
-        silo.Services.AddScoped<IWorkflowRunStore, WorkflowRunStore>();
-        silo.Services.Configure<HermesNotificationOptions>(configuration.GetSection(HermesNotificationOptions.SectionName));
-        silo.Services.AddSingleton<HermesIssueNotificationRenderer>();
-        silo.Services.AddSingleton<IHermesIssueNotificationDispatcher, BackgroundHermesIssueNotificationDispatcher>();
-        silo.Services.AddHttpClient<IHermesWebhookClient, HermesWebhookClient>();
-        silo.Services.AddCloudEventHandlersFromAssembly(typeof(MohistSiloRegistration).Assembly);
-        silo.Services.Configure<AgentJobOptions>(configuration.GetSection(AgentJobOptions.SectionName));
-        silo.Services.TryAddSingleton(TimeProvider.System);
+        // Issue-362: the dispatcher grain registers a ~1s reminder, well
+        // below the runtime's default MinimumReminderPeriod (~1 minute).
+        // Lower the floor to 100ms so a fast cadence is accepted at
+        // registration time; the grain's EventDispatcherOptions still
+        // decides the actual cadence.
+        silo.Configure<ReminderOptions>(options =>
+        {
+            options.MinimumReminderPeriod = TimeSpan.FromMilliseconds(100);
+        });
+
+        // Issue-362 (T-002): the cluster-singleton EventDispatcherGrain
+        // resolves EventDispatcherOptions from its constructor. Options
+        // binding happens in the silo DI scope so the reminder cadence
+        // configured under "EventDispatcher" reaches the grain regardless
+        // of whether the host DI is populated.
+        silo.Services.Configure<EventDispatcherOptions>(
+            configuration.GetSection(EventDispatcherOptions.SectionName));
 
         return silo;
     }

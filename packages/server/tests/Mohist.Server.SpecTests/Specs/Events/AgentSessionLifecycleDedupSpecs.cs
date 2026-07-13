@@ -23,6 +23,8 @@ public class AgentSessionLifecycleDedupSpecs
         _fixture = fixture;
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task AttachPhysicalSessionAsync_PersistsRuntimeBoundExactlyOnce()
     {
@@ -49,6 +51,33 @@ public class AgentSessionLifecycleDedupSpecs
         Assert.Equal("/mohist/agent-session/" + session.Id, bound.Envelope.Source.ToString());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
+    public async Task AttachThenFirstRuntimeAppend_PersistsRuntimeBoundOnceAcrossRuntimeEvents()
+    {
+        var session = await CreateSessionWithoutAttachAsync("attach-append");
+
+        await _fixture.Client.PostOkAsync(RunnerAgentSessionAttachPath(session),
+            new { agentSessionId = session.Id, workDir = "/tmp", processPid = 4321 });
+        await AppendEventsAsync(session, new
+        {
+            runtimeEvents = new object[]
+            {
+                new { type = "message.delta", payload = new { text = "first runtime row" } },
+            }
+        });
+
+        var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id);
+        await grain.FlushForTestAsync();
+
+        var eventStore = _fixture.Services.GetRequiredService<IEventStore>();
+        var stored = await eventStore.ListAgentSessionEventsAsync(session.Id);
+        Assert.Equal(1, stored.Count(s => s.Envelope.Type == EventCatalog.ReverseDns.AgentSessionRuntimeBound));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task AppendRuntimeEventsAsync_WithoutAttach_DoesNotPersistRuntimeBound()
     {
@@ -88,6 +117,90 @@ public class AgentSessionLifecycleDedupSpecs
         Assert.Equal(0, stored.Count(s => s.Envelope.Type == EventCatalog.ReverseDns.AgentSessionRuntimeBound));
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
+    public async Task AppendRuntimeEventsAsync_SessionClosedDoesNotPersistTerminalDomainEvents()
+    {
+        var session = await CreateStartedSessionAsync("dedup-completed");
+
+        await AppendTerminalAsync(session, status: "completed", exitCode: 0);
+        await AppendTerminalAsync(session, status: "completed", exitCode: 0);
+        await AppendEventsAsync(session, new
+        {
+            runtimeEvents = new object[]
+            {
+                new { type = "message.delta", payload = new { text = "after-terminal" } },
+            }
+        });
+
+        var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id);
+        await grain.FlushForTestAsync();
+
+        var eventStore = _fixture.Services.GetRequiredService<IEventStore>();
+        var stored = await eventStore.ListAgentSessionEventsAsync(session.Id);
+        // Only the RuntimeBound event from the attach may be present.
+        Assert.All(stored, s => Assert.NotEqual("session.closed", s.Envelope.Type));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
+    public async Task AppendRuntimeEventsAsync_FailedClosedObservationDoesNotPersistFailedDomainEvent()
+    {
+        var session = await CreateStartedSessionAsync("dedup-failed");
+
+        await AppendTerminalAsync(session, status: "failed", exitCode: 1, failureReason: "boom");
+        await AppendTerminalAsync(session, status: "completed", exitCode: 0);
+
+        var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id);
+        await grain.FlushForTestAsync();
+
+        var eventStore = _fixture.Services.GetRequiredService<IEventStore>();
+        var stored = await eventStore.ListAgentSessionEventsAsync(session.Id);
+        Assert.All(stored, s => Assert.NotEqual("session.closed", s.Envelope.Type));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
+    public async Task AppendRuntimeEventsAsync_CancelledClosedObservationDoesNotPersistCancelledDomainEvent()
+    {
+        var session = await CreateStartedSessionAsync("dedup-cancelled");
+
+        await AppendTerminalAsync(session, status: "cancelled", exitCode: 0, failureReason: "user-cancel");
+        await AppendTerminalAsync(session, status: "completed", exitCode: 0);
+
+        var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id);
+        await grain.FlushForTestAsync();
+
+        var eventStore = _fixture.Services.GetRequiredService<IEventStore>();
+        var stored = await eventStore.ListAgentSessionEventsAsync(session.Id);
+        Assert.All(stored, s => Assert.NotEqual("session.closed", s.Envelope.Type));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
+    public async Task AppendRuntimeEventsAsync_LivenessDoesNotPersistDomainStatusEvents()
+    {
+        var session = await CreateStartedSessionAsync("dedup-liveness");
+
+        await AppendLivenessAsync(session, status: "running");
+        await AppendLivenessAsync(session, status: "running");
+        await AppendLivenessAsync(session, status: "running");
+
+        var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id);
+        await grain.FlushForTestAsync();
+
+        var eventStore = _fixture.Services.GetRequiredService<IEventStore>();
+        var stored = await eventStore.ListAgentSessionEventsAsync(session.Id);
+        // Only the RuntimeBound event from the attach may be present.
+        Assert.All(stored, s => Assert.NotEqual("session.liveness", s.Envelope.Type));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task AppendRuntimeEventsAsync_TranscriptRows_DoNotPersistAsDomainEvents()
     {
@@ -127,6 +240,8 @@ public class AgentSessionLifecycleDedupSpecs
             s.Envelope.Type == "model.resolved"));
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task AppendRuntimeEventsAsync_RunnerTranscriptRows_PublishToTranscriptChannel()
     {
@@ -151,6 +266,8 @@ public class AgentSessionLifecycleDedupSpecs
             third => Assert.Equal("tool_call.updated", third.Type));
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task AppendRuntimeEventsAsync_SessionClosedPublishesOnlyTranscriptChannel()
     {
@@ -169,6 +286,8 @@ public class AgentSessionLifecycleDedupSpecs
         Assert.Equal(0, stored.Count(s => s.Envelope.Type == "session.closed"));
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task AppendRuntimeEventsAsync_UsageAndModelEventsPersistReverseDnsType()
     {
@@ -248,6 +367,15 @@ public class AgentSessionLifecycleDedupSpecs
                 failureReason is null
                     ? (object)new { type = "session.closed", payload = new { status, exitCode } }
                     : new { type = "session.closed", payload = new { status, exitCode, failureReason } }
+            }
+        });
+
+    private Task AppendLivenessAsync(CreatedSession session, string status) =>
+        AppendEventsAsync(session, new
+        {
+            runtimeEvents = new[]
+            {
+                new { type = "session.liveness", payload = new { status } }
             }
         });
 

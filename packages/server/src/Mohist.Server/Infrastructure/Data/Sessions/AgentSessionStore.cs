@@ -1,11 +1,14 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
+using Mohist.Server.Events.Grains;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Infrastructure.Data.Db;
+using Orleans;
 
 namespace Mohist.Server.Infrastructure.Data.Sessions;
 
@@ -20,11 +23,19 @@ public class AgentSessionStore : IAgentSessionStore
 
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly IEventStore _eventStore;
+    private readonly IGrainFactory _grainFactory;
+    private readonly ILogger<AgentSessionStore> _log;
 
-    public AgentSessionStore(IDbContextFactory<MohistDbContext> dbFactory, IEventStore eventStore)
+    public AgentSessionStore(
+        IDbContextFactory<MohistDbContext> dbFactory,
+        IEventStore eventStore,
+        IGrainFactory grainFactory,
+        ILogger<AgentSessionStore> log)
     {
         _dbFactory = dbFactory;
         _eventStore = eventStore;
+        _grainFactory = grainFactory;
+        _log = log;
     }
 
     public async Task<AgentSession?> LoadAsync(string key)
@@ -71,7 +82,12 @@ public class AgentSessionStore : IAgentSessionStore
         {
             throw;
         }
+
+        PokeDispatcherBestEffort();
     }
+
+    private void PokeDispatcherBestEffort() =>
+        EventDispatcherPoke.PokeAfterCommit(_grainFactory, _log, nameof(AgentSessionStore));
 
     private async Task StageSessionAsync(MohistDbContext db, string key, AgentSession state, CancellationToken ct = default)
     {
