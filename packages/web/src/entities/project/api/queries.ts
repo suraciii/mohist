@@ -1,6 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
+import { useProject } from '../model/ProjectContext'
 import { createProject, deleteProject, getProjects, getRepositories, addRepository, removeRepository, setDefaultRepository } from './client'
+import { getProjectEvents, type ProjectEventDto } from './projectEvents'
 
 export type ProjectCreator = typeof createProject
 
@@ -92,5 +94,15 @@ export function useDeleteProject() {
     onError: (err: Error) => {
       toast.error(err.message || 'Request failed')
     },
+  })
+}
+
+export function useProjectEvents(params?: { limit?: number }) {
+  const { projectId } = useProject()
+  return useQuery<ProjectEventDto[]>({
+    queryKey: ['project-events', projectId],
+    queryFn: () => getProjectEvents({ projectId, limit: params?.limit ?? 200 }),
+    enabled: !!projectId,
+    refetchInterval: 5000,
   })
 }

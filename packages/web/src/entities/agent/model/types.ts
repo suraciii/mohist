@@ -187,6 +187,8 @@ export interface AgentActivitySession {
   failureReason: string | null
   eventSummary?: AgentSessionEventSummary
   usage?: AgentSessionUsage
+  agentId?: string | null
+  agentName?: string | null
 }
 
 export interface AgentActivityWaiting {

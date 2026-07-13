@@ -64,7 +64,7 @@ export function SlotsEditor({
     <div className="inline-flex items-center gap-1" data-testid="slots-editor">
       <button
         type="button"
-        className="inline-flex items-center justify-center w-6 h-6 rounded border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-30 disabled:cursor-not-allowed text-sm leading-none"
+        className="inline-flex items-center justify-center w-6 h-6 rounded border border-border text-muted-foreground hover:bg-muted disabled:opacity-30 disabled:cursor-not-allowed text-sm leading-none"
         disabled={atMin || mutation.isPending}
         onClick={() => save(local - 1)}
         aria-label="Decrease slots"
@@ -74,7 +74,7 @@ export function SlotsEditor({
       </button>
       <input
         type="number"
-        className="w-12 h-6 text-center text-xs border border-gray-200 rounded tabular-nums focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-200 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+        className="w-12 h-6 text-center text-xs border border-border rounded tabular-nums focus:outline-none focus:border-info-border focus:ring-1 focus:ring-info-border [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
         min={1}
         value={local}
         onChange={(e) => handleChange(Number(e.target.value))}
@@ -85,7 +85,7 @@ export function SlotsEditor({
       />
       <button
         type="button"
-        className="inline-flex items-center justify-center w-6 h-6 rounded border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-30 disabled:cursor-not-allowed text-sm leading-none"
+        className="inline-flex items-center justify-center w-6 h-6 rounded border border-border text-muted-foreground hover:bg-muted disabled:opacity-30 disabled:cursor-not-allowed text-sm leading-none"
         disabled={mutation.isPending}
         onClick={() => save(local + 1)}
         aria-label="Increase slots"
@@ -94,7 +94,7 @@ export function SlotsEditor({
         +
       </button>
       {mutation.isPending && (
-        <span className="text-xs text-gray-400 ml-1" data-testid="slots-editor-saving">
+        <span className="text-xs text-muted-foreground ml-1" data-testid="slots-editor-saving">
           saving…
         </span>
       )}

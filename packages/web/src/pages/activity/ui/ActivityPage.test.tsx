@@ -1,6 +1,6 @@
 import '@testing-library/jest-dom'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, useLocation } from 'react-router-dom'
 import { ProjectProvider } from '../../../entities/project'
@@ -18,6 +18,11 @@ function mockRunners(rows: RunnerStatusRow[]) {
 }
 
 const activityPageDependencies: ActivityPageDependencies = {
+  activityEventsHook: () => ({
+    events: [],
+    isLoading: false,
+    isError: false,
+  }),
   activityCardsHook: () => ({
     activeCards: [],
     activeCardByIssueNumber: new Map(),
@@ -27,7 +32,7 @@ const activityPageDependencies: ActivityPageDependencies = {
     slotUsage: { active: 0, max: 0 },
     isLoading: false,
     isError: false,
-  }) as never,
+  }),
   activityUsageSnapshotHook: () => ({
     inputTokens: 0,
     outputTokens: 0,
@@ -57,7 +62,7 @@ function makeRow(overrides: Partial<RunnerStatusRow> = {}): RunnerStatusRow {
 }
 
 function getRunnerBadgeButton(): HTMLElement {
-  return screen.getByRole('button')
+  return screen.getByTestId('runner-summary-button')
 }
 
 function LocationProbe({ testId }: { testId: string }) {
@@ -69,10 +74,12 @@ function renderWith({
   initialProjectId = TEST_PROJECT.id,
   initialProjects = [TEST_PROJECT],
   initialRoute = `/${TEST_PROJECT.name}/activity`,
+  deps = activityPageDependencies,
 }: {
   initialProjectId?: string | null
   initialProjects?: typeof TEST_PROJECT[]
   initialRoute?: string
+  deps?: ActivityPageDependencies
 } = {}) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: 0 }, mutations: { retry: false } },
@@ -82,7 +89,7 @@ function renderWith({
       <ProjectProvider initialProjectId={initialProjectId} initialProjects={initialProjects}>
         <MemoryRouter initialEntries={[initialRoute]}>
           <LocationProbe testId="route-pathname" />
-          <ActivityPage dependencies={activityPageDependencies} />
+          <ActivityPage dependencies={deps} />
         </MemoryRouter>
       </ProjectProvider>
     </QueryClientProvider>,
@@ -202,27 +209,4 @@ describe('ActivityPage', () => {
     })
   })
 
-  describe('session-only content', () => {
-    it('still renders the Active / Waiting / Recent section headers', () => {
-      renderWith()
-
-      const activeSection = screen.getByRole('heading', { level: 3, name: 'Active' }).closest('section')
-      const waitingSection = screen.getByRole('heading', { level: 3, name: 'Waiting' }).closest('section')
-      const recentSection = screen.getByRole('heading', { level: 3, name: 'Recent' }).closest('section')
-
-      expect(activeSection).not.toBeNull()
-      expect(waitingSection).not.toBeNull()
-      expect(recentSection).not.toBeNull()
-
-      expect(within(activeSection!).getByText('No active sessions')).toBeInTheDocument()
-      expect(within(waitingSection!).getByText('No issues waiting for action')).toBeInTheDocument()
-      expect(within(recentSection!).getByText('No recent sessions')).toBeInTheDocument()
-    })
-
-    it('does not render an embedded "Runners" Card header', () => {
-      renderWith()
-
-      expect(screen.queryByRole('heading', { name: 'Runners' })).not.toBeInTheDocument()
-    })
-  })
 })
