@@ -439,6 +439,80 @@ public class RunnerGrainConcurrencySpecs : IAsyncLifetime
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
+    public async Task ReconcileAgentJobsAsync_DuringCrossGrainCheck_DoesNotHoldLifecycleGate_AllowsConcurrentAssignment()
+    {
+        var (runnerId, _) = await RegisterRunnerAsync(
+            $"reconcile-deadlock-{Guid.NewGuid():N}",
+            maxWorkflowSlots: 2);
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        var agentJobId = $"reconcile-job-{Guid.NewGuid():N}";
+        var workId = $"reconcile-work-{Guid.NewGuid():N}";
+
+        // A fresh AgentJobGrain starts in Pending. Assign the work on the
+        // runner side and mark it accepted on the agent-job side so
+        // IsWorkRunnableAsync returns true during reconcile.
+        var job = Grains.GetGrain<IAgentJobGrain>(agentJobId);
+        Assert.Equal(
+            RunnerWorkAssignmentStatus.Assigned,
+            (await runner.AssignAgentJobAsync(new WorkDispatch(
+                WorkflowRunId: string.Empty,
+                WorkId: workId,
+                AgentJobId: agentJobId,
+                OwnerKind: WorkDispatchOwnerKinds.AgentJob))).Status);
+        await job.AssignRunnerAsync(runnerId, workId);
+
+        // Admit a poll round so _pollAdmitted is true (matching production).
+        var admission = await runner.TryBeginPollAsync();
+        Assert.True(admission.Admitted);
+
+        try
+        {
+            // Reconcile with an empty reported set — the pre-assigned work is
+            // "missing", so ReconcileAgentJobsAsync will snapshot it under the
+            // gate, RELEASE the gate, then call IsWorkRunnableAsync outside.
+            var reconcile = runner.ReconcileAgentJobsAsync([]);
+
+            // Fire a concurrent [AlwaysInterleave] assignment. Before the fix
+            // this would block on the lifecycle gate held across the
+            // cross-grain IsWorkRunnableAsync call; if that call were to
+            // bounce back through AssignAgentJobAsync (as AgentJobGrain does
+            // on recovery) the whole thing deadlocks. After the fix the gate
+            // is free during the cross-grain call, so this assignment settles
+            // promptly — rejected by the _pollAdmitted guard — instead of
+            // hanging behind the reconcile.
+            var concurrentAgentJobId = $"concurrent-job-{Guid.NewGuid():N}";
+            var concurrentWorkId = $"concurrent-work-{Guid.NewGuid():N}";
+            var concurrentAssignment = runner.AssignAgentJobAsync(new WorkDispatch(
+                WorkflowRunId: string.Empty,
+                WorkId: concurrentWorkId,
+                AgentJobId: concurrentAgentJobId,
+                OwnerKind: WorkDispatchOwnerKinds.AgentJob));
+
+            var settled = await Task.WhenAny(
+                Task.Delay(TimeSpan.FromSeconds(3)),
+                concurrentAssignment);
+            Assert.Same(concurrentAssignment, settled);
+            Assert.Equal(
+                RunnerWorkAssignmentStatus.Rejected,
+                (await concurrentAssignment).Status);
+            Assert.Equal("runner-reconciling", (await concurrentAssignment).Reason);
+
+            // The reconcile itself completes without hanging and returns the
+            // missing dispatch snapshot.
+            var pollState = await reconcile;
+            Assert.Equal(1, pollState.ActiveCount);
+            Assert.NotNull(pollState.Dispatch);
+            Assert.Equal(workId, pollState.Dispatch!.WorkId);
+        }
+        finally
+        {
+            await runner.EndPollAsync();
+        }
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
+    [Fact]
     public async Task ConcurrentReportAndAssignment_PreserveRunnerStateAndWorkLedgerAcrossReactivation()
     {
         var (runnerId, _) = await RegisterRunnerAsync(

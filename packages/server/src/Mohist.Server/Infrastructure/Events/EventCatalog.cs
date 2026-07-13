@@ -96,6 +96,7 @@ public static class EventCatalog
         ReverseDns.EpicStatusChanged,
         ReverseDns.EpicClosed,
         ReverseDns.EpicReopened,
+        ReverseDns.EpicStartAttemptFailed,
     };
 
     /// <summary>
@@ -163,6 +164,7 @@ public static class EventCatalog
         public const string EpicStatusChanged = "com.mohist.epic.status-changed";
         public const string EpicClosed = "com.mohist.epic.closed";
         public const string EpicReopened = "com.mohist.epic.reopened";
+        public const string EpicStartAttemptFailed = "com.mohist.epic.start-attempt-failed";
 
         public const string InboxItemPersisted = "com.mohist.inbox.item-persisted";
     }

@@ -312,54 +312,95 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
     {
         var reported = reportedWorkKeys.ToHashSet(StringComparer.Ordinal);
 
-        await _lifecycleGate.WaitAsync();
-        try
+        // The cross-grain IsWorkRunnableAsync call must NOT happen while
+        // _lifecycleGate is held: AgentJobGrain.TryAssignToRunnerAsync calls
+        // back into AssignAgentJobAsync (which needs the same gate), and both
+        // grains are non-reentrant — holding the gate across the call forms a
+        // circular wait. Snapshot the candidate under the gate, release, do
+        // the cross-grain check outside, then re-acquire to mutate.
+        //
+        // _pollAdmitted stays true for the whole poll round (cleared only by
+        // DispatchService's finally → EndPollAsync), so AssignAgentJobAsync
+        // continues to reject with "runner-reconciling" while the gate is
+        // released — the works list cannot be mutated by assignment here.
+        while (true)
         {
-            while (true)
+            ReconcileCandidate? snapshot;
+            int activeCount;
+            await _lifecycleGate.WaitAsync();
+            try
             {
                 var activeWorks = GetWorks()
                     .Where(IsActiveAgentJobWork)
                     .ToList();
+                activeCount = activeWorks.Count;
                 var candidate = activeWorks.FirstOrDefault(work =>
                     !reported.Contains(AgentJobWorkKey(work.OwnerId, work.WorkId)));
 
                 if (candidate is null)
-                    return new AgentJobPollState(activeWorks.Count, null);
+                    return new AgentJobPollState(activeCount, null);
 
-                var agentJobId = candidate.OwnerId;
-                var workId = candidate.WorkId;
-                var job = GrainFactory.GetGrain<IAgentJobGrain>(agentJobId);
-                if (!await job.IsWorkRunnableAsync(RunnerId, workId))
+                snapshot = new ReconcileCandidate(
+                    candidate.OwnerId,
+                    candidate.WorkId,
+                    candidate.Status,
+                    candidate.DispatchSnapshot);
+            }
+            finally
+            {
+                _lifecycleGate.Release();
+            }
+
+            var job = GrainFactory.GetGrain<IAgentJobGrain>(snapshot.AgentJobId);
+            var runnable = await job.IsWorkRunnableAsync(RunnerId, snapshot.WorkId);
+
+            await _lifecycleGate.WaitAsync();
+            try
+            {
+                // Re-find the work under the gate: it may have been removed by
+                // a concurrent path (e.g. HandleTimeoutAsync closeout). If gone,
+                // skip to the next candidate.
+                var live = FindWork(snapshot.WorkId, WorkDispatchOwnerKinds.AgentJob, snapshot.AgentJobId);
+                if (live is null)
+                    continue;
+
+                if (!runnable)
                 {
                     _log.LogDebug(
                         "Runner {Id} dropping work {WorkId} for agent-job {AgentJobId}: not runnable",
-                        RunnerId, workId, agentJobId);
-                    TryRemoveWork(workId, WorkDispatchOwnerKinds.AgentJob, agentJobId);
+                        RunnerId, snapshot.WorkId, snapshot.AgentJobId);
+                    TryRemoveWork(snapshot.WorkId, WorkDispatchOwnerKinds.AgentJob, snapshot.AgentJobId);
                     await PersistAsync();
                     await MarkRunnerWorkTerminalAsync(
                         WorkDispatchOwnerKinds.AgentJob,
-                        agentJobId,
-                        workId,
+                        snapshot.AgentJobId,
+                        snapshot.WorkId,
                         LedgerRunnerWorkStatus.Failed,
                         "not-runnable");
                     continue;
                 }
 
-                if (candidate.Status == RunnerWorkStatus.Pending)
+                if (live.Status == RunnerWorkStatus.Pending)
                 {
-                    candidate.Status = RunnerWorkStatus.Running;
-                    candidate.StartedAt = _timeProvider.GetUtcNow();
+                    live.Status = RunnerWorkStatus.Running;
+                    live.StartedAt = _timeProvider.GetUtcNow();
                     await PersistAsync();
                 }
 
-                return new AgentJobPollState(activeWorks.Count, candidate.DispatchSnapshot);
+                return new AgentJobPollState(activeCount, live.DispatchSnapshot);
+            }
+            finally
+            {
+                _lifecycleGate.Release();
             }
         }
-        finally
-        {
-            _lifecycleGate.Release();
-        }
     }
+
+    private sealed record ReconcileCandidate(
+        string AgentJobId,
+        string WorkId,
+        RunnerWorkStatus Status,
+        WorkDispatch? DispatchSnapshot);
 
     public async Task<RunnerWorkReportResult> ReportAgentJobResultAsync(string agentJobId, string workId, WorkResult result)
     {

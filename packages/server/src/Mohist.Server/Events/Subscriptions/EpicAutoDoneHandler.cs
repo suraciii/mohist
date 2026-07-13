@@ -12,6 +12,9 @@ namespace Mohist.Server.Events.Subscriptions;
 /// a unified <see cref="IEpicGrain.RecomputeProgressAsync"/> call
 /// to the owning epic. Recompute progress covers both the auto-done
 /// readiness check and the <c>running</c> epic's next-issue advance.
+/// Also reverse-looks-up epics whose members list the completed issue
+/// as an external prerequisite, so a dependent epic can advance once
+/// the blocker clears.
 /// </summary>
 [Subscription(Type = EventCatalog.ReverseDns.IssueCompleted)]
 public sealed class EpicAutoDoneHandler : ICloudEventHandler<IssueCompleted>
@@ -38,7 +41,7 @@ public sealed class EpicAutoDoneHandler : ICloudEventHandler<IssueCompleted>
     public bool Filter(CloudEvent<IssueCompleted> evt) => true;
 
     public Task HandleAsync(CloudEvent<IssueCompleted> evt, CancellationToken ct) =>
-        _dispatcher.DispatchAsync(evt.Id, evt.Extensions, evtType: "completed", ct);
+        _dispatcher.DispatchAsync(evt.Id, evt.Extensions, evtType: "completed", includePrerequisiteLookup: true, ct);
 }
 
 /// <summary>
@@ -48,7 +51,8 @@ public sealed class EpicAutoDoneHandler : ICloudEventHandler<IssueCompleted>
 /// <see cref="EpicAutoDoneHandler"/>. Both terminal events must trigger
 /// recompute progress because both clear the serial in-progress slot the
 /// epic is waiting on — missing this subscription would deadlock the
-/// epic when its in-progress issue is cancelled.
+/// epic when its in-progress issue is cancelled. Like completed, it also
+/// reverse-looks-up dependent epics via external prerequisites.
 /// </summary>
 [Subscription(Type = EventCatalog.ReverseDns.IssueCancelled)]
 public sealed class EpicCancelledHandler : ICloudEventHandler<IssueCancelled>
@@ -75,17 +79,116 @@ public sealed class EpicCancelledHandler : ICloudEventHandler<IssueCancelled>
     public bool Filter(CloudEvent<IssueCancelled> evt) => true;
 
     public Task HandleAsync(CloudEvent<IssueCancelled> evt, CancellationToken ct) =>
-        _dispatcher.DispatchAsync(evt.Id, evt.Extensions, evtType: "cancelled", ct);
+        _dispatcher.DispatchAsync(evt.Id, evt.Extensions, evtType: "cancelled", includePrerequisiteLookup: true, ct);
 }
 
 /// <summary>
-/// Shared dispatch logic for terminal-event → EpicGrain recompute-progress
-/// wiring. Both <see cref="EpicAutoDoneHandler"/> (completed) and
-/// <see cref="EpicCancelledHandler"/> (cancelled) funnel here so the
+/// Subscribes to <c>com.mohist.issue.draft-changed</c> and triggers
+/// <see cref="IEpicGrain.RecomputeProgressAsync"/> on the owning epic
+/// when a member transitions from draft to ready (undraft). A draft
+/// member blocks <c>SelectStartableNext</c>; clearing that blocker may
+/// unblock a running-but-idle epic. Only undraft (NewIsDraft == false)
+/// is actionable — drafting a ready issue has no epic-progress effect.
+/// </summary>
+[Subscription(Type = EventCatalog.ReverseDns.IssueDraftChanged)]
+public sealed class EpicDraftChangedHandler : ICloudEventHandler<IssueDraftChanged>
+{
+    private readonly EpicProgressRecomputeDispatcher _dispatcher;
+
+    [ActivatorUtilitiesConstructor]
+    public EpicDraftChangedHandler(
+        IServiceScopeFactory scopes,
+        IGrainFactory grains,
+        ILogger<EpicDraftChangedHandler> log)
+    {
+        _dispatcher = new EpicProgressRecomputeDispatcher(scopes, grains, log);
+    }
+
+    internal EpicDraftChangedHandler(
+        EpicQuerier epicQuerier,
+        IGrainFactory grains,
+        ILogger<EpicDraftChangedHandler> log)
+    {
+        _dispatcher = new EpicProgressRecomputeDispatcher(epicQuerier, grains, log);
+    }
+
+    public bool Filter(CloudEvent<IssueDraftChanged> evt) => !evt.Data.NewIsDraft;
+
+    public Task HandleAsync(CloudEvent<IssueDraftChanged> evt, CancellationToken ct) =>
+        _dispatcher.DispatchAsync(evt.Id, evt.Extensions, evtType: "draft-changed", includePrerequisiteLookup: false, ct);
+}
+
+/// <summary>
+/// Subscribes to <c>com.mohist.epic.issue-linked</c> and triggers
+/// <see cref="IEpicGrain.RecomputeProgressAsync"/> on the epic that
+/// linked the issue. This is the durable convergence path for link
+/// operations: <c>LinkIssueAsync</c> commits the membership row then
+/// calls recompute inline, but a crash between commit and recompute
+/// would leave a linked-but-unadvanced epic. The event is durable
+/// (persisted to the event store before the grain returns), so the
+/// dispatcher redelivers it until the handler succeeds — closing the
+/// gap left by the removed poll-driven sweep.
+/// </summary>
+[Subscription(Type = EventCatalog.ReverseDns.EpicIssueLinked)]
+public sealed class EpicIssueLinkedHandler : ICloudEventHandler<Epic.Domain.Events.EpicIssueLinked>
+{
+    private readonly EpicEventRecomputeDispatcher _dispatcher;
+
+    [ActivatorUtilitiesConstructor]
+    public EpicIssueLinkedHandler(
+        IGrainFactory grains,
+        ILogger<EpicIssueLinkedHandler> log)
+    {
+        _dispatcher = new EpicEventRecomputeDispatcher(grains, log);
+    }
+
+    public bool Filter(CloudEvent<Epic.Domain.Events.EpicIssueLinked> evt) => true;
+
+    public Task HandleAsync(CloudEvent<Epic.Domain.Events.EpicIssueLinked> evt, CancellationToken ct) =>
+        _dispatcher.DispatchAsync(evt.Id, evt.Extensions, evtType: "issue-linked", ct);
+}
+
+/// <summary>
+/// Subscribes to <c>com.mohist.epic.start-attempt-failed</c> and re-drives
+/// <see cref="IEpicGrain.RecomputeProgressAsync"/> on the epic. When
+/// <c>TryStartNextAsync</c> catches a transient <c>StartWorkAsync</c> failure
+/// under <c>PreserveRunning</c>, the epic records this event; the durable
+/// dispatcher redelivers it with backoff until the recompute succeeds —
+/// recovering a running-but-idle epic that would otherwise stay stuck. The
+/// recompute uses <c>Propagate</c> start-failure mode inside the grain, so a
+/// permanently failing start surfaces to the dispatcher for dead-lettering
+/// rather than being silently swallowed again.
+/// </summary>
+[Subscription(Type = EventCatalog.ReverseDns.EpicStartAttemptFailed)]
+public sealed class EpicStartRetryHandler : ICloudEventHandler<Epic.Domain.Events.EpicStartAttemptFailed>
+{
+    private readonly EpicEventRecomputeDispatcher _dispatcher;
+
+    [ActivatorUtilitiesConstructor]
+    public EpicStartRetryHandler(
+        IGrainFactory grains,
+        ILogger<EpicStartRetryHandler> log)
+    {
+        _dispatcher = new EpicEventRecomputeDispatcher(grains, log);
+    }
+
+    public bool Filter(CloudEvent<Epic.Domain.Events.EpicStartAttemptFailed> evt) => true;
+
+    public Task HandleAsync(CloudEvent<Epic.Domain.Events.EpicStartAttemptFailed> evt, CancellationToken ct) =>
+        _dispatcher.DispatchAsync(evt.Id, evt.Extensions, evtType: "start-attempt-failed", ct);
+}
+
+/// <summary>
+/// Shared dispatch logic for issue-event → EpicGrain recompute-progress
+/// wiring. <see cref="EpicAutoDoneHandler"/> (completed),
+/// <see cref="EpicCancelledHandler"/> (cancelled), and
+/// <see cref="EpicDraftChangedHandler"/> (undraft) funnel here so the
 /// CloudEvent <c>projectid</c>/<c>issueid</c> extension parsing, epic
-/// lookup, and grain dispatch stay in one place. Kept
-/// package-internal (no <c>public</c> modifier) because this is a
-/// wiring concern that should not be consumed outside this folder.
+/// lookup, and grain dispatch stay in one place. When
+/// <paramref name="includePrerequisiteLookup"/> is set, also reverse-looks-up
+/// epics whose members depend on the event's issue as an external
+/// prerequisite — the owning-epic lookup misses those because the
+/// prerequisite has no direct active membership. Kept package-internal.
 /// </summary>
 internal sealed class EpicProgressRecomputeDispatcher
 {
@@ -118,6 +221,7 @@ internal sealed class EpicProgressRecomputeDispatcher
         string eventId,
         IReadOnlyDictionary<string, string> extensions,
         string evtType,
+        bool includePrerequisiteLookup,
         CancellationToken ct)
     {
         if (!extensions.TryGetValue("projectid", out var projectId) || string.IsNullOrWhiteSpace(projectId))
@@ -135,19 +239,79 @@ internal sealed class EpicProgressRecomputeDispatcher
             return;
         }
 
-        string? epicId;
+        var epicIds = new HashSet<string>(StringComparer.Ordinal);
+
         if (_epicQuerier is not null)
         {
-            epicId = await _epicQuerier.GetEpicIdForIssueAsync(projectId, issueId).ConfigureAwait(false);
+            var direct = await _epicQuerier.GetEpicIdForIssueAsync(projectId, issueId).ConfigureAwait(false);
+            if (direct is not null) epicIds.Add(direct);
+            if (includePrerequisiteLookup && int.TryParse(extensions.GetValueOrDefault("issueno"), out var issueNo))
+            {
+                var dependent = await _epicQuerier
+                    .GetEpicIdsDependentOnPrerequisiteAsync(projectId, issueNo)
+                    .ConfigureAwait(false);
+                foreach (var id in dependent) epicIds.Add(id);
+            }
         }
         else
         {
             await using var scope = _scopes!.CreateAsyncScope();
             var epicQuerier = scope.ServiceProvider.GetRequiredService<EpicQuerier>();
-            epicId = await epicQuerier.GetEpicIdForIssueAsync(projectId, issueId).ConfigureAwait(false);
+            var direct = await epicQuerier.GetEpicIdForIssueAsync(projectId, issueId).ConfigureAwait(false);
+            if (direct is not null) epicIds.Add(direct);
+            if (includePrerequisiteLookup && int.TryParse(extensions.GetValueOrDefault("issueno"), out var issueNo))
+            {
+                var dependent = await epicQuerier
+                    .GetEpicIdsDependentOnPrerequisiteAsync(projectId, issueNo)
+                    .ConfigureAwait(false);
+                foreach (var id in dependent) epicIds.Add(id);
+            }
         }
-        if (epicId is null)
+
+        foreach (var epicId in epicIds)
         {
+            var grain = _grains.GetGrain<IEpicGrain>($"{projectId}:{epicId}");
+            await grain.RecomputeProgressAsync().ConfigureAwait(false);
+        }
+    }
+}
+
+/// <summary>
+/// Dispatch logic for epic-event → EpicGrain recompute-progress wiring.
+/// Epic events carry <c>projectid</c> + <c>epicid</c> on the envelope
+/// (stamped by <c>EpicGrain.PersistEpicEventsAsync</c>), so no reverse
+/// lookup is needed — the epic identity is already known. Used by
+/// <see cref="EpicIssueLinkedHandler"/> and the start-retry handler.
+/// </summary>
+internal sealed class EpicEventRecomputeDispatcher
+{
+    private readonly IGrainFactory _grains;
+    private readonly ILogger _log;
+
+    public EpicEventRecomputeDispatcher(IGrainFactory grains, ILogger log)
+    {
+        _grains = grains;
+        _log = log;
+    }
+
+    public async Task DispatchAsync(
+        string eventId,
+        IReadOnlyDictionary<string, string> extensions,
+        string evtType,
+        CancellationToken ct)
+    {
+        if (!extensions.TryGetValue("projectid", out var projectId) || string.IsNullOrWhiteSpace(projectId))
+        {
+            _log.LogDebug(
+                "{EvtType} event missing projectid extension; skipping (event {EventId})",
+                evtType, eventId);
+            return;
+        }
+        if (!extensions.TryGetValue("epicid", out var epicId) || string.IsNullOrWhiteSpace(epicId))
+        {
+            _log.LogDebug(
+                "{EvtType} event missing epicid extension; skipping (event {EventId})",
+                evtType, eventId);
             return;
         }
 

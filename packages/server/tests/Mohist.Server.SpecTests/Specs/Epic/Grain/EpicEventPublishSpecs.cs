@@ -124,9 +124,12 @@ public class EpicEventPublishSpecs
         // our three deliberate transitions. The spec requires that
         // every transition persists its event, not that the count is
         // exactly 3 — assert the three we issued appear in order.
+        // Filter before mapping so non-status-changed events (e.g.
+        // EpicStartAttemptFailed from a transient issue-start failure)
+        // don't crash the property access.
         var transitions = statusChanges
+            .Where(e => e.Envelope.Type == EventCatalog.ReverseDns.EpicStatusChanged)
             .Select(e => (Type: e.Envelope.Type, Old: e.Envelope.Data?.GetProperty("oldStatus").GetString(), New: e.Envelope.Data?.GetProperty("newStatus").GetString()))
-            .Where(t => t.Type == EventCatalog.ReverseDns.EpicStatusChanged)
             .ToList();
         Assert.Contains(transitions, t => t.Old == "idle" && t.New == "running");
         var idleToRunning = transitions.FindIndex(t => t.Old == "idle" && t.New == "running");

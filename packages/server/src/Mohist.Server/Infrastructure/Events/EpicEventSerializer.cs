@@ -30,6 +30,7 @@ internal static class EpicEventSerializer
         EpicStatusChanged => EventCatalog.ReverseDns.EpicStatusChanged,
         EpicClosed => EventCatalog.ReverseDns.EpicClosed,
         EpicReopened => EventCatalog.ReverseDns.EpicReopened,
+        EpicStartAttemptFailed => EventCatalog.ReverseDns.EpicStartAttemptFailed,
         _ => throw new InvalidOperationException($"No CloudEvents type for {Unwrap(payload).GetType().Name}"),
     };
 
@@ -49,6 +50,7 @@ internal static class EpicEventSerializer
         EpicStatusChanged x => x,
         EpicClosed x => x,
         EpicReopened x => x,
+        EpicStartAttemptFailed x => x,
         null => throw new ArgumentNullException(nameof(payload)),
     };
 }

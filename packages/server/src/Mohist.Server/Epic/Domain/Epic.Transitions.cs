@@ -175,6 +175,12 @@ public sealed partial class Epic
         RecordEvent(new EpicIssueUnlinked(issueId, issueNumber));
     }
 
+    public void RecordStartAttemptFailure(string issueId, int issueNumber, string reason, DateTime? now = null)
+    {
+        Touch(now);
+        RecordEvent(new EpicStartAttemptFailed(issueId, issueNumber, reason));
+    }
+
     private void EnsureNotTerminal(EpicStatus requested)
     {
         if (_status is EpicStatus.Done or EpicStatus.Closed)

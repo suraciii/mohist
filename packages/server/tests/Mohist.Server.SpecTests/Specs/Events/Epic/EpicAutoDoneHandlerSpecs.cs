@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Epic.Grains;
+using Mohist.Server.Epic.Domain.Events;
 using Mohist.Server.Epic.Services;
 using Mohist.Server.Events.Grains;
 using Mohist.Server.Events.Subscriptions;
@@ -559,6 +560,257 @@ public class EpicAutoDoneHandlerSpecs
         // membership; the reordered duplicate terminal signal then has
         // no active owner to dispatch to.
         Assert.Single(grains.Calls);
+    }
+
+    // --- Fix B: EpicIssueLinkedHandler (durable convergence for link) ---
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task IssueLinkedHandler_HasSubscriptionAttributeOnLinkedType()
+    {
+        var attr = (SubscriptionAttribute?)Attribute.GetCustomAttribute(
+            typeof(EpicIssueLinkedHandler), typeof(SubscriptionAttribute));
+        Assert.NotNull(attr);
+        Assert.Equal(EventCatalog.ReverseDns.EpicIssueLinked, attr!.Type);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task IssueLinkedHandler_LinkedEvent_InvokesRecomputeOnOwningEpic()
+    {
+        // Epic events carry projectid + epicid on the envelope (stamped by
+        // PersistEpicEventsAsync), so no reverse lookup is needed.
+        var grains = new TestEpicGrainFactory(CreateDatabase().Factory);
+        var handler = new EpicIssueLinkedHandler(grains, NullLogger<EpicIssueLinkedHandler>.Instance);
+
+        var evt = BuildEpicIssueLinkedEvent(projectId: "project_1", epicId: "epic_1", issueId: "issue_1", issueNumber: 1);
+        await handler.HandleAsync(evt, CancellationToken.None);
+
+        var call = Assert.Single(grains.Calls);
+        Assert.Equal("project_1:epic_1", call.GrainKey);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task IssueLinkedHandler_MissingProjectIdExtension_NoOps()
+    {
+        var grains = new TestEpicGrainFactory(CreateDatabase().Factory);
+        var handler = new EpicIssueLinkedHandler(grains, NullLogger<EpicIssueLinkedHandler>.Instance);
+
+        var evt = new CloudEvent<EpicIssueLinked>(
+            id: Guid.NewGuid().ToString(),
+            source: new Uri("/mohist/epic/epic_1", UriKind.Relative),
+            type: EventCatalog.ReverseDns.EpicIssueLinked,
+            time: DateTimeOffset.UtcNow,
+            data: new EpicIssueLinked("issue_1", 1),
+            subject: "1",
+            extensions: new Dictionary<string, string> { ["epicid"] = "epic_1" });
+
+        await handler.HandleAsync(evt, CancellationToken.None);
+        Assert.Empty(grains.Calls);
+    }
+
+    // --- Fix C-1: EpicDraftChangedHandler (undraft triggers recompute) ---
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task DraftChangedHandler_HasSubscriptionAttributeOnDraftChangedType()
+    {
+        var attr = (SubscriptionAttribute?)Attribute.GetCustomAttribute(
+            typeof(EpicDraftChangedHandler), typeof(SubscriptionAttribute));
+        Assert.NotNull(attr);
+        Assert.Equal(EventCatalog.ReverseDns.IssueDraftChanged, attr!.Type);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task DraftChangedHandler_Undraft_InvokesRecomputeOnOwningEpic()
+    {
+        await using var database = CreateDatabase();
+        await SeedEpicAsync(database, status: "running");
+        await SeedIssueAsync(database, projectId: "project_1", issueId: "issue_1", issueNumber: 1, status: Mohist.Server.Issue.Domain.IssueStatus.Backlog);
+        await SeedLinkAsync(database, epicId: "epic_1", issueId: "issue_1", issueNumber: 1);
+
+        var querier = new EpicQuerier(database.Factory, null!);
+        var grains = new TestEpicGrainFactory(database.Factory);
+        var handler = new EpicDraftChangedHandler(querier, grains, NullLogger<EpicDraftChangedHandler>.Instance);
+
+        // OldIsDraft=true, NewIsDraft=false — undraft to ready
+        var evt = BuildDraftChangedEvent(projectId: "project_1", issueId: "issue_1", oldIsDraft: true, newIsDraft: false);
+        await handler.HandleAsync(evt, CancellationToken.None);
+
+        var call = Assert.Single(grains.Calls);
+        Assert.Equal("project_1:epic_1", call.GrainKey);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task DraftChangedHandler_Drafting_IgnoresEvent()
+    {
+        // Drafting a ready issue (NewIsDraft=true) has no epic-progress
+        // effect; the handler's Filter rejects it.
+        var handler = new EpicDraftChangedHandler(
+            new EpicQuerier(CreateDatabase().Factory, null!),
+            new TestEpicGrainFactory(CreateDatabase().Factory),
+            NullLogger<EpicDraftChangedHandler>.Instance);
+
+        var evt = BuildDraftChangedEvent(projectId: "project_1", issueId: "issue_1", oldIsDraft: false, newIsDraft: true);
+        Assert.False(handler.Filter(evt));
+    }
+
+    // --- Fix C-2: External prerequisite reverse lookup ---
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task HandleAsync_ExternalPrerequisiteCompletes_DispatchesToDependentEpic()
+    {
+        // An external prerequisite (issue 10) is NOT a member of the epic,
+        // but issue 2 (a member) depends on it. When issue 10 completes,
+        // the handler must reverse-look-up the dependent epic and recompute.
+        await using var database = CreateDatabase();
+        await SeedEpicAsync(database, status: "running");
+        // Member issue 2 depends on external prerequisite 10
+        await SeedIssueWithPrereqsAsync(database, projectId: "project_1", issueId: "issue_2", issueNumber: 2, prereqNumbers: [10]);
+        await SeedLinkAsync(database, epicId: "epic_1", issueId: "issue_2", issueNumber: 2);
+        // External prerequisite issue 10 — not linked to the epic
+        await SeedIssueAsync(database, projectId: "project_1", issueId: "issue_10", issueNumber: 10, status: Mohist.Server.Issue.Domain.IssueStatus.Done);
+
+        var querier = new EpicQuerier(database.Factory, null!);
+        var grains = new TestEpicGrainFactory(database.Factory);
+        var handler = new EpicAutoDoneHandler(querier, grains, NullLogger<EpicAutoDoneHandler>.Instance);
+
+        // issue_10 completes — it has no direct membership, but the
+        // prerequisite reverse lookup should find epic_1 via issue_2.
+        var evt = BuildCompletedEvent(projectId: "project_1", issueId: "issue_10");
+        evt = new CloudEvent<IssueCompleted>(
+            id: evt.Id,
+            source: evt.Source,
+            type: evt.Type,
+            time: evt.Time,
+            data: evt.Data,
+            subject: "10",
+            extensions: new Dictionary<string, string>
+            {
+                ["projectid"] = "project_1",
+                ["issueid"] = "issue_10",
+                ["issueno"] = "10",
+            });
+        await handler.HandleAsync(evt, CancellationToken.None);
+
+        var call = Assert.Single(grains.Calls);
+        Assert.Equal("project_1:epic_1", call.GrainKey);
+    }
+
+    // --- Fix D: EpicStartRetryHandler (start-attempt-failed triggers recompute) ---
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task StartRetryHandler_HasSubscriptionAttributeOnStartAttemptFailedType()
+    {
+        var attr = (SubscriptionAttribute?)Attribute.GetCustomAttribute(
+            typeof(EpicStartRetryHandler), typeof(SubscriptionAttribute));
+        Assert.NotNull(attr);
+        Assert.Equal(EventCatalog.ReverseDns.EpicStartAttemptFailed, attr!.Type);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task StartRetryHandler_StartAttemptFailedEvent_InvokesRecomputeOnOwningEpic()
+    {
+        var grains = new TestEpicGrainFactory(CreateDatabase().Factory);
+        var handler = new EpicStartRetryHandler(grains, NullLogger<EpicStartRetryHandler>.Instance);
+
+        var evt = BuildStartAttemptFailedEvent(projectId: "project_1", epicId: "epic_1", issueId: "issue_1", issueNumber: 1);
+        await handler.HandleAsync(evt, CancellationToken.None);
+
+        var call = Assert.Single(grains.Calls);
+        Assert.Equal("project_1:epic_1", call.GrainKey);
+    }
+
+    private static CloudEvent<EpicIssueLinked> BuildEpicIssueLinkedEvent(
+        string projectId, string epicId, string issueId, int issueNumber) =>
+        new(
+            id: Guid.NewGuid().ToString(),
+            source: new Uri($"/mohist/epic/{epicId}", UriKind.Relative),
+            type: EventCatalog.ReverseDns.EpicIssueLinked,
+            time: DateTimeOffset.UtcNow,
+            data: new EpicIssueLinked(issueId, issueNumber),
+            subject: epicId,
+            extensions: new Dictionary<string, string>
+            {
+                ["projectid"] = projectId,
+                ["epicid"] = epicId,
+                ["epicno"] = "1",
+            });
+
+    private static CloudEvent<IssueDraftChanged> BuildDraftChangedEvent(
+        string projectId, string issueId, bool oldIsDraft, bool newIsDraft) =>
+        new(
+            id: Guid.NewGuid().ToString(),
+            source: new Uri($"/mohist/issue/{issueId}", UriKind.Relative),
+            type: EventCatalog.ReverseDns.IssueDraftChanged,
+            time: DateTimeOffset.UtcNow,
+            data: new IssueDraftChanged(oldIsDraft, newIsDraft),
+            subject: "1",
+            extensions: new Dictionary<string, string>
+            {
+                ["projectid"] = projectId,
+                ["issueid"] = issueId,
+                ["issueno"] = "1",
+            });
+
+    private static CloudEvent<EpicStartAttemptFailed> BuildStartAttemptFailedEvent(
+        string projectId, string epicId, string issueId, int issueNumber) =>
+        new(
+            id: Guid.NewGuid().ToString(),
+            source: new Uri($"/mohist/epic/{epicId}", UriKind.Relative),
+            type: EventCatalog.ReverseDns.EpicStartAttemptFailed,
+            time: DateTimeOffset.UtcNow,
+            data: new EpicStartAttemptFailed(issueId, issueNumber, "transient failure"),
+            subject: epicId,
+            extensions: new Dictionary<string, string>
+            {
+                ["projectid"] = projectId,
+                ["epicid"] = epicId,
+                ["epicno"] = "1",
+            });
+
+    private static async Task SeedIssueWithPrereqsAsync(
+        TestDatabase database,
+        string projectId,
+        string issueId,
+        int issueNumber,
+        int[] prereqNumbers)
+    {
+        var issue = new Mohist.Server.Issue.Domain.Issue
+        {
+            Id = issueId,
+            ProjectId = projectId,
+            Number = issueNumber,
+            Title = $"Issue {issueNumber}",
+            Status = Mohist.Server.Issue.Domain.IssueStatus.Backlog,
+        };
+        foreach (var prereq in prereqNumbers)
+            issue.AddPrerequisite(prereq);
+        var json = IssueStore.Serialize(issue);
+        await using var db = database.CreateDbContext();
+        db.Issues.Add(new IssueRow
+        {
+            IssueId = issueId,
+            ProjectId = projectId,
+            Number = issueNumber,
+            State = json,
+        });
+        await db.SaveChangesAsync();
     }
 
     private static CloudEvent<IssueCompleted> BuildCompletedEvent(string projectId, string issueId) =>

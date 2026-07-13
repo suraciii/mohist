@@ -814,8 +814,15 @@ public class EpicGrain : Grain, IEpicGrain
             if (startFailureMode == StartFailureMode.PreserveRunning)
             {
                 _log.LogWarning(ex,
-                    "Epic {EpicId} ({ProjectId}) failed to start next linked issue {IssueId}; epic remains running-but-idle",
+                    "Epic {EpicId} ({ProjectId}) failed to start next linked issue {IssueId}; epic remains running-but-idle, emitting start-attempt-failed for durable retry",
                     epicId, projectId, next.Id);
+                var now = _timeProvider.GetUtcNow();
+                var domain = Materialize(row, links);
+                domain.RecordStartAttemptFailure(next.Id, next.Number, ex.Message, now.UtcDateTime);
+                MapToRow(domain, row, now);
+                var pending = DrainPendingEvents(domain);
+                await db.SaveChangesAsync();
+                await PersistEpicEventsAsync(domain, pending, now);
                 return ToDto(row);
             }
             throw;
