@@ -106,7 +106,7 @@ public class WorkflowStatusMapperFrontendStatusTests
         new()
         {
             Id = "wf-frontend",
-            Metadata = new WorkflowRunMetadata("test", DateTimeOffset.UnixEpoch),
+            Metadata = new WorkflowRunMetadata("test", DateTimeOffset.UtcNow),
             Status = status,
             CurrentStageId = "build",
             Stages =
@@ -256,7 +256,7 @@ public class WorkflowStatusMapperBuildPendingWorkTests
         new()
         {
             Id = "wf-pending",
-            Metadata = new WorkflowRunMetadata("test", DateTimeOffset.UnixEpoch),
+            Metadata = new WorkflowRunMetadata("test", DateTimeOffset.UtcNow),
             Status = runStatus,
             CurrentStageId = "build",
             Stages =

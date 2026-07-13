@@ -332,7 +332,7 @@ public class SystemInfoServiceTests
         {
             Version = version;
             GitHash = gitHash;
-            StartedAt = DateTimeOffset.UnixEpoch;
+            StartedAt = DateTimeOffset.UtcNow;
         }
     }
 

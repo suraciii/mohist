@@ -1,15 +1,13 @@
 using Microsoft.AspNetCore.StaticFiles;
-using Microsoft.Extensions.FileProviders;
 
 namespace Mohist.Server.Infrastructure.Hosting;
 
 public static class MohistWebRegistration
 {
-    public static WebApplication MapMohistWeb(this WebApplication app)
+    public static WebApplication MapMohistWeb(this WebApplication app, IConfiguration configuration)
     {
-        var fileProvider = app.Services.GetRequiredService<IWebContentProvider>().GetFileProvider();
-        var index = fileProvider?.GetFileInfo("index.html");
-        if (index is not { Exists: true })
+        var webRoot = ResolveWebRoot(configuration);
+        if (webRoot is null)
         {
             app.MapGet("/", () => Results.Text(
                 "Mohist Web UI is not built. Run `npm run build:web` or set Mohist:WebRoot.",
@@ -20,7 +18,7 @@ public static class MohistWebRegistration
         var provider = new FileExtensionContentTypeProvider();
         app.UseStaticFiles(new StaticFileOptions
         {
-            FileProvider = fileProvider,
+            FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(webRoot),
             ContentTypeProvider = provider,
         });
 
@@ -41,7 +39,7 @@ public static class MohistWebRegistration
                 return;
             }
 
-            await SendIndexAsync(context, index);
+            await SendIndexAsync(context, webRoot);
         });
 
         return app;
@@ -72,11 +70,9 @@ public static class MohistWebRegistration
         return null;
     }
 
-    private static async Task SendIndexAsync(HttpContext context, IFileInfo index)
+    private static async Task SendIndexAsync(HttpContext context, string webRoot)
     {
         context.Response.ContentType = "text/html; charset=utf-8";
-        context.Response.ContentLength = index.Length;
-        await using var stream = index.CreateReadStream();
-        await stream.CopyToAsync(context.Response.Body, context.RequestAborted);
+        await context.Response.SendFileAsync(Path.Combine(webRoot, "index.html"));
     }
 }

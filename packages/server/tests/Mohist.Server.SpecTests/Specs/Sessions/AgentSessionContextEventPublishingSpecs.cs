@@ -31,6 +31,8 @@ public class AgentSessionContextEventPublishingSpecs
         _fixture = fixture;
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task UsageUpdated_EmitsContextHealthUpdateThroughTranscriptPublisher()
     {
@@ -86,6 +88,8 @@ public class AgentSessionContextEventPublishingSpecs
         Assert.Equal(85d, red.Payload.GetProperty("contextUsagePercent").GetDouble());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task CompactAsync_EmitsCompactionEventThroughTranscriptPublisher()
     {
@@ -109,6 +113,8 @@ public class AgentSessionContextEventPublishingSpecs
         Assert.Equal("## Compacted summary", envelope.Payload.GetProperty("summary").GetString());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task ResetAsync_EmitsCompactionEventWithoutSummary()
     {
@@ -128,6 +134,8 @@ public class AgentSessionContextEventPublishingSpecs
         Assert.Equal("reset", envelope.Payload.GetProperty("strategy").GetString());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task SessionClosed_FailedWithContextExhaustion_PersistsContextExhaustedEventRow()
     {
@@ -162,6 +170,8 @@ public class AgentSessionContextEventPublishingSpecs
         Assert.Equal(96d, exhaustion.Envelope.Data!.Value.GetProperty("contextUsagePercent").GetDouble());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task UsageUpdated_EmitsContextHealthUpdatedEventRow()
     {

@@ -31,8 +31,9 @@ public class InboxApiSpecs
         _client = fixture.Client;
     }
 
-    private DateTimeOffset Now => _fixture.TimeProvider.GetUtcNow();
-
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task List_EmptyProject_ReturnsEmptyArray()
     {
@@ -44,6 +45,9 @@ public class InboxApiSpecs
         Assert.Empty(items);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task List_WithItems_ReturnsFieldsOrderedMostRecentFirstAndExcludesArchived()
     {
@@ -87,14 +91,17 @@ public class InboxApiSpecs
         Assert.False(failed.GetProperty("isRead").GetBoolean());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task MarkRead_SetsItemRead_LeavesOthersUnchanged()
     {
         var projectId = await CreateProjectAsync("inbox-mark-one");
         var first = await SeedAsync(projectId, "issue_1", 1, "First",
-            NotificationKinds.WorkflowFailed, Now, "evt-mr-1");
+            NotificationKinds.WorkflowFailed, DateTimeOffset.UtcNow, "evt-mr-1");
         var second = await SeedAsync(projectId, "issue_2", 2, "Second",
-            NotificationKinds.ApprovalRequested, Now, "evt-mr-2");
+            NotificationKinds.ApprovalRequested, DateTimeOffset.UtcNow, "evt-mr-2");
 
         await _client.PostOkAsync($"/api/projects/{projectId}/inbox/{first}/read");
 
@@ -112,12 +119,15 @@ public class InboxApiSpecs
         Assert.False(secondItem.TryGetProperty("readAt", out _));
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task MarkRead_RepeatedCall_StaysOk()
     {
         var projectId = await CreateProjectAsync("inbox-mark-idem");
         var itemId = await SeedAsync(projectId, "issue_1", 1, "First",
-            NotificationKinds.WorkflowFailed, Now, "evt-mri-1");
+            NotificationKinds.WorkflowFailed, DateTimeOffset.UtcNow, "evt-mri-1");
 
         await _client.PostOkAsync($"/api/projects/{projectId}/inbox/{itemId}/read");
         // A repeated "mark read" must not 404 — the user clicked the
@@ -131,6 +141,9 @@ public class InboxApiSpecs
         Assert.True(item.GetProperty("isRead").GetBoolean());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task MarkRead_CrossProjectItemId_Returns404()
     {
@@ -138,7 +151,7 @@ public class InboxApiSpecs
         var projectB = await CreateProjectAsync("inbox-cross-b");
 
         var itemInA = await SeedAsync(projectA, "issue_1", 1, "First",
-            NotificationKinds.WorkflowFailed, Now, "evt-xcr-1");
+            NotificationKinds.WorkflowFailed, DateTimeOffset.UtcNow, "evt-xcr-1");
 
         using var response = await _client.PostAsync(
             $"/api/projects/{projectB}/inbox/{itemInA}/read",
@@ -147,6 +160,9 @@ public class InboxApiSpecs
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task MarkRead_UnknownItemId_Returns404()
     {
@@ -159,16 +175,19 @@ public class InboxApiSpecs
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task MarkAllRead_MarksAllNonArchivedItemsInProject()
     {
         var projectId = await CreateProjectAsync("inbox-read-all");
         await SeedAsync(projectId, "issue_1", 1, "First",
-            NotificationKinds.WorkflowFailed, Now, "evt-ra-1");
+            NotificationKinds.WorkflowFailed, DateTimeOffset.UtcNow, "evt-ra-1");
         await SeedAsync(projectId, "issue_2", 2, "Second",
-            NotificationKinds.ApprovalRequested, Now, "evt-ra-2");
+            NotificationKinds.ApprovalRequested, DateTimeOffset.UtcNow, "evt-ra-2");
         var archived = await SeedAsync(projectId, "issue_3", 3, "Archived",
-            NotificationKinds.IssueStarted, Now, "evt-ra-3");
+            NotificationKinds.IssueStarted, DateTimeOffset.UtcNow, "evt-ra-3");
         await ArchiveAsync(projectId, archived);
 
         var result = await _client.PostDataAsync<JsonElement>(
@@ -183,6 +202,9 @@ public class InboxApiSpecs
         Assert.All(items, i => Assert.True(i.GetProperty("isRead").GetBoolean()));
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task MarkAllRead_DoesNotTouchOtherProjectItems()
     {
@@ -190,11 +212,11 @@ public class InboxApiSpecs
         var projectB = await CreateProjectAsync("inbox-readall-b");
 
         await SeedAsync(projectA, "issue_1", 1, "A1",
-            NotificationKinds.WorkflowFailed, Now, "evt-ra-x-1");
+            NotificationKinds.WorkflowFailed, DateTimeOffset.UtcNow, "evt-ra-x-1");
         await SeedAsync(projectA, "issue_2", 2, "A2",
-            NotificationKinds.ApprovalRequested, Now, "evt-ra-x-2");
+            NotificationKinds.ApprovalRequested, DateTimeOffset.UtcNow, "evt-ra-x-2");
         var itemInB = await SeedAsync(projectB, "issue_1", 1, "B1",
-            NotificationKinds.IssueStarted, Now, "evt-ra-x-b-1");
+            NotificationKinds.IssueStarted, DateTimeOffset.UtcNow, "evt-ra-x-b-1");
 
         var result = await _client.PostDataAsync<JsonElement>(
             $"/api/projects/{projectA}/inbox/read-all");
@@ -208,14 +230,17 @@ public class InboxApiSpecs
         Assert.False(b.GetProperty("isRead").GetBoolean());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task Archive_ExcludesItemFromDefaultList()
     {
         var projectId = await CreateProjectAsync("inbox-archive");
         var first = await SeedAsync(projectId, "issue_1", 1, "First",
-            NotificationKinds.WorkflowFailed, Now, "evt-ar-1");
+            NotificationKinds.WorkflowFailed, DateTimeOffset.UtcNow, "evt-ar-1");
         await SeedAsync(projectId, "issue_2", 2, "Second",
-            NotificationKinds.ApprovalRequested, Now, "evt-ar-2");
+            NotificationKinds.ApprovalRequested, DateTimeOffset.UtcNow, "evt-ar-2");
 
         await _client.PostOkAsync($"/api/projects/{projectId}/inbox/{first}/archive");
 
@@ -227,6 +252,9 @@ public class InboxApiSpecs
         Assert.False(surviving.GetProperty("isArchived").GetBoolean());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task Archive_CrossProjectItemId_Returns404()
     {
@@ -234,7 +262,7 @@ public class InboxApiSpecs
         var projectB = await CreateProjectAsync("inbox-arc-b");
 
         var itemInA = await SeedAsync(projectA, "issue_1", 1, "First",
-            NotificationKinds.WorkflowFailed, Now, "evt-arc-x-1");
+            NotificationKinds.WorkflowFailed, DateTimeOffset.UtcNow, "evt-arc-x-1");
 
         using var response = await _client.PostAsync(
             $"/api/projects/{projectB}/inbox/{itemInA}/archive",
@@ -249,6 +277,9 @@ public class InboxApiSpecs
         Assert.False(a.GetProperty("isArchived").GetBoolean());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task Archive_UnknownItemId_Returns404()
     {
@@ -261,6 +292,9 @@ public class InboxApiSpecs
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task List_UnknownProject_Returns404()
     {
@@ -270,17 +304,19 @@ public class InboxApiSpecs
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
-    public async Task WorkflowRunStoreEvent_PersistsRowButDoesNotSyncProjectToInbox()
+    public async Task WorkflowRunStoreEvent_PersistsRowAndDispatcherProjectsItToInbox()
     {
-        // issue-361 T-002/T-003: IEventPublisher converges to write-only
-        // and WorkflowRunStore now writes its event row inside the state
-        // transaction. The synchronous dispatch path that previously
-        // invoked InboxProjectionHandler during publish is removed; the
-        // inbox row will be projected by the future dispatcher. This spec
-        // verifies that the workflow event is durable (visible via the
-        // event store) but the projection is suspended until the
-        // dispatcher lands.
+        // issue-362 T-003: WorkflowRunStore pokes the dispatcher grain
+        // immediately after the transaction commits. The dispatcher picks
+        // up the freshly-persisted workflow.run.failed event and
+        // InboxProjectionHandler projects it into the project's inbox —
+        // restoring the at-least-once delivery the dispatcher was wired
+        // up to provide. The cross-project isolation rule still holds:
+        // the other project's inbox remains empty.
         var projectId = await CreateProjectAsync("inbox-spec");
         await _client.PostOkAsync(
             $"/api/projects/{projectId}/repositories",
@@ -308,7 +344,7 @@ public class InboxApiSpecs
                 Id = runId,
                 Metadata = new WorkflowRunMetadata(
                     Name: null,
-                    CreatedAt: Now,
+                    CreatedAt: DateTimeOffset.UtcNow,
                     Annotations: new Dictionary<string, string>(StringComparer.Ordinal)
                     {
                         ["projectId"] = projectId,
@@ -323,21 +359,27 @@ public class InboxApiSpecs
         {
             var events = verify.ServiceProvider.GetRequiredService<Mohist.Server.Infrastructure.Events.IEventStore>();
             var stored = await events.ListAsync(runId);
-            // issue-361 T-003: WorkflowRunStore now appends event rows inside
-            // the state transaction and no longer publishes; exactly one row
-            // per emitted event lands in the event store.
             var storedFailed = Assert.Single(stored);
             Assert.Equal("com.mohist.workflow.run.failed", storedFailed.Envelope.Type);
         }
 
-        Assert.Empty(await _client.GetDataAsync<JsonElement[]>(
-            $"/api/projects/{projectId}/inbox"));
+        var inboxItems = await TestWait.ForAsync(
+            () => _client.GetDataAsync<JsonElement[]>($"/api/projects/{projectId}/inbox"),
+            items => items.Length >= 1,
+            timeout: TimeSpan.FromSeconds(10),
+            step: TimeSpan.FromMilliseconds(100),
+            description: "inbox row projected by dispatcher after WorkflowRunStore poke");
+        var item = Assert.Single(inboxItems);
+        Assert.Equal("workflow_failed", item.GetProperty("notificationKind").GetString());
 
         var otherProjectId = await CreateProjectAsync("inbox-spec-other");
         Assert.Empty(await _client.GetDataAsync<JsonElement[]>(
             $"/api/projects/{otherProjectId}/inbox"));
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task MarkRead_UnknownProject_Returns404()
     {
@@ -354,6 +396,16 @@ public class InboxApiSpecs
             "/api/projects",
             new { name = $"{prefix}-{Guid.NewGuid():N}" });
         return project.GetProperty("id").GetString()!;
+    }
+
+    private async Task<JsonElement[]> WaitForInboxItemsAsync(string projectId, int expectedCount)
+    {
+        return await TestWait.ForAsync(
+            () => _client.GetDataAsync<JsonElement[]>($"/api/projects/{projectId}/inbox"),
+            items => items.Length == expectedCount,
+            TimeSpan.FromSeconds(2),
+            TimeSpan.FromMilliseconds(20),
+            $"project '{projectId}' inbox to contain {expectedCount} items");
     }
 
     private async Task<string> SeedAsync(
@@ -393,6 +445,6 @@ public class InboxApiSpecs
         var row = await db.InboxItems.SingleAsync(r => r.ProjectId == projectId && r.SourceEventId == sourceEventId);
         await db.InboxItems
             .Where(r => r.Id == row.Id)
-            .ExecuteUpdateAsync(s => s.SetProperty(r => r.ArchivedAt, Now));
+            .ExecuteUpdateAsync(s => s.SetProperty(r => r.ArchivedAt, DateTimeOffset.UtcNow));
     }
 }

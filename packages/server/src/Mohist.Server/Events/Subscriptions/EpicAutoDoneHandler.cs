@@ -1,3 +1,4 @@
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Mohist.Server.Epic.Grains;
 using Mohist.Server.Epic.Services;
@@ -17,7 +18,16 @@ public sealed class EpicAutoDoneHandler : ICloudEventHandler<IssueCompleted>
 {
     private readonly EpicReconcileDispatcher _dispatcher;
 
+    [ActivatorUtilitiesConstructor]
     public EpicAutoDoneHandler(
+        IServiceScopeFactory scopes,
+        IGrainFactory grains,
+        ILogger<EpicAutoDoneHandler> log)
+    {
+        _dispatcher = new EpicReconcileDispatcher(scopes, grains, log);
+    }
+
+    internal EpicAutoDoneHandler(
         EpicQuerier epicQuerier,
         IGrainFactory grains,
         ILogger<EpicAutoDoneHandler> log)
@@ -45,7 +55,16 @@ public sealed class EpicCancelledReconcileHandler : ICloudEventHandler<IssueCanc
 {
     private readonly EpicReconcileDispatcher _dispatcher;
 
+    [ActivatorUtilitiesConstructor]
     public EpicCancelledReconcileHandler(
+        IServiceScopeFactory scopes,
+        IGrainFactory grains,
+        ILogger<EpicCancelledReconcileHandler> log)
+    {
+        _dispatcher = new EpicReconcileDispatcher(scopes, grains, log);
+    }
+
+    internal EpicCancelledReconcileHandler(
         EpicQuerier epicQuerier,
         IGrainFactory grains,
         ILogger<EpicCancelledReconcileHandler> log)
@@ -64,15 +83,26 @@ public sealed class EpicCancelledReconcileHandler : ICloudEventHandler<IssueCanc
 /// wiring. Both <see cref="EpicAutoDoneHandler"/> (completed) and
 /// <see cref="EpicCancelledReconcileHandler"/> (cancelled) funnel here so the
 /// CloudEvent <c>projectid</c>/<c>issueid</c> extension parsing, epic
-/// lookup, and exception swallowing stay in one place. Kept
+/// lookup, and grain dispatch stay in one place. Kept
 /// package-internal (no <c>public</c> modifier) because this is a
 /// wiring concern that should not be consumed outside this folder.
 /// </summary>
 internal sealed class EpicReconcileDispatcher
 {
-    private readonly EpicQuerier _epicQuerier;
+    private readonly IServiceScopeFactory? _scopes;
+    private readonly EpicQuerier? _epicQuerier;
     private readonly IGrainFactory _grains;
     private readonly ILogger _log;
+
+    public EpicReconcileDispatcher(
+        IServiceScopeFactory scopes,
+        IGrainFactory grains,
+        ILogger log)
+    {
+        _scopes = scopes;
+        _grains = grains;
+        _log = log;
+    }
 
     public EpicReconcileDispatcher(
         EpicQuerier epicQuerier,
@@ -105,22 +135,23 @@ internal sealed class EpicReconcileDispatcher
             return;
         }
 
-        var epicId = await _epicQuerier.GetEpicIdForIssueAsync(projectId, issueId).ConfigureAwait(false);
+        string? epicId;
+        if (_epicQuerier is not null)
+        {
+            epicId = await _epicQuerier.GetEpicIdForIssueAsync(projectId, issueId).ConfigureAwait(false);
+        }
+        else
+        {
+            await using var scope = _scopes!.CreateAsyncScope();
+            var epicQuerier = scope.ServiceProvider.GetRequiredService<EpicQuerier>();
+            epicId = await epicQuerier.GetEpicIdForIssueAsync(projectId, issueId).ConfigureAwait(false);
+        }
         if (epicId is null)
         {
             return;
         }
 
-        try
-        {
-            var grain = _grains.GetGrain<IEpicGrain>($"{projectId}:{epicId}");
-            await grain.ReconcileAfterTerminalAsync().ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            _log.LogWarning(ex,
-                "Epic reconcile-on-terminal handler failed for project {ProjectId} epic {EpicId} issue {IssueId} ({EvtType}); relying on reconciliation sweep",
-                projectId, epicId, issueId, evtType);
-        }
+        var grain = _grains.GetGrain<IEpicGrain>($"{projectId}:{epicId}");
+        await grain.ReconcileAfterTerminalAsync().ConfigureAwait(false);
     }
 }

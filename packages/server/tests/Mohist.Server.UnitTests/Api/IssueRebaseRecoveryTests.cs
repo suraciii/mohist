@@ -1,32 +1,10 @@
 using Mohist.Server.Api;
-using Mohist.Server.Project.Domain;
 using Xunit;
 
 namespace Mohist.Server.UnitTests.Api;
 
 public class IssueRebaseRecoveryTests
 {
-    [Fact]
-    public void BuildRebaseTaskWith_UsesResolvedRepositoryContext()
-    {
-        var repository = new RepositoryInfo
-        {
-            Name = "secondary",
-            GitUrl = "git@secondary.example:repo.git",
-            BaseBranch = "release",
-        };
-
-        var input = IssueRoutes.BuildRebaseTaskWith("release", repository);
-
-        Assert.NotNull(input);
-        Assert.Equal("release", input!.Value.GetProperty("baseBranch").GetString());
-        Assert.Equal("origin", input.Value.GetProperty("remote").GetString());
-        var taskRepository = input.Value.GetProperty("repository");
-        Assert.Equal("secondary", taskRepository.GetProperty("name").GetString());
-        Assert.Equal("git@secondary.example:repo.git", taskRepository.GetProperty("gitUrl").GetString());
-        Assert.Equal("release", taskRepository.GetProperty("baseBranch").GetString());
-    }
-
     [Fact]
     public void ManualRebaseRecovery_ReferencesNamedPromptAndAgent_NeverInlines()
     {

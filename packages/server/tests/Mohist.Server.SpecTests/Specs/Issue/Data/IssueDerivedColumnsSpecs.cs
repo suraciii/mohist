@@ -1,0 +1,89 @@
+using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
+using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Data.Issue;
+using Mohist.Server.SpecTests.Support;
+using Xunit;
+
+namespace Mohist.Server.SpecTests.Specs.Issue.Data;
+
+public class IssueDerivedColumnsSpecs
+{
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task DerivedColumn_TracksStateAfterUpdate()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+
+        var options = new DbContextOptionsBuilder<MohistDbContext>()
+            .UseSqlite(connection)
+            .Options;
+
+        MigratedSqliteTemplate.CopyTo(connection);
+        await using var db = new MohistDbContext(options);
+
+        var issue = new IssueRow
+        {
+            IssueId = "issue_001",
+            State = """{"projectId":"proj_1","number":1,"title":"Old title","priority":"p2","isDraft":false,"prerequisiteNumbers":[2,3]}"""
+        };
+        db.Issues.Add(issue);
+        await db.SaveChangesAsync();
+
+        issue.State = """{"projectId":"proj_1","number":1,"title":"New title","priority":"p1","isDraft":true,"prerequisiteNumbers":[4]}""";
+        await db.SaveChangesAsync();
+
+        var read = await db.Issues.AsNoTracking().SingleAsync(i => i.IssueId == "issue_001");
+
+        Assert.Equal("New title", read.Title);
+        Assert.Equal("p1", read.Priority);
+        Assert.True(read.IsDraft);
+        Assert.Equal("[4]", read.PrerequisiteNumbersJson);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task DerivedColumn_MissingOrLegacyKeys_YieldNullSafely()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+
+        var options = new DbContextOptionsBuilder<MohistDbContext>()
+            .UseSqlite(connection)
+            .Options;
+
+        MigratedSqliteTemplate.CopyTo(connection);
+        await using var db = new MohistDbContext(options);
+
+        var legacyIssue = new IssueRow
+        {
+            IssueId = "issue_legacy",
+            State = """{"ProjectId":"proj_1","Number":2,"Status":"backlog","Title":"Legacy title","Priority":"P0"}"""
+        };
+        var sparseIssue = new IssueRow
+        {
+            IssueId = "issue_sparse",
+            State = """{"projectId":"proj_1","number":3,"status":"backlog"}"""
+        };
+
+        db.Issues.Add(legacyIssue);
+        db.Issues.Add(sparseIssue);
+        await db.SaveChangesAsync();
+
+        var legacyRead = await db.Issues.AsNoTracking().SingleAsync(i => i.IssueId == "issue_legacy");
+        var sparseRead = await db.Issues.AsNoTracking().SingleAsync(i => i.IssueId == "issue_sparse");
+
+        Assert.Equal("Legacy title", legacyRead.Title);
+        Assert.Equal("P0", legacyRead.Priority);
+        Assert.Null(legacyRead.IsDraft);
+        Assert.Null(legacyRead.PrerequisiteNumbersJson);
+
+        Assert.Null(sparseRead.Title);
+        Assert.Null(sparseRead.Priority);
+        Assert.Null(sparseRead.IsDraft);
+        Assert.Null(sparseRead.PrerequisiteNumbersJson);
+    }
+}

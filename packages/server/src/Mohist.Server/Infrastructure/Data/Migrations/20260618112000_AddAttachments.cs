@@ -1,5 +1,4 @@
 using System;
-using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
@@ -7,7 +6,6 @@ using Microsoft.EntityFrameworkCore.Migrations;
 namespace Mohist.Server.Infrastructure.Data.Migrations
 {
     /// <inheritdoc />
-    [DbContext(typeof(Db.MohistDbContext))]
     [Migration("20260618112000_AddAttachments")]
     public partial class AddAttachments : Migration
     {

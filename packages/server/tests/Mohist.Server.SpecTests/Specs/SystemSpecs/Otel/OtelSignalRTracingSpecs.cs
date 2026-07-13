@@ -27,14 +27,18 @@ namespace Mohist.Server.SpecTests.Specs.SystemSpecs.Otel;
 [Collection("OtelTracing")]
 public class OtelSignalRTracingSpecs
 {
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task HubConnection_ProducesRealEchoHubMethodActivity()
     {
         // Stand up an OtelTestHost with the production OTel pipeline,
         // plus our minimal test hub mapped at /hubs/test.
-        await using var host = new OtelTestHost(
-            configureServices: services => services.AddSignalR(),
-            configureApp: app =>
+        await using var host = new OtelTestHost(new OtelTestHostOptions
+        {
+            Enabled = true,
+            ConfigureServices = services => services.AddSignalR(),
+            ConfigureApp = app =>
             {
                 app.MapHub<OtelSignalRTestHub>("/hubs/test", options =>
                 {
@@ -45,7 +49,8 @@ public class OtelSignalRTracingSpecs
                     // WebSockets here.
                     options.Transports = HttpTransportType.LongPolling;
                 });
-            });
+            },
+        });
 
         // Open a SignalR client connection routed through the
         // in-process TestServer handler. HubConnectionBuilder's
@@ -72,6 +77,14 @@ public class OtelSignalRTracingSpecs
         {
             await connection.DisposeAsync();
         }
+
+        // The SignalR Server source emits an activity for every hub
+        // lifecycle hook and every hub method invocation. Wait until
+        // at least one Server-kind activity (the OnConnectedAsync
+        // hook fired at connection establishment) has been captured.
+        await host.Recorder.WaitForAsync(s => s
+            .Any(a => a.Source?.Name == MohistOpenTelemetryRegistration.SignalRServerActivitySourceName),
+            TimeSpan.FromSeconds(5));
 
         var signalrActivities = host.Recorder.EndedActivities
             .Where(a => a.Source?.Name == MohistOpenTelemetryRegistration.SignalRServerActivitySourceName)

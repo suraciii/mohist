@@ -1,5 +1,7 @@
 using System.Text.Json;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.UnitTests.Support;
 using Xunit;
@@ -8,10 +10,12 @@ namespace Mohist.Server.UnitTests.SystemSpecs;
 
 public class EventBusTests
 {
+    private static readonly FakeTimeProvider TestTime = new(new DateTimeOffset(2026, 7, 1, 0, 0, 0, TimeSpan.Zero));
+
     [Fact]
     public async Task PublishAsync_NoSubscriber_DoesNotThrow()
     {
-        var bus = new InMemoryEventBus(new NoopEventStore(), NullLogger<InMemoryEventBus>.Instance);
+        var bus = new InMemoryEventBus(new NoopEventStore(), TestTime, NullLogger<InMemoryEventBus>.Instance);
 
         await bus.PublishAsync(
             data: new TestPayload("orphan"),
@@ -31,7 +35,7 @@ public class EventBusTests
                 onEvent: e => received.Enqueue(e)),
                 DispatchDynamic),
         };
-        var bus = new InMemoryEventBus(subs, store, NullLogger<InMemoryEventBus>.Instance);
+        var bus = new InMemoryEventBus(subs, store, TestTime, NullLogger<InMemoryEventBus>.Instance);
 
         await bus.PublishAsync(
             data: new TestPayload("hello"),
@@ -48,7 +52,7 @@ public class EventBusTests
     public async Task PublishAsync_TypedOverload_PreservesSubjectDataAndExtensions()
     {
         var store = new RecordingEventStore();
-        var bus = new InMemoryEventBus(store, NullLogger<InMemoryEventBus>.Instance);
+        var bus = new InMemoryEventBus(store, TestTime, NullLogger<InMemoryEventBus>.Instance);
         var extensions = new Dictionary<string, string>(StringComparer.Ordinal) { ["traceId"] = "tr_typed" };
 
         await bus.PublishAsync(
@@ -78,7 +82,7 @@ public class EventBusTests
                 onEvent: e => received.Enqueue(e)),
                 DispatchDynamic),
         };
-        var bus = new InMemoryEventBus(subs, store, NullLogger<InMemoryEventBus>.Instance);
+        var bus = new InMemoryEventBus(subs, store, TestTime, NullLogger<InMemoryEventBus>.Instance);
 
         await bus.PublishAsync(
             data: new TestPayload("hello"),
@@ -93,7 +97,7 @@ public class EventBusTests
     public async Task PublishAsync_CloudEventOverload_AppendsSingleRowPreservingEnvelope()
     {
         var store = new RecordingEventStore();
-        var bus = new InMemoryEventBus(store, NullLogger<InMemoryEventBus>.Instance);
+        var bus = new InMemoryEventBus(store, TestTime, NullLogger<InMemoryEventBus>.Instance);
 
         var data = JsonDocument.Parse("{\"k\":\"v\"}").RootElement;
         var extensions = new Dictionary<string, string>(StringComparer.Ordinal) { ["traceId"] = "tr_1" };
@@ -132,7 +136,7 @@ public class EventBusTests
                 onEvent: _ => throw new InvalidOperationException("handler exploded")),
                 DispatchDynamic),
         };
-        var bus = new InMemoryEventBus(subs, store, NullLogger<InMemoryEventBus>.Instance);
+        var bus = new InMemoryEventBus(subs, store, TestTime, NullLogger<InMemoryEventBus>.Instance);
 
         await bus.PublishAsync(
             data: new TestPayload("hello"),
@@ -141,6 +145,17 @@ public class EventBusTests
 
         Assert.Empty(received);
         Assert.Single(store.Appended);
+    }
+
+    [Fact]
+    public void HandlerRegistration_InvalidSubscriptionPatternFailsImmediately()
+    {
+        var services = new ServiceCollection();
+
+        var error = Assert.Throws<ArgumentException>(() =>
+            services.AddCloudEventHandlers([typeof(InvalidPatternHandler)]));
+
+        Assert.Contains("wildcards are only allowed", error.Message, StringComparison.Ordinal);
     }
 
     private sealed record TestPayload(string Message);
@@ -177,5 +192,13 @@ public class EventBusTests
             _onEvent(evt);
             return Task.CompletedTask;
         }
+    }
+
+    [Subscription(Type = "test.*.invalid")]
+    private sealed class InvalidPatternHandler : ICloudEventHandler
+    {
+        public bool Filter(CloudEvent evt) => true;
+
+        public Task HandleAsync(CloudEvent evt, CancellationToken ct) => Task.CompletedTask;
     }
 }
