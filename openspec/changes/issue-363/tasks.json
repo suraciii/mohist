@@ -1,16 +1,14 @@
 {
   "project": "mohist-local",
-  "description": "Remove reentrancy patches, collapse handler error handling to the durable dispatcher, and clean up the epic reconcile misnomer + poll-driven sweep after #362's durable delivery landed.",
+  "description": "Remove reentrancy patches from WorkflowGrain and RunnerGrain, collapse handler error handling to the durable dispatcher, and clean up the epic reconcile misnomer + poll-driven sweep after #362's durable delivery landed.",
   "tasks": [
     {
       "id": "T-001",
       "title": "Restore turn-based serialization on WorkflowGrain and add concurrency specs",
       "spec": "specs/grain-turn-serialization/spec.md#Authority grains rely solely on Orleans turn-based serialization",
-      "description": "Remove broad [Reentrant] from WorkflowGrain (WorkflowGrain.cs:22); drop `using Orleans.Concurrency` if no symbol from that namespace remains. RunnerGrain reentrancy removal and _worksStateWriteGate removal are deferred to a follow-up prerequisite that resolves the multi-call poll lease and reciprocal Runner↔AgentJob waits without modifying DispatchService. Clean up stale [Reentrant] prose in WorkflowStageLockReleaseHandler.cs:21-23. Add concurrency characteristic specs through the real Orleans runtime for WorkflowGrain, asserting allowed complete serialized outcomes without depending on scheduler order.",
+      "description": "Remove broad [Reentrant] from WorkflowGrain (WorkflowGrain.cs:22); drop `using Orleans.Concurrency` if no symbol from that namespace remains. Clean up stale [Reentrant] prose in WorkflowStageLockReleaseHandler.cs:21-23. Add concurrency characteristic specs through the real Orleans runtime for WorkflowGrain, asserting allowed complete serialized outcomes without depending on scheduler order.",
       "acceptanceCriteria": [
         "WorkflowGrain does not carry the [Reentrant] attribute and its `using Orleans.Concurrency` is dropped if no symbol from that namespace remains",
-        "RunnerGrain retains [Reentrant] and _worksStateWriteGate in this issue; no state-mutating Runner method is modified as a substitute",
-        "This task does not modify DispatchService",
         "WorkflowStageLockReleaseHandler.cs XML doc no longer references [Reentrant] or in-stack delivery; prose describes the awaited dispatch model",
         "WorkflowGrainConcurrencySpecs exists under packages/server/tests/Mohist.Server.SpecTests/Specs/Workflow/ and issues valid concurrent control operations from prepared lifecycle phases, asserting only allowed complete serialized outcomes and agreement between in-memory run state and persisted snapshot",
         "Concurrency spec uses InProcessTestCluster + MigratedSqliteTemplate.CopyTo + FakeTimeProvider; no real clustering, no real DB, no wall-clock waits, no order dependencies",
@@ -24,7 +22,7 @@
       "output": "Modified WorkflowGrain.cs and WorkflowStageLockReleaseHandler.cs; new WorkflowGrainConcurrencySpecs.cs spec file",
       "dependsOn": [],
       "passes": false,
-      "notes": "RunnerGrain reentrancy removal is deferred to a follow-up prerequisite. The multi-call poll lease (TouchPresenceAsync/GetInfoAsync/ReconcileAgentJobsAsync before EndPollAsync) and reciprocal Runner↔AgentJob waits during assignment/reconciliation/reporting/closeout both depend on broad interleaving. DispatchService is explicitly out of scope. WorkflowGrain has no scheduler-mediated self-call (verified: no GetGrain<IWorkflowGrain> self-reference in the Workflow slice), so its [Reentrant] removal is safe."
+      "notes": "WorkflowGrain has no scheduler-mediated self-call (verified: no GetGrain<IWorkflowGrain> self-reference in the Workflow slice), so its [Reentrant] removal is safe. RunnerGrain reentrancy removal is handled in T-004."
     },
     {
       "id": "T-002",
@@ -50,7 +48,7 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "Modified AgentSubscriptionDispatchHandler.cs and HermesIssueNotificationHandler.cs; verified RunnerWorkflowTerminalStatusHandler.cs remains awaited and updated AgentSubscriptionDispatchHandlerSpecs.cs, EventDispatcherSpecs.cs, HermesIssueNotificationTests.cs, and RunnerWorkflowTerminalStatusHandlerSpecs.cs",
-      "dependsOn": [],
+      "dependsOn": ["T-001"],
       "passes": false,
       "notes": "Do NOT remove the DeliverAsync try-catch in HermesIssueNotificationHandler - it is the best-effort UI-push channel's own error handling (design/architecture.md two-channel split), not a dispatcher-level swallow. Only the setup-phase try-catch propagates."
     },
@@ -83,10 +81,44 @@
       "priority": 3,
       "mode": "AFK",
       "type": "WRITE",
-      "output": "Deleted EpicReconciliationService.cs; modified IEpicGrain.cs, EpicGrain.cs (incl. link-time recompute calls + rename), EpicAutoDoneHandler.cs (incl. EpicProgressRecomputeDispatcher + EpicCancelledHandler renames), MohistServiceRegistration.cs; updated EpicProgressionSpecs.cs, EpicAutoDoneSpecs.cs, EpicAutoDoneHandlerSpecs.cs",
-      "dependsOn": [],
+      "dependsOn": ["T-002"],
       "passes": false,
       "notes": "The sweep's non-terminal-event readiness behavior is preserved by link-time recompute triggers: LinkIssueAsync and LinkIssuesAsync call RecomputeProgressInternalAsync with PreserveRunning after non-wake links to non-terminal epics. This covers link-to-running (TryStartNext advances), terminal-before-link (MarkDone if all complete), and all-complete-idle (MarkDone). Draft/prerequisite readiness is covered by durable delivery of the prerequisite's completed event. No cross-aggregate event->command semantics are changed. The terminal-event start-failure contract is resolved: Propagate for RecomputeProgressAsync, PreserveRunning for StartAsync/link/ResumeAsync. Delete the sweep before applying the rename to avoid throwaway call-site work. AutoMarkDoneIfReadyAsync is a separate readiness entry, not in the rename scope. Workflow-scheduling DispatchService reconcile (epic #44) is NOT touched."
+    },
+    {
+      "id": "T-004",
+      "title": "Restore turn-based serialization on RunnerGrain: remove reentrancy, write gate, and poll admission gate; add interleavable methods and concurrency specs",
+      "spec": "specs/grain-turn-serialization/spec.md#Authority grains rely solely on Orleans turn-based serialization",
+      "description": "Remove broad [Reentrant] from RunnerGrain (RunnerGrain.cs:33). Remove _worksStateWriteGate (line 43) and simplify PersistAsync to call WriteStateAsync directly. Remove _pollAdmissionGate (line 45); keep _pollAdmitted as a boolean flag for the AssignAgentJobAsync business-logic reject. Remove _pollAdmissionGate WaitAsync/Release from UnregisterAsync, UpdateAsync, and AssignAgentJobAsync. TryBeginPollAsync uses _pollAdmitted flag check instead of gate Wait(0); EndPollAsync clears the flag. Add [AlwaysInterleave] to GetRuntimeStateAsync and AssignAgentJobAsync on IRunnerGrain (GetSlotsAsync is already [AlwaysInterleave]). Keep _lifecycleGate for AssignAgentJobAsync state-mutation protection. Move CloseoutLostAsync() call outside _lifecycleGate in HandleTimeoutAsync (set offline + unregister inside gate, release, then closeout). Add RunnerGrainConcurrencySpecs through the real Orleans runtime, including a reciprocal-deadlock scenario (HandleTimeoutAsync fires while AgentJobGrain.TryAssignToRunnerAsync is in progress).",
+      "acceptanceCriteria": [
+        "RunnerGrain does not carry the [Reentrant] attribute",
+        "RunnerGrain._worksStateWriteGate field does not exist; PersistAsync calls _worksState.WriteStateAsync() directly without a SemaphoreSlim",
+        "RunnerGrain._pollAdmissionGate field does not exist; no method blocks on a poll-admission semaphore",
+        "RunnerGrain._pollAdmitted boolean flag remains; TryBeginPollAsync sets it, EndPollAsync clears it, AssignAgentJobAsync rejects with 'runner-reconciling' when true",
+        "UnregisterAsync and UpdateAsync no longer acquire or release _pollAdmissionGate; they acquire _lifecycleGate as before",
+        "AssignAgentJobAsync no longer acquires _pollAdmissionGate; it checks _pollAdmitted flag, then acquires _lifecycleGate for state mutations",
+        "IRunnerGrain.GetRuntimeStateAsync carries [AlwaysInterleave]",
+        "IRunnerGrain.AssignAgentJobAsync carries [AlwaysInterleave]",
+        "IRunnerGrain.GetSlotsAsync retains its existing [AlwaysInterleave]",
+        "RunnerGrain._lifecycleGate field remains; AssignAgentJobAsync acquires it before mutating state",
+        "HandleTimeoutAsync sets _status = Offline and calls registry.UnregisterAsync inside _lifecycleGate, releases _lifecycleGate, then calls CloseoutLostAsync outside the gate",
+        "CloseoutLostAsync does not acquire _lifecycleGate during cross-grain calls to IAgentJobGrain",
+        "This task does not modify DispatchService or its poll call sequence (TryBeginPollAsync, TouchPresenceAsync, GetInfoAsync, ReconcileAgentJobsAsync, EndPollAsync are called in the same order)",
+        "RunnerGrainConcurrencySpecs exists under packages/server/tests/Mohist.Server.SpecTests/Specs/Runner/ and issues concurrent lifecycle and poll operations from prepared phases, asserting only allowed complete serialized outcomes and agreement between in-memory state and persisted snapshot",
+        "RunnerGrainConcurrencySpecs includes a scenario where HandleTimeoutAsync fires while AgentJobGrain.TryAssignToRunnerAsync is in progress, asserting no deadlock and correct final state (runner offline, assignment rejected, closeout completed)",
+        "Concurrency spec uses InProcessTestCluster + MigratedSqliteTemplate.CopyTo + FakeTimeProvider; no real clustering, no real DB, no wall-clock waits, no order dependencies",
+        "Concurrency specs assert only on final settled state, never on interleaving timing",
+        "Existing RunnerGrain tests affected by _pollAdmissionGate removal and [AlwaysInterleave] additions are updated",
+        "npm run build succeeds (TreatWarningsAsErrors catches any missed reference)",
+        "npm test passes (server specs, including the new RunnerGrain concurrency spec file)"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Modified RunnerGrain.cs (remove [Reentrant], _worksStateWriteGate, _pollAdmissionGate; simplify PersistAsync; restructure HandleTimeoutAsync; remove gate waits from UnregisterAsync/UpdateAsync/AssignAgentJobAsync), IRunnerGrain.cs (add [AlwaysInterleave] to GetRuntimeStateAsync and AssignAgentJobAsync); new RunnerGrainConcurrencySpecs.cs spec file; updated existing RunnerGrain tests",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Deadlock analysis (verified from source): (1) _pollAdmissionGate causes hold-and-wait deadlock when UnregisterAsync/UpdateAsync blocks on it between poll calls - fixed by removing the gate and using _pollAdmitted flag only. (2) Reciprocal Runner↔AgentJob deadlock when HandleTimeoutAsync holds _lifecycleGate and calls AgentJobGrain while TryAssignToRunnerAsync calls RunnerGrain.AssignAgentJobAsync - fixed by [AlwaysInterleave] on GetRuntimeStateAsync and AssignAgentJobAsync + moving CloseoutLostAsync outside _lifecycleGate. _lifecycleGate is retained because AssignAgentJobAsync is now [AlwaysInterleave] and needs explicit state-mutation protection. _worksStateWriteGate is removed because non-interleaved PersistAsync calls are serialized by the turn, and AssignAgentJobAsync's PersistAsync is protected by _lifecycleGate. AgentJobGrain.IsWorkRunnableAsync is a pure synchronous read (no callback into RunnerGrain) - safe during ReconcileAgentJobsAsync. AgentJobGrain is non-reentrant. DispatchService is NOT modified."
     }
   ]
 }
