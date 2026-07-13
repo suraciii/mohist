@@ -153,7 +153,7 @@ public class EpicAutoDoneHandlerSpecs
         await handler.HandleAsync(evt, CancellationToken.None);
         await handler.HandleAsync(evt, CancellationToken.None);
 
-        // The first reconcile marks the epic terminal and releases active
+        // The first recompute marks the epic terminal and releases active
         // ownership; repeated terminal events then find no active owner.
         Assert.Single(grains.Calls);
         await using var verify = database.CreateDbContext();
@@ -259,10 +259,10 @@ public class EpicAutoDoneHandlerSpecs
     public async Task CancelledHandler_HasSubscriptionAttributeOnCancelledType()
     {
         // The IssueCancelled subscription is required: a cancelled in-progress
-        // issue must trigger reconcile so the next startable issue is
+        // issue must trigger recompute progress so the next startable issue is
         // advanced (otherwise the epic deadlocks on a cancelled slot).
         var attr = (SubscriptionAttribute?)Attribute.GetCustomAttribute(
-            typeof(EpicCancelledReconcileHandler), typeof(SubscriptionAttribute));
+            typeof(EpicCancelledHandler), typeof(SubscriptionAttribute));
         Assert.NotNull(attr);
         Assert.Equal(EventCatalog.ReverseDns.IssueCancelled, attr!.Type);
     }
@@ -270,7 +270,7 @@ public class EpicAutoDoneHandlerSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
-    public async Task CancelledHandler_CancelledIssue_InvokesReconcileOnOwningEpic()
+    public async Task CancelledHandler_CancelledIssue_InvokesRecomputeOnOwningEpic()
     {
         // Both terminal events funnel through the same grain method;
         // this verifies the new subscription delivers the same call.
@@ -281,14 +281,14 @@ public class EpicAutoDoneHandlerSpecs
 
         var querier = new EpicQuerier(database.Factory, null!);
         var grains = new TestEpicGrainFactory(database.Factory);
-        var handler = new EpicCancelledReconcileHandler(querier, grains, NullLogger<EpicCancelledReconcileHandler>.Instance);
+        var handler = new EpicCancelledHandler(querier, grains, NullLogger<EpicCancelledHandler>.Instance);
 
         var evt = BuildCancelledEvent(projectId: "project_1", issueId: "issue_1");
         await handler.HandleAsync(evt, CancellationToken.None);
 
-        // The grain call itself is the wiring contract — ReconcileAfterTerminalAsync
+        // The grain call itself is the wiring contract — RecomputeProgressAsync
         // advances the next startable issue via the EpicGrain (covered by
-        // EpicProgressionSpecs.ReconcileAfterTerminalAsync_RunningEpicOnCancelledInProgressIssue_AdvancesNext).
+        // EpicProgressionSpecs.RecomputeProgressAsync_RunningEpicOnCancelledInProgressIssue_AdvancesNext).
         var call = Assert.Single(grains.Calls);
         Assert.Equal("project_1:epic_1", call.GrainKey);
     }
@@ -307,7 +307,7 @@ public class EpicAutoDoneHandlerSpecs
 
         var querier = new EpicQuerier(database.Factory, null!);
         var grains = new TestEpicGrainFactory(database.Factory);
-        var handler = new EpicCancelledReconcileHandler(querier, grains, NullLogger<EpicCancelledReconcileHandler>.Instance);
+        var handler = new EpicCancelledHandler(querier, grains, NullLogger<EpicCancelledHandler>.Instance);
 
         await handler.HandleAsync(BuildCancelledEvent(projectId: "project_1", issueId: "issue_1"), CancellationToken.None);
 
@@ -325,7 +325,7 @@ public class EpicAutoDoneHandlerSpecs
 
         var querier = new EpicQuerier(database.Factory, null!);
         var grains = new TestEpicGrainFactory(database.Factory);
-        var handler = new EpicCancelledReconcileHandler(querier, grains, NullLogger<EpicCancelledReconcileHandler>.Instance);
+        var handler = new EpicCancelledHandler(querier, grains, NullLogger<EpicCancelledHandler>.Instance);
 
         var evt = BuildCancelledEvent(projectId: "project_1", issueId: "issue_unlinked");
         await handler.HandleAsync(evt, CancellationToken.None);
@@ -341,7 +341,7 @@ public class EpicAutoDoneHandlerSpecs
         // Duplicate terminal signals must converge to the same state
         // without erroring. After the terminal/open readiness change,
         // a running epic with only a cancelled linked issue has no open
-        // linked issue and auto-marks done on the first reconcile;
+        // linked issue and auto-marks done on the first recompute;
         // subsequent duplicate events see a terminal epic and no-op.
         await using var database = CreateDatabase();
         await SeedEpicAsync(database, status: "running");
@@ -350,7 +350,7 @@ public class EpicAutoDoneHandlerSpecs
 
         var querier = new EpicQuerier(database.Factory, null!);
         var grains = new TestEpicGrainFactory(database.Factory);
-        var handler = new EpicCancelledReconcileHandler(querier, grains, NullLogger<EpicCancelledReconcileHandler>.Instance);
+        var handler = new EpicCancelledHandler(querier, grains, NullLogger<EpicCancelledHandler>.Instance);
 
         var evt = BuildCancelledEvent(projectId: "project_1", issueId: "issue_1");
         await handler.HandleAsync(evt, CancellationToken.None);
@@ -369,7 +369,7 @@ public class EpicAutoDoneHandlerSpecs
     public async Task CancelledHandler_TerminalEpic_StaysTerminalNoError()
     {
         // Terminal epics must absorb the closed event without flipping
-        // state or throwing. ReconcileAfterTerminalAsync short-circuits
+        // state or throwing. RecomputeProgressAsync short-circuits
         // on done/closed.
         await using var database = CreateDatabase();
         await SeedEpicAsync(database, status: "done");
@@ -378,13 +378,13 @@ public class EpicAutoDoneHandlerSpecs
 
         var querier = new EpicQuerier(database.Factory, null!);
         var grains = new TestEpicGrainFactory(database.Factory);
-        var handler = new EpicCancelledReconcileHandler(querier, grains, NullLogger<EpicCancelledReconcileHandler>.Instance);
+        var handler = new EpicCancelledHandler(querier, grains, NullLogger<EpicCancelledHandler>.Instance);
 
         var evt = BuildCancelledEvent(projectId: "project_1", issueId: "issue_1");
         await handler.HandleAsync(evt, CancellationToken.None);
 
         // Retained terminal memberships are historical only; without a
-        // non-terminal owner there is no active epic to reconcile.
+        // non-terminal owner there is no active epic to recompute.
         Assert.Empty(grains.Calls);
         await using var verify = database.CreateDbContext();
         var stored = await verify.Epics.AsNoTracking().FirstAsync();
@@ -401,7 +401,7 @@ public class EpicAutoDoneHandlerSpecs
 
         var querier = new EpicQuerier(database.Factory, null!);
         var grains = new TestEpicGrainFactory(database.Factory);
-        var handler = new EpicCancelledReconcileHandler(querier, grains, NullLogger<EpicCancelledReconcileHandler>.Instance);
+        var handler = new EpicCancelledHandler(querier, grains, NullLogger<EpicCancelledHandler>.Instance);
 
         var evt = new CloudEvent<IssueCancelled>(
             id: Guid.NewGuid().ToString(),
@@ -427,7 +427,7 @@ public class EpicAutoDoneHandlerSpecs
 
         var querier = new EpicQuerier(database.Factory, null!);
         var grains = new TestEpicGrainFactory(database.Factory);
-        var handler = new EpicCancelledReconcileHandler(querier, grains, NullLogger<EpicCancelledReconcileHandler>.Instance);
+        var handler = new EpicCancelledHandler(querier, grains, NullLogger<EpicCancelledHandler>.Instance);
 
         var evt = new CloudEvent<IssueCancelled>(
             id: Guid.NewGuid().ToString(),
@@ -451,7 +451,7 @@ public class EpicAutoDoneHandlerSpecs
         // Out-of-order terminal signals (e.g. completed arrives
         // AFTER cancelled because the bus reordered them) must still end
         // at the correct epic state. Both handlers call the same
-        // idempotent reconcile method; the grain absorbs the
+        // idempotent recompute-progress method; the grain absorbs the
         // reordering without double-transition or stuck state.
         await using var database = CreateDatabase();
         await SeedEpicAsync(database, status: "running");
@@ -463,7 +463,7 @@ public class EpicAutoDoneHandlerSpecs
         var querier = new EpicQuerier(database.Factory, null!);
         var grains = new TestEpicGrainFactory(database.Factory);
         var completed = new EpicAutoDoneHandler(querier, grains, NullLogger<EpicAutoDoneHandler>.Instance);
-        var cancelled = new EpicCancelledReconcileHandler(querier, grains, NullLogger<EpicCancelledReconcileHandler>.Instance);
+        var cancelled = new EpicCancelledHandler(querier, grains, NullLogger<EpicCancelledHandler>.Instance);
 
         // Cancelled first, then completed (out of order).
         await cancelled.HandleAsync(BuildCancelledEvent("project_1", "issue_2"), CancellationToken.None);

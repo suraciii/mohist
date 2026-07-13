@@ -95,7 +95,6 @@ public static class MohistServiceRegistration
         services.AddSingleton<ITaskLogDeltaPublisher, SignalRTaskLogDeltaPublisher>();
         services.AddHostedService<AttachmentCleanupService>();
         services.AddHostedService<DispatcherActivationService>();
-        services.AddHostedService<EpicReconciliationService>();
         services.TryAddSingleton<IProcessStartTimeProvider, ProcessStartTimeProvider>();
         services.AddHostedService<SystemUpdateRecoveryService>();
         services.AddSingleton<IRuntimeBuildInfo>(sp => sp.GetRequiredService<RuntimeBuildInfo>());

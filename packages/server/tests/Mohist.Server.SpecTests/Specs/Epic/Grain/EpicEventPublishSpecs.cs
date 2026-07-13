@@ -107,7 +107,7 @@ public class EpicEventPublishSpecs
         var time = new FakeTimeProvider(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero));
         await SeedEpicAsync(database);
         // Pin an open (in-progress) linked issue so the post-Resume
-        // reconcile path does not auto-mark the epic done — that would
+        // recompute path does not auto-mark the epic done — that would
         // emit an extra EpicStatusChanged event and obscure the
         // start→pause→resume sequence the spec calls out.
         await SeedIssueAsync(database);
@@ -120,7 +120,7 @@ public class EpicEventPublishSpecs
 
         var statusChanges = await eventStore.ListEpicEventsAsync(EpicId);
         // The grain may have emitted extra status events (e.g. running→
-        // running from a reconcile, in_progress issue start) before
+        // running from a recompute, in_progress issue start) before
         // our three deliberate transitions. The spec requires that
         // every transition persists its event, not that the count is
         // exactly 3 — assert the three we issued appear in order.
@@ -185,7 +185,7 @@ public class EpicEventPublishSpecs
         var (database, eventStore) = CreateDatabaseWithRecordingEventStore();
         var time = new FakeTimeProvider(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero));
         await SeedEpicAsync(database);
-        // Pin an open linked issue so the post-Resume reconcile path
+        // Pin an open linked issue so the post-Resume recompute path
         // does not auto-mark the epic done before we can exercise the
         // remaining transitions (Update, SetStatus "closed").
         await SeedIssueAsync(database);

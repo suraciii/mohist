@@ -159,6 +159,20 @@ public class EpicGrain : Grain, IEpicGrain
                 .Where(link => link.ProjectId == projectId && link.EpicId == epicId)
                 .ToListAsync());
         }
+        else if (row.Status != EpicStatusName.Done && row.Status != EpicStatusName.Closed)
+        {
+            // Link-time recompute: after a non-wake link to a non-terminal
+            // epic, recompute progress so a startable issue linked to a
+            // running epic is advanced via TryStartNext, and an epic whose
+            // members are all complete at link time is marked done. This
+            // preserves the readiness behavior previously supplied by the
+            // poll-driven sweep, deleted in #363.
+            await RecomputeProgressInternalAsync(db, projectId, epicId, row,
+                await db.EpicIssues.AsNoTracking()
+                    .Where(link => link.ProjectId == projectId && link.EpicId == epicId)
+                    .ToListAsync(),
+                StartFailureMode.PreserveRunning);
+        }
     }
 
     public async Task<IReadOnlyList<BatchMembershipOutcome>> LinkIssuesAsync(
@@ -219,6 +233,13 @@ public class EpicGrain : Grain, IEpicGrain
         var wasDoneAtEntry = row.Status == EpicStatusName.Done;
 
         var outcomes = new List<BatchMembershipOutcome>(dedupByIssueId.Count);
+        // Tracks whether at least one item in this batch was actually
+        // linked (not deduped, not rejected by the cross-aggregate
+        // uniqueness check, not lost to a save-conflict). The link-time
+        // recompute below only fires when a link was committed; a
+        // batch where every item was rejected must not trigger a
+        // MarkDone event from the recompute.
+        var hasLinkedAny = false;
         foreach (var item in dedupByIssueId.Values)
         {
             // Already a member of this epic — idempotent, no duplicate.
@@ -319,6 +340,7 @@ public class EpicGrain : Grain, IEpicGrain
             existingLinks.Add(item.IssueId);
             outcomes.Add(BatchMembershipOutcome.Linked(item.Identifier, item.IssueId, item.IssueNumber));
             await PersistEpicEventsAsync(domain, pending, now);
+            hasLinkedAny = true;
         }
 
         // Per design D4: if this batch woke the epic from done to running,
@@ -332,6 +354,22 @@ public class EpicGrain : Grain, IEpicGrain
                 .Where(link => link.ProjectId == projectId && link.EpicId == epicId)
                 .ToListAsync();
             await TryStartNextAsync(db, projectId, epicId, row, finalLinks);
+        }
+        else if (hasLinkedAny && !wasDoneAtEntry && row.Status != EpicStatusName.Done && row.Status != EpicStatusName.Closed)
+        {
+            // Link-time recompute for non-wake batches to non-terminal
+            // epics: covers startable-issue-linked-to-running-epic
+            // (TryStartNext advance) and all-complete-at-link-time
+            // (MarkDone). Preserves the readiness behavior previously
+            // supplied by the poll-driven sweep, deleted in #363. Only
+            // fires when at least one item in the batch was actually
+            // linked — a batch where every item was rejected must not
+            // trigger a MarkDone event from the recompute.
+            var finalLinks = await db.EpicIssues.AsNoTracking()
+                .Where(link => link.ProjectId == projectId && link.EpicId == epicId)
+                .ToListAsync();
+            await RecomputeProgressInternalAsync(db, projectId, epicId, row, finalLinks,
+                StartFailureMode.PreserveRunning);
         }
 
         return outcomes;
@@ -521,7 +559,7 @@ public class EpicGrain : Grain, IEpicGrain
 
         if (row.Status == EpicStatusName.Running && !wasAlreadyRunning)
         {
-            return await ReconcileAfterTerminalInternalAsync(db, projectId, epicId, row, links);
+            return await RecomputeProgressInternalAsync(db, projectId, epicId, row, links);
         }
         return ToDto(row);
     }
@@ -650,7 +688,7 @@ public class EpicGrain : Grain, IEpicGrain
         return await TryAutoMarkDoneAsync(db, projectId, epicId, row);
     }
 
-    public async Task<EpicDto?> ReconcileAfterTerminalAsync()
+    public async Task<EpicDto?> RecomputeProgressAsync()
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
         var parts = GrainKey.Split(':');
@@ -664,13 +702,15 @@ public class EpicGrain : Grain, IEpicGrain
             .Where(link => link.ProjectId == projectId && link.EpicId == epicId)
             .ToListAsync();
 
-        return await ReconcileAfterTerminalInternalAsync(db, projectId, epicId, row, links);
+        return await RecomputeProgressInternalAsync(db, projectId, epicId, row, links, StartFailureMode.Propagate);
     }
 
     /// <summary>
-    /// Core reconcile-on-terminal-event logic, shared by the
-    /// <see cref="ReconcileAfterTerminalAsync"/> grain entry point and
-    /// <see cref="ResumeAsync"/>'s post-resume re-evaluation.
+    /// Core recompute-progress logic, shared by the
+    /// <see cref="RecomputeProgressAsync"/> grain entry point,
+    /// <see cref="ResumeAsync"/>'s post-resume re-evaluation, and the
+    /// link-time trigger added in <see cref="LinkIssueAsync"/> /
+    /// <see cref="LinkIssuesAsync"/>.
     ///
     /// Behavior:
     /// <list type="bullet">
@@ -680,8 +720,15 @@ public class EpicGrain : Grain, IEpicGrain
     /// an <c>idle</c> epic does not auto-advance.</item>
     /// </list>
     /// </summary>
-    private async Task<EpicDto> ReconcileAfterTerminalInternalAsync(
-        MohistDbContext db, string projectId, string epicId, EpicRow row, IReadOnlyList<EpicIssueRow> links)
+    /// <param name="startFailureMode">
+    /// <c>Propagate</c> for terminal-event recompute — failures escape
+    /// to the durable dispatcher for retry/dead-lettering. <c>PreserveRunning</c>
+    /// for command paths (Resume, link) — failures keep the epic
+    /// running-but-idle so the next event-driven recompute can re-evaluate.
+    /// </param>
+    private async Task<EpicDto> RecomputeProgressInternalAsync(
+        MohistDbContext db, string projectId, string epicId, EpicRow row, IReadOnlyList<EpicIssueRow> links,
+        StartFailureMode startFailureMode = StartFailureMode.PreserveRunning)
     {
         if (row.Status is EpicStatusName.Done or EpicStatusName.Closed)
             return ToDto(row);
@@ -704,7 +751,7 @@ public class EpicGrain : Grain, IEpicGrain
 
         if (row.Status == EpicStatusName.Running)
         {
-            return await TryStartNextAsync(db, projectId, epicId, row, links);
+            return await TryStartNextAsync(db, projectId, epicId, row, links, startFailureMode);
         }
 
         // idle: not self-driving; do not advance.
@@ -716,15 +763,25 @@ public class EpicGrain : Grain, IEpicGrain
     /// Idempotent and safe to call repeatedly: returns without starting
     /// when the serial in-progress slot is occupied, when nothing is
     /// startable, or when the previous start attempt already left the
-    /// epic in a stable state. Exceptions from
-    /// <see cref="IIssueGrain.StartWorkAsync"/> are caught and logged —
-    /// the epic remains <c>running</c> (running-but-idle) so the next
-    /// reconcile retry can re-evaluate. The serial "at most one
+    /// epic in a stable state. The serial "at most one
     /// in-progress" rule is expressed here as a runtime check
     /// (capacity N=1), leaving room for future multi-runner parallelism.
+    ///
+    /// Start-failure contract:
+    /// <list type="bullet">
+    /// <item><c>PreserveRunning</c>: <see cref="IIssueGrain.StartWorkAsync"/>
+    /// failures are caught and logged — the epic remains <c>running</c>
+    /// (running-but-idle) so the next event-driven recompute can
+    /// re-evaluate. Used by <see cref="StartAsync"/>,
+    /// <see cref="ResumeAsync"/>, and link operations.</item>
+    /// <item><c>Propagate</c>: failures escape untouched so the durable
+    /// dispatcher retries / dead-letters the terminal-event handler
+    /// delivery. Used by <see cref="RecomputeProgressAsync"/>.</item>
+    /// </list>
     /// </summary>
     private async Task<EpicDto> TryStartNextAsync(
-        MohistDbContext db, string projectId, string epicId, EpicRow row, IReadOnlyList<EpicIssueRow> links)
+        MohistDbContext db, string projectId, string epicId, EpicRow row, IReadOnlyList<EpicIssueRow> links,
+        StartFailureMode startFailureMode = StartFailureMode.PreserveRunning)
     {
         if (row.Status != EpicStatusName.Running)
             return ToDto(row);
@@ -754,12 +811,23 @@ public class EpicGrain : Grain, IEpicGrain
         }
         catch (Exception ex)
         {
-            _log.LogWarning(ex,
-                "Epic {EpicId} ({ProjectId}) failed to start next linked issue {IssueId}; epic remains running-but-idle",
-                epicId, projectId, next.Id);
+            if (startFailureMode == StartFailureMode.PreserveRunning)
+            {
+                _log.LogWarning(ex,
+                    "Epic {EpicId} ({ProjectId}) failed to start next linked issue {IssueId}; epic remains running-but-idle",
+                    epicId, projectId, next.Id);
+                return ToDto(row);
+            }
+            throw;
         }
 
         return ToDto(row);
+    }
+
+    private enum StartFailureMode
+    {
+        PreserveRunning,
+        Propagate,
     }
 
     private async Task<EpicDto> TryAutoMarkDoneAsync(MohistDbContext db, string projectId, string epicId, EpicRow row)

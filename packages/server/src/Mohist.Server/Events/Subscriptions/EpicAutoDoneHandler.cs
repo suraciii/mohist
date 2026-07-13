@@ -9,14 +9,14 @@ namespace Mohist.Server.Events.Subscriptions;
 
 /// <summary>
 /// Subscribes to <c>com.mohist.issue.completed</c> and dispatches
-/// a unified <see cref="IEpicGrain.ReconcileAfterTerminalAsync"/> call
-/// to the owning epic. Reconcile covers both the auto-done readiness
-/// check and the <c>running</c> epic's next-issue advance.
+/// a unified <see cref="IEpicGrain.RecomputeProgressAsync"/> call
+/// to the owning epic. Recompute progress covers both the auto-done
+/// readiness check and the <c>running</c> epic's next-issue advance.
 /// </summary>
 [Subscription(Type = EventCatalog.ReverseDns.IssueCompleted)]
 public sealed class EpicAutoDoneHandler : ICloudEventHandler<IssueCompleted>
 {
-    private readonly EpicReconcileDispatcher _dispatcher;
+    private readonly EpicProgressRecomputeDispatcher _dispatcher;
 
     [ActivatorUtilitiesConstructor]
     public EpicAutoDoneHandler(
@@ -24,7 +24,7 @@ public sealed class EpicAutoDoneHandler : ICloudEventHandler<IssueCompleted>
         IGrainFactory grains,
         ILogger<EpicAutoDoneHandler> log)
     {
-        _dispatcher = new EpicReconcileDispatcher(scopes, grains, log);
+        _dispatcher = new EpicProgressRecomputeDispatcher(scopes, grains, log);
     }
 
     internal EpicAutoDoneHandler(
@@ -32,7 +32,7 @@ public sealed class EpicAutoDoneHandler : ICloudEventHandler<IssueCompleted>
         IGrainFactory grains,
         ILogger<EpicAutoDoneHandler> log)
     {
-        _dispatcher = new EpicReconcileDispatcher(epicQuerier, grains, log);
+        _dispatcher = new EpicProgressRecomputeDispatcher(epicQuerier, grains, log);
     }
 
     public bool Filter(CloudEvent<IssueCompleted> evt) => true;
@@ -44,32 +44,32 @@ public sealed class EpicAutoDoneHandler : ICloudEventHandler<IssueCompleted>
 /// <summary>
 /// Subscribes to <c>com.mohist.issue.cancelled</c> (cancellation terminal
 /// signal) and dispatches the same
-/// <see cref="IEpicGrain.ReconcileAfterTerminalAsync"/> call as
+/// <see cref="IEpicGrain.RecomputeProgressAsync"/> call as
 /// <see cref="EpicAutoDoneHandler"/>. Both terminal events must trigger
-/// reconcile because both clear the serial in-progress slot the epic
-/// is waiting on — missing this subscription would deadlock the epic
-/// when its in-progress issue is cancelled.
+/// recompute progress because both clear the serial in-progress slot the
+/// epic is waiting on — missing this subscription would deadlock the
+/// epic when its in-progress issue is cancelled.
 /// </summary>
 [Subscription(Type = EventCatalog.ReverseDns.IssueCancelled)]
-public sealed class EpicCancelledReconcileHandler : ICloudEventHandler<IssueCancelled>
+public sealed class EpicCancelledHandler : ICloudEventHandler<IssueCancelled>
 {
-    private readonly EpicReconcileDispatcher _dispatcher;
+    private readonly EpicProgressRecomputeDispatcher _dispatcher;
 
     [ActivatorUtilitiesConstructor]
-    public EpicCancelledReconcileHandler(
+    public EpicCancelledHandler(
         IServiceScopeFactory scopes,
         IGrainFactory grains,
-        ILogger<EpicCancelledReconcileHandler> log)
+        ILogger<EpicCancelledHandler> log)
     {
-        _dispatcher = new EpicReconcileDispatcher(scopes, grains, log);
+        _dispatcher = new EpicProgressRecomputeDispatcher(scopes, grains, log);
     }
 
-    internal EpicCancelledReconcileHandler(
+    internal EpicCancelledHandler(
         EpicQuerier epicQuerier,
         IGrainFactory grains,
-        ILogger<EpicCancelledReconcileHandler> log)
+        ILogger<EpicCancelledHandler> log)
     {
-        _dispatcher = new EpicReconcileDispatcher(epicQuerier, grains, log);
+        _dispatcher = new EpicProgressRecomputeDispatcher(epicQuerier, grains, log);
     }
 
     public bool Filter(CloudEvent<IssueCancelled> evt) => true;
@@ -79,22 +79,22 @@ public sealed class EpicCancelledReconcileHandler : ICloudEventHandler<IssueCanc
 }
 
 /// <summary>
-/// Shared dispatch logic for terminal-event → EpicGrain reconcile
+/// Shared dispatch logic for terminal-event → EpicGrain recompute-progress
 /// wiring. Both <see cref="EpicAutoDoneHandler"/> (completed) and
-/// <see cref="EpicCancelledReconcileHandler"/> (cancelled) funnel here so the
+/// <see cref="EpicCancelledHandler"/> (cancelled) funnel here so the
 /// CloudEvent <c>projectid</c>/<c>issueid</c> extension parsing, epic
 /// lookup, and grain dispatch stay in one place. Kept
 /// package-internal (no <c>public</c> modifier) because this is a
 /// wiring concern that should not be consumed outside this folder.
 /// </summary>
-internal sealed class EpicReconcileDispatcher
+internal sealed class EpicProgressRecomputeDispatcher
 {
     private readonly IServiceScopeFactory? _scopes;
     private readonly EpicQuerier? _epicQuerier;
     private readonly IGrainFactory _grains;
     private readonly ILogger _log;
 
-    public EpicReconcileDispatcher(
+    public EpicProgressRecomputeDispatcher(
         IServiceScopeFactory scopes,
         IGrainFactory grains,
         ILogger log)
@@ -104,7 +104,7 @@ internal sealed class EpicReconcileDispatcher
         _log = log;
     }
 
-    public EpicReconcileDispatcher(
+    public EpicProgressRecomputeDispatcher(
         EpicQuerier epicQuerier,
         IGrainFactory grains,
         ILogger log)
@@ -152,6 +152,6 @@ internal sealed class EpicReconcileDispatcher
         }
 
         var grain = _grains.GetGrain<IEpicGrain>($"{projectId}:{epicId}");
-        await grain.ReconcileAfterTerminalAsync().ConfigureAwait(false);
+        await grain.RecomputeProgressAsync().ConfigureAwait(false);
     }
 }

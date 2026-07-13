@@ -90,7 +90,7 @@ public class EpicEventsApiSpecs
 
         Assert.NotEmpty(events);
         // The initial EpicCreated envelope is the first event; later
-        // events are status changes interleaved with the reconcile path.
+        // events are status changes interleaved with the recompute path.
         Assert.Equal("com.mohist.epic.created", events[0].Type);
         Assert.NotEqual(0, events[0].Id);
 
@@ -171,7 +171,7 @@ public class EpicEventsApiSpecs
         var project = await CreateProjectAsync();
         var epic = await CreateEpicAsync(project.Id, "Limit epic");
 
-        // Seed multiple events without driving the reconcile path that
+        // Seed multiple events without driving the recompute path that
         // could auto-mark the epic done (T-002/T-003 patterns avoid a
         // Resume with a fully-blocked linked-issue set). Here we just
         // pause from idle (which is a guarded 409) so instead drive
