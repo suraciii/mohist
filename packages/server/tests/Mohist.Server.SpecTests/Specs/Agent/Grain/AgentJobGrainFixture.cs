@@ -24,6 +24,7 @@ public sealed class AgentJobGrainFixture : IAsyncLifetime
     public FakeTimeProvider TimeProvider { get; } = new(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
     public ControllableAgentJobDispatchObserver DispatchObserver { get; } = new();
     public ControllableRunnerGrainAssignmentObserver RunnerAssignmentObserver { get; } = new();
+    public ControllableRunnerGrainCloseoutObserver CloseoutObserver { get; } = new();
 
     private readonly InMemoryEventBus _sharedEventBus = new(new RecordingEventStore(), System.TimeProvider.System, NullLogger<InMemoryEventBus>.Instance);
     private readonly RecordingEventStore _sharedEventStore = new();
@@ -45,6 +46,7 @@ public sealed class AgentJobGrainFixture : IAsyncLifetime
             GrainTestConfig.ConfigureSilo(siloBuilder, connectionString, _sharedEventBus, _sharedEventStore, TimeProvider);
             siloBuilder.Services.AddSingleton<IAgentJobDispatchObserver>(DispatchObserver);
             siloBuilder.Services.AddSingleton<IRunnerGrainAssignmentObserver>(RunnerAssignmentObserver);
+            siloBuilder.Services.AddSingleton<IRunnerGrainCloseoutObserver>(CloseoutObserver);
         });
         Cluster = builder.Build();
         return Cluster.DeployAsync();
@@ -130,6 +132,24 @@ public sealed class ControllableRunnerGrainAssignmentObserver : IRunnerGrainAssi
         _assignmentAdmissionBlock = null;
         _assignmentAdmission = NewSignal();
     }
+
+    private static TaskCompletionSource NewSignal() =>
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
+}
+
+public sealed class ControllableRunnerGrainCloseoutObserver : IRunnerGrainCloseoutObserver
+{
+    private TaskCompletionSource _agentJobCloseoutStarted = NewSignal();
+
+    public Task AgentJobCloseoutStartingAsync(string runnerId, string agentJobId, string workId)
+    {
+        _agentJobCloseoutStarted.TrySetResult();
+        return Task.CompletedTask;
+    }
+
+    public Task WaitForAgentJobCloseoutStartingAsync() => _agentJobCloseoutStarted.Task;
+
+    public void Reset() => _agentJobCloseoutStarted = NewSignal();
 
     private static TaskCompletionSource NewSignal() =>
         new(TaskCreationOptions.RunContinuationsAsynchronously);

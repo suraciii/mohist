@@ -7,6 +7,7 @@ using Mohist.Server.Epic.Grains;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Epic;
 using Mohist.Server.Infrastructure.Data.Issue;
+using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.SpecTests.Support;
@@ -335,6 +336,45 @@ public class EpicProgressionSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
+    public async Task ResumeAsync_StartFailureEventAppendFailure_RollsBackTransitionAndRetryAdvancesIssue()
+    {
+        var database = CreateDatabase();
+        await SeedEpicAsync(database, status: "paused");
+        await SeedIssueAsync(database, projectId: "project_1", epicId: "epic_1", issueId: "issue_1", issueNumber: 1, status: IssueStatus.Done, canStart: true);
+        await SeedIssueAsync(database, projectId: "project_1", epicId: "epic_1", issueId: "issue_2", issueNumber: 2, status: IssueStatus.Backlog, canStart: true);
+        await SeedLinkAsync(database, "epic_1", "issue_1", 1);
+        await SeedLinkAsync(database, "epic_1", "issue_2", 2);
+
+        var eventStore = new RecordingEventStore
+        {
+            ThrowOnAppend = envelope => envelope.Type == EventCatalog.ReverseDns.EpicStartAttemptFailed,
+        };
+        var grains = new RecordingGrainFactory(database.Factory, eventStore) { ThrowOnStart = true };
+        var grain = grains.GetEpicGrain("project_1:epic_1");
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => grain.ResumeAsync());
+
+        await using (var verify = database.CreateDbContext())
+        {
+            var stored = await verify.Epics.AsNoTracking().SingleAsync();
+            Assert.Equal("paused", stored.Status);
+        }
+
+        eventStore.ThrowOnAppend = null;
+        grains.ThrowOnStart = false;
+
+        var resumed = await grain.ResumeAsync();
+
+        Assert.Equal("running", resumed.Status);
+        Assert.Equal(["issue_2", "issue_2"], grains.IssueStartCalls);
+        await using var afterRetry = database.CreateDbContext();
+        var afterRetryStored = await afterRetry.Epics.AsNoTracking().SingleAsync();
+        Assert.Equal("running", afterRetryStored.Status);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
     public async Task ResumeAsync_PausedEpic_AdvancesAfterResume()
     {
         var database = CreateDatabase();
@@ -580,12 +620,14 @@ public class EpicProgressionSpecs
     private sealed class RecordingGrainFactory : IGrainFactory
     {
         private readonly IDbContextFactory<MohistDbContext> _dbFactory;
+        private readonly IEventStore _eventStore;
         public List<string> IssueStartCalls { get; } = [];
-        public bool ThrowOnStart { get; init; }
+        public bool ThrowOnStart { get; set; }
 
-        public RecordingGrainFactory(IDbContextFactory<MohistDbContext> dbFactory)
+        public RecordingGrainFactory(IDbContextFactory<MohistDbContext> dbFactory, IEventStore? eventStore = null)
         {
             _dbFactory = dbFactory;
+            _eventStore = eventStore ?? new NoopEventStore();
         }
 
         public IEpicGrain GetEpicGrain(string grainKey) =>
@@ -593,7 +635,7 @@ public class EpicProgressionSpecs
                 _dbFactory,
                 this,
                 new FakeTimeProvider(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero)),
-                new NoopEventStore(),
+                _eventStore,
                 NullLogger<EpicGrain>.Instance) { GrainKeyForTest = grainKey };
 
         public IIssueGrain GetIssueGrain(string issueId) => new RecordingIssueGrain(this, issueId);

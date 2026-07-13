@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Runner;
@@ -36,6 +37,7 @@ public class RunnerGrainConcurrencySpecs : IAsyncLifetime
     {
         _fixture.DispatchObserver.Reset();
         _fixture.RunnerAssignmentObserver.Reset();
+        _fixture.CloseoutObserver.Reset();
         return Task.CompletedTask;
     }
 
@@ -263,71 +265,61 @@ public class RunnerGrainConcurrencySpecs : IAsyncLifetime
     {
         var (runnerId, projectId) = await RegisterRunnerAsync($"deadlock-runner-{Guid.NewGuid():N}");
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
-
         var jobKey = $"deadlock-agent-job-{Guid.NewGuid():N}";
         var job = Grains.GetGrain<IAgentJobGrain>(jobKey);
+        var input = MakeInput("deadlock", projectId, "/tmp/deadlock");
+        var options = Services.GetRequiredService<IOptions<AgentJobOptions>>().Value;
+        var dispatchRetryBound = options.DispatchRetryBound;
 
-        // Block the agent job at the assignment-prepared point so it stays
-        // inside TryAssignToRunnerAsync while we force the runner presence
-        // timer to fire. This reproduces the reciprocal hold-and-wait: the
-        // runner turn is about to call AgentJobGrain.ReportResultAsync during
-        // closeout while the agent job turn holds RunnerGrain.AssignAgentJobAsync.
-        _fixture.DispatchObserver.BlockAssignmentPrepared();
-
-        var submit = job.SubmitAsync(MakeInput("deadlock", projectId, "/tmp/deadlock"));
-        await _fixture.DispatchObserver.WaitForAssignmentPreparedAsync();
-
-        // Force the runner presence timer to fire. The runner will set itself
-        // offline and start CloseoutLostAsync, which calls
-        // AgentJobGrain.ReportResultAsync and queues behind the agent job turn.
-        _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(3));
-
-        await TestWait.ForAsync(
-            () => runner.GetRuntimeStateAsync(),
-            s => s.Status == RunnerStatus.Offline,
-            TimeSpan.FromSeconds(5),
-            TimeSpan.FromMilliseconds(20),
-            "runner to go offline after presence timeout");
-
-        // Release the agent job. AssignAgentJobAsync is [AlwaysInterleave], so
-        // it executes even though the runner turn is held by HandleTimeoutAsync.
-        // It acquires the free lifecycle gate, sees the runner is offline, and
-        // rejects. This frees the agent job turn so the closeout report can
-        // complete, proving there is no deadlock.
-        _fixture.DispatchObserver.ReleaseAssignmentPrepared();
-
-        await TestWait.ForAsync(
-            () => job.GetStatusAsync(),
-            s => s is AgentJobStatus.Failed or AgentJobStatus.Running,
-            TimeSpan.FromSeconds(5),
-            TimeSpan.FromMilliseconds(20),
-            "agent job to settle after timeout");
-
-        var runtime = await runner.GetRuntimeStateAsync();
-        Assert.Equal(RunnerStatus.Offline, runtime.Status);
-        Assert.Empty(runtime.ActiveWorks);
-
-        var terminal = await job.GetTerminalResultAsync();
-        Assert.Equal(AgentJobStatus.Failed, terminal.Status);
-        Assert.NotNull(terminal.FailureReason);
-
-        // If the runner's closeout reached the agent job before the dispatch
-        // retry bound (5 s in the test config) expired, the reason is
-        // runner-lost; otherwise the agent job self-fails with
-        // runner-unavailable. Either outcome is a correct settled state: the
-        // runner is offline, the assignment was rejected, and closeout ran to
-        // completion without deadlocking.
-        var workId = (await job.GetRuntimeSnapshotAsync()).CurrentWorkId;
-        if (!string.IsNullOrWhiteSpace(workId)
-            && string.Equals(terminal.FailureReason, "runner-lost", StringComparison.Ordinal))
+        options.DispatchRetryBound = TimeSpan.FromMinutes(5);
+        try
         {
+            _fixture.DispatchObserver.FailRunnerAccepted = true;
+            await job.SubmitAsync(input);
+            await _fixture.DispatchObserver.WaitForRunnerAcceptedAsync();
+
+            var prepared = await job.GetRuntimeSnapshotAsync();
+            Assert.Equal(AgentJobStatus.Pending, prepared.Status);
+            Assert.Equal(runnerId, prepared.RunnerId);
+            Assert.False(string.IsNullOrWhiteSpace(prepared.CurrentWorkId));
+            var workId = prepared.CurrentWorkId!;
+            Assert.Contains((await runner.GetRuntimeStateAsync()).ActiveWorks,
+                work => work.OwnerId == jobKey && work.WorkId == workId);
+
+            _fixture.DispatchObserver.FailRunnerAccepted = false;
+            _fixture.RunnerAssignmentObserver.BlockAssignmentAdmission();
+            var retry = job.EnsureSubmittedAsync(input);
+            await _fixture.RunnerAssignmentObserver.WaitForAssignmentAdmissionAsync();
+
+            _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(3));
+            await _fixture.CloseoutObserver.WaitForAgentJobCloseoutStartingAsync();
+
+            _fixture.RunnerAssignmentObserver.ReleaseAssignmentAdmission();
+            await retry;
+
+            await runner.UpdateAsync(RunnerCapacity.DefaultMaxWorkflowSlots);
+            var terminal = await job.GetTerminalResultAsync();
+
+            var runtime = await runner.GetRuntimeStateAsync();
+            Assert.Equal(RunnerStatus.Offline, runtime.Status);
+            Assert.Empty(runtime.ActiveWorks);
+            Assert.Equal(AgentJobStatus.Failed, terminal.Status);
+            Assert.Equal("runner-lost", terminal.FailureReason);
+            var rejected = await job.GetRuntimeSnapshotAsync();
+            Assert.Null(rejected.RunnerId);
+            Assert.Null(rejected.CurrentWorkId);
+
             var row = await FindRunnerWorkAsync(runnerId, WorkDispatchOwnerKinds.AgentJob, jobKey, workId);
             Assert.NotNull(row);
             Assert.Equal("failed", row!.Status);
             Assert.Equal("runner-lost", row.Reason);
         }
-
-        await submit;
+        finally
+        {
+            _fixture.DispatchObserver.FailRunnerAccepted = false;
+            _fixture.RunnerAssignmentObserver.ReleaseAssignmentAdmission();
+            options.DispatchRetryBound = dispatchRetryBound;
+        }
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]

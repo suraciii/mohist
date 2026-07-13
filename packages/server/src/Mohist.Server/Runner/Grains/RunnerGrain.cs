@@ -55,6 +55,7 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<RunnerGrain> _log;
     private readonly IRunnerGrainAssignmentObserver _assignmentObserver;
+    private readonly IRunnerGrainCloseoutObserver _closeoutObserver;
 
     private static readonly TimeSpan PresenceTimeout = TimeSpan.FromMinutes(2);
     private static readonly TimeSpan PresenceCheckInterval = TimeSpan.FromSeconds(10);
@@ -67,7 +68,8 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
         ILogger<RunnerGrain> log,
         TimeProvider timeProvider,
         [PersistentState("runner-works")] IPersistentState<RunnerWorksState> worksState,
-        IRunnerGrainAssignmentObserver? assignmentObserver = null)
+        IRunnerGrainAssignmentObserver? assignmentObserver = null,
+        IRunnerGrainCloseoutObserver? closeoutObserver = null)
     {
         _workflowRuns = workflowRuns;
         _definitions = definitions;
@@ -76,6 +78,7 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
         _timeProvider = timeProvider;
         _worksState = worksState;
         _assignmentObserver = assignmentObserver ?? NoopRunnerGrainAssignmentObserver.Instance;
+        _closeoutObserver = closeoutObserver ?? NoopRunnerGrainCloseoutObserver.Instance;
     }
 
     private string RunnerId => this.GetPrimaryKeyString();
@@ -230,13 +233,13 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
             if (_pollAdmitted)
                 return new RunnerWorkAssignmentResult(RunnerWorkAssignmentStatus.Rejected, "runner-reconciling");
 
+            if (_status != RunnerStatus.Online || _info is null)
+                return new RunnerWorkAssignmentResult(RunnerWorkAssignmentStatus.Rejected, "runner-offline");
+
             var ownerId = work.AgentJobId!;
             var existing = FindWork(work.WorkId, WorkDispatchOwnerKinds.AgentJob, ownerId);
             if (existing is not null)
                 return new RunnerWorkAssignmentResult(RunnerWorkAssignmentStatus.Assigned);
-
-            if (_status != RunnerStatus.Online || _info is null)
-                return new RunnerWorkAssignmentResult(RunnerWorkAssignmentStatus.Rejected, "runner-offline");
 
             var state = await GetRuntimeStateAsync();
             var activeOwnerCount = state.ActiveWorks
@@ -672,6 +675,7 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
                 if (FindWork(entry.WorkId, entry.OwnerKind, entry.OwnerId) is null)
                     continue;
                 var job = GrainFactory.GetGrain<IAgentJobGrain>(entry.OwnerId);
+                await _closeoutObserver.AgentJobCloseoutStartingAsync(RunnerId, entry.OwnerId, entry.WorkId);
                 var reportResult = await job.ReportResultAsync(RunnerId, entry.WorkId, synthesizedFailure);
                 if (!reportResult.Accepted)
                     await job.FailAsync(synthesizedFailure.Message ?? "failed");
