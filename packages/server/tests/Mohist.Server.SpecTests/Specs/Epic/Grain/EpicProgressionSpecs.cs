@@ -7,6 +7,7 @@ using Mohist.Server.Epic.Grains;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Epic;
 using Mohist.Server.Infrastructure.Data.Issue;
+using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.SpecTests.Support;
@@ -81,7 +82,7 @@ public class EpicProgressionSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
-    public async Task ReconcileAfterTerminalAsync_RunningEpicOnDoneIssue_AdvancesNextStartable()
+    public async Task RecomputeProgressAsync_RunningEpicOnDoneIssue_AdvancesNextStartable()
     {
         var database = CreateDatabase();
         await SeedEpicAsync(database, status: "running");
@@ -95,7 +96,7 @@ public class EpicProgressionSpecs
         var grains = new RecordingGrainFactory(database.Factory);
         var grain = grains.GetEpicGrain("project_1:epic_1");
 
-        var result = await grain.ReconcileAfterTerminalAsync();
+        var result = await grain.RecomputeProgressAsync();
 
         Assert.Equal("running", result!.Status);
         // Highest-priority startable (p0 issue_3) wins; issue_2 is p2.
@@ -106,12 +107,12 @@ public class EpicProgressionSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
-    public async Task ReconcileAfterTerminalAsync_RunningEpicOnCancelledInProgressIssue_AdvancesNext()
+    public async Task RecomputeProgressAsync_RunningEpicOnCancelledInProgressIssue_AdvancesNext()
     {
         // The in-progress issue is cancelled (terminal), the serial
-        // in-progress slot is cleared, and reconcile must pick the
-        // next startable issue. This is the scenario that requires
-        // subscribing to IssueCancelled, but the reconcile logic
+        // in-progress slot is cleared, and recompute progress must pick
+        // the next startable issue. This is the scenario that requires
+        // subscribing to IssueCancelled, but the recompute logic
         // itself is T-002.
         var database = CreateDatabase();
         await SeedEpicAsync(database, status: "running");
@@ -123,7 +124,7 @@ public class EpicProgressionSpecs
         var grains = new RecordingGrainFactory(database.Factory);
         var grain = grains.GetEpicGrain("project_1:epic_1");
 
-        var result = await grain.ReconcileAfterTerminalAsync();
+        var result = await grain.RecomputeProgressAsync();
 
         Assert.Equal("running", result!.Status);
         var started = Assert.Single(grains.IssueStartCalls);
@@ -133,7 +134,7 @@ public class EpicProgressionSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
-    public async Task ReconcileAfterTerminalAsync_RunningEpicOnDoneIssueWithAllComplete_AutoMarksDone()
+    public async Task RecomputeProgressAsync_RunningEpicOnDoneIssueWithAllComplete_AutoMarksDone()
     {
         var database = CreateDatabase();
         await SeedEpicAsync(database, status: "running");
@@ -145,7 +146,7 @@ public class EpicProgressionSpecs
         var grains = new RecordingGrainFactory(database.Factory);
         var grain = grains.GetEpicGrain("project_1:epic_1");
 
-        var result = await grain.ReconcileAfterTerminalAsync();
+        var result = await grain.RecomputeProgressAsync();
 
         Assert.Equal("done", result!.Status);
         Assert.Empty(grains.IssueStartCalls);
@@ -157,7 +158,7 @@ public class EpicProgressionSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
-    public async Task ReconcileAfterTerminalAsync_PausedEpic_IsNoOpAndDoesNotAdvance()
+    public async Task RecomputeProgressAsync_PausedEpic_IsNoOpAndDoesNotAdvance()
     {
         var database = CreateDatabase();
         await SeedEpicAsync(database, status: "paused", pauseReason: "on hold");
@@ -169,7 +170,7 @@ public class EpicProgressionSpecs
         var grains = new RecordingGrainFactory(database.Factory);
         var grain = grains.GetEpicGrain("project_1:epic_1");
 
-        var result = await grain.ReconcileAfterTerminalAsync();
+        var result = await grain.RecomputeProgressAsync();
 
         Assert.Equal("paused", result!.Status);
         Assert.Equal("on hold", result.PauseReason);
@@ -179,7 +180,7 @@ public class EpicProgressionSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
-    public async Task ReconcileAfterTerminalAsync_IdleEpic_DoesNotAdvance()
+    public async Task RecomputeProgressAsync_IdleEpic_DoesNotAdvance()
     {
         var database = CreateDatabase();
         await SeedEpicAsync(database, status: "idle");
@@ -191,7 +192,7 @@ public class EpicProgressionSpecs
         var grains = new RecordingGrainFactory(database.Factory);
         var grain = grains.GetEpicGrain("project_1:epic_1");
 
-        var result = await grain.ReconcileAfterTerminalAsync();
+        var result = await grain.RecomputeProgressAsync();
 
         Assert.Equal("idle", result!.Status);
         Assert.Empty(grains.IssueStartCalls);
@@ -200,14 +201,14 @@ public class EpicProgressionSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
-    public async Task ReconcileAfterTerminalAsync_TerminalEpic_IsNoOp()
+    public async Task RecomputeProgressAsync_TerminalEpic_IsNoOp()
     {
         var database = CreateDatabase();
         await SeedEpicAsync(database, status: "done");
         var grains = new RecordingGrainFactory(database.Factory);
         var grain = grains.GetEpicGrain("project_1:epic_1");
 
-        var result = await grain.ReconcileAfterTerminalAsync();
+        var result = await grain.RecomputeProgressAsync();
 
         Assert.Equal("done", result!.Status);
         Assert.Empty(grains.IssueStartCalls);
@@ -216,10 +217,10 @@ public class EpicProgressionSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
-    public async Task ReconcileAfterTerminalAsync_FailedInProgressIssue_HoldsEpic()
+    public async Task RecomputeProgressAsync_FailedInProgressIssue_HoldsEpic()
     {
         // The in-progress issue is stuck (NOT a terminal state) so
-        // reconcile must not start a second issue: the serial
+        // recompute progress must not start a second issue: the serial
         // in-progress slot is occupied. The epic remains running.
         var database = CreateDatabase();
         await SeedEpicAsync(database, status: "running");
@@ -231,7 +232,7 @@ public class EpicProgressionSpecs
         var grains = new RecordingGrainFactory(database.Factory);
         var grain = grains.GetEpicGrain("project_1:epic_1");
 
-        var result = await grain.ReconcileAfterTerminalAsync();
+        var result = await grain.RecomputeProgressAsync();
 
         Assert.Equal("running", result!.Status);
         Assert.Empty(grains.IssueStartCalls);
@@ -240,7 +241,7 @@ public class EpicProgressionSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
-    public async Task ReconcileAfterTerminalAsync_NoStartableIssue_RemainsRunningButIdle()
+    public async Task RecomputeProgressAsync_NoStartableIssue_RemainsRunningButIdle()
     {
         var database = CreateDatabase();
         await SeedEpicAsync(database, status: "running");
@@ -252,7 +253,7 @@ public class EpicProgressionSpecs
         var grains = new RecordingGrainFactory(database.Factory);
         var grain = grains.GetEpicGrain("project_1:epic_1");
 
-        var result = await grain.ReconcileAfterTerminalAsync();
+        var result = await grain.RecomputeProgressAsync();
 
         Assert.Equal("running", result!.Status);
         Assert.Empty(grains.IssueStartCalls);
@@ -261,7 +262,7 @@ public class EpicProgressionSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
-    public async Task ReconcileAfterTerminalAsync_CancelledIssueIsSkipped_NextStartableChosen()
+    public async Task RecomputeProgressAsync_CancelledIssueIsSkipped_NextStartableChosen()
     {
         var database = CreateDatabase();
         await SeedEpicAsync(database, status: "running");
@@ -273,7 +274,7 @@ public class EpicProgressionSpecs
         var grains = new RecordingGrainFactory(database.Factory);
         var grain = grains.GetEpicGrain("project_1:epic_1");
 
-        var result = await grain.ReconcileAfterTerminalAsync();
+        var result = await grain.RecomputeProgressAsync();
 
         Assert.Equal("running", result!.Status);
         var started = Assert.Single(grains.IssueStartCalls);
@@ -283,8 +284,34 @@ public class EpicProgressionSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
-    public async Task ReconcileAfterTerminalAsync_StartWorkAsyncThrows_LeavesEpicRunning()
+    public async Task RecomputeProgressAsync_CancelledLinkedPrerequisite_DoesNotStartDependent()
     {
+        var database = CreateDatabase();
+        await SeedEpicAsync(database, status: "running");
+        await SeedIssueAsync(database, projectId: "project_1", epicId: "epic_1", issueId: "issue_prerequisite", issueNumber: 1, status: IssueStatus.Cancelled, canStart: true);
+        await SeedIssueAsync(database, projectId: "project_1", epicId: "epic_1", issueId: "issue_dependent", issueNumber: 2, status: IssueStatus.Backlog, canStart: true, prerequisiteNumbers: [1]);
+        await SeedLinkAsync(database, "epic_1", "issue_prerequisite", 1);
+        await SeedLinkAsync(database, "epic_1", "issue_dependent", 2);
+
+        var grains = new RecordingGrainFactory(database.Factory);
+        var grain = grains.GetEpicGrain("project_1:epic_1");
+
+        var result = await grain.RecomputeProgressAsync();
+
+        Assert.Equal("running", result!.Status);
+        Assert.Empty(grains.IssueStartCalls);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task RecomputeProgressAsync_StartWorkAsyncThrows_PropagatesToDispatcher()
+    {
+        // Terminal-event recompute uses StartFailureMode.Propagate so the
+        // durable dispatcher can retry / dead-letter. Command paths
+        // (StartAsync / ResumeAsync / link) use PreserveRunning and
+        // absorb the same failure, leaving the epic running-but-idle —
+        // covered by RecomputeProgressAsync_CommandPath_StartWorkAsyncThrows_LeavesEpicRunning.
         var database = CreateDatabase();
         await SeedEpicAsync(database, status: "running");
         await SeedIssueAsync(database, projectId: "project_1", epicId: "epic_1", issueId: "issue_1", issueNumber: 1, status: IssueStatus.Done, canStart: true);
@@ -295,10 +322,62 @@ public class EpicProgressionSpecs
         var grains = new RecordingGrainFactory(database.Factory) { ThrowOnStart = true };
         var grain = grains.GetEpicGrain("project_1:epic_1");
 
-        var result = await grain.ReconcileAfterTerminalAsync();
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => grain.RecomputeProgressAsync());
 
-        Assert.Equal("running", result!.Status);
         Assert.NotEmpty(grains.IssueStartCalls);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task RecomputeProgressAsync_CommandPath_StartWorkAsyncThrows_LeavesEpicRunning()
+    {
+        // Command paths (StartAsync, ResumeAsync, link) use
+        // StartFailureMode.PreserveRunning. StartWorkAsync failures are
+        // caught and logged; the epic remains running-but-idle so the
+        // next event-driven recompute can re-evaluate. Here we drive
+        // ResumeAsync as a representative command path.
+        var database = CreateDatabase();
+        await SeedEpicAsync(database, status: "paused");
+        await SeedIssueAsync(database, projectId: "project_1", epicId: "epic_1", issueId: "issue_1", issueNumber: 1, status: IssueStatus.Done, canStart: true);
+        await SeedIssueAsync(database, projectId: "project_1", epicId: "epic_1", issueId: "issue_2", issueNumber: 2, status: IssueStatus.Backlog, canStart: true);
+        await SeedLinkAsync(database, "epic_1", "issue_1", 1);
+        await SeedLinkAsync(database, "epic_1", "issue_2", 2);
+
+        var grains = new RecordingGrainFactory(database.Factory) { ThrowOnStart = true };
+        var grain = grains.GetEpicGrain("project_1:epic_1");
+
+        var result = await grain.ResumeAsync();
+
+        Assert.Equal("running", result.Status);
+        Assert.NotEmpty(grains.IssueStartCalls);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task ResumeAsync_StartFailure_PersistsRecoveryEvent()
+    {
+        var database = CreateDatabase();
+        await SeedEpicAsync(database, status: "paused");
+        await SeedIssueAsync(database, projectId: "project_1", epicId: "epic_1", issueId: "issue_1", issueNumber: 1, status: IssueStatus.Done, canStart: true);
+        await SeedIssueAsync(database, projectId: "project_1", epicId: "epic_1", issueId: "issue_2", issueNumber: 2, status: IssueStatus.Backlog, canStart: true);
+        await SeedLinkAsync(database, "epic_1", "issue_1", 1);
+        await SeedLinkAsync(database, "epic_1", "issue_2", 2);
+
+        var eventStore = new RecordingEventStore();
+        var grains = new RecordingGrainFactory(database.Factory, eventStore) { ThrowOnStart = true };
+        var grain = grains.GetEpicGrain("project_1:epic_1");
+
+        var resumed = await grain.ResumeAsync();
+
+        Assert.Equal("running", resumed.Status);
+        Assert.Contains(eventStore.Appended,
+            evt => evt.Envelope.Type == EventCatalog.ReverseDns.EpicStartAttemptFailed);
+        await using var verify = database.CreateDbContext();
+        var stored = await verify.Epics.AsNoTracking().SingleAsync();
+        Assert.Equal("running", stored.Status);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
@@ -408,7 +487,7 @@ public class EpicProgressionSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
-    public async Task ReconcileAfterTerminalAsync_HighestPriorityStartableWins()
+    public async Task RecomputeProgressAsync_HighestPriorityStartableWins()
     {
         var database = CreateDatabase();
         await SeedEpicAsync(database, status: "running");
@@ -422,7 +501,7 @@ public class EpicProgressionSpecs
         var grains = new RecordingGrainFactory(database.Factory);
         var grain = grains.GetEpicGrain("project_1:epic_1");
 
-        await grain.ReconcileAfterTerminalAsync();
+        await grain.RecomputeProgressAsync();
 
         var started = Assert.Single(grains.IssueStartCalls);
         Assert.Equal("issue_p0", started);
@@ -461,7 +540,8 @@ public class EpicProgressionSpecs
         int issueNumber,
         Mohist.Server.Issue.Domain.IssueStatus status,
         bool canStart = false,
-        string priority = "p2")
+        string priority = "p2",
+        int[]? prerequisiteNumbers = null)
     {
         var issue = new Mohist.Server.Issue.Domain.Issue
         {
@@ -472,6 +552,7 @@ public class EpicProgressionSpecs
             Status = status,
             Priority = priority,
             IsDraft = !canStart,
+            PrerequisiteNumbers = prerequisiteNumbers ?? [],
         };
         var json = IssueStore.Serialize(issue);
         await using var db = database.CreateDbContext();
@@ -549,12 +630,14 @@ public class EpicProgressionSpecs
     private sealed class RecordingGrainFactory : IGrainFactory
     {
         private readonly IDbContextFactory<MohistDbContext> _dbFactory;
+        private readonly IEventStore _eventStore;
         public List<string> IssueStartCalls { get; } = [];
-        public bool ThrowOnStart { get; init; }
+        public bool ThrowOnStart { get; set; }
 
-        public RecordingGrainFactory(IDbContextFactory<MohistDbContext> dbFactory)
+        public RecordingGrainFactory(IDbContextFactory<MohistDbContext> dbFactory, IEventStore? eventStore = null)
         {
             _dbFactory = dbFactory;
+            _eventStore = eventStore ?? new NoopEventStore();
         }
 
         public IEpicGrain GetEpicGrain(string grainKey) =>
@@ -562,7 +645,7 @@ public class EpicProgressionSpecs
                 _dbFactory,
                 this,
                 new FakeTimeProvider(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero)),
-                new NoopEventStore(),
+                _eventStore,
                 NullLogger<EpicGrain>.Instance) { GrainKeyForTest = grainKey };
 
         public IIssueGrain GetIssueGrain(string issueId) => new RecordingIssueGrain(this, issueId);

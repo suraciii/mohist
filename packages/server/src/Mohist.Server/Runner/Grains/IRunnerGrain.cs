@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
 using Orleans.Concurrency;
 
@@ -12,15 +13,25 @@ public interface IRunnerGrain : IGrainWithStringKey
     Task HeartbeatAsync();
     /// <summary>Refreshes runner information. Does not refresh presence.</summary>
     Task HeartbeatRepairAsync(RunnerInfo info);
-    // Agent-job assignment stays push-based because the job grain owns the
-    // dispatch snapshot. Poll delivery reconciles that stable work against the
-    // runner's process-lifetime reported set.
+    /// <summary>
+    /// Agent-job assignment stays push-based because the job grain owns the
+    /// dispatch snapshot. Poll delivery reconciles that stable work against the
+    /// runner's process-lifetime reported set.
+    /// </summary>
+    [AlwaysInterleave]
     Task<RunnerWorkAssignmentResult> AssignAgentJobAsync(WorkDispatch work);
     Task<RunnerWorkReportResult> ReportAgentJobResultAsync(string agentJobId, string workId, WorkResult result);
     /// <summary>Atomically admits one reconciliation round and captures its capacity.</summary>
     Task<RunnerPollAdmission> TryBeginPollAsync();
     /// <summary>Releases the reconciliation round admitted by <see cref="TryBeginPollAsync"/>.</summary>
     Task EndPollAsync();
+    /// <summary>
+    /// Claims one workflow work item while checking the runner's live
+    /// registration and capacity. Poll admission prevents overlapping polls;
+    /// this operation is the authoritative availability boundary for fresh
+    /// workflow claims.
+    /// </summary>
+    Task<WorkItem?> TryClaimWorkflowAsync(string workflowRunId, string? projectId, bool assignWorker);
     /// <summary>Returns active Agent capacity and at most one missing stable dispatch.</summary>
     Task<AgentJobPollState> ReconcileAgentJobsAsync(List<string> reportedWorkKeys);
     /// <summary>
@@ -30,6 +41,8 @@ public interface IRunnerGrain : IGrainWithStringKey
     /// to an info-refresh channel.
     /// </summary>
     Task TouchPresenceAsync();
+
+    [AlwaysInterleave]
     Task<RunnerRuntimeState> GetRuntimeStateAsync();
     Task UpdateBuildGitHashAsync(string? buildGitHash);
     Task<RunnerInfo?> GetInfoAsync();
@@ -130,6 +143,10 @@ public sealed record RunnerPollRequest(
 [GenerateSerializer]
 public sealed record RunnerPollAdmission(
     [property: Id(0)] bool Admitted,
+    /// <summary>
+    /// Capacity observed when the poll starts. It is informational only;
+    /// each fresh workflow claim rechecks live capacity.
+    /// </summary>
     [property: Id(1)] int Slots);
 
 /// <summary>

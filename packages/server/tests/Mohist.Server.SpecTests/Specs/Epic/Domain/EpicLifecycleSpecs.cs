@@ -28,6 +28,11 @@ public class EpicLifecycleSpecs
     [Fact]
     public async Task MarkDone_WhenOpenLinkedIssuesRemain_Returns4xxAndLeavesStatusUnchanged()
     {
+        // First link (delivered / Done) auto-marks the epic done via
+        // the link-time recompute. Second link (pending / open) wakes
+        // the done epic back to running and autopilot starts the
+        // pending issue. The /done POST still returns 409 because the
+        // pending issue remains open, and the final status is running.
         var project = await CreateProjectAsync();
         var delivered = await CreateIssueAsync(project.Id, "Delivered");
         await CompleteIssueAsync(project.Id, delivered);
@@ -48,7 +53,7 @@ public class EpicLifecycleSpecs
         Assert.Equal(1, envelope.Details!.OpenLinkedCount);
 
         var after = await _client.GetDataAsync<EpicDto>($"/api/projects/{project.Id}/epics/{epic.Id}");
-        Assert.Equal("idle", after.Status);
+        Assert.Equal("running", after.Status);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -149,7 +154,7 @@ public class EpicLifecycleSpecs
         var epic = await CreateEpicAsync(project.Id, "Repeated done");
         await LinkIssueAsync(project.Id, epic.Id, issue.Number);
         await CompleteIssueAsync(project.Id, issue);
-        // The dispatcher's auto-mark-done handler reconciles the epic
+        // The dispatcher's auto-mark-done handler recomputes the epic
         // on the terminal-issue event; wait for that, then verify the
         // duplicate /done call is rejected.
         await _client.WaitForStatusAsync<EpicDetailDto>(
@@ -358,16 +363,23 @@ public class EpicLifecycleSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
-    public async Task MarkDone_AllDelivered_EpicIsNotMarkedDoneAutomaticallyUntilRequested()
+    public async Task MarkDone_AllDelivered_LinkTimeRecomputeAutoTransitionsToDone()
     {
+        // The poll-driven sweep that used to drive auto-mark-done for
+        // an idle epic with all-delivered links was removed in #363.
+        // The link-time recompute introduced in its place observes the
+        // same condition: every linked issue is delivered at link time
+        // → the epic auto-transitions to done in the same commit. The
+        // readiness detail (ReadyToMarkDone / counts) still matches
+        // the post-transition state.
         var project = await CreateProjectAsync();
         var issue = await CreateIssueAsync(project.Id, "Delivered");
         await CompleteIssueAsync(project.Id, issue);
-        var epic = await CreateEpicAsync(project.Id, "No auto complete");
+        var epic = await CreateEpicAsync(project.Id, "Auto complete on link");
         await LinkIssueAsync(project.Id, epic.Id, issue.Number);
 
-        var beforeMark = await _client.GetDataAsync<EpicDto>($"/api/projects/{project.Id}/epics/{epic.Id}");
-        Assert.Equal("idle", beforeMark.Status);
+        var afterLink = await _client.GetDataAsync<EpicDto>($"/api/projects/{project.Id}/epics/{epic.Id}");
+        Assert.Equal("done", afterLink.Status);
 
         var detail = await _client.GetDataAsync<EpicDetailDto>($"/api/projects/{project.Id}/epics/{epic.Id}");
         Assert.True(detail.Progress.ReadyToMarkDone);
@@ -450,6 +462,11 @@ public class EpicLifecycleSpecs
     [Fact]
     public async Task EpicDetail_ProgressOutputsAreUnchangedByPrerequisiteData()
     {
+        // First link (delivered) auto-marks the epic done; second link
+        // (open, prereq satisfied by first) wakes the epic back to
+        // running and autopilot starts the second issue immediately.
+        // The progress detail therefore reports second as an active
+        // (in_progress) issue and no NextIssue candidate.
         var project = await CreateProjectAsync();
         var first = await CreateIssueAsync(project.Id, "First");
         await CompleteIssueAsync(project.Id, first);
@@ -466,10 +483,10 @@ public class EpicLifecycleSpecs
         Assert.Equal(1, detail.Progress.DeliveredCount);
         Assert.Equal(2, detail.Progress.TotalIssueCount);
         Assert.False(detail.Progress.ReadyToMarkDone);
-        Assert.NotNull(detail.Progress.NextIssue);
-        Assert.Equal(second.Number, detail.Progress.NextIssue!.Number);
-        Assert.Equal(second.Id, detail.Progress.NextIssue.Id);
-        Assert.Empty(detail.Progress.ActiveIssues);
+        Assert.Null(detail.Progress.NextIssue);
+        var active = Assert.Single(detail.Progress.ActiveIssues);
+        Assert.Equal(second.Number, active.Number);
+        Assert.Equal(second.Id, active.Id);
         Assert.Empty(detail.Progress.BlockedIssues);
 
         var secondRow = detail.LinkedIssues.Single(i => i.Number == second.Number);

@@ -20,17 +20,20 @@ public sealed class DispatchService : IScopedService
     private readonly WorkflowRunQuerier _workflowRuns;
     private readonly WorkflowItemTranslator _translator;
     private readonly ILogger<DispatchService> _log;
+    private readonly IDispatchPollObserver _pollObserver;
 
     public DispatchService(
         IGrainFactory grains,
         WorkflowRunQuerier workflowRuns,
         WorkflowItemTranslator translator,
-        ILogger<DispatchService> log)
+        ILogger<DispatchService> log,
+        IDispatchPollObserver? pollObserver = null)
     {
         _grains = grains;
         _workflowRuns = workflowRuns;
         _translator = translator;
         _log = log;
+        _pollObserver = pollObserver ?? NoopDispatchPollObserver.Instance;
     }
 
     public async Task<RunnerPollResponse> PollAsync(
@@ -67,6 +70,8 @@ public sealed class DispatchService : IScopedService
         if (info is null)
             return new RunnerPollResponse([]);
 
+        await _pollObserver.AfterRunnerInfoAsync(runnerId);
+
         var dispatches = new List<WorkDispatch>();
         var reportedWorkKeys = ReportedWorkKeys(req);
         var agentJobs = await runner.ReconcileAgentJobsAsync(reportedWorkKeys.ToList());
@@ -78,11 +83,11 @@ public sealed class DispatchService : IScopedService
         if (spare <= 0)
             return new RunnerPollResponse(dispatches);
 
-        spare = await AddAssignedReadyDispatchesAsync(runnerId, workerId, spare, dispatches, ct);
+        spare = await AddAssignedReadyDispatchesAsync(runner, info.ProjectId, runnerId, workerId, spare, dispatches, ct);
         if (spare <= 0)
             return new RunnerPollResponse(dispatches);
 
-        await AddAssignablePendingDispatchesAsync(info.ProjectId, runnerId, workerId, spare, dispatches, ct);
+        await AddAssignablePendingDispatchesAsync(runner, info.ProjectId, runnerId, workerId, spare, dispatches, ct);
 
         return new RunnerPollResponse(dispatches);
     }
@@ -112,6 +117,8 @@ public sealed class DispatchService : IScopedService
     }
 
     private async Task<int> AddAssignedReadyDispatchesAsync(
+        IRunnerGrain runner,
+        string? projectId,
         string runnerId,
         string workerId,
         int availableSlots,
@@ -123,7 +130,8 @@ public sealed class DispatchService : IScopedService
         foreach (var workflowRunId in await _workflowRuns.FindAssignedToAsync(workerId, ct))
         {
             if (remainingSlots <= 0) break;
-            var dispatch = await ClaimAndRenderAsync(workflowRunId, runnerId, workerId, ct);
+            var dispatch = await ClaimAndRenderAsync(
+                runner, workflowRunId, projectId, runnerId, workerId, assignWorker: false, ct);
             if (dispatch is null) continue;
             dispatches.Add(dispatch);
             remainingSlots--;
@@ -133,6 +141,7 @@ public sealed class DispatchService : IScopedService
     }
 
     private async Task<int> AddAssignablePendingDispatchesAsync(
+        IRunnerGrain runner,
         string? projectId,
         string runnerId,
         string workerId,
@@ -145,11 +154,8 @@ public sealed class DispatchService : IScopedService
         foreach (var workflowRunId in await _workflowRuns.FindAssignableAsync(projectId, ct: ct))
         {
             if (remainingSlots <= 0) break;
-            var workflow = _grains.GetGrain<IWorkflowGrain>(workflowRunId);
-            var assigned = await workflow.AssignWorkerAsync(workerId);
-            if (assigned.Status != WorkflowAssignmentStatus.Assigned) continue;
-
-            var dispatch = await ClaimAndRenderAsync(workflowRunId, runnerId, workerId, ct);
+            var dispatch = await ClaimAndRenderAsync(
+                runner, workflowRunId, projectId, runnerId, workerId, assignWorker: true, ct);
             if (dispatch is null) continue;
             dispatches.Add(dispatch);
             remainingSlots--;
@@ -186,10 +192,15 @@ public sealed class DispatchService : IScopedService
     }
 
     private async Task<WorkDispatch?> ClaimAndRenderAsync(
-        string workflowRunId, string runnerId, string workerId, CancellationToken ct)
+        IRunnerGrain runner,
+        string workflowRunId,
+        string? projectId,
+        string runnerId,
+        string workerId,
+        bool assignWorker,
+        CancellationToken ct)
     {
-        var workflow = _grains.GetGrain<IWorkflowGrain>(workflowRunId);
-        var item = await workflow.ClaimNextAsync(workerId);
+        var item = await runner.TryClaimWorkflowAsync(workflowRunId, projectId, assignWorker);
         if (item is null) return null;
 
         var run = await _workflowRuns.LoadAsync(workflowRunId, ct);

@@ -419,8 +419,13 @@ public class AgentSubscriptionDispatchHandlerSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
-    public async Task HandleAsync_LaunchFailure_IsLoggedAndSwallowed()
+    public async Task HandleAsync_LaunchFailure_PropagatesToDispatcher()
     {
+        // issue-363 T-002: subscription launch failures now reach the
+        // dispatcher's unified retry/DLQ path. The handler must NOT
+        // absorb the exception via a local catch; instead it surfaces
+        // the failure, the record of the launch attempt is preserved,
+        // and no warning is logged at the handler boundary.
         var (recorder, scope) = Build();
         await using var _ = scope;
         await SeedProjectAsync(scope, "proj_a");
@@ -430,21 +435,20 @@ public class AgentSubscriptionDispatchHandlerSpecs
             filterType: "com.mohist.issue.*", priority: 5);
         recorder.Failure = new InvalidOperationException("launch unavailable");
 
-        await scope.Handler.HandleAsync(
-            new CloudEvent(
-                id: "evt_failure",
-                source: new Uri("/mohist/issues/issue_x", UriKind.Relative),
-                type: EventCatalog.ReverseDns.IssueWorkStarted,
-                time: DateTimeOffset.UnixEpoch,
-                data: null,
-                extensions: new Dictionary<string, string> { ["projectid"] = "proj_a" }),
-            CancellationToken.None);
+        var evt = new CloudEvent(
+            id: "evt_failure",
+            source: new Uri("/mohist/issues/issue_x", UriKind.Relative),
+            type: EventCatalog.ReverseDns.IssueWorkStarted,
+            time: DateTimeOffset.UnixEpoch,
+            data: null,
+            extensions: new Dictionary<string, string> { ["projectid"] = "proj_a" });
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            scope.Handler.HandleAsync(evt, CancellationToken.None));
+        Assert.Equal("launch unavailable", ex.Message);
 
         Assert.Single(recorder.Calls);
-        var warning = Assert.Single(scope.Logger.Entries);
-        Assert.Equal(Microsoft.Extensions.Logging.LogLevel.Warning, warning.Level);
-        Assert.Equal("launch unavailable", warning.Exception?.Message);
-        Assert.Contains("evt_failure", warning.Message, StringComparison.Ordinal);
+        Assert.Empty(scope.Logger.Entries);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]

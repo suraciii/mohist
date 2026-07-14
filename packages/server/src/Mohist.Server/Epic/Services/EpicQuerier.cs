@@ -186,6 +186,44 @@ public class EpicQuerier : IScopedService
         return activeOwner;
     }
 
+    public async Task<List<string>> GetEpicIdsDependentOnPrerequisiteAsync(
+        string projectId,
+        int prerequisiteNumber)
+    {
+        if (string.IsNullOrWhiteSpace(projectId) || prerequisiteNumber <= 0)
+            return [];
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var projectIdParam = new SqliteParameter("@projectId", projectId);
+        var prereqParam = new SqliteParameter("@prereqNumber", prerequisiteNumber);
+        var issueIdRows = await db.Database
+            .SqlQueryRaw<string>(
+                """
+                SELECT "IssueId" FROM "Issues"
+                WHERE "ProjectId" = @projectId
+                  AND EXISTS (
+                    SELECT 1 FROM json_each("PrerequisiteNumbersJson")
+                    WHERE json_each.value = @prereqNumber
+                  )
+                """,
+                projectIdParam, prereqParam)
+            .ToListAsync();
+
+        if (issueIdRows.Count == 0) return [];
+
+        var epicIds = await (
+            from active in db.EpicActiveIssues.AsNoTracking()
+            join epic in db.Epics.AsNoTracking()
+                on active.EpicId equals epic.Id
+            where active.ProjectId == projectId
+                && issueIdRows.Contains(active.IssueId)
+                && epic.ProjectId == projectId
+                && epic.Status != EpicStatusName.Done
+                && epic.Status != EpicStatusName.Closed
+            select active.EpicId
+        ).Distinct().ToListAsync();
+        return epicIds;
+    }
+
     private static EpicWithProgressDto BuildEpicWithProgress(
         EpicIssueListItem epicRow,
         List<EpicIssueListItem> rows,

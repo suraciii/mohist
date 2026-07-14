@@ -47,31 +47,16 @@ public sealed class HermesIssueNotificationHandler : ICloudEventHandler
 
     public Task HandleAsync(CloudEvent evt, CancellationToken ct)
     {
-        try
-        {
-            var options = _options.CurrentValue;
-            if (!options.IsWebhookConfigured || !TryResolveNotificationType(evt.Type, out var notificationType))
-                return Task.CompletedTask;
-
-            if (!options.IsEnabled(notificationType))
-                return Task.CompletedTask;
-
-            ct.ThrowIfCancellationRequested();
-            _dispatcher.Dispatch(backgroundCt => DeliverAsync(evt, notificationType, backgroundCt));
+        var options = _options.CurrentValue;
+        if (!options.IsWebhookConfigured || !TryResolveNotificationType(evt.Type, out var notificationType))
             return Task.CompletedTask;
-        }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _log.LogWarning(ex,
-                "Hermes issue notification dispatch failed for event {EventType} {EventId}",
-                evt.Type,
-                evt.Id);
+
+        if (!options.IsEnabled(notificationType))
             return Task.CompletedTask;
-        }
+
+        ct.ThrowIfCancellationRequested();
+        _dispatcher.Dispatch(backgroundCt => DeliverAsync(evt, notificationType, backgroundCt));
+        return Task.CompletedTask;
     }
 
     private async Task DeliverAsync(CloudEvent evt, string notificationType, CancellationToken ct)

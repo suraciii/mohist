@@ -293,7 +293,7 @@ public class EpicWakeUpSpecs
         // The tail-call TryStartNextAsync is best-effort: when the
         // newly-linked open issue cannot start (prerequisites missing,
         // draft, etc.) the wake-up still succeeds and the epic remains
-        // running-but-idle for the next reconcile retry.
+        // running-but-idle for the next recompute retry.
         var database = CreateDatabase();
         await SeedEpicAsync(database, status: EpicStatusName.Done);
         await SeedIssueAsync(database, issueId: "issue_1", issueNumber: 1, status: IssueStatus.Backlog, canStart: false);

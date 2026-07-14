@@ -650,7 +650,7 @@ public class EpicApiSpecs
         var created = await _client.PostDataAsync<EpicDto>($"/api/projects/{project.Id}/epics", new { title = "Done epic", projectId = project.Id });
         await _client.PostOkAsync($"/api/projects/{project.Id}/epics/{created.Id}/issues", new { issueId = issue.Id });
         await CompleteIssueAsync(project.Id, issue);
-        // The dispatcher's auto-mark-done handler reconciles the epic when
+        // The dispatcher's auto-mark-done handler recomputes the epic when
         // every linked issue is terminal; wait for that eventual transition
         // instead of racing it with an explicit /done call.
         await _client.WaitForStatusAsync<EpicDetailFullDto>(

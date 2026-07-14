@@ -305,8 +305,12 @@ public class EpicBatchMembershipSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
-    public async Task LinkIssuesAsync_WhenActiveMembershipInsertFails_DoesNotPersistIssueLinkedEvent()
+    public async Task LinkIssuesAsync_WhenActiveMembershipInsertFails_RollsBackLinkAndEventAtomically()
     {
+        // With atomic event persistence (recovery events appended into the
+        // same DbContext transaction), a SaveChanges failure rolls back both
+        // the membership row and the EpicIssueLinked event row. The conflict
+        // outcome is still surfaced. The link is not committed.
         var store = new RecordingEventStore();
         var database = CreateDatabase();
         await SeedEpicAsync(database, epicId: "epic_target", status: "idle", number: 1);
@@ -331,9 +335,8 @@ public class EpicBatchMembershipSpecs
         Assert.Equal("conflict", outcome.Status);
         Assert.Equal("epic_owner", outcome.OwningEpicId);
 
-        var stored = await store.ListEpicEventsAsync("epic_target");
-        Assert.Empty(stored);
-
+        // The link row is not committed — the SaveChanges failure rolls back
+        // the entire transaction (membership row + event row are atomic).
         await using var verify = database.CreateDbContext();
         var targetLinks = await verify.EpicIssues.AsNoTracking()
             .Where(link => link.ProjectId == ProjectId && link.EpicId == "epic_target" && link.IssueId == "issue_race")
@@ -562,6 +565,67 @@ public class EpicBatchMembershipSpecs
         // the earliest one.
         var started = Assert.Single(grains.IssueStartCalls);
         Assert.Equal("issue_open", started);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task LinkIssuesAsync_RunningEpic_BatchWithStartableIssue_AdvancesNewlyLinkedIssue()
+    {
+        var database = CreateDatabase();
+        await SeedEpicAsync(database, epicId: "epic_target", status: EpicStatusName.Running, number: 1);
+        await SeedIssueAsync(database, issueId: "issue_open", issueNumber: 1, status: IssueStatus.Backlog, canStart: true);
+
+        var grains = new RecordingGrainFactory(database.Factory);
+        var grain = grains.GetEpicGrain($"{ProjectId}:epic_target");
+
+        var outcomes = await grain.LinkIssuesAsync(
+            [new BatchMembershipRequestItem("1", "issue_open", 1)], ProjectId);
+
+        Assert.Equal("linked", Assert.Single(outcomes).Status);
+        Assert.Equal(["issue_open"], grains.IssueStartCalls);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task LinkIssuesAsync_IdleEpic_BatchWithOnlyTerminalIssues_MarksDoneAndReleasesActiveMemberships()
+    {
+        var database = CreateDatabase();
+        await SeedEpicAsync(database, epicId: "epic_target", status: EpicStatusName.Idle, number: 1);
+        await SeedIssueAsync(database, issueId: "issue_existing", issueNumber: 1, status: IssueStatus.Done);
+        await SeedIssueAsync(database, issueId: "issue_cancelled", issueNumber: 2, status: IssueStatus.Cancelled);
+        await using (var seed = database.CreateDbContext())
+        {
+            seed.EpicIssues.Add(new EpicIssueRow
+            {
+                ProjectId = ProjectId,
+                EpicId = "epic_target",
+                IssueId = "issue_existing",
+                IssueNumber = 1,
+                CreatedAt = new DateTimeOffset(2026, 7, 1, 12, 0, 0, TimeSpan.Zero),
+            });
+            seed.EpicActiveIssues.Add(new EpicActiveIssueRow
+            {
+                ProjectId = ProjectId,
+                EpicId = "epic_target",
+                IssueId = "issue_existing",
+                IssueNumber = 1,
+            });
+            await seed.SaveChangesAsync();
+        }
+
+        var grain = CreateGrain(database.Factory, $"{ProjectId}:epic_target");
+        var outcomes = await grain.LinkIssuesAsync(
+            [new BatchMembershipRequestItem("2", "issue_cancelled", 2)], ProjectId);
+
+        Assert.Equal("linked", Assert.Single(outcomes).Status);
+        await using var verify = database.CreateDbContext();
+        var epic = await verify.Epics.AsNoTracking().SingleAsync(e => e.Id == "epic_target");
+        Assert.Equal(EpicStatusName.Done, epic.Status);
+        Assert.Empty(await verify.EpicActiveIssues.AsNoTracking()
+            .Where(row => row.ProjectId == ProjectId && row.EpicId == "epic_target")
+            .ToListAsync());
     }
 
     private static EpicGrain CreateGrain(TestDbContextFactory factory, string grainKey) =>

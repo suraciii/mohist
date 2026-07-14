@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Infrastructure.Events;
+using Mohist.Server.Runner.Grains;
 using Mohist.Server.SpecTests.Support;
 using Orleans;
 using Orleans.TestingHost;
@@ -22,6 +23,8 @@ public sealed class AgentJobGrainFixture : IAsyncLifetime
     public FakeRunnerWorkspaceClient RunnerWorkspace => Cluster.GetSiloServiceProvider(null).GetRequiredService<FakeRunnerWorkspaceClient>();
     public FakeTimeProvider TimeProvider { get; } = new(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
     public ControllableAgentJobDispatchObserver DispatchObserver { get; } = new();
+    public ControllableRunnerGrainAssignmentObserver RunnerAssignmentObserver { get; } = new();
+    public ControllableRunnerGrainCloseoutObserver CloseoutObserver { get; } = new();
 
     private readonly InMemoryEventBus _sharedEventBus = new(new RecordingEventStore(), System.TimeProvider.System, NullLogger<InMemoryEventBus>.Instance);
     private readonly RecordingEventStore _sharedEventStore = new();
@@ -42,6 +45,8 @@ public sealed class AgentJobGrainFixture : IAsyncLifetime
         {
             GrainTestConfig.ConfigureSilo(siloBuilder, connectionString, _sharedEventBus, _sharedEventStore, TimeProvider);
             siloBuilder.Services.AddSingleton<IAgentJobDispatchObserver>(DispatchObserver);
+            siloBuilder.Services.AddSingleton<IRunnerGrainAssignmentObserver>(RunnerAssignmentObserver);
+            siloBuilder.Services.AddSingleton<IRunnerGrainCloseoutObserver>(CloseoutObserver);
         });
         Cluster = builder.Build();
         return Cluster.DeployAsync();
@@ -59,6 +64,7 @@ public sealed class ControllableAgentJobDispatchObserver : IAgentJobDispatchObse
 {
     private TaskCompletionSource _assignmentPrepared = NewSignal();
     private TaskCompletionSource _runnerAccepted = NewSignal();
+    private TaskCompletionSource? _assignmentPreparedBlock;
 
     public bool FailAssignmentPrepared { get; set; }
     public bool FailRunnerAccepted { get; set; }
@@ -66,6 +72,8 @@ public sealed class ControllableAgentJobDispatchObserver : IAgentJobDispatchObse
     public Task AssignmentPreparedAsync(string agentJobId, string runnerId, string workId)
     {
         _assignmentPrepared.TrySetResult();
+        if (_assignmentPreparedBlock is not null)
+            return _assignmentPreparedBlock.Task;
         return FailAssignmentPrepared
             ? Task.FromException(new InvalidOperationException("simulated activation loss after assignment preparation"))
             : Task.CompletedTask;
@@ -83,13 +91,65 @@ public sealed class ControllableAgentJobDispatchObserver : IAgentJobDispatchObse
 
     public Task WaitForAssignmentPreparedAsync() => _assignmentPrepared.Task;
 
+    public void BlockAssignmentPrepared() => _assignmentPreparedBlock ??= NewSignal();
+
+    public void ReleaseAssignmentPrepared() => _assignmentPreparedBlock?.TrySetResult();
+
     public void Reset()
     {
         FailAssignmentPrepared = false;
         FailRunnerAccepted = false;
+        _assignmentPreparedBlock?.TrySetResult();
+        _assignmentPreparedBlock = null;
         _assignmentPrepared = NewSignal();
         _runnerAccepted = NewSignal();
     }
+
+    private static TaskCompletionSource NewSignal() =>
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
+}
+
+public sealed class ControllableRunnerGrainAssignmentObserver : IRunnerGrainAssignmentObserver
+{
+    private TaskCompletionSource _assignmentAdmission = NewSignal();
+    private TaskCompletionSource? _assignmentAdmissionBlock;
+
+    public Task AssignmentAdmissionAsync(string runnerId, WorkDispatch work)
+    {
+        _assignmentAdmission.TrySetResult();
+        return _assignmentAdmissionBlock?.Task ?? Task.CompletedTask;
+    }
+
+    public Task WaitForAssignmentAdmissionAsync() => _assignmentAdmission.Task;
+
+    public void BlockAssignmentAdmission() => _assignmentAdmissionBlock ??= NewSignal();
+
+    public void ReleaseAssignmentAdmission() => _assignmentAdmissionBlock?.TrySetResult();
+
+    public void Reset()
+    {
+        _assignmentAdmissionBlock?.TrySetResult();
+        _assignmentAdmissionBlock = null;
+        _assignmentAdmission = NewSignal();
+    }
+
+    private static TaskCompletionSource NewSignal() =>
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
+}
+
+public sealed class ControllableRunnerGrainCloseoutObserver : IRunnerGrainCloseoutObserver
+{
+    private TaskCompletionSource _agentJobCloseoutStarted = NewSignal();
+
+    public Task AgentJobCloseoutStartingAsync(string runnerId, string agentJobId, string workId)
+    {
+        _agentJobCloseoutStarted.TrySetResult();
+        return Task.CompletedTask;
+    }
+
+    public Task WaitForAgentJobCloseoutStartingAsync() => _agentJobCloseoutStarted.Task;
+
+    public void Reset() => _agentJobCloseoutStarted = NewSignal();
 
     private static TaskCompletionSource NewSignal() =>
         new(TaskCreationOptions.RunContinuationsAsynchronously);

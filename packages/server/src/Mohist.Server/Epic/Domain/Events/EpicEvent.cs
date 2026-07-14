@@ -8,7 +8,8 @@ public union EpicEvent(
     EpicIssueUnlinked,
     EpicStatusChanged,
     EpicClosed,
-    EpicReopened);
+    EpicReopened,
+    EpicStartAttemptFailed);
 
 public sealed record EpicCreated(
     string Title,
@@ -39,3 +40,11 @@ public sealed record EpicStatusChanged(
 public sealed record EpicClosed;
 
 public sealed record EpicReopened;
+
+/// <param name="IssueId">The linked issue that failed to start.</param>
+/// <param name="IssueNumber">The issue number of the failed start target.</param>
+/// <param name="Reason">A short reason string from the caught exception.</param>
+public sealed record EpicStartAttemptFailed(
+    string IssueId,
+    int IssueNumber,
+    string Reason);
