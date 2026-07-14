@@ -61,6 +61,7 @@ for (const sourceFile of sourceFiles) {
   const sourceRank = layerRank.get(sourceModule.layer)
   if (sourceRank === undefined) continue
 
+  // The `from` branch intentionally covers static imports and re-exports.
   const imports = /(?:\bfrom\s*|\bimport\s*\()(['"])([^'"\n]+)\1/g
   for (let match; (match = imports.exec(source));) {
     const targetFile = resolveLocalImport(sourceFile, match[2])
