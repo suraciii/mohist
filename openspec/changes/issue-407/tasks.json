@@ -1,0 +1,185 @@
+{
+  "project": "mohist-local",
+  "description": "Unify AgentSession logical identity, source, and session operations: split Compact (keeps binding) from Reset (guarded replacement), make sessionId the sole stable identity surfaced everywhere, persist runtime on the binding/lineage, add named-agent compact/reset parity, fail explicitly on missing runtime session, define the Mohist-owned runner command contract, and migrate the wire from acpSessionId/coderSessionId to runtimeSessionId (+runtime).",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Persist runtime on binding, lineage, and RuntimeBound event; surface missing-runtime-session failure",
+      "spec": "specs/agent-session-identity/spec.md#persistent-minimal-current-runtime-session-binding-with-append-only-lineage, specs/agent-session-identity/spec.md#legacy-data-remains-queryable-without-rewrite-and-surfaces-missing-runtime-sessions-explicitly",
+      "description": "Add a Runtime (execution-backend name) field to AgentSessionRuntime, RuntimeSessionLineageEntry, and the AgentSessionRuntimeBound domain event; stamp Runtime when the runner opens/attaches a session (today OpenAgentSessionCommand.AgentRuntime carries it but CreateSession discards it). Add a domain-level 'runtime session missing' check (binding absent or Runtime unmatched) used by compact/reset/follow-up, producing a runtime_session_missing error (HTTP 409) that names the stable sessionId and prompts Reset. Legacy rows with no Runtime degrade to absent/hidden on the wire. No stored data is rewritten.",
+      "acceptanceCriteria": [
+        "AgentSessionRuntime carries a Runtime field; AgentSessionGrain.CreateSession stamps Runtime from OpenAgentSessionCommand.AgentRuntime instead of discarding it.",
+        "RuntimeSessionLineageEntry carries Runtime; new lineage entries record the backend; legacy entries without Runtime stay queryable.",
+        "AgentSessionRuntimeBound event carries Runtime so realtime consumers render the backend.",
+        "A session command (compact/reset/follow-up) targeting an AgentSession whose current binding is absent or whose Runtime no longer matches a registered backend fails with a runtime_session_missing error (HTTP 409) naming the stable sessionId and prompting Reset.",
+        "No synthetic transcript or continuous conversation is fabricated for a missing backend.",
+        "Server unit tests cover: runtime stamping on open/attach, lineage runtime recording, and the missing-runtime-session rejection path.",
+        "Server spec tests cover the 'Legacy backend binding surfaces as missing runtime session' scenario."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Updated packages/server/src/Mohist.Server/Sessions/Domain/AgentSession.cs, AgentSessionEvent.cs, AgentSession.Transitions.cs, AgentSessionGrain.cs; updated server unit + spec tests.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Foundational: the Runtime field is read by D2/D3/D5/D7. Legacy rows with no Runtime are the spec's intended legacy-binding behaviour — do not backfill."
+    },
+    {
+      "id": "T-002",
+      "title": "Split Compact (keeps binding) from Reset (expected-binding guard) in domain, grain, and commands",
+      "spec": "specs/agent-session-commands/spec.md#compact-keeps-the-current-runtime-session-binding-and-only-records-the-compaction, specs/agent-session-commands/spec.md#reset-requests-a-replacement-runtime-session-under-an-expected-binding-guard, specs/agent-session-commands/spec.md#compact-and-reset-share-an-idle-only-concurrency-boundary",
+      "description": "Split the shared ApplyRecoveryTransitions into two distinct grain paths. Compact must call only RecordCompaction (no RebindRuntimeSession, no lineage append, no AgentSessionRuntimeBound event) and keep the current runtime binding unchanged. Reset must call RebindRuntimeSession (append lineage, emit AgentSessionRuntimeBound) only when the command's ExpectedRuntimeSessionId still matches the persisted current binding; a mismatch is rejected as a stale_binding conflict naming the stable sessionId and the actual current binding, with no mutation. Change CompactAgentSessionCommand to drop NewAgentSessionId; change ResetAgentSessionCommand to carry ExpectedRuntimeSessionId (sourced server-side from the session's current binding). Keep EnsureSessionIdleForRecovery and PersistRecoveryAsync as the shared pieces.",
+      "acceptanceCriteria": [
+        "CompactAsync records only a compaction (AgentSessionContextCompacted); it does not call RebindRuntimeSession, appends no lineage entry, and emits no AgentSessionRuntimeBound. After Compact the runtimeSessionId, runtime, and stable sessionId are unchanged.",
+        "ResetAsync appends a lineage entry and emits AgentSessionRuntimeBound only when ExpectedRuntimeSessionId matches the persisted current binding; on mismatch it rejects with a stale_binding conflict (no mutation, no lineage append), naming the stable sessionId and the actual current binding.",
+        "CompactAgentSessionCommand drops NewAgentSessionId; ResetAgentSessionCommand carries ExpectedRuntimeSessionId.",
+        "EnsureSessionIdleForRecovery keeps the single idle-only boundary; both Compact and Reset rejected while a turn is active return an identical session_active conflict referencing the stable sessionId.",
+        "Existing server spec/unit tests that construct CompactAgentSessionCommand/ResetAgentSessionCommand with NewAgentSessionId are updated.",
+        "Server spec tests cover: Compact preserves binding + appends no lineage; Reset applies replacement when expected binding is current; Reset rejected when expected binding is stale; Compact and Reset rejected while active."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Updated AgentSessionGrain.cs, IAgentSessionGrain.cs command records, AgentSession.Transitions.cs; updated + new server spec/unit tests.",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Reset happy-path replacement creation is deferred to #409; the server-side guard + rejection path is the testable surface here. The replacement runtimeSessionId is supplied by the runner command result (T-005); wire the reset grain path to read it from that result, with the fake handler used in tests."
+    },
+    {
+      "id": "T-003",
+      "title": "Stable sessionId in every recovery response; remove client-side id minting on workflow routes",
+      "spec": "specs/agent-session-command-surface/spec.md#recovery-responses-return-the-same-stable-sessionid-with-no-id-rotation",
+      "description": "Delete BuildNewAgentSessionId() from IssueRoutes.Sessions.cs. The workflow compact route takes no id argument; the workflow reset route reads ExpectedRuntimeSessionId from the session's current binding server-side (not minted by the route). Update AgentSessionRecoveryResult to address the session by the stable Id only — drop the rotated AgentSessionId field from its public meaning; the result still carries context-window before/after and Operation for the UI. The grain returns the stable sessionId in every recovery response.",
+      "acceptanceCriteria": [
+        "BuildNewAgentSessionId() is removed; no route handler mints a fresh client id for compact or reset.",
+        "AgentSessionRecoveryResult responses address the session by the stable sessionId; the rotated AgentSessionId field no longer carries a freshly minted id.",
+        "The workflow compact/reset routes read ExpectedRuntimeSessionId from the session's current binding server-side.",
+        "Server spec tests assert the compact and reset responses carry the unchanged stable sessionId and no rotated/new id."
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Updated IssueRoutes.Sessions.cs, AgentSessionRecoveryResult in IAgentSessionGrain.cs, response mappers; updated server spec tests.",
+      "dependsOn": ["T-002"],
+      "passes": false,
+      "notes": "Diagnostics for the runtime id belong on the session read model (runtimeSessionId, T-006), not on the command response."
+    },
+    {
+      "id": "T-004",
+      "title": "Add generic (named-agent) compact/reset routes and shared canonical routing for both sources",
+      "spec": "specs/agent-session-command-surface/spec.md#workflow-and-agent-launch-entries-share-one-canonical-command-routing, specs/agent-session-commands/spec.md#commands-route-through-a-mohist-owned-requestresult-shape-independent-of-source",
+      "description": "Add POST .../agent-sessions/{sessionId}/compact and .../agent-sessions/{sessionId}/reset HTTP routes alongside the existing followup/cancel generic routes. Both reuse the exact grain commands and response shapes as the workflow routes — no source-specific branching in the grain. Both sources resolve through the same canonical AgentSession routing. Ensure followup/cancel are documented as already sharing the canonical path; no source offers a privileged or divergent command path.",
+      "acceptanceCriteria": [
+        "POST /api/projects/{projectRef}/agent-sessions/{sessionId}/compact and .../reset exist and call CompactAsync/ResetAsync with the same command shapes and response shapes as the workflow routes.",
+        "Compact and Reset are reachable from both the Workflow-scoped surface and the Agent-launch-scoped surface with identical product semantics.",
+        "No source-specific branching exists in the grain; both entries resolve through the canonical AgentSession routing.",
+        "Server spec tests cover both sources reaching the same canonical routing for compact and reset."
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "New generic compact/reset route handlers (e.g. AgentSessionCompactRoutes.cs / AgentSessionResetRoutes.cs or extension to an existing partial); updated server spec tests.",
+      "dependsOn": ["T-003"],
+      "passes": false,
+      "notes": "Routes live under /agent-sessions/{sessionId} for parity with followup/cancel (design D7). The workflow-scoped issue/number/sessions/name routes stay as a product surface — both entries resolve to the same canonical routing."
+    },
+    {
+      "id": "T-005",
+      "title": "Define Mohist-owned runner command contract (SessionCommand request/result) and server-side dispatch with a fake handler",
+      "spec": "specs/agent-session-commands/spec.md#commands-route-through-a-mohist-owned-requestresult-shape-independent-of-source, specs/agent-session-commands/spec.md#a-missing-current-runtime-session-fails-explicitly-with-a-reset-hint",
+      "description": "Define the server->runner request/result shape for compact and reset, independent of Workflow Action Input and Agent definitions: SessionCommandRequest = { sessionId, runtime, runtimeSessionId, runnerId, workDir, command, expectedRuntimeSessionId? } and SessionCommandResult = { ok, runtimeSessionId?, error? } where error is in {conflict, missing, unavailable}. The runner handler fulfils the command from this shape alone. For Compact the result carries no new runtimeSessionId (binding unchanged); for Reset it carries the replacement runtimeSessionId. A 'missing' error maps to T-001's runtime_session_missing response. Land the types, the server-side dispatch (mirroring registerFollowupHandler/registerCancelHandler), and contract tests with a fake handler. #409 swaps the fake for real OpenCode SDK calls.",
+      "acceptanceCriteria": [
+        "SessionCommandRequest and SessionCommandResult types exist on the server and are shared with the runner contract surface; the request carries only Mohist-owned fields (no Workflow Action Input, no Agent definition).",
+        "Server-side dispatch invokes the handler for compact and reset; the Reset grain path (T-002) consumes the replacement runtimeSessionId from the result.",
+        "A 'missing' handler error maps to the runtime_session_missing response (T-001); a 'conflict' error maps to the idle-boundary conflict.",
+        "The handler fulfils a command from the Mohist-owned request alone, without reading Workflow Action Input or Agent definitions.",
+        "Contract tests with a fake handler pin the request/result shape that #409 must satisfy, covering compact (no new id), reset (replacement id), conflict, and missing."
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "SessionCommand request/result types, server dispatch wiring, fake handler + contract tests.",
+      "dependsOn": ["T-002", "T-004"],
+      "passes": false,
+      "notes": "This is the placeholder contract for #409. Do not implement real SDK calls (summarize/create/abort) — those are #409. Use a dedicated SessionCommand invocation rather than overloading ReceiveFollowup/CancelAgentSession because compact/reset need a reply AND a server-side state mutation."
+    },
+    {
+      "id": "T-006",
+      "title": "Migrate wire from acpSessionId/coderSessionId to runtimeSessionId (+runtime) across server, runner, and web",
+      "spec": "specs/agent-session-identity/spec.md#canonical-wire-representation-uses-runtime-+-runtimesessionid",
+      "description": "Rename the JSON wire property on every DTO carrying the physical session id: AgentSessionMetadataDto, AgentSessionSummaryDto, WorkflowSessionDto, RuntimeSessionLineageEntryDto (agentRuntimeSessionId -> runtimeSessionId + add runtime), RunnerAgentSessionResponse/RunnerGenericAgentSessionResponse, runner followup-handler payload, and web event-envelope normalisation + ~10 model/test files. The C# property names (AgentRuntimeSessionId) stay as the internal domain handle; only the serialised wire name changes, so grain state and stored events are untouched. Drop coderSessionId from ProjectEventsRoutes event-property allow-list.",
+      "acceptanceCriteria": [
+        "No server DTO serialises the physical session id as acpSessionId or coderSessionId; all use runtimeSessionId, and lineage/binding DTOs expose runtime.",
+        "Runner followup-handler payload uses runtimeSessionId; runner runtime event payloads address the physical session as runtimeSessionId.",
+        "Web event-envelope normalisation and model/test files read runtimeSessionId and stop emitting acpSessionId/coderSessionId.",
+        "ProjectEventsRoutes event-property allow-list no longer carries coderSessionId.",
+        "Grain state and stored events are not migrated (C# property names unchanged); server/runner/web tests updated to the new wire names.",
+        "Grep across packages confirms no remaining acpSessionId/coderSessionId wire emissions (internal ACP SDK variable names in packages/runner/src/actions/acp/* are out of scope — only wire/payload fields migrate)."
+      ],
+      "priority": 6,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Updated AgentSessionReadModels.cs DTOs, RunnerRoutes.cs, runner followup-handler.ts + related payloads, web event-envelope.ts + model/test files; updated tests across all three packages.",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Breaking wire rename; lands atomically across server/runner/web from the monorepo (no partial-upgrade window). The migration is mechanical but wide in web (~100 references) — the event-envelope normalisation layer is the single read site for most consumers. Internal ACP SDK adapter variable names (packages/runner/src/actions/acp/*) are not wire fields and stay as-is; only payload field names emitted to the server/web migrate."
+    },
+    {
+      "id": "T-007",
+      "title": "CLI parity: add mo agent session compact|reset; rewrite mo issue session compact|reset help/output to stable-identity",
+      "spec": "specs/agent-session-command-surface/spec.md#named-agent-cli-gains-compact-and-reset, specs/agent-session-command-surface/spec.md#help-text-and-error-wording-reflect-the-stable-identity-model",
+      "description": "Add `mo agent session compact <session-id>` and `mo agent session reset <session-id>` to MohistCliCommands.Agent.cs, mirroring the workflow CLI builders but addressing the generic /agent-sessions/{sessionId} path. Rewrite `mo issue session compact|reset` help text from 'return a new session id' to in-place wording ('Compact/Reset the session in place'); both commands print the stable sessionId. Update CliIssueSessionSpecs assertions. Error wording for session_active and runtime_session_missing references the stable sessionId with no id-rotation language.",
+      "acceptanceCriteria": [
+        "`mo agent session compact <session-id>` and `mo agent session reset <session-id>` exist, route to the canonical AgentSession, apply compact-keeps-binding / reset-expected-binding-guard semantics, and return the same stable sessionId.",
+        "`mo issue session compact|reset` help text no longer contains 'new session id' or any id-rotation wording; it describes an in-place operation.",
+        "Both CLI surfaces print the stable sessionId in their responses.",
+        "session_active and runtime_session_missing error wording references the stable sessionId and does not suggest a new id was/would be produced.",
+        "CliIssueSessionSpecs assertions updated; CLI spec coverage for `mo agent session compact|reset` added."
+      ],
+      "priority": 7,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Updated MohistCliCommands.Agent.cs, MohistCliCommands.Issue.Session.cs, CliIssueSessionSpecs.cs; new CLI spec coverage for named-agent compact/reset.",
+      "dependsOn": ["T-004", "T-006"],
+      "passes": false,
+      "notes": "The named-agent CLI mirrors the workflow CLI builders but addresses the generic path. Help text is a spec requirement, not cosmetic."
+    },
+    {
+      "id": "T-008",
+      "title": "Confirm Follow-up and Cancel semantics across both sources; drop acpSessionId from followup event payload",
+      "spec": "specs/agent-session-commands/spec.md#follow-up-joins-the-active-turn-or-starts-a-user-initiated-idle-turn-without-creating-work-units, specs/agent-session-commands/spec.md#cancel-interrupts-only-the-current-turn-and-never-deletes-the-agentsession",
+      "description": "Follow-up already joins the active turn and starts a user-initiated idle turn without creating a TaskRun/AgentJob; Cancel already interrupts only the current turn and never deletes the AgentSession. This task ensures both the workflow-scoped and generic followup share the same join-active/start-idle wording and the same sessionId-stable response, confirms Cancel never deletes the AgentSession (documented as outside the idle boundary), and drops acpSessionId from the followup event payload (per T-006 wire rename). No behavioural change beyond the wire rename and shared wording.",
+      "acceptanceCriteria": [
+        "Follow-up from both sources shares the same join-active-turn / start-idle-turn wording and a sessionId-stable response; it creates no TaskRun/AgentJob in either case.",
+        "Cancel from both sources interrupts only the current turn; the AgentSession remains queryable under the same stable sessionId with transcript and lineage intact.",
+        "The followup event payload uses runtimeSessionId (no acpSessionId).",
+        "Server spec tests cover follow-up join-active and start-idle (no new work unit) and cancel-preserves-session, for both sources where applicable."
+      ],
+      "priority": 8,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Updated AgentSessionFollowupRoutes.cs / AgentSessionCancelRoutes.cs wording + payload, followup-handler.ts; updated server spec tests.",
+      "dependsOn": ["T-006"],
+      "passes": false,
+      "notes": "Design D10 explicitly records these two commands as already spec-compliant so #409 and reviewers do not re-litigate them. The only required change here is the wire rename and shared wording; do not introduce behavioural changes."
+    },
+    {
+      "id": "T-009",
+      "title": "Align docs gap notes with landed stable-identity behaviour",
+      "spec": "specs/agent-session-command-surface/spec.md#help-text-and-error-wording-reflect-the-stable-identity-model",
+      "description": "Update docs/cli-reference.md (compact/reset gap note), design/agent-execution.md and design/runtimes/opencode.md 实装差距 sections to reflect the landed stable-identity model: compact keeps binding, reset is guarded, sessionId is stable, runtime+runtimeSessionId is the canonical wire, missing runtime session fails with a Reset hint. Per the spec-first convention, the body remains the spec and the gap note is the footnote describing current status.",
+      "acceptanceCriteria": [
+        "docs/cli-reference.md compact/reset entries reflect in-place semantics (no 'new session id').",
+        "design/agent-execution.md and design/runtimes/opencode.md 实装差距 sections updated to describe the landed behaviour and reference issue-407.",
+        "No product-language doc introduces technical-language (grain/handler/field names) outside the design layer."
+      ],
+      "priority": 9,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Updated docs/cli-reference.md, design/agent-execution.md, design/runtimes/opencode.md.",
+      "dependsOn": ["T-007", "T-008"],
+      "passes": false,
+      "notes": "Per AGENTS.md: body is spec, gap note is footnote. Update only the gap/差距 sections to reflect landed behaviour; do not rewrite the spec body."
+    }
+  ]
+}
