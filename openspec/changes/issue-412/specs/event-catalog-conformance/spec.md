@@ -7,9 +7,9 @@
 - **WHEN** `EventCatalog` is inspected for any registered event type
 - **THEN** it exposes the lineage attribute names that type is required to carry on its envelope
 
-#### Scenario: Stage, task, and check types declare the stage attribute
+#### Scenario: Stage, task, check, and feedback-requested types declare the stage attribute
 
-- **WHEN** a `workflow.stage.*`, `workflow.task.*`, or `workflow.check.*` type is registered
+- **WHEN** a `workflow.stage.*`, `workflow.task.*`, `workflow.check.*`, or `workflow.feedback.requested` type is registered
 - **THEN** its declared required attributes include `stage` in addition to the base `workflow.*` lineage attributes
 
 ### Requirement: Conformance check exercises every event production path

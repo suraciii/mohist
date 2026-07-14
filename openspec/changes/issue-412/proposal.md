@@ -6,8 +6,8 @@ An event knows who emitted it (`source`) and what happened (`type`), but not whi
 
 - **Lineage stamped on every event family at production time**, per the matrix in `design/event-protocol.md:59-70`. Stamping uses only identity the aggregate already holds (own state or existing annotations/labels) — producers SHALL NOT issue cross-aggregate queries to stamp.
   - `workflow.*`: add `workflowrunid` and `issue` (issue number); `projectid`/`issueid`/`issue`/`workflowrunid` printed when present, omitted when absent.
-  - `workflow.stage.*` / `workflow.task.*` / `workflow.check.*`: additionally print `stage` — the value is already carried on every such event record but never lifted to the envelope today.
-  - `issue.*`: add `epicid` when the issue belongs to an epic.
+  - `workflow.stage.*` / `workflow.task.*` / `workflow.check.*` / `workflow.feedback.requested`: additionally print `stage` — the value is already carried on these structurally stage-bearing event records but never lifted to the envelope today.
+  - `issue.*`: add `epicid` when the issue belongs to an epic. Because the Issue aggregate does not own epic membership, `epicid` is denormalized onto Issue state by the Epic domain at link/unlink and stamped from the issue's own state — no cross-aggregate query at stamp time (design D5).
   - `agent-session.*`: stamp `projectid`, `sessionid` always, `agentid` for agent-origin sessions, and `issue`/`workflowrunid`/`stage` when the session originates from a workflow/issue (all already present in `Metadata.Labels`).
   - `epic.*` and the inbox-synthesized event are brought under the same matrix.
 - **Lineage is a production-time snapshot.** Attributes record affiliation at emit time; later relationship changes do not rewrite history. Absent affiliation is omitted — never an empty string.
@@ -24,8 +24,9 @@ An event knows who emitted it (`source`) and what happened (`type`), but not whi
 
 - **Producer stamping sites** (all server-side; runner does not emit into this envelope system):
   - `Infrastructure/Data/Workflow/WorkflowRunStore.cs:81-103` — stamps `projectid`+`issueid` only today; add `workflowrunid`, `issue` (from annotations), and `stage` (from the event record for stage/task/check events).
-  - `Infrastructure/Data/Issue/IssueStore.cs:130-138` — stamps `projectid`/`issueid`/`issueno`; add `epicid` when present, rename `issueno` → `issue`.
-  - `Epic/Grains/EpicGrain.cs:1098-1103,1148-1153` — stamps `projectid`/`epicid`/`epicno`; drop `epicno` (not a routing dimension per the matrix).
+  - `Infrastructure/Data/Issue/IssueStore.cs:130-138` — stamps `projectid`/`issueid`/`issueno`; rename `issueno` → `issue` and stamp `epicid` from the issue's own `EpicId` state (added by this change; written by the Epic domain at link/unlink).
+  - `Issue/Domain/Issue.cs` + `Issue/Grains/IIssueGrain.cs` / `IssueGrain.cs` — `Issue` gains a nullable `EpicId` (the same cross-aggregate-reference pattern it already uses for `WorkflowRunId`) and an eventless `SetEpicId` transition; `IIssueGrain.SetEpicAffiliationAsync` persists it via the state-only save (no domain event — it is a denormalization).
+  - `Epic/Grains/EpicGrain.cs:1098-1103,1148-1153` — stamps `projectid`/`epicid`/`epicno`; drop `epicno` (not a routing dimension per the matrix). The link/unlink paths additionally push `EpicId` onto the linked issue via `IIssueGrain.SetEpicAffiliationAsync` (D5 denormalization), and a one-time backfill sets `Issue.EpicId` from `EpicIssueRow` for already-linked issues.
   - `Infrastructure/Data/Sessions/AgentSessionStore.cs:118-131` — passes `extensions: null` today; project `Metadata.Labels` (`project-id`, `agent-id`, `agent-launch/issue-number`, `source-kind`, `work-id`, `stage`) onto extensions.
   - `Events/Subscriptions/InboxProjectionHandler.cs:148-167` — synthesizes `inbox.item-persisted` stamping only `projectid`; lift `issue`/`issueid` already present in the hint payload.
 - **Catalog / registry**:

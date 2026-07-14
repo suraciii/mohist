@@ -3,7 +3,7 @@
 Every event family SHALL stamp its full business lineage into CloudEvents envelope extensions at the moment the event is produced, using only identity the producing aggregate already holds (its own state or existing annotations/labels). The stamped attributes per family SHALL conform to the lineage matrix:
 
 - `workflow.*` events SHALL carry `workflowrunid` and `projectid`; they SHALL carry `issueid`, `issue` (issue number), and `epicid` when that affiliation is present at emit time.
-- `workflow.stage.*`, `workflow.task.*`, and `workflow.check.*` events SHALL additionally carry `stage` (the stage name).
+- `workflow.stage.*`, `workflow.task.*`, `workflow.check.*`, and `workflow.feedback.requested` events SHALL additionally carry `stage` (the stage name), because their domain event records are structurally stage-bearing.
 - `issue.*` events SHALL carry `projectid`, `issueid`, and `issue` (issue number); they SHALL carry `epicid` when the issue belongs to an epic at emit time.
 - `epic.*` events SHALL carry `projectid` and `epicid`.
 - `agent-session.*` events SHALL carry `projectid` and `sessionid`; they SHALL carry `agentid` when the session originates from an agent, and `issue`, `workflowrunid`, and `stage` when the session originates from a workflow/issue.
@@ -15,9 +15,9 @@ Every event family SHALL stamp its full business lineage into CloudEvents envelo
 - **WHEN** a `workflow.run.*` event is produced for a run whose metadata annotations carry a project id, issue id, and issue number
 - **THEN** the emitted envelope extensions contain `projectid`, `issueid`, `issue`, and `workflowrunid`
 
-#### Scenario: Stage, task, and check events carry the stage name
+#### Scenario: Stage, task, check, and feedback-requested events carry the stage name
 
-- **WHEN** a `workflow.stage.*`, `workflow.task.*`, or `workflow.check.*` event is produced
+- **WHEN** a `workflow.stage.*`, `workflow.task.*`, `workflow.check.*`, or `workflow.feedback.requested` event is produced
 - **THEN** the emitted envelope extensions contain `stage` set to the stage name, in addition to the `workflow.*` lineage attributes
 
 #### Scenario: Issue events carry epic lineage when affiliated
@@ -73,6 +73,11 @@ Producers SHALL NOT issue cross-aggregate queries to gather lineage for stamping
 
 - **WHEN** the workflow run store produces an event for a run
 - **THEN** it derives `projectid`, `issueid`, and `issue` from the run's own metadata annotations, and does not load the issue aggregate to stamp them
+
+#### Scenario: Issue store stamps epicid from its own state, not a membership lookup
+
+- **WHEN** the issue store produces an event for an issue whose own state carries an `EpicId`
+- **THEN** it stamps `epicid` from that own state, and issues no query against the epic-issue membership table (or any other aggregate) to gather it
 
 ### Requirement: User-visible identity uses short names; internal ids carry the id suffix
 

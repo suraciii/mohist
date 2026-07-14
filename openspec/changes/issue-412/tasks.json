@@ -6,9 +6,9 @@
       "id": "T-001",
       "title": "Raise EventCatalog to the per-type lineage registry with a conformance helper",
       "spec": "specs/event-catalog-conformance/spec.md#eventcatalog-declares-required-lineage-attributes-per-type",
-      "description": "Turn EventCatalog from the flat All name list into the protocol registry: every registered type declares the lineage attributes its envelope MUST always carry, grouped by family so workflow.stage.*/task.*/check.* inherit the workflow.* base plus stage. Preserve the existing All list as a derived introspection surface so current callers keep compiling. Add a conformance helper (e.g. EventCatalog.RequiredAttributes(type) plus a test-side EnvelopeConformance.AssertRequired(envelope, type)) that fails when an emitted envelope is missing any required attribute. Declaration is the single source of truth the producers (T-002..T-006) stamp against and that the distributed conformance assertions call.",
+      "description": "Turn EventCatalog from the flat All name list into the protocol registry: every registered type declares the lineage attributes its envelope MUST always carry, grouped by family so workflow.stage.*/task.*/check.*/feedback.requested inherit the workflow.* base plus stage. Preserve the existing All list as a derived introspection surface so current callers keep compiling. Add a conformance helper (e.g. EventCatalog.RequiredAttributes(type) plus a test-side EnvelopeConformance.AssertRequired(envelope, type)) that fails when an emitted envelope is missing any required attribute. Declaration is the single source of truth the producers (T-002..T-006) stamp against and that the distributed conformance assertions call.",
       "acceptanceCriteria": [
-        "EventCatalog exposes, for every registered type, the set of always-required lineage attributes matching the matrix: workflow.run.* -> {projectid, workflowrunid}; workflow.stage.*/task.*/check.* -> {projectid, workflowrunid, stage}; issue.* -> {projectid, issueid, issue}; epic.* -> {projectid, epicid}; agent-session.* -> {projectid, sessionid}; runner.* -> {runnerid}; com.mohist.inbox.item-persisted -> {projectid, issueid, issue}.",
+        "EventCatalog exposes, for every registered type, the set of always-required lineage attributes matching the matrix: workflow.run.* -> {projectid, workflowrunid}; workflow.stage.*/task.*/check.*/feedback.requested -> {projectid, workflowrunid, stage}; issue.* -> {projectid, issueid, issue}; epic.* -> {projectid, epicid}; agent-session.* -> {projectid, sessionid}; runner.* -> {runnerid}; com.mohist.inbox.item-persisted -> {projectid, issueid, issue}.",
         "Catalog-only types with no producer today (runner.disconnected, workflow.repair-scheduled) are declared in the registry with their matrix required attributes but are not exercised by the conformance check.",
         "Conditional/affiliation-dependent attributes (issueid/issue/epicid on workflow.*, epicid on issue.*, agentid/issue/workflowrunid/stage on agent-session.*) are modelled as conditional and validated by the stamping scenarios in the producer tasks, not as always-required.",
         "A unit test proves the helper: a synthetic envelope of a registered type carrying all required attributes passes, and one missing a required attribute fails (negative case proving the guard actually catches drift).",
@@ -45,43 +45,47 @@
     },
     {
       "id": "T-003",
-      "title": "Stamp issue lineage (rename to issue, add epicid via join table) in IssueStore",
+      "title": "Stamp issue lineage (rename to issue, add EpicId on Issue state) in IssueStore",
       "spec": "specs/event-lineage-stamping/spec.md#lineage-stamped-on-every-event-family-at-production-time",
-      "description": "In IssueStore rename the stamped issue number from issueno to issue (the protocol name users will write in expressions), and stamp epicid when the issue belongs to an epic. Because the Issue aggregate does not own epic membership, resolve epicid with a single indexed lookup against db.EpicIssues (by ProjectId+IssueId) inside the existing append transaction — the one narrow cross-aggregate exception (D5); omit epicid when no link row exists. Keep stamping a production-time snapshot; do not rewrite history on later relationship changes.",
+      "description": "In IssueStore rename the stamped issue number from issueno to issue (the protocol name users will write in expressions). Add a nullable EpicId property to the Issue domain aggregate (the same cross-aggregate-reference pattern it already uses for WorkflowRunId) plus an eventless SetEpicId transition, and expose IIssueGrain.SetEpicAffiliationAsync(epicId) which persists via the existing state-only IssueStore.SaveAsync(key, state) overload (no domain event — it is a denormalization). Stamp epicid from state.EpicId — the issue's own state, no cross-aggregate query (D5). Omit epicid when state.EpicId is null. The EpicGrain write path that populates Issue.EpicId on link/unlink is T-004. Keep stamping a production-time snapshot; do not rewrite history on later relationship changes.",
       "acceptanceCriteria": [
         "An issue.* event stamps projectid, issueid, and issue (the issue number); no issueno key is present.",
-        "An issue.* event for an issue linked to an epic additionally stamps epicid; an unaffiliated issue omits epicid entirely (no empty value).",
-        "epicid is resolved by a single indexed EpicIssues lookup (ProjectId+IssueId) inside the append transaction; no Epic grain call and no Epic domain logic is invoked.",
-        "BuildIdentityExtensions/ToCloudEvent still run within SaveAsync's transaction so the epicid snapshot is consistent with the append.",
-        "IssueTransactionalEventAppendSpecs asserts issue (not issueno), epicid presence when linked and absence when unaffiliated, and that each emitted envelope satisfies EventCatalog.RequiredAttributes for its type.",
+        "An issue.* event for an issue whose state carries a non-null EpicId additionally stamps epicid; an issue with a null EpicId omits epicid entirely (no empty value).",
+        "epicid is stamped purely from state.EpicId (the issue aggregate's own state); IssueStore issues no query against db.EpicIssues or any other aggregate to gather it.",
+        "Issue exposes a nullable EpicId and an eventless SetEpicId transition; IIssueGrain.SetEpicAffiliationAsync persists it via the state-only save (no issue domain event is recorded, since the authoritative EpicIssueLinked/EpicIssueUnlinked events live on the epic stream).",
+        "BuildIdentityExtensions still runs within SaveAsync's transaction so the epicid snapshot is consistent with the append.",
+        "IssueTransactionalEventAppendSpecs asserts issue (not issueno), epicid presence when state.EpicId is set and absence when null, and that each emitted envelope satisfies EventCatalog.RequiredAttributes for its type.",
         "Server build + `npm test` pass."
       ],
       "priority": 3,
       "mode": "AFK",
       "type": "WRITE",
-      "output": "packages/server/src/Mohist.Server/Infrastructure/Data/Issue/IssueStore.cs updated; IssueTransactionalEventAppendSpecs extended with issue/epicid assertions and conformance checks.",
+      "output": "packages/server/src/Mohist.Server/Issue/Domain/Issue.cs (EpicId + SetEpicId), packages/server/src/Mohist.Server/Issue/Grains/IIssueGrain.cs + IssueGrain.cs (SetEpicAffiliationAsync), packages/server/src/Mohist.Server/Infrastructure/Data/Issue/IssueStore.cs (rename + epicid stamp from state); IssueTransactionalEventAppendSpecs extended.",
       "dependsOn": ["T-001"],
       "passes": false,
-      "notes": "db.EpicIssues is indexed on {ProjectId, IssueId} (MohistDbContext line 288). This is the only permitted cross-aggregate read; document it as such. Historical rows keep issueno (Non-Goal: no backfill); read-side fallback is handled in T-007."
+      "notes": "Issue already holds WorkflowRunId as a cross-aggregate reference; EpicId follows the same pattern and rides the existing State JSON column (IssueRow's denormalized columns are computed from State, so no schema migration is needed for stamping). The write side (EpicGrain link/unlink -> IssueGrain.SetEpicAffiliationAsync, plus backfill) is T-004. Historical event rows keep issueno (Non-Goal: no event backfill); read-side fallback is handled in T-007."
     },
     {
       "id": "T-004",
-      "title": "Drop epicno and keep project+epic identity in EpicGrain stamping",
+      "title": "Drop epicno in EpicGrain stamping and push EpicId onto Issue at link/unlink",
       "spec": "specs/event-lineage-stamping/spec.md#lineage-stamped-on-every-event-family-at-production-time",
-      "description": "Update both PersistEpicEventsAsync overloads in EpicGrain so epic.* events stamp only projectid and epicid, removing epicno (not a routing dimension per the matrix). Normalize the extensions dict to StringComparer.Ordinal for consistency with the stores. Extract the extension construction into a testable pure helper so the stamped attributes can be asserted without a full Orleans silo.",
+      "description": "Two EpicGrain changes. (1) Stamp: update both PersistEpicEventsAsync overloads so epic.* events stamp only projectid and epicid, removing epicno (not a routing dimension per the matrix); normalize the extensions dict to StringComparer.Ordinal; extract extension construction into a testable pure helper. (2) Denormalization push (D5): on link, after the epic transaction commits, call IIssueGrain.SetEpicAffiliationAsync(epicId) (added in T-003); on unlink call it with null. The state-only save persists Issue.EpicId without recording a domain event. If the synchronous grain-to-grain call fails, the existing durable EpicIssueLinkedHandler/EpicIssueUnlinkedHandler re-apply it (self-healing). Also backfill Issue.EpicId for issues already linked at cutover, from EpicIssueRow (state backfill only; no historical event is rewritten).",
       "acceptanceCriteria": [
         "An epic.* event stamps projectid and epicid and contains no epicno key.",
         "Both PersistEpicEventsAsync overloads (post-commit and transactional) stamp the identical unified set.",
         "A unit test (on the extracted helper, no silo required) asserts projectid+epicid present and epicno absent, and that the produced extensions satisfy EventCatalog.RequiredAttributes for an epic.* type.",
+        "On link, EpicGrain sets the linked issue's EpicId to the epic id via IIssueGrain.SetEpicAffiliationAsync; on unlink it clears it (null). The state-only save persists the change without recording an issue domain event.",
+        "If the synchronous SetEpicAffiliationAsync call fails, the durable EpicIssueLinked/EpicIssueUnlinked handler re-applies it (bounded, self-healing drift).",
+        "Issues already linked to an epic at cutover have their Issue.EpicId backfilled from EpicIssueRow in a one-time pass (state backfill; no historical event is rewritten).",
         "Server build + `npm test` pass."
       ],
       "priority": 4,
       "mode": "AFK",
       "type": "WRITE",
-      "output": "packages/server/src/Mohist.Server/Epic/Grains/EpicGrain.cs updated (both stamping sites) with an extracted, unit-tested extension helper.",
-      "dependsOn": ["T-001"],
+      "output": "packages/server/src/Mohist.Server/Epic/Grains/EpicGrain.cs updated (both stamping sites drop epicno; link/unlink push EpicId via IIssueGrain.SetEpicAffiliationAsync; one-time backfill) with an extracted, unit-tested extension helper.",
+      "dependsOn": ["T-001", "T-003"],
       "passes": false,
-      "notes": "Stamping sites are EpicGrain.cs:1098-1103 and 1148-1153. The transactional overload appends inside the caller's db context; keep that scope."
+      "notes": "Stamping sites are EpicGrain.cs:1098-1103 and 1148-1153. The transactional overload appends inside the caller's db context; keep that scope. The EpicId push is the D5 denormalization that lets IssueStore stamp epicid from the issue's own state (no cross-aggregate query). Link/unlink entry points are LinkIssueAsync/LinkIssuesAsync/UnlinkIssueAsync/UnlinkIssuesAsync."
     },
     {
       "id": "T-005",
@@ -132,15 +136,15 @@
         "HermesIssueNotificationHandler.ResolveFromIssueExtensions reads issue with an issueno fallback.",
         "packages/web event-envelope.ts documents issue (and epicid) instead of issueno/epicno; any web code/fixtures hardcoding issueno or epicno are updated to issue / epicid.",
         "Server build + `npm test` pass; web `npm run typecheck -w packages/web` and `npm run test:run -w packages/web` pass.",
-        "No producer or consumer references issueno as the primary key or references epicno anywhere (only the intentional history-fallback reads remain)."
+        "After T-003 (issueno -> issue producer) and T-004 (epicno drop) land, no producer or consumer references issueno as the primary key or references epicno anywhere; only the intentional history-fallback reads remain."
       ],
       "priority": 7,
       "mode": "AFK",
       "type": "WRITE",
       "output": "EpicAutoDoneHandler.cs, HermesIssueNotificationHandler.cs, and packages/web/src/app/providers/model/event-envelope.ts (+ fixtures) reconciled to issue/epicid with history fallback where rows are traversed.",
-      "dependsOn": ["T-003"],
+      "dependsOn": ["T-003", "T-004"],
       "passes": false,
-      "notes": "Ship the rename atomically (D3): web only reads issue after the server stamps it. T-006 already handled InboxProjectionHandler's own read in the same file. Keep the dual-key issueno fallback minimal and permanent in history-traversing handlers (Non-Goal: no backfill)."
+      "notes": "Ship the rename atomically (D3): web only reads issue after the server stamps it. T-003 produces the issue rename and T-004 drops epicno, so T-007 depends on both before its end-state AC can hold; T-006 already handled InboxProjectionHandler's own read in the same file. Keep the dual-key issueno fallback minimal and permanent in history-traversing handlers (Non-Goal: no backfill)."
     }
   ]
 }
