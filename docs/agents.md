@@ -36,8 +36,8 @@ Inline Agent 是一种使用方式，不是持久化实体。Workflow task 直�
 - 这次执行的 prompt；
 - 可选的 Session 名称和 OpenCode 模型选项。
 
-它适合 Workflow 中的规划、实现、审查和修复。它没有名称、Instructions、Skills、
-订阅或 Agent ID，也不能被 `mo agent` 命令查找。
+它适合 Workflow 中的规划、实现、审查和修复。它没有名称、Instructions、Skills
+或 Agent ID，不能被事件路由规则引用，也不能被 `mo agent` 命令查找。
 
 Workflow TaskRun 拥有这次 task 的成功、失败和输出。Action 只是执行接口，
 AgentSession 只是对话与审计记录。
@@ -49,10 +49,10 @@ Mohist Agent 也称 Named Agent，是 Project 内的一等资源。它保存：
 - 稳定 ID 和名称；
 - Instructions 和 Agent 配置；
 - Skills；
-- 并发限制与 active / archived 状态；
-- 可选的事件订阅。
+- 并发限制与 active / archived 状态。
 
-用户可以手动启动 Mohist Agent，订阅也可以在事件命中后启动它。启动时会创建
+用户可以手动启动 Mohist Agent，项目的事件路由规则命中后也可以启动它
+（规则引用 Agent，Agent 不拥有规则）。启动时会创建
 AgentJob，并固定本次使用的 Agent 指令和配置；之后编辑 Agent，不改变已经开始的
 执行。
 
@@ -109,4 +109,4 @@ Compact 或 Reset 也不会重新启动 Mohist Agent。具体执行方式由当�
 Mohist Agent 专项设计，本篇不定义它的输入、复用或等待语义。
 
 `mohist/opencode` 的具体配置见 [`mohist/opencode` Action](actions/opencode.md)。Mohist Agent
-事件响应见 [Agent 事件订阅](agent-subscriptions.md)。
+事件响应见 [Agent 事件路由](agent-subscriptions.md)。
