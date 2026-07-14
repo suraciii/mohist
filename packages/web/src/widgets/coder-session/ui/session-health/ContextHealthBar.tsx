@@ -2,8 +2,7 @@ import { useState } from 'react'
 import { cn } from '@/shared/lib/utils'
 import { Button } from '@/shared/ui/components/button'
 import { formatCompact } from '@/shared/lib/format-compact'
-import type { ContextHealthStatus } from '@/shared/lib/context-health'
-import { clampPercent, isContextHealthStatus } from '@/shared/lib/context-health'
+import { clampPercent, isContextHealthStatus, type ContextHealthStatus } from '@/entities/coder-session'
 
 export interface ContextHealthBarProps {
   contextWindowUsed?: number | null

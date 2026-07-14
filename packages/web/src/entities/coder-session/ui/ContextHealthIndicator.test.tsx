@@ -1,7 +1,7 @@
 import '@testing-library/jest-dom'
 import { render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
-import { ContextHealthIndicator } from './context-health-indicator'
+import { ContextHealthIndicator } from './ContextHealthIndicator'
 
 describe('ContextHealthIndicator', () => {
   describe('missing / non-finite data', () => {

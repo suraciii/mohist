@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseDiff, parseDiffFiles } from '../../../widgets/issue-changed-files'
+import { parseDiff, parseDiffFiles } from '../../../shared/lib/diff-model'
 import {
   BAR_DIFF,
   changedFile,

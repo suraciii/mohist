@@ -1,7 +1,7 @@
 import '@testing-library/jest-dom'
 import { render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
-import { ContextUsageTrendMiniChart, type ContextUsageTrendSample } from './context-usage-trend-mini-chart'
+import { ContextUsageTrendMiniChart, type ContextUsageTrendSample } from './ContextUsageTrendMiniChart'
 
 function makeHistory(count: number, opts: { firstPercent?: number; lastPercent?: number; spacingSeconds?: number } = {}): ContextUsageTrendSample[] {
   const { firstPercent = 10, lastPercent = 80, spacingSeconds = 60 } = opts

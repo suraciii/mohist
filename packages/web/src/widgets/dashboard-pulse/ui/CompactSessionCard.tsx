@@ -1,8 +1,11 @@
 import { Link } from 'react-router-dom'
 import { useProjectPath } from '@/entities/project'
 import type { IssueAttentionItem } from '@/entities/agent-ops'
-import { ContextHealthIndicator } from '@/shared/ui/context-health-indicator'
-import { ContextUsageTrendMiniChart, type ContextUsageTrendSample } from '@/shared/ui/context-usage-trend-mini-chart'
+import {
+  ContextHealthIndicator,
+  ContextUsageTrendMiniChart,
+  type ContextUsageTrendSample,
+} from '@/entities/coder-session'
 import { formatCompact, formatCost } from '@/shared/lib/format-compact'
 import type { SessionCard } from '@/entities/agent-ops'
 

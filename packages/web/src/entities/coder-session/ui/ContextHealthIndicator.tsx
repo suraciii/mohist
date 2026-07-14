@@ -1,6 +1,6 @@
 import { AlertTriangleIcon, CircleAlertIcon } from 'lucide-react'
 import { cn } from '@/shared/lib/utils'
-import { clampPercent, isContextHealthStatus, type ContextHealthStatus } from '@/shared/lib/context-health'
+import { clampPercent, isContextHealthStatus, type ContextHealthStatus } from '../lib/context-health'
 
 export interface ContextHealthIndicatorProps {
   contextWindowUsed?: number | null
