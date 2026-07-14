@@ -284,6 +284,27 @@ public class EpicProgressionSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
+    public async Task RecomputeProgressAsync_CancelledLinkedPrerequisite_DoesNotStartDependent()
+    {
+        var database = CreateDatabase();
+        await SeedEpicAsync(database, status: "running");
+        await SeedIssueAsync(database, projectId: "project_1", epicId: "epic_1", issueId: "issue_prerequisite", issueNumber: 1, status: IssueStatus.Cancelled, canStart: true);
+        await SeedIssueAsync(database, projectId: "project_1", epicId: "epic_1", issueId: "issue_dependent", issueNumber: 2, status: IssueStatus.Backlog, canStart: true, prerequisiteNumbers: [1]);
+        await SeedLinkAsync(database, "epic_1", "issue_prerequisite", 1);
+        await SeedLinkAsync(database, "epic_1", "issue_dependent", 2);
+
+        var grains = new RecordingGrainFactory(database.Factory);
+        var grain = grains.GetEpicGrain("project_1:epic_1");
+
+        var result = await grain.RecomputeProgressAsync();
+
+        Assert.Equal("running", result!.Status);
+        Assert.Empty(grains.IssueStartCalls);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
     public async Task RecomputeProgressAsync_StartWorkAsyncThrows_PropagatesToDispatcher()
     {
         // Terminal-event recompute uses StartFailureMode.Propagate so the
@@ -336,12 +357,8 @@ public class EpicProgressionSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
-    public async Task ResumeAsync_StartFailureWithRetryEventAppendFailure_LeavesEpicRunningButIdle()
+    public async Task ResumeAsync_StartFailure_PersistsRecoveryEvent()
     {
-        // Parent-before-child: the paused-to-running transition commits before
-        // TryStartNextAsync. The EpicStartAttemptFailed event is best-effort:
-        // if its append fails, the exception is caught (logged) and the epic
-        // stays running-but-idle — it converges on the next readiness event.
         var database = CreateDatabase();
         await SeedEpicAsync(database, status: "paused");
         await SeedIssueAsync(database, projectId: "project_1", epicId: "epic_1", issueId: "issue_1", issueNumber: 1, status: IssueStatus.Done, canStart: true);
@@ -349,19 +366,15 @@ public class EpicProgressionSpecs
         await SeedLinkAsync(database, "epic_1", "issue_1", 1);
         await SeedLinkAsync(database, "epic_1", "issue_2", 2);
 
-        var eventStore = new RecordingEventStore
-        {
-            ThrowOnAppend = envelope => envelope.Type == EventCatalog.ReverseDns.EpicStartAttemptFailed,
-        };
+        var eventStore = new RecordingEventStore();
         var grains = new RecordingGrainFactory(database.Factory, eventStore) { ThrowOnStart = true };
         var grain = grains.GetEpicGrain("project_1:epic_1");
 
-        // ResumeAsync commits the running transition, then TryStartNextAsync
-        // fails (ThrowOnStart) and the recovery event append fails (ThrowOnAppend).
-        // The best-effort persistence swallows the append error.
         var resumed = await grain.ResumeAsync();
 
         Assert.Equal("running", resumed.Status);
+        Assert.Contains(eventStore.Appended,
+            evt => evt.Envelope.Type == EventCatalog.ReverseDns.EpicStartAttemptFailed);
         await using var verify = database.CreateDbContext();
         var stored = await verify.Epics.AsNoTracking().SingleAsync();
         Assert.Equal("running", stored.Status);
@@ -527,7 +540,8 @@ public class EpicProgressionSpecs
         int issueNumber,
         Mohist.Server.Issue.Domain.IssueStatus status,
         bool canStart = false,
-        string priority = "p2")
+        string priority = "p2",
+        int[]? prerequisiteNumbers = null)
     {
         var issue = new Mohist.Server.Issue.Domain.Issue
         {
@@ -538,6 +552,7 @@ public class EpicProgressionSpecs
             Status = status,
             Priority = priority,
             IsDraft = !canStart,
+            PrerequisiteNumbers = prerequisiteNumbers ?? [],
         };
         var json = IssueStore.Serialize(issue);
         await using var db = database.CreateDbContext();

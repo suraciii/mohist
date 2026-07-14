@@ -246,6 +246,35 @@ public sealed class EpicIssueUnlinkedHandler : ICloudEventHandler<Epic.Domain.Ev
 }
 
 /// <summary>
+/// Subscribes to <c>com.mohist.epic.status-changed</c> transitions into
+/// <c>running</c> and re-drives <see cref="IEpicGrain.RecomputeProgressAsync"/>.
+/// This is the durable recovery intent for a command-path start: if a crash
+/// occurs after the running transition commits but before
+/// <c>TryStartNextAsync</c> advances the first issue, this handler re-drives
+/// the recompute on redelivery. It also covers the auto-mark-done path for
+/// an epic that starts with no open members.
+/// </summary>
+[Subscription(Type = EventCatalog.ReverseDns.EpicStatusChanged)]
+public sealed class EpicRunningStatusHandler : ICloudEventHandler<Epic.Domain.Events.EpicStatusChanged>
+{
+    private readonly EpicEventRecomputeDispatcher _dispatcher;
+
+    [ActivatorUtilitiesConstructor]
+    public EpicRunningStatusHandler(
+        IGrainFactory grains,
+        ILogger<EpicRunningStatusHandler> log)
+    {
+        _dispatcher = new EpicEventRecomputeDispatcher(grains, log);
+    }
+
+    public bool Filter(CloudEvent<Epic.Domain.Events.EpicStatusChanged> evt) =>
+        string.Equals(evt.Data.NewStatus, "running", StringComparison.Ordinal);
+
+    public Task HandleAsync(CloudEvent<Epic.Domain.Events.EpicStatusChanged> evt, CancellationToken ct) =>
+        _dispatcher.DispatchAsync(evt.Id, evt.Extensions, evtType: "status-changed", ct);
+}
+
+/// <summary>
 /// Subscribes to <c>com.mohist.epic.start-attempt-failed</c> and re-drives
 /// <see cref="IEpicGrain.RecomputeProgressAsync"/> on the epic. When
 /// <c>TryStartNextAsync</c> catches a transient <c>StartWorkAsync</c> failure

@@ -551,8 +551,12 @@ public class EpicGrain : Grain, IEpicGrain
         domain.Start(now.UtcDateTime);
         MapToRow(domain, row, now);
         var pending = DrainPendingEvents(domain);
+        // Persist the status-changed event atomically with the state transition
+        // so the EpicRunningStatusHandler durable trigger survives or rolls back
+        // together. The handler re-drives recompute if the command-path
+        // TryStartNextAsync never runs (crash after commit).
+        await PersistEpicEventsAsync(db, domain, pending, now);
         await db.SaveChangesAsync();
-        await PersistEpicEventsAsync(domain, pending, now);
 
         if (row.Status == EpicStatusName.Running && !wasAlreadyRunning)
         {
@@ -586,8 +590,8 @@ public class EpicGrain : Grain, IEpicGrain
         domain.Resume(now.UtcDateTime);
         MapToRow(domain, row, now);
         var pending = DrainPendingEvents(domain);
+        await PersistEpicEventsAsync(db, domain, pending, now);
         await db.SaveChangesAsync();
-        await PersistEpicEventsAsync(domain, pending, now);
 
         if (row.Status == EpicStatusName.Running && !wasAlreadyRunning)
         {
@@ -963,12 +967,11 @@ public class EpicGrain : Grain, IEpicGrain
 
         // Build the set of undelivered issue numbers across the linked
         // issues so each issue's StartBlocker can be evaluated against
-        // peer state. Cancelled issues are NOT considered delivered
-        // (they are excluded from selection by EpicProgress anyway, and
-        // other in-flight work should still be respected as prereqs).
+        // peer state. Only a done prerequisite is delivered; cancellation
+        // remains a blocker for a dependent issue.
         var undeliveredPrereqNumbers = new HashSet<int>(
             byNumber.Values
-                .Where(i => i.Status is not (IssueStatus.Done or IssueStatus.Cancelled))
+                .Where(i => i.Status != IssueStatus.Done)
                 .Select(i => i.Number));
 
         // Also fetch external prerequisites (prerequisite numbers that are
@@ -991,7 +994,7 @@ public class EpicGrain : Grain, IEpicGrain
                 allPrereqNumbers);
             foreach (var prereqIssue in prereqIssues.Values)
             {
-                if (prereqIssue.Status is not (IssueStatus.Done or IssueStatus.Cancelled))
+                if (prereqIssue.Status != IssueStatus.Done)
                     undeliveredPrereqNumbers.Add(prereqIssue.Number);
             }
         }

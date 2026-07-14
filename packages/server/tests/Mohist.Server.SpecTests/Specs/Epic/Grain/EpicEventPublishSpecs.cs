@@ -240,24 +240,24 @@ public class EpicEventPublishSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
-    public async Task EventStoreFailure_DoesNotPropagateAndStateStillCommits()
+    public async Task EventStoreFailure_AtomicRollback_PreventsTransitionWithoutEvent()
     {
-        // Epic state transitions commit before child work starts (parent-
-        // before-child ordering prevents orphaned issues). Event persistence
-        // is best-effort for the status-changed event: a failure is caught
-        // and logged but does not roll back the already-committed state.
+        // With atomic event persistence for status transitions, an event-store
+        // append failure rolls back the entire transaction — the epic does not
+        // end up in a committed state without its durable status-changed event.
+        // This ensures the EpicRunningStatusHandler recovery trigger is never
+        // lost relative to the state transition.
         var (database, _) = CreateDatabaseWithRecordingEventStore();
         var time = new FakeTimeProvider(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero));
         await SeedEpicAsync(database);
         var throwingStore = new ThrowingEventStore();
 
         var grain = CreateGrain(database.Factory, $"{ProjectId}:{EpicId}", throwingStore, time);
-        await grain.StartAsync();
+        await Assert.ThrowsAsync<InvalidOperationException>(() => grain.StartAsync());
 
         await using var verify = database.CreateDbContext();
         var row = await verify.Epics.AsNoTracking().SingleAsync(e => e.Id == EpicId);
-        Assert.Equal("running", row.Status);
-        Assert.Equal(1, throwingStore.AppendCount);
+        Assert.Equal("idle", row.Status);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
