@@ -1,4 +1,8 @@
-import type { ToolCallEntry } from '../../../entities/coder-session'
+import {
+  isContextHealthStatus,
+  type ContextHealthStatus,
+  type ToolCallEntry,
+} from '../../../entities/coder-session'
 import type { AgentDetailEventMap } from '../../../entities/agent'
 import {
   viewSessionEvents,
@@ -15,7 +19,7 @@ export interface RecoveryEvent {
   timestamp: number
 }
 
-export type ContextHealthStatus = 'green' | 'yellow' | 'red'
+export type { ContextHealthStatus } from '../../../entities/coder-session'
 
 export interface ContextHealthState {
   status: ContextHealthStatus | null
@@ -26,7 +30,7 @@ export interface ContextHealthState {
 }
 
 export function toContextHealthStatus(value: string | null | undefined): ContextHealthStatus | null {
-  return value === 'green' || value === 'yellow' || value === 'red' ? value : null
+  return isContextHealthStatus(value) ? value : null
 }
 
 export interface CompactionEntry {
