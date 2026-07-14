@@ -4,15 +4,17 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { AlertTriangleIcon, CheckCircle2Icon, GaugeIcon, ShieldOffIcon } from 'lucide-react'
 import {
   approveIssue,
-  deriveAttentionItems,
   invalidateApprovalWait,
-  isIssueAttentionItem,
   useApprovalWait,
   useIssues,
   type ApprovalWaitMetricsResponse,
-  type AttentionItem,
   type Issue,
 } from '../../../entities/issue'
+import {
+  deriveAttentionItems,
+  isIssueAttentionItem,
+  type AttentionItem,
+} from '../../../entities/agent-ops'
 import { formatDuration } from '@/shared/lib/format-duration'
 import { useAgentStatus, type AgentStatus } from '../../../entities/agent'
 import { useProject, useProjectPath } from '../../../entities/project'

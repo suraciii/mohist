@@ -1,4 +1,4 @@
-import type { SessionCompactView, SessionEvent } from '../view'
+import type { SessionCompactView, SessionEvent } from '../types'
 import {
   extractTextChunk,
   getStringProp,

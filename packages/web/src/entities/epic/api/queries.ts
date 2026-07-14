@@ -3,7 +3,7 @@ import type { QueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import type { Epic, EpicDetail, EpicWithProgress, StoredCloudEventDto } from '../model/types'
 import { useProject } from '../../project/@x/project-context'
-import { startIssue } from '../../issue'
+import { startIssue } from '../../issue/@x/actions'
 import { addEpicIssue, batchAddEpicIssues, batchRemoveEpicIssues, closeEpic, createEpic, getEpic, getEpicEvents, getEpics, markEpicDone, pauseEpic, removeEpicIssue, reopenEpic, resumeEpic, startEpic, updateEpic, type BatchMembershipResponse, type UpdateEpicInput } from './client'
 
 type InvalidationClient = Pick<QueryClient, 'invalidateQueries'>

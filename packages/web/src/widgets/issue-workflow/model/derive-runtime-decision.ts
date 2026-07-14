@@ -1,5 +1,4 @@
-import { IssueHealth, WorkflowStage, type Issue, type RecoveryProjection, type WorkflowTimeline } from '../../../entities/issue'
-import type { AgentStatus } from '../../../entities/agent'
+import { IssueHealth, WorkflowStage, type RecoveryProjection } from '../../../entities/issue'
 import {
   findFailedCheck,
   findFailedScriptHealthCheck,
@@ -10,76 +9,22 @@ import {
   buildPresentationContext,
   resolveSummaryPresentation,
 } from './runtime-presentations'
+import type {
+  RuntimeAvailableAction,
+  RuntimeCurrentTask,
+  RuntimeDecision,
+  RuntimeDecisionInput,
+  RuntimeSummary,
+} from './runtime-types'
 
-export type RuntimeSummary =
-  | 'running'
-  | 'queued'
-  | 'approval-required'
-  | 'blocked'
-  | 'failed'
-  | 'done'
-
-export type RuntimeActionKind =
-  | 'approve'
-  | 'send-back'
-  | 'retry'
-  | 'resume'
-  | 'rerun'
-  | 'stop'
-  | 'start'
-  | 'inspect'
-
-export interface RuntimeCurrentTask {
-  kind: 'task' | 'check'
-  title: string
-  status: string | null
-}
-
-export interface RuntimeAvailableAction {
-  kind: RuntimeActionKind
-  label: string
-  enabled: boolean
-  reason?: string
-}
-
-export interface RuntimeDecision {
-  summary: RuntimeSummary
-  headline: string
-  rationale: string
-  currentTask: RuntimeCurrentTask | null
-  nextAction: string
-  primary: RuntimeAvailableAction | null
-  actions: RuntimeAvailableAction[]
-  stopRecoverable: boolean | null
-  waitReason: string | null
-  driftNote: string | null
-  blockedReason: string | null
-  approvalStage: string | null
-}
-
-export interface RuntimeDecisionInput {
-  issue: Pick<Issue,
-    | 'status'
-    | 'workflowStage'
-    | 'workflowStatus'
-    | 'health'
-    | 'approvalState'
-    | 'blockedReason'
-    | 'recovery'
-    | 'convergence'
-    | 'drift'
-    | 'workflowStageProgress'
-    | 'prerequisites'
-    | 'isDraft'
-    | 'canStart'
-    | 'blocker'
-  > | null | undefined
-  timeline?: Pick<WorkflowTimeline, 'currentStage' | 'status' | 'stages' | 'pendingWork' | 'availableActions'> | null
-  agentStatus?: Pick<AgentStatus, 'runnerAvailable' | 'runnerMessage' | 'capacity' | 'activeAgents'> | null
-  issueNumber?: number
-  hasActiveAgent?: boolean
-  hasAnyActiveAgent?: boolean
-}
+export type {
+  RuntimeActionKind,
+  RuntimeAvailableAction,
+  RuntimeCurrentTask,
+  RuntimeDecision,
+  RuntimeDecisionInput,
+  RuntimeSummary,
+} from './runtime-types'
 
 const APPROVAL_FAILURE_OVERRIDE_SUMMARY: RuntimeSummary = 'failed'
 

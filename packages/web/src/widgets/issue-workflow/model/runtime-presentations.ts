@@ -5,7 +5,7 @@ import type {
   RuntimeCurrentTask,
   RuntimeDecisionInput,
   RuntimeSummary,
-} from './derive-runtime-decision'
+} from './runtime-types'
 
 interface SummaryPresentationContext {
   input: RuntimeDecisionInput

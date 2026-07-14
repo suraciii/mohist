@@ -1,5 +1,5 @@
 import type { RuntimeActionKind, RuntimeDecision } from './model/derive-runtime-decision'
-import type { RuntimeDecisionSurfaceMutations } from './ui/RuntimeDecisionSurface'
+import type { RuntimeDecisionSurfaceMutations } from './model/runtime-action-types'
 
 export interface StopConsequenceCopy {
   title: string

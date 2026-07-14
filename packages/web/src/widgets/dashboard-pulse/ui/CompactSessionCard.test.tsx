@@ -2,7 +2,7 @@ import '@testing-library/jest-dom'
 import { render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
-import type { SessionCard } from '@/widgets/coder-session/model/activity-cards'
+import type { SessionCard } from '@/entities/agent-ops'
 import { CompactSessionCard } from './CompactSessionCard'
 
 function makeCard(overrides: Partial<SessionCard> = {}): SessionCard {

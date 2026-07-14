@@ -6,7 +6,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { IssueHealth, IssueStatus, type Issue, type IssuePrerequisiteSummary } from '../../../../entities/issue'
 import { IssueConfigurationCard } from './IssueConfigurationCard'
 import type { IssueDetailMutations } from '../../model/useIssueDetailMutations'
-import type { IssuePrerequisitePickerProps } from '../../../../features/prerequisite-picker'
+import type { IssuePrerequisitePickerProps } from '../../../../entities/issue'
 
 const PROJECT_ID = 'proj_live_001'
 const ISSUE_NUMBER = 10

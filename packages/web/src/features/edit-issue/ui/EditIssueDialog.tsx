@@ -9,10 +9,8 @@ import {
 import { Button } from '@/shared/ui/components/button'
 import { Input } from '@/shared/ui/components/input'
 import { AttachmentComposer } from '@/shared/ui'
-import { extractAttachmentIds, updateIssue } from '../../../entities/issue'
-import { LabelEditor } from '../../../entities/issue/lib/label-editor'
-import type { LabelMap } from '../../../entities/issue/model/labels'
-import type { Issue } from '../../../entities/issue'
+import { extractAttachmentIds, LabelEditor, updateIssue } from '../../../entities/issue'
+import type { Issue, LabelMap } from '../../../entities/issue'
 import { getPriorityStyle } from '../../../shared/lib/label-colors'
 
 const PRIORITIES = ['p0', 'p1', 'p2', 'p3', 'p4']

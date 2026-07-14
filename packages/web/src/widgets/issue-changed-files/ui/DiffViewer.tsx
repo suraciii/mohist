@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { parseDiff, FileBlock } from '../model/diffModel'
+import { parseDiff, FileBlock } from '@/shared/lib/diff-model'
 import { Button } from '@/shared/ui/components/button'
 
 function FileEntry({ block }: { block: FileBlock }) {

@@ -3,5 +3,6 @@ export { agentRuntimeToConfigKey, configToAgentRuntime, SUPPORTED_RUNTIME_KEYS }
 export type { ProjectDefaultWorkflowProfile } from './api/client'
 export * from './model/types'
 export * from './model/updateOutcome'
+export { includesWorkflowProfileId, workflowProfileIdEquals } from './model/workflowProfileIds'
 export { ProgressStages } from './ui/ProgressStages'
 export { SystemUpdateOutcomeView } from './ui/SystemUpdateOutcomeView'

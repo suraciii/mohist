@@ -5,7 +5,7 @@ import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { SidebarProvider } from '../../../shared/ui/components/sidebar'
-import { ThemeProvider } from '../../../app/providers/ThemeProvider'
+import { ThemeProvider } from '../../../shared/lib/theme/ThemeProvider'
 import { THEME_STORAGE_KEY } from '../../../shared/lib/theme/theme'
 import {
   PreferencesSection,
@@ -16,7 +16,7 @@ import {
   __resetShortcutHandlersForTesting,
   getShortcutHandler,
   registerShortcutHandler,
-} from '../../../features/settings-search/keyboard-shortcuts'
+} from '../../../shared/lib/keyboard-shortcuts'
 
 function renderPreferences() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })

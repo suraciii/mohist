@@ -1,5 +1,5 @@
 import { Button } from '@/shared/ui/components/button'
-import type { IssueCommitsResponse } from '../../../../entities/issue/model/git-changes'
+import type { IssueCommitsResponse } from '../../../../entities/issue'
 import { formatRelativeTime } from '../../model/format'
 
 export interface IssueCommitsSectionProps {

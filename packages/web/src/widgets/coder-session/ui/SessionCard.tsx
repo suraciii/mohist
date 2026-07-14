@@ -1,9 +1,9 @@
 import { Link } from 'react-router-dom'
 import { useProjectPath } from '../../../entities/project'
-import type { SessionCard as SessionCardType, WaitingCard as WaitingCardType } from '../model/activity-cards'
+import type { SessionCard as SessionCardType, WaitingCard as WaitingCardType } from '@/entities/agent-ops'
 import { ActiveSessionAnomalies, WaitingSessionAnomalies } from '../model/anomaly'
 import { formatCompact, formatCost } from '../../../shared/lib/format-compact'
-import { ContextHealthIndicator } from '../../session-health'
+import { ContextHealthIndicator } from '@/shared/ui/context-health-indicator'
 
 function formatDuration(ms: number): string {
   const totalSeconds = Math.floor(ms / 1000)

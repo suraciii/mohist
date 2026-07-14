@@ -1,5 +1,5 @@
 import { useState, useMemo, useContext, createContext, useEffect, useRef } from 'react'
-import { getFileBlockIdentity, type FileBlock } from '../model/diffModel'
+import { getFileBlockIdentity, type FileBlock } from '@/shared/lib/diff-model'
 import { Button } from '@/shared/ui/components/button'
 import { Input } from '@/shared/ui/components/input'
 

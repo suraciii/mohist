@@ -10,7 +10,7 @@ import { Button } from '@/shared/ui/components/button'
 import {
   SlotsEditor,
   type SlotsEditorMutationHook,
-} from '../../../widgets/runner-status/ui/SlotsEditor'
+} from '../../../widgets/runner-status'
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
 
 function formatTimestamp(value: string | null | undefined): string {

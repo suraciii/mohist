@@ -1,6 +1,5 @@
-import { IssueStatus } from '../../../entities/issue/@x/types'
-import { EpicStatus } from '../../../entities/epic/model/types'
-import type { LinkedIssue } from '../../../entities/epic/model/types'
+import { IssueStatus } from '../../../entities/issue'
+import { EpicStatus, type LinkedIssue } from '../../../entities/epic'
 
 export type AdvancementState =
   | { kind: 'running-but-idle' }

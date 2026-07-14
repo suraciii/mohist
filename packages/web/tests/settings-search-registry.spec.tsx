@@ -3,7 +3,7 @@ import { MemoryRouter } from 'react-router-dom'
 import { cleanup, render, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { settingsSearchRegistry } from '../src/features/settings-search'
+import { settingsSearchRegistry } from '../src/pages/settings/model/settings-search-registry'
 import { AiSettingsSection } from '../src/pages/settings/ui/AiSettingsSection'
 import { AgentSettingsSection } from '../src/pages/settings/ui/AgentSettingsSection'
 import { PreferencesSection } from '../src/pages/settings/ui/PreferencesSection'

@@ -25,8 +25,8 @@ import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
 import { Button } from '@/shared/ui/components/button'
 import { Badge } from '@/shared/ui/components/badge'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/shared/ui/components/dialog'
-import { AgentProfileEditor as DefaultAgentProfileEditor } from '../../../widgets/agent-profile-editor/ui/AgentProfileEditor'
-import { SubscriptionsSection as DefaultSubscriptionsSection } from '../../../widgets/agent-subscriptions/ui/SubscriptionsSection'
+import { AgentProfileEditor as DefaultAgentProfileEditor } from '../../../widgets/agent-profile-editor'
+import { SubscriptionsSection as DefaultSubscriptionsSection } from '../../../widgets/agent-subscriptions'
 
 export interface AgentDetailPageComponents {
   AgentProfileEditor: ComponentType<ComponentProps<typeof DefaultAgentProfileEditor>>

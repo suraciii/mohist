@@ -7,7 +7,7 @@ import { useProjectPath } from '../../../entities/project'
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
 import { Button } from '@/shared/ui/components/button'
 import { Badge } from '@/shared/ui/components/badge'
-import { AgentProfileEditor as DefaultAgentProfileEditor } from '../../../widgets/agent-profile-editor/ui/AgentProfileEditor'
+import { AgentProfileEditor as DefaultAgentProfileEditor } from '../../../widgets/agent-profile-editor'
 
 export interface AgentListPageComponents {
   AgentProfileEditor: ComponentType<ComponentProps<typeof DefaultAgentProfileEditor>>

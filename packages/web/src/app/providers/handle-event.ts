@@ -2,15 +2,18 @@ import type { Dispatch, SetStateAction } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import type { QueryClient } from '@tanstack/react-query'
-import type { EventName, RebaseConflictState } from '../../entities/issue'
-import { dispatchRebaseEvent } from '../../entities/issue/model/rebase-events'
-import { invalidateApprovalWait } from '../../entities/issue'
+import {
+  dispatchRebaseEvent,
+  invalidateApprovalWait,
+  type EventName,
+  type RebaseConflictState,
+} from '../../entities/issue'
 import {
   applyInboxHint,
   isHighAttentionKind,
   parseInboxItemPersistedHint,
   shouldSuppressInAppNotice,
-} from '../../entities/inbox/model/inbox-effects'
+} from '../../entities/inbox'
 import { EVENT_TYPES, REVERSE_DNS_EVENT_TYPES } from '../../shared/lib/canonical-event-types'
 import { decideReverseDnsOutcome } from './model/reverse-dns-outcome'
 import {

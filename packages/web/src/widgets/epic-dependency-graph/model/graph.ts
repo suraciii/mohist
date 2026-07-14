@@ -1,4 +1,4 @@
-import type { LinkedIssue } from '../../../entities/epic/model/types'
+import type { LinkedIssue } from '../../../entities/epic'
 
 export interface GraphEdge {
   source: number

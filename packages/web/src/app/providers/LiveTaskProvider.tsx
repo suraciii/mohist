@@ -1,13 +1,16 @@
 import { useCallback, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import type { LiveTaskState, RebaseConflictState } from '../../entities/issue'
+import {
+  dispatchTimelineEvent,
+  LiveTaskContext,
+  type LiveTaskState,
+  type RebaseConflictState,
+} from '../../entities/issue'
 import { dispatchAgentEvent } from '../../entities/agent'
 import type { AgentDetailEventMap } from '../../entities/agent'
-import { LiveTaskContext } from '../../entities/issue'
 import { useProject } from '../../entities/project'
 import { useEventsConnection } from '../../shared/api/events-hub'
-import { dispatchTimelineEvent } from '../../entities/issue/model/timeline-events'
-import { parseInboxItemPersistedHint } from '../../entities/inbox/model/inbox-effects'
+import { parseInboxItemPersistedHint } from '../../entities/inbox'
 import {
   isAgentDetailEvent,
   routeTranscriptEventName,
