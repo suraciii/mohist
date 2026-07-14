@@ -82,7 +82,9 @@ Workflow Action adapter 向 TaskRun 报告工作结果，AgentJob executor 向 A
 
 Session 命令不是工作 dispatch。执行中提交的 Follow-up 成为当前回合输入；空闲时提交
 Follow-up 会启动一个用户发起的对话回合，只记录命令和 Runtime 事实，不创建 TaskRun
-或 AgentJob。Compact 与 Reset 遵循相同的 Session-only 所有权规则。
+或 AgentJob。Compact 与 Reset 遵循相同的 Session-only 所有权规则，且都只在逻辑
+Session 空闲时执行；两者都不轮换 AgentSession ID，命令响应返回同一稳定
+`sessionId`，只有 Reset 替换 Runtime 绑定。
 
 ## AgentSession 来源
 
