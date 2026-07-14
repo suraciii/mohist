@@ -176,7 +176,7 @@ export function SessionDetailShell({
   const recoveryBarContent = hasRecoveryActions || lineageLink ? (
     <div className="flex flex-col gap-2">
       {hasRecoveryActions && (
-        <div className="flex flex-row gap-2 items-start justify-between">
+        <div className="flex flex-row flex-wrap gap-2 items-start justify-between md:flex-nowrap">
           <div className="flex-1 min-w-0">
             <ContextHealthBar
               contextWindowUsed={contextWindowUsed}
@@ -186,7 +186,7 @@ export function SessionDetailShell({
             />
           </div>
           {recoverySessionName && (
-            <div className="shrink-0">
+            <div className="contents md:block md:shrink-0">
               <SessionRecoveryActions
                 issueNumber={issueNumber}
                 sessionName={recoverySessionName}
@@ -560,7 +560,7 @@ function SessionHeader({
   return (
     <div
       data-testid="session-header"
-      className="border-b border-border bg-background px-4 py-3 shrink-0 min-w-0"
+      className="border-b border-border bg-background px-4 py-2 md:py-3 shrink-0 min-w-0"
     >
       <div className="flex flex-wrap items-center gap-2 text-sm mb-2 min-w-0">
         <Link
@@ -573,8 +573,8 @@ function SessionHeader({
         </Link>
         {issueTitle && (
           <>
-            <span className="text-muted-foreground/40 shrink-0">/</span>
-            <span className="text-muted-foreground truncate min-w-0">{issueTitle}</span>
+            <span className="hidden md:inline text-muted-foreground/40 shrink-0">/</span>
+            <span className="hidden md:inline text-muted-foreground truncate min-w-0">{issueTitle}</span>
           </>
         )}
         {workflowContextPath && workflowContextLabel && (
@@ -602,7 +602,7 @@ function SessionHeader({
           </h1>
         </div>
 
-        <div className="flex flex-col gap-2 text-xs text-muted-foreground sm:flex-row sm:items-center sm:gap-2 sm:ml-auto sm:shrink-0 sm:flex-wrap sm:justify-end">
+        <div className="flex flex-col gap-2 text-xs text-muted-foreground max-md:flex-row max-md:flex-wrap max-md:items-center sm:flex-row sm:items-center sm:gap-2 sm:ml-auto sm:shrink-0 sm:flex-wrap sm:justify-end">
           <StatusBadge kind={statusKind} failureReason={meta?.failureReason} />
           <span
             data-testid="session-stage-chip"

@@ -4,6 +4,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import { ProjectProvider } from '../src/entities/project'
 import { SessionPage, type SessionPageDependencies } from '../src/pages/session/ui/SessionPage'
+import { SessionDetailShell } from '../src/pages/session/ui/SessionDetailShell'
+import type { SessionDataSourceResult } from '../src/pages/session/data/SessionDataSource'
 import type {
   AgentSessionMetadata,
   CoderSessionSummary,
@@ -121,6 +123,66 @@ function makeMockMetadata(overrides: Partial<AgentSessionMetadata> = {}): AgentS
       toolErrorCount: 0,
     },
     ...overrides,
+  }
+}
+
+function makeCancelableSessionData(): SessionDataSourceResult {
+  return {
+    isLoading: false,
+    isError: false,
+    notFound: false,
+    sessionKey: 'build',
+    acpSessionId: 'acp-1',
+    meta: {
+      sessionId: 'agent-session-12345678',
+      sessionName: 'build',
+      coderSessionId: 'agent-session-12345678',
+      issueId: 'issue-1',
+      acpSessionId: 'acp-1',
+      executionId: null,
+      title: 'Build session',
+      status: 'active',
+      statusKind: 'live',
+      model: 'minimax/MiniMax-M3',
+      stage: 'build',
+      createdAt: '2026-06-15T10:00:00.000Z',
+      completedAt: null,
+      lastActivityAt: '2026-06-15T11:00:00.000Z',
+      lastDataAt: '2026-06-15T11:00:00.000Z',
+    },
+    transcriptResponse: null,
+    initialTurns: [],
+    statusKind: 'live',
+    isRunning: true,
+    followupIsPending: false,
+    sendFollowup: () => {},
+    cancel: { mutate: () => {}, isPending: false },
+    contextWindowUsed: null,
+    contextWindowSize: null,
+    contextUsagePercent: null,
+    healthStatus: null,
+    hasRecoveryActions: false,
+    recoverySessionName: null,
+    runtimeSessionLineage: null,
+    viewedRuntimeSessionId: null,
+    buildLineageTargetPath: null,
+    metadataQueryKey: [],
+    transcriptQueryKey: [],
+    handleRecoverySuccess: () => {},
+    backPath: '/issues/123',
+    backLabel: 'Issue #123',
+    siblingNav: null,
+    siblingSidebar: null,
+    sessionTurns: [],
+    transcriptVersion: 0,
+    scrollToBottom: () => {},
+    newContentAvailable: false,
+    setIsNearBottom: () => {},
+    isFinalizing: false,
+    isThinking: false,
+    isStreaming: false,
+    displayTurns: [],
+    issueNumber: 123,
   }
 }
 
@@ -365,43 +427,19 @@ describe('Coder Session compact viewport — structural contract', () => {
     expect(context.className).not.toMatch(/\bhidden\b/)
   })
 
-  it('keeps session-cancel-trigger without hidden class when the cancel control is provided', async () => {
-    _metadataData = makeMockMetadata({
-      status: 'active',
-      statusKind: 'live',
-      completedAt: null,
-      lastActivityAt: _now.toISOString(),
-    })
-
-    const queryClient = createQueryClient()
-    queryClients.push(queryClient)
-    vi.spyOn(Date, 'now').mockReturnValue(_now.getTime())
-
-    const rendered = render(
-      <QueryClientProvider client={queryClient}>
-        <ProjectProvider initialProjectId={TEST_PROJECT.id} initialProjects={[TEST_PROJECT]}>
-          <MemoryRouter initialEntries={['/issues/123/workflow/sessions/build']}>
-            <Routes>
-              <Route
-                path="/issues/:number/workflow/sessions/:sessionName"
-                element={<SessionPage dependencies={sessionPageDependencies} />}
-              />
-            </Routes>
-          </MemoryRouter>
-        </ProjectProvider>
-      </QueryClientProvider>,
+  it('keeps session-cancel-trigger visible when a cancel dependency is provided', () => {
+    const { container } = render(
+      <MemoryRouter>
+        <SessionDetailShell
+          data={makeCancelableSessionData()}
+          components={sessionPageDependencies.shellComponents}
+        />
+      </MemoryRouter>,
     )
 
-    await waitFor(() => {
-      if (!rendered.container.querySelector('[data-testid="session-header"]')) {
-        throw new Error('not ready yet')
-      }
-    })
-    const statusBadge = rendered.container.querySelector('[data-testid="session-status-badge"]') as HTMLElement
-    expect(statusBadge.className).not.toMatch(/\bhidden\b/)
-
-    const stageChip = rendered.container.querySelector('[data-testid="session-stage-chip"]') as HTMLElement
-    expect(stageChip.className).not.toMatch(/\bhidden\b/)
+    const cancelTrigger = container.querySelector('[data-testid="session-cancel-trigger"]') as HTMLElement
+    expect(cancelTrigger).not.toBeNull()
+    expect(cancelTrigger.className).not.toMatch(/\bhidden\b/)
   })
 
   it('preserves all existing region anchors', async () => {

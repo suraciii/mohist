@@ -12,6 +12,7 @@ const project = {
 const issueNumber = 411
 const workflowRunId = 'wr-coder-session-compact-viewport'
 const sessionName = 'integrate'
+const genericSessionId = 'generic-cancel-session'
 
 function apiResponse(data: unknown) {
   return { success: true, data }
@@ -91,23 +92,32 @@ function makeCompactViewportSession(): WorkflowRunSession {
   }
 }
 
-function makeCompactViewportMetadata() {
+function makeCompactViewportMetadata(status = 'failed') {
+  const isRunning = status === 'active' || status === 'running' || status === 'probing'
+  const statusKind = status === 'failed'
+    ? 'failed'
+    : status === 'completed'
+      ? 'completed'
+      : status === 'probing'
+        ? 'probing'
+        : 'live'
+
   return {
     id: `session-${sessionName}`,
     sessionName,
     acpSessionId: `acp-${sessionName}`,
-    status: 'failed',
-    statusKind: 'failed',
+    status,
+    statusKind,
     model: 'minimax/MiniMax-M3',
     stage: 'integrate',
     title: 'Integrate session',
     createdAt: '2026-06-12T10:00:00.000Z',
-    completedAt: '2026-06-12T10:05:00.000Z',
+    completedAt: isRunning ? null : '2026-06-12T10:05:00.000Z',
     lastActivityAt: '2026-06-12T10:05:00.000Z',
     lastDataAt: '2026-06-12T10:05:00.000Z',
     probeSentAt: null,
     probeDeadlineAt: null,
-    failureReason: 'context window exceeded',
+    failureReason: status === 'failed' ? 'context window exceeded' : null,
     turnCount: 3,
     changedFiles: [
       { path: 'src/index.ts', operation: 'modified', additions: 12, deletions: 3 },
@@ -137,75 +147,74 @@ function makeCompactViewportMetadata() {
 
 function makeCompactViewportTranscript() {
   const at = '2026-06-12T10:05:00.000Z'
+  const turns = Array.from({ length: 12 }, (_, index) => {
+    const number = index + 1
+    return {
+      id: `turn-${number}`,
+      startedAt: at,
+      completedAt: at,
+      user: {
+        role: 'mohist',
+        text: `Compact viewport turn ${number} user prompt with enough evidence to scroll the transcript.`,
+        kind: 'task',
+        sentAt: at,
+      },
+      assistant: [
+        {
+          id: `part-${number}`,
+          type: 'text',
+          text: `Compact viewport assistant response ${number} with enough evidence to scroll the transcript.`,
+          startedAt: at,
+          completedAt: at,
+        },
+      ],
+    }
+  })
+
   return {
-    turns: [
-      {
-        id: 'turn-1',
-        startedAt: at,
-        completedAt: at,
-        user: {
-          role: 'mohist',
-          text: 'Compact viewport turn 1 user prompt',
-          kind: 'task',
-          sentAt: at,
-        },
-        assistant: [
-          {
-            id: 'part-1',
-            type: 'text',
-            text: 'Compact viewport assistant response 1.',
-            startedAt: at,
-            completedAt: at,
-          },
-        ],
-      },
-      {
-        id: 'turn-2',
-        startedAt: at,
-        completedAt: at,
-        user: {
-          role: 'mohist',
-          text: 'Compact viewport turn 2 user prompt',
-          kind: 'task',
-          sentAt: at,
-        },
-        assistant: [
-          {
-            id: 'part-2',
-            type: 'text',
-            text: 'Compact viewport assistant response 2.',
-            startedAt: at,
-            completedAt: at,
-          },
-        ],
-      },
-      {
-        id: 'turn-3',
-        startedAt: at,
-        completedAt: at,
-        user: {
-          role: 'mohist',
-          text: 'Compact viewport turn 3 user prompt',
-          kind: 'task',
-          sentAt: at,
-        },
-        assistant: [
-          {
-            id: 'part-3',
-            type: 'text',
-            text: 'Compact viewport assistant response 3.',
-            startedAt: at,
-            completedAt: at,
-          },
-        ],
-      },
-    ],
-    partCount: 3,
+    turns,
+    partCount: turns.length,
     lastActivityAt: at,
   }
 }
 
-async function mockCoderSessionApi(page: Page, session = makeCompactViewportSession()) {
+function makeGenericRunningSession() {
+  return {
+    sessionId: genericSessionId,
+    agentId: 'agent-cancel',
+    agentName: 'Cancellation Agent',
+    status: 'active',
+    createdAt: '2026-06-12T10:00:00.000Z',
+    lastActivityAt: '2026-06-12T10:05:00.000Z',
+    resolvedModel: 'minimax/MiniMax-M3',
+    failureCategory: null,
+    toolCallCount: 12,
+    toolErrorCount: 0,
+    contextRefs: null,
+    usage: {
+      totalTokens: 15_000,
+      inputTokens: 12_000,
+      outputTokens: 3_000,
+      costAmount: 0.21,
+      costCurrency: 'USD',
+      contextWindowUsed: 15_000,
+      contextWindowSize: 32_000,
+      contextUsagePercent: 47,
+    },
+  }
+}
+
+interface CoderSessionFixture {
+  session?: WorkflowRunSession
+  metadata?: ReturnType<typeof makeCompactViewportMetadata>
+  compactError?: string
+  genericSession?: ReturnType<typeof makeGenericRunningSession>
+}
+
+async function mockCoderSessionApi(page: Page, fixture: CoderSessionFixture = {}) {
+  const session = fixture.session ?? makeCompactViewportSession()
+  const metadata = fixture.metadata ?? makeCompactViewportMetadata(session.status)
+
   await page.route('**/hubs/events**', route => route.fulfill({ status: 204, body: '' }))
   await page.route('**/api/**', async (route) => {
     const url = new URL(route.request().url())
@@ -228,7 +237,7 @@ async function mockCoderSessionApi(page: Page, session = makeCompactViewportSess
       return route.fulfill({ json: apiResponse([session]) })
     }
     if (method === 'GET' && path === `/projects/${project.id}/issues/${issueNumber}/sessions/${sessionName}`) {
-      return route.fulfill({ json: apiResponse(makeCompactViewportMetadata()) })
+      return route.fulfill({ json: apiResponse(metadata) })
     }
     if (method === 'GET' && path === `/projects/${project.id}/issues/${issueNumber}/sessions/${sessionName}/transcript`) {
       return route.fulfill({ json: apiResponse(makeCompactViewportTranscript()) })
@@ -245,17 +254,20 @@ async function mockCoderSessionApi(page: Page, session = makeCompactViewportSess
     if (method === 'GET' && path === `/workflow-runs/${workflowRunId}/sessions`) {
       return route.fulfill({ json: apiResponse([session]) })
     }
+    if (fixture.genericSession && method === 'GET' && path === `/projects/${project.id}/agent-sessions/${genericSessionId}`) {
+      return route.fulfill({ json: apiResponse(fixture.genericSession) })
+    }
+    if (fixture.genericSession && method === 'GET' && path === `/projects/${project.id}/agent-sessions/${genericSessionId}/transcript`) {
+      return route.fulfill({ json: apiResponse(makeCompactViewportTranscript()) })
+    }
+    if (fixture.compactError && method === 'POST' && path === `/projects/${project.id}/issues/${issueNumber}/sessions/${sessionName}/compact`) {
+      return route.fulfill({ status: 409, json: { success: false, error: fixture.compactError } })
+    }
+    if (fixture.genericSession && method === 'POST' && path === `/projects/${project.id}/agent-sessions/${genericSessionId}/cancel`) {
+      return route.fulfill({ json: apiResponse({ state: 'cancelled' }) })
+    }
 
     return route.fulfill({ status: 404, json: { success: false, error: `Unhandled test route: ${method} ${path}` } })
-  })
-}
-
-async function transcriptHeight(page: Page): Promise<number> {
-  return page.evaluate(() => {
-    const node = document.querySelector('[data-testid="session-transcript-scroll-container"]') as HTMLElement | null
-    if (!node) return 0
-    const rect = node.getBoundingClientRect()
-    return rect.height
   })
 }
 
@@ -272,170 +284,139 @@ async function navBox(page: Page) {
   return boxOf(page, nav)
 }
 
-test.describe('Coder Session compact viewport — pixel verification', () => {
-  test('preserves transcript height > 100px at 375x667', async ({ page }) => {
-    await page.setViewportSize({ width: 375, height: 667 })
-    await mockCoderSessionApi(page)
+const compactViewports = [
+  { width: 375, height: 667 },
+  { width: 320, height: 568 },
+] as const
 
-    await page.goto(`/${project.name}/issues/${issueNumber}/workflow/sessions/${sessionName}`)
+async function openIssueSession(page: Page, viewport: { width: number; height: number }, fixture?: CoderSessionFixture) {
+  await page.setViewportSize(viewport)
+  await mockCoderSessionApi(page, fixture)
+  await page.goto(`/${project.name}/issues/${issueNumber}/workflow/sessions/${sessionName}`)
+}
 
-    const transcriptScrollContainer = page.getByTestId('session-transcript-scroll-container')
-    await expect(transcriptScrollContainer).toBeVisible()
+async function expectReachableAboveMobileNav(page: Page, locator: Locator, label: string) {
+  const control = await boxOf(page, locator)
+  const nav = await navBox(page)
+  const viewport = await page.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight }))
 
-    await page.waitForTimeout(150)
-    const height = await transcriptHeight(page)
-    expect(height, 'transcript must have non-zero visible height at 375x667').toBeGreaterThan(100)
+  expect(control.x, `${label} starts inside the viewport`).toBeGreaterThanOrEqual(0)
+  expect(control.y, `${label} starts inside the viewport`).toBeGreaterThanOrEqual(0)
+  expect(control.x + control.width, `${label} ends inside the viewport`).toBeLessThanOrEqual(viewport.width)
+  expect(control.y + control.height, `${label} ends above the mobile navigation`).toBeLessThanOrEqual(nav.y + 1)
+}
+
+async function expectTranscriptScrollsIndependently(page: Page) {
+  const transcript = page.getByTestId('session-transcript-scroll-container')
+  const header = page.getByTestId('session-header')
+  const usage = page.getByTestId('session-usage-summary')
+  const composer = page.getByTestId('session-followup-composer')
+
+  await expect(transcript).toBeVisible()
+  await expect(header).toBeVisible()
+  await expect(usage).toBeVisible()
+  await expect(composer).toBeVisible()
+
+  const [headerBefore, usageBefore, composerBefore] = await Promise.all([
+    boxOf(page, header),
+    boxOf(page, usage),
+    boxOf(page, composer),
+  ])
+  const metrics = await transcript.evaluate((node) => ({
+    height: node.getBoundingClientRect().height,
+    clientHeight: node.clientHeight,
+    scrollHeight: node.scrollHeight,
+  }))
+
+  expect(metrics.height, 'transcript keeps the compact 120px reading floor').toBeGreaterThanOrEqual(120)
+  expect(metrics.scrollHeight, 'transcript has overflow to read').toBeGreaterThan(metrics.clientHeight)
+
+  await transcript.evaluate((node) => {
+    node.scrollTop = Math.max(1, Math.floor((node.scrollHeight - node.clientHeight) / 2))
+    node.dispatchEvent(new Event('scroll'))
   })
+  await expect.poll(() => transcript.evaluate((node) => node.scrollTop)).toBeGreaterThan(0)
 
-  test('preserves transcript height > 0px at 320x568', async ({ page }) => {
-    await page.setViewportSize({ width: 320, height: 568 })
-    await mockCoderSessionApi(page)
+  const [headerAfter, usageAfter, composerAfter] = await Promise.all([
+    boxOf(page, header),
+    boxOf(page, usage),
+    boxOf(page, composer),
+  ])
+  expect(Math.abs(headerAfter.y - headerBefore.y), 'header remains fixed while transcript scrolls').toBeLessThanOrEqual(1)
+  expect(Math.abs(usageAfter.y - usageBefore.y), 'usage remains fixed while transcript scrolls').toBeLessThanOrEqual(1)
+  expect(Math.abs(composerAfter.y - composerBefore.y), 'composer remains fixed while transcript scrolls').toBeLessThanOrEqual(1)
+}
 
-    await page.goto(`/${project.name}/issues/${issueNumber}/workflow/sessions/${sessionName}`)
+async function expectNoDocumentHorizontalOverflow(page: Page) {
+  const metrics = await page.evaluate(() => ({
+    scrollWidth: document.documentElement.scrollWidth,
+    clientWidth: document.documentElement.clientWidth,
+  }))
+  expect(metrics.scrollWidth).toBeLessThanOrEqual(metrics.clientWidth)
+}
 
-    const transcriptScrollContainer = page.getByTestId('session-transcript-scroll-container')
-    await expect(transcriptScrollContainer).toBeVisible()
+test.describe('Coder Session compact viewport pixel verification', () => {
+  for (const viewport of compactViewports) {
+    test(`preserves a readable, independently scrollable transcript at ${viewport.width}x${viewport.height}`, async ({ page }) => {
+      await openIssueSession(page, viewport)
+      await expectTranscriptScrollsIndependently(page)
+    })
 
-    await page.waitForTimeout(150)
-    const height = await transcriptHeight(page)
-    expect(height, 'transcript must never collapse to zero at 320x568').toBeGreaterThan(0)
-  })
+    test(`keeps Compact and Reset recovery controls above the mobile navigation at ${viewport.width}x${viewport.height}`, async ({ page }) => {
+      await openIssueSession(page, viewport)
+      await expectReachableAboveMobileNav(page, page.getByTestId('session-recovery-compact'), 'Compact')
+      await expectReachableAboveMobileNav(page, page.getByTestId('session-recovery-reset'), 'Reset')
+    })
 
-  test('Compact and Reset recovery controls are not covered by mobile bottom nav at 375x667', async ({ page }) => {
-    await page.setViewportSize({ width: 375, height: 667 })
-    await mockCoderSessionApi(page)
+    test(`renders the active follow-up form above the mobile navigation at ${viewport.width}x${viewport.height}`, async ({ page }) => {
+      const runningSession: WorkflowRunSession = {
+        ...makeCompactViewportSession(),
+        status: 'active',
+        completedAt: null,
+        lastDataAt: '2026-06-12T10:05:30.000Z',
+      }
+      await openIssueSession(page, viewport, { session: runningSession })
 
-    await page.goto(`/${project.name}/issues/${issueNumber}/workflow/sessions/${sessionName}`)
+      const composer = page.getByTestId('session-followup-composer')
+      const input = page.getByTestId('session-followup-input')
+      const send = page.getByTestId('session-followup-send')
+      await expect(input).toBeVisible()
+      await expect(send).toBeVisible()
+      await expectReachableAboveMobileNav(page, composer, 'follow-up composer')
+      await expectReachableAboveMobileNav(page, input, 'follow-up input')
+      await expectReachableAboveMobileNav(page, send, 'follow-up send button')
+    })
+
+    test(`keeps transcript content clear of the mobile navigation at ${viewport.width}x${viewport.height}`, async ({ page }) => {
+      await openIssueSession(page, viewport)
+      await expectReachableAboveMobileNav(page, page.getByTestId('session-transcript-scroll-container'), 'transcript')
+    })
+
+    test(`keeps the generic session cancel control reachable at ${viewport.width}x${viewport.height}`, async ({ page }) => {
+      await page.setViewportSize(viewport)
+      await mockCoderSessionApi(page, { genericSession: makeGenericRunningSession() })
+      await page.goto(`/${project.name}/agent-sessions/${genericSessionId}`)
+
+      const cancel = page.getByTestId('session-cancel-trigger')
+      await expectReachableAboveMobileNav(page, cancel, 'cancel session')
+      await cancel.click()
+      await expect(page.getByTestId('session-cancel-alert')).toBeVisible()
+    })
+  }
+
+  test('keeps a long recovery error readable without horizontal overflow at 320x568', async ({ page }) => {
+    const recoveryError = 'The recovery request was rejected because a stale execution lease still owns this session and the current runner must release it before compaction can continue.'
+    await openIssueSession(page, { width: 320, height: 568 }, { compactError: recoveryError })
 
     const compact = page.getByTestId('session-recovery-compact')
     const reset = page.getByTestId('session-recovery-reset')
-    await expect(compact).toBeVisible()
-    await expect(reset).toBeVisible()
+    await compact.click()
 
-    const nav = await navBox(page)
-    const compactBox = await boxOf(page, compact)
-    const resetBox = await boxOf(page, reset)
-
-    const viewportHeight = await page.evaluate(() => window.innerHeight)
-    expect(viewportHeight).toBe(667)
-
-    expect(compactBox.y, 'compact top within viewport').toBeGreaterThanOrEqual(0)
-    expect(compactBox.y + compactBox.height, 'compact bottom within viewport').toBeLessThanOrEqual(viewportHeight)
-    expect(resetBox.y, 'reset top within viewport').toBeGreaterThanOrEqual(0)
-    expect(resetBox.y + resetBox.height, 'reset bottom within viewport').toBeLessThanOrEqual(viewportHeight)
-
-    expect(compactBox.y + compactBox.height, 'compact above nav').toBeLessThanOrEqual(nav.y)
-    expect(resetBox.y + resetBox.height, 'reset above nav').toBeLessThanOrEqual(nav.y)
-  })
-
-  test('Compact and Reset recovery controls are reachable at 320x568 (never covered by nav)', async ({ page }) => {
-    await page.setViewportSize({ width: 320, height: 568 })
-    await mockCoderSessionApi(page)
-
-    await page.goto(`/${project.name}/issues/${issueNumber}/workflow/sessions/${sessionName}`)
-
-    const compact = page.getByTestId('session-recovery-compact')
-    const reset = page.getByTestId('session-recovery-reset')
-    await expect(compact).toBeVisible()
-    await expect(reset).toBeVisible()
-
-    const nav = await navBox(page)
-    const compactBox = await boxOf(page, compact)
-    const resetBox = await boxOf(page, reset)
-
-    const viewportHeight = await page.evaluate(() => window.innerHeight)
-    expect(viewportHeight).toBe(568)
-
-    expect(compactBox.y, 'compact top within viewport at 320x568').toBeGreaterThanOrEqual(0)
-    expect(compactBox.y + compactBox.height, 'compact bottom within viewport at 320x568').toBeLessThanOrEqual(viewportHeight)
-    expect(resetBox.y, 'reset top within viewport at 320x568').toBeGreaterThanOrEqual(0)
-    expect(resetBox.y + resetBox.height, 'reset bottom within viewport at 320x568').toBeLessThanOrEqual(viewportHeight)
-
-    expect(compactBox.y + compactBox.height, 'compact above nav at 320x568').toBeLessThanOrEqual(nav.y)
-    expect(resetBox.y + resetBox.height, 'reset above nav at 320x568').toBeLessThanOrEqual(nav.y)
-  })
-
-  test('follow-up composer is reachable and not covered by mobile navigation at 375x667', async ({ page }) => {
-    const baseSession = makeCompactViewportSession()
-    const runningSession: typeof baseSession = {
-      ...baseSession,
-      status: 'active',
-      completedAt: null,
-      lastDataAt: '2026-06-12T10:05:30.000Z',
-    }
-    await page.setViewportSize({ width: 375, height: 667 })
-    await mockCoderSessionApi(page, runningSession)
-
-    await page.goto(`/${project.name}/issues/${issueNumber}/workflow/sessions/${sessionName}`)
-
-    const composer = page.getByTestId('session-followup-composer')
-    await expect(composer).toBeVisible()
-
-    const composerBox = await boxOf(page, composer)
-    const nav = await navBox(page)
-
-    expect(composerBox.y + composerBox.height, 'composer bottom above nav (allow 1px sub-pixel rounding)').toBeLessThanOrEqual(nav.y + 1)
-  })
-
-  test('follow-up composer is reachable and not covered by mobile navigation at 320x568', async ({ page }) => {
-    const baseSession = makeCompactViewportSession()
-    const runningSession: typeof baseSession = {
-      ...baseSession,
-      status: 'active',
-      completedAt: null,
-      lastDataAt: '2026-06-12T10:05:30.000Z',
-    }
-    await page.setViewportSize({ width: 320, height: 568 })
-    await mockCoderSessionApi(page, runningSession)
-
-    await page.goto(`/${project.name}/issues/${issueNumber}/workflow/sessions/${sessionName}`)
-
-    const composer = page.getByTestId('session-followup-composer')
-    await expect(composer).toBeVisible()
-
-    const composerBox = await boxOf(page, composer)
-    const nav = await navBox(page)
-
-    expect(composerBox.y + composerBox.height, 'composer bottom above nav at 320x568 (allow 1px sub-pixel rounding)').toBeLessThanOrEqual(nav.y + 1)
-  })
-
-  test('mobile bottom navigation does not overlap the transcript content area at 375x667', async ({ page }) => {
-    await page.setViewportSize({ width: 375, height: 667 })
-    await mockCoderSessionApi(page)
-
-    await page.goto(`/${project.name}/issues/${issueNumber}/workflow/sessions/${sessionName}`)
-
-    const transcriptScrollContainer = page.getByTestId('session-transcript-scroll-container')
-    await expect(transcriptScrollContainer).toBeVisible()
-
-    await page.waitForTimeout(150)
-    const transcriptBox = await transcriptScrollContainer.boundingBox()
-    const nav = await navBox(page)
-    expect(transcriptBox).not.toBeNull()
-
-    expect(
-      transcriptBox!.y + transcriptBox!.height,
-      'transcript bottom must be above nav top',
-    ).toBeLessThanOrEqual(nav.y)
-  })
-
-  test('mobile bottom navigation does not overlap the transcript content area at 320x568', async ({ page }) => {
-    await page.setViewportSize({ width: 320, height: 568 })
-    await mockCoderSessionApi(page)
-
-    await page.goto(`/${project.name}/issues/${issueNumber}/workflow/sessions/${sessionName}`)
-
-    const transcriptScrollContainer = page.getByTestId('session-transcript-scroll-container')
-    await expect(transcriptScrollContainer).toBeVisible()
-
-    await page.waitForTimeout(150)
-    const transcriptBox = await transcriptScrollContainer.boundingBox()
-    const nav = await navBox(page)
-    expect(transcriptBox).not.toBeNull()
-
-    expect(
-      transcriptBox!.y + transcriptBox!.height,
-      'transcript bottom must be above nav top at 320x568',
-    ).toBeLessThanOrEqual(nav.y)
+    const error = page.getByTestId('session-recovery-error')
+    await expect(error).toHaveText(recoveryError)
+    await expectNoDocumentHorizontalOverflow(page)
+    await expectReachableAboveMobileNav(page, compact, 'Compact after recovery error')
+    await expectReachableAboveMobileNav(page, reset, 'Reset after recovery error')
+    await expectReachableAboveMobileNav(page, error, 'recovery error')
   })
 })
