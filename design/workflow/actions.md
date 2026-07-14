@@ -86,6 +86,10 @@ expect:
 
 必须存在的 path 同时放进 `expect` 与 `artifacts`；可选产物只放进 `artifacts`。
 
+marker 的 `path` 可以是特殊值 `_output`，表示对回合最终 assistant 文本匹配，而不是
+文件内容。task executor 从 Action result 携带的回合事实中取得该文本；它不进入
+Action Output，也不要求 Action 额外声明。
+
 ## 错误字段与 recovery
 
 Action output 中的错误字段，例如 `errorCode`、`promise`，都属于 Action 自己的契约。
@@ -111,13 +115,17 @@ with:
 ```
 
 Action 只接收展开后的 `prompt`、可选逻辑 `session` 名称和可选 OpenCode 模型
-`options`。Workflow 把 `expect` 作为 task 完成契约单独提供。Action 不会把
+`options`。`options` 中除 `model` 与 `variant` 之外的键被忽略并记入诊断，不使回合
+失败。Workflow 把 `expect` 作为 task 完成契约单独提供。Action 不会把
 `vars.agent` 当作隐藏 fallback。除非 expectation 命中 promise marker，否则 output 为
 `null`；命中时只返回：
 
 ```json
 { "promise": "PASS" }
 ```
+
+该 `{ promise }` output 由 Workflow task executor 依据 `expect` 合成；Action 与
+Runtime 都不产生它。
 
 Runtime Session 身份、model、usage、transcript、诊断信息和 expectation 明细保存在
 各自所属模型中，不复制到 Action output。概念所有权见

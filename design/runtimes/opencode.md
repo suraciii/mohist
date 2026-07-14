@@ -39,6 +39,10 @@ Runtime 只按第一个 `/` 分割。`variant` 始终是独立字段，不能拼
 Runtime。OpenCode 的默认 agent、tools、plugins、permissions 与自动压缩策略
 继续由 OpenCode 原生配置负责。
 
+`options` 中除 `model` 与 `variant` 之外的键被忽略并记入诊断，不使回合失败；这让
+仍含遗留键（如 `type`、liveness 配置）的已持久化 `vars.agent` 可以继续绑定，直到
+写入路径完成收敛。`model` 或 `variant` 存在但不是字符串时，返回 invalid input。
+
 Action 不读取 Workflow variables。`TaskWithExpander` 在 dispatch 前把
 `options: ${{ vars.agent }}` 展开为 object，展开后的 Action Input 是本次执行唯一的配置
 事实。`variant` 可以和 `model` 一起提供，也可以单独提供；省略 `model` 时，OpenCode
@@ -52,8 +56,13 @@ Action 不读取 Workflow variables。`TaskWithExpander` 在 dispatch 前把
 
 Runner 的 Workflow task executor 在 `OpenCodeActionInput` 之外单独接收 `expect` 与
 artifact 声明，并在 OpenCode Action 返回后应用它们。只有命中 promise 时才把对应值
-作为 Action Output 暴露。Runtime 身份、transcript、model、usage、诊断信息与
-expectation 明细保存在原有 state / read model 中，不塞进 Action output。
+作为 Action Output 暴露；`{ promise }` 由 task executor 依据 Workflow 拥有的 `expect`
+合成，Action 与 Runtime 都不产生该字段。Runtime 身份、transcript、model、usage、
+诊断信息与 expectation 明细保存在原有 state / read model 中，不塞进 Action output。
+
+规范化回合事实包含回合的最终 assistant 文本。task executor 用它评估
+`path: _output` 的 expect marker；该文本经由 Action result 的回合事实提供，
+不经由 Action Output。
 
 ## SDK 调用面
 
@@ -159,7 +168,10 @@ executor 在 Action 返回后应用 `expect`、artifacts、`failIf`、Action Out
 语义；AgentJob executor 通过由 Agent 拥有的契约校验和报告自己的结果。
 
 SSE 沉默不表示失败，`idle` event 也不是完成权威。等待完成的 Prompt 响应决定回合
-是否结束。现有调用方 abort signal 是唯一执行期限。收到 abort 时调用
+是否结束。现有调用方 abort signal 是唯一执行期限：Workflow task executor 与 AgentJob
+executor 拥有工作回合的执行期限（沿用现有分层 timeout signal 与默认值），期限到达时
+abort 回合并让工作失败。移除 ACP liveness probe 后，这个 executor 期限是悬挂回合的
+唯一兜底；`OpenCodeRuntime` 不自带静默检测。收到 abort 时调用
 `client.session.abort()`，向调用者返回 interrupted result。
 
 Runner 生命周期内可以 retry startup 与 readiness 操作。Prompt submission 以及任何
@@ -200,7 +212,8 @@ Runtime 绑定是路由事实，Runner 内存 cache 只是优化。
 
 ### Compact
 
-先从 OpenCode Session 读取当前 model，再调用
+只有逻辑 Session idle 时才允许 Compact；Session 有执行中的工作回合时返回 conflict，
+与 Reset 使用同一并发边界。先从 OpenCode Session 读取当前 model，再调用
 `client.session.summarize({ sessionID, providerID, modelID })`。Compact 不创建新的物理
 Session，也没有 Mohist 侧的 synthetic summary fallback。Session 没有当前 model 时返回
 可操作错误，不能猜测。产生的 Session 与 message events 继续核对进 transcript。
@@ -215,6 +228,9 @@ Session。
 每个命令携带 expected current binding。Server 只在该绑定仍是 current 时应用返回的
 replacement，防止过期 Reset result 覆盖更新的绑定。OpenCode Session 缺失时明确报错，
 并提示 Reset；不能隐式创建 replacement。
+
+Compact 与 Reset 都不轮换 AgentSession ID：命令响应返回同一稳定 `sessionId`，只有
+Reset 替换 Runtime 绑定。API 响应形状与 CLI 文案不得再表述为"返回新 session id"。
 
 ## 权限与错误
 
@@ -273,6 +289,21 @@ snapshot 与 prompt 后，携带由 Agent 拥有的 OpenCode execution request�
 直接调用 `OpenCodeRuntime`。这不会引入 `mohist/agent`，也不提供 feature flag、
 compatibility alias 或 ACP fallback。
 
+### 存量数据与配置的过渡行为
+
+不做存量数据重写，过渡行为必须明确而不是静默：
+
+- 已持久化的 AgentSession（含 `acpSessionId`、历史 Compact / Reset 轮换出的旧
+  Session 记录）保持可查询与可审计；ACP 时代的 Runtime 绑定在替换后视为
+  "当前 Runtime Session 不存在"，Session 操作明确失败并提示 Reset。
+- 旧结构 Workflow Profile（`with.expect`、`with.agent`、`uses: mohist/acp-agent`）在
+  加载 / 校验时返回可操作错误，不被静默忽略，也不自动改写。
+- 切换前已开始的 WorkflowRun 不自动迁移；其后续 agent task dispatch 以可操作错误
+  失败，由用户 rerun 受影响 stage。
+- issue 级 `agentConfig` 配置面收敛为 model / variant（`type` 与 ACP liveness 字段从
+  API / CLI / Web 移除）；已持久化 `vars.agent` 中的遗留键由 Action Input 的
+  忽略 + 诊断规则兜底。
+
 ## 上游边界
 
 决策时使用的依赖是 `@opencode-ai/sdk/v2` 1.17.18，但其中两个 namespace 的成熟度不同。
@@ -285,9 +316,14 @@ Mohist 跟随这些真实内部调用路径，而不是假设每个生成的 V2 
 封装在 `OpenCodeRuntime` 内；以后迁移到完整 V2 Session 执行接口时，只改变
 一个深模块，不改变 Workflow Action 或 Session 产品契约。
 
+实现开始时必须先锁定 SDK package 版本，并对上表断言的调用面在真实 OpenCode 上做
+一次冒烟验证；发现漂移时先修订本表，再进入实现。
+
 ## 实装差距
 
 当前 Runner 仍使用 `@agentclientprotocol/sdk`、`mohist/acp-agent`、ACP liveness 与 log
 heuristics、CLI model parsing、private compaction metadata 和 `acpSessionId` wire fields。
 当前 Compact 仍合成 Mohist 侧 transcript state 并替换物理绑定，Workflow schema 也仍把
-`expect` 放在 `with` 内。这些路径是相对目标设计的实现债务，必须在同一次替换中移除。
+`expect` 放在 `with` 内；内置 profile 中写在 task 顶层的 `expect` 被当前解析器静默
+丢弃，从未生效。当前 Compact / Reset 的 API 与 CLI 还会轮换并返回新的 AgentSession
+ID。这些路径是相对目标设计的实现债务，必须在同一次替换中移除。
