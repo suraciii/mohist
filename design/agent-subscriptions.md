@@ -2,85 +2,122 @@
 status: wip
 ---
 
-# Agent Subscriptions
+# Agent 事件路由（Routing Table）
 
-Agent listens to CloudEvents and auto-responds by prompt, instead of manual launch.
-Here, Agent always means the project-scoped Mohist Agent definition, never an Inline Agent
-invocation or the OpenCode runtime `agent` option.
-Lifecycle ownership and Session relationships are defined in
-[`agent-execution.md`](agent-execution.md).
+Mohist Agent 通过项目级**事件路由表**自动响应系统事件，取代手动 launch。
+本文的 Agent 均指 Mohist Agent（Named Agent），不是 Inline Agent 或 OpenCode
+runtime 的 `agent` 选项。生命周期所有权与 Session 关系见
+[`agent-execution.md`](agent-execution.md)；信封协议与匹配表达式语法见
+[`event-protocol.md`](event-protocol.md)。
 
-## Boundary
+本设计取代早期「订阅 + 优先级仲裁」模型（AgentSubscription + Arbitrate），
+迁移见文末。
 
-Subscription belongs to Agent context. Consumes CloudEvent PL (infra layer). Never `using Workflow.Domain` or `Issue.Domain`.
+## 边界
 
-## How context flows
+路由属于 Agent context。消费 CloudEvent PL（infra 层）。禁止 `using
+Workflow.Domain` 或 `Issue.Domain`。匹配与渲染 envelope-only，零跨域反查。
 
-Handler reads only the CloudEvent envelope (`source`, `data.stage`, `type`). Renders into response prompt.
-
-Agent starts → `mo workflow get <runId> --json` → gets `IssueRef.Number + Title` → `mo issue show <number>`.
-
-No handler reverse-query. No identity stamping on events. Zero cross-domain imports.
-
-Pre-req: `mo workflow get` returns issue ref — delivered by issue #381.
-
-## Subscription model
+## 模型
 
 ```
-AgentSubscription (1 Agent : N subscriptions)
-  Id, ProjectId, AgentId, Name
-  Filter                    expression on CloudEvent attributes
-  ResponsePrompt            template with {{workflow_run_id}} {{stage}} {{event_type}}
-  CoordinationMode          fanout | exclusive
-  Priority?                 arbitration; null = default
+RoutingRule（项目级，有序表）
+  Id, ProjectId, Name
+  Position                  表内序号，唯一；求值按此序
+  Match                     匹配表达式（event-protocol.md 定义的 CEL 子集）
+  AgentId                   响应 Agent
+  ResponsePrompt            模板，{{event.<attr>}} 占位符
+  Continue                  bool；命中后是否继续向下求值（默认 false）
   Status                    active | archived
 ```
 
-### Filter
+一个项目一张表；规则引用 Agent，Agent 不拥有规则（早期「1 Agent : N 订阅」的
+归属关系取消——规则的排序语义是表级的，挂在 Agent 下无法表达跨 Agent 的
+兜底/接管次序）。
 
-Matches CloudEvent envelope attributes. Extends existing `[Subscription]` type syntax to multi-attribute:
+## 求值语义
 
-| Capability | Syntax |
-|---|---|
-| exact type | `com.mohist.workflow.stage.approval-requested` |
-| prefix wildcard | `com.mohist.workflow.*` |
-| catch-all | `*` |
-| multi-value | `a\|b\|c` |
-| scope by source | constrain `source` attribute to specific issue's run |
+事件到达（带 `projectid`）→ 取该项目 active 规则按 `Position` 升序：
 
-No business-domain queries in matching.
+1. 逐条求值 `Match`；不命中 → 下一条。
+2. 命中 → 渲染 `ResponsePrompt`，经 `IAgentLauncher` 启动 Agent；
+   `Continue == false` → 求值结束；`true` → 继续下一条。
+3. 命中但不可执行（Agent 已 archived、渲染后 prompt 为空）→ 视同不命中，
+   记结构化日志，继续下一条。
+4. 表达式运行期异常 → 视同不命中（见 event-protocol.md）。
 
-### Coordination
+由此得到：
 
-- fanout: all matching active subscriptions fire.
-- exclusive: group by Agent, pick highest priority Agent, then highest priority subscription within that Agent.
+- **exclusive（默认）**：first-match-wins，排序即优先级，无数字算术；
+- **fanout**：上游规则标 `Continue`；
+- **兜底 + 接管**：针对性规则排在兜底规则上方。
 
-Same priority = deterministic pick (subscription id). No error, no block.
+无 Arbitrate、无 Priority 字段、无 CoordinationMode。
 
-### Visibility over validation
+## 写入时校验
 
-Every triggered session gets two metadata labels:
-- `mohist.io/trigger/event-id` — which CloudEvent
-- `mohist.io/trigger/subscription-id` — which subscription
+创建/更新规则时：
 
-Traceable in both directions. User owns config correctness; system owns observability.
-Each trigger creates an AgentJob plus an AgentSession. AgentJob is authoritative for response
-completion; the labeled AgentSession supplies conversation and audit evidence.
+- `Match` 编译失败 → 拒绝；
+- `AgentId` 不存在或非 active → 拒绝；
+- `ResponsePrompt` 空 → 拒绝。
 
-## Components
+运行期只做求值，不做校验兜底（Agent 事后 archived 属运行期跳过情形）。
 
-1. Subscription aggregate + Store
-2. IAgentLauncher service (extract from `AgentSessionLaunchRoutes`)
-3. Dispatch handler: `[Subscription]` → match filter → coordination → render prompt → IAgentLauncher
-4. Template rendering: simple string replace for 3 variables
+## 渲染
 
-Handler has zero business domain `using`.
+`{{event.<attr>}}` 直接替换信封属性（与 Match 同一命名空间），envelope-only、
+无模板引擎、未命中占位符原样保留。旧 token（`{{workflow_run_id}}`、`{{stage}}`、
+`{{event_type}}`）保留为别名。`{{event.stage}}` 依赖 stage 提升为信封属性
+（stamping 矩阵 workflow 族），不再从 `data` 解析。
+
+## 幂等与可见性
+
+- Launcher key = `hash(projectId, eventId, ruleId)`：同一事件×规则重复分发不会
+  重复起 job（沿用现有 AgentLauncher 机制，subscriptionId 换 ruleId）。
+- 触发的 AgentSession 打标签：`mohist.io/trigger/event-id`、
+  `mohist.io/trigger/rule-id`。事件 → 规则 → AgentJob 双向可查。
+- AgentJob 裁定响应完成；AgentSession 提供对话与审计证据。
+
+## 与系统 handler 的关系
+
+路由表是用户态消费面；`[Subscription]` handler 是系统态消费面。两者消费同一
+信封协议、共用同一 matcher 语义，经同一个分发器投递。Agent 无特殊通道：响应
+动作走 `mo workflow approve` / `mo issue comment` 等正规命令面。
+
+## 命令面（草案）
+
+```
+mo routing rule create --name <n> --match <expr> --agent <agent> \
+    --response-prompt <p> [--continue] [--before <rule> | --after <rule>]
+mo routing rule list | show <n> | update <n> | archive <n>
+mo routing rule move <n> --before <rule> | --after <rule>
+mo routing test [--last <N>]     # 用最近 N 个事件干跑整张表，逐条显示命中
+mo events tail [--match <expr>]  # 用同一 matcher 过滤事件流
+```
+
+命名遵循 [`cli.md`](cli.md)：资源在前、项目作用域走 active project / `--project`。
+
+## 迁移
+
+不做数据自动迁移：旧模型（`AgentSubscription` + `Arbitrate`）与
+`mo agent subscription` 命令面直接删除，不留兼容层（项目积极开发期，无版本
+兼容义务）。现存订阅由操作者手动重配为路由规则（Filter 三字段可机械对应
+表达式：`event.type == "..." && event.source == "..."`，Priority 降序对应
+表内顺序）。
 
 ## Not doing
 
-- Agent-specific approve channel. Agents use `mo workflow approve` / `mo issue approve`.
-- Strict conflict detection. Visibility replaces it.
-- Per-subscription retry/outbox. Reuse event bus delivery + AgentJob failure visibility and
-  AgentSession audit evidence.
-- Workflow profile `requiresApproval`. Orthogonal.
-- Per-agent concurrency gate. Control through subscription and visibility first.
+- Agent 专用审批通道——走正规命令面。
+- 严格冲突检测——干跑 + 可见性替代。
+- 规则级 retry/outbox——复用分发器投递保障 + AgentJob 失败可见性。
+- `event.data.*` 匹配——按 event-protocol.md 准入标准提升属性。
+- 每 Agent 并发闸——先靠规则与可见性控制。
+- 触发频控 / 冷却期——监管型 Agent 的循环风险（失败→rerun→失败→再触发）
+  短期由响应提示词自限（如 comment 计数），系统级频控留待真实需求出现。
+
+## 实装差距
+
+已实装：AgentSubscription 三字段过滤 + Priority 仲裁 + AgentLauncher 幂等启动 +
+trigger 标签 + `mo agent subscription` 命令面。本文的路由表（有序规则、表达式、
+Continue、写入时编译、`{{event.*}}` 渲染、干跑工具）未实装，由事件路由 epic 推进。
