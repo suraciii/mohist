@@ -48,7 +48,7 @@ const dependencies: ActivityPageDependencies = {
     costAmount: 0,
     costCurrency: null,
   }),
-  RunnerSummaryBadge: () => <RunnerSummary summary={deriveRunnerSummary([])} />,
+  RunnerSummaryBadge: ({ targetPath }) => <RunnerSummary summary={deriveRunnerSummary([])} targetPath={targetPath} />,
 }
 
 function renderPage(events: ActivityEvent[]) {
@@ -78,20 +78,23 @@ describe('ActivityPage evidence feed', () => {
   it('renders event identity and keeps attention ahead of routine evidence', () => {
     renderPage([
       makeEvent('issue-state', 'routine', { id: 'issue-1', title: 'Routine issue' }),
-      makeEvent('workflow-stage', 'approval', { id: 'approval-1', title: 'Needs review' }),
+      makeEvent('workflow-stage', 'approval', { id: 'approval-1', title: 'Needs review', targets: { workflow: { issueNumber: 1, label: 'Workflow context', path: '/issues/1?from=activity' } } }),
+      makeEvent('runner', 'blocked', { id: 'runner-1', title: 'Runner disconnected', targets: { runner: { runnerId: 'runner-1', label: 'Runner runner-1', path: '/runners/runner-1?from=activity' } } }),
       makeEvent('failure', 'failure', { id: 'failure-1', title: 'Stage failed' }),
     ])
 
     const entries = screen.getAllByTestId('activity-event-entry')
-    expect(entries).toHaveLength(3)
+    expect(entries).toHaveLength(4)
     expect(entries.map((entry) => entry.getAttribute('data-event-type'))).toEqual([
       'failure',
       'workflow-stage',
+      'runner',
       'issue-state',
     ])
     expect(entries.map((entry) => entry.getAttribute('data-attention'))).toEqual([
       'failure',
       'approval',
+      'blocked',
       'routine',
     ])
 
@@ -99,6 +102,9 @@ describe('ActivityPage evidence feed', () => {
     const routine = screen.getByTestId('activity-routine-zone')
     expect(attention.compareDocumentPosition(routine) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(within(attention).getByText('Stage failed')).toBeInTheDocument()
+    expect(within(attention).getByTestId('activity-event-workflow-link')).toHaveAttribute('href', expect.stringContaining('/issues/1?from=activity'))
+    expect(within(attention).getByTestId('activity-event-runner-link')).toHaveAttribute('href', expect.stringContaining('/runners/runner-1?from=activity'))
+    expect(within(routine).getByText('Issue').className).not.toBe(within(attention).getByText('Workflow').className)
   })
 
   it('omits an empty attention zone and supports collapsing routine evidence', () => {

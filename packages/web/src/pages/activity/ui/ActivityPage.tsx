@@ -200,14 +200,14 @@ export function ActivityPage({
         activeSlots={slotUsage.active}
         maxSlots={slotUsage.max}
       >
-        <RunnerBadge />
+        <RunnerBadge targetPath="/runners?from=activity" />
       </StatusBar>
 
       <div className="flex-1 overflow-y-auto">
         <div className="max-w-3xl mx-auto px-4 py-4 md:px-6 space-y-6">
           <div className="flex justify-end">
             <Link
-              to={toProjectPath('/runners')}
+              to={toProjectPath('/runners?from=activity')}
               data-testid="activity-runners-link"
               className="inline-flex items-center gap-1 text-xs font-medium text-info hover:text-info-foreground hover:underline"
             >

@@ -22,7 +22,6 @@ function makeProjectEvent(overrides: Partial<ProjectEventDto> = {}): ProjectEven
     subject: '1',
     dataContentType: 'application/json',
     data: {},
-    extensions: { issueno: '1' },
     runnerId: null,
     ...overrides,
   }

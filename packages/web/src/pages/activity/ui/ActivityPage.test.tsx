@@ -40,7 +40,7 @@ const activityPageDependencies: ActivityPageDependencies = {
     costAmount: 0,
     costCurrency: null,
   }),
-  RunnerSummaryBadge: () => <RunnerSummary summary={deriveRunnerSummary(runnerRows)} />,
+  RunnerSummaryBadge: ({ targetPath }) => <RunnerSummary summary={deriveRunnerSummary(runnerRows)} targetPath={targetPath} />,
 }
 
 function makeRow(overrides: Partial<RunnerStatusRow> = {}): RunnerStatusRow {
@@ -67,7 +67,7 @@ function getRunnerBadgeButton(): HTMLElement {
 
 function LocationProbe({ testId }: { testId: string }) {
   const location = useLocation()
-  return <div data-testid={testId}>{location.pathname}</div>
+  return <div data-testid={testId}>{location.pathname}{location.search}</div>
 }
 
 function renderWith({
@@ -121,13 +121,13 @@ describe('ActivityPage', () => {
       expect(screen.queryByText(/Loading\.\.\./)).not.toBeInTheDocument()
     })
 
-    it('renders a link that navigates to the project-scoped /runners route', () => {
+    it('renders a link that preserves Activity return context', () => {
       renderWith()
 
       const link = screen.getByTestId('activity-runners-link')
       expect(link).toBeInTheDocument()
       expect(link.tagName.toLowerCase()).toBe('a')
-      expect(link).toHaveAttribute('href', `/${PROJECT_SEGMENT}/runners`)
+      expect(link).toHaveAttribute('href', `/${PROJECT_SEGMENT}/runners?from=activity`)
     })
 
     it('keeps the runner overview badge in the status bar when runners are idle', async () => {
@@ -170,7 +170,7 @@ describe('ActivityPage', () => {
 
       fireEvent.click(badge)
 
-      expect(screen.getByTestId('route-pathname').textContent).toBe(`/${PROJECT_SEGMENT}/runners`)
+      expect(screen.getByTestId('route-pathname').textContent).toBe(`/${PROJECT_SEGMENT}/runners?from=activity`)
     })
 
     it('navigates to /runners when the busy badge is activated', async () => {
@@ -182,7 +182,7 @@ describe('ActivityPage', () => {
 
       fireEvent.click(badge)
 
-      expect(screen.getByTestId('route-pathname').textContent).toBe(`/${PROJECT_SEGMENT}/runners`)
+      expect(screen.getByTestId('route-pathname').textContent).toBe(`/${PROJECT_SEGMENT}/runners?from=activity`)
     })
 
     it('navigates to /runners when the stale/offline badge is activated', async () => {
@@ -194,7 +194,7 @@ describe('ActivityPage', () => {
 
       fireEvent.click(badge)
 
-      expect(screen.getByTestId('route-pathname').textContent).toBe(`/${PROJECT_SEGMENT}/runners`)
+      expect(screen.getByTestId('route-pathname').textContent).toBe(`/${PROJECT_SEGMENT}/runners?from=activity`)
     })
 
     it('navigates to /runners (not /activity) when any badge is activated', async () => {
@@ -205,7 +205,7 @@ describe('ActivityPage', () => {
 
       const pathname = screen.getByTestId('route-pathname').textContent
       expect(pathname).not.toBe(`/${PROJECT_SEGMENT}/activity`)
-      expect(pathname).toBe(`/${PROJECT_SEGMENT}/runners`)
+      expect(pathname).toBe(`/${PROJECT_SEGMENT}/runners?from=activity`)
     })
   })
 

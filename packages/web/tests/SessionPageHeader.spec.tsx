@@ -253,9 +253,8 @@ describe('SessionPage header and states', () => {
 
       renderWithQueryClient(<SessionPage />)
 
-      await waitFor(() => {
-        expect(screen.getByText('3 turns')).toBeInTheDocument()
-      })
+      const header = await screen.findByTestId('session-header')
+      await within(header).findByText('3 turns')
     })
 
     it('shows changed-files summary in header when metadata has changedFiles', async () => {
@@ -393,9 +392,8 @@ describe('SessionPage header and states', () => {
 
       renderWithQueryClient(<SessionPage />)
 
-      await waitFor(() => {
-        expect(screen.getByText('Running')).toBeInTheDocument()
-      })
+      const header = await screen.findByTestId('session-header')
+      await within(header).findByText('Running')
     })
 
     it('shows stale status badge for running sessions with old activity', async () => {
@@ -410,9 +408,8 @@ describe('SessionPage header and states', () => {
 
       renderWithQueryClient(<SessionPage />)
 
-      await waitFor(() => {
-        expect(screen.getByText('Stale')).toBeInTheDocument()
-      })
+      const header = await screen.findByTestId('session-header')
+      await within(header).findByText('Stale')
     })
 
     it('shows finalizing status badge when session is finalizing', async () => {
@@ -427,9 +424,8 @@ describe('SessionPage header and states', () => {
 
       renderWithQueryClient(<SessionPage />)
 
-      await waitFor(() => {
-        expect(screen.getByText('Finalizing')).toBeInTheDocument()
-      })
+      const header = await screen.findByTestId('session-header')
+      await within(header).findByText('Finalizing')
     })
 
     it('shows failed status badge for failed sessions', async () => {
@@ -443,10 +439,10 @@ describe('SessionPage header and states', () => {
       setupSessionPage({ detail })
 
       renderWithQueryClient(<SessionPage />)
-      await waitFor(() => {
-        expect(screen.getByTestId('session-status-badge')).toHaveAttribute('data-status-kind', 'failed')
-        expect(screen.getByTestId('session-status-badge').textContent).toContain('Session failed')
-      })
+      const header = await screen.findByTestId('session-header')
+      const badge = await within(header).findByTestId('session-status-badge')
+      expect(badge).toHaveAttribute('data-status-kind', 'failed')
+      expect(badge.textContent).toContain('Session failed')
     })
   })
 
@@ -594,7 +590,7 @@ describe('SessionPage header and states', () => {
       expect(screen.queryByText(/Jump to bottom/i)).not.toBeInTheDocument()
     })
 
-    it('renders recoveryBar inside the SessionHeader region on the main branch', async () => {
+    it('renders the recovery bar inside the transcript scroll container on the main branch', async () => {
       const turns = [makeTurn({ id: 'turn-1' })]
       const detail = makeMockDetail({
         metadata: makeMockMetadata({
@@ -608,8 +604,7 @@ describe('SessionPage header and states', () => {
 
       await screen.findByText('Issue #123')
 
-      // recoveryBar is rendered inside the header sub-region (testid exists on every branch).
-      expect(screen.getByTestId('session-recovery-bar')).toBeInTheDocument()
+      expect(screen.getByTestId('session-transcript-scroll-container')).toContainElement(screen.getByTestId('session-recovery-bar'))
     })
 
     it('renders the same header on the main branch as on the empty branch', async () => {
@@ -620,7 +615,6 @@ describe('SessionPage header and states', () => {
         model: 'claude-3-5-sonnet',
       })
 
-      // Main branch: turns > 0
       const mainDetail = makeMockDetail({ metadata: baseMetadata })
       setupSessionPage({
         detail: mainDetail,
@@ -637,7 +631,6 @@ describe('SessionPage header and states', () => {
       expect(screen.queryByText(/No activity recorded/i)).not.toBeInTheDocument()
       unmount()
 
-      // Empty branch: turns === 0
       const emptyDetail = makeMockDetail({
         metadata: baseMetadata,
         turns: [],
@@ -653,8 +646,8 @@ describe('SessionPage header and states', () => {
       expect(screen.getByText('Build')).toBeInTheDocument()
       const emptyCompletedBadges = screen.getAllByText('Completed')
       expect(emptyCompletedBadges.length).toBeGreaterThanOrEqual(1)
-      // Empty branch shows the "No activity" sub-region.
       expect(screen.getByText(/No activity recorded/i)).toBeInTheDocument()
+      expect(screen.getByTestId('session-transcript-scroll-container')).toContainElement(screen.getByTestId('session-recovery-bar'))
     })
 
     it('main branch session header back-link uses whitespace-nowrap and never wraps', async () => {

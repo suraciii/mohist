@@ -27,7 +27,7 @@ const STAGE_COLORS: Record<string, string> = {
 }
 
 const APPROVAL_CHIP_COLORS = 'bg-warning-subtle text-warning border-warning-border'
-const BLOCKED_CHIP_COLORS = 'bg-muted text-muted-foreground border-border'
+const BLOCKED_CHIP_COLORS = 'bg-warning-subtle text-warning border-warning-border'
 const RECENT_FAILURE_CHIP_COLORS = 'bg-danger-subtle text-danger border-danger-border'
 
 function ObservabilityBar({ card }: { card: SessionCardType }) {
@@ -216,7 +216,7 @@ export function WaitingCard({ card }: WaitingCardProps) {
                 : BLOCKED_CHIP_COLORS
             }`}
             data-testid="waiting-card-chip"
-            data-tone={isApproval ? 'warning' : 'neutral'}
+            data-tone="warning"
           >
             {isApproval ? '\u23F8' : '\u2753'}
             {card.label}

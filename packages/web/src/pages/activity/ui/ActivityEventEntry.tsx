@@ -30,7 +30,7 @@ const attentionPresentation = {
 const typePresentation: Record<ActivityEvent['type'], { label: string; chip: string }> = {
   'issue-state': {
     label: 'Issue',
-    chip: 'bg-info-subtle text-info border-info-border',
+    chip: 'bg-muted text-muted-foreground border-border',
   },
   'workflow-stage': {
     label: 'Workflow',

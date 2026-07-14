@@ -280,7 +280,7 @@ describe('Coder Session evidence view — region contract', () => {
     expect(errorsRegion).not.toBeNull()
     expect(errorsRegion!.getAttribute('data-failure-category')).toBe('context_limit')
     expect(errorsRegion!.getAttribute('data-tool-error-count')).toBe('2')
-    expect(errorsRegion!.textContent).toContain('context_limit')
+    expect(errorsRegion!.textContent).toContain('Context limit')
     expect(errorsRegion!.textContent).toContain('2')
   })
 
@@ -357,12 +357,15 @@ describe('Coder Session evidence view — region contract', () => {
     const usage = container.querySelector('[data-testid="session-usage-summary"]')
     const errorsRegion = container.querySelector('[data-testid="session-errors-region"]')
     const scrollContainer = container.querySelector('[data-testid="session-transcript-scroll-container"]')
+    const header = container.querySelector('[data-testid="session-header"]')
     expect(usage).not.toBeNull()
     expect(errorsRegion).not.toBeNull()
     expect(scrollContainer).not.toBeNull()
+    expect(header).not.toBeNull()
 
     expect(usage!.compareDocumentPosition(errorsRegion!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(errorsRegion!.compareDocumentPosition(scrollContainer!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(header!.textContent).not.toContain('tokens')
   })
 
   it('renders failureReason only when a non-null value is available', async () => {

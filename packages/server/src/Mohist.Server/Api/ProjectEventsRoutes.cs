@@ -26,7 +26,8 @@ public static class ProjectEventsRoutes
         {
             var project = context.GetResolvedProject();
             var effectiveLimit = ClampLimit(limit);
-            var filter = ProjectEventFilter.Create(types, attentionOnly == true);
+            if (!ProjectEventFilter.TryCreate(types, attentionOnly == true, out var filter))
+                return ApiResults.BadRequest("types contains an unsupported event category", "invalid_event_types");
             var eventsResult = await events.ListAsync(project.Id, effectiveLimit, filter, ct);
             var response = eventsResult.Select(ProjectEventDto.From).ToList();
             return ApiResults.Ok(response);
@@ -69,7 +70,6 @@ public sealed record ProjectEventDto(
     string? Subject,
     string? DataContentType,
     JsonElement Data,
-    Dictionary<string, string> Extensions,
     string? RunnerId,
     int? IssueNumber,
     string? SessionSourceKind,
@@ -90,12 +90,31 @@ public sealed record ProjectEventDto(
             envelope.SpecVersion,
             envelope.Subject,
             envelope.DataContentType,
-            envelope.Data,
-            new Dictionary<string, string>(envelope.Extensions),
+            ActivityData(envelope.Data),
             envelope.RunnerId,
             envelope.IssueNumber,
             envelope.SessionSourceKind,
             envelope.WorkflowRunId,
             envelope.AgentId,
             envelope.AgentName);
+
+    private static readonly HashSet<string> ActivityDataFields = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "agentId", "agentName", "checkName", "coderSessionId", "failureCategory",
+        "failureReason", "issueNo", "issueNumber", "issue_number", "message", "reason",
+        "runnerId", "sessionId", "stage", "stageName", "status", "taskId", "title",
+    };
+
+    private static JsonElement ActivityData(JsonElement data)
+    {
+        if (data.ValueKind != JsonValueKind.Object)
+            return JsonSerializer.SerializeToElement(new Dictionary<string, JsonElement>());
+
+        var result = new Dictionary<string, JsonElement>();
+        foreach (var property in data.EnumerateObject())
+        {
+            if (ActivityDataFields.Contains(property.Name)) result[property.Name] = property.Value.Clone();
+        }
+        return JsonSerializer.SerializeToElement(result);
+    }
 }

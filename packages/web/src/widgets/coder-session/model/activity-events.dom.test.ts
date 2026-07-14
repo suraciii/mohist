@@ -17,7 +17,6 @@ function makeProjectEvent(overrides: Partial<ProjectEventDto> = {}): ProjectEven
     subject: '1',
     dataContentType: 'application/json',
     data: {},
-    extensions: { issueno: '1' },
     runnerId: null,
     ...overrides,
   }
@@ -186,7 +185,7 @@ describe('buildActivityEvents', () => {
   it('classifies runner events as runner type with blocked attention for disconnected', () => {
     const events = buildActivityEvents({
       recordedEvents: [
-        makeProjectEvent({ origin: 'agent-session', sourceAggregateKind: 'agent-session', sourceAggregateId: 'session-1', source: '/mohist/agent-session/session-1', type: 'com.mohist.runner.disconnected', extensions: { runnerid: 'runner-1' } }),
+        makeProjectEvent({ origin: 'agent-session', sourceAggregateKind: 'agent-session', sourceAggregateId: 'session-1', source: '/mohist/agent-session/session-1', type: 'com.mohist.runner.disconnected', runnerId: 'runner-1' }),
       ],
       sessions: [],
       waiting: [],
@@ -196,6 +195,18 @@ describe('buildActivityEvents', () => {
     const runner = events.find((e) => e.type === 'runner')
     expect(runner?.attention).toBe('blocked')
     expect(runner?.targets.primary?.path).toContain('/runners/runner-1')
+  })
+  it('keeps unrecognized recorded issue, workflow, agent, and runner events visible', () => {
+    const events = buildActivityEvents({
+      recordedEvents: [
+        makeProjectEvent({ type: 'com.mohist.issue.renamed' }),
+        makeProjectEvent({ origin: 'workflow-run', sourceAggregateKind: 'workflow-run', type: 'com.mohist.workflow.run.noted' }),
+        makeProjectEvent({ origin: 'agent-session', sourceAggregateKind: 'agent-session', type: 'com.mohist.agent-session.checkpointed' }),
+        makeProjectEvent({ type: 'com.mohist.runner.reconnected', runnerId: 'runner-1' }),
+      ], sessions: [], waiting: [], runners: [],
+    })
+
+    expect(events.map((event) => event.type)).toEqual(['workflow-stage', 'issue-state', 'agent-session', 'runner'])
   })
   it('generates runner snapshot evidence for busy and stale runners, omitting idle', () => {
     const events = buildActivityEvents({

@@ -7,9 +7,10 @@ const RUNNER_START_HINT = 'Start a runner with: npx mohist runner'
 
 interface RunnerSummaryProps {
   summary: RunnerStatusSummary
+  targetPath?: string
 }
 
-export function RunnerSummary({ summary }: RunnerSummaryProps) {
+export function RunnerSummary({ summary, targetPath = '/runners' }: RunnerSummaryProps) {
   const navigate = useNavigate()
   const toProjectPath = useProjectPath()
   const { rows } = summary
@@ -34,7 +35,7 @@ export function RunnerSummary({ summary }: RunnerSummaryProps) {
   if (!hasConnectedCapacity) {
     return (
       <button
-        onClick={() => navigate(toProjectPath('/runners'))}
+        onClick={() => navigate(toProjectPath(targetPath))}
         data-testid="runner-summary-button"
         className="flex items-center gap-2 text-xs hover:underline text-left"
       >
@@ -53,7 +54,7 @@ export function RunnerSummary({ summary }: RunnerSummaryProps) {
   if (connectedBusyCount > 0) {
     return (
       <button
-        onClick={() => navigate(toProjectPath('/runners'))}
+        onClick={() => navigate(toProjectPath(targetPath))}
         data-testid="runner-summary-button"
         className="flex items-center gap-2 text-xs hover:underline text-left"
       >
@@ -72,7 +73,7 @@ export function RunnerSummary({ summary }: RunnerSummaryProps) {
 
   return (
     <button
-      onClick={() => navigate(toProjectPath('/runners'))}
+      onClick={() => navigate(toProjectPath(targetPath))}
       data-testid="runner-summary-button"
       className="flex items-center gap-2 text-xs hover:underline text-left"
     >
@@ -89,7 +90,7 @@ export function RunnerSummary({ summary }: RunnerSummaryProps) {
   )
 }
 
-export function RunnerSummaryBadge() {
+export function RunnerSummaryBadge({ targetPath }: Pick<RunnerSummaryProps, 'targetPath'>) {
   const summary = useRunnerSummary()
-  return <RunnerSummary summary={summary} />
+  return <RunnerSummary summary={summary} targetPath={targetPath} />
 }

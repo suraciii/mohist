@@ -6,7 +6,6 @@ import { SessionFollowupComposer as DefaultSessionFollowupComposer, SessionRecov
 import { ContextHealthBar as DefaultContextHealthBar, CompactionLineageLink as DefaultCompactionLineageLink } from '../../../widgets/coder-session'
 import { Button } from '@/shared/ui/components/button'
 import { AlertDialog } from '@/shared/ui/components/alert-dialog'
-import { formatCompact, formatCost } from '../../../shared/lib/format-compact'
 import type { StatusKind, SessionDataSourceResult } from '../data/SessionDataSource'
 import { SessionUsageSummary } from './SessionUsageSummary'
 
@@ -34,6 +33,17 @@ interface SessionErrorsEvidenceProps {
 }
 
 const ERROR_SURFACE_CLASS = 'bg-danger-subtle text-danger border-danger-border'
+
+const FAILURE_CATEGORY_LABELS: Record<string, string> = {
+  cancelled: 'Cancelled',
+  compaction: 'Context compaction',
+  context_limit: 'Context limit',
+  timeout: 'Timed out',
+}
+
+function formatFailureCategory(category: string): string {
+  return FAILURE_CATEGORY_LABELS[category.toLowerCase()] ?? 'Execution failure'
+}
 
 export function SessionErrorsEvidence({
   statusKind,
@@ -65,7 +75,7 @@ export function SessionErrorsEvidence({
             className="inline-flex items-center rounded-full border border-danger-border bg-danger-subtle text-danger px-2 py-0.5 text-[10px] font-semibold"
             data-testid="session-errors-region-category"
           >
-            {failureCategory}
+            {formatFailureCategory(failureCategory)}
           </span>
         )}
         {hasToolErrors && (
@@ -320,24 +330,7 @@ export function SessionDetailShell({
     )
   }
 
-  const headerWithRecovery = (
-    <SessionHeader
-      backPath={backPath}
-      backLabel={backLabel}
-      issueTitle={issueTitle}
-      workflowContextPath={workflowContextPath}
-      workflowContextLabel={workflowContextLabel}
-      meta={meta}
-      statusKind={displayStatusKind}
-      turnCount={displayTurnCount}
-      recoveryBar={recoveryBarContent}
-      siblingNav={siblingNav}
-      isRunning={isRunning}
-      cancel={cancel}
-    />
-  )
-
-  const headerWithoutRecovery = (
+  const header = (
     <SessionHeader
       backPath={backPath}
       backLabel={backLabel}
@@ -353,39 +346,12 @@ export function SessionDetailShell({
     />
   )
 
-  if (turns.length === 0 && isRunning) {
-    return (
-      <div className="flex flex-col flex-1 min-h-0 xl:flex-row">
-        <div className="flex flex-col flex-1 min-h-0">
-          {headerWithRecovery}
-          <SessionUsageSummary usage={meta.usage} />
-          {errorsEvidence}
-          <SessionWaitingState />
-          <SessionFollowupComposer onSend={sendFollowup} isSending={followupIsPending} disabled={!isRunning} />
-        </div>
-        {siblingSidebar}
-      </div>
-    )
-  }
-
-  if (turns.length === 0) {
-    return (
-      <div className="flex flex-col flex-1 min-h-0 xl:flex-row">
-        <div className="flex flex-col flex-1 min-h-0">
-          {headerWithRecovery}
-          <SessionUsageSummary usage={meta.usage} />
-          {errorsEvidence}
-          <SessionEmptyState />
-        </div>
-        {siblingSidebar}
-      </div>
-    )
-  }
+  const hasTurns = turns.length > 0
 
   return (
     <div className="flex flex-col flex-1 min-h-0 relative xl:flex-row">
       <div className="flex flex-col flex-1 min-h-0">
-        {headerWithoutRecovery}
+        {header}
         <SessionUsageSummary usage={meta.usage} />
         {errorsEvidence}
         <div
@@ -407,27 +373,31 @@ export function SessionDetailShell({
               {recoveryBarContent}
             </div>
           )}
-          <SessionTranscriptLayout
-            title={meta.sessionName ?? sessionKey ?? 'Session'}
-            turnCount={displayTurnCount}
-            turns={displayTurns}
-            statusKind={displayStatusKind}
-            isRunning={isRunning}
-            isThinking={isThinking}
-            isStreaming={isStreaming}
-            scrollContainerRef={scrollContainerRef}
-          />
+          {hasTurns ? (
+            <SessionTranscriptLayout
+              title={meta.sessionName ?? sessionKey ?? 'Session'}
+              turnCount={displayTurnCount}
+              turns={displayTurns}
+              statusKind={displayStatusKind}
+              isRunning={isRunning}
+              isThinking={isThinking}
+              isStreaming={isStreaming}
+              scrollContainerRef={scrollContainerRef}
+            />
+          ) : isRunning ? <SessionWaitingState /> : <SessionEmptyState />}
         </div>
 
-        <div data-testid="session-followup-composer-region">
-          <SessionFollowupComposer
-            onSend={sendFollowup}
-            isSending={followupIsPending}
-            disabled={!isRunning}
-          />
-        </div>
+        {(hasTurns || isRunning) && (
+          <div data-testid="session-followup-composer-region">
+            <SessionFollowupComposer
+              onSend={sendFollowup}
+              isSending={followupIsPending}
+              disabled={!isRunning}
+            />
+          </div>
+        )}
 
-        {newContentAvailable && <JumpToBottomButton onClick={handleScrollToBottom} />}
+        {hasTurns && newContentAvailable && <JumpToBottomButton onClick={handleScrollToBottom} />}
       </div>
       {siblingSidebar}
     </div>
@@ -550,7 +520,6 @@ function SessionHeader({
   meta,
   statusKind,
   turnCount,
-  recoveryBar,
   siblingNav,
   isRunning,
   cancel,
@@ -563,7 +532,6 @@ function SessionHeader({
   meta: import('../../../entities/coder-session').SessionMetadata
   statusKind: StatusKind
   turnCount: number
-  recoveryBar?: React.ReactNode
   siblingNav?: React.ReactNode
   isRunning: boolean
   cancel: SessionDataSourceResult['cancel']
@@ -584,19 +552,7 @@ function SessionHeader({
     ? changedFiles.length === 1 ? '1 file changed' : `${changedFiles.length} files changed`
     : null
 
-  const usage = meta?.usage
   const eventSummary = meta?.eventSummary
-  const hasUsage =
-    usage?.totalTokens != null ||
-    usage?.inputTokens != null ||
-    usage?.outputTokens != null ||
-    usage?.cachedReadTokens != null ||
-    usage?.thoughtTokens != null
-
-  const contextWindowPct =
-    usage?.contextUsagePercent != null
-      ? Math.round(Math.max(0, Math.min(100, usage.contextUsagePercent)))
-      : null
 
   const stageLower = (meta?.stage ?? '').toLowerCase()
   const stageClassName = stageChipPresentation[stageLower] ?? 'bg-muted text-muted-foreground border-border'
@@ -740,53 +696,6 @@ function SessionHeader({
         />
       )}
 
-      {(hasUsage || usage?.costAmount != null || usage?.contextWindowUsed != null || eventSummary?.failureCategory || eventSummary?.toolCallCount != null) && (
-        <div className="flex items-center gap-3 mt-2 text-xs text-muted-foreground flex-wrap">
-          {hasUsage && (
-            <span>
-              {usage?.totalTokens != null
-                ? `${formatCompact(usage.totalTokens)} tokens`
-                : [usage?.inputTokens != null ? `${formatCompact(usage.inputTokens)} in` : '', usage?.outputTokens != null ? `${formatCompact(usage.outputTokens)} out` : '']
-                    .filter(Boolean)
-                    .join(' · ')}
-              {usage?.cachedReadTokens != null && usage.cachedReadTokens > 0 && (
-                <span className="ml-1 text-muted-foreground/70">+{formatCompact(usage.cachedReadTokens)} cached</span>
-              )}
-              {usage?.thoughtTokens != null && usage.thoughtTokens > 0 && (
-                <span className="ml-1 text-muted-foreground/70">+{formatCompact(usage.thoughtTokens)} thought</span>
-              )}
-            </span>
-          )}
-          {usage?.costAmount != null && usage?.costCurrency && (
-            <span>{formatCost(usage.costAmount, usage.costCurrency)}</span>
-          )}
-          {usage?.contextWindowUsed != null && (
-            <span>
-              {usage?.contextWindowSize != null
-                ? `${formatCompact(usage.contextWindowUsed)} / ${formatCompact(usage.contextWindowSize)} ctx`
-                : `${formatCompact(usage.contextWindowUsed)} ctx used`}
-              {contextWindowPct != null && <span className="ml-1 text-muted-foreground/70">({contextWindowPct}%)</span>}
-            </span>
-          )}
-          {eventSummary?.failureCategory && (
-            <span className="px-1.5 py-0.5 rounded-full bg-danger-subtle text-danger border border-danger-border text-[10px] font-medium">
-              {eventSummary.failureCategory}
-            </span>
-          )}
-          {eventSummary?.toolCallCount != null && (
-            <span className={eventSummary?.toolErrorCount ? 'text-warning font-medium' : ''}>
-              {eventSummary.toolCallCount} tool{eventSummary.toolCallCount !== 1 ? 's' : ''}
-              {eventSummary?.toolErrorCount ? ` · ${eventSummary.toolErrorCount} error${eventSummary.toolErrorCount !== 1 ? 's' : ''}` : ''}
-            </span>
-          )}
-        </div>
-      )}
-
-      {recoveryBar && (
-        <div className="mt-3 pt-3 border-t border-border" data-testid="session-recovery-bar">
-          {recoveryBar}
-        </div>
-      )}
     </div>
   )
 }
@@ -796,30 +705,12 @@ function StickySessionTitle({ meta, statusKind, turnCount }: {
   statusKind: StatusKind
   turnCount: number
 }) {
-  const usage = meta?.usage
-  const totalTokens = usage?.totalTokens ?? null
-  const contextPct = usage?.contextUsagePercent != null
-    ? Math.round(Math.max(0, Math.min(100, usage.contextUsagePercent)))
-    : null
-
   return (
     <div className="sticky top-0 z-20 border-b border-border bg-background px-4 py-2" data-testid="session-sticky-title">
       <div className="flex items-center gap-2 text-sm">
         <span className="font-medium truncate">{meta?.sessionName ?? 'Session'}</span>
         <StatusBadge kind={statusKind} />
         <span className="text-muted-foreground text-xs">{turnCount} turn{turnCount !== 1 ? 's' : ''}</span>
-        {totalTokens != null && (
-          <>
-            <span className="text-muted-foreground/40">·</span>
-            <span className="text-muted-foreground text-xs">{formatCompact(totalTokens)} tokens</span>
-          </>
-        )}
-        {contextPct != null && (
-          <>
-            <span className="text-muted-foreground/40">·</span>
-            <span className="text-muted-foreground text-xs">{contextPct}% ctx</span>
-          </>
-        )}
       </div>
     </div>
   )

@@ -196,7 +196,7 @@ export interface AgentActivityWaiting {
   issueNumber: number
   issueTitle: string
   stage: string | null
-  label: 'Needs Approval'
+  label: 'Needs Approval' | 'Blocked'
   requestedAt: string | null
   preview: string | null
 }

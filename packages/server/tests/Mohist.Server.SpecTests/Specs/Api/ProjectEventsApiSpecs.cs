@@ -243,11 +243,9 @@ public class ProjectEventsApiSpecs
 
         Assert.Single(responseA);
         Assert.Equal(issueAId, responseA[0].SourceAggregateId);
-        Assert.Equal(projectA.Id, responseA[0].Extensions["projectid"]);
 
         Assert.Single(responseB);
         Assert.Equal(issueBId, responseB[0].SourceAggregateId);
-        Assert.Equal(projectB.Id, responseB[0].Extensions["projectid"]);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -307,6 +305,21 @@ public class ProjectEventsApiSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
+    public async Task GetProjectEvents_RejectsEventTypesWithoutARecordedSource()
+    {
+        var project = await CreateProjectAsync("invalid-types");
+
+        using var response = await _client.GetAsync($"/api/projects/{project.Id}/events?types=runner");
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+
+        using var emptyResponse = await _client.GetAsync($"/api/projects/{project.Id}/events?types=,");
+        Assert.Equal(HttpStatusCode.BadRequest, emptyResponse.StatusCode);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
+    [Fact]
     public async Task GetProjectEvents_DoesNotCreateAnyNewEvents()
     {
         var project = await CreateProjectAsync("no-new-events");
@@ -341,7 +354,7 @@ public class ProjectEventsApiSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
-    public async Task GetProjectEvents_PreservesEnvelopePayloadAndExtensions()
+    public async Task GetProjectEvents_ProjectsOnlyActivitySafePayloadFields()
     {
         var project = await CreateProjectAsync("payload");
         var issueId = $"issue_{Guid.NewGuid():N}";
@@ -351,7 +364,7 @@ public class ProjectEventsApiSpecs
         await AppendIssueEventAsync(issueId, project.Id, "com.mohist.issue.work-started",
             time: t0,
             subject: "7",
-            data: new { stage = "build", attempt = 1 });
+            data: new { stage = "build", attempt = 1, internalTrace = "not for activity" });
 
         var response = await _client.GetDataAsync<List<ProjectEventResponseDto>>(
             $"/api/projects/{project.Id}/events");
@@ -363,19 +376,14 @@ public class ProjectEventsApiSpecs
         Assert.Equal("application/json", entry.DataContentType);
         Assert.Equal(JsonValueKind.Object, entry.Data.ValueKind);
         Assert.Equal("build", entry.Data.GetProperty("stage").GetString());
-        Assert.Equal(1, entry.Data.GetProperty("attempt").GetInt32());
-
-        Assert.True(entry.Extensions.ContainsKey("projectid"));
-        Assert.Equal(project.Id, entry.Extensions["projectid"]);
-        Assert.True(entry.Extensions.ContainsKey("issueid"));
-        Assert.Equal(issueId, entry.Extensions["issueid"]);
-        Assert.Equal(7, int.Parse(entry.Extensions["issueno"]));
+        Assert.False(entry.Data.TryGetProperty("attempt", out _));
+        Assert.False(entry.Data.TryGetProperty("internalTrace", out _));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
-    public async Task GetProjectEvents_DoesNotIncludeSubscribedOrDispatchedMarkers()
+    public async Task GetProjectEvents_DoesNotExposeEnvelopeExtensions()
     {
         var project = await CreateProjectAsync("no-sub");
         var issueId = $"issue_{Guid.NewGuid():N}";
@@ -385,15 +393,10 @@ public class ProjectEventsApiSpecs
         await AppendIssueEventAsync(issueId, project.Id, "com.mohist.issue.created",
             time: t0, subject: "1");
 
-        var response = await _client.GetDataAsync<List<ProjectEventResponseDto>>(
-            $"/api/projects/{project.Id}/events");
-
-        var entry = Assert.Single(response);
-        Assert.True(entry.Id > 0);
-        Assert.False(entry.Extensions.ContainsKey("subscribers"));
-        Assert.False(entry.Extensions.ContainsKey("subscriptions"));
-        Assert.False(entry.Extensions.ContainsKey("subscribedAt"));
-        Assert.False(entry.Extensions.ContainsKey("dispatchedAt"));
+        using var response = await _client.GetAsync($"/api/projects/{project.Id}/events");
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var entry = Assert.Single(document.RootElement.GetProperty("data").EnumerateArray());
+        Assert.False(entry.TryGetProperty("extensions", out _));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -472,6 +475,14 @@ public class ProjectEventsApiSpecs
             response,
             eventEntry => Assert.Equal(1_000, eventEntry.Id),
             eventEntry => Assert.Equal(999, eventEntry.Id));
+
+        var maxResponse = await _client.GetDataAsync<List<ProjectEventResponseDto>>(
+            $"/api/projects/{project.Id}/events?limit=1001");
+        var defaultLimitResponse = await _client.GetDataAsync<List<ProjectEventResponseDto>>(
+            $"/api/projects/{project.Id}/events?limit=0");
+
+        Assert.Equal(1_000, maxResponse.Count);
+        Assert.Equal(200, defaultLimitResponse.Count);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -528,7 +539,7 @@ public class ProjectEventsApiSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
-    public async Task GetProjectEvents_PreservesScalarAndArrayPayloads()
+    public async Task GetProjectEvents_ProjectsScalarAndArrayPayloadsAsEmptyObjects()
     {
         var project = await CreateProjectAsync("json-payloads");
         var issueId = $"issue_{Guid.NewGuid():N}";
@@ -540,8 +551,11 @@ public class ProjectEventsApiSpecs
         var response = await _client.GetDataAsync<List<ProjectEventResponseDto>>(
             $"/api/projects/{project.Id}/events");
 
-        Assert.Contains(response, entry => entry.Data.ValueKind == JsonValueKind.String && entry.Data.GetString() == "created");
-        Assert.Contains(response, entry => entry.Data.ValueKind == JsonValueKind.Array && entry.Data.GetArrayLength() == 2);
+        Assert.All(response, entry =>
+        {
+            Assert.Equal(JsonValueKind.Object, entry.Data.ValueKind);
+            Assert.Empty(entry.Data.EnumerateObject());
+        });
     }
 
     private async Task<ProjectDto> CreateProjectAsync(string nameSuffix = "events")
@@ -840,7 +854,6 @@ public class ProjectEventsApiSpecs
         string? Subject,
         string? DataContentType,
         JsonElement Data,
-        Dictionary<string, string> Extensions,
         string? RunnerId,
         int? IssueNumber,
         string? SessionSourceKind,

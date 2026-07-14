@@ -17,7 +17,6 @@ function makeProjectEvent(overrides: Partial<ProjectEventDto> = {}): ProjectEven
     subject: '1',
     dataContentType: 'application/json',
     data: {},
-    extensions: { issueno: '1' },
     runnerId: null,
     ...overrides,
   }
@@ -87,7 +86,6 @@ describe('activity event targets', () => {
       source: '/mohist/agent-sessions/workflow-session-42',
       type: 'session.closed',
       subject: null,
-      extensions: {},
       data: { status: 'failed', failureReason: 'runner timeout' },
       issueNumber: 42,
       sessionSourceKind: 'workflow',
@@ -113,7 +111,6 @@ describe('activity event targets', () => {
       source: '/mohist/agent-sessions/generic-session-1',
       type: 'coder_session_started',
       subject: null,
-      extensions: {},
       data: { status: 'opened' },
       sessionSourceKind: 'agent-launch',
       agentId: 'agent-1',
@@ -135,12 +132,23 @@ describe('activity event targets', () => {
       source: '/mohist/workflow-runs/wr-42',
       type: 'com.mohist.workflow.stage.started',
       subject: null,
-      extensions: {},
       issueNumber: 42,
       data: { stage: 'Build' },
     }))
 
     expect(event.targets.primary?.path).toContain('/issues/42')
     expect(event.targets.workflow?.path).toContain('/issues/42')
+  })
+
+  it('keeps workflow session navigation when its recorded event has no issue context', () => {
+    const event = firstRecordedEvent(makeProjectEvent({
+      origin: 'agent-session', sourceAggregateKind: 'agent-session', sourceAggregateId: 'workflow-session',
+      source: '/mohist/agent-sessions/workflow-session', type: 'coder_session_started', subject: null,
+      sessionSourceKind: 'workflow', workflowRunId: 'wr-without-issue', data: { status: 'opened' },
+    }))
+
+    expect(event.targets.session).toMatchObject({ sessionId: 'workflow-session', isGeneric: false })
+    expect(event.targets.primary?.path).toContain('/agent-sessions/workflow-session?from=activity')
+    expect(event.targets.issue).toBeUndefined()
   })
 })

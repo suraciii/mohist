@@ -466,9 +466,6 @@ public sealed class ProjectEventFilter
         "com.mohist.agent-session.context-exhausted", "session.closed", "session.liveness",
     ];
 
-    private static readonly string[] RunnerTypes =
-    ["com.mohist.runner.connected", "com.mohist.runner.disconnected", "com.mohist.runner.heartbeat"];
-
     private readonly HashSet<string> _types;
 
     private ProjectEventFilter(HashSet<string> types, bool attentionOnly)
@@ -483,15 +480,24 @@ public sealed class ProjectEventFilter
         (_types.Count == 0 || _types.Contains("failure"))
         && (AttentionOnly || _types.Contains("failure"));
 
-    public static ProjectEventFilter? Create(string? types, bool attentionOnly)
+    public static bool TryCreate(string? types, bool attentionOnly, out ProjectEventFilter? filter)
     {
-        var values = string.IsNullOrWhiteSpace(types)
-            ? new HashSet<string>(StringComparer.Ordinal)
-            : types.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
-                .Where(type => type is "issue-state" or "workflow-stage" or "agent-session" or "runner" or "failure")
-                .ToHashSet(StringComparer.Ordinal);
+        if (types is null)
+        {
+            filter = attentionOnly ? new ProjectEventFilter(new HashSet<string>(StringComparer.Ordinal), true) : null;
+            return true;
+        }
 
-        return values.Count == 0 && !attentionOnly ? null : new ProjectEventFilter(values, attentionOnly);
+        var values = types.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+            .ToHashSet(StringComparer.Ordinal);
+        if (values.Count == 0 || values.Any(type => type is not ("issue-state" or "workflow-stage" or "agent-session" or "failure")))
+        {
+            filter = null;
+            return false;
+        }
+
+        filter = values.Count == 0 && !attentionOnly ? null : new ProjectEventFilter(values, attentionOnly);
+        return true;
     }
 
     public string[]? CandidateTypes(ProjectEventOrigin origin)
@@ -523,9 +529,9 @@ public sealed class ProjectEventFilter
 
     private static IEnumerable<string> SourceTypes(ProjectEventOrigin origin) => origin switch
     {
-        ProjectEventOrigin.Issue => IssueTypes.Concat(RunnerTypes),
-        ProjectEventOrigin.WorkflowRun => WorkflowTypes.Concat(RunnerTypes),
-        ProjectEventOrigin.AgentSession => AgentSessionTypes.Concat(RunnerTypes),
+        ProjectEventOrigin.Issue => IssueTypes,
+        ProjectEventOrigin.WorkflowRun => WorkflowTypes,
+        ProjectEventOrigin.AgentSession => AgentSessionTypes,
         _ => [],
     };
 
