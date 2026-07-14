@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useParams, useSearchParams, Link } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { ChevronLeftIcon, ChevronRightIcon } from 'lucide-react'
@@ -58,7 +58,7 @@ function buildSessionMetadata(
     lastDataAt: lastEventAt ?? meta.lastDataAt ?? meta.lastActivityAt ?? null,
     probeSentAt: null,
     probeDeadlineAt: null,
-    failureReason: null,
+    failureReason: meta.failureReason ?? null,
     partCount: meta.metadata.partCount,
     toolCount: meta.metadata.toolCount,
     turnCount,
@@ -132,18 +132,39 @@ export function useIssueSessionDataSource(
   useDocumentTitle(`Session — Issue #${issueNumber} — Mohist`)
 
   const { data: issue } = useIssueHook(issueNumber)
-  const { sessions, isLoading: sessionsLoading } = useCoderSessionsHook(issueNumber)
+  const { sessions, isLoading: sessionsLoading, isFetching: sessionsFetching, refetch: refetchSessions } = useCoderSessionsHook(issueNumber)
   const session = sessions.find((s) => decodedSessionName
     ? (s.sessionName ?? s.executionId ?? s.id) === decodedSessionName
     : s.id === decodedSessionId)
 
+  // Resolve the route's sessionId segment to the canonical sessionName
+  // when the legacy `/issues/:number/session/:sessionId` route is used.
+  // Sessions are keyed by sessionName in the workflow-run API; using the
+  // raw sessionId as a key would cause a metadata miss for any session
+  // whose id and name differ (e.g. compacted/reset sessions). Falls back
+  // to the sessionName segment when already on the workflow-sessions route.
+  const resolvedSessionName = decodedSessionName
+    ?? (decodedSessionId
+      ? sessions.find((s) => s.id === decodedSessionId)?.sessionName ?? undefined
+      : undefined)
+
+  const isLegacyIdRoute = decodedSessionName == null && decodedSessionId != null
+  const [refreshedLegacyId, setRefreshedLegacyId] = useState<string | null>(null)
+  useEffect(() => {
+    if (!isLegacyIdRoute || !decodedSessionId || resolvedSessionName || sessionsLoading || sessionsFetching || refreshedLegacyId === decodedSessionId) return
+    void refetchSessions().then(() => setRefreshedLegacyId(decodedSessionId))
+  }, [decodedSessionId, isLegacyIdRoute, refetchSessions, refreshedLegacyId, resolvedSessionName, sessionsFetching, sessionsLoading])
+
   const siblingNavHook = useSiblingSessionsHook(issue?.workflowRunId ?? null, {
-    currentKey: decodedSessionName ?? decodedSessionId ?? null,
+    currentKey: resolvedSessionName ?? decodedSessionId ?? null,
   })
 
-  const lookupKey = decodedSessionName ?? decodedSessionId
+  const lookupKey = resolvedSessionName ?? decodedSessionId
 
-  const hasRoute = !!lookupKey && !!projectId && issueNumber > 0
+  // The legacy route carries a stable ID, while the detail endpoints are name-keyed.
+  // A cached list can omit a newly-created session, so force one list refresh and
+  // never issue a detail request with the stable ID as though it were a name.
+  const hasRoute = !!lookupKey && !!projectId && issueNumber > 0 && (!isLegacyIdRoute || resolvedSessionName != null)
   const metadataQueryKey = useMemo(
     () => ['issues', issueNumber, projectId, 'agent-session-metadata', lookupKey] as const,
     [issueNumber, projectId, lookupKey],
@@ -242,26 +263,30 @@ export function useIssueSessionDataSource(
   const recoverySessionName = detail?.metadata?.sessionName ?? session?.sessionName ?? session?.executionId ?? lookupKey ?? ''
 
   const [searchParams] = useSearchParams()
+  const fromActivity = searchParams.get('from') === 'activity'
   const runtimeLineage = metadata?.runtimeSessionLineage ?? null
   const viewedRuntimeSessionId = searchParams.get('rt') ?? metadata?.acpSessionId ?? null
 
   const buildLineageTargetPath = runtimeLineage && runtimeLineage.length >= 2
     ? (runtimeId: string) => {
         const base = toProjectPath(`/issues/${issueNumber}/workflow/sessions/${encodeURIComponent(recoverySessionName)}`)
-        return `${base}?rt=${encodeURIComponent(runtimeId)}`
+        const params = new URLSearchParams({ rt: runtimeId })
+        if (fromActivity) params.set('from', 'activity')
+        return `${base}?${params}`
       }
     : null
 
   const hasRecoveryActions = !!recoverySessionName
   const recoverySessionNameStr = recoverySessionName
 
-  const currentSiblingKey = decodedSessionName ?? decodedSessionId ?? null
+  const currentSiblingKey = resolvedSessionName ?? decodedSessionId ?? null
 
   const siblingNav = (
     <SiblingNavigation
       issueNumber={issueNumber}
       previous={siblingNavHook.previous}
       next={siblingNavHook.next}
+      fromActivity={fromActivity}
     />
   )
 
@@ -270,12 +295,19 @@ export function useIssueSessionDataSource(
       issueNumber={issueNumber}
       siblings={siblingNavHook.sessions}
       currentKey={currentSiblingKey}
+      fromActivity={fromActivity}
     />
   )
 
   const isDetailError = metadataError || (!metadata && !session)
+  const backPath = fromActivity
+    ? toProjectPath('/activity')
+    : toProjectPath(`/issues/${issueNumber}`)
+  const backLabel = fromActivity ? 'Activity' : `Issue #${issueNumber}`
+  const workflowContextPath = toProjectPath(`/issues/${issueNumber}`)
+  const workflowContextLabel = 'Workflow context'
   return {
-    isLoading: sessionsLoading || metadataLoading,
+    isLoading: sessionsLoading || (isLegacyIdRoute && !resolvedSessionName && sessionsFetching) || metadataLoading,
     isError: isDetailError,
     notFound: !lookupKey || isNaN(issueNumber) || issueNumber <= 0 || (!detail && !sessionsLoading && !metadataLoading && !isDetailError),
     sessionKey: lookupKey ?? '',
@@ -300,9 +332,11 @@ export function useIssueSessionDataSource(
     metadataQueryKey,
     transcriptQueryKey,
     handleRecoverySuccess,
-    backPath: toProjectPath(`/issues/${issueNumber}`),
-    backLabel: `Issue #${issueNumber}`,
+    backPath,
+    backLabel,
     issueTitle: issue?.title,
+    workflowContextPath,
+    workflowContextLabel,
     siblingNav,
     siblingSidebar,
     sessionTurns: turns,
@@ -322,18 +356,24 @@ function SiblingNavigation({
   issueNumber,
   previous,
   next,
+  fromActivity,
 }: {
   issueNumber: number
   previous: WorkflowRunSession | null
   next: WorkflowRunSession | null
+  fromActivity: boolean
 }) {
   const toProjectPath = useProjectPath()
+  const sessionPath = (sessionName: string) => {
+    const path = toProjectPath(`/issues/${issueNumber}/workflow/sessions/${encodeURIComponent(sessionName)}`)
+    return fromActivity ? `${path}?from=activity` : path
+  }
   return (
     <div className="flex max-w-full min-w-0 flex-wrap items-center gap-1" data-testid="session-sibling-navigation">
       {previous ? (
         <Link
-          to={toProjectPath(`/issues/${issueNumber}/workflow/sessions/${encodeURIComponent(previous.sessionName)}`)}
-          className="inline-flex max-w-full min-w-0 items-center gap-1 rounded border border-gray-200 bg-white px-2 py-1 text-xs font-medium text-gray-700 transition-colors hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700"
+          to={sessionPath(previous.sessionName)}
+          className="inline-flex max-w-full min-w-0 items-center gap-1 rounded border border-border bg-background px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:border-info-border hover:bg-info-subtle hover:text-info"
           data-testid="session-sibling-prev"
           title={`Previous session: ${previous.sessionName}`}
           aria-label={`Previous session: ${previous.sessionName}`}
@@ -343,7 +383,7 @@ function SiblingNavigation({
         </Link>
       ) : (
         <span
-          className="inline-flex items-center gap-1 rounded border border-gray-100 bg-gray-50 px-2 py-1 text-xs font-medium text-gray-300 cursor-not-allowed"
+          className="inline-flex items-center gap-1 rounded border border-border bg-muted px-2 py-1 text-xs font-medium text-muted-foreground/60 cursor-not-allowed"
           data-testid="session-sibling-prev-disabled"
           aria-disabled="true"
           title="No previous session"
@@ -354,8 +394,8 @@ function SiblingNavigation({
       )}
       {next ? (
         <Link
-          to={toProjectPath(`/issues/${issueNumber}/workflow/sessions/${encodeURIComponent(next.sessionName)}`)}
-          className="inline-flex max-w-full min-w-0 items-center gap-1 rounded border border-gray-200 bg-white px-2 py-1 text-xs font-medium text-gray-700 transition-colors hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700"
+          to={sessionPath(next.sessionName)}
+          className="inline-flex max-w-full min-w-0 items-center gap-1 rounded border border-border bg-background px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:border-info-border hover:bg-info-subtle hover:text-info"
           data-testid="session-sibling-next"
           title={`Next session: ${next.sessionName}`}
           aria-label={`Next session: ${next.sessionName}`}
@@ -365,7 +405,7 @@ function SiblingNavigation({
         </Link>
       ) : (
         <span
-          className="inline-flex items-center gap-1 rounded border border-gray-100 bg-gray-50 px-2 py-1 text-xs font-medium text-gray-300 cursor-not-allowed"
+          className="inline-flex items-center gap-1 rounded border border-border bg-muted px-2 py-1 text-xs font-medium text-muted-foreground/60 cursor-not-allowed"
           data-testid="session-sibling-next-disabled"
           aria-disabled="true"
           title="No next session"
@@ -386,54 +426,73 @@ function SiblingSessionsSidebar({
   issueNumber,
   siblings,
   currentKey,
+  fromActivity,
 }: {
   issueNumber: number
   siblings: WorkflowRunSession[]
   currentKey: string | null
+  fromActivity: boolean
 }) {
   const toProjectPath = useProjectPath()
   if (siblings.length === 0) return null
 
   return (
     <aside
-      className="hidden xl:flex w-64 shrink-0 flex-col border-l border-gray-200 bg-white"
+      className="hidden xl:flex w-64 shrink-0 flex-col border-l border-border bg-background"
       data-testid="session-sibling-sidebar"
       aria-label="Sibling sessions"
     >
-      <div className="px-3 py-2 border-b border-gray-200 text-xs font-semibold uppercase tracking-wide text-gray-500">
+      <div className="px-3 py-2 border-b border-border text-xs font-semibold uppercase tracking-wide text-muted-foreground">
         Sibling sessions
       </div>
       <nav className="flex-1 overflow-y-auto p-1">
         {siblings.map((sibling) => {
           const isCurrent = isCurrentSiblingSession(sibling, currentKey)
-          const path = toProjectPath(`/issues/${issueNumber}/workflow/sessions/${encodeURIComponent(sibling.sessionName)}`)
+          const basePath = toProjectPath(`/issues/${issueNumber}/workflow/sessions/${encodeURIComponent(sibling.sessionName)}`)
+          const path = fromActivity ? `${basePath}?from=activity` : basePath
           return (
             <Link
               key={sibling.id}
               to={path}
-              className={`flex items-center gap-2 rounded px-2 py-1.5 text-xs transition-colors min-w-0 ${
-                isCurrent ? 'bg-blue-50 text-blue-800 font-medium' : 'text-gray-700 hover:bg-gray-100'
-              }`}
               data-testid="session-sibling-sidebar-entry"
               data-current={isCurrent ? 'true' : 'false'}
+              data-tone={isCurrent ? 'info' : 'neutral'}
               title={`Open ${sibling.sessionName} transcript`}
               aria-current={isCurrent ? 'page' : undefined}
+              className={`flex items-center gap-2 rounded px-2 py-1.5 text-xs transition-colors min-w-0 ${
+                isCurrent ? 'bg-info-subtle text-info font-medium border border-info-border' : 'text-muted-foreground hover:bg-muted border border-transparent'
+              }`}
             >
               <span
+                data-testid="session-sibling-status-dot"
+                data-tone={
+                  sibling.status === 'completed'
+                    ? 'success'
+                    : sibling.status === 'failed' || sibling.status === 'cancelled'
+                      ? 'danger'
+                      : sibling.status === 'running' || sibling.status === 'active' || sibling.status === 'probing'
+                        ? 'info'
+                        : 'neutral'
+                }
                 className={`inline-block h-1.5 w-1.5 shrink-0 rounded-full ${
                   sibling.status === 'completed'
-                    ? 'bg-green-500'
+                    ? 'bg-success'
                     : sibling.status === 'failed' || sibling.status === 'cancelled'
-                      ? 'bg-red-500'
+                      ? 'bg-danger'
                       : sibling.status === 'running' || sibling.status === 'active' || sibling.status === 'probing'
-                        ? 'bg-blue-500'
-                        : 'bg-gray-400'
+                        ? 'bg-info'
+                        : 'bg-muted-foreground/60'
                 }`}
                 aria-hidden="true"
               />
               <span className="min-w-0 flex-1 truncate font-mono">{sibling.sessionName}</span>
               {isCurrent && (
-                <span className="shrink-0 text-[10px] uppercase tracking-wide text-blue-700">current</span>
+                <span
+                  data-testid="session-sibling-current-label"
+                  className="shrink-0 text-[10px] uppercase tracking-wide text-info"
+                >
+                  current
+                </span>
               )}
             </Link>
           )

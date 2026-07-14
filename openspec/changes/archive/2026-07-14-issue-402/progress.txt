@@ -1,0 +1,394 @@
+## T-000 — Project-scoped event read endpoint for Activity evidence
+
+Goal: deliver `GET /api/projects/{projectRef}/events` that reads recorded
+CloudEvents from `IssueEvents`, `WorkflowRunEvents`, `AgentSessionEvents`,
+and `EpicEvents` for a single project, sorted most-recent-first, without
+changing how events are recorded, emitted, or subscribed. Resolves the
+project-scoped recorded-event prerequisite for T-002.
+
+### Codebase Patterns
+
+- The per-aggregate event tables share the same row schema
+  (`Id`, `Source`, `EventId`, `Type`, `Time`, `SpecVersion`,
+  `Subject`, `DataContentType`, `Data`, `ExtensionsJson`, `DispatchedAt`)
+  with a `(Source, Id)` composite primary key. `Source` is the
+  CloudEvents URI-reference (`/mohist/{kind}/{id}`); `Id` is a
+  per-source monotonic sequence. Source prefixes are defined as
+  `SourcePrefix` constants on internal static classes
+  (`IssueEventPersistence`, `WorkflowRunEventPersistence`,
+  `AgentSessionEventPersistence`, `EpicEventPersistence`).
+- Existing per-aggregate event reads (`IEventStore.ListAsync` /
+  `ListIssueEventsAsync` / `ListEpicEventsAsync` /
+  `ListAgentSessionEventsAsync`) all filter by `Source` and ride the
+  index. They do not join — joins are done in code after the per-source
+  fetch.
+- The endpoint must mirror the existing
+  `StoredCloudEventDto` shape (id, eventId, source, type, specVersion,
+  subject, time, dataContentType, data, extensions) so the Web
+  projection layer can opt into richer payload decoding later without a
+  schema migration. Added `origin`, `sourceAggregateKind`,
+  `sourceAggregateId`, and `runnerId` projection fields on top of that
+  envelope.
+- Project-scoped querier pattern: `EpicEventQuerier` is the canonical
+  example — thin pass-through to `IEventStore.ListEpicEventsAsync` plus
+  DTO mapping. `ProjectEventQuerier` follows the same shape but reads
+  four tables instead of one.
+- `ProjectResolutionEndpointFilter` resolves `{projectRef}` and stashes
+  the resolved `ProjectInfo` in `HttpContext.Items`. Routes read it
+  via `context.GetResolvedProject()` and apply it directly — no extra
+  round-trip to the resolver.
+
+### Decisions
+
+- **Architecture**: kept `IEventStore` focused on per-aggregate reads;
+  the project-scoped query lives in a new
+  `ProjectEventQuerier` (scoped service) that fans out to the four
+  per-aggregate event tables. Mirrors the `EpicEventQuerier` precedent
+  and avoids growing the `IEventStore` surface for a single consumer.
+- **Source set construction**: one trip to each aggregate table
+  (`Issues.ProjectId`, `WorkflowRuns.MetadataProjectId`,
+  `AgentSessions.LabelProjectId`, `Epics.ProjectId`) translates the
+  aggregate id into its canonical CloudEvents `Source` prefix. The four
+  event reads use `Where(e => sources.Contains(e.Source))` so they ride
+  the existing `Source` indexes; an empty project short-circuits before
+  any event-table read.
+- **Order + cap**: per-table order is most-recent-first by `Time`
+  (with `Id` as a stable tiebreaker); the merged stream is sorted in
+  memory and capped at `limit`. SQLite's EF provider cannot translate
+  `ORDER BY` over `DateTimeOffset`, so per-table order is applied in
+  memory after `ToListAsync()` — matches the existing pattern in
+  `InboxQuerier.ListCoreAsync` and
+  `DeadLetterStore.ListByHandlerAsync`.
+- **Per-table cap = max(limit, 200)**: applied before the merge so
+  a project with concentrated issue activity cannot starve
+  sparse session evidence. The final `Take(limit)` on the merged
+  stream enforces the caller's cap on the output, not the per-table
+  reads.
+- **Aggregate id extraction**: pulled from the `Source` URI-reference
+  by stripping the kind-specific prefix (`/mohist/issues/`,
+  `/mohist/workflow-runs/`, etc.). The matching
+  `SourceAggregateKind` ("issue" / "workflow-run" / "agent-session" /
+  "epic") is a stable, lower-cased, hyphenated vocabulary the Web
+  projection layer can route on.
+- **Limit defaults**: route clamps to `[1, 1000]` and defaults to
+  `200` (matches the per-aggregate endpoints).
+- **RunnerId**: sourced from the event envelope's
+  `Extensions["runnerid" | "runnerId" | "runner_id" | "runner"]`
+  if any publisher stamps one. Today no producer stamps a runner id on
+  the event envelope (the runner-id binding lives on the
+  `AgentSessionRow` instead), so the field surfaces `null` for
+  every existing event — it is a forward-compatible hook for
+  `com.mohist.runner.disconnected` and friends once those events are
+  emitted.
+
+### Gotchas
+
+- **SQLite ORDER BY on DateTimeOffset**: silently fails with
+  `NotSupportedException` at query translation. Apply per-table order
+  after `ToListAsync()` and sort the merged stream in memory.
+- **Internal SourcePrefix classes**: `IssueEventPersistence`,
+  `WorkflowRunEventPersistence`, `AgentSessionEventPersistence`,
+  and `EpicEventPersistence` are `internal static`. They are
+  reachable from the `Mohist.Server.Project.Services` namespace
+  because both live in the same assembly.
+- **`IssueStore` namespace**: lives in
+  `Mohist.Server.Infrastructure.Data.Issue`, not
+  `Mohist.Server.Issue.Services` — easy to miss in tests when
+  serialising an `Issue` for direct DB seeding.
+- **Project ref resolution**: `MapGroup("/api/projects/{projectRef}/events")`
+  + `AddEndpointFilter<ProjectResolutionEndpointFilter>` is the
+  standard pattern; the route handler reads
+  `context.GetResolvedProject().Id` and never touches `projectRef`
+  directly.
+
+### Files touched
+
+- `packages/server/src/Mohist.Server/Project/Services/ProjectEventQuerier.cs`
+  (new) — scoped service that fans out to the four event tables and
+  merges the results in time order.
+- `packages/server/src/Mohist.Server/Api/ProjectEventsRoutes.cs`
+  (new) — `MapProjectEventsRoutes`, `ProjectEventDto`, `ProjectEventOrigin`.
+- `packages/server/src/Mohist.Server/Infrastructure/Hosting/MohistApiRegistration.cs`
+  — registers `MapProjectEventsRoutes` immediately after
+  `MapProjectRoutes`.
+- `packages/server/tests/Mohist.Server.SpecTests/Specs/Api/ProjectEventsApiSpecs.cs`
+  (new) — 10 specs covering cross-aggregate retrieval, time
+  ordering, default + explicit limit, project scoping for issues and
+  agent sessions, empty project, unknown project 404, payload /
+  extensions preservation, no-mutation, and absence of subscription /
+  dispatch markers.
+
+### Verification
+
+- `npm test` (server): 2868 passed, 9 skipped, 0 failed.
+- `dotnet test Mohist.Server.ArchTests`: 24 passed, 3 skipped, 0 failed.
+- New specs: 10 passed.
+- No event-recording / event-emission / event-subscription changes;
+  the read path queries the existing per-aggregate tables only.
+
+## T-001 — Reorganize Coder Session into a structured execution-evidence view
+
+Goal: formalize the Coder Session shell into stable, scannable evidence
+regions (task identity + status, usage, errors, transcript, follow-up,
+siblings) and migrate all session status surfaces to the shared theme-token
+families from issue 398. Preserve existing transcript, cancel, recovery,
+follow-up, sibling, and lineage behavior; add the read-only errors region,
+workflow-context navigation, Activity return orientation, and reliable
+resolution of `/issues/:number/session/:sessionId`.
+
+### Codebase Patterns
+
+- The session shell is driven by a single `SessionDataSourceResult` produced
+  by `useIssueSessionDataSource` and `useGenericSessionDataSource`. Both
+  data sources now expose `workflowContextPath`/`workflowContextLabel` and
+  honor `?from=activity` as a project-scoped Activity back target.
+- The legacy `/issues/:number/session/:sessionId` route is resolved by
+  looking up the session id in the `useCoderSessions` list and using the
+  canonical `sessionName` as the detail-query key. The route waits for the
+  sessions list to resolve (`isLegacyIdRoute && sessionsResolved`) before
+  enabling metadata/transcript fetches.
+- Status presentation is implemented as small inline records
+  (`sessionStatusPresentation`, `stageChipPresentation`,
+  `ERROR_SURFACE_CLASS`) that map semantic kinds to the shared token
+  utilities (`success`/`warning`/`info`/`danger` + `-subtle`/`-border`).
+  No `shared/status-presentation/` helper module was reintroduced.
+- The errors region is a compact read-only strip (`SessionErrorsEvidence`)
+  rendered between `SessionUsageSummary` and the transcript scroll
+  container; it is omitted when `statusKind !== failed`, no failure
+  category, and no tool errors are present. The sticky recovery bar
+  remains inside the transcript scroll container to preserve existing
+  gating and `SessionPage.sticky.test.tsx` anchors.
+
+### Decisions
+
+- **Region order**: header → usage summary → errors → transcript scroll
+  container (sticky title + recovery bar + turns/tool calls) → follow-up
+  composer → optional sibling sidebar. This matches design D4 and degrades
+  gracefully: when usage/errors/siblings are absent, remaining regions keep
+  their places.
+- **Issue-session ID resolution**: the `sessionId` segment is decoded and
+  matched against `s.id` in the `useCoderSessions` result; the resolved
+  `sessionName` is used as `lookupKey` for metadata and transcript queries.
+  This fixes misses for compacted/reset sessions whose id and name differ.
+- **Activity return orientation**: both issue-bound and generic data sources
+  read `?from=activity`, set `backPath` to the project-scoped Activity page,
+  and label it "Activity". Direct entries continue to fall back to issue or
+  agent context.
+- **Workflow-context entry point**: issue-bound sessions link to the issue
+  detail (`/issues/:number`) because the WorkflowSessionsPanel lives there.
+  Generic sessions do not fabricate workflow links.
+- **Token migration**: all session status surfaces (badges, errors, recovery,
+  context-health, usage, follow-up, sibling dots, transcript tool accents,
+  timeline category/marker styles) now use the shared token families. Diff
+  syntax colors are out of scope per the Files/Diff non-goal.
+
+### Gotchas
+
+- The `sessionTurns` used by `SessionDetailShell` for the empty-vs-main
+  branch decision comes from `useSessionTranscript`, which is initialized
+  after the transcript query resolves. Tests that assert both the errors
+  region and the scroll container must wait for the transcript container to
+  appear, not just the errors region.
+- `SessionUsageSummary` renders `null` when no usage fields are present,
+  but the `SessionHeader` still displays a compact summary strip for
+  `failureCategory`, `toolCallCount`, and any available usage/cost/context.
+  This is existing behavior; the dedicated usage-summary region is the
+  authoritative home for usage evidence.
+- The test-file size budget requires keeping `.spec.tsx` files under 800
+  lines and respecting baseline allowances for existing larger files. Added
+  focused spec coverage was trimmed to fit the budget.
+
+### Files touched
+
+- `packages/web/src/pages/session/ui/SessionDetailShell.tsx` — reorganized
+  layout, `SessionErrorsEvidence`, inline `sessionStatusPresentation`/`stageChipPresentation`,
+  `headerWithRecovery`/`headerWithoutRecovery` branches.
+- `packages/web/src/pages/session/data/SessionDataSource.ts` — added
+  `workflowContextPath`/`workflowContextLabel` and `issueNumber` to the
+  result shape.
+- `packages/web/src/pages/session/data/useIssueSessionDataSource.tsx` —
+  issue-session ID resolution, `from=activity` back target, workflow-context
+  link, project-scoped sibling navigation.
+- `packages/web/src/pages/session/data/useGenericSessionDataSource.ts` —
+  `from=activity` back target, agent-context fallback, no fabricated workflow
+  link.
+- `packages/web/src/pages/session/ui/SessionUsageSummary.tsx` — migrated
+  health/context accents to shared tokens.
+- `packages/web/src/widgets/session-health/ui/ContextHealthBar.tsx`,
+  `ContextHealthIndicator.tsx` — token-based surfaces.
+- `packages/web/src/widgets/coder-session/ui/SessionRecoveryActions.tsx`,
+  `SessionFollowupComposer.tsx`, `SessionCard.tsx`, `SessionTimeline.tsx`,
+  `UsageSnapshotLabel.tsx`, `model/anomaly.tsx` — token migration.
+- `packages/web/src/widgets/issue-event-timeline/model/types.ts`,
+  `ui/EventTimelineRow.tsx`, `ui/EventTimelinePanel.test.tsx` — category
+  styles and marker accents moved to tokens.
+- `packages/web/src/widgets/session-transcript/ui/*` (`AssistantParts`,
+  `SessionTranscriptLayout`, `SessionTranscriptView`, `ToolCallCard`,
+  `tool-views/*`) — tool success/failure accents and status surfaces use
+  tokens.
+- `packages/web/src/shared/ui/StatusBar.tsx` — status counts use tokens.
+- `packages/web/src/pages/session/ui/SessionPage.sticky.test.tsx` — updated
+  expectations to match token classes.
+- `packages/web/tests/SessionPageHeader.spec.tsx` — updated assertions for
+  shared tokens and issue-session ID resolution.
+- `packages/web/tests/CoderSessionEvidence.spec.tsx` (new) — region order
+  and degradation, errors presence/absence, issue-session ID resolution,
+  Activity return orientation, project-scoped navigation, action
+  preservation, and shared token classes in light/dark mode.
+
+### Verification
+
+- `npm run typecheck -w packages/web`: passed.
+- `npm run test:run -w packages/web`: 323 files, 4623 tests passed.
+- `npm run check:test-boundaries -w packages/web`: passed.
+- `dotnet test Mohist.Server.SpecTests --filter ...` for the single Epic
+  spec that failed during root `npm test`: passed in isolation; the root
+  failure appears to be a cross-test ordering/flakiness issue unrelated to
+  these Web changes.
+
+
+## T-002 — Replace Activity session cards with an attention-first event evidence feed
+
+Goal: deliver an event-level ActivityPage feed with type identity, attention
+zones, event/attention filters, generic-session coverage, theme-token
+treatment, and direct evidence links built on the project-scoped event read
+endpoint (T-000) plus existing activity/session/runner snapshots.
+
+### Codebase Patterns
+
+- The `widgets/coder-session/index.ts` barrel already re-exports
+  `useActivityEvents` + `buildActivityEvents` + `sortActivityEvents` and
+  `ActivityEvent`/`ActivityEventType`/`ActivityAttention` types. The hook
+  composes `useProjectEvents` (T-000), `useAgentActivity`, and `useRunners`
+  in a single `useMemo` keyed on those three inputs.
+- `ActivityEventTargets` carries discriminated members (`primary`, `issue`,
+  `workflow`, `session`, `agent`, `runner`); the renderer picks `primary`
+  first and falls back to its constituent members, all routed through
+  `useProjectPath()`. `fromActivity` is appended via a small `fromActivity()`
+  helper to keep query-string wiring uniform.
+- The `activity-event-entry` markup uses inline `attentionPresentation` and
+  `typePresentation` records against shared tokens, mirroring the
+  `pages/issue-detail/ui/pills.tsx` and `StatusHeadline.tsx` pattern;
+  no shared `status-presentation` helper was reintroduced.
+- `AgentActivitySession` got `agentId` / `agentName` optional fields so the
+  Web projection can carry generic-session identity through without
+  re-shaping the API DTO. `useGlobalAgentSessions` is intentionally NOT
+  composed into `useActivityEvents` to avoid duplicate rows with
+  `useAgentActivity`.
+- The ActivityPage reads `now` from a prop when provided so tests can pin
+  the clock; real callers leave it `undefined` and the page falls back to
+  its own `setInterval(1000)`.
+
+### Decisions
+
+- **Projection layout**: a single pure `buildActivityEvents(input)`
+  function produces `ActivityEvent[]`. Recorded events come first, snapshot
+  rows second, and the union is de-duplicated by `id` before
+  `sortActivityEvents` is applied. No transition is fabricated from an
+  inactive snapshot — the snapshot is rendered with its `status` text and
+  `routine` attention.
+- **Event-type identity**: `type ∈ { issue-state, workflow-stage,
+  agent-session, runner, failure }`. Failed workflow and session events
+  promote to `failure` so a single recorded failure entry surfaces as a
+  distinct failure evidence row instead of being diluted inside the
+  workflow-stage bucket.
+- **Filter chips**: a single local `FilterBar` component maps over
+  `EVENT_TYPES` and adds an `Attention only` chip plus a `Clear` button.
+  No `CategoryFilter` import — the category vocabulary is different and
+  chips stay local to the page.
+- **Routing**: workflow-bound session targets use
+  `/issues/:number/session/:sessionId?from=activity`; generic sessions use
+  `/agent-sessions/:sessionId?from=activity`. Both data sources
+  (`useIssueSessionDataSource`, `useGenericSessionDataSource`) honor
+  `from=activity` per T-001.
+- **Theme tokens**: the entry surfaces use `bg-danger-subtle`,
+  `bg-warning-subtle`, `bg-info-subtle`, `bg-success-subtle`, plus
+  corresponding `*-border` and `*-foreground` tokens. The markers
+  (`bg-danger`, `bg-warning`) and primary link colors similarly. No `bg-*`
+  / `text-*` palette classes (`red`, `amber`, `blue`, etc.) remain in the
+  Activity surface.
+- **Eventual consistency**: `useProjectEvents` polls every 5s; an entry's
+  `recorded-{origin}-{kind}-{id}-{seq}-{type}` identity stays stable across
+  refetches so the page does not flash rows in/out within a single
+  refetch interval.
+
+### Gotchas
+
+- The `data-event-type` and `data-attention` attributes live on the entry
+  `<div>`, not on the type chip. Spec tests assert those identifiers on
+  the entry via `screen.getByTestId('activity-event-entry')`.
+- Tests that simulate the production path must mock `useActivityEvents`
+  through `dependencies`; tests that exercise the projection route it
+  through MSW by intercepting `/api/projects/:projectId/events`.
+- The ActivityPage `setInterval(1000)` for the clock is bypassed when a
+  `now` prop is provided; the spec test passes `now={NOW}` to keep
+  `timeAgo` deterministic.
+- `useProjectEvents` returns a `data` array; the compositing hook in
+  `useActivityEvents` re-runs the projection only when `data`, `activity`,
+  or `runners` changes — pinning the spread on `data ?? []` keeps the
+  memo stable during initial fetch and avoids re-sorting on every render.
+- `useGlobalAgentSessions` is not composed in `useActivityEvents`; using
+  `useAgentActivity` alone is the project-scoped session source.
+- The category filter vocabulary in `widgets/issue-event-timeline/ui/CategoryFilter.tsx`
+  is timeline-category-shaped and remains untouched; Activity reuses the
+  chip *style* but not the component to avoid coupling the two.
+
+### Files touched
+
+- `packages/web/src/widgets/coder-session/model/activity-events.ts`
+  (new) — `buildActivityEvents`, `sortActivityEvents`, `useActivityEvents`,
+  `ActivityEvent`/`ActivityEventTargets` types.
+- `packages/web/src/widgets/coder-session/model/activity-events.dom.test.ts`
+  (new) — 11 unit tests covering classification, ordering, dedup,
+  generic-session identity, target construction.
+- `packages/web/src/pages/activity/ui/ActivityEventEntry.tsx` (new) —
+  entry presentation, `data-event-type`/`data-attention`, secondary
+  target chips, time-ago formatting.
+- `packages/web/src/pages/activity/ui/ActivityPage.tsx` — replaced the
+  Active/Waiting/Recent grid with `FilterBar` + attention/routine zones
+  + collapsible headers, took a `now` prop, and threaded
+  `useActivityEvents` through DI.
+- `packages/web/src/pages/activity/ui/ActivityPage.evidence.test.tsx`
+  (new) — DI-driven tests for filter chips, attention zone presence/
+  absence and prominence, routine collapse, and shared token classes.
+- `packages/web/src/pages/activity/ui/ActivityPage.test.tsx` — replaced
+  the prior session-only block with runner badge navigation assertions;
+  the data-testid for the badge moved to `runner-summary-button`.
+- `packages/web/src/entities/project/api/projectEvents.ts` (new) —
+  `getProjectEvents` + `ProjectEventDto` envelope shape.
+- `packages/web/src/entities/project/api/queries.ts` /
+  `index.ts` — `useProjectEvents` hook, exports, and `ProjectEventDto`
+  type.
+- `packages/web/src/entities/agent/model/types.ts` —
+  `agentId` / `agentName` fields on `AgentActivitySession` so generic
+  sessions reach the projection.
+- `packages/web/src/widgets/coder-session/index.ts` — re-export the
+  projection hook/types.
+- `packages/web/tests/ActivityEvidenceView.spec.tsx` (new) — MSW-backed
+  spec covering event identity, attention prominence, filtering /
+  clearing, generic + workflow-bound visibility, direct navigation with
+  `from=activity`, and shared token classes in light + dark mode.
+- `packages/web/src/widgets/issue-event-timeline/ui/EventTimelinePanel.tsx`
+  + `ActivityDialog.tsx` + `CategoryFilter.tsx` — surface palette
+  migrated to tokens (`bg-border`, `bg-background`, `text-muted-foreground`,
+  `bg-info-subtle`, etc.) so the spec scenario
+  "Failure events use the shared danger tokens in both themes" is
+  satisfied when the modal hosts them.
+- `packages/web/src/widgets/runner-status/ui/RunnerList.tsx` +
+  `RunnerSummary.tsx` + `SlotsEditor.tsx` — `bg-emerald-*`,
+  `bg-amber-*`, `bg-blue-*`, `text-gray-*` classes replaced by
+  `bg-success*`, `bg-warning*`, `bg-info*`, `text-muted-foreground`
+  tokens; `RunnerSummary` exposes `data-testid="runner-summary-button"`
+  for activity/spec tests.
+- `packages/web/src/shared/ui/StatusBar.tsx` — already on tokens in this
+  branch; nothing to change in T-002 beyond verification.
+
+### Verification
+
+- `npm run typecheck -w packages/web`: passed.
+- `npm run test:run -w packages/web`: 326 files, 4644 tests passed
+  (was 323 files / 4623 tests after T-001).
+- `npm run check:test-boundaries -w packages/web`: passed.
+- No event-recording, event-emission, transcript-recording, or
+  event-subscription changes; only a read endpoint (T-000) + projection +
+  rendering.

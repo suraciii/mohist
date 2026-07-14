@@ -213,10 +213,10 @@ describe('AssistantParts tool views — baseline render', () => {
 
     const { container } = renderAssistantParts(parts)
 
-    expect(container.querySelector('.bg-green-500')).toBeInTheDocument()
-    expect(container.querySelector('.bg-red-500')).toBeInTheDocument()
-    expect(container.querySelector('.bg-gray-400')).toBeInTheDocument()
-    expect(container.querySelector('.bg-gray-300')).toBeInTheDocument()
+    expect(container.querySelector('[data-tone="success"].bg-success')).toBeInTheDocument()
+    expect(container.querySelector('[data-tone="danger"].bg-danger')).toBeInTheDocument()
+    expect(container.querySelector('[data-tone="neutral"].bg-muted-foreground\\/60')).toBeInTheDocument()
+    expect(container.querySelector('[data-tone="neutral"].bg-muted-foreground\\/40')).toBeInTheDocument()
     expect(container.querySelector('.animate-ping')).toBeInTheDocument()
   })
 

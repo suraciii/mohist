@@ -16,6 +16,19 @@ export function formatTimeAgo(date: Date): string {
   return date.toLocaleDateString()
 }
 
+export function formatElapsedTimeAgo(isoString: string, now = Date.now()): string {
+  const timestamp = Date.parse(isoString)
+  if (!Number.isFinite(timestamp)) return 'unknown'
+
+  const minutes = Math.floor(Math.max(0, now - timestamp) / 60000)
+  if (minutes < 1) return 'just now'
+  if (minutes < 60) return `${minutes}m ago`
+
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours}h ago`
+  return `${Math.floor(hours / 24)}d ago`
+}
+
 export function formatLogTime(time: string | null): string {
   if (!time) return '--:--:--'
   try {

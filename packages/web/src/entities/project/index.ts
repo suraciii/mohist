@@ -1,5 +1,7 @@
-export { useCreateProject, useDeleteProject, useProjects, useRepositories, useAddRepository, useRemoveRepository, useSetDefaultRepository } from './api/queries'
+export { useCreateProject, useDeleteProject, useProjects, useRepositories, useAddRepository, useRemoveRepository, useSetDefaultRepository, useProjectEvents } from './api/queries'
 export type { ProjectCreator } from './api/queries'
 export { getRepositories, addRepository, removeRepository, setDefaultRepository } from './api/client'
+export { getProjectEvents } from './api/projectEvents'
 export { ProjectProvider, useProject, useProjectPath, projectPath } from './model/ProjectContext'
 export type { Project, Repository, AddRepositoryInput } from './model/types'
+export type { JsonValue, ProjectEventDto, ProjectEventTypeFilter } from './api/projectEvents'

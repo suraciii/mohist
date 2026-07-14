@@ -80,9 +80,9 @@ useMswServer(
     HttpResponse.json({ success: true, data: sessionPageMocks.workflowRunSessions })),
 )
 
-function renderWithQueryClient(_ui: ReactElement) {
+function renderWithQueryClient(_ui: ReactElement, initialEntry?: string) {
   const { number, sessionName } = sessionPageMocks.params
-  const route = `/issues/${encodeURIComponent(number)}/workflow/sessions/${encodeURIComponent(sessionName)}`
+  const route = initialEntry ?? `/issues/${encodeURIComponent(number)}/workflow/sessions/${encodeURIComponent(sessionName)}`
   return renderPageWithQueryClient(<SessionPage />, route)
 }
 
@@ -253,9 +253,8 @@ describe('SessionPage header and states', () => {
 
       renderWithQueryClient(<SessionPage />)
 
-      await waitFor(() => {
-        expect(screen.getByText('3 turns')).toBeInTheDocument()
-      })
+      const header = await screen.findByTestId('session-header')
+      await within(header).findByText('3 turns')
     })
 
     it('shows changed-files summary in header when metadata has changedFiles', async () => {
@@ -393,9 +392,8 @@ describe('SessionPage header and states', () => {
 
       renderWithQueryClient(<SessionPage />)
 
-      await waitFor(() => {
-        expect(screen.getByText('Running')).toBeInTheDocument()
-      })
+      const header = await screen.findByTestId('session-header')
+      await within(header).findByText('Running')
     })
 
     it('shows stale status badge for running sessions with old activity', async () => {
@@ -410,9 +408,8 @@ describe('SessionPage header and states', () => {
 
       renderWithQueryClient(<SessionPage />)
 
-      await waitFor(() => {
-        expect(screen.getByText('Stale')).toBeInTheDocument()
-      })
+      const header = await screen.findByTestId('session-header')
+      await within(header).findByText('Stale')
     })
 
     it('shows finalizing status badge when session is finalizing', async () => {
@@ -427,9 +424,8 @@ describe('SessionPage header and states', () => {
 
       renderWithQueryClient(<SessionPage />)
 
-      await waitFor(() => {
-        expect(screen.getByText('Finalizing')).toBeInTheDocument()
-      })
+      const header = await screen.findByTestId('session-header')
+      await within(header).findByText('Finalizing')
     })
 
     it('shows failed status badge for failed sessions', async () => {
@@ -443,10 +439,10 @@ describe('SessionPage header and states', () => {
       setupSessionPage({ detail })
 
       renderWithQueryClient(<SessionPage />)
-
-      await waitFor(() => {
-        expect(screen.getByText('Session failed')).toBeInTheDocument()
-      })
+      const header = await screen.findByTestId('session-header')
+      const badge = await within(header).findByTestId('session-status-badge')
+      expect(badge).toHaveAttribute('data-status-kind', 'failed')
+      expect(badge.textContent).toContain('Session failed')
     })
   })
 
@@ -594,7 +590,7 @@ describe('SessionPage header and states', () => {
       expect(screen.queryByText(/Jump to bottom/i)).not.toBeInTheDocument()
     })
 
-    it('renders recoveryBar inside the SessionHeader region on the main branch', async () => {
+    it('renders the recovery bar inside the transcript scroll container on the main branch', async () => {
       const turns = [makeTurn({ id: 'turn-1' })]
       const detail = makeMockDetail({
         metadata: makeMockMetadata({
@@ -608,8 +604,7 @@ describe('SessionPage header and states', () => {
 
       await screen.findByText('Issue #123')
 
-      // recoveryBar is rendered inside the header sub-region (testid exists on every branch).
-      expect(screen.getByTestId('session-recovery-bar')).toBeInTheDocument()
+      expect(screen.getByTestId('session-transcript-scroll-container')).toContainElement(screen.getByTestId('session-recovery-bar'))
     })
 
     it('renders the same header on the main branch as on the empty branch', async () => {
@@ -620,7 +615,6 @@ describe('SessionPage header and states', () => {
         model: 'claude-3-5-sonnet',
       })
 
-      // Main branch: turns > 0
       const mainDetail = makeMockDetail({ metadata: baseMetadata })
       setupSessionPage({
         detail: mainDetail,
@@ -637,7 +631,6 @@ describe('SessionPage header and states', () => {
       expect(screen.queryByText(/No activity recorded/i)).not.toBeInTheDocument()
       unmount()
 
-      // Empty branch: turns === 0
       const emptyDetail = makeMockDetail({
         metadata: baseMetadata,
         turns: [],
@@ -653,8 +646,8 @@ describe('SessionPage header and states', () => {
       expect(screen.getByText('Build')).toBeInTheDocument()
       const emptyCompletedBadges = screen.getAllByText('Completed')
       expect(emptyCompletedBadges.length).toBeGreaterThanOrEqual(1)
-      // Empty branch shows the "No activity" sub-region.
       expect(screen.getByText(/No activity recorded/i)).toBeInTheDocument()
+      expect(screen.getByTestId('session-transcript-scroll-container')).toContainElement(screen.getByTestId('session-recovery-bar'))
     })
 
     it('main branch session header back-link uses whitespace-nowrap and never wraps', async () => {
@@ -728,26 +721,10 @@ describe('SessionPage header and states', () => {
 
     it('renders prev/next controls for a mid-sequence session and links to the chronologically adjacent siblings', async () => {
       sessionPageMocks.params = { number: '55', sessionName: 'build' } as any
-      setWorkflowRunSessions([
-        { id: 's-plan', sessionName: 'plan', status: 'completed', createdAt: '2026-06-15T08:00:00.000Z' },
-        { id: 's-build', sessionName: 'build', status: 'running', createdAt: '2026-06-15T10:00:00.000Z' },
-        { id: 's-check', sessionName: 'check', status: 'completed', createdAt: '2026-06-15T12:00:00.000Z' },
-      ])
-
-      const turns = [makeTurn({ id: 'turn-1' })]
-      const detail = makeMockDetail({
-        id: 'session-build',
-        metadata: makeMockMetadata({
-          status: 'running',
-          statusKind: 'live',
-          stage: 'build',
-          sessionName: 'build',
-          sessionId: 'session-build',
-        }),
-      })
+      setWorkflowRunSessions([{ id: 's-plan', sessionName: 'plan', status: 'completed', createdAt: '2026-06-15T08:00:00.000Z' }, { id: 's-build', sessionName: 'build', status: 'running', createdAt: '2026-06-15T10:00:00.000Z' }, { id: 's-check', sessionName: 'check', status: 'completed', createdAt: '2026-06-15T12:00:00.000Z' }])
       setupSessionPage({
-        detail,
-        turns,
+        detail: makeMockDetail({ id: 'session-build', metadata: makeMockMetadata({ status: 'running', statusKind: 'live', stage: 'build', sessionName: 'build', sessionId: 'session-build' }) }),
+        turns: [makeTurn({ id: 'turn-1' })],
         sessions: [{ ...makeMockSession(), id: 'session-build', sessionName: 'build' }],
         issue: { number: 55, title: 'Issue 55', workflowRunId: 'wr-1' },
       })
@@ -763,6 +740,22 @@ describe('SessionPage header and states', () => {
       expect(next.getAttribute('href')).toBe('/Test%20Project/issues/55/workflow/sessions/check')
       expect(prev.getAttribute('title')).toBe('Previous session: plan')
       expect(next.getAttribute('title')).toBe('Next session: check')
+    })
+
+    it('keeps Activity as the back destination after opening a sibling', async () => {
+      sessionPageMocks.params = { number: '55', sessionName: 'build' } as any
+      setWorkflowRunSessions([{ id: 's-plan', sessionName: 'plan', status: 'completed', createdAt: '2026-06-15T08:00:00.000Z' }, { id: 's-build', sessionName: 'build', status: 'running', createdAt: '2026-06-15T10:00:00.000Z' }])
+      setupSessionPage({
+        detail: makeMockDetail({ id: 'session-build', metadata: makeMockMetadata({ sessionName: 'build', sessionId: 'session-build' }) }),
+        turns: [makeTurn({ id: 'turn-1' })],
+        sessions: [{ ...makeMockSession(), id: 'session-build', sessionName: 'build' }],
+        issue: { number: 55, title: 'Issue 55', workflowRunId: 'wr-1' },
+      })
+
+      renderWithQueryClient(<SessionPage />, '/issues/55/workflow/sessions/build?from=activity')
+
+      const previous = await screen.findByTestId('session-sibling-prev')
+      expect(previous).toHaveAttribute('href', '/Test%20Project/issues/55/workflow/sessions/plan?from=activity')
     })
 
     it('disables the previous control when the current session is the first sibling in createdAt order', async () => {
@@ -921,7 +914,7 @@ describe('SessionPage header and states', () => {
       expect(current).toBeDefined()
       expect(current?.getAttribute('aria-current')).toBe('page')
       expect(current?.textContent).toContain('current')
-      expect(current?.className).toContain('bg-blue-50')
+      expect(current?.className).toContain('bg-info-subtle')
 
       // Non-current entries are not marked current.
       const others = entries.filter((node) => node.getAttribute('data-current') !== 'true')

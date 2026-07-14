@@ -31,46 +31,46 @@ export function SessionUsageSummary({ usage }: SessionUsageSummaryProps) {
       : null
 
   return (
-    <div className="border-b border-gray-200 bg-gray-50 px-4 py-2" data-testid="session-usage-summary">
+    <div className="border-b border-border bg-muted px-4 py-2" data-testid="session-usage-summary">
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
         {/* Token detail */}
-        <span className="text-gray-500 font-medium" data-testid="usage-summary-tokens">
+        <span className="text-muted-foreground font-medium" data-testid="usage-summary-tokens">
           Tokens:
           {usage.inputTokens != null && (
-            <span className="ml-1 text-gray-700" data-testid="usage-summary-input">{formatCompact(usage.inputTokens)} in</span>
+            <span className="ml-1 text-foreground" data-testid="usage-summary-input">{formatCompact(usage.inputTokens)} in</span>
           )}
           {usage.outputTokens != null && (
-            <span className="ml-1 text-gray-700" data-testid="usage-summary-output">· {formatCompact(usage.outputTokens)} out</span>
+            <span className="ml-1 text-foreground" data-testid="usage-summary-output">· {formatCompact(usage.outputTokens)} out</span>
           )}
           {usage.totalTokens != null && (
-            <span className="ml-1 text-gray-900 font-semibold" data-testid="usage-summary-total">· {formatCompact(usage.totalTokens)} total</span>
+            <span className="ml-1 text-foreground font-semibold" data-testid="usage-summary-total">· {formatCompact(usage.totalTokens)} total</span>
           )}
           {shouldShowToken(usage.cachedReadTokens) && (
-            <span className="ml-1 text-gray-500" data-testid="usage-summary-cached">· {formatCompact(usage.cachedReadTokens)} cached</span>
+            <span className="ml-1 text-muted-foreground" data-testid="usage-summary-cached">· {formatCompact(usage.cachedReadTokens)} cached</span>
           )}
           {shouldShowToken(usage.thoughtTokens) && (
-            <span className="ml-1 text-gray-500" data-testid="usage-summary-thought">· {formatCompact(usage.thoughtTokens)} thought</span>
+            <span className="ml-1 text-muted-foreground" data-testid="usage-summary-thought">· {formatCompact(usage.thoughtTokens)} thought</span>
           )}
         </span>
 
         {/* Cost */}
         {usage.costAmount != null && usage.costCurrency != null && (
-          <span className="text-gray-600" data-testid="usage-summary-cost">
+          <span className="text-muted-foreground" data-testid="usage-summary-cost">
             {formatCost(usage.costAmount, usage.costCurrency)}
           </span>
         )}
 
         {/* Context window */}
         {usage.contextWindowUsed != null && (
-          <span className="text-gray-500" data-testid="usage-summary-context">
+          <span className="text-muted-foreground" data-testid="usage-summary-context">
             Context:
-            <span className="ml-1 text-gray-700">
+            <span className="ml-1 text-foreground">
               {usage.contextWindowSize != null
                 ? `${formatCompact(usage.contextWindowUsed)} / ${formatCompact(usage.contextWindowSize)}`
                 : `${formatCompact(usage.contextWindowUsed)} used`}
             </span>
             {contextWindowPct != null && (
-              <span className="ml-1 text-gray-400">({contextWindowPct}%)</span>
+              <span className="ml-1 text-muted-foreground/70">({contextWindowPct}%)</span>
             )}
           </span>
         )}

@@ -28,7 +28,12 @@ const sessionPageDependencies: SessionPageDependencies = {
     useIssue: () => ({ data: _issueData }) as never,
     useCoderSessions: (issueNumber) => {
       _sessionsHandler(issueNumber, TEST_PROJECT.id)
-      return { sessions: _sessionsData, isLoading: _sessionsLoading }
+      return {
+        sessions: _sessionsData,
+        isLoading: _sessionsLoading,
+        isFetching: false,
+        refetch: async () => ({}) as never,
+      }
     },
     useSiblingSessions: () => ({
       sessions: [],

@@ -7,12 +7,14 @@ import { getCoderSessions } from '../api/client'
 
 export type CoderSessionsFetcher = typeof getCoderSessions
 
+const EMPTY_SESSIONS: CoderSessionSummary[] = []
+
 export function useCoderSessions(
   issueNumber: number,
   fetcher: CoderSessionsFetcher = getCoderSessions,
 ) {
   const { projectId } = useProject()
-  const { data: sessions = [], isLoading } = useQuery({
+  const { data: sessions = EMPTY_SESSIONS, isLoading, isFetching, refetch } = useQuery({
     queryKey: ['issues', issueNumber, projectId, 'coder-sessions'],
     queryFn: () => fetcher(issueNumber, projectId),
     enabled: issueNumber > 0 && !!projectId,
@@ -30,10 +32,21 @@ export function useCoderSessions(
   }, [issueNumber, projectId])
 
   useEffect(() => {
-    if (isLoading || !sessions) return
-    if (initializedRef.current) return
-    initializedRef.current = true
-    setLiveSessions([...sessions])
+    if (isLoading) return
+    setLiveSessions((previous) => {
+      if (!initializedRef.current) {
+        initializedRef.current = true
+        return [...sessions]
+      }
+
+      const fetchedIds = new Set(sessions.map((session) => session.id))
+      const liveOnly = previous.filter(
+        (session) =>
+          (session.status === 'running' || session.status === 'probing') &&
+          !fetchedIds.has(session.id),
+      )
+      return [...sessions, ...liveOnly]
+    })
   }, [sessions, isLoading])
 
   const startTimer = useCallback(() => {
@@ -173,5 +186,7 @@ export function useCoderSessions(
   return {
     sessions: liveSessions,
     isLoading,
+    isFetching,
+    refetch,
   }
 }

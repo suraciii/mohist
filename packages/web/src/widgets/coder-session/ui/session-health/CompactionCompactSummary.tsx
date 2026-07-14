@@ -132,14 +132,14 @@ export function CompactionCompactSummary({ entries }: CompactionCompactSummaryPr
 
   return (
     <div
-      className="flex items-center gap-2 rounded-md border border-blue-200 bg-blue-50/60 px-2.5 py-1.5 text-xs text-blue-800"
+      className="flex items-center gap-2 rounded-md border border-info-border bg-info-subtle/60 px-2.5 py-1.5 text-xs text-info"
       data-testid="compaction-compact-summary"
       data-compaction-count={stats.count}
       title={tooltip}
       aria-label={tooltip}
     >
       <svg
-        className="h-3.5 w-3.5 shrink-0 text-blue-500"
+        className="h-3.5 w-3.5 shrink-0 text-info"
         viewBox="0 0 20 20"
         fill="currentColor"
         aria-hidden="true"
@@ -155,28 +155,28 @@ export function CompactionCompactSummary({ entries }: CompactionCompactSummaryPr
       </span>
       {timesLabel && (
         <>
-          <span className="text-blue-300" aria-hidden="true">·</span>
-          <span data-testid="compaction-compact-summary-times" className="text-blue-600">
+          <span className="text-info/60" aria-hidden="true">·</span>
+          <span data-testid="compaction-compact-summary-times" className="text-info">
             {timesLabel}
           </span>
         </>
       )}
-      <span className="text-blue-300" aria-hidden="true">·</span>
+      <span className="text-info/60" aria-hidden="true">·</span>
       <span data-testid="compaction-compact-summary-strategies">
         {strategiesLabel}
       </span>
       {stats.hasCountableReduction && (
         <>
-          <span className="text-blue-300" aria-hidden="true">·</span>
-          <span data-testid="compaction-compact-summary-reduction" className="text-blue-600">
+          <span className="text-info/60" aria-hidden="true">·</span>
+          <span data-testid="compaction-compact-summary-reduction" className="text-info">
             reduced by {formatCompact(stats.totalReduction)} tokens ({stats.totalReductionPercent}%)
           </span>
         </>
       )}
       {!stats.hasCountableReduction && entries.length > 0 && (
         <>
-          <span className="text-blue-300" aria-hidden="true">·</span>
-          <span data-testid="compaction-compact-summary-reduction" className="text-blue-600">
+          <span className="text-info/60" aria-hidden="true">·</span>
+          <span data-testid="compaction-compact-summary-reduction" className="text-info">
             reduction unknown
           </span>
         </>

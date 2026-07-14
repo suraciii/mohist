@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { formatTime, formatTimeAgo, formatLogTime } from './format-time'
+import { formatElapsedTimeAgo, formatTime, formatTimeAgo, formatLogTime } from './format-time'
 
 describe('formatTime', () => {
   it('formats a known ISO date string to locale string', () => {
@@ -80,6 +80,18 @@ describe('formatTimeAgo', () => {
   it('returns locale date string for exactly 30 days ago', () => {
     const date = new Date('2026-03-28T12:00:00.000Z')
     expect(formatTimeAgo(date)).toBe(date.toLocaleDateString())
+  })
+})
+
+describe('formatElapsedTimeAgo', () => {
+  const now = Date.parse('2026-04-27T12:00:00.000Z')
+
+  it('uses the supplied current time and retains elapsed day counts', () => {
+    expect(formatElapsedTimeAgo('2026-04-24T12:00:00.000Z', now)).toBe('3d ago')
+  })
+
+  it('returns unknown for an invalid timestamp', () => {
+    expect(formatElapsedTimeAgo('not-a-date', now)).toBe('unknown')
   })
 })
 

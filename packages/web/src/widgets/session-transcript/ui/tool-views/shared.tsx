@@ -5,7 +5,7 @@ import { getFallbackSubtitle } from '../../model/transcript-tool-utils'
 export function ToolIcon({ normalizedName }: { normalizedName: string }) {
   const entry = getToolRegistryEntry(normalizedName)
   const iconEl = entry.icon as React.ReactElement<{ className?: string }>
-  return React.cloneElement(iconEl, { className: 'h-3.5 w-3.5 text-gray-400 shrink-0' })
+  return React.cloneElement(iconEl, { className: 'h-3.5 w-3.5 text-muted-foreground/70 shrink-0' })
 }
 
 export function getToolDisplayLabel(normalizedName: string, displayTitle?: string, displaySubtitle?: string, rawInput?: string): string {
@@ -27,9 +27,9 @@ export function getRegistrySubtitle(normalizedName: string, rawInput?: string): 
 
 export function RunningIndicator() {
   return (
-    <span className="relative flex h-2.5 w-2.5 shrink-0">
-      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
-      <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-blue-500"></span>
+    <span className="relative flex h-2.5 w-2.5 shrink-0" data-tone="info">
+      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-info/70 opacity-75"></span>
+      <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-info"></span>
     </span>
   )
 }
@@ -49,14 +49,14 @@ export function ToolStatusDot({ status }: ToolStatusDotProps) {
     case 'running':
       return <RunningIndicator />
     case 'completed':
-      return <span className="h-2 w-2 rounded-full bg-green-500 shrink-0" />
+      return <span className="h-2 w-2 rounded-full bg-success shrink-0" data-tone="success" />
     case 'failed':
-      return <span className="h-2 w-2 rounded-full bg-red-500 shrink-0" />
+      return <span className="h-2 w-2 rounded-full bg-danger shrink-0" data-tone="danger" />
     case 'cancelled':
-      return <span className="h-2 w-2 rounded-full bg-gray-400 shrink-0" />
+      return <span className="h-2 w-2 rounded-full bg-muted-foreground/60 shrink-0" data-tone="neutral" />
     case 'pending':
     default:
-      return <span className="h-2 w-2 rounded-full bg-gray-300 shrink-0" />
+      return <span className="h-2 w-2 rounded-full bg-muted-foreground/40 shrink-0" data-tone="neutral" />
   }
 }
 

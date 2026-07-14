@@ -123,8 +123,12 @@ public class MohistDbContext : DbContext
                     raw => raw);
             entity.Property(e => e.Time)
                 .IsRequired();
+            entity.Property(e => e.TimeSortKey)
+                .HasComputedColumnSql(EventReadKeys.TimeSortKeySql, stored: true);
             entity.Property(e => e.DispatchedAt);
             entity.HasIndex(nameof(WorkflowRunEventRow.Type), nameof(WorkflowRunEventRow.Source), nameof(WorkflowRunEventRow.Id));
+            entity.HasIndex(e => new { e.TimeSortKey, e.Source, e.Id })
+                .HasDatabaseName("IX_WorkflowRunEvents_TimeSortKey_Source_Id");
             entity.HasIndex(e => new { e.Source, e.Id, e.DispatchedAt })
                 .HasFilter("\"DispatchedAt\" IS NULL")
                 .HasDatabaseName("IX_WorkflowRunEvents_Source_Id_DispatchedAt");
@@ -214,8 +218,12 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.CorrelationId).HasMaxLength(256);
             entity.Property(e => e.Text).IsRequired();
             entity.Property(e => e.PayloadJson).IsRequired();
+            entity.Property(e => e.PayloadStatus)
+                .HasComputedColumnSql(EventReadKeys.PayloadStatusSql, stored: true);
             entity.HasIndex(e => new { e.TurnId, e.Sequence }).IsUnique();
             entity.HasIndex(e => new { e.TurnId, e.Type, e.CorrelationKey }).IsUnique();
+            entity.HasIndex(e => new { e.Type, e.PayloadStatus, e.LastSeenAt, e.Id })
+                .HasDatabaseName("IX_AgentSessionTranscriptParts_Type_PayloadStatus_LastSeenAt_Id");
         });
 
         modelBuilder.Entity<IssueCommentRow>(entity =>
@@ -395,8 +403,12 @@ public class MohistDbContext : DbContext
                     raw => raw);
             entity.Property(e => e.Time)
                 .IsRequired();
+            entity.Property(e => e.TimeSortKey)
+                .HasComputedColumnSql(EventReadKeys.TimeSortKeySql, stored: true);
             entity.Property(e => e.DispatchedAt);
             entity.HasIndex(nameof(IssueEventRow.Type), nameof(IssueEventRow.Source), nameof(IssueEventRow.Id));
+            entity.HasIndex(e => new { e.TimeSortKey, e.Source, e.Id })
+                .HasDatabaseName("IX_IssueEvents_TimeSortKey_Source_Id");
             entity.HasIndex(e => new { e.Source, e.Id, e.DispatchedAt })
                 .HasFilter("\"DispatchedAt\" IS NULL")
                 .HasDatabaseName("IX_IssueEvents_Source_Id_DispatchedAt");
@@ -479,9 +491,17 @@ public class MohistDbContext : DbContext
                     raw => raw);
             entity.Property(e => e.Time)
                 .IsRequired();
+            entity.Property(e => e.TimeSortKey)
+                .HasComputedColumnSql(EventReadKeys.TimeSortKeySql, stored: true);
+            entity.Property(e => e.DataStatus)
+                .HasComputedColumnSql(EventReadKeys.DataStatusSql, stored: true);
             entity.Property(e => e.DispatchedAt);
             entity.HasIndex(nameof(AgentSessionEventRow.Type), nameof(AgentSessionEventRow.Source), nameof(AgentSessionEventRow.Id));
             entity.HasIndex(e => new { e.Type, e.Time });
+            entity.HasIndex(e => new { e.TimeSortKey, e.Source, e.Id })
+                .HasDatabaseName("IX_AgentSessionEvents_TimeSortKey_Source_Id");
+            entity.HasIndex(e => new { e.DataStatus, e.Type, e.TimeSortKey, e.Source, e.Id })
+                .HasDatabaseName("IX_AgentSessionEvents_DataStatus_Type_TimeSortKey_Source_Id");
             entity.HasIndex(e => new { e.Source, e.Id })
                 .HasFilter("\"DispatchedAt\" IS NULL")
                 .HasDatabaseName("IX_AgentSessionEvents_Undelivered");

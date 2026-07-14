@@ -268,21 +268,19 @@ describe('SessionPage lineage link wiring', () => {
   })
 
   it('uses the ?rt=<runtimeSessionId> anchor scheme within the existing session route', async () => {
-    _metadataData = baseMetadata({
-      runtimeSessionLineage: [
-        { agentRuntimeSessionId: 'rt-prev', boundAt: '2026-06-15T09:00:00.000Z' },
-        { agentRuntimeSessionId: 'rt-latest', boundAt: '2026-06-15T10:00:00.000Z' },
-      ],
-    })
+    _metadataData = baseMetadata({ runtimeSessionLineage: [{ agentRuntimeSessionId: 'rt-prev', boundAt: '2026-06-15T09:00:00.000Z' }, { agentRuntimeSessionId: 'rt-latest', boundAt: '2026-06-15T10:00:00.000Z' }] })
 
     const { container } = await renderPage()
-    const predecessor = container.querySelector('[data-testid="compaction-lineage-link-predecessor"]')
-    expect(predecessor).not.toBeNull()
-    const href = predecessor!.getAttribute('href')
-    expect(href).not.toBeNull()
+    const href = container.querySelector('[data-testid="compaction-lineage-link-predecessor"]')?.getAttribute('href') ?? ''
     expect(href).toContain('/workflow/sessions/session-1')
     expect(href).toContain('rt=rt-prev')
     expect(href).toMatch(/^.*\?rt=rt-prev$/)
+  })
+
+  it('preserves the Activity return context on lineage links', async () => {
+    _metadataData = baseMetadata({ runtimeSessionLineage: [{ agentRuntimeSessionId: 'rt-prev', boundAt: '2026-06-15T09:00:00.000Z' }, { agentRuntimeSessionId: 'rt-latest', boundAt: '2026-06-15T10:00:00.000Z' }] })
+    const { container } = await renderPage({ initialEntry: '/issues/123/workflow/sessions/session-1?from=activity' })
+    expect(container.querySelector('[data-testid="compaction-lineage-link-predecessor"]')).toHaveAttribute('href', expect.stringContaining('rt=rt-prev&from=activity'))
   })
 
   it('renders both predecessor and successor links when the user is viewing a non-latest runtime session (?rt= param)', async () => {

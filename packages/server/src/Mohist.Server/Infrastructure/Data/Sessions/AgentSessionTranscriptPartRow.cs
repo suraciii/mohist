@@ -10,6 +10,7 @@ public class AgentSessionTranscriptPartRow
     public string? CorrelationId { get; set; }
     public string Text { get; set; } = string.Empty;
     public string PayloadJson { get; set; } = "{}";
+    public string? PayloadStatus { get; set; }
     public DateTime FirstSeenAt { get; set; } = DateTime.UtcNow;
     public DateTime LastSeenAt { get; set; } = DateTime.UtcNow;
     public int RawEventCount { get; set; }
