@@ -6,23 +6,9 @@
 
 - [ID: item-1]
   Severity: info
-  Scope: `packages/web/src/pages/session/data/useIssueSessionDataSource.tsx:155`
-  Evidence: The legacy session-id forced-refetch set its one-shot guard in `.finally()`, so a transient refetch failure (network/server error) would still arm the guard, leaving `resolvedSessionName` permanently undefined and the user stranded on a loading state with no metadata/transcript request and no error surface. Changed to `.then()` so the guard is armed only on a successful refetch; a failed refetch leaves the guard unset, allowing the effect to retry on the next render.
-  Verification: `npx vitest run tests/CoderSessionEvidence.spec.tsx` — 28 passed.
-  Status: resolved
-
-- [ID: item-2]
-  Severity: info
-  Scope: `packages/web/src/entities/coder-session/model/useCoderSessions.ts:40-44`
-  Evidence: The merge-on-refetch built a `Map` it never read by value (only by key membership) to filter out survivors already present in the refreshed list. Simplified to a `Set<string>` of refreshed ids so the intent (preserve hub-arrived sessions not yet in the server list, append them after the server-ordered set) reads clearly. Order semantics are unchanged and deliberate: the server list is the authoritative ordering; live-arrived sessions the server has not yet listed are newer and belong after it.
-  Verification: `npx vitest run src/entities/coder-session/model/useCoderSessions.test.tsx tests/CoderSessionEvidence.spec.tsx` — passed.
-  Status: resolved
-
-- [ID: item-3]
-  Severity: info
-  Scope: `packages/server/tests/Mohist.Server.SpecTests/Specs/Api/ProjectEventsApiSpecs.cs`
-  Evidence: The stored `TimeSortKey` computed column (`EventReadKeys.TimeSortKeySql`) had no spec proving it orders sub-second timestamps for the real Microsoft.Data.Sqlite `DateTimeOffset` storage format (roundtrip `.ffffffff+00:00`). Added `GetProjectEvents_SubSecondTimes_AreOrderedByFractionalPrecision`, which seeds three issue events 100/500/900 ms apart and asserts the descending order. The test exercises the actual stored-column expression end-to-end through the endpoint, so it also guards against regressions in the `substr` fractional extraction.
-  Verification: `dotnet test --filter "FullyQualifiedName~SubSecond|FullyQualifiedName~ProjectEvents"` — 19 passed.
+  Scope: formatting | missing-obvious-guards
+  Evidence: `GenericSessionPage.test.tsx` used `screen.getByText('Completed')` to assert the session status badge. After the Coder Session layout change, `StatusBadge` is rendered both in the session header and in the sticky title, so the text `Completed` appears twice and the query matched multiple elements, causing the test to fail. Scoped the assertion to the `session-header` region using `within(screen.getByTestId('session-header')).getByTestId('session-status-badge')` so the header badge is asserted independently of the sticky title duplicate.
+  Verification: `npx vitest run src/pages/session/ui/GenericSessionPage.test.tsx` — 28 passed.
   Status: resolved
 
 ## Blocking Items
@@ -31,18 +17,32 @@ None.
 
 ## Follow-up Items
 
+- [ID: item-2]
+  Severity: follow-up
+  Scope: `packages/server/src/Mohist.Server/Api/ProjectEventsRoutes.cs:60-99` and `packages/server/src/Mohist.Server/AgentOps/Services/ProjectEventFeedAssembler.cs:258`
+  Evidence: The `ProjectEventDto` exposes `IssueNumber` for workflow-run and agent-session events, but `FromIssue` never populates it, so issue-state events carry `IssueNumber: null`. The Web projection falls back to parsing `Subject` (CloudEvents subject) as the issue number, which works in current seeding because tests set `Subject` to the issue number. If a producer ever emits an issue event with a non-numeric subject, the Activity entry will lose its issue link. Populating `IssueNumber` from the joined `Issues.Number` column in `LoadIssueEventsAsync` would make the DTO consistent with the acceptance criterion that events include issue number context.
+  SuggestedAction: Pass `issue.Number` from the `LoadIssueEventsAsync` join into `ProjectEventEnvelope.FromIssue` and through to `ProjectEventDto`.
+  Status: follow-up
+
+- [ID: item-3]
+  Severity: follow-up
+  Scope: `packages/web/src/pages/session/ui/SessionDetailShell.tsx:489` and `packages/web/src/pages/session/ui/SessionDetailShell.tsx:712`
+  Evidence: `StatusBadge` is rendered in both the `SessionHeader` and the `StickySessionTitle`, both using `data-testid="session-status-badge"`. The duplicate test id forces tests to scope to one region or use `getAllByTestId`, and the duplicated status text is announced twice to screen readers. The sticky title is intentionally compact, but the duplicate test id and status text are unnecessary.
+  SuggestedAction: Keep the sticky title's status badge but change its `data-testid` to `session-sticky-status-badge` (or remove the test id) and consider `aria-hidden` for the duplicate badge text so it is not re-announced.
+  Status: follow-up
+
 - [ID: item-4]
   Severity: follow-up
-  Scope: `packages/server/src/Mohist.Server/Infrastructure/Data/Events/EventReadKeys.cs`
-  Evidence: `TimeSortKeySql` normalizes to a `Z` suffix and assumes position-20 string surgery over the stored `DateTimeOffset` text. All current event producers write UTC (`TimeProvider.GetUtcNow()` / `DateTimeOffset.UtcNow` / injected `now`), so every stored row carries a `+00:00` offset and the expression is correct and proven by the new sub-second spec. If a future producer stamps a non-zero offset, the expression would not normalize it to UTC before deriving the key. This is not a present defect (no such producer exists), but the expression is defensive only for the UTC case.
-  SuggestedAction: If a non-UTC event producer is ever introduced, switch `TimeSortKey` to a write-time UTC-normalized column or a SQL expression that converts via `datetime()` before formatting.
+  Scope: `packages/web/src/pages/activity/ui/ActivityPage.tsx:188-190`
+  Evidence: `StatusBar` receives `completed` and `failed` counts from `evidenceCounts`, which only counts `ActivityEvent.outcome` values set on recorded events. Snapshot entries (session, waiting, runner) do not have `outcome`, so completed/failed sessions discovered only via the live activity snapshot are not reflected in the StatusBar. Meanwhile `active` and `waiting` still come from `useActivityCards`, which is the older snapshot feed. This mixes two counting schemes.
+  SuggestedAction: Derive completed/failed counts from the same source as active/waiting (either extend snapshot entries to carry terminal outcome or use `useAgentActivity.summary` directly), or document the intentional difference.
   Status: follow-up
 
 - [ID: item-5]
   Severity: follow-up
-  Scope: `packages/server/src/Mohist.Server/AgentOps/Services/ProjectEventFeedAssembler.cs`
-  Evidence: The attention/server-side failure filter bounds the candidate set in SQL only for the `coder_session_status_changed` and `session.closed` paths. Workflow and issue failures rely on in-memory `AttentionOnly` pruning after the bounded `Take(limit)`. The guarantee "an older failure is found beyond a window of newer routine events" therefore holds for session failures (proven by specs) and for workflow/issue failures when the failure count itself is under the limit (the routine events are pruned in memory, leaving room). It would only break if a single project accumulated more than `limit` failure events newer than the target failure — a volume this evidence view does not approach today.
-  SuggestedAction: Push a failure predicate into the workflow/issue SQL candidate selection if a project ever concentrates enough failure events to exceed the requested window.
+  Scope: `packages/server/src/Mohist.Server/Api/ProjectEventsRoutes.cs:83`
+  Evidence: `ProjectEventDto.Origin` is produced by `envelope.Origin.ToString().ToLowerInvariant()`, yielding `issue` / `workflowrun` / `agentsession`, while `SourceAggregateKind` is hyphenated (`issue` / `workflow-run` / `agent-session`). The Web projection defensively accepts both forms, but the wire contract is inconsistent. A single lowercase-hyphenated vocabulary would be cleaner and less error-prone for future consumers.
+  SuggestedAction: Normalize `Origin` to the same hyphenated vocabulary as `SourceAggregateKind` (e.g., `workflow-run`, `agent-session`).
   Status: follow-up
 
 ## Pre-existing or Out-of-scope Items
@@ -50,8 +50,8 @@ None.
 - [ID: item-6]
   Severity: info
   Scope: `packages/web` Vitest worker heap pressure
-  Evidence: Running the full `packages/web` Vitest suite concurrently occasionally triggers a V8 "Ineffective mark-compacts near heap limit" OOM in a single worker, surfacing as a non-test "Worker exited unexpectedly" error while all 4647 test assertions still pass. This is an environment-level memory pressure issue under parallel jsdom execution, not a defect in the changed code, and reproduces independent of this change.
-  SuggestedAction: Consider lowering the default Vitest fork/thread count or raising the worker heap limit in a separate change if the suite grows further.
+  Evidence: Running the full `packages/web` Vitest suite (`npm run test:run -w packages/web`) with `NODE_OPTIONS=--max-old-space-size=8192` still triggers a V8 "Ineffective mark-compacts near heap limit" OOM in a single worker, causing "Worker exited unexpectedly" even though every test that completed passed (4653 tests passed, 0 failed, 10 tests in one file were not reached). This reproduces with or without the reviewed change and is independent of the touched files. The targeted test files for this change all pass in isolation.
+  SuggestedAction: Consider lowering Vitest's default worker count or raising the worker heap limit in a separate infrastructure change; this is not a defect in the issue-402 code.
   Status: pre-existing
 
 <promise>PASS</promise>
