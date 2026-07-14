@@ -40,11 +40,11 @@
 - **THEN** the method SHALL proceed without blocking on a poll-admission semaphore
 - **AND** the method SHALL acquire `_lifecycleGate` for its state mutations as normal
 
-#### Scenario: DispatchService poll sequence is unchanged
+#### Scenario: DispatchService poll order is unchanged
 
 - **WHEN** the DispatchService poll sequence is inspected
 - **THEN** it SHALL call `TryBeginPollAsync`, `TouchPresenceAsync`, `GetInfoAsync`, `ReconcileAgentJobsAsync`, and `EndPollAsync` in the same order as before
-- **AND** no change to DispatchService source code SHALL be required
+- **AND** every fresh workflow claim SHALL revalidate live Runner registration and capacity before assigning work
 
 ### Requirement: RunnerGrain interleavable methods prevent reciprocal deadlock with AgentJobGrain
 

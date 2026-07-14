@@ -104,22 +104,11 @@ public class WorkflowGrainConcurrencySpecs : WorkflowGrainSpecs
         var persisted = await LoadRunAsync(_workflowId!);
         var inMemoryStatus = await workflow.GetRunStatusAsync();
 
-        Assert.True(
-            persisted.Status is WorkflowRunStatus.Paused or WorkflowRunStatus.Stopped,
-            $"Expected Paused or Stopped, got {persisted.Status}");
+        var stopResults = new[] { results[1], results[3] };
+        Assert.Single(stopResults, result => result is null);
+        Assert.Equal(WorkflowRunStatus.Stopped, persisted.Status);
         Assert.Equal(persisted.Status.ToString(), inMemoryStatus);
-
-        if (persisted.Status == WorkflowRunStatus.Paused)
-        {
-            Assert.All(results, r =>
-                Assert.True(r is null || r is InvalidOperationException,
-                    $"Pause+Stop race from Pending should never produce unexpected errors: {r?.GetType().Name}"));
-        }
-        else
-        {
-            Assert.Contains(results, r => r is null);
-            Assert.All(results.Where(r => r is not null), r => Assert.IsType<InvalidOperationException>(r));
-        }
+        Assert.All(results.Where(result => result is not null), result => Assert.IsType<InvalidOperationException>(result));
 
         await DeactivateWorkflowAsync(_workflowId!);
         var reloaded = await LoadRunAsync(_workflowId!);
@@ -175,34 +164,47 @@ public class WorkflowGrainConcurrencySpecs : WorkflowGrainSpecs
         {
             var workflow = Grains.GetGrain<IWorkflowGrain>(id);
             await SeedWorkflowTemplateAsync(id, SingleStage(checks: []), TestProjectId(id));
-            await workflow.StartAsync(TestInput(TestProjectId(id), TestIssueId(id)));
+            await workflow.StartAsync(ConcurrencyInput(TestProjectId(id), TestIssueId(id)));
             workflows.Add(workflow);
         }
 
-        var tasks = new List<Task>();
+        var operations = new List<(string Id, Task<Exception?> Stop, Task<Exception?> Pause)>();
         for (var i = 0; i < ids.Length; i++)
         {
             var id = ids[i];
             var w = workflows[i];
-            tasks.Add(CatchAsync(w.StopAsync($"stop-{id}")));
-            tasks.Add(CatchAsync(w.PauseAsync($"pause-{id}")));
+            operations.Add((
+                id,
+                CatchAsync(w.StopAsync($"stop-{id}")),
+                CatchAsync(w.PauseAsync($"pause-{id}"))));
         }
 
-        await Task.WhenAll(tasks);
+        await Task.WhenAll(operations.SelectMany(operation => new Task[] { operation.Stop, operation.Pause }));
 
-        foreach (var id in ids)
+        foreach (var operation in operations)
         {
-            var w = Grains.GetGrain<IWorkflowGrain>(id);
-            var persisted = await LoadRunAsync(id);
+            Assert.Null(await operation.Stop);
+            var pauseResult = await operation.Pause;
+            Assert.True(pauseResult is null or InvalidOperationException);
+
+            var w = Grains.GetGrain<IWorkflowGrain>(operation.Id);
+            var persisted = await LoadRunAsync(operation.Id);
             var inMemoryStatus = await w.GetRunStatusAsync();
 
             Assert.Equal(persisted.Status.ToString(), inMemoryStatus);
-            Assert.True(
-                persisted.Status is WorkflowRunStatus.Paused or WorkflowRunStatus.Stopped
-                    or WorkflowRunStatus.Pending or WorkflowRunStatus.Ready or WorkflowRunStatus.Running,
-                $"Unexpected status {persisted.Status} for {id}");
+            Assert.Equal(WorkflowRunStatus.Stopped, persisted.Status);
         }
     }
+
+    private WorkflowStartInput ConcurrencyInput(string projectId, string issueId) =>
+        new(Metadata: new WorkflowRunMetadata(
+            Name: null,
+            CreatedAt: _fixture.TimeProvider.GetUtcNow(),
+            Annotations: new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["projectId"] = projectId,
+                ["issueId"] = issueId,
+            }));
 
     private static void AssertAllowedSerializedState(string? status)
     {

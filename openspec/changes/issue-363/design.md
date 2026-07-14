@@ -30,7 +30,7 @@ Stakeholders: Server slice owners (Workflow, Runner, Events, Epic). No web/CLI/r
 
 **Non-Goals:**
 - Rewrite the workflow state machine or change cross-aggregate event->command orchestration semantics.
-- Touch workflow-scheduling reconcile (`DispatchService` / `design/workflow/scheduling.md` / epic #44). The DispatchService poll call sequence and scheduling algorithm remain unchanged.
+- Rewrite workflow-scheduling reconcile (`DispatchService` / `design/workflow/scheduling.md` / epic #44). The DispatchService poll order remains unchanged; fresh workflow claims revalidate live Runner availability and capacity.
 - Change `AutoMarkDoneIfReadyAsync` (a separate readiness entry, not in the rename scope).
 - Make Hermes notification delivery durable (it is intentionally best-effort; only its setup phase propagates to the dispatcher).
 - Any web / CLI / runner / HTTP contract change, new external dependency, or persistence schema change.

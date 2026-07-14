@@ -816,6 +816,39 @@ public class EpicAutoDoneHandlerSpecs
         Assert.Equal("project_1:epic_1", call.GrainKey);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task CancelledHandler_ExternalCancelledPrerequisite_DoesNotDispatchDependentEpic()
+    {
+        await using var database = CreateDatabase();
+        await SeedEpicAsync(database, status: "running");
+        await SeedIssueWithPrereqsAsync(database, projectId: "project_1", issueId: "issue_2", issueNumber: 2, prereqNumbers: [10]);
+        await SeedLinkAsync(database, epicId: "epic_1", issueId: "issue_2", issueNumber: 2);
+        await SeedIssueAsync(database, projectId: "project_1", issueId: "issue_10", issueNumber: 10, status: Mohist.Server.Issue.Domain.IssueStatus.Cancelled);
+
+        var querier = new EpicQuerier(database.Factory, null!);
+        var grains = new TestEpicGrainFactory(database.Factory);
+        var handler = new EpicCancelledHandler(querier, grains, NullLogger<EpicCancelledHandler>.Instance);
+        var evt = new CloudEvent<IssueCancelled>(
+            id: Guid.NewGuid().ToString(),
+            source: new Uri("/mohist/issues/issue_10", UriKind.Relative),
+            type: EventCatalog.ReverseDns.IssueCancelled,
+            time: EventTime,
+            data: new IssueCancelled("cancelled"),
+            subject: "10",
+            extensions: new Dictionary<string, string>
+            {
+                ["projectid"] = "project_1",
+                ["issueid"] = "issue_10",
+                ["issueno"] = "10",
+            });
+
+        await handler.HandleAsync(evt, CancellationToken.None);
+
+        Assert.Empty(grains.Calls);
+    }
+
     // --- Fix D: EpicStartRetryHandler (start-attempt-failed triggers recompute) ---
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]

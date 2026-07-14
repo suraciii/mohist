@@ -430,74 +430,77 @@ public class RunnerGrainConcurrencySpecs : IAsyncLifetime
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
-    [Fact]
-    public async Task ReconcileAgentJobsAsync_DuringCrossGrainCheck_DoesNotHoldLifecycleGate_AllowsConcurrentAssignment()
+    [Fact(Timeout = 5000)]
+    public async Task ReconcileAgentJobsAsync_DuringRealAgentJobRetry_ReleasesLifecycleGate()
     {
-        var (runnerId, _) = await RegisterRunnerAsync(
+        var (runnerId, projectId) = await RegisterRunnerAsync(
             $"reconcile-deadlock-{Guid.NewGuid():N}",
             maxWorkflowSlots: 2);
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
         var agentJobId = $"reconcile-job-{Guid.NewGuid():N}";
-        var workId = $"reconcile-work-{Guid.NewGuid():N}";
-
-        // A fresh AgentJobGrain starts in Pending. Assign the work on the
-        // runner side and mark it accepted on the agent-job side so
-        // IsWorkRunnableAsync returns true during reconcile.
         var job = Grains.GetGrain<IAgentJobGrain>(agentJobId);
-        Assert.Equal(
-            RunnerWorkAssignmentStatus.Assigned,
-            (await runner.AssignAgentJobAsync(new WorkDispatch(
-                WorkflowRunId: string.Empty,
-                WorkId: workId,
-                AgentJobId: agentJobId,
-                OwnerKind: WorkDispatchOwnerKinds.AgentJob))).Status);
-        await job.AssignRunnerAsync(runnerId, workId);
+        var input = MakeInput("reconcile", projectId, "/tmp/reconcile-deadlock");
+        var options = Services.GetRequiredService<IOptions<AgentJobOptions>>().Value;
+        var dispatchRetryBound = options.DispatchRetryBound;
+        var dispatchBackoffInitial = options.DispatchBackoffInitial;
+        var dispatchBackoffCap = options.DispatchBackoffCap;
 
-        // Admit a poll round so _pollAdmitted is true (matching production).
-        var admission = await runner.TryBeginPollAsync();
-        Assert.True(admission.Admitted);
+        options.DispatchRetryBound = TimeSpan.FromMinutes(5);
+        options.DispatchBackoffInitial = TimeSpan.FromMinutes(1);
+        options.DispatchBackoffCap = TimeSpan.FromMinutes(1);
 
         try
         {
-            // Reconcile with an empty reported set — the pre-assigned work is
-            // "missing", so ReconcileAgentJobsAsync will snapshot it under the
-            // gate, RELEASE the gate, then call IsWorkRunnableAsync outside.
-            //
-            // We fire both the reconcile and a concurrent [AlwaysInterleave]
-            // assignment concurrently via Task.WhenAll. If the lifecycle gate
-            // were held across the cross-grain IsWorkRunnableAsync call (the
-            // pre-fix deadlock), the concurrent assignment would block on the
-            // gate, the reconcile would block on the cross-grain call (which
-            // bounces back through AssignAgentJobAsync on recovery), and
-            // Task.WhenAll would hang — caught by the test framework's
-            // timeout. After the fix, the gate is free during the cross-grain
-            // call, so the assignment acquires it, sees _pollAdmitted, and
-            // rejects cleanly; both tasks complete.
-            var concurrentAgentJobId = $"concurrent-job-{Guid.NewGuid():N}";
-            var concurrentWorkId = $"concurrent-work-{Guid.NewGuid():N}";
+            _fixture.DispatchObserver.FailRunnerAccepted = true;
+            await job.SubmitAsync(input);
+            await _fixture.DispatchObserver.WaitForRunnerAcceptedAsync();
 
-            var reconcile = runner.ReconcileAgentJobsAsync([]);
-            var concurrentAssignment = runner.AssignAgentJobAsync(new WorkDispatch(
-                WorkflowRunId: string.Empty,
-                WorkId: concurrentWorkId,
-                AgentJobId: concurrentAgentJobId,
-                OwnerKind: WorkDispatchOwnerKinds.AgentJob));
+            var prepared = await job.GetRuntimeSnapshotAsync();
+            Assert.Equal(AgentJobStatus.Pending, prepared.Status);
+            Assert.Equal(runnerId, prepared.RunnerId);
+            Assert.False(string.IsNullOrWhiteSpace(prepared.CurrentWorkId));
+            var workId = prepared.CurrentWorkId!;
 
-            await Task.WhenAll(reconcile, concurrentAssignment);
+            _fixture.DispatchObserver.FailRunnerAccepted = false;
+            _fixture.RunnerAssignmentObserver.BlockAssignmentAdmission();
+            var retry = job.EnsureSubmittedAsync(input);
+            await _fixture.RunnerAssignmentObserver.WaitForAssignmentAdmissionAsync();
 
-            var assignmentResult = await concurrentAssignment;
-            Assert.Equal(RunnerWorkAssignmentStatus.Rejected, assignmentResult.Status);
-            Assert.Equal("runner-reconciling", assignmentResult.Reason);
+            var admission = await runner.TryBeginPollAsync();
+            Assert.True(admission.Admitted);
+            try
+            {
+                var reconcile = runner.ReconcileAgentJobsAsync([]);
+                _fixture.RunnerAssignmentObserver.ReleaseAssignmentAdmission();
 
-            // The reconcile returns the missing dispatch snapshot.
-            var pollState = await reconcile;
-            Assert.Equal(1, pollState.ActiveCount);
-            Assert.NotNull(pollState.Dispatch);
-            Assert.Equal(workId, pollState.Dispatch!.WorkId);
+                await Task.WhenAll(retry, reconcile);
+
+                var pollState = await reconcile;
+                Assert.Equal(1, pollState.ActiveCount);
+                Assert.NotNull(pollState.Dispatch);
+                Assert.Equal(workId, pollState.Dispatch!.WorkId);
+            }
+            finally
+            {
+                _fixture.RunnerAssignmentObserver.ReleaseAssignmentAdmission();
+                await runner.EndPollAsync();
+            }
+
+            var settled = await job.GetRuntimeSnapshotAsync();
+            Assert.Equal(AgentJobStatus.Pending, settled.Status);
+            Assert.Equal(runnerId, settled.RunnerId);
+            Assert.Equal(workId, settled.CurrentWorkId);
+            var runtime = await runner.GetRuntimeStateAsync();
+            var work = Assert.Single(runtime.ActiveWorks, active => active.OwnerId == agentJobId);
+            Assert.Equal(workId, work.WorkId);
         }
         finally
         {
-            await runner.EndPollAsync();
+            _fixture.DispatchObserver.FailRunnerAccepted = false;
+            _fixture.RunnerAssignmentObserver.ReleaseAssignmentAdmission();
+            options.DispatchRetryBound = dispatchRetryBound;
+            options.DispatchBackoffInitial = dispatchBackoffInitial;
+            options.DispatchBackoffCap = dispatchBackoffCap;
         }
     }
 

@@ -24,6 +24,26 @@ public class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTests.Specs.
     private static string WorkKey(string workflowRunId, string workId) =>
         $"{WorkDispatchOwnerKinds.Workflow}:{workflowRunId}:{workId}";
 
+    private async Task<(string RunnerId, string[] WorkflowIds)> StartReadyWorkflowsAsync(
+        string prefix,
+        int count,
+        int slots)
+    {
+        await ClearBacklogAsync();
+        var projectId = $"{prefix}-project";
+        var runnerId = await RegisterRunnerForProjectAsync(projectId, $"{prefix}-runner", slots);
+        var workflowIds = new string[count];
+        for (var index = 0; index < count; index++)
+        {
+            var workflowId = $"{prefix}-workflow-{index}";
+            var workflow = Grains.GetGrain<IWorkflowGrain>(workflowId);
+            await SeedWorkflowTemplateAsync(workflowId, SingleStage(checks: []), projectId);
+            await workflow.StartAsync(TestInput(projectId));
+            workflowIds[index] = workflowId;
+        }
+        return (runnerId, workflowIds);
+    }
+
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
@@ -121,6 +141,66 @@ public class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTests.Specs.
         var resp = await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], []));
 
         Assert.Empty(resp.Dispatches);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
+    [Fact]
+    public async Task PollAsync_UnregisterAfterInfoRead_DoesNotAssignWorkflow()
+    {
+        var (runnerId, workflowIds) = await StartReadyWorkflowsAsync(
+            $"poll-unregister-{Guid.NewGuid():N}", count: 1, slots: 1);
+        _fixture.DispatchPollObserver.Reset();
+        _fixture.DispatchPollObserver.BlockAfterRunnerInfo();
+
+        try
+        {
+            var poll = Dispatch.PollAsync(runnerId, new RunnerPollRequest([], []));
+            await _fixture.DispatchPollObserver.WaitForRunnerInfoAsync();
+
+            await Grains.GetGrain<IRunnerGrain>(runnerId).UnregisterAsync();
+            _fixture.DispatchPollObserver.ReleaseAfterRunnerInfo();
+
+            Assert.Empty((await poll).Dispatches);
+            var workflow = Grains.GetGrain<IWorkflowGrain>(workflowIds[0]);
+            Assert.Null(await workflow.GetAssignedWorkerIdAsync());
+            Assert.Equal("Pending", await workflow.GetRunStatusAsync());
+        }
+        finally
+        {
+            _fixture.DispatchPollObserver.ReleaseAfterRunnerInfo();
+        }
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
+    [Fact]
+    public async Task PollAsync_CapacityReducedAfterInfoRead_ClaimsAtMostNewCapacity()
+    {
+        var (runnerId, workflowIds) = await StartReadyWorkflowsAsync(
+            $"poll-capacity-{Guid.NewGuid():N}", count: 2, slots: 2);
+        _fixture.DispatchPollObserver.Reset();
+        _fixture.DispatchPollObserver.BlockAfterRunnerInfo();
+
+        try
+        {
+            var poll = Dispatch.PollAsync(runnerId, new RunnerPollRequest([], []));
+            await _fixture.DispatchPollObserver.WaitForRunnerInfoAsync();
+
+            await Grains.GetGrain<IRunnerGrain>(runnerId).UpdateAsync(1);
+            _fixture.DispatchPollObserver.ReleaseAfterRunnerInfo();
+
+            var response = await poll;
+            Assert.Single(response.Dispatches);
+            var statuses = await Task.WhenAll(workflowIds.Select(async workflowId =>
+                await Grains.GetGrain<IWorkflowGrain>(workflowId).GetRunStatusAsync()));
+            Assert.Equal(1, statuses.Count(status => status == "Running"));
+            Assert.Equal(1, statuses.Count(status => status == "Pending"));
+        }
+        finally
+        {
+            _fixture.DispatchPollObserver.ReleaseAfterRunnerInfo();
+        }
     }
 
     private async Task InsertStatusRowAsync(string workflowRunId, string status, string runnerId)

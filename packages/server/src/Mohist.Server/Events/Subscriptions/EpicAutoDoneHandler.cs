@@ -51,8 +51,8 @@ public sealed class EpicAutoDoneHandler : ICloudEventHandler<IssueCompleted>
 /// <see cref="EpicAutoDoneHandler"/>. Both terminal events must trigger
 /// recompute progress because both clear the serial in-progress slot the
 /// epic is waiting on — missing this subscription would deadlock the
-/// epic when its in-progress issue is cancelled. Like completed, it also
-/// reverse-looks-up dependent epics via external prerequisites.
+/// epic when its in-progress issue is cancelled. Cancellation only recomputes
+/// the owning epic: external prerequisites become startable only when done.
 /// </summary>
 [Subscription(Type = EventCatalog.ReverseDns.IssueCancelled)]
 public sealed class EpicCancelledHandler : ICloudEventHandler<IssueCancelled>
@@ -79,7 +79,7 @@ public sealed class EpicCancelledHandler : ICloudEventHandler<IssueCancelled>
     public bool Filter(CloudEvent<IssueCancelled> evt) => true;
 
     public Task HandleAsync(CloudEvent<IssueCancelled> evt, CancellationToken ct) =>
-        _dispatcher.DispatchAsync(evt.Id, evt.Extensions, evtType: "cancelled", includePrerequisiteLookup: true, ct);
+        _dispatcher.DispatchAsync(evt.Id, evt.Extensions, evtType: "cancelled", includePrerequisiteLookup: false, ct);
 }
 
 /// <summary>
@@ -153,6 +153,9 @@ public sealed class EpicIssueReopenedHandler : ICloudEventHandler<IssueReopened>
     public Task HandleAsync(CloudEvent<IssueReopened> evt, CancellationToken ct) =>
         _dispatcher.DispatchAsync(evt.Id, evt.Extensions, evtType: "reopened", includePrerequisiteLookup: false, ct);
 }
+
+/// <summary>
+/// Subscribes to <c>com.mohist.issue.prerequisite-removed</c> and triggers
 /// <see cref="IEpicGrain.RecomputeProgressAsync"/> on the owning epic.
 /// Removing a prerequisite can make a previously-blocked backlog member
 /// startable in a running-but-idle epic — a readiness transition the
@@ -240,32 +243,6 @@ public sealed class EpicIssueUnlinkedHandler : ICloudEventHandler<Epic.Domain.Ev
 
     public Task HandleAsync(CloudEvent<Epic.Domain.Events.EpicIssueUnlinked> evt, CancellationToken ct) =>
         _dispatcher.DispatchAsync(evt.Id, evt.Extensions, evtType: "issue-unlinked", ct);
-}
-
-/// <summary>
-/// Subscribes to a transition into <c>running</c>. Starting or resuming an
-/// epic persists this event with the status transition before attempting child
-/// work, so it is the durable recovery intent for a command-path start
-/// failure.
-/// </summary>
-[Subscription(Type = EventCatalog.ReverseDns.EpicStatusChanged)]
-public sealed class EpicRunningStatusHandler : ICloudEventHandler<Epic.Domain.Events.EpicStatusChanged>
-{
-    private readonly EpicEventRecomputeDispatcher _dispatcher;
-
-    [ActivatorUtilitiesConstructor]
-    public EpicRunningStatusHandler(
-        IGrainFactory grains,
-        ILogger<EpicRunningStatusHandler> log)
-    {
-        _dispatcher = new EpicEventRecomputeDispatcher(grains, log);
-    }
-
-    public bool Filter(CloudEvent<Epic.Domain.Events.EpicStatusChanged> evt) =>
-        string.Equals(evt.Data.NewStatus, "running", StringComparison.Ordinal);
-
-    public Task HandleAsync(CloudEvent<Epic.Domain.Events.EpicStatusChanged> evt, CancellationToken ct) =>
-        _dispatcher.DispatchAsync(evt.Id, evt.Extensions, evtType: "status-changed", ct);
 }
 
 /// <summary>

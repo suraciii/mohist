@@ -101,13 +101,13 @@ When an issue is linked to a non-terminal epic without waking from done, the epi
 
 The poll-driven sweep reevaluated readiness transitions beyond missed terminal events. Each transition the sweep covered SHALL have a durable, event-driven recompute trigger so convergence does not depend on a periodic scan:
 
-- **External prerequisite completes**: `EpicAutoDoneHandler` (completed) and `EpicCancelledHandler` (cancelled) SHALL reverse-look-up epics whose members depend on the event issue as an external prerequisite via `EpicQuerier.GetEpicIdsDependentOnPrerequisiteAsync`, and dispatch `RecomputeProgressAsync` to those epics in addition to the direct-member epic.
+- **External prerequisite completes**: `EpicAutoDoneHandler` SHALL reverse-look-up epics whose members depend on the completed event issue as an external prerequisite via `EpicQuerier.GetEpicIdsDependentOnPrerequisiteAsync`, and dispatch `RecomputeProgressAsync` to those epics in addition to the direct-member epic. Cancellation only recomputes the direct-member epic because prerequisites require completion.
 - **Draft undraft**: `EpicDraftChangedHandler` subscribing `com.mohist.issue.draft-changed` SHALL dispatch `RecomputeProgressAsync` to the owning epic when a member transitions from draft to ready (`NewIsDraft == false`).
 - **Prerequisite removed**: `EpicPrerequisiteRemovedHandler` subscribing `com.mohist.issue.prerequisite-removed` SHALL dispatch `RecomputeProgressAsync` to the owning epic.
 - **Link commit/recompute crash**: `EpicIssueLinkedHandler` subscribing `com.mohist.epic.issue-linked` SHALL dispatch `RecomputeProgressAsync` to the epic that linked the issue. This is the durable convergence path for a crash between link commit and inline recompute.
 - **Command-path start failure**: `TryStartNextAsync` with `PreserveRunning` SHALL emit `EpicStartAttemptFailed` (persisted atomically with the epic state). `EpicStartRetryHandler` subscribing `com.mohist.epic.start-attempt-failed` SHALL re-drive `RecomputeProgressAsync` via the durable dispatcher with backoff, replacing the sweep's running-but-idle recovery loop. Permanent start failures SHALL be dead-lettered by the dispatcher.
 
-Recovery-critical events (`EpicIssueLinked`, `EpicStartAttemptFailed`) SHALL be persisted atomically with the epic state transition via `EventStore.AppendAsync(db, envelope)` into the caller's DbContext, so a crash or failed append between commit and event persistence cannot lose the only convergence signal.
+Recovery-critical events (`EpicIssueLinked`, `EpicStatusChanged` transitions to running, and `EpicStartAttemptFailed`) SHALL be persisted atomically with the epic state transition via `EventStore.AppendAsync(db, envelope)` into the caller's DbContext, so a crash or failed append between commit and event persistence cannot lose the only convergence signal.
 
 #### Scenario: External prerequisite completes recomputes dependent epic
 

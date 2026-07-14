@@ -336,15 +336,12 @@ public class EpicProgressionSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
-    public async Task ResumeAsync_StartFailureWithEventAppendFailure_LeavesEpicRunningButIdle()
+    public async Task ResumeAsync_StartFailureWithRetryEventAppendFailure_LeavesEpicRunningButIdle()
     {
-        // Parent-before-child: the paused-to-running transition is committed
-        // before TryStartNextAsync. If StartWorkAsync fails and the
-        // best-effort EpicStartAttemptFailed append also fails, the epic
-        // stays running-but-idle (state committed, recovery event lost).
-        // This is an accepted trade-off: orphaned child work (from deferred
-        // commit) is the worse failure mode. The epic converges on the next
-        // readiness event.
+        // Parent-before-child: the paused-to-running transition commits before
+        // TryStartNextAsync. The EpicStartAttemptFailed event is best-effort:
+        // if its append fails, the exception is caught (logged) and the epic
+        // stays running-but-idle — it converges on the next readiness event.
         var database = CreateDatabase();
         await SeedEpicAsync(database, status: "paused");
         await SeedIssueAsync(database, projectId: "project_1", epicId: "epic_1", issueId: "issue_1", issueNumber: 1, status: IssueStatus.Done, canStart: true);

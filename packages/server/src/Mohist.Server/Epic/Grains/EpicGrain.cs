@@ -551,10 +551,6 @@ public class EpicGrain : Grain, IEpicGrain
         domain.Start(now.UtcDateTime);
         MapToRow(domain, row, now);
         var pending = DrainPendingEvents(domain);
-        // Commit the parent running transition BEFORE starting child work so
-        // a later epic SaveChanges failure cannot orphan a started issue.
-        // Event persistence is best-effort (same as pre-#363): a failed
-        // append is logged but does not roll back the committed state.
         await db.SaveChangesAsync();
         await PersistEpicEventsAsync(domain, pending, now);
 
@@ -857,10 +853,6 @@ public class EpicGrain : Grain, IEpicGrain
                 domain.RecordStartAttemptFailure(next.Id, next.Number, "start-failed", now.UtcDateTime);
                 MapToRow(domain, row, now);
                 var pending = DrainPendingEvents(domain);
-                // Best-effort persistence: the parent running transition is
-                // already committed by the caller. If this append fails, the
-                // epic stays running-but-idle and converges on the next
-                // readiness event.
                 await PersistEpicEventsAsync(domain, pending, now);
                 return ToDto(row);
             }

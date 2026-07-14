@@ -311,6 +311,46 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
 
     }
 
+    public async Task<WorkItem?> TryClaimWorkflowAsync(
+        string workflowRunId,
+        string? projectId,
+        bool assignWorker)
+    {
+        await _lifecycleGate.WaitAsync();
+        try
+        {
+            if (_status != RunnerStatus.Online
+                || _info is null
+                || !string.Equals(_info.ProjectId, projectId, StringComparison.Ordinal))
+            {
+                return null;
+            }
+
+            var activeWorkflowCount = (await _workflowRuns.FindRunningAssignedToAsync(RunnerId)).Count;
+            var activeAgentJobCount = GetWorks()
+                .Where(IsActiveAgentJobWork)
+                .Select(work => work.OwnerId)
+                .Distinct(StringComparer.Ordinal)
+                .Count();
+            if (activeWorkflowCount + activeAgentJobCount >= MaxWorkflowSlots)
+                return null;
+
+            var workflow = GrainFactory.GetGrain<IWorkflowGrain>(workflowRunId);
+            if (assignWorker)
+            {
+                var assignment = await workflow.AssignWorkerAsync(RunnerId);
+                if (assignment.Status != WorkflowAssignmentStatus.Assigned)
+                    return null;
+            }
+
+            return await workflow.ClaimNextAsync(RunnerId);
+        }
+        finally
+        {
+            _lifecycleGate.Release();
+        }
+    }
+
     public async Task<AgentJobPollState> ReconcileAgentJobsAsync(List<string> reportedWorkKeys)
     {
         var reported = reportedWorkKeys.ToHashSet(StringComparer.Ordinal);
