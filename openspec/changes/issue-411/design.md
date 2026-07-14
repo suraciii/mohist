@@ -87,7 +87,7 @@ This reduces the recovery bar's sticky height from ~80px to ~50px, freeing ~30px
 
 ### D5 - Pure CSS `md:` breakpoint classes, no JS viewport hook
 
-All accommodations (D1-D4) use Tailwind `md:` prefixed classes. No `useIsMobile()` or `useNarrowViewport()` hook is introduced. Rationale:
+All accommodations (D1-D4) are pure CSS breakpoint classes. D1-D3 use `md:` prefixed classes (`hidden md:inline`, `min-h-[120px] md:min-h-0`, `py-1 md:py-2`, `py-2 md:py-3`). D4 removes the `sm:` prefix from the recovery bar inner layout (making `flex-row` always apply) and adds `md:py-3` to the wrapper padding; the layout change only affects below-`sm` behavior because `sm+` was already `sm:flex-row`. No `useIsMobile()` or `useNarrowViewport()` hook is introduced. Rationale:
 
 - The `MobileBottomNav` is `md:hidden` (visible below 768px), so `md` is the natural breakpoint for "compact viewport" in this context.
 - Pure CSS classes don't require `matchMedia` mocking in tests. Elements remain in the DOM (hidden via CSS), so existing `getByText`/`getByTestId` assertions in `SessionPageHeader.spec.tsx` and `CoderSessionEvidence.spec.tsx` remain green without modification.
@@ -118,7 +118,7 @@ Per `design/testing.md`, two test tracks:
 - **[min-h could cause overflow on extreme edge cases]** -> Mitigated by D1+D2 density reduction, which frees ~120-180px at compact viewports. The 120px floor is calibrated below the worst-case available height (~207px at 320x568 with errors + active composer). If an unexpected combination arises, the floor prevents zero-height (the more dangerous failure) at the cost of potential minor overflow, which is the lesser evil.
 - **[Hiding metadata reduces information density on mobile]** -> Mitigated by the `StickySessionTitle` inside the transcript, which shows session name + status + turn count while scrolling. The owner sees identity and status at all times; detailed metadata (model, duration, session id) is available on desktop or by rotating to landscape (md+ width). The spec explicitly lists these as "nonessential" at compact viewports.
 - **[Recovery bar horizontal layout at 320px width]** -> The `ContextHealthBar` gets ~140px in a horizontal layout at 320px. Its label (`formatUsageLabel`) is a single line of mono text (`12K / 32K tokens (37%)`) that truncates gracefully. The bar itself is `w-full` of its `flex-1` container. Browser tests at 320x568 verify the layout doesn't break.
-- **[D4 changes recovery bar layout from sm: to always flex-row]** -> This changes the visual layout at 640-767px (sm to md) from stacked to horizontal. This is intentional: the stacked layout was the height problem, and horizontal is more compact. The change is purely visual; recovery gating and button behavior are unchanged.
+- **[D4 changes recovery bar layout from sm: to always flex-row]** -> This changes the visual layout below `sm` (640px) from stacked to horizontal; at `sm+` (640px+) the layout was already `sm:flex-row`, so md+ behavior is unchanged. The change is intentional: the stacked layout below sm was the height problem, and horizontal is more compact. The change is purely visual; recovery gating and button behavior are unchanged.
 - **[No JS viewport hook means no runtime viewport-aware logic]** -> All accommodations are static CSS. If future needs require runtime viewport awareness (e.g., conditional rendering, dynamic padding), a hook can be added then. For this change, CSS-only is simpler and sufficient.
 
 ## Migration Plan
