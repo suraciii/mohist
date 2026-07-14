@@ -3,6 +3,7 @@ import { useProjectPath } from '../../../entities/project'
 import type { SessionCard as SessionCardType, WaitingCard as WaitingCardType } from '@/entities/agent-ops'
 import { ActiveSessionAnomalies, WaitingSessionAnomalies } from '../model/anomaly'
 import { formatCompact, formatCost } from '../../../shared/lib/format-compact'
+import { formatElapsedTimeAgo } from '../../../shared/lib/format-time'
 import { ContextHealthIndicator } from '@/entities/coder-session'
 
 function formatDuration(ms: number): string {
@@ -15,17 +16,6 @@ function formatDuration(ms: number): string {
     return `${hours}h ${minutes}m`
   }
   return `${minutes}m ${seconds}s`
-}
-
-function formatTimeAgo(isoString: string): string {
-  const diff = Date.now() - new Date(isoString).getTime()
-  const minutes = Math.floor(diff / 60000)
-  if (minutes < 1) return 'just now'
-  if (minutes < 60) return `${minutes}m ago`
-  const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours}h ago`
-  const days = Math.floor(hours / 24)
-  return `${days}d ago`
 }
 
 const STAGE_COLORS: Record<string, string> = {
@@ -308,7 +298,7 @@ export function RecentCard({ card }: RecentCardProps) {
           </div>
           {card.completedAt && (
             <span className="text-[10px] text-muted-foreground/70">
-              {formatTimeAgo(card.completedAt)}
+              {formatElapsedTimeAgo(card.completedAt)}
             </span>
           )}
         </div>

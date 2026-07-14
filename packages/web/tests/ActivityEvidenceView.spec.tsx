@@ -385,4 +385,27 @@ describe('Activity evidence view', () => {
       expect(screen.queryByTestId(`activity-evidence-error-${source}`)).not.toBeInTheDocument()
     })
   })
+
+  it('renders each source error when every activity source fails', async () => {
+    projectEventsFailed = true
+    agentActivityFailed = true
+    runnersFailed = true
+    renderPage()
+
+    for (const source of ['recorded-events', 'agent-activity', 'runners']) {
+      expect(await screen.findByTestId(`activity-evidence-error-${source}`)).toHaveAttribute('role', 'alert')
+    }
+
+    projectEventsFailed = false
+    agentActivityFailed = false
+    runnersFailed = false
+    for (const source of ['recorded-events', 'agent-activity', 'runners']) {
+      fireEvent.click(screen.getByTestId(`activity-evidence-retry-${source}`))
+    }
+    await waitFor(() => {
+      expect(screen.queryByTestId('activity-evidence-error-recorded-events')).not.toBeInTheDocument()
+      expect(screen.queryByTestId('activity-evidence-error-agent-activity')).not.toBeInTheDocument()
+      expect(screen.queryByTestId('activity-evidence-error-runners')).not.toBeInTheDocument()
+    })
+  })
 })

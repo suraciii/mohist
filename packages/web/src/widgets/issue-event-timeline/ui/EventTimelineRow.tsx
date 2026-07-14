@@ -22,6 +22,11 @@ function formatTimelineDate(iso: string): string {
   })
 }
 
+const MARKER_RING = {
+  'bg-danger': 'ring-danger',
+  'bg-warning': 'ring-warning',
+} as const
+
 interface EventTimelineRowProps {
   entry: TimelineEntry
 }
@@ -41,9 +46,7 @@ export function EventTimelineRow({ entry }: EventTimelineRowProps) {
       ? 'bg-warning'
       : null
   const markerClass = markerAccent ?? style.dot
-  const markerRing = markerAccent
-    ? 'ring-2 ring-offset-1 ' + markerAccent.replace('bg-', 'ring-')
-    : ''
+  const markerRing = markerAccent ? `ring-2 ring-offset-1 ${MARKER_RING[markerAccent]}` : ''
 
   return (
     <div

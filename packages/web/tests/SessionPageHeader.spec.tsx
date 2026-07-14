@@ -728,26 +728,10 @@ describe('SessionPage header and states', () => {
 
     it('renders prev/next controls for a mid-sequence session and links to the chronologically adjacent siblings', async () => {
       sessionPageMocks.params = { number: '55', sessionName: 'build' } as any
-      setWorkflowRunSessions([
-        { id: 's-plan', sessionName: 'plan', status: 'completed', createdAt: '2026-06-15T08:00:00.000Z' },
-        { id: 's-build', sessionName: 'build', status: 'running', createdAt: '2026-06-15T10:00:00.000Z' },
-        { id: 's-check', sessionName: 'check', status: 'completed', createdAt: '2026-06-15T12:00:00.000Z' },
-      ])
-
-      const turns = [makeTurn({ id: 'turn-1' })]
-      const detail = makeMockDetail({
-        id: 'session-build',
-        metadata: makeMockMetadata({
-          status: 'running',
-          statusKind: 'live',
-          stage: 'build',
-          sessionName: 'build',
-          sessionId: 'session-build',
-        }),
-      })
+      setWorkflowRunSessions([{ id: 's-plan', sessionName: 'plan', status: 'completed', createdAt: '2026-06-15T08:00:00.000Z' }, { id: 's-build', sessionName: 'build', status: 'running', createdAt: '2026-06-15T10:00:00.000Z' }, { id: 's-check', sessionName: 'check', status: 'completed', createdAt: '2026-06-15T12:00:00.000Z' }])
       setupSessionPage({
-        detail,
-        turns,
+        detail: makeMockDetail({ id: 'session-build', metadata: makeMockMetadata({ status: 'running', statusKind: 'live', stage: 'build', sessionName: 'build', sessionId: 'session-build' }) }),
+        turns: [makeTurn({ id: 'turn-1' })],
         sessions: [{ ...makeMockSession(), id: 'session-build', sessionName: 'build' }],
         issue: { number: 55, title: 'Issue 55', workflowRunId: 'wr-1' },
       })
@@ -767,16 +751,9 @@ describe('SessionPage header and states', () => {
 
     it('keeps Activity as the back destination after opening a sibling', async () => {
       sessionPageMocks.params = { number: '55', sessionName: 'build' } as any
-      setWorkflowRunSessions([
-        { id: 's-plan', sessionName: 'plan', status: 'completed', createdAt: '2026-06-15T08:00:00.000Z' },
-        { id: 's-build', sessionName: 'build', status: 'running', createdAt: '2026-06-15T10:00:00.000Z' },
-      ])
-      const detail = makeMockDetail({
-        id: 'session-build',
-        metadata: makeMockMetadata({ sessionName: 'build', sessionId: 'session-build' }),
-      })
+      setWorkflowRunSessions([{ id: 's-plan', sessionName: 'plan', status: 'completed', createdAt: '2026-06-15T08:00:00.000Z' }, { id: 's-build', sessionName: 'build', status: 'running', createdAt: '2026-06-15T10:00:00.000Z' }])
       setupSessionPage({
-        detail,
+        detail: makeMockDetail({ id: 'session-build', metadata: makeMockMetadata({ sessionName: 'build', sessionId: 'session-build' }) }),
         turns: [makeTurn({ id: 'turn-1' })],
         sessions: [{ ...makeMockSession(), id: 'session-build', sessionName: 'build' }],
         issue: { number: 55, title: 'Issue 55', workflowRunId: 'wr-1' },

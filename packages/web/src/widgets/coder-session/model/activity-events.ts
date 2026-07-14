@@ -125,8 +125,7 @@ const TYPE_ORDER: Record<ActivityEventType, number> = {
 const FALLBACK_EVENT_TIME = '1970-01-01T00:00:00.000Z'
 
 function fromActivity(path: string): string {
-  const separator = path.includes('?') ? '&' : '?'
-  return `${path}${separator}from=activity`
+  return `${path}?from=activity`
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {

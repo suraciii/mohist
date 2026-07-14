@@ -291,43 +291,6 @@ export function SessionDetailShell({
     return () => window.removeEventListener('resize', handleResize)
   }, [isRunning])
 
-  // ── Early returns (hooks above are all unconditional) ──
-
-  const sessionMeta = meta as import('../../../entities/coder-session').SessionMetadata
-
-  const headerWithRecovery = (
-    <SessionHeader
-      backPath={backPath}
-      backLabel={backLabel}
-      issueTitle={issueTitle}
-      workflowContextPath={workflowContextPath}
-      workflowContextLabel={workflowContextLabel}
-      meta={sessionMeta}
-      statusKind={displayStatusKind}
-      turnCount={displayTurnCount}
-      recoveryBar={recoveryBarContent}
-      siblingNav={siblingNav}
-      isRunning={isRunning}
-      cancel={cancel}
-    />
-  )
-
-  const headerWithoutRecovery = (
-    <SessionHeader
-      backPath={backPath}
-      backLabel={backLabel}
-      issueTitle={issueTitle}
-      workflowContextPath={workflowContextPath}
-      workflowContextLabel={workflowContextLabel}
-      meta={sessionMeta}
-      statusKind={displayStatusKind}
-      turnCount={displayTurnCount}
-      siblingNav={siblingNav}
-      isRunning={isRunning}
-      cancel={cancel}
-    />
-  )
-
   if (notFound) {
     return (
       <div className="flex items-center justify-center flex-1">
@@ -357,12 +320,45 @@ export function SessionDetailShell({
     )
   }
 
+  const headerWithRecovery = (
+    <SessionHeader
+      backPath={backPath}
+      backLabel={backLabel}
+      issueTitle={issueTitle}
+      workflowContextPath={workflowContextPath}
+      workflowContextLabel={workflowContextLabel}
+      meta={meta}
+      statusKind={displayStatusKind}
+      turnCount={displayTurnCount}
+      recoveryBar={recoveryBarContent}
+      siblingNav={siblingNav}
+      isRunning={isRunning}
+      cancel={cancel}
+    />
+  )
+
+  const headerWithoutRecovery = (
+    <SessionHeader
+      backPath={backPath}
+      backLabel={backLabel}
+      issueTitle={issueTitle}
+      workflowContextPath={workflowContextPath}
+      workflowContextLabel={workflowContextLabel}
+      meta={meta}
+      statusKind={displayStatusKind}
+      turnCount={displayTurnCount}
+      siblingNav={siblingNav}
+      isRunning={isRunning}
+      cancel={cancel}
+    />
+  )
+
   if (turns.length === 0 && isRunning) {
     return (
       <div className="flex flex-col flex-1 min-h-0 xl:flex-row">
         <div className="flex flex-col flex-1 min-h-0">
           {headerWithRecovery}
-          <SessionUsageSummary usage={meta?.usage} />
+          <SessionUsageSummary usage={meta.usage} />
           {errorsEvidence}
           <SessionWaitingState />
           <SessionFollowupComposer onSend={sendFollowup} isSending={followupIsPending} disabled={!isRunning} />
@@ -377,7 +373,7 @@ export function SessionDetailShell({
       <div className="flex flex-col flex-1 min-h-0 xl:flex-row">
         <div className="flex flex-col flex-1 min-h-0">
           {headerWithRecovery}
-          <SessionUsageSummary usage={meta?.usage} />
+          <SessionUsageSummary usage={meta.usage} />
           {errorsEvidence}
           <SessionEmptyState />
         </div>
@@ -398,7 +394,7 @@ export function SessionDetailShell({
           data-testid="session-transcript-scroll-container"
         >
           <StickySessionTitle
-            meta={sessionMeta}
+            meta={meta}
             statusKind={displayStatusKind}
             turnCount={displayTurnCount}
           />

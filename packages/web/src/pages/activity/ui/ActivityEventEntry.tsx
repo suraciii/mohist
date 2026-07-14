@@ -1,20 +1,8 @@
 import type { ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { useProjectPath } from '../../../entities/project'
+import { formatElapsedTimeAgo } from '../../../shared/lib/format-time'
 import type { ActivityEvent, ActivityEventTargets } from '../../../widgets/coder-session'
-
-function formatTimeAgo(isoString: string, now: number): string {
-  const timestamp = Date.parse(isoString)
-  if (!Number.isFinite(timestamp)) return 'unknown'
-  const diff = Math.max(0, now - timestamp)
-  const minutes = Math.floor(diff / 60000)
-  if (minutes < 1) return 'just now'
-  if (minutes < 60) return `${minutes}m ago`
-  const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours}h ago`
-  const days = Math.floor(hours / 24)
-  return `${days}d ago`
-}
 
 const attentionPresentation = {
   failure: {
@@ -91,25 +79,17 @@ function SecondaryTargets({ targets }: { targets: ActivityEventTargets }) {
       </Link>,
     )
   }
-  if (targets.session) {
-    const path = targets.session.path
-      ?? (targets.session.isGeneric
-        ? `/agent-sessions/${encodeURIComponent(targets.session.sessionId)}?from=activity`
-        : targets.issue
-          ? `/issues/${targets.issue.number}/session/${encodeURIComponent(targets.session.sessionId)}?from=activity`
-          : null)
-    if (path) {
-      chips.push(
-        <Link
-          key="session"
-          to={toProjectPath(path)}
-          data-testid="activity-event-session-link"
-          className="inline-flex items-center rounded border border-border bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground hover:text-foreground"
-        >
-          {targets.session.label}
-        </Link>,
-      )
-    }
+  if (targets.session?.path) {
+    chips.push(
+      <Link
+        key="session"
+        to={toProjectPath(targets.session.path)}
+        data-testid="activity-event-session-link"
+        className="inline-flex items-center rounded border border-border bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground hover:text-foreground"
+      >
+        {targets.session.label}
+      </Link>,
+    )
   }
   if (targets.agent) {
     chips.push(
@@ -192,7 +172,7 @@ export function ActivityEventEntry({ event, now }: ActivityEventEntryProps) {
               title={event.time}
               className="ml-auto text-[10px] tabular-nums text-muted-foreground"
             >
-              {formatTimeAgo(event.time, now)}
+              {formatElapsedTimeAgo(event.time, now)}
             </time>
           </div>
         </div>
