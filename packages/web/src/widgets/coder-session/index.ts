@@ -1,6 +1,6 @@
 export { useActivityUsageSnapshot } from './model/usage-snapshot'
 export { useActivityEvents, buildActivityEvents, sortActivityEvents } from './model/activity-events'
-export type { ActivityEvent, ActivityEventType, ActivityAttention, ActivityEventTargets } from './model/activity-events'
+export type { ActivityEvent, ActivityEventType, ActivityAttention, ActivityEventFilters, ActivityEventsResult, ActivityEventTargets } from './model/activity-events'
 export { ActiveSessionCard, RecentCard, WaitingCard } from './ui/SessionCard'
 export { SessionRecoveryActions } from './ui/SessionRecoveryActions'
 export { UsageSnapshotLabel } from './ui/UsageSnapshotLabel'

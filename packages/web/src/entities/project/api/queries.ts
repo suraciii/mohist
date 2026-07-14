@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { useProject } from '../model/ProjectContext'
 import { createProject, deleteProject, getProjects, getRepositories, addRepository, removeRepository, setDefaultRepository } from './client'
-import { getProjectEvents, type ProjectEventDto } from './projectEvents'
+import { getProjectEvents, type ProjectEventDto, type ProjectEventTypeFilter } from './projectEvents'
 
 export type ProjectCreator = typeof createProject
 
@@ -97,16 +97,27 @@ export function useDeleteProject() {
   })
 }
 
-export function projectEventsQueryKey(projectId: string | null | undefined, limit: number) {
-  return ['project-events', projectId, limit] as const
+export function projectEventsQueryKey(
+  projectId: string | null | undefined,
+  limit: number,
+  types: readonly ProjectEventTypeFilter[] = [],
+  attentionOnly = false,
+) {
+  return ['project-events', projectId, limit, types, attentionOnly] as const
 }
 
-export function useProjectEvents(params?: { limit?: number }) {
+export function useProjectEvents(params?: {
+  limit?: number
+  types?: readonly ProjectEventTypeFilter[]
+  attentionOnly?: boolean
+}) {
   const { projectId } = useProject()
   const limit = params?.limit ?? 200
+  const types = params?.types ?? []
+  const attentionOnly = params?.attentionOnly ?? false
   return useQuery<ProjectEventDto[]>({
-    queryKey: projectEventsQueryKey(projectId, limit),
-    queryFn: () => getProjectEvents({ projectId, limit }),
+    queryKey: projectEventsQueryKey(projectId, limit, types, attentionOnly),
+    queryFn: () => getProjectEvents({ projectId, limit, types, attentionOnly }),
     enabled: !!projectId,
     refetchInterval: 5000,
   })

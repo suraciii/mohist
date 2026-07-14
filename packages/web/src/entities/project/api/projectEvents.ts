@@ -12,7 +12,7 @@ export interface ProjectEventDto {
   specVersion: string
   subject: string | null
   dataContentType: string | null
-  data: Record<string, unknown> | null
+  data: JsonValue
   extensions: Record<string, string>
   runnerId: string | null
   issueNumber?: number | null
@@ -22,9 +22,19 @@ export interface ProjectEventDto {
   agentName?: string | null
 }
 
-export function getProjectEvents(params?: { projectId?: string | null; limit?: number }) {
+export type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue }
+export type ProjectEventTypeFilter = 'issue-state' | 'workflow-stage' | 'agent-session' | 'runner' | 'failure'
+
+export function getProjectEvents(params?: {
+  projectId?: string | null
+  limit?: number
+  types?: readonly ProjectEventTypeFilter[]
+  attentionOnly?: boolean
+}) {
   const search = new URLSearchParams()
   if (params?.limit != null) search.set('limit', String(params.limit))
+  if (params?.types?.length) search.set('types', params.types.join(','))
+  if (params?.attentionOnly) search.set('attentionOnly', 'true')
   const qs = search.toString()
   return request<ProjectEventDto[]>(projectApiPath(params?.projectId, `/events${qs ? `?${qs}` : ''}`))
 }

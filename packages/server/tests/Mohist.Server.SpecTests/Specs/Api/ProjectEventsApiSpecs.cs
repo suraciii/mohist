@@ -1,9 +1,14 @@
 using System.Net;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
+using Microsoft.EntityFrameworkCore.Migrations.Operations;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Events;
+using Mohist.Server.Infrastructure.Data.Migrations;
 using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Events;
@@ -391,6 +396,127 @@ public class ProjectEventsApiSpecs
         Assert.False(entry.Extensions.ContainsKey("dispatchedAt"));
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
+    [Fact]
+    public async Task GetProjectEvents_AttentionFilter_FindsOlderFailureBeyondRoutineWindow()
+    {
+        var project = await CreateProjectAsync("filtered-history");
+        var issueId = $"issue_{Guid.NewGuid():N}";
+        var workflowRunId = $"wf_{Guid.NewGuid():N}";
+        await SeedIssueAsync(project.Id, issueId, number: 1);
+        await SeedWorkflowRunAsync(project.Id, workflowRunId, issueId);
+
+        await AppendWorkflowEventAsync(workflowRunId, project.Id, issueId,
+            "com.mohist.workflow.stage.failed", time: FixedTime.AddHours(-2));
+        for (var i = 0; i < 205; i++)
+        {
+            await AppendWorkflowEventAsync(workflowRunId, project.Id, issueId,
+                "com.mohist.workflow.stage.started", time: FixedTime.AddMinutes(i));
+        }
+
+        var response = await _client.GetDataAsync<List<ProjectEventResponseDto>>(
+            $"/api/projects/{project.Id}/events?types=failure&attentionOnly=true");
+
+        var failure = Assert.Single(response);
+        Assert.Equal("com.mohist.workflow.stage.failed", failure.Type);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
+    [Fact]
+    public async Task GetProjectEvents_FailureFilter_FindsOlderStatusFailureBeyondRoutineWindow()
+    {
+        var project = await CreateProjectAsync("status-filtered-history");
+        var sessionId = $"agent_session_{Guid.NewGuid():N}";
+        await SeedAgentSessionAsync(project.Id, sessionId);
+
+        await AppendAgentSessionEventAsync(
+            sessionId,
+            project.Id,
+            "coder_session_status_changed",
+            time: FixedTime.AddHours(-2),
+            data: new { status = "failed" });
+        for (var i = 0; i < 205; i++)
+        {
+            await AppendAgentSessionEventAsync(
+                sessionId,
+                project.Id,
+                "coder_session_status_changed",
+                time: FixedTime.AddMinutes(i),
+                data: new { status = "active" });
+        }
+
+        var response = await _client.GetDataAsync<List<ProjectEventResponseDto>>(
+            $"/api/projects/{project.Id}/events?types=failure&attentionOnly=true");
+
+        var failure = Assert.Single(response);
+        Assert.Equal("coder_session_status_changed", failure.Type);
+        Assert.Equal("failed", failure.Data.GetProperty("status").GetString());
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
+    [Fact]
+    public async Task GetProjectEvents_LargeHistory_ReturnsOnlyTheRequestedBoundedWindow()
+    {
+        var project = await CreateProjectAsync("large-history");
+        var issueId = $"issue_{Guid.NewGuid():N}";
+        await SeedIssueAsync(project.Id, issueId, number: 1);
+        await SeedIssueEventHistoryAsync(issueId, project.Id, 1_000);
+
+        var response = await _client.GetDataAsync<List<ProjectEventResponseDto>>(
+            $"/api/projects/{project.Id}/events?limit=2");
+
+        Assert.Collection(
+            response,
+            eventEntry => Assert.Equal(1_000, eventEntry.Id),
+            eventEntry => Assert.Equal(999, eventEntry.Id));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
+    [Fact]
+    public async Task GetProjectEvents_LimitOne_UsesStableCompleteTieBreakAcrossAggregates()
+    {
+        var project = await CreateProjectAsync("stable-order");
+        var issueId = $"issue_{Guid.NewGuid():N}";
+        var workflowRunId = $"wf_{Guid.NewGuid():N}";
+        await SeedIssueAsync(project.Id, issueId, number: 1);
+        await SeedWorkflowRunAsync(project.Id, workflowRunId, issueId);
+
+        await AppendIssueEventAsync(issueId, project.Id, "com.mohist.issue.created", time: FixedTime, subject: "1");
+        await AppendWorkflowEventAsync(workflowRunId, project.Id, issueId,
+            "com.mohist.workflow.stage.started", time: FixedTime);
+
+        var first = await _client.GetDataAsync<List<ProjectEventResponseDto>>(
+            $"/api/projects/{project.Id}/events?limit=1");
+        var second = await _client.GetDataAsync<List<ProjectEventResponseDto>>(
+            $"/api/projects/{project.Id}/events?limit=1");
+
+        Assert.Equal("com.mohist.issue.created", Assert.Single(first).Type);
+        Assert.Equal(first[0].EnvelopeId, Assert.Single(second).EnvelopeId);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
+    [Fact]
+    public async Task GetProjectEvents_PreservesScalarAndArrayPayloads()
+    {
+        var project = await CreateProjectAsync("json-payloads");
+        var issueId = $"issue_{Guid.NewGuid():N}";
+        await SeedIssueAsync(project.Id, issueId, number: 1);
+
+        await AppendIssueEventAsync(issueId, project.Id, "com.mohist.issue.created", data: "created");
+        await AppendIssueEventAsync(issueId, project.Id, "com.mohist.issue.work-started", data: new[] { "build", "check" });
+
+        var response = await _client.GetDataAsync<List<ProjectEventResponseDto>>(
+            $"/api/projects/{project.Id}/events");
+
+        Assert.Contains(response, entry => entry.Data.ValueKind == JsonValueKind.String && entry.Data.GetString() == "created");
+        Assert.Contains(response, entry => entry.Data.ValueKind == JsonValueKind.Array && entry.Data.GetArrayLength() == 2);
+    }
+
     private async Task<ProjectDto> CreateProjectAsync(string nameSuffix = "events")
     {
         var name = $"{nameSuffix}-{Guid.NewGuid():N}";
@@ -646,6 +772,32 @@ public class ProjectEventsApiSpecs
         await store.AppendAsync(envelope);
     }
 
+    private async Task SeedIssueEventHistoryAsync(string issueId, string projectId, int count)
+    {
+        await using var db = await _fixture.Services
+            .GetRequiredService<IDbContextFactory<MohistDbContext>>()
+            .CreateDbContextAsync();
+        var source = IssueEventPersistence.IssueSource(issueId);
+        db.IssueEvents.AddRange(Enumerable.Range(1, count).Select(index => new IssueEventRow
+        {
+            Id = index,
+            Source = source,
+            EventId = $"history-{index}",
+            Type = "com.mohist.issue.created",
+            Time = FixedTime.AddSeconds(index),
+            SpecVersion = "1.0",
+            DataContentType = "application/json",
+            Data = JsonSerializer.SerializeToElement(new { }, CloudEvent.JsonOptions),
+            ExtensionsJson = JsonSerializer.Serialize(new Dictionary<string, string>
+            {
+                ["projectid"] = projectId,
+                ["issueid"] = issueId,
+                ["issueno"] = "1",
+            }),
+        }));
+        await db.SaveChangesAsync();
+    }
+
     private sealed record ProjectDto(string Id, string Name, string Path, string BaseBranch);
 
     private sealed record ProjectEventResponseDto(
@@ -668,4 +820,23 @@ public class ProjectEventsApiSpecs
         string? WorkflowRunId,
         string? AgentId,
         string? AgentName);
+}
+
+public class ProjectEventsModelDebug
+{
+    [Fact]
+    public void DebugPendingModelChanges()
+    {
+        var options = new DbContextOptionsBuilder<MohistDbContext>()
+            .UseSqlite("Data Source=:memory:")
+            .Options;
+        using var db = new MohistDbContext(options);
+        var differ = db.GetService<IMigrationsModelDiffer>();
+        var initializer = db.GetService<IModelRuntimeInitializer>();
+        var operations = differ.GetDifferences(
+            initializer.Initialize(new MohistDbContextModelSnapshot().Model, designTime: true).GetRelationalModel(),
+            db.GetService<IDesignTimeModel>().Model.GetRelationalModel());
+
+        Assert.Empty(operations);
+    }
 }

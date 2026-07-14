@@ -66,6 +66,19 @@ function SecondaryTargets({ targets }: { targets: ActivityEventTargets }) {
   const toProjectPath = useProjectPath()
   const chips: ReactNode[] = []
 
+  if (targets.issue?.path && targets.issue.path !== targets.primary?.path) {
+    chips.push(
+      <Link
+        key="issue"
+        to={toProjectPath(targets.issue.path)}
+        data-testid="activity-event-issue-link"
+        className="inline-flex items-center rounded border border-border bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground hover:text-foreground"
+      >
+        {targets.issue.label}
+      </Link>,
+    )
+  }
+
   if (targets.workflow?.path) {
     chips.push(
       <Link

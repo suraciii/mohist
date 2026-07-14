@@ -12,7 +12,7 @@ export function useCoderSessions(
   fetcher: CoderSessionsFetcher = getCoderSessions,
 ) {
   const { projectId } = useProject()
-  const { data: sessions = [], isLoading } = useQuery({
+  const { data: sessions = [], isLoading, isFetching, refetch } = useQuery({
     queryKey: ['issues', issueNumber, projectId, 'coder-sessions'],
     queryFn: () => fetcher(issueNumber, projectId),
     enabled: issueNumber > 0 && !!projectId,
@@ -30,10 +30,19 @@ export function useCoderSessions(
   }, [issueNumber, projectId])
 
   useEffect(() => {
-    if (isLoading || !sessions) return
-    if (initializedRef.current) return
-    initializedRef.current = true
-    setLiveSessions([...sessions])
+    if (isLoading) return
+    setLiveSessions((previous) => {
+      if (!initializedRef.current) {
+        initializedRef.current = true
+        return [...sessions]
+      }
+
+      const refreshedById = new Map(sessions.map((session) => [session.id, session]))
+      return [
+        ...sessions,
+        ...previous.filter((session) => !refreshedById.has(session.id)),
+      ]
+    })
   }, [sessions, isLoading])
 
   const startTimer = useCallback(() => {
@@ -173,5 +182,7 @@ export function useCoderSessions(
   return {
     sessions: liveSessions,
     isLoading,
+    isFetching,
+    refetch,
   }
 }

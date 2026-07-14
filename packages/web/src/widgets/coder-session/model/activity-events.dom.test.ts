@@ -91,6 +91,11 @@ describe('buildActivityEvents', () => {
     expect(events.every((e) => e.attention === 'routine')).toBe(true)
     const nullPayloadEvents = buildActivityEvents({ recordedEvents: [makeProjectEvent({ data: null })], sessions: [], waiting: [], runners: [] })
     expect(nullPayloadEvents[0]).toMatchObject({ type: 'issue-state', title: 'Issue #1 created' })
+
+    const scalarPayloadEvents = buildActivityEvents({ recordedEvents: [makeProjectEvent({ data: 'created' })], sessions: [], waiting: [], runners: [] })
+    const arrayPayloadEvents = buildActivityEvents({ recordedEvents: [makeProjectEvent({ data: ['created'] })], sessions: [], waiting: [], runners: [] })
+    expect(scalarPayloadEvents[0]).toMatchObject({ type: 'issue-state', title: 'Issue #1 created' })
+    expect(arrayPayloadEvents[0]).toMatchObject({ type: 'issue-state', title: 'Issue #1 created' })
   })
 
   it('classifies workflow stage events and promotes failures to failure type', () => {

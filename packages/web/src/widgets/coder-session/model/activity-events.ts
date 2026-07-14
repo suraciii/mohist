@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { useAgentActivity, type AgentActivitySession, type AgentActivityWaiting } from '../../../entities/agent'
-import { useProjectEvents, type ProjectEventDto } from '../../../entities/project'
+import { useProjectEvents, type ProjectEventDto, type ProjectEventTypeFilter } from '../../../entities/project'
 import { useRunners, type RunnerStatusRow } from '../../../entities/runner'
 
 export type ActivityEventType = 'issue-state' | 'workflow-stage' | 'agent-session' | 'runner' | 'failure'
@@ -129,8 +129,12 @@ function fromActivity(path: string): string {
   return `${path}${separator}from=activity`
 }
 
-function readString(data: Record<string, unknown> | null | undefined, keys: string[]): string | null {
-  if (data == null) return null
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+}
+
+function readString(data: unknown, keys: string[]): string | null {
+  if (!isPlainObject(data)) return null
   const normalizedKeys = new Set(keys.map((key) => key.toLowerCase()))
   for (const [key, value] of Object.entries(data)) {
     if (!normalizedKeys.has(key.toLowerCase())) continue
@@ -328,7 +332,7 @@ function agentSessionEventInfo(event: ProjectEventDto): EventTypeInfo | null {
   if (!base) return null
 
   const status = readString(event.data, ['status'])?.toLowerCase()
-  if (status === 'failed') {
+  if (status === 'failed' || status === 'timeout' || status === 'cancelled') {
     return { label: 'failed', attention: 'failure' }
   }
   if (event.type === 'coder_session_status_changed' && status) {
@@ -378,6 +382,7 @@ function buildSessionSnapshotEntry(session: AgentActivitySession): ActivityEvent
   const targets: ActivityEventTargets = {}
   if (isGeneric) {
     targets.agent = agentTarget(session.agentId!, session.agentName ?? null)
+    if (issueNumber != null) targets.issue = issueTarget(issueNumber)
     targets.primary = { path: sessionPath(session.sessionId, null, true), label: 'Session' }
     targets.session = { sessionId: session.sessionId, label: 'Session', isGeneric: true, path: sessionPath(session.sessionId, null, true) }
   } else if (issueNumber != null) {
@@ -520,10 +525,32 @@ function eventTime(value: string): number {
   return Number.isFinite(time) ? time : Number.NEGATIVE_INFINITY
 }
 
-export function useActivityEvents() {
-  const { data: recordedEvents = [], isLoading: eventsLoading, isError: eventsError } = useProjectEvents()
-  const { data: activity, isLoading: activityLoading, isError: activityError } = useAgentActivity()
-  const { data: runners = [], isLoading: runnersLoading, isError: runnersError } = useRunners()
+export interface ActivityEventFilters {
+  types?: readonly ActivityEventType[]
+  attentionOnly?: boolean
+}
+
+export interface ActivityEvidenceSourceError {
+  key: 'recorded-events' | 'agent-activity' | 'runners'
+  label: string
+  retry: () => Promise<unknown>
+}
+
+export interface ActivityEventsResult {
+  events: ActivityEvent[]
+  isLoading: boolean
+  isError: boolean
+  sourceErrors?: ActivityEvidenceSourceError[]
+}
+
+export function useActivityEvents(filters: ActivityEventFilters = {}): ActivityEventsResult {
+  const recordedTypes = filters.types as readonly ProjectEventTypeFilter[] | undefined
+  const { data: recordedEvents = [], isLoading: eventsLoading, isError: eventsError, refetch: refetchEvents } = useProjectEvents({
+    types: recordedTypes,
+    attentionOnly: filters.attentionOnly,
+  })
+  const { data: activity, isLoading: activityLoading, isError: activityError, refetch: refetchActivity } = useAgentActivity()
+  const { data: runners = [], isLoading: runnersLoading, isError: runnersError, refetch: refetchRunners } = useRunners()
 
   const events = useMemo(() => {
     return buildActivityEvents({
@@ -534,9 +561,15 @@ export function useActivityEvents() {
     })
   }, [recordedEvents, activity, runners])
 
+  const sourceErrors: ActivityEvidenceSourceError[] = []
+  if (eventsError) sourceErrors.push({ key: 'recorded-events', label: 'Recorded event feed', retry: refetchEvents })
+  if (activityError) sourceErrors.push({ key: 'agent-activity', label: 'Agent activity', retry: refetchActivity })
+  if (runnersError) sourceErrors.push({ key: 'runners', label: 'Runners', retry: refetchRunners })
+
   return {
     events,
     isLoading: eventsLoading || activityLoading || runnersLoading,
-    isError: eventsError || activityError || runnersError,
+    isError: sourceErrors.length > 0,
+    sourceErrors,
   }
 }

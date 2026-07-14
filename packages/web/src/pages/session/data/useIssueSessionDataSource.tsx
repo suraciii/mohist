@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useParams, useSearchParams, Link } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { ChevronLeftIcon, ChevronRightIcon } from 'lucide-react'
@@ -132,7 +132,7 @@ export function useIssueSessionDataSource(
   useDocumentTitle(`Session — Issue #${issueNumber} — Mohist`)
 
   const { data: issue } = useIssueHook(issueNumber)
-  const { sessions, isLoading: sessionsLoading } = useCoderSessionsHook(issueNumber)
+  const { sessions, isLoading: sessionsLoading, isFetching: sessionsFetching, refetch: refetchSessions } = useCoderSessionsHook(issueNumber)
   const session = sessions.find((s) => decodedSessionName
     ? (s.sessionName ?? s.executionId ?? s.id) === decodedSessionName
     : s.id === decodedSessionId)
@@ -148,19 +148,23 @@ export function useIssueSessionDataSource(
       ? sessions.find((s) => s.id === decodedSessionId)?.sessionName ?? undefined
       : undefined)
 
+  const isLegacyIdRoute = decodedSessionName == null && decodedSessionId != null
+  const [refreshedLegacyId, setRefreshedLegacyId] = useState<string | null>(null)
+  useEffect(() => {
+    if (!isLegacyIdRoute || !decodedSessionId || resolvedSessionName || sessionsLoading || sessionsFetching || refreshedLegacyId === decodedSessionId) return
+    void refetchSessions().finally(() => setRefreshedLegacyId(decodedSessionId))
+  }, [decodedSessionId, isLegacyIdRoute, refetchSessions, refreshedLegacyId, resolvedSessionName, sessionsFetching, sessionsLoading])
+
   const siblingNavHook = useSiblingSessionsHook(issue?.workflowRunId ?? null, {
     currentKey: resolvedSessionName ?? decodedSessionId ?? null,
   })
 
   const lookupKey = resolvedSessionName ?? decodedSessionId
 
-  // When the legacy `/issues/:number/session/:sessionId` route is used, wait
-  // for the sessions list to resolve so the canonical sessionName is known
-  // before any detail query is fired; otherwise the metadata fetch would
-  // race the resolver and use the raw sessionId as the key.
-  const isLegacyIdRoute = decodedSessionName == null && decodedSessionId != null
-  const sessionsResolved = !sessionsLoading || resolvedSessionName != null
-  const hasRoute = !!lookupKey && !!projectId && issueNumber > 0 && (!isLegacyIdRoute || sessionsResolved)
+  // The legacy route carries a stable ID, while the detail endpoints are name-keyed.
+  // A cached list can omit a newly-created session, so force one list refresh and
+  // never issue a detail request with the stable ID as though it were a name.
+  const hasRoute = !!lookupKey && !!projectId && issueNumber > 0 && (!isLegacyIdRoute || resolvedSessionName != null)
   const metadataQueryKey = useMemo(
     () => ['issues', issueNumber, projectId, 'agent-session-metadata', lookupKey] as const,
     [issueNumber, projectId, lookupKey],
@@ -259,13 +263,16 @@ export function useIssueSessionDataSource(
   const recoverySessionName = detail?.metadata?.sessionName ?? session?.sessionName ?? session?.executionId ?? lookupKey ?? ''
 
   const [searchParams] = useSearchParams()
+  const fromActivity = searchParams.get('from') === 'activity'
   const runtimeLineage = metadata?.runtimeSessionLineage ?? null
   const viewedRuntimeSessionId = searchParams.get('rt') ?? metadata?.acpSessionId ?? null
 
   const buildLineageTargetPath = runtimeLineage && runtimeLineage.length >= 2
     ? (runtimeId: string) => {
         const base = toProjectPath(`/issues/${issueNumber}/workflow/sessions/${encodeURIComponent(recoverySessionName)}`)
-        return `${base}?rt=${encodeURIComponent(runtimeId)}`
+        const params = new URLSearchParams({ rt: runtimeId })
+        if (fromActivity) params.set('from', 'activity')
+        return `${base}?${params}`
       }
     : null
 
@@ -279,6 +286,7 @@ export function useIssueSessionDataSource(
       issueNumber={issueNumber}
       previous={siblingNavHook.previous}
       next={siblingNavHook.next}
+      fromActivity={fromActivity}
     />
   )
 
@@ -287,12 +295,11 @@ export function useIssueSessionDataSource(
       issueNumber={issueNumber}
       siblings={siblingNavHook.sessions}
       currentKey={currentSiblingKey}
+      fromActivity={fromActivity}
     />
   )
 
   const isDetailError = metadataError || (!metadata && !session)
-  // Activity-origin links pass `?from=activity`; honor that as a return-to-Activity back target.
-  const fromActivity = searchParams.get('from') === 'activity'
   const backPath = fromActivity
     ? toProjectPath('/activity')
     : toProjectPath(`/issues/${issueNumber}`)
@@ -300,7 +307,7 @@ export function useIssueSessionDataSource(
   const workflowContextPath = toProjectPath(`/issues/${issueNumber}`)
   const workflowContextLabel = 'Workflow context'
   return {
-    isLoading: sessionsLoading || metadataLoading,
+    isLoading: sessionsLoading || (isLegacyIdRoute && !resolvedSessionName && sessionsFetching) || metadataLoading,
     isError: isDetailError,
     notFound: !lookupKey || isNaN(issueNumber) || issueNumber <= 0 || (!detail && !sessionsLoading && !metadataLoading && !isDetailError),
     sessionKey: lookupKey ?? '',
@@ -349,17 +356,23 @@ function SiblingNavigation({
   issueNumber,
   previous,
   next,
+  fromActivity,
 }: {
   issueNumber: number
   previous: WorkflowRunSession | null
   next: WorkflowRunSession | null
+  fromActivity: boolean
 }) {
   const toProjectPath = useProjectPath()
+  const sessionPath = (sessionName: string) => {
+    const path = toProjectPath(`/issues/${issueNumber}/workflow/sessions/${encodeURIComponent(sessionName)}`)
+    return fromActivity ? `${path}?from=activity` : path
+  }
   return (
     <div className="flex max-w-full min-w-0 flex-wrap items-center gap-1" data-testid="session-sibling-navigation">
       {previous ? (
         <Link
-          to={toProjectPath(`/issues/${issueNumber}/workflow/sessions/${encodeURIComponent(previous.sessionName)}`)}
+          to={sessionPath(previous.sessionName)}
           className="inline-flex max-w-full min-w-0 items-center gap-1 rounded border border-border bg-background px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:border-info-border hover:bg-info-subtle hover:text-info"
           data-testid="session-sibling-prev"
           title={`Previous session: ${previous.sessionName}`}
@@ -381,7 +394,7 @@ function SiblingNavigation({
       )}
       {next ? (
         <Link
-          to={toProjectPath(`/issues/${issueNumber}/workflow/sessions/${encodeURIComponent(next.sessionName)}`)}
+          to={sessionPath(next.sessionName)}
           className="inline-flex max-w-full min-w-0 items-center gap-1 rounded border border-border bg-background px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:border-info-border hover:bg-info-subtle hover:text-info"
           data-testid="session-sibling-next"
           title={`Next session: ${next.sessionName}`}
@@ -413,10 +426,12 @@ function SiblingSessionsSidebar({
   issueNumber,
   siblings,
   currentKey,
+  fromActivity,
 }: {
   issueNumber: number
   siblings: WorkflowRunSession[]
   currentKey: string | null
+  fromActivity: boolean
 }) {
   const toProjectPath = useProjectPath()
   if (siblings.length === 0) return null
@@ -433,7 +448,8 @@ function SiblingSessionsSidebar({
       <nav className="flex-1 overflow-y-auto p-1">
         {siblings.map((sibling) => {
           const isCurrent = isCurrentSiblingSession(sibling, currentKey)
-          const path = toProjectPath(`/issues/${issueNumber}/workflow/sessions/${encodeURIComponent(sibling.sessionName)}`)
+          const basePath = toProjectPath(`/issues/${issueNumber}/workflow/sessions/${encodeURIComponent(sibling.sessionName)}`)
+          const path = fromActivity ? `${basePath}?from=activity` : basePath
           return (
             <Link
               key={sibling.id}

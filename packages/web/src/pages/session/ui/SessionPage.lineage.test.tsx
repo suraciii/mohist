@@ -285,6 +285,22 @@ describe('SessionPage lineage link wiring', () => {
     expect(href).toMatch(/^.*\?rt=rt-prev$/)
   })
 
+  it('preserves the Activity return context on lineage links', async () => {
+    _metadataData = baseMetadata({
+      runtimeSessionLineage: [
+        { agentRuntimeSessionId: 'rt-prev', boundAt: '2026-06-15T09:00:00.000Z' },
+        { agentRuntimeSessionId: 'rt-latest', boundAt: '2026-06-15T10:00:00.000Z' },
+      ],
+    })
+
+    const { container } = await renderPage({
+      initialEntry: '/issues/123/workflow/sessions/session-1?from=activity',
+    })
+
+    expect(container.querySelector('[data-testid="compaction-lineage-link-predecessor"]'))
+      .toHaveAttribute('href', expect.stringContaining('rt=rt-prev&from=activity'))
+  })
+
   it('renders both predecessor and successor links when the user is viewing a non-latest runtime session (?rt= param)', async () => {
     _metadataData = baseMetadata({
       runtimeSessionLineage: [

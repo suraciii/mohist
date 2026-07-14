@@ -36,16 +36,24 @@ let agentActivity: AgentActivity = {
 }
 let runners: RunnerStatusListResponse = { runners: [] }
 let projectEventsFailed = false
+let agentActivityFailed = false
+let runnersFailed = false
+let attentionFilteredEvents: ProjectEventDto[] | null = null
 
 useMswServer(
-  http.get('*/api/projects/:projectId/events', () => {
+  http.get('*/api/projects/:projectId/events', ({ request }) => {
     if (projectEventsFailed) return new HttpResponse(null, { status: 500 })
+    if (new URL(request.url).searchParams.get('attentionOnly') === 'true' && attentionFilteredEvents) {
+      return HttpResponse.json({ success: true, data: attentionFilteredEvents })
+    }
     return HttpResponse.json({ success: true, data: projectEvents })
   }),
   http.get('*/api/projects/:projectId/agent/activity', () => {
+    if (agentActivityFailed) return new HttpResponse(null, { status: 500 })
     return HttpResponse.json({ success: true, data: agentActivity })
   }),
   http.get('*/api/projects/:projectId/runners', () => {
+    if (runnersFailed) return new HttpResponse(null, { status: 500 })
     return HttpResponse.json({ success: true, data: runners })
   }),
 )
@@ -59,6 +67,9 @@ beforeEach(() => {
   }
   runners = { runners: [] }
   projectEventsFailed = false
+  agentActivityFailed = false
+  runnersFailed = false
+  attentionFilteredEvents = null
   document.documentElement.classList.remove('dark')
 })
 
@@ -203,7 +214,7 @@ describe('Activity evidence view', () => {
         },
         {
           issueId: 'agent_agent-1',
-          issueNumber: 0,
+          issueNumber: 42,
           issueTitle: 'Agent session',
           issueStage: '',
           issueStatus: null,
@@ -241,6 +252,7 @@ describe('Activity evidence view', () => {
     const genericLink = within(generic!).getByTestId('activity-event-primary-link')
     expect(genericLink).toHaveAttribute('href', expect.stringContaining('/agent-sessions/generic-session-1'))
     expect(genericLink).toHaveAttribute('href', expect.stringContaining('from=activity'))
+    expect(within(generic!).getByTestId('activity-event-issue-link')).toHaveAttribute('href', expect.stringContaining('/issues/42?from=activity'))
   })
 
   it('links recorded issue-bound sessions directly with an Activity return target', async () => {
@@ -266,6 +278,53 @@ describe('Activity evidence view', () => {
       'href',
       `/${encodeURIComponent(TEST_PROJECT.name)}/issues/42/session/session-42?from=activity`,
     )
+  })
+
+  it('shows an issue target alongside a generic session when the event carries issue context', async () => {
+    projectEvents = [
+      makeProjectEvent({
+        origin: 'agent-session',
+        sourceAggregateKind: 'agent-session',
+        sourceAggregateId: 'agent-session-42',
+        source: '/mohist/agent-session/agent-session-42',
+        type: 'coder_session_started',
+        sessionSourceKind: 'agent-launch',
+        issueNumber: 42,
+        agentId: 'agent-42',
+        agentName: 'Reviewer',
+      }),
+    ]
+
+    renderPage()
+
+    await waitFor(() => {
+      expect(screen.getByTestId('activity-event-session-link')).toBeInTheDocument()
+    })
+    expect(screen.getByTestId('activity-event-session-link')).toHaveAttribute('href', expect.stringContaining('/agent-sessions/agent-session-42'))
+    expect(screen.getByTestId('activity-event-issue-link')).toHaveAttribute('href', expect.stringContaining('/issues/42?from=activity'))
+  })
+
+  it('requests filtered recorded evidence so an older attention event remains discoverable', async () => {
+    projectEvents = [makeProjectEvent({ id: 1, type: 'com.mohist.issue.created' })]
+    attentionFilteredEvents = [
+      makeProjectEvent({
+        id: 2,
+        origin: 'workflow-run',
+        sourceAggregateKind: 'workflow-run',
+        sourceAggregateId: 'wr-1',
+        source: '/mohist/workflow-runs/wr-1',
+        type: 'com.mohist.workflow.stage.failed',
+        data: { stage: 'Build' },
+      }),
+    ]
+
+    renderPage()
+    await waitFor(() => expect(screen.getByTestId('activity-routine-zone')).toBeInTheDocument())
+    fireEvent.click(screen.getByTestId('activity-filter-attention'))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('activity-event-entry')).toHaveAttribute('data-attention', 'failure')
+    })
   })
 
   it('uses shared theme-token families in light and dark mode', async () => {
@@ -302,14 +361,28 @@ describe('Activity evidence view', () => {
     document.documentElement.classList.remove('dark')
   })
 
-  it('shows incomplete evidence when the recorded event request fails', async () => {
-    projectEventsFailed = true
+  it.each([
+    ['recorded-events', 'Recorded event feed'],
+    ['agent-activity', 'Agent activity'],
+    ['runners', 'Runners'],
+  ] as const)('identifies and retries a failed %s source', async (source, label) => {
+    if (source === 'recorded-events') projectEventsFailed = true
+    if (source === 'agent-activity') agentActivityFailed = true
+    if (source === 'runners') runnersFailed = true
 
     renderPage()
 
+    const alert = await screen.findByTestId(`activity-evidence-error-${source}`)
+    expect(alert).toHaveAttribute('role', 'alert')
+    expect(alert).toHaveTextContent(label)
+
+    if (source === 'recorded-events') projectEventsFailed = false
+    if (source === 'agent-activity') agentActivityFailed = false
+    if (source === 'runners') runnersFailed = false
+    fireEvent.click(screen.getByTestId(`activity-evidence-retry-${source}`))
+
     await waitFor(() => {
-      expect(screen.getByTestId('activity-evidence-error')).toBeInTheDocument()
+      expect(screen.queryByTestId(`activity-evidence-error-${source}`)).not.toBeInTheDocument()
     })
-    expect(screen.queryByText('No activity yet.')).not.toBeInTheDocument()
   })
 })

@@ -4,4 +4,4 @@ export { getRepositories, addRepository, removeRepository, setDefaultRepository 
 export { getProjectEvents } from './api/projectEvents'
 export { ProjectProvider, useProject, useProjectPath, projectPath } from './model/ProjectContext'
 export type { Project, Repository, AddRepositoryInput } from './model/types'
-export type { ProjectEventDto } from './api/projectEvents'
+export type { JsonValue, ProjectEventDto, ProjectEventTypeFilter } from './api/projectEvents'

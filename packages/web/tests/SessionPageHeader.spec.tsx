@@ -80,9 +80,9 @@ useMswServer(
     HttpResponse.json({ success: true, data: sessionPageMocks.workflowRunSessions })),
 )
 
-function renderWithQueryClient(_ui: ReactElement) {
+function renderWithQueryClient(_ui: ReactElement, initialEntry?: string) {
   const { number, sessionName } = sessionPageMocks.params
-  const route = `/issues/${encodeURIComponent(number)}/workflow/sessions/${encodeURIComponent(sessionName)}`
+  const route = initialEntry ?? `/issues/${encodeURIComponent(number)}/workflow/sessions/${encodeURIComponent(sessionName)}`
   return renderPageWithQueryClient(<SessionPage />, route)
 }
 
@@ -763,6 +763,29 @@ describe('SessionPage header and states', () => {
       expect(next.getAttribute('href')).toBe('/Test%20Project/issues/55/workflow/sessions/check')
       expect(prev.getAttribute('title')).toBe('Previous session: plan')
       expect(next.getAttribute('title')).toBe('Next session: check')
+    })
+
+    it('keeps Activity as the back destination after opening a sibling', async () => {
+      sessionPageMocks.params = { number: '55', sessionName: 'build' } as any
+      setWorkflowRunSessions([
+        { id: 's-plan', sessionName: 'plan', status: 'completed', createdAt: '2026-06-15T08:00:00.000Z' },
+        { id: 's-build', sessionName: 'build', status: 'running', createdAt: '2026-06-15T10:00:00.000Z' },
+      ])
+      const detail = makeMockDetail({
+        id: 'session-build',
+        metadata: makeMockMetadata({ sessionName: 'build', sessionId: 'session-build' }),
+      })
+      setupSessionPage({
+        detail,
+        turns: [makeTurn({ id: 'turn-1' })],
+        sessions: [{ ...makeMockSession(), id: 'session-build', sessionName: 'build' }],
+        issue: { number: 55, title: 'Issue 55', workflowRunId: 'wr-1' },
+      })
+
+      renderWithQueryClient(<SessionPage />, '/issues/55/workflow/sessions/build?from=activity')
+
+      const previous = await screen.findByTestId('session-sibling-prev')
+      expect(previous).toHaveAttribute('href', '/Test%20Project/issues/55/workflow/sessions/plan?from=activity')
     })
 
     it('disables the previous control when the current session is the first sibling in createdAt order', async () => {

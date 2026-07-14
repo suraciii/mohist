@@ -28,6 +28,7 @@ const mocks: MockSession = {
 const queryClients: QueryClient[] = []
 const metadataCalls: string[] = []
 const transcriptCalls: string[] = []
+let sessionListResponses: any[][] | null = null
 
 function createQueryClient() {
   const queryClient = new QueryClient({
@@ -43,7 +44,7 @@ function createQueryClient() {
 useMswServer(
   http.get('*/api/projects/:projectId/issues/:issueNumber/coder-sessions', () => {
     if (mocks.pending) return new Promise<never>(() => {})
-    return HttpResponse.json({ success: true, data: mocks.sessions })
+    return HttpResponse.json({ success: true, data: sessionListResponses?.shift() ?? mocks.sessions })
   }),
   http.get('*/api/projects/:projectId/issues/:issueNumber/sessions/:sessionName/transcript', ({ params }) => {
     transcriptCalls.push(String(params.sessionName))
@@ -217,6 +218,7 @@ beforeEach(() => {
   setupDefaultMocks()
   metadataCalls.length = 0
   transcriptCalls.length = 0
+  sessionListResponses = null
   setScopedValue(Element.prototype, 'scrollTo', vi.fn())
 })
 
@@ -596,6 +598,43 @@ describe('Coder Session evidence view — issue-session ID resolution', () => {
     // to settle, but the last call must use the canonical name.
     expect(metadataCalls[metadataCalls.length - 1]).toBe('build')
     expect(transcriptCalls[transcriptCalls.length - 1] ?? '').toBe('build')
+  })
+
+  it('refreshes a fresh cached list before resolving a newly-created Activity session ID', async () => {
+    mocks.metadata = baseCompletedMetadata({ id: 'new-session-id', sessionName: 'build' })
+    sessionListResponses = [
+      [],
+      [
+        {
+          id: 'new-session-id',
+          sessionName: 'build',
+          workflowRunId: 'wr-1',
+          acpSessionId: 'acp-1',
+          projectId: 'test-project',
+          issueNumber: 123,
+          runnerId: 'runner-1',
+          status: 'completed',
+          stage: 'build',
+          model: 'minimax/MiniMax-M3',
+          workDir: null,
+          processPid: null,
+          createdAt: '2026-06-15T10:00:00.000Z',
+          startedAt: '2026-06-15T10:00:05.000Z',
+          completedAt: '2026-06-15T11:00:00.000Z',
+          lastDataAt: '2026-06-15T10:30:00.000Z',
+          failureReason: null,
+          exitCode: 0,
+        },
+      ],
+    ]
+
+    renderPage('/issues/123/session/new-session-id?from=activity')
+
+    await waitFor(() => {
+      expect(metadataCalls).toContain('build')
+    })
+    expect(metadataCalls).not.toContain('new-session-id')
+    expect(transcriptCalls).not.toContain('new-session-id')
   })
 })
 

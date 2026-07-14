@@ -137,16 +137,20 @@ export function ActivityPage({
   dependencies?: ActivityPageDependencies
   now?: number
 } = {}) {
-  const { activityEventsHook: useEvents, activityCardsHook: useCards, activityUsageSnapshotHook: useUsageSnapshot, RunnerSummaryBadge: RunnerBadge } = dependencies
-  const { events, isLoading, isError } = useEvents()
-  const { statusCounts, slotUsage } = useCards()
-  const usageSnapshot = useUsageSnapshot()
-  const toProjectPath = useProjectPath()
   const [clockNow, setClockNow] = useState(() => providedNow ?? Date.now())
   const [selectedTypes, setSelectedTypes] = useState<Set<ActivityEvent['type']>>(new Set())
   const [attentionOnly, setAttentionOnly] = useState(false)
   const [attentionCollapsed, setAttentionCollapsed] = useState(false)
   const [routineCollapsed, setRoutineCollapsed] = useState(false)
+  const { activityEventsHook: useEvents, activityCardsHook: useCards, activityUsageSnapshotHook: useUsageSnapshot, RunnerSummaryBadge: RunnerBadge } = dependencies
+  const selectedTypeFilters = useMemo(() => [...selectedTypes], [selectedTypes])
+  const { events, isLoading, isError, sourceErrors = [] } = useEvents({
+    types: selectedTypeFilters,
+    attentionOnly,
+  })
+  const { statusCounts, slotUsage } = useCards()
+  const usageSnapshot = useUsageSnapshot()
+  const toProjectPath = useProjectPath()
 
   useEffect(() => {
     if (providedNow != null) return
@@ -242,11 +246,24 @@ export function ActivityPage({
               counts={counts}
             />
 
-            {isError && (
-              <div data-testid="activity-evidence-error" className="rounded-lg border border-warning-border bg-warning-subtle px-4 py-3 text-sm text-warning-foreground">
-                Activity evidence is incomplete. Refresh to retry the recorded event feed.
+            {sourceErrors.map((source) => (
+              <div
+                key={source.key}
+                role="alert"
+                data-testid={`activity-evidence-error-${source.key}`}
+                className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-warning-border bg-warning-subtle px-4 py-3 text-sm text-warning-foreground"
+              >
+                <span>Activity evidence is incomplete: {source.label} is unavailable.</span>
+                <button
+                  type="button"
+                  onClick={() => { void source.retry() }}
+                  data-testid={`activity-evidence-retry-${source.key}`}
+                  className="rounded border border-warning-border bg-background px-2 py-1 text-xs font-semibold text-foreground hover:bg-warning-subtle"
+                >
+                  Retry
+                </button>
               </div>
-            )}
+            ))}
 
             {isLoading && events.length === 0 && (
               <div className="space-y-2">

@@ -1,6 +1,6 @@
 using System.Text.Json;
 using Microsoft.AspNetCore.Http;
-using Mohist.Server.Project.Services;
+using Mohist.Server.AgentOps.Services;
 
 namespace Mohist.Server.Api;
 
@@ -22,11 +22,12 @@ public static class ProjectEventsRoutes
         var group = app.MapGroup("/api/projects/{projectRef}/events")
             .AddEndpointFilter<ProjectResolutionEndpointFilter>();
 
-        group.MapGet("", async (HttpContext context, int? limit, ProjectEventQuerier events, CancellationToken ct) =>
+        group.MapGet("", async (HttpContext context, int? limit, string? types, bool? attentionOnly, ProjectEventFeedAssembler events, CancellationToken ct) =>
         {
             var project = context.GetResolvedProject();
             var effectiveLimit = ClampLimit(limit);
-            var eventsResult = await events.ListAsync(project.Id, effectiveLimit, ct);
+            var filter = ProjectEventFilter.Create(types, attentionOnly == true);
+            var eventsResult = await events.ListAsync(project.Id, effectiveLimit, filter, ct);
             var response = eventsResult.Select(ProjectEventDto.From).ToList();
             return ApiResults.Ok(response);
         });
