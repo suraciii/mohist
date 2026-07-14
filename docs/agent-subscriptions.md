@@ -1,137 +1,150 @@
 ---
-status: wip-not-implemented
+status: wip
 ---
 
-# Agent 事件订阅
-
-> **⚠️ 尚未实现**：本文描述的功能当前**没有**实装。这是产品方案，记录用户需求与设计方向。已实装的能力请看其它文档。
+# Agent 事件路由
 
 本文的 Agent 均指有稳定 ID、名称和 Instructions 的 **Mohist Agent（Named Agent）**，
-不是 Workflow 通过 `mohist/opencode` 直接调用的 Inline Agent。Inline Agent 没有可供
-订阅引用的 Agent 身份。两者关系见 [Agent 与 AgentSession](agents.md)。
-
-> **CLI 前置依赖已就绪**：Agent 响应提示词里要按 `workflowRunId` 拉取 run 详情（含关联 issue）的能力已由 `mo workflow get <runId>` 提供（issue #381）。本特性落地时不再受该前置依赖阻塞。
+不是 Workflow 直接调用的 Inline Agent。两者关系见 [Agent 与 AgentSession](agents.md)。
 
 ## 它解决什么问题
 
-Mohist 是一条软件生产线。Workflow、issue、epic、runner、AgentSession 都会产生事件：阶段等待审批、任务失败、issue 完成、epic 没有可推进的 issue、runner 掉线等。
+Mohist 是一条软件生产线。Workflow、issue、epic、runner、AgentSession 都会产生事件：
+阶段等待审批、任务失败、issue 完成、epic 没有可推进的 issue、runner 掉线等。
 
-Agent 事件订阅让你把这些事件交给 Agent 响应。你配置一条订阅：匹配什么事件、由哪个 Agent 响应、响应时用什么提示词。事件发生后，Agent 自动启动，按提示词读取上下文并执行动作。
+事件路由让你把这些事件交给 Agent 响应。你在项目里维护一张**路由表**：每条规则
+声明匹配什么事件、由哪个 Agent 响应、响应时用什么提示词。事件发生后，系统按表
+匹配，命中的 Agent 自动启动，按提示词读取上下文并执行动作。
 
 每次命中都会创建一次 AgentJob 和一段 AgentSession。AgentJob 记录这次响应是否完成，
-AgentSession 记录对话和工具调用；订阅本身不把 Session 当作工作结果。
+AgentSession 记录对话和工具调用。
 
-> 用你的话说：「我实际上是在配置让一个 agent 监听某个 issue 的某个事件，事件发生时 agent 就会响应……判断逻辑写在提示词里，不写在程序里——我来负责把提示词写好。」
+Agent 在这里是代理人。它进入流水线上原本由 owner 负责的位置：owner 能审批，
+Agent 也能审批；owner 能分析失败、写总结、创建后续 issue，Agent 也通过同一套
+动作完成这些事。Agent 不是特殊通道。判断逻辑归你的提示词，系统负责匹配事件、
+启动 Agent、记录这次响应。
 
-代理审批只是一个场景。这个能力的边界更大：**让 Agent 响应系统事件**。判断逻辑归你的提示词，系统负责匹配事件、启动 Agent、记录这次响应。
+## 三个心智模型
 
-Agent 在这里是代理人。它进入流水线上原本由 owner 负责的位置：owner 能审批，Agent 也能审批；owner 能分析失败、写总结、创建后续 issue，Agent 也通过同一套动作完成这些事。Agent 不是特殊通道。
+### 1. 事件自带业务谱系
 
-## 两个心智模型
+每个事件都带着一组**属性**，说明它发生在生产线的哪个位置：事件类型是什么
+（`event.type`）、属于哪个 issue（`event.issue`）、哪个 epic、哪次 workflow 运行、
+哪个阶段。凡是围绕某个 issue 发生的事件——无论出自 workflow 还是 issue 本身——
+都带着这个 issue 的编号。
 
-### 1. 两层 Prompt
+这意味着「盯住 issue #42 的一切」不需要任何特殊机制，一条表达式就够了。
+
+### 2. 两层 Prompt
 
 一个 Agent 实际行动时，它的指令由两层拼成：
 
+- **第一层：Agent 内置指令**（定义「我是谁」）——配 Agent 时写一次，长期稳定，
+  所有规则共享。比如「你是 owner 的代理人，负责审批 plan/check，review 要严谨，
+  不确定就升级给 owner」。
+- **第二层：规则的响应提示词**（定义「这次该做什么反应」）——配规则时写，
+  每条规则各写各的。
+
+**为什么拆开？** 同一个 Agent 可能要响应多种事件。把所有反应塞进身份指令会让
+Agent 定义膨胀、难复用。**身份归 Agent，反应归规则**。
+
+### 3. 路由表按序求值
+
+规则是一张**有序表**，像邮件过滤器：事件来了从上往下逐条比对，命中就触发该条
+规则的 Agent，然后**默认停止**。想让多个 Agent 响应同一事件，给上面的规则标
+「继续」。
+
+这一个模型同时表达三种需求：
+
+- **独占响应**：审批这类只能有一个决策者的事件，天然 first-match；
+- **并行响应**：issue 完成后一个 Agent 写 release note、另一个通知 owner——
+  上面的规则标「继续」；
+- **兜底 + 接管**：全局兜底规则放表底，针对某个 issue 的规则放它上面。
+  谁先谁赢，一眼看懂，不用心算优先级。
+
+## 表达式怎么写
+
+规则用一条布尔表达式匹配事件属性，支持 `==`、`!=`、`&&`、`||`、`in`、
+`startsWith` 等：
+
 ```
-┌─────────────────────────────────────────────────────┐
-│ 第一层：Agent 内置指令（定义「我是谁」）              │
-│   配 Agent 时写一次，长期稳定，所有订阅共享           │
-│   = Agent 的身份 / 角色 / 通用规则                    │
-└─────────────────────────────────────────────────────┘
-                          │
-                          │  1 个 Agent : N 条订阅
-                          ▼
-┌─────────────────────────────────────────────────────┐
-│ 第二层：订阅响应提示词（定义「这次该做什么反应」）     │
-│   配订阅时写，每条订阅各写各的                        │
-│   = 遇到这个事件、这一刻，具体怎么响应                │
-└─────────────────────────────────────────────────────┘
+# 只盯 issue #42 的审批
+event.type == "com.mohist.workflow.stage.approval-requested" && event.issue == "42"
+
+# 全项目的 workflow 终态失败
+event.type == "com.mohist.workflow.run.failed"
+
+# issue #42 名下的一切事件
+event.issue == "42"
+
+# 某两个 issue 的完成事件
+event.type == "com.mohist.issue.completed" && event.issue in ["42", "43"]
 ```
 
-- **第一层**对应你已有能力——配置 Agent 时写的 Instructions。它定义这个 Agent 是干什么的（比如「你是 owner 的代理人，负责审批 plan/check，review 要严谨，不确定就升级给 owner」）。
-- **第二层**是这个功能**新增**的。它定义「遇到某事件、此刻的反应」。同一个 Agent 可以挂多条订阅，每条配不同的响应提示词。
+响应提示词里可以用同一套属性做占位符：`{{event.issue}}`、
+`{{event.workflowrunid}}`、`{{event.stage}}`。Agent 拿到后自己去拉详情、做判断、
+执行动作。
 
-**为什么不把反应逻辑也并进 Agent 指令？** 同一个 Agent 可能要响应多种事件。把所有反应塞进身份指令会让 Agent 定义膨胀、难复用。拆开：**身份归 Agent，反应归订阅**。
+## 场景：让 Agent 监管一个 issue
 
-> 你定的规则：「它的 prompt 不是和 agent 一对一的，而是和订阅一对一，一个 Agent 可以开多个订阅，每个都可以配不同的事件和不同的提示词。」
+这是驱动本功能的核心场景：你启动一个 Agent 监管 issue 的推进，workflow 失败或
+等审批时它替你出手。
 
-### 2. 订阅是一等对象
+配一个 Agent（写身份指令），加三条规则：
 
-订阅是你可以独立增删启停、命名的东西，不是 Agent 配置里的一行。每条订阅声明：**匹配什么事件**（过滤表达式）、**用哪个 Agent 响应**、**用什么响应提示词**，以及必要时的优先级或响应方式。
+| 顺序 | 匹配 | 响应提示词让 Agent 干什么 |
+|---|---|---|
+| 1 | `…approval-requested" && event.issue == "42"` | 用 `mo issue show` 读 proposal，review 产物；符合计划就 approve 附理由，存疑就 reject 说明疑点 |
+| 2 | `…run.failed" && event.issue == "42"` | 先读 issue comment 里自己之前的处理记录，拉日志分析根因；可修复且自动重试少于 2 次就修完 rerun，否则把结论写进 comment 升级给 owner |
+| 3 | `…issue.completed" && event.issue == "42"` | 写一段交付总结到 comment |
 
-## 订阅靠「过滤表达式」匹配事件
+两个工作方式上的要点：
 
-订阅不再分「事件类型 + 范围」两个字段，而是**一个统一的过滤表达式**。命中这个表达式的事件，就触发这条订阅。
-
-表达式基于事件信封（CloudEvent）自带的属性来写，支持通配符。最常见的形式是按事件类型：
-
-- `com.mohist.workflow.stage.approval-requested` —— 精确匹配这一种事件。
-- `com.mohist.workflow.stage.*` —— 这个域下所有 stage 事件。
-
-需要精确到某个 issue 时，在表达式里加事件来源的约束（比如「来源是 issue #42 的 workflow」）。这样「只盯某个关键 issue」和「兜底全局所有 issue」用的是同一套表达式机制，不再需要单独的「范围」字段。
-
-## 优先级与响应方式
-
-不同事件的响应方式不同。
-
-有些事件适合多条订阅同时响应，例如 issue 完成后，一个 Agent 写 release note，另一个 Agent 做交付总结，第三个 Agent 通知 owner。
-
-有些事件需要互斥处理，例如同一个审批点只能收到一个最终 approve / reject 决策。这类场景需要优先级解决**兜底 + 接管**：
-
-- 你有一个 Agent A，订阅某事件、配成**全局兜底**（低优先级），让大多数 issue 的事件都有人接。
-- 你特别关注 issue #42，给 Agent B 配一条**只针对它**的订阅（高优先级），让 B 接管、A 不响应。
-
-互斥响应时，系统按优先级选一个 Agent 响应，避免两个 Agent 同时审批同一个阶段。
-
-同一个 Agent 的多条订阅都命中同一事件是允许的（比如你给一个 Agent 配不同提示词应对不同子场景），系统在 Agent 内部按订阅优先级选一条触发。
-
-## 你怎么用
-
-**配 Agent**（写第一层）——已有能力，不变：起名、写身份指令、选 model。
-
-**配订阅**（写第二层）——新增：对某个 Agent，创建一条订阅，写过滤表达式、写响应提示词、可选指定优先级。
-
-响应提示词由你配置。系统不判断提示词是否正确或安全，只负责匹配事件、启动 Agent、拼接两层 prompt。响应提示词里可以用事件自带的占位符（哪个 workflow run、什么事件类型），Agent 拿到后自己去拉详情、做判断、执行动作。举个例子：
-
-> workflow run {{workflow_run_id}} 在 {{stage}} 阶段等待审批。先 `mo workflow get {{workflow_run_id}} --json` 找到关联 issue，再 `mo issue show <number>` 读 proposal 和 tasks。如果 plan 清晰、tasks 可执行，执行 `mo workflow approve {{workflow_run_id}}` 并附一句理由。如果把握不准，执行 `mo workflow reject {{workflow_run_id}} -m "..."` 把疑问反馈回去。
-
-事件发生后，Agent 按这段提示词行动。多数自动 approve、少数升级给 owner，这个分流由响应提示词决定，不由 Workflow 写死。Workflow 只收到 approve / reject 决策，不关心审批者是谁。
+- **失败订终态**。系统自己有重试和修复机制，阶段失败可能自愈；`run.failed`
+  才是原本该 owner 出场的时刻，代理人接的就是这个位置。
+- **用 issue comment 当 Agent 的记忆**。每次触发都是一次独立执行，Agent 没有
+  跨次记忆。让它把「做了什么、为什么、第几次」写进 comment、下次先读——
+  处理记录同时就是给你看的审计线索，也是防止「失败→重试→再失败」无限循环的
+  计数器。
 
 ## 可见性：知道谁响应了什么
 
-系统不做严格冲突拦截（不强制你把所有订阅优先级配得互不重叠），但提供**可见性**让你自己核对配置是否符合预期：
+系统不做严格冲突拦截，但提供**可见性**让你核对配置是否符合预期：
 
-- 从事件查：某次事件 → 是被哪个 Agent、哪条订阅响应的。
-- 从 AgentJob 查：这个 Agent 这次执行 → 是响应哪个事件、哪条订阅触发的。
+- 从事件查：某次事件是被哪条规则、哪个 Agent 响应的；
+- 从 AgentJob 查：这次执行是响应哪个事件、哪条规则触发的；
+- **干跑**：拿最近的事件回放整张路由表，逐条显示会命中什么——配完规则先干跑，
+  不用等真实事件来验证。
 
-兜底/接管配错了（你以为 B 接管结果 A 跑了），从可见性里能发现，然后你去调优先级。**配置正确性你负责，可观测性系统负责。**
+**配置正确性你负责，可观测性系统负责。**
 
-## 几个场景（说明通用性）
+## 更多场景
 
-| 场景 | 订阅的事件 | 响应提示词让 Agent 干什么 |
+| 场景 | 匹配的事件 | 响应提示词让 Agent 干什么 |
 |---|---|---|
 | 代理审批 | 阶段等待审批 | review 产物，按规则 approve 或 reject |
-| 失败兜底分析 | stage 失败 | 拉错误，分析根因，写进 issue comment |
+| 失败兜底分析 | workflow 终态失败 | 拉错误，分析根因，写进 issue comment |
 | 完成自动汇总 | issue 完成 | 汇总产物，写 release note |
 | 后续工作生成 | issue 完成 / review 发现风险 | 创建 follow-up issue |
-| 产线维护 | runner 掉线 / epic running-but-idle | 分析原因，通知 owner 或创建维护 issue |
+| 产线维护 | runner 掉线 / epic 无可推进 issue | 分析原因，通知 owner 或创建维护 issue |
 
-这些订阅共用同一套机制，只是过滤表达式、响应提示词和响应方式不同。
+这些规则共用同一张表、同一套表达式，只是匹配条件和响应提示词不同。
 
 ## 你和系统的责任边界
 
 | 归谁 | 负责 |
 |---|---|
-| **你** | 把响应提示词写好、写安全；用优先级和响应方式表达兜底、接管或并行响应 |
-| **系统** | 准确匹配事件、启动 Agent、记录事件与 Agent 响应之间的关系 |
+| **你** | 把响应提示词写好、写安全；用表的顺序和「继续」表达独占、兜底或并行 |
+| **系统** | 准确匹配事件、启动 Agent、记录事件与响应之间的关系 |
 | **系统不负责** | 判断提示词对错；给 Agent 提供特殊审批通道。Agent 走的是和 owner、脚本一样的正规通道（详见[工作流详解](the-workflow.md)） |
 
-## 还没定的几件事
+## 实装差距
 
-1. **动作可追溯性**：Workflow 不关心审批者是谁，但审计视图需要能看出某次动作是由哪个 AgentSession、脚本或用户发起。
-2. **配置入口**：订阅在 Web UI 的 Agent 详情页里配（Subscriptions 分区），还是单独的订阅管理页？CLI 要不要 `mo agent subscribe ...`？
-3. **过滤表达式的精确语法**：沿用现有 `|` 多选 + `.*` 通配的写法，还是引入更通用的多属性过滤语法，待技术方案定。
-4. **响应方式**：哪些事件默认 fan-out，哪些事件必须互斥，是否由订阅显式声明，待技术方案定。
+当前已实装一个较早的订阅模型：按事件类型（支持通配）过滤、多条订阅按优先级
+仲裁出一个响应者，`mo agent subscription` 可配。本文描述的目标形态与它的差距：
 
-技术实现细节见 [`design/agent-subscriptions.md`](../design/agent-subscriptions.md)。
+- 事件还未全面携带业务谱系属性（issue 编号、epic 等），「只盯一个 issue」暂时
+  只能在响应提示词里让 Agent 自行判断并退出；
+- 匹配表达式、有序路由表、「继续」标记、干跑工具均未实装。
+
+以上由事件路由 epic 推进；落地后本文从「产品方案（WIP）」板块毕业。

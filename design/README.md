@@ -12,12 +12,13 @@
 - [conventions.md](conventions.md) — 命名、分层、变量等约定。
 - [cli.md](cli.md) — 命令面设计契约：句法（资源在前）、命令树形状、资源命名（作用域用 flag、子资源挂父资源下）、动词一致性、唯一入口与全局 flag 约定。
 - [testing.md](testing.md) — 测试两条轨道（spec/unit）、外部依赖、时间依赖、fake 入口速查。
-- [eventbus.md](eventbus.md) — 事件总线：CloudEvent 订阅契约 + 单分发器可靠 at-least-once 通知（分发器**未交付**）。
+- [eventbus.md](eventbus.md) — 事件总线：CloudEvent 订阅契约 + 单分发器可靠 at-least-once 通知。
+- [event-protocol.md](event-protocol.md) — 事件协议（**WIP**）：三轴信封模型、业务谱系 stamping 矩阵、匹配表达式（CEL 子集）与 conformance。
 
 ## Agent 与执行
 
 - [agent-execution.md](agent-execution.md) — Action、Inline Agent、Mohist Agent、AgentJob、AgentSession 与 Runtime Session 的分层和生命周期所有权。
-- [agent-subscriptions.md](agent-subscriptions.md) — Mohist Agent 事件订阅（**WIP**）：Named Agent 监听 CloudEvent、按订阅响应提示词自动启动。
+- [agent-subscriptions.md](agent-subscriptions.md) — Agent 事件路由（**WIP**）：项目级有序路由表，表达式匹配 + first-match/continue 触发 Agent，取代订阅优先级仲裁。
 
 ## Runtime 集成
 
