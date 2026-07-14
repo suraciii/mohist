@@ -9,10 +9,10 @@ import { Badge } from '@/shared/ui/components/badge'
 const RUNNER_START_HINT = 'npx mohist runner'
 
 const STATUS_CONFIG: Record<RunnerStatusRow['status'], { dot: string; badge: string; label: string }> = {
-  idle: { dot: 'bg-emerald-500', badge: 'bg-emerald-50 text-emerald-700 ring-emerald-600/20', label: 'idle' },
-  busy: { dot: 'bg-blue-500', badge: 'bg-blue-50 text-blue-700 ring-blue-600/20', label: 'busy' },
-  stale: { dot: 'bg-amber-500', badge: 'bg-amber-50 text-amber-700 ring-amber-600/20', label: 'stale' },
-  offline: { dot: 'bg-gray-400', badge: 'bg-gray-50 text-gray-500 ring-gray-600/20', label: 'offline' },
+  idle: { dot: 'bg-success', badge: 'bg-success-subtle text-success ring-success-border', label: 'idle' },
+  busy: { dot: 'bg-info', badge: 'bg-info-subtle text-info ring-info-border', label: 'busy' },
+  stale: { dot: 'bg-warning', badge: 'bg-warning-subtle text-warning ring-warning-border', label: 'stale' },
+  offline: { dot: 'bg-muted-foreground', badge: 'bg-muted text-muted-foreground ring-border', label: 'offline' },
 }
 
 function RunnerScopeLabel({ scope }: { scope: RunnerStatusRow['scope'] }) {
@@ -72,11 +72,11 @@ function ActiveWorkSummary({
     return (
       <div className="flex items-center gap-1.5 text-xs" data-testid="active-work-row">
         <span className="text-foreground truncate">{label}</span>
-        <span className="text-gray-300 shrink-0">·</span>
+        <span className="text-muted-foreground shrink-0">·</span>
         <Link
           to={toProjectPath(`/issues/${work.issue.issueNumber}`)}
           onClick={(event) => event.stopPropagation()}
-          className="text-blue-600 hover:text-blue-700 hover:underline shrink-0"
+          className="text-info hover:text-info-foreground hover:underline shrink-0"
           data-testid="active-work-issue-link"
           data-work-id={work.workId}
         >
@@ -97,7 +97,7 @@ function ActiveWorkSummary({
 
 function CapacityIndicator({ used, total }: { used: number; total: number }) {
   const pct = total > 0 ? Math.min(100, (used / total) * 100) : 0
-  const color = used >= total ? 'bg-amber-500' : used > 0 ? 'bg-blue-500' : 'bg-emerald-500'
+  const color = used >= total ? 'bg-warning' : used > 0 ? 'bg-info' : 'bg-success'
   return (
     <div className="flex items-center gap-2" data-testid="runner-capacity">
       <div className="flex items-center gap-1.5">
@@ -198,7 +198,7 @@ function RunnerRow({ row }: { row: RunnerStatusRow }) {
         )}
         {row.connectionState && (
           <span
-            className={`text-xs ${row.connectionState === 'connected' ? 'text-emerald-600' : 'text-muted-foreground'}`}
+            className={`text-xs ${row.connectionState === 'connected' ? 'text-success' : 'text-muted-foreground'}`}
           >
             {row.connectionState}
           </span>
@@ -208,8 +208,8 @@ function RunnerRow({ row }: { row: RunnerStatusRow }) {
 
       {/* Active work */}
       {activeWorks.length > 0 && (
-        <div
-          className="mt-2 space-y-1 rounded-md bg-blue-50/50 px-2.5 py-1.5"
+          <div
+            className="mt-2 space-y-1 rounded-md bg-info-subtle px-2.5 py-1.5"
           data-testid="runner-active-works"
           data-count={activeWorks.length}
         >

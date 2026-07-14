@@ -309,10 +309,10 @@ describe('EventTimelinePanel', () => {
       renderTimelineView()
 
       const row = screen.getByTestId('event-timeline-row')
+      expect(row.className).not.toContain('bg-danger-subtle')
       expect(row.className).not.toContain('bg-red-50')
       expect(row.className).not.toContain('bg-red-50/80')
-
-      const marker = row.querySelector('span.bg-red-500')
+      const marker = row.querySelector('span.bg-danger')
       expect(marker).not.toBeNull()
     })
 
@@ -333,10 +333,10 @@ describe('EventTimelinePanel', () => {
 
       const row = screen.getByTestId('event-timeline-row')
       expect(row.getAttribute('data-attention')).toBe('true')
+      expect(row.className).not.toContain('bg-warning-subtle')
       expect(row.className).not.toContain('bg-amber-50')
       expect(row.className).not.toContain('bg-amber-50/60')
-
-      const marker = row.querySelector('span.bg-amber-500')
+      const marker = row.querySelector('span.bg-warning')
       expect(marker).not.toBeNull()
     })
 
@@ -360,7 +360,7 @@ describe('EventTimelinePanel', () => {
 
       const detail = screen.getByTestId('event-detail')
       expect(detail.className).not.toContain('bg-gray-900')
-      expect(detail.className).toContain('bg-gray-50')
+      expect(detail.className).toContain('bg-muted')
       expect(detail.textContent).toContain('compile error: foo.ts')
     })
 

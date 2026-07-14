@@ -168,12 +168,13 @@ public class EpicEventsApiSpecs
         var project = await CreateProjectAsync();
         var epic = await CreateEpicAsync(project.Id, "Limit epic");
 
-        // Seed multiple events without driving the recompute path that
-        // could auto-mark the epic done (T-002/T-003 patterns avoid a
-        // Resume with a fully-blocked linked-issue set). Here we just
-        // pause from idle (which is a guarded 409) so instead drive
-        // start -> pause -> resume, which keeps the epic running, and
-        // patch priority changes.
+        // Seed multiple events. Note: StartAsync emits an EpicStatusChanged
+        // event which fires the EpicRunningStatusHandler subscription
+        // asynchronously. With no linked issues, that handler's recompute
+        // can auto-mark-done the epic, racing with the priority patches
+        // below. The ?limit=1 contract is about tail selection, not which
+        // event the test produced last, so we assert against the actual
+        // tail of the recorded stream rather than a specific type.
         _fixture.TimeProvider.Advance(TimeSpan.FromSeconds(1));
         await _client.PostOkAsync($"/api/projects/{project.Id}/epics/{epic.Id}/start", null);
         _fixture.TimeProvider.Advance(TimeSpan.FromSeconds(1));
@@ -193,9 +194,8 @@ public class EpicEventsApiSpecs
             $"/api/projects/{project.Id}/epics/{epic.Id}/events?limit=1");
 
         var single = Assert.Single(limited);
-        // UpdateAsync emits EpicUpdated followed by EpicPriorityChanged;
-        // the tail of the recorded stream is therefore EpicUpdated.
-        Assert.Equal("com.mohist.epic.updated", single.Type);
+        Assert.Equal(unlimited[^1].Id, single.Id);
+        Assert.Equal(unlimited[^1].Type, single.Type);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]

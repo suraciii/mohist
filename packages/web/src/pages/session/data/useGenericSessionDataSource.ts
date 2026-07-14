@@ -1,5 +1,5 @@
 import { useCallback, useMemo } from 'react'
-import { useParams } from 'react-router-dom'
+import { useParams, useSearchParams } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import { useProject, useProjectPath } from '../../../entities/project'
 import { useGenericSessionSummary, useGenericSessionTranscript, useGenericFollowup, useCancelGenericSession } from '../../../entities/agent'
@@ -122,16 +122,33 @@ export function useGenericSessionDataSource(
 
   const displayTurns = useMemo(() => turns.map((turn) => projectTranscriptTurn(turn)), [turns, projectTranscriptTurn])
 
-  // Determine back link: if context ref has issueNumber, link to issue; else link to agent profile
+  // Determine back link: Activity-origin links (from=activity) take priority
+  // and return to the project-scoped Activity page. Otherwise, if the session
+  // carries an issue context ref, link to that issue; otherwise link to the
+  // agent profile (and never fabricate issue/workflow links for sessions
+  // without an issue binding).
+  const [searchParams] = useSearchParams()
+  const fromActivity = searchParams.get('from') === 'activity'
   const hasIssueContextRef = summary?.contextRefs?.issueNumber != null
-  const backPath = hasIssueContextRef && summary?.contextRefs?.issueNumber
+  const backPath = fromActivity
+    ? toProjectPath('/activity')
+    : hasIssueContextRef && summary?.contextRefs?.issueNumber
+      ? toProjectPath(`/issues/${summary.contextRefs.issueNumber}`)
+      : summary?.agentId
+        ? toProjectPath(`/agents/${encodeURIComponent(summary.agentId)}`)
+        : toProjectPath('/agents')
+  const backLabel = fromActivity
+    ? 'Activity'
+    : hasIssueContextRef && summary?.contextRefs?.issueNumber
+      ? `Issue #${summary.contextRefs.issueNumber}`
+      : summary?.agentName ?? 'Agent'
+  // Generic sessions have no workflow context link; only expose it when
+  // an issue binding exists. Do NOT fabricate workflow context for sessions
+  // without an issue.
+  const workflowContextPath = hasIssueContextRef && summary?.contextRefs?.issueNumber
     ? toProjectPath(`/issues/${summary.contextRefs.issueNumber}`)
-    : summary?.agentId
-      ? toProjectPath(`/agents/${encodeURIComponent(summary.agentId)}`)
-      : toProjectPath('/agents')
-  const backLabel = hasIssueContextRef && summary?.contextRefs?.issueNumber
-    ? `Issue #${summary.contextRefs.issueNumber}`
-    : summary?.agentName ?? 'Agent'
+    : undefined
+  const workflowContextLabel = workflowContextPath ? 'Workflow context' : undefined
 
   const hasData = meta?.usage?.contextWindowUsed != null || meta?.usage?.contextWindowSize != null
 
@@ -180,6 +197,8 @@ export function useGenericSessionDataSource(
     backPath,
     backLabel,
     issueTitle: undefined,
+    workflowContextPath,
+    workflowContextLabel,
     siblingNav: null,
     siblingSidebar: null,
     sessionTurns: turns,

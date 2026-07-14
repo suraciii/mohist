@@ -97,9 +97,9 @@ export function CompactionLineageLink({
       data-lineage-length={lineage.length}
       data-viewed-index={viewedIndex}
     >
-      <div className="flex items-center gap-1.5 text-[10px] font-medium text-indigo-700">
+      <div className="flex items-center gap-1.5 text-[10px] font-medium text-info">
         <svg
-          className="h-3 w-3 shrink-0 text-indigo-500"
+          className="h-3 w-3 shrink-0 text-info"
           viewBox="0 0 20 20"
           fill="currentColor"
           aria-hidden="true"
@@ -110,15 +110,15 @@ export function CompactionLineageLink({
             clipRule="evenodd"
           />
         </svg>
-        <span className="uppercase tracking-wide text-indigo-500" data-testid="compaction-lineage-link-label">
+        <span className="uppercase tracking-wide text-info" data-testid="compaction-lineage-link-label">
           Compaction chain
         </span>
         {predecessor && (
           <>
-            <span className="text-indigo-300" aria-hidden="true">·</span>
+            <span className="text-info/60" aria-hidden="true">·</span>
             <Link
               to={buildTargetPath(predecessor.agentRuntimeSessionId)}
-              className="inline-flex items-center gap-1 rounded border border-indigo-200 bg-white px-1.5 py-0.5 font-mono text-indigo-700 transition-colors hover:border-indigo-400 hover:bg-indigo-50 hover:text-indigo-900"
+              className="inline-flex items-center gap-1 rounded border border-info-border bg-background px-1.5 py-0.5 font-mono text-info transition-colors hover:border-info hover:bg-info-subtle hover:text-info"
               data-testid="compaction-lineage-link-predecessor"
               data-target-runtime-session-id={predecessor.agentRuntimeSessionId}
               title={`Previous runtime session: ${predecessor.agentRuntimeSessionId}`}
@@ -131,10 +131,10 @@ export function CompactionLineageLink({
         )}
         {successor && (
           <>
-            <span className="text-indigo-300" aria-hidden="true">·</span>
+            <span className="text-info/60" aria-hidden="true">·</span>
             <Link
               to={buildTargetPath(successor.agentRuntimeSessionId)}
-              className="inline-flex items-center gap-1 rounded border border-indigo-200 bg-white px-1.5 py-0.5 font-mono text-indigo-700 transition-colors hover:border-indigo-400 hover:bg-indigo-50 hover:text-indigo-900"
+              className="inline-flex items-center gap-1 rounded border border-info-border bg-background px-1.5 py-0.5 font-mono text-info transition-colors hover:border-info hover:bg-info-subtle hover:text-info"
               data-testid="compaction-lineage-link-successor"
               data-target-runtime-session-id={successor.agentRuntimeSessionId}
               title={`Next runtime session: ${successor.agentRuntimeSessionId}`}

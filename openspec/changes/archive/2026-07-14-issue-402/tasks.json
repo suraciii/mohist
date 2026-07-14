@@ -1,0 +1,78 @@
+{
+  "project": "mohist-local",
+  "description": "Turn Activity and Coder Session into scannable execution-evidence views with attention-first event classification, stable session evidence regions, project-scoped navigation, and shared light/dark status treatment, consuming recorded events via a project-scoped read endpoint plus existing snapshots.",
+  "tasks": [
+    {
+      "id": "T-000",
+      "title": "Add project-scoped event read endpoint for Activity evidence",
+      "spec": "specs/activity-evidence-view/spec.md",
+      "description": "Add a server-side project-scoped event read endpoint (GET /api/projects/:projectRef/events) that queries existing recorded events across issues, workflow runs, and agent sessions within a project, sorted by time. This reads already-stored events without changing how they are recorded and without adding event subscription behavior, resolving the project-scoped recorded-event prerequisite for T-002.",
+      "acceptanceCriteria": [
+        "The endpoint GET /api/projects/:projectRef/events returns a time-sorted list of recorded events across issues, workflow runs, and agent sessions within the specified project.",
+        "Each event includes enough context (event type, source aggregate type, issue number, workflow run id, session id, runner id where applicable) for the Web projection to classify it as issue-state, workflow-stage, agent-session, runner, or failure evidence.",
+        "The endpoint queries existing stored events from the per-aggregate event tables without changing how events are recorded, emitted, or subscribed.",
+        "The endpoint supports a limit parameter with a sensible default and returns events most-recent-first.",
+        "Server spec tests verify cross-aggregate event retrieval, time ordering, project scoping, and that no event recording or subscription behavior is added.",
+        "npm test (server) passes."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Project-scoped event read endpoint in packages/server/src/Mohist.Server/Api/ with a new querier or IEventStore method, plus server spec tests",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Resolves the project-scoped recorded-event prerequisite for T-002. Does not change event recording or add subscription behavior. Events are already stored per-aggregate in IssueEvents, WorkflowRunEvents, EpicEvents, and AgentSessionEvents tables; the endpoint queries across them by project. The existing per-issue endpoint GET /api/projects/:projectRef/issues/:number/events and WorkflowEventQuerier.ListIssueEventsAsync are reference points for the DTO shape."
+    },
+    {
+      "id": "T-001",
+      "title": "Reorganize Coder Session into a structured execution-evidence view",
+      "spec": "specs/coder-session-evidence-view/spec.md",
+      "description": "Formalize the existing Coder Session shell into stable regions for task identity and status, usage, errors, transcript turns and tool calls, follow-up actions, and sibling evidence. Add the read-only errors summary, workflow-context navigation, Activity return orientation, and reliable resolution of the existing issue-session ID route while preserving existing transcript, cancel, recovery, follow-up, sibling, and lineage behavior, and migrate all session status surfaces to the shared theme-token families.",
+      "acceptanceCriteria": [
+        "SessionDetailShell renders recognizable, stable regions for task identity/current status, optional usage, optional errors, transcript turns and tool calls, follow-up actions, and optional sibling sessions; sessions without usage, errors, turns, or siblings degrade without moving or merging the remaining regions.",
+        "A compact session-errors-region appears above the transcript when statusKind is failed, failureCategory is present, or toolErrorCount is greater than zero; it renders failureReason only when available, exposes data-failure-category and data-tool-error-count for verification, and is absent when no error evidence exists.",
+        "The existing transcript hierarchy continues to distinguish tool calls from message turns, and the transcript scroll container, sticky title, sticky recovery bar, follow-up composer, sibling navigation slot, lineage link, and cancel confirmation anchors and behavior remain available with their existing gating semantics.",
+        "Issue-bound sessions expose project-scoped entry points to the relevant issue and workflow context; the existing /issues/:number/session/:sessionId route resolves the session ID to the canonical session name before detail queries; Activity-origin links return to the project-scoped Activity page; sibling and lineage links remain project-scoped; generic sessions without an issue link to their agent context and do not fabricate issue or workflow links.",
+        "Status badges for running, completed, failed, stale, probing, and finalizing sessions, plus failure, recovery, context-health, usage, follow-up, sibling, and transcript tool success/failure accents, use the shared success/warning/info/danger and neutral surface token families in light and dark mode; no parallel shared status helper or hardcoded semantic red/amber/yellow/blue/green palette remains on these session status surfaces.",
+        "The implementation consumes the existing session metadata, transcript, usage, sibling, and lineage data sources without API, DTO, query, transcript-recording, subscription, or action-semantics changes and without exposing raw implementation field names as labels.",
+        "Existing SessionPage sticky, cancel, lineage, follow-up, GenericSessionPage, and tests/SessionPageHeader.spec.tsx coverage are updated and pass; focused spec coverage verifies region order and optional-region degradation, error presence/absence, issue-session ID resolution, Activity return orientation, project-scoped navigation, action preservation, and shared token classes in both themes using existing DI seams and MSW without vi.mock.",
+        "npm run typecheck -w packages/web and npm run test:run -w packages/web pass."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Structured Coder Session evidence layout in packages/web/src/pages/session and related coder-session/session-health/session-transcript widgets, with preserved actions, direct-link resolution, return orientation, and updated unit/spec tests",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Covers the complete coder-session-evidence-view capability and design D4-D7. Keep session-recovery-bar inside the transcript scroll container, make session-errors-region read-only, preserve existing test anchors where still valid, and use local inline status-presentation records rather than reintroducing shared/status-presentation. T-002 depends on this task's issue-session ID resolution and from=activity back-target handling."
+    },
+    {
+      "id": "T-002",
+      "title": "Replace Activity session cards with an attention-first event evidence feed",
+      "spec": "specs/activity-evidence-view/spec.md",
+      "description": "Build a pure ActivityEvent projection over the project-scoped event read endpoint (T-000) plus the existing activity and runner snapshots, then replace the Active/Waiting/Recent card sections with event entries carrying production event type, attention level, timestamps, and navigation targets. Deliver the collapsible attention and routine zones, event/attention filters, generic-session coverage, direct evidence links, and shared theme-token treatment as one usable Activity module.",
+      "acceptanceCriteria": [
+        "A pure buildActivityEvents projection and composing hook produce ActivityEvent entries with type, attention, time, domain-language title/description, and project-scoped targets from recorded events plus current snapshots; entries distinguish issue-state, workflow-stage, agent-session, runner, and failure evidence without relabeling current-state snapshots as unavailable transitions.",
+        "Recorded failed lifecycle events produce failure attention while retaining their separate recorded agent-session lifecycle evidence; current inactive session snapshots do not fabricate completed, cancelled, or failed transitions; waiting rows produce approval attention; stale/offline runner rows produce blocked attention while busy runners produce routine runner evidence and idle runners remain summarized; all entries have deterministic ordering and duplicate evidence is merged only once.",
+        "Generic agent-launched and workflow-bound sessions already present in the activity feed appear together with the same agent-session event identity; workflow sessions link directly through /issues/:number/session/:sessionId with from=activity, generic sessions link directly through /agent-sessions/:sessionId with from=activity, and generic sessions use agentId/agentName without fabricated issue context or duplicate fetching.",
+        "ActivityPage renders activity-attention-zone before activity-routine-zone whenever failure, approval, or blocked entries exist, omits the attention zone entirely when none exist, and orders entries most-recent-first within their attention/type grouping so routine evidence never precedes needs-attention evidence on the first screen.",
+        "The activity-filter-bar can isolate each supported event type and attention-only evidence and can clear filters to restore the complete attention-ordered feed; every activity-event-entry exposes data-event-type and data-attention identities.",
+        "Every applicable entry provides the most specific project-scoped primary destination plus available issue, workflow-context, session, agent, or runner secondary targets; session destinations preserve a project-scoped Activity back target, activity-runners-link remains available, and no context-less root route is introduced.",
+        "Activity event entries, attention markers, filters, StatusBar/runner/session status surfaces, and issue-event-timeline category and marker styles use shared success/warning/info/danger and neutral surface token families in light and dark mode; hardcoded semantic red/amber/orange/yellow/blue/green/gray palette classes covered by design D5 are removed without adding a shared status-presentation module.",
+        "The feature consumes the project-scoped event read endpoint (T-000) for recorded transitions plus the existing activity, session, and runner snapshots; it adds no event-recording, event-emission, transcript-recording, or event/session-subscription behavior and exposes only production/domain labels.",
+        "Collocated activity-events unit tests cover recorded-event and snapshot classification, refusal to fabricate terminal transitions, ordering, generic-session identity/deduplication, and target construction; ActivityPage and new evidence-view spec tests cover event identity, attention-zone presence/absence and prominence, filtering/clearing, direct navigation and return orientation, and light/dark token classes using MSW/DI seams and fake timers without vi.mock or wall-clock waits.",
+        "npm run typecheck -w packages/web and npm run test:run -w packages/web pass."
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "ActivityEvent projection and attention-first ActivityPage feed in packages/web/src/pages/activity and related activity/session/timeline/runner widgets, with complete unit/spec coverage",
+      "dependsOn": [
+        "T-000",
+        "T-001"
+      ],
+      "passes": false,
+      "notes": "Covers the complete activity-evidence-view capability and design D1-D3 plus D5-D7. Do not reuse EventTimelinePanel, infer transitions from snapshots, or add subscription behavior. The project-scoped recorded-event read endpoint is delivered by T-000. Preserve activity-runners-link, route all links through useProjectPath(), consume T-001's issue-session ID resolution and from=activity handling, control Activity timers in tests, and keep filter-chip logic local rather than extracting a speculative shared component."
+    }
+  ]
+}

@@ -64,15 +64,15 @@ export function CompactionTimelineEntry({ entry }: CompactionTimelineEntryProps)
     >
       <div className="flex flex-col items-center shrink-0 pt-0.5">
         <span
-          className="inline-block h-3.5 w-3.5 rounded-full border-2 border-blue-300 bg-blue-100"
+          className="inline-block h-3.5 w-3.5 rounded-full border-2 border-info-border bg-info-subtle"
           aria-hidden="true"
         />
-        <div className="w-px flex-1 bg-blue-200 mt-1" />
+        <div className="w-px flex-1 bg-info-border mt-1" />
       </div>
       <div className="flex-1 min-w-0 pb-3">
-        <div className="flex items-center gap-2 rounded-md border border-blue-200 bg-blue-50/60 px-2.5 py-1.5 text-xs text-blue-800">
+        <div className="flex items-center gap-2 rounded-md border border-info-border bg-info-subtle/60 px-2.5 py-1.5 text-xs text-info">
           <svg
-            className="h-3.5 w-3.5 shrink-0 text-blue-500"
+            className="h-3.5 w-3.5 shrink-0 text-info"
             viewBox="0 0 20 20"
             fill="currentColor"
             aria-hidden="true"
@@ -86,20 +86,20 @@ export function CompactionTimelineEntry({ entry }: CompactionTimelineEntryProps)
           <span className="font-medium" data-testid="compaction-timeline-title">
             Context compacted ({strategy})
           </span>
-          {time && <span className="text-blue-500">· {time}</span>}
+          {time && <span className="text-info/80">· {time}</span>}
         </div>
-        <div className="mt-1.5 ml-1 space-y-1 text-xs text-gray-700">
+        <div className="mt-1.5 ml-1 space-y-1 text-xs text-foreground">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5" data-testid="compaction-timeline-counts">
             <span>
-              <span className="text-gray-500">Before:</span>{' '}
+              <span className="text-muted-foreground">Before:</span>{' '}
               <span className="font-mono">{formatTokens(before)}</span>
             </span>
-            <span className="text-gray-300">→</span>
+            <span className="text-muted-foreground/60">→</span>
             <span>
-              <span className="text-gray-500">After:</span>{' '}
+              <span className="text-muted-foreground">After:</span>{' '}
               <span className="font-mono">{formatTokens(after)}</span>
             </span>
-            {reduction && <span className="text-gray-500">· {reduction}</span>}
+            {reduction && <span className="text-muted-foreground">· {reduction}</span>}
           </div>
           {summary && (
             <div>
@@ -107,12 +107,12 @@ export function CompactionTimelineEntry({ entry }: CompactionTimelineEntryProps)
                 variant="link"
                 size="sm"
                 onClick={() => setExpanded((v) => !v)}
-                className="h-auto p-0 text-[11px] text-blue-600 hover:text-blue-800"
+                className="h-auto p-0 text-[11px] text-info hover:text-info"
               >
                 {expanded ? 'Hide summary' : 'Show summary'}
               </Button>
               {expanded && (
-                <pre className="mt-1 whitespace-pre-wrap break-all rounded bg-blue-50/40 p-2 text-[11px] text-gray-700 max-h-40 overflow-auto">
+                <pre className="mt-1 whitespace-pre-wrap break-all rounded bg-info-subtle/40 p-2 text-[11px] text-foreground max-h-40 overflow-auto">
                   {summary}
                 </pre>
               )}

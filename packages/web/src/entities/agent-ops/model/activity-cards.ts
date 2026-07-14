@@ -18,7 +18,7 @@ export interface WaitingCard {
   issueNumber: string
   issueTitle: string
   issueStage: string | null
-  label: 'Needs Approval'
+  label: 'Needs Approval' | 'Blocked'
   questionPreview?: string
   questionId?: string
   questionAskedAt?: string

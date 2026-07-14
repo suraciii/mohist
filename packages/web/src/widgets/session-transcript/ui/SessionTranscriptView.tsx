@@ -286,7 +286,11 @@ function SessionErrorPartView({ part }: { part: ErrorPart }) {
   }
 
   return (
-    <div className="flex items-center gap-1.5 text-xs text-amber-600">
+    <div
+      data-testid="session-error-part"
+      data-tone="warning"
+      className="flex items-center gap-1.5 text-xs text-warning"
+    >
       <svg className="h-3 w-3 shrink-0" viewBox="0 0 20 20" fill="currentColor">
         <path fillRule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
       </svg>
@@ -369,7 +373,13 @@ function ContextGroupCard({ tools }: ContextGroupCardProps) {
         <span className="text-xs font-medium text-gray-700">{expanded ? expandedLabel : summary}</span>
         <span className="sr-only">Context gathered</span>
         {failedCount > 0 && (
-          <span className="text-xs text-red-500">{failedCount} failed</span>
+          <span
+            data-testid="context-group-failed-count"
+            data-tone="danger"
+            className="text-xs text-danger"
+          >
+            {failedCount} failed
+          </span>
         )}
         <svg className={`h-3 w-3 text-gray-400 shrink-0 ml-auto transition-transform ${expanded ? 'rotate-90' : ''}`} viewBox="0 0 20 20" fill="currentColor">
           <path fillRule="evenodd" d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z" clipRule="evenodd" />
@@ -396,8 +406,12 @@ function CompactContextTool({ tool }: { tool: ToolPart }) {
     : undefined
 
   return (
-    <div className={`flex items-center gap-2 px-2 py-1 text-xs rounded border border-gray-100 bg-gray-50/50 ${tool.tool.status === 'failed' ? 'border-red-200' : ''}`}>
-      <span className={tool.tool.status === 'failed' ? 'text-red-500' : 'text-green-500'}>
+    <div
+      data-testid="compact-context-tool"
+      data-tone={tool.tool.status === 'failed' ? 'danger' : tool.tool.status === 'completed' ? 'success' : 'neutral'}
+      className={`flex items-center gap-2 px-2 py-1 text-xs rounded border border-border bg-muted/50 ${tool.tool.status === 'failed' ? 'border-danger-border' : ''}`}
+    >
+      <span className={tool.tool.status === 'failed' ? 'text-danger' : 'text-success'}>
         {tool.tool.status === 'failed' ? 'failed' : tool.tool.status === 'completed' ? 'done' : tool.tool.status}
       </span>
       <span className="font-mono text-gray-600">{toolName}</span>
@@ -450,42 +464,58 @@ function TodoUpdateCard({ part }: TodoUpdateCardProps) {
         </svg>
         <span className="text-xs font-medium text-gray-700">{summary}</span>
         {part.tool.status === 'failed' && (
-          <span className="text-xs text-red-500">failed</span>
+          <span
+            data-testid="todo-update-failed"
+            data-tone="danger"
+            className="text-xs text-danger"
+          >
+            failed
+          </span>
         )}
-        <svg className={`h-3 w-3 text-gray-400 shrink-0 ml-auto transition-transform ${expanded ? 'rotate-90' : ''}`} viewBox="0 0 20 20" fill="currentColor">
+        <svg className={`h-3 w-3 text-muted-foreground/70 shrink-0 ml-auto transition-transform ${expanded ? 'rotate-90' : ''}`} viewBox="0 0 20 20" fill="currentColor">
           <path fillRule="evenodd" d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z" clipRule="evenodd" />
         </svg>
       </Button>
       {expanded && (
-        <div className="px-3 pb-2 border-t border-gray-100">
-          <div className="rounded-md border border-gray-200 overflow-hidden">
-            <div className="flex items-center gap-2 px-3 py-1.5 border-b border-gray-100 bg-gray-50">
-              <svg className="h-3.5 w-3.5 text-green-500" viewBox="0 0 20 20" fill="currentColor">
+        <div className="px-3 pb-2 border-t border-border">
+          <div className="rounded-md border border-border overflow-hidden">
+            <div className="flex items-center gap-2 px-3 py-1.5 border-b border-border bg-muted">
+              <svg className="h-3.5 w-3.5 text-success" viewBox="0 0 20 20" fill="currentColor">
                 <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z" clipRule="evenodd" />
               </svg>
-              <span className="text-xs font-mono text-gray-600">todowrite</span>
+              <span className="text-xs font-mono text-muted-foreground">todowrite</span>
               {part.tool.status === 'failed' && (
-                <span className="text-xs text-red-500">failed</span>
+                <span
+                  data-testid="todo-update-failed-detail"
+                  data-tone="danger"
+                  className="text-xs text-danger"
+                >
+                  failed
+                </span>
               )}
             </div>
             {part.tool.input && (
               <div className="px-3 py-2">
-                <div className="font-medium text-xs text-gray-500 mb-1">Input</div>
-                <pre className="whitespace-pre-wrap break-all text-xs text-gray-700 bg-gray-50 rounded p-2 max-h-48 overflow-auto">
+                <div className="font-medium text-xs text-muted-foreground mb-1">Input</div>
+                <pre className="whitespace-pre-wrap break-all text-xs text-foreground bg-muted rounded p-2 max-h-48 overflow-auto">
                   {part.tool.input}
                 </pre>
               </div>
             )}
             {part.tool.output && (
-              <div className="px-3 py-2 border-t border-gray-100">
-                <div className="font-medium text-xs text-gray-500 mb-1">Output</div>
-                <pre className="whitespace-pre-wrap break-all text-xs text-gray-700 bg-gray-50 rounded p-2 max-h-48 overflow-auto">
+              <div className="px-3 py-2 border-t border-border">
+                <div className="font-medium text-xs text-muted-foreground mb-1">Output</div>
+                <pre className="whitespace-pre-wrap break-all text-xs text-foreground bg-muted rounded p-2 max-h-48 overflow-auto">
                   {part.tool.output}
                 </pre>
               </div>
             )}
             {part.tool.error && (
-              <div className="px-3 py-2 text-xs text-red-600 bg-red-50 border-t border-red-100">
+              <div
+                data-testid="todo-update-error"
+                data-tone="danger"
+                className="px-3 py-2 text-xs text-danger bg-danger-subtle border-t border-danger-border"
+              >
                 {part.tool.error}
               </div>
             )}
@@ -557,8 +587,14 @@ function SessionTurnView({ turn }: { turn: SessionTurn }) {
           <span>{formatDateTime(turn.startedAt)}</span>
           {turn.incomplete && (
             <>
-              <span className="text-gray-300">·</span>
-              <span className="text-amber-500">Incomplete</span>
+              <span className="text-muted-foreground/60">·</span>
+              <span
+                data-testid="turn-incomplete-glyph"
+                data-tone="warning"
+                className="text-warning"
+              >
+                Incomplete
+              </span>
             </>
           )}
         </div>
@@ -594,7 +630,11 @@ export function SessionTranscriptView({
 }) {
   if (turns.length === 0 && !isRunning) {
     return (
-      <div className="text-center text-gray-400 text-sm py-12">
+      <div
+        data-testid="transcript-empty-state"
+        data-tone="neutral"
+        className="text-center text-muted-foreground/70 text-sm py-12"
+      >
         No activity recorded for this session
       </div>
     )
@@ -602,8 +642,12 @@ export function SessionTranscriptView({
 
   if (turns.length === 0 && isRunning) {
     return (
-      <div className="flex items-center gap-2 text-sm text-blue-500 justify-center py-12">
-        <span className="inline-block h-2.5 w-2.5 rounded-full bg-blue-500 animate-pulse" />
+      <div
+        data-testid="transcript-empty-state"
+        data-tone="info"
+        className="flex items-center gap-2 text-sm text-info justify-center py-12"
+      >
+        <span className="inline-block h-2.5 w-2.5 rounded-full bg-info animate-pulse" />
         Waiting for activity...
       </div>
     )

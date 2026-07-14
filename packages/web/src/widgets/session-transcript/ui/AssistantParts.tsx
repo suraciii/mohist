@@ -30,12 +30,16 @@ export function AssistantTextPartView({ text, completedAt, isStreaming }: Assist
       <TranscriptMarkdown content={text} />
       <div className="mt-1 flex items-center gap-2">
         {(isIncomplete || isStreaming) && (
-          <span className="inline-block h-1.5 w-1.5 rounded-full bg-blue-400 animate-pulse" />
+          <span
+            data-testid="assistant-text-streaming-glyph"
+            data-tone={isStreaming ? 'info' : 'warning'}
+            className="inline-block h-1.5 w-1.5 rounded-full bg-info animate-pulse"
+          />
         )}
         <Button
           variant="link"
           onClick={handleCopy}
-          className="h-auto p-0 text-xs text-gray-400 hover:text-gray-600 transition-colors"
+          className="h-auto p-0 text-xs text-muted-foreground/70 hover:text-foreground transition-colors"
         >
           {copied ? 'Copied!' : 'Copy'}
         </Button>
@@ -54,10 +58,10 @@ export function ReasoningPartView({ text, startedAt }: ReasoningPartViewProps) {
 
   return (
     <details className="max-w-[90%] sm:max-w-[80%] min-w-0">
-      <summary className="text-xs text-gray-400 cursor-pointer hover:text-gray-600 select-none">
+      <summary className="text-xs text-muted-foreground/70 cursor-pointer hover:text-foreground select-none">
         Thinking... {sizeKB}KB · {formatTime(startedAt)}
       </summary>
-      <pre data-scrollable="" className="mt-1 text-xs text-gray-500 whitespace-pre-wrap break-all max-h-48 overflow-auto bg-gray-50 rounded p-2">
+      <pre data-scrollable="" className="mt-1 text-xs text-muted-foreground whitespace-pre-wrap break-all max-h-48 overflow-auto bg-muted rounded p-2">
         {text}
       </pre>
     </details>
@@ -79,7 +83,11 @@ export function ErrorPartView({ message, kind, at }: ErrorPartViewProps) {
   }
 
   return (
-    <div className="flex items-center gap-1.5 text-xs text-amber-600">
+    <div
+      data-testid="assistant-error-part"
+      data-tone="warning"
+      className="flex items-center gap-1.5 text-xs text-warning"
+    >
       <svg className="h-3 w-3 shrink-0" viewBox="0 0 20 20" fill="currentColor">
         <path fillRule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
       </svg>
@@ -100,9 +108,9 @@ interface DividerPartViewProps {
 export function DividerPartView({ label }: DividerPartViewProps) {
   return (
     <div className="flex items-center gap-2 py-2">
-      <div className="flex-1 border-t border-gray-200" />
-      <span className="text-xs text-gray-400">{label}</span>
-      <div className="flex-1 border-t border-gray-200" />
+      <div className="flex-1 border-t border-border" />
+      <span className="text-xs text-muted-foreground/70">{label}</span>
+      <div className="flex-1 border-t border-border" />
     </div>
   )
 }

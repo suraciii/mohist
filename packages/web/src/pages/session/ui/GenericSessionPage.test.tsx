@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider, useMutation } from '@tanstack/react-query'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import { ProjectProvider } from '../../../entities/project'
@@ -160,7 +160,7 @@ describe('GenericSessionPage', () => {
       _summaryData = baseSummary()
       renderPage()
       await waitFor(() => {
-        expect(screen.getByText('Completed')).toBeInTheDocument()
+        expect(within(screen.getByTestId('session-header')).getByTestId('session-status-badge')).toBeInTheDocument()
       })
       expect(screen.getByText('gpt-4')).toBeInTheDocument()
       const agentNameElements = screen.getAllByText('Test Agent')

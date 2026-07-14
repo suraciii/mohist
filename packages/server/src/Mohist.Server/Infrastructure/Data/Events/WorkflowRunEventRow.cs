@@ -17,6 +17,7 @@ public sealed class WorkflowRunEventRow : IEventRow
     public required string EventId { get; init; }
     public required string Type { get; init; }
     public required DateTimeOffset Time { get; init; }
+    public string? TimeSortKey { get; set; }
     public required string SpecVersion { get; init; }
     public string? Subject { get; init; }
     public required string DataContentType { get; init; }

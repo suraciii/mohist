@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Data.Events;
 
 #nullable disable
 
@@ -12,7 +13,9 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
     [DbContext(typeof(MohistDbContext))]
     partial class MohistDbContextModelSnapshot : ModelSnapshot
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        protected override void BuildModel(ModelBuilder modelBuilder) => BuildModelCore(modelBuilder);
+
+        internal static void BuildModelCore(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.8");
@@ -261,6 +264,11 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("DataStatus")
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("TEXT")
+                        .HasComputedColumnSql(EventReadKeys.DataStatusSql, true);
+
                     b.Property<DateTimeOffset?>("DispatchedAt")
                         .HasColumnType("TEXT");
 
@@ -285,6 +293,11 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.Property<DateTimeOffset>("Time")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("TimeSortKey")
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("TEXT")
+                        .HasComputedColumnSql(EventReadKeys.TimeSortKeySql, true);
+
                     b.Property<string>("Type")
                         .IsRequired()
                         .HasMaxLength(256)
@@ -299,6 +312,12 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.HasIndex("Type", "Time");
 
                     b.HasIndex("Type", "Source", "Id");
+
+                    b.HasIndex("DataStatus", "Type", "TimeSortKey", "Source", "Id")
+                        .HasDatabaseName("IX_AgentSessionEvents_DataStatus_Type_TimeSortKey_Source_Id");
+
+                    b.HasIndex("TimeSortKey", "Source", "Id")
+                        .HasDatabaseName("IX_AgentSessionEvents_TimeSortKey_Source_Id");
 
                     b.ToTable("AgentSessionEvents", (string)null);
                 });
@@ -498,6 +517,11 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.Property<DateTimeOffset>("Time")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("TimeSortKey")
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("TEXT")
+                        .HasComputedColumnSql(EventReadKeys.TimeSortKeySql, true);
+
                     b.Property<string>("Type")
                         .IsRequired()
                         .HasMaxLength(256)
@@ -510,6 +534,9 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasFilter("\"DispatchedAt\" IS NULL");
 
                     b.HasIndex("Type", "Source", "Id");
+
+                    b.HasIndex("TimeSortKey", "Source", "Id")
+                        .HasDatabaseName("IX_IssueEvents_TimeSortKey_Source_Id");
 
                     b.ToTable("IssueEvents", (string)null);
                 });
@@ -556,6 +583,11 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.Property<DateTimeOffset>("Time")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("TimeSortKey")
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("TEXT")
+                        .HasComputedColumnSql(EventReadKeys.TimeSortKeySql, true);
+
                     b.Property<string>("Type")
                         .IsRequired()
                         .HasMaxLength(256)
@@ -568,6 +600,9 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasFilter("\"DispatchedAt\" IS NULL");
 
                     b.HasIndex("Type", "Source", "Id");
+
+                    b.HasIndex("TimeSortKey", "Source", "Id")
+                        .HasDatabaseName("IX_WorkflowRunEvents_TimeSortKey_Source_Id");
 
                     b.ToTable("WorkflowRunEvents", (string)null);
                 });
@@ -1256,6 +1291,11 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("PayloadStatus")
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("TEXT")
+                        .HasComputedColumnSql(EventReadKeys.PayloadStatusSql, true);
+
                     b.Property<int>("RawEventCount")
                         .HasColumnType("INTEGER");
 
@@ -1281,6 +1321,9 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
 
                     b.HasIndex("TurnId", "Type", "CorrelationKey")
                         .IsUnique();
+
+                    b.HasIndex("Type", "PayloadStatus", "LastSeenAt", "Id")
+                        .HasDatabaseName("IX_AgentSessionTranscriptParts_Type_PayloadStatus_LastSeenAt_Id");
 
                     b.ToTable("AgentSessionTranscriptParts", (string)null);
                 });

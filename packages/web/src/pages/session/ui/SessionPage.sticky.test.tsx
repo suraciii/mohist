@@ -254,7 +254,7 @@ describe('SessionPage sticky recovery bar', () => {
     expect(recoveryBar).not.toBeNull()
 
     const className = recoveryBar!.className
-    expect(className).toContain('bg-white')
+    expect(className).toContain('bg-background')
     expect(className).toMatch(/\bz-\d+/)
     expect(className).toContain('top-9')
   })
@@ -276,7 +276,7 @@ describe('SessionPage sticky recovery bar', () => {
     expect(reset).not.toBeNull()
   })
 
-  it('renders the sticky title strip with identity info and usage摘要 inside the scroll container', async () => {
+  it('renders the sticky title strip with identity and status inside the scroll container', async () => {
     const { container } = await renderPage()
     const scrollContainer = container.querySelector('[data-testid="session-transcript-scroll-container"]')
     expect(scrollContainer).not.toBeNull()
@@ -293,13 +293,13 @@ describe('SessionPage sticky recovery bar', () => {
     const className = stickyTitle!.className
     expect(className).toContain('sticky')
     expect(className).toContain('top-0')
-    expect(className).toContain('bg-white')
+    expect(className).toContain('bg-background')
 
     expect(stickyTitle!.textContent).toContain('session-1')
     expect(stickyTitle!.textContent).toContain('Completed')
     expect(stickyTitle!.textContent).toContain('2 turns')
-    expect(stickyTitle!.textContent).toContain('1.5k tokens')
-    expect(stickyTitle!.textContent).toContain('38% ctx')
+    expect(stickyTitle!.textContent).not.toContain('tokens')
+    expect(stickyTitle!.textContent).not.toContain('ctx')
   })
 
   it('keeps the outer session header non-sticky — only the title strip and recovery bar are sticky inside the scroll container', async () => {

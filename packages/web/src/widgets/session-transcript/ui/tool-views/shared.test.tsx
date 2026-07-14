@@ -12,29 +12,44 @@ import {
 
 describe('tool-views shared', () => {
   describe('ToolStatusDot', () => {
-    it('renders a green dot for completed', () => {
+    it('renders a success-tone dot for completed', () => {
       const { container } = render(<ToolStatusDot status="completed" />)
-      expect(container.querySelector('.bg-green-500')).toBeInTheDocument()
+      const dot = container.querySelector('span[data-tone="success"]')
+      expect(dot).not.toBeNull()
+      expect(dot?.className).toContain('bg-success')
+      expect(dot?.className).not.toContain('bg-green-')
     })
 
-    it('renders a red dot for failed', () => {
+    it('renders a danger-tone dot for failed', () => {
       const { container } = render(<ToolStatusDot status="failed" />)
-      expect(container.querySelector('.bg-red-500')).toBeInTheDocument()
+      const dot = container.querySelector('span[data-tone="danger"]')
+      expect(dot).not.toBeNull()
+      expect(dot?.className).toContain('bg-danger')
+      expect(dot?.className).not.toContain('bg-red-')
     })
 
-    it('renders a gray dot for cancelled', () => {
+    it('renders a neutral dot for cancelled', () => {
       const { container } = render(<ToolStatusDot status="cancelled" />)
-      expect(container.querySelector('.bg-gray-400')).toBeInTheDocument()
+      const dot = container.querySelector('span[data-tone="neutral"]')
+      expect(dot).not.toBeNull()
+      expect(dot?.className).toContain('bg-muted-foreground/60')
+      expect(dot?.className).not.toContain('bg-gray-')
     })
 
-    it('renders a default gray dot for pending', () => {
+    it('renders a default neutral dot for pending', () => {
       const { container } = render(<ToolStatusDot status="pending" />)
-      expect(container.querySelector('.bg-gray-300')).toBeInTheDocument()
+      const dot = container.querySelector('span[data-tone="neutral"]')
+      expect(dot).not.toBeNull()
+      expect(dot?.className).not.toContain('bg-gray-')
     })
 
-    it('renders the animated running indicator', () => {
+    it('renders the animated running indicator with info-tone', () => {
       const { container } = render(<ToolStatusDot status="running" />)
-      expect(container.querySelector('.animate-ping')).toBeInTheDocument()
+      const indicator = container.querySelector('.animate-ping')
+      expect(indicator).not.toBeNull()
+      const wrapper = container.querySelector('span[data-tone="info"]')
+      expect(wrapper).not.toBeNull()
+      expect(indicator?.className).toContain('bg-info')
     })
   })
 

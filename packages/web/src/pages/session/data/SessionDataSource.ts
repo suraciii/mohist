@@ -47,6 +47,14 @@ export interface SessionDataSourceResult {
   backPath: string
   backLabel: string
   issueTitle?: string
+  /**
+   * Project-scoped entry point to the workflow context. For issue-bound
+   * sessions this links to the issue detail page (which hosts the
+   * WorkflowSessionsPanel); for sessions with no issue binding the field
+   * is undefined so the entry point is not fabricated.
+   */
+  workflowContextPath?: string
+  workflowContextLabel?: string
 
   siblingNav: React.ReactNode | null
   siblingSidebar: React.ReactNode | null

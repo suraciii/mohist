@@ -187,6 +187,8 @@ export interface AgentActivitySession {
   failureReason: string | null
   eventSummary?: AgentSessionEventSummary
   usage?: AgentSessionUsage
+  agentId?: string | null
+  agentName?: string | null
 }
 
 export interface AgentActivityWaiting {
@@ -194,7 +196,7 @@ export interface AgentActivityWaiting {
   issueNumber: number
   issueTitle: string
   stage: string | null
-  label: 'Needs Approval'
+  label: 'Needs Approval' | 'Blocked'
   requestedAt: string | null
   preview: string | null
 }

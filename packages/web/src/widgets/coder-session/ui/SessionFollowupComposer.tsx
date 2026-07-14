@@ -85,7 +85,7 @@ export function SessionFollowupComposer({
         data-testid="session-followup-composer"
         data-disabled="true"
         className={cn(
-          'shrink-0 border-t border-gray-200 bg-gray-50 px-4 py-2 text-xs text-gray-500',
+          'shrink-0 border-t border-border bg-muted px-4 py-2 text-xs text-muted-foreground',
           className,
         )}
       >
@@ -105,7 +105,7 @@ export function SessionFollowupComposer({
       data-testid="session-followup-composer"
       onSubmit={handleSubmit}
       className={cn(
-        'shrink-0 border-t border-gray-200 bg-white px-4 py-3',
+        'shrink-0 border-t border-border bg-background px-4 py-3',
         className,
       )}
     >
@@ -135,8 +135,9 @@ export function SessionFollowupComposer({
       <div className="mt-1 flex items-center justify-between text-xs" aria-live="polite">
         <span
           data-testid="session-followup-status"
+          data-tone={composerState === 'sent' ? 'success' : 'neutral'}
           className={cn(
-            composerState === 'sent' ? 'text-green-600' : 'text-transparent',
+            composerState === 'sent' ? 'text-success' : 'text-transparent',
           )}
         >
           {statusLabel ?? 'placeholder'}
@@ -145,7 +146,8 @@ export function SessionFollowupComposer({
           <span
             role="alert"
             data-testid="session-followup-error"
-            className="text-red-600"
+            data-tone="danger"
+            className="text-danger"
           >
             {inlineError}
           </span>

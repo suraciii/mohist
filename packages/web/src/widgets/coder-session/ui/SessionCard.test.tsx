@@ -2,8 +2,8 @@ import '@testing-library/jest-dom'
 import { render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { describe, expect, it } from 'vitest'
-import type { SessionCard as SessionCardType } from '@/entities/agent-ops'
-import { ActiveSessionCard, RecentCard } from './SessionCard'
+import type { SessionCard as SessionCardType, WaitingCard as WaitingCardType } from '@/entities/agent-ops'
+import { ActiveSessionCard, RecentCard, WaitingCard } from './SessionCard'
 
 function makeCard(overrides: Partial<SessionCardType> = {}): SessionCardType {
   return {
@@ -180,5 +180,14 @@ describe('ActiveSessionCard context health', () => {
     expect(indicator).toHaveAttribute('title', 'Context window 95% full — at limit, compact or reset recommended')
     expect(indicator).toHaveAttribute('aria-label', 'Context window 95% full — at limit, compact or reset recommended')
     expect(screen.getByTestId('context-health-glyph')).toBeInTheDocument()
+  })
+})
+
+describe('WaitingCard', () => {
+  it('uses warning treatment for a blocked wait', () => {
+    const card: WaitingCardType = { issueId: 'issue-1', issueNumber: '12', issueTitle: 'Resolve merge conflict', issueStage: 'Check', label: 'Blocked' }
+    render(<MemoryRouter><WaitingCard card={card} /></MemoryRouter>)
+
+    expect(screen.getByTestId('waiting-card-chip')).toHaveAttribute('data-tone', 'warning')
   })
 })

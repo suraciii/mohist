@@ -45,7 +45,7 @@ function truncate(text: string, max: number): string {
 function StatusIcon({ state }: { state: ToolCallEntry['state'] }) {
   if (state === 'started') {
     return (
-      <svg className="h-3.5 w-3.5 text-blue-500 animate-spin" viewBox="0 0 24 24" fill="none">
+      <svg className="h-3.5 w-3.5 text-info animate-spin" viewBox="0 0 24 24" fill="none">
         <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
         <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
       </svg>
@@ -53,13 +53,13 @@ function StatusIcon({ state }: { state: ToolCallEntry['state'] }) {
   }
   if (state === 'completed') {
     return (
-      <svg className="h-3.5 w-3.5 text-green-500" viewBox="0 0 20 20" fill="currentColor">
+      <svg className="h-3.5 w-3.5 text-success" viewBox="0 0 20 20" fill="currentColor">
         <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z" clipRule="evenodd" />
       </svg>
     )
   }
   return (
-    <svg className="h-3.5 w-3.5 text-red-500" viewBox="0 0 20 20" fill="currentColor">
+    <svg className="h-3.5 w-3.5 text-danger" viewBox="0 0 20 20" fill="currentColor">
       <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.28 7.22a.75.75 0 00-1.06 1.06L8.94 10l-1.72 1.72a.75.75 0 101.06 1.06L10 11.06l1.72 1.72a.75.75 0 101.06-1.06L11.06 10l1.72-1.72a.75.75 0 00-1.06-1.06L10 8.94 8.28 7.22z" clipRule="evenodd" />
     </svg>
   )
@@ -76,35 +76,35 @@ export function ToolCallTimelineEntry({ entry }: { entry: ToolCallEntry }) {
     <div className="flex gap-2">
       <div className="flex flex-col items-center shrink-0 pt-0.5">
         <StatusIcon state={entry.state} />
-        <div className="w-px flex-1 bg-gray-200 mt-1" />
+        <div className="w-px flex-1 bg-muted mt-1" />
       </div>
       <div className="flex-1 min-w-0 pb-3">
         <Button
           variant="ghost"
           size="sm"
           onClick={() => entry.state !== 'started' && setExpanded(!expanded)}
-          className={`flex h-auto items-center justify-start gap-2 w-full text-left py-0 ${entry.state !== 'started' ? 'cursor-pointer hover:bg-gray-50 rounded px-1 -mx-1' : 'cursor-default px-0'}`}
+          className={`flex h-auto items-center justify-start gap-2 w-full text-left py-0 ${entry.state !== 'started' ? 'cursor-pointer hover:bg-muted rounded px-1 -mx-1' : 'cursor-default px-0'}`}
         >
-          <span className="font-mono text-xs text-gray-700">
+          <span className="font-mono text-xs text-foreground">
             {entry.toolName}
           </span>
           {displayTitle !== entry.toolName && (
-            <span className="text-xs text-gray-500 truncate">
+            <span className="text-xs text-muted-foreground truncate">
               {displayTitle}
             </span>
           )}
           {entry.state === 'started' && (
-            <span className="text-xs text-blue-500">running...</span>
+            <span className="text-xs text-info">running...</span>
           )}
           {entry.duration != null && entry.state !== 'started' && (
-            <span className="text-xs text-gray-400">{formatDuration(entry.duration)}</span>
+            <span className="text-xs text-muted-foreground/70">{formatDuration(entry.duration)}</span>
           )}
           {entry.state === 'failed' && entry.error && (
-            <span className="text-xs text-red-500 truncate">{entry.error}</span>
+            <span className="text-xs text-danger truncate">{entry.error}</span>
           )}
           {entry.state !== 'started' && (
             <svg
-              className={`h-3 w-3 text-gray-400 shrink-0 transition-transform ml-auto ${expanded ? 'rotate-90' : ''}`}
+              className={`h-3 w-3 text-muted-foreground/70 shrink-0 transition-transform ml-auto ${expanded ? 'rotate-90' : ''}`}
               viewBox="0 0 20 20"
               fill="currentColor"
             >
@@ -117,16 +117,16 @@ export function ToolCallTimelineEntry({ entry }: { entry: ToolCallEntry }) {
           <div className="mt-1.5 space-y-1.5 text-xs">
             {displayInput && (
               <div>
-                <div className="font-medium text-gray-500 mb-0.5">Input</div>
-                <pre className="whitespace-pre-wrap break-all text-gray-700 bg-gray-50 rounded p-2 max-h-32 overflow-auto">
+                <div className="font-medium text-muted-foreground mb-0.5">Input</div>
+                <pre className="whitespace-pre-wrap break-all text-foreground bg-muted rounded p-2 max-h-32 overflow-auto">
                   {tryFormatJson(typeof displayInput === 'string' ? displayInput : JSON.stringify(displayInput))}
                 </pre>
               </div>
             )}
             {displayOutput && (
               <div>
-                <div className="font-medium text-gray-500 mb-0.5">Output</div>
-                <pre className="whitespace-pre-wrap break-all text-gray-700 bg-gray-50 rounded p-2 max-h-48 overflow-auto">
+                <div className="font-medium text-muted-foreground mb-0.5">Output</div>
+                <pre className="whitespace-pre-wrap break-all text-foreground bg-muted rounded p-2 max-h-48 overflow-auto">
                   {truncate(tryFormatJson(typeof displayOutput === 'string' ? displayOutput : JSON.stringify(displayOutput)), 2000)}
                 </pre>
               </div>
@@ -167,19 +167,19 @@ export function WorkflowStatusTimeline({ currentStage }: { currentStage: string 
             data-state={stageState}
           >
             {i > 0 && (
-              <div className={`h-0.5 w-4 ${isCompleted || isCurrent ? 'bg-blue-500' : 'bg-gray-200'}`} />
+              <div className={`h-0.5 w-4 ${isCompleted || isCurrent ? 'bg-info' : 'bg-muted'}`} />
             )}
             <div className="flex items-center gap-1">
               {isCompleted ? (
-                <svg className="h-3.5 w-3.5 text-green-500" viewBox="0 0 20 20" fill="currentColor">
+                <svg className="h-3.5 w-3.5 text-success" viewBox="0 0 20 20" fill="currentColor">
                   <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z" clipRule="evenodd" />
                 </svg>
               ) : isCurrent ? (
-                <span className="inline-block h-2.5 w-2.5 rounded-full bg-blue-500 animate-pulse" />
+                <span className="inline-block h-2.5 w-2.5 rounded-full bg-info animate-pulse" />
               ) : (
-                <span className="inline-block h-2 w-2 rounded-full bg-gray-200" />
+                <span className="inline-block h-2 w-2 rounded-full bg-muted" />
               )}
-              <span className={`text-xs ${isCompleted || isCurrent ? 'text-blue-600 font-medium' : 'text-gray-400'}`}>
+              <span className={`text-xs ${isCompleted || isCurrent ? 'text-info font-medium' : 'text-muted-foreground/70'}`}>
                 {stage.label}
               </span>
             </div>
@@ -197,28 +197,28 @@ function isBuildRoundLabel(label: string): boolean {
 function getRoundColor(round: Round, isLive: boolean) {
   if (isBuildRoundLabel(round.label)) {
     return {
-      dot: 'bg-purple-400',
-      border: 'border-purple-200',
-      bg: 'bg-purple-50/30',
-      text: 'text-purple-700',
-      labelBg: 'bg-purple-100',
+      dot: 'bg-info',
+      border: 'border-info-border',
+      bg: 'bg-info-subtle/30',
+      text: 'text-info',
+      labelBg: 'bg-info-subtle',
     }
   }
   if (isLive && !round.completedAt) {
     return {
-      dot: 'bg-blue-500 animate-pulse',
-      border: 'border-blue-200',
-      bg: 'bg-blue-50/30',
-      text: 'text-blue-700',
-      labelBg: 'bg-blue-100',
+      dot: 'bg-info animate-pulse',
+      border: 'border-info-border',
+      bg: 'bg-info-subtle/30',
+      text: 'text-info',
+      labelBg: 'bg-info-subtle',
     }
   }
   return {
-    dot: 'bg-gray-400',
-    border: 'border-gray-200',
-    bg: 'bg-white',
-    text: 'text-gray-700',
-    labelBg: 'bg-gray-100',
+    dot: 'bg-muted-foreground/60',
+    border: 'border-border',
+    bg: 'bg-background',
+    text: 'text-foreground',
+    labelBg: 'bg-muted',
   }
 }
 
@@ -242,10 +242,10 @@ export function RoundSection({
         variant="ghost"
         size="sm"
         onClick={() => setExpanded(!expanded)}
-        className="flex h-auto items-center justify-start gap-2 w-full text-left px-3 py-2 hover:bg-gray-50/50 rounded-t-lg"
+        className="flex h-auto items-center justify-start gap-2 w-full text-left px-3 py-2 hover:bg-muted/50 rounded-t-lg"
       >
         <svg
-          className={`h-3 w-3 text-gray-400 shrink-0 transition-transform ${expanded ? 'rotate-90' : ''}`}
+          className={`h-3 w-3 text-muted-foreground/70 shrink-0 transition-transform ${expanded ? 'rotate-90' : ''}`}
           viewBox="0 0 20 20"
           fill="currentColor"
         >
@@ -254,35 +254,35 @@ export function RoundSection({
         <span className={`inline-block h-2 w-2 rounded-full ${colors.dot}`} />
         <span className={`text-xs font-medium ${colors.text}`}>{round.label}</span>
         {round.startedAt && (
-          <span className="text-xs text-gray-400">
+          <span className="text-xs text-muted-foreground/70">
             {new Date(round.startedAt).toLocaleTimeString()}
           </span>
         )}
         {isLiveRound && (
-          <span className="text-xs text-blue-500 ml-auto">Live</span>
+          <span className="text-xs text-info ml-auto">Live</span>
         )}
         {!round.completedAt && !isLiveRound && round.agentText && (
-          <span className="text-xs text-gray-400 ml-auto">In progress</span>
+          <span className="text-xs text-muted-foreground/70 ml-auto">In progress</span>
         )}
       </Button>
 
       {expanded && (
-        <div className="px-3 pb-3 space-y-2 border-t border-gray-100">
+        <div className="px-3 pb-3 space-y-2 border-t border-border">
           {round.agentText && (
-            <div className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed pt-2">
+            <div className="text-sm text-foreground whitespace-pre-wrap leading-relaxed pt-2">
               {round.agentText}
               {isLiveRound && isStreaming && (
-                <span className="inline-block w-1.5 h-4 bg-blue-500 ml-0.5 animate-pulse align-text-bottom" />
+                <span className="inline-block w-1.5 h-4 bg-info ml-0.5 animate-pulse align-text-bottom" />
               )}
             </div>
           )}
 
           {round.thoughtText && (
             <details className="pt-1">
-              <summary className="text-xs text-gray-400 cursor-pointer hover:text-gray-600 select-none">
+              <summary className="text-xs text-muted-foreground/70 cursor-pointer hover:text-foreground select-none">
                 Thinking...{round.thoughtText.length > 500 ? ` (${(round.thoughtText.length / 1024).toFixed(1)}KB)` : ''}
               </summary>
-              <pre className="mt-1 text-xs text-gray-500 whitespace-pre-wrap break-all max-h-48 overflow-auto bg-gray-50 rounded p-2">
+              <pre className="mt-1 text-xs text-muted-foreground whitespace-pre-wrap break-all max-h-48 overflow-auto bg-muted rounded p-2">
                 {round.thoughtText.length > 20000
                   ? round.thoughtText.slice(0, 20000) + '\n... (truncated)'
                   : round.thoughtText}
@@ -326,7 +326,7 @@ export function RoundSection({
           )}
 
           {!hasContent && !isLiveRound && (
-            <div className="text-xs text-gray-400 pt-2">No output recorded</div>
+            <div className="text-xs text-muted-foreground/70 pt-2">No output recorded</div>
           )}
         </div>
       )}
@@ -338,32 +338,38 @@ function TaskStatusIcon({ status }: { status: string }) {
   switch (status) {
     case 'passed':
       return (
-        <svg className="h-3.5 w-3.5 text-green-500" viewBox="0 0 20 20" fill="currentColor">
+        <svg className="h-3.5 w-3.5 text-success" viewBox="0 0 20 20" fill="currentColor">
           <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z" clipRule="evenodd" />
         </svg>
       )
     case 'running':
       return (
-        <svg className="h-3.5 w-3.5 text-blue-500 animate-spin" viewBox="0 0 24 24" fill="none">
+        <svg className="h-3.5 w-3.5 text-info animate-spin" viewBox="0 0 24 24" fill="none">
           <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
           <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
         </svg>
       )
     case 'failed':
       return (
-        <svg className="h-3.5 w-3.5 text-red-500" viewBox="0 0 20 20" fill="currentColor">
+        <svg className="h-3.5 w-3.5 text-danger" viewBox="0 0 20 20" fill="currentColor">
           <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.28 7.22a.75.75 0 00-1.06 1.06L8.94 10l-1.72 1.72a.75.75 0 101.06 1.06L10 11.06l1.72 1.72a.75.75 0 101.06-1.06L11.06 10l1.72-1.72a.75.75 0 00-1.06-1.06L10 8.94 8.28 7.22z" clipRule="evenodd" />
         </svg>
       )
     case 'retrying':
       return (
-        <svg className="h-3.5 w-3.5 text-orange-500" viewBox="0 0 20 20" fill="currentColor">
+        <svg
+          data-testid="task-status-retrying"
+          data-tone="warning"
+          className="h-3.5 w-3.5 text-warning"
+          viewBox="0 0 20 20"
+          fill="currentColor"
+        >
           <path fillRule="evenodd" d="M15.312 11.424a5.5 5.5 0 01-9.201 2.466l-.312-.311h2.433a.75.75 0 000-1.5H4.598a.75.75 0 00-.75.75v3.634a.75.75 0 001.5 0v-2.233l.312.311a7 7 0 0011.712-3.138.75.75 0 00-1.449-.39zm-10.624-2.85a5.5 5.5 0 019.2-2.464l.311.311h-2.432a.75.75 0 000 1.5h3.634a.75.75 0 00.75-.75V3.538a.75.75 0 00-1.5 0v2.234l-.311-.312a7 7 0 00-11.712 3.138.75.75 0 001.449.39z" clipRule="evenodd" />
         </svg>
       )
     default:
       return (
-        <span className="inline-block h-2.5 w-2.5 rounded-full bg-gray-300" />
+        <span className="inline-block h-2.5 w-2.5 rounded-full bg-muted-foreground/60" />
       )
   }
 }
@@ -379,16 +385,16 @@ export function TaskProgressPanel({
   const total = loopProgress?.total ?? tasks.length
 
   return (
-    <div className="rounded-lg border border-purple-200 bg-purple-50/30 p-3 mb-2">
+    <div className="rounded-lg border border-info-border bg-info-subtle/30 p-3 mb-2">
       <div className="flex items-center justify-between mb-2">
-        <span className="text-xs font-medium text-purple-800">Task Progress</span>
-        <span className="text-xs text-purple-600">{passed}/{total} passed</span>
+        <span className="text-xs font-medium text-info">Task Progress</span>
+        <span className="text-xs text-info">{passed}/{total} passed</span>
       </div>
       <div className="flex flex-wrap gap-1.5">
         {tasks.map((task) => (
           <div key={task.taskId} className="flex items-center gap-1" title={task.error ?? task.status}>
             <TaskStatusIcon status={task.status} />
-            <span className="text-xs font-mono text-gray-700">{task.taskId}</span>
+            <span className="text-xs font-mono text-foreground">{task.taskId}</span>
           </div>
         ))}
       </div>
@@ -397,7 +403,7 @@ export function TaskProgressPanel({
           {tasks
             .filter((t) => t.status === 'failed' && t.error)
             .map((t) => (
-              <div key={t.taskId} className="text-xs text-red-600 bg-red-50 rounded px-2 py-1">
+              <div key={t.taskId} className="text-xs text-danger bg-danger-subtle rounded px-2 py-1">
                 <span className="font-mono">{t.taskId}:</span> {t.error}
               </div>
             ))}
@@ -410,8 +416,8 @@ export function TaskProgressPanel({
 function RecoveryBanner({ status }: { status: RecoveryStatus }) {
   if (status.status === 'detected') {
     return (
-      <div className="flex items-center gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-        <svg className="h-4 w-4 shrink-0 text-amber-500" viewBox="0 0 20 20" fill="currentColor">
+      <div className="flex items-center gap-2 rounded-md border border-warning-border bg-warning-subtle px-3 py-2 text-xs text-warning">
+        <svg className="h-4 w-4 shrink-0 text-warning" viewBox="0 0 20 20" fill="currentColor">
           <path fillRule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
         </svg>
         <span className="font-medium">Coder agent 连接中断，正在尝试恢复...</span>
@@ -421,8 +427,8 @@ function RecoveryBanner({ status }: { status: RecoveryStatus }) {
 
   if (status.status === 'recovering') {
     return (
-      <div className="flex items-center gap-2 rounded-md border border-blue-300 bg-blue-50 px-3 py-2 text-xs text-blue-800">
-        <svg className="h-4 w-4 shrink-0 text-blue-500 animate-spin" viewBox="0 0 24 24" fill="none">
+      <div className="flex items-center gap-2 rounded-md border border-info-border bg-info-subtle px-3 py-2 text-xs text-info">
+        <svg className="h-4 w-4 shrink-0 text-info animate-spin" viewBox="0 0 24 24" fill="none">
           <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
           <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
         </svg>
@@ -433,8 +439,8 @@ function RecoveryBanner({ status }: { status: RecoveryStatus }) {
 
   if (status.status === 'failed') {
     return (
-      <div className="flex items-center gap-2 rounded-md border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-800">
-        <svg className="h-4 w-4 shrink-0 text-red-500" viewBox="0 0 20 20" fill="currentColor">
+      <div className="flex items-center gap-2 rounded-md border border-danger-border bg-danger-subtle px-3 py-2 text-xs text-danger">
+        <svg className="h-4 w-4 shrink-0 text-danger" viewBox="0 0 20 20" fill="currentColor">
           <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.28 7.22a.75.75 0 00-1.06 1.06L8.94 10l-1.72 1.72a.75.75 0 101.06 1.06L10 11.06l1.72 1.72a.75.75 0 101.06-1.06L11.06 10l1.72-1.72a.75.75 0 00-1.06-1.06L10 8.94 8.28 7.22z" clipRule="evenodd" />
         </svg>
         <span className="font-medium">恢复失败{status.reason ? `: ${status.reason}` : ''}</span>
@@ -448,8 +454,8 @@ function RecoveryBanner({ status }: { status: RecoveryStatus }) {
 function RecoveryEventIndicator({ event }: { event: RecoveryEvent }) {
   if (event.status === 'detected') {
     return (
-      <div className="flex items-center gap-1.5 text-xs text-amber-700 py-0.5">
-        <svg className="h-3 w-3 shrink-0 text-amber-500" viewBox="0 0 20 20" fill="currentColor">
+      <div className="flex items-center gap-1.5 text-xs text-warning py-0.5">
+        <svg className="h-3 w-3 shrink-0 text-warning" viewBox="0 0 20 20" fill="currentColor">
           <path fillRule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
         </svg>
         <span>Coder agent 连接中断</span>
@@ -459,8 +465,8 @@ function RecoveryEventIndicator({ event }: { event: RecoveryEvent }) {
 
   if (event.status === 'recovering') {
     return (
-      <div className="flex items-center gap-1.5 text-xs text-blue-700 py-0.5">
-        <svg className="h-3 w-3 shrink-0 text-blue-500" viewBox="0 0 20 20" fill="currentColor">
+      <div className="flex items-center gap-1.5 text-xs text-info py-0.5">
+        <svg className="h-3 w-3 shrink-0 text-info" viewBox="0 0 20 20" fill="currentColor">
           <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z" clipRule="evenodd" />
         </svg>
         <span>尝试恢复 (attempt {event.attempt})</span>
@@ -470,8 +476,8 @@ function RecoveryEventIndicator({ event }: { event: RecoveryEvent }) {
 
   if (event.status === 'recovered') {
     return (
-      <div className="flex items-center gap-1.5 text-xs text-green-700 py-0.5">
-        <svg className="h-3 w-3 shrink-0 text-green-500" viewBox="0 0 20 20" fill="currentColor">
+      <div className="flex items-center gap-1.5 text-xs text-success py-0.5">
+        <svg className="h-3 w-3 shrink-0 text-success" viewBox="0 0 20 20" fill="currentColor">
           <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z" clipRule="evenodd" />
         </svg>
         <span>恢复成功</span>
@@ -481,8 +487,8 @@ function RecoveryEventIndicator({ event }: { event: RecoveryEvent }) {
 
   if (event.status === 'failed') {
     return (
-      <div className="flex items-center gap-1.5 text-xs text-red-700 py-0.5">
-        <svg className="h-3 w-3 shrink-0 text-red-500" viewBox="0 0 20 20" fill="currentColor">
+      <div className="flex items-center gap-1.5 text-xs text-danger py-0.5">
+        <svg className="h-3 w-3 shrink-0 text-danger" viewBox="0 0 20 20" fill="currentColor">
           <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.28 7.22a.75.75 0 00-1.06 1.06L8.94 10l-1.72 1.72a.75.75 0 101.06 1.06L10 11.06l1.72 1.72a.75.75 0 101.06-1.06L11.06 10l1.72-1.72a.75.75 0 00-1.06-1.06L10 8.94 8.28 7.22z" clipRule="evenodd" />
         </svg>
         <span>恢复失败{event.reason ? `: ${event.reason}` : ''}</span>
@@ -507,16 +513,16 @@ export function SessionTimeline({
 }: SessionTimelineProps) {
   if (isLoading) {
     return (
-      <div className="rounded-lg border border-gray-200 bg-white p-4">
-        <div className="text-sm text-gray-400 text-center">Loading session...</div>
+      <div className="rounded-lg border border-border bg-background p-4">
+        <div className="text-sm text-muted-foreground/70 text-center">Loading session...</div>
       </div>
     )
   }
 
   if (rounds.length === 0 && !isStreaming) {
     return (
-      <div className="rounded-lg border border-gray-200 bg-white p-4">
-        <div className="text-sm text-gray-400 text-center">No agent activity yet</div>
+      <div className="rounded-lg border border-border bg-background p-4">
+        <div className="text-sm text-muted-foreground/70 text-center">No agent activity yet</div>
       </div>
     )
   }
@@ -532,18 +538,18 @@ export function SessionTimeline({
   const hasCompactions = allCompactions.length > 0
 
   return (
-    <div className="rounded-lg border border-blue-200 bg-blue-50/30">
-      <div className="px-3 py-2 border-b border-blue-200 flex items-center gap-2">
-        <span className="inline-block h-2.5 w-2.5 rounded-full bg-blue-500" />
-        <span className="text-sm text-blue-800 font-semibold">Agent Session</span>
+    <div className="rounded-lg border border-info-border bg-info-subtle/30">
+      <div className="px-3 py-2 border-b border-info-border flex items-center gap-2">
+        <span className="inline-block h-2.5 w-2.5 rounded-full bg-info" />
+        <span className="text-sm text-info font-semibold">Agent Session</span>
         {isLive && isStreaming && (
-          <span className="text-xs text-blue-500 ml-auto flex items-center gap-1">
-            <span className="inline-block h-2 w-2 rounded-full bg-blue-500 animate-pulse" />
+          <span className="text-xs text-info ml-auto flex items-center gap-1">
+            <span className="inline-block h-2 w-2 rounded-full bg-info animate-pulse" />
             Live
           </span>
         )}
         {!isLive && rounds.length > 0 && (
-          <span className="text-xs text-gray-400 ml-auto">History</span>
+          <span className="text-xs text-muted-foreground/70 ml-auto">History</span>
         )}
       </div>
 

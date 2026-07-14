@@ -29,24 +29,24 @@ export interface ContextHealthIndicatorProps {
 }
 
 const DOT_CLASS: Record<ContextHealthStatus, string> = {
-  green: 'bg-gray-400',
-  yellow: 'bg-yellow-500',
-  red: 'bg-red-500',
+  green: 'bg-muted-foreground/60',
+  yellow: 'bg-warning',
+  red: 'bg-danger',
 }
 
 const TEXT_CLASS: Record<ContextHealthStatus, string> = {
-  // Healthy usage is deliberately quiet: neutral gray, no warning
+  // Healthy usage is deliberately quiet: neutral muted-foreground, no warning
   // color, no background pill. The alert treatment reserved for
   // yellow/red signals "this needs attention".
-  green: 'text-gray-600',
-  yellow: 'text-yellow-800',
-  red: 'text-red-800',
+  green: 'text-muted-foreground',
+  yellow: 'text-warning',
+  red: 'text-danger',
 }
 
 const CONTAINER_CLASS: Record<ContextHealthStatus, string> = {
   green: '',
-  yellow: 'rounded px-1.5 bg-yellow-50 border border-yellow-300',
-  red: 'rounded px-1.5 bg-red-50 border border-red-300',
+  yellow: 'rounded px-1.5 bg-warning-subtle border border-warning-border',
+  red: 'rounded px-1.5 bg-danger-subtle border border-danger-border',
 }
 
 const SEVERITY_LABEL: Record<ContextHealthStatus, 'ok' | 'warning' | 'critical'> = {
@@ -143,7 +143,7 @@ export function ContextHealthIndicator({
       />
       <span className="tabular-nums">{label}</span>
       {showTokens && contextWindowUsed != null && contextWindowSize != null && (
-        <span className="text-gray-500 font-normal ml-0.5">
+        <span className="text-muted-foreground font-normal ml-0.5">
           ({formatCompactPair(contextWindowUsed, contextWindowSize)})
         </span>
       )}
