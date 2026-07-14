@@ -1,16 +1,5 @@
 import { cn } from '@/shared/lib/utils'
-
-/**
- * One sample of a context-usage trend. Mirrors the wire projection of
- * `AgentUsageDto.contextUsageHistory` exposed by the live activity feed
- * (issue-245 T-002 / design D5). The field is omitted from the wire
- * when empty, so receiving `null` / `undefined` here simply means "no
- * history" and the chart degrades to hidden.
- */
-export interface ContextUsageTrendSample {
-  at: string
-  percent: number
-}
+import type { ContextUsageHistoryEntry } from '../model/types'
 
 export interface ContextUsageTrendMiniChartProps {
   /**
@@ -19,7 +8,7 @@ export interface ContextUsageTrendMiniChartProps {
    * to `null` whenever fewer than two samples are available so a freshly
    * started session does not render a broken or empty-axis chart.
    */
-  history?: ContextUsageTrendSample[] | null
+  history?: ContextUsageHistoryEntry[] | null
   /**
    * Pixel width of the rendered SVG. Height scales to keep a 4:1
    * aspect ratio so the line stays legible at compact card sizes.
@@ -47,7 +36,7 @@ const FILL_CLASS = 'fill-gray-400/15'
  * to the right edge. Y is inverted so a higher percent sits higher on
  * the chart (matching the snapshot bar above this widget).
  */
-function buildPath(samples: ContextUsageTrendSample[], innerWidth: number, innerHeight: number): string {
+function buildPath(samples: ContextUsageHistoryEntry[], innerWidth: number, innerHeight: number): string {
   const points: Array<{ x: number; y: number }> = []
   const stepCount = samples.length - 1
   for (let i = 0; i < samples.length; i += 1) {
@@ -74,7 +63,7 @@ function buildFillPath(linePath: string, innerWidth: number, innerHeight: number
  * [0, 100] band rather than dropped — the chart tolerates these so a
  * buggy upstream writer cannot hide a still-plotable trend.
  */
-function sanitize(samples: ContextUsageTrendSample[]): ContextUsageTrendSample[] {
+function sanitize(samples: ContextUsageHistoryEntry[]): ContextUsageHistoryEntry[] {
   return samples
     .filter((s) => typeof s?.percent === 'number' && Number.isFinite(s.percent))
     .map((s) => ({ at: s.at, percent: clamp(s.percent) }))
