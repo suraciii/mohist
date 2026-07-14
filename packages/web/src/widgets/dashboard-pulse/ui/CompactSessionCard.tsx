@@ -4,7 +4,6 @@ import type { IssueAttentionItem } from '@/entities/agent-ops'
 import {
   ContextHealthIndicator,
   ContextUsageTrendMiniChart,
-  type ContextUsageTrendSample,
 } from '@/entities/coder-session'
 import { formatCompact, formatCost } from '@/shared/lib/format-compact'
 import type { SessionCard } from '@/entities/agent-ops'
@@ -248,7 +247,7 @@ function getTaskProgressPercent(completed: number, total: number): number {
  * (no empty-axis visual to compete with the snapshot indicator).
  */
 function countUsableHistorySamples(
-  history: ContextUsageTrendSample[] | null | undefined,
+  history: SessionCard['contextUsageHistory'],
 ): number {
   if (!history) return 0
   let n = 0
@@ -258,7 +257,7 @@ function countUsableHistorySamples(
   return n
 }
 
-function hasTrendData(history: ContextUsageTrendSample[] | null | undefined): boolean {
+function hasTrendData(history: SessionCard['contextUsageHistory']): boolean {
   return countUsableHistorySamples(history) >= 2
 }
 

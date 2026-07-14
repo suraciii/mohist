@@ -4,12 +4,6 @@ export function isContextHealthStatus(value: string | null | undefined): value i
   return value === 'green' || value === 'yellow' || value === 'red'
 }
 
-export interface ContextUsageSnapshot {
-  contextWindowUsed?: number | null
-  contextWindowSize?: number | null
-  contextUsagePercent?: number | null
-}
-
 /**
  * Clamp a percentage value to the [0, 100] range. Non-finite values
  * return 0. This is a pure formatting utility; it does not derive or

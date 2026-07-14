@@ -1,12 +1,13 @@
 import '@testing-library/jest-dom'
 import { render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
-import { ContextUsageTrendMiniChart, type ContextUsageTrendSample } from './ContextUsageTrendMiniChart'
+import type { ContextUsageHistoryEntry } from '../model/types'
+import { ContextUsageTrendMiniChart } from './ContextUsageTrendMiniChart'
 
-function makeHistory(count: number, opts: { firstPercent?: number; lastPercent?: number; spacingSeconds?: number } = {}): ContextUsageTrendSample[] {
+function makeHistory(count: number, opts: { firstPercent?: number; lastPercent?: number; spacingSeconds?: number } = {}): ContextUsageHistoryEntry[] {
   const { firstPercent = 10, lastPercent = 80, spacingSeconds = 60 } = opts
   if (count < 2) throw new Error('need at least 2 samples')
-  const out: ContextUsageTrendSample[] = []
+  const out: ContextUsageHistoryEntry[] = []
   for (let i = 0; i < count; i += 1) {
     const ratio = count === 1 ? 0 : i / (count - 1)
     const percent = firstPercent + (lastPercent - firstPercent) * ratio
@@ -128,7 +129,7 @@ describe('ContextUsageTrendMiniChart', () => {
   })
 
   it('drops non-finite percent values before plotting but keeps the trend visible when enough samples remain', () => {
-    const history: ContextUsageTrendSample[] = [
+    const history: ContextUsageHistoryEntry[] = [
       { at: '2026-01-01T00:00:00Z', percent: 10 },
       { at: '2026-01-01T00:01:00Z', percent: Number.NaN },
       { at: '2026-01-01T00:02:00Z', percent: 30 },

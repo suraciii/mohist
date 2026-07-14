@@ -19,8 +19,6 @@ export interface RecoveryEvent {
   timestamp: number
 }
 
-export type { ContextHealthStatus } from '../../../entities/coder-session'
-
 export interface ContextHealthState {
   status: ContextHealthStatus | null
   contextWindowUsed: number | null
