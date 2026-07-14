@@ -4,9 +4,7 @@ Workflow Profile 定义"Issue 怎么从 Draft 走到 Done"，包括阶段、任�
 
 ## 默认 Profile
 
-文件位置：`packages/server/src/Mohist.Server/Issue/Services/WorkflowProfiles/mohist-local.workflow.yaml`
-
-结构（简化）：
+`mohist/local` 的结构（简化）：
 
 ```yaml
 variables:
@@ -397,7 +395,3 @@ mo issue show ${{ issue.number }} --project-id ${{ project.id }}
 ```
 
 完整变量列表看 [`design/workflow/profile.md`](../design/workflow/profile.md)。
-
----
-
-对应源码：`Issue/Services/WorkflowProfiles/mohist-local.workflow.yaml`、`Issue/Services/WorkflowProfiles/mohist-github-pr.workflow.yaml`、[`design/workflow/profile.md`](../design/workflow/profile.md)、[`design/workflow/builtin-workflows/github-pr.md`](../design/workflow/builtin-workflows/github-pr.md)。

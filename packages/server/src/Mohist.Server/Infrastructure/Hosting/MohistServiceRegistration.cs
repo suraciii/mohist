@@ -19,6 +19,7 @@ using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Workspace;
+using Mohist.Server.Runner.Grains;
 using Mohist.Server.Runner.Services.SignalR;
 using Mohist.Server.Runner.Services;
 using Mohist.Server.SystemInfo;
@@ -63,6 +64,7 @@ public static class MohistServiceRegistration
         // without taking on the concrete type. Lifetime matches the
         // concrete type — scoped, like IssueQuerier.
         services.AddScoped<IAgentLauncher>(sp => sp.GetRequiredService<AgentLauncher>());
+        services.AddSingleton<IAgentJobWorkCoordinator>(sp => sp.GetRequiredService<AgentJobWorkCoordinator>());
 
         var connectionString = ResolveSqliteConnectionString(configuration);
 

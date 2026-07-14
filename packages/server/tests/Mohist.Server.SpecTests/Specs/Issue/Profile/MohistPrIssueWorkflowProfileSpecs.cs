@@ -872,10 +872,10 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
     private static string ReadResourceYaml(string fileName)
     {
         var baseDir = AppContext.BaseDirectory;
-        var path = Path.Combine(baseDir, "Issue", "Services", "WorkflowProfiles", fileName);
+        var path = Path.Combine(baseDir, "Workflow", "Services", "Profiles", fileName);
         if (File.Exists(path)) return File.ReadAllText(path);
 
-        var sourceProbe = Path.Combine(baseDir, "..", "..", "..", "..", "..", "..", "src", "Mohist.Server", "Issue", "Services", "WorkflowProfiles", fileName);
+        var sourceProbe = Path.Combine(baseDir, "..", "..", "..", "..", "..", "..", "src", "Mohist.Server", "Workflow", "Services", "Profiles", fileName);
         if (File.Exists(sourceProbe)) return File.ReadAllText(Path.GetFullPath(sourceProbe));
 
         throw new FileNotFoundException($"YAML resource not found: {fileName}");

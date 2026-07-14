@@ -3,7 +3,6 @@ using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Hosting;
-using Mohist.Server.Issue.Services.WorkflowProfiles;
 using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Services.Prompts;
@@ -33,14 +32,14 @@ public class ProjectWorkflowProfileManager : IScopedService
         return
         [
             new SystemTemplateInfo(
-                Id: IssueWorkflowProfiles.LocalId,
+                Id: WorkflowProfileCatalog.LocalId,
                 Name: "Mohist Local",
-                Description: MohistWorkflow.ResolveDescription(MohistWorkflow.Definition),
+                Description: WorkflowProfileCatalog.ResolveDescription(WorkflowProfileCatalog.Definition),
                 IsDefault: true),
             new SystemTemplateInfo(
-                Id: IssueWorkflowProfiles.GithubPrId,
+                Id: WorkflowProfileCatalog.GithubPrId,
                 Name: "Mohist GitHub PR",
-                Description: MohistWorkflow.ResolveDescription(MohistWorkflow.GithubPrWorkflowDefinition),
+                Description: WorkflowProfileCatalog.ResolveDescription(WorkflowProfileCatalog.GithubPrWorkflowDefinition),
                 IsDefault: false),
         ];
     }
@@ -67,18 +66,14 @@ public class ProjectWorkflowProfileManager : IScopedService
     public static SystemTemplateInfo? GetSystemTemplateInfo(string templateId)
     {
         foreach (var template in SystemTemplates)
-            if (IssueWorkflowProfiles.IdComparer.Equals(template.Id, templateId))
+            if (WorkflowProfileCatalog.IdComparer.Equals(template.Id, templateId))
                 return template;
         return null;
     }
 
     public static WorkflowDefinition? GetSystemTemplateDefinition(string templateId)
     {
-        if (IssueWorkflowProfiles.IdComparer.Equals(templateId, IssueWorkflowProfiles.LocalId))
-            return MohistWorkflow.Definition;
-        if (IssueWorkflowProfiles.IdComparer.Equals(templateId, IssueWorkflowProfiles.GithubPrId))
-            return MohistWorkflow.GithubPrWorkflowDefinition;
-        return null;
+        return WorkflowProfileCatalog.GetDefinition(templateId);
     }
 
     // =======================================================================
@@ -446,8 +441,8 @@ public class ProjectWorkflowProfileManager : IScopedService
         await using var db = await _dbFactory.CreateDbContextAsync();
         var row = await db.ProjectWorkflowProfiles.AsNoTracking()
             .FirstOrDefaultAsync(x => x.ProjectId == projectId);
-        return row?.DisabledWorkflowProfileIds?.ToHashSet(IssueWorkflowProfiles.IdComparer)
-            ?? new HashSet<string>(IssueWorkflowProfiles.IdComparer);
+        return row?.DisabledWorkflowProfileIds?.ToHashSet(WorkflowProfileCatalog.IdComparer)
+            ?? new HashSet<string>(WorkflowProfileCatalog.IdComparer);
     }
 
     public async Task SetProfileEnabledAsync(string projectId, string profileId, bool enabled)
@@ -465,7 +460,7 @@ public class ProjectWorkflowProfileManager : IScopedService
             if (enabled)
                 return;
 
-            var allSystemIds = SystemTemplates.Select(t => t.Id).ToHashSet(IssueWorkflowProfiles.IdComparer);
+            var allSystemIds = SystemTemplates.Select(t => t.Id).ToHashSet(WorkflowProfileCatalog.IdComparer);
             if (allSystemIds.Count <= 1)
                 throw new InvalidOperationException(
                     $"Cannot disable '{profileId}': at least one workflow profile must remain enabled. " +
@@ -482,7 +477,7 @@ public class ProjectWorkflowProfileManager : IScopedService
         }
         else
         {
-            var disabled = new HashSet<string>(row.DisabledWorkflowProfileIds, IssueWorkflowProfiles.IdComparer);
+            var disabled = new HashSet<string>(row.DisabledWorkflowProfileIds, WorkflowProfileCatalog.IdComparer);
 
             if (enabled)
                 disabled.Remove(canonicalProfileId);
@@ -491,7 +486,7 @@ public class ProjectWorkflowProfileManager : IScopedService
 
             if (!enabled)
             {
-                var allSystemIds = SystemTemplates.Select(t => t.Id).ToHashSet(IssueWorkflowProfiles.IdComparer);
+                var allSystemIds = SystemTemplates.Select(t => t.Id).ToHashSet(WorkflowProfileCatalog.IdComparer);
                 var enabledCount = allSystemIds.Count(id => !disabled.Contains(id));
                 if (enabledCount == 0)
                     throw new InvalidOperationException(

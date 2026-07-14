@@ -6,7 +6,6 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Time.Testing;
-using Mohist.Server.Agent.Grains;
 using Mohist.Server.Api;
 using Mohist.Server.Infrastructure.Config;
 using Mohist.Server.Runner.Grains;
@@ -324,9 +323,7 @@ public class RunnerConfigApiSpecs : IClassFixture<RunnerConfigFixture>, IAsyncLi
                 workspace = new { path = "/tmp/runner-config-poll", projectId },
             });
 
-        var job = _fixture.Grains.GetGrain<IAgentJobGrain>(jobKey);
-        await WaitForAgentJobStatusAsync(job, AgentJobStatus.Running, TimeSpan.FromSeconds(8));
-        var workId = (await job.GetRuntimeSnapshotAsync()).CurrentWorkId!;
+        var workId = await _fixture.WaitForAgentJobDispatchAsync(jobKey, runnerId);
 
         using var response = await _fixture.Client.PostAsync($"/api/runner/{runnerId}/poll", content: null);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -362,17 +359,6 @@ public class RunnerConfigApiSpecs : IClassFixture<RunnerConfigFixture>, IAsyncLi
         Assert.Equal(HttpStatusCode.OK, validationResponse.StatusCode);
     }
 
-    private static async Task WaitForAgentJobStatusAsync(
-        IAgentJobGrain job,
-        AgentJobStatus expected,
-        TimeSpan timeout)
-        => await TestWait.ForAsync(
-            () => job.GetStatusAsync(),
-            s => s == expected,
-            timeout,
-            TimeSpan.FromMilliseconds(25),
-            $"Agent job to reach {expected}",
-            () => job.CheckTimeoutsAsync());
 }
 
 /// <summary>
@@ -457,6 +443,15 @@ public class RunnerConfigFixture : IAsyncLifetime
             $"Runner '{runnerId}' to reach Online");
         _registeredRunnerIds.Add(runnerId);
         return runnerId;
+    }
+
+    public async Task<string> WaitForAgentJobDispatchAsync(string agentJobId, string expectedRunnerId)
+    {
+        var assignment = await _factory.Services
+            .GetRequiredService<AgentJobDispatchProbe>()
+            .WaitForRunnerAcceptedAsync(agentJobId);
+        Assert.Equal(expectedRunnerId, assignment.RunnerId);
+        return assignment.WorkId;
     }
 
     public void WakeAgentJobValidationAwaiter() =>

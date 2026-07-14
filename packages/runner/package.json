@@ -8,14 +8,14 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "postbuild": "node scripts/write-build-info.mjs",
+    "postbuild": "tsx scripts/write-build-info.ts",
     "dev": "tsx src/cli.ts",
     "start": "node dist/cli.js",
     "test": "vitest run",
     "test:run": "vitest run",
     "test:ci": "npm run typecheck:tests && npm run check:test-boundaries && npm run test:run",
     "test:integration": "vitest run --config vitest.integration.config.ts",
-    "check:test-boundaries": "node ../../scripts/check-node-test-boundaries.mjs --scope runner",
+    "check:test-boundaries": "tsx ../../scripts/check-node-test-boundaries.ts --scope runner",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "typecheck:tests": "tsc -p tsconfig.tests.json --noEmit"
   },
@@ -25,7 +25,6 @@
   },
   "devDependencies": {
     "@types/node": "^22.15.0",
-    "tsx": "^4.20.0",
     "typescript": "7.0.2",
     "vitest": "^4.1.10"
   }

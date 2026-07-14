@@ -11,6 +11,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Time.Testing;
+using Mohist.Server.Agent.Grains;
 using Mohist.Server.Infrastructure.Config;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Events;
@@ -45,6 +46,7 @@ public class MohistIntegrationFixture : IAsyncLifetime
     public IEventPublisher EventBus => _factory.Services.GetRequiredService<IEventPublisher>();
     public FakeGitService Git => _factory.Services.GetRequiredService<FakeGitService>();
     public FakeRunnerWorkspaceClient RunnerWorkspace => _factory.Services.GetRequiredService<FakeRunnerWorkspaceClient>();
+    public AgentJobDispatchProbe AgentJobDispatches => _factory.Services.GetRequiredService<AgentJobDispatchProbe>();
     public FakeTimeProvider TimeProvider { get; } = new(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero));
     public string ConnectionString { get; private set; } = null!;
     public string RunnerRoot => _runnerRoot ?? throw new InvalidOperationException("Fixture is not initialized");
@@ -190,6 +192,9 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
             services.AddSingleton<IRunnerWorkspaceClient>(provider => provider.GetRequiredService<FakeRunnerWorkspaceClient>());
             services.RemoveAll<TimeProvider>();
             services.AddSingleton<TimeProvider>(_timeProvider);
+            services.RemoveAll<IAgentJobDispatchObserver>();
+            services.AddSingleton<AgentJobDispatchProbe>();
+            services.AddSingleton<IAgentJobDispatchObserver>(provider => provider.GetRequiredService<AgentJobDispatchProbe>());
             services.RemoveAll<IHubContext<RunnerHub>>();
             services.AddSingleton<RecordingRunnerHubContext>();
             services.AddSingleton<IHubContext<RunnerHub>>(provider => provider.GetRequiredService<RecordingRunnerHubContext>());

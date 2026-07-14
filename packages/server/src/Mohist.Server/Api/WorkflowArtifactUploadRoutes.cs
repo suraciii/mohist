@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Http;
+using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Workflow.Services.Artifacts;
 
 namespace Mohist.Server.Api;

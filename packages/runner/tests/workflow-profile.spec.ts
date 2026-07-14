@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest"
 
 const profilesDir = resolve(
   process.cwd(),
-  "../server/src/Mohist.Server/Issue/Services/WorkflowProfiles",
+  "../server/src/Mohist.Server/Workflow/Services/Profiles",
 )
 
 const profileFiles = {

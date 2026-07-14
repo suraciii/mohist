@@ -95,10 +95,12 @@ jobs:
           git rev-parse --verify "${base_ref}^{commit}" >/dev/null
           printf 'NODE_TEST_BUDGET_BASE_REF=%s\n' "$base_ref" >> "$GITHUB_ENV"
 
+      - name: Check Node architecture scripts
+        run: |
+          npm run archtest
+
       - name: Check Node test boundaries
         run: |
-          node scripts/check-node-test-boundaries.mjs --self-test
-          node scripts/compare-vitest-results.mjs --self-test
           npm run check:test-boundaries -w packages/runner -- --budget-base-ref "$NODE_TEST_BUDGET_BASE_REF"
           npm run check:test-boundaries -w packages/web -- --budget-base-ref "$NODE_TEST_BUDGET_BASE_REF"
 

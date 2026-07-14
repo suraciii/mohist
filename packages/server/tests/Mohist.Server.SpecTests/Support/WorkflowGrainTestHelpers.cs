@@ -119,7 +119,6 @@ public static class WorkflowGrainTestHelpers
             .Options;
         var factory = new PooledDbContextFactory<MohistDbContext>(options);
         var promptLoader = new Mohist.Server.Workflow.Services.Prompts.FilePromptLoader();
-        var registry = new Mohist.Server.Issue.Services.WorkflowProfiles.IssueWorkflowProfileRegistry(promptLoader, factory);
         return new WorkflowQuerier(
             factory,
             new WorkflowProfileManager(
@@ -127,8 +126,7 @@ public static class WorkflowGrainTestHelpers
                 promptLoader,
                 new PromptTemplateEngine(),
                 CreateEmptyConfigService(),
-                new WorkflowRunProfileManager(factory),
-                new Mohist.Server.Issue.Services.WorkflowProfiles.EffectiveWorkflowProfileResolver(registry)),
+                new WorkflowRunProfileManager(factory)),
             new WorkflowArtifactQuerier(factory));
     }
 

@@ -168,12 +168,6 @@ public sealed record AgentJobPollState(
     [property: Id(1)] WorkDispatch? Dispatch);
 
 [GenerateSerializer]
-public record WorkIssueRef(
-    string ProjectId,
-    string IssueId,
-    int IssueNumber);
-
-[GenerateSerializer]
 public record WorkResult(
     string Status,
     string? Message = null,

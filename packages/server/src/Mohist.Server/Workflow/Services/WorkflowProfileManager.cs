@@ -5,12 +5,10 @@ using Mohist.Server.Infrastructure.Config;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Infrastructure.Hosting;
-using Mohist.Server.Issue.Services.WorkflowProfiles;
 using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Services.Prompts;
 using Mohist.Server.Infrastructure.Data.Workflow;
-using IssueWorkflowProfiles = Mohist.Server.Issue.Services.WorkflowProfiles.IssueWorkflowProfiles;
 
 namespace Mohist.Server.Workflow.Services;
 
@@ -21,9 +19,7 @@ namespace Mohist.Server.Workflow.Services;
 ///   1. Issue custom YAML (issue_workflow_profile.Template)
 ///   2. Issue referenced template (issue_workflow_profile.SourceTemplateId)
 ///   3. Issue's effective workflow profile (issue.WorkflowProfileId →
-///      project default template → first enabled system profile), resolved through the centralized
-///      <see cref="EffectiveWorkflowProfileResolver"/> so the running
-///      workflow agrees with the profile id projected by every read surface.
+///      project default template → first enabled system profile).
 /// </summary>
 public class WorkflowProfileManager : IScopedService
 {
@@ -35,22 +31,19 @@ public class WorkflowProfileManager : IScopedService
     private readonly PromptTemplateEngine _engine;
     private readonly ConfigService _configService;
     private readonly WorkflowRunProfileManager _runProfileManager;
-    private readonly EffectiveWorkflowProfileResolver _effectiveProfileResolver;
 
     public WorkflowProfileManager(
         IDbContextFactory<MohistDbContext> dbFactory,
         IPromptLoader promptLoader,
         PromptTemplateEngine engine,
         ConfigService configService,
-        WorkflowRunProfileManager runProfileManager,
-        EffectiveWorkflowProfileResolver effectiveProfileResolver)
+        WorkflowRunProfileManager runProfileManager)
     {
         _dbFactory = dbFactory;
         _promptLoader = promptLoader;
         _engine = engine;
         _configService = configService;
         _runProfileManager = runProfileManager;
-        _effectiveProfileResolver = effectiveProfileResolver;
     }
 
     public async Task<ResolvedTemplate> LoadTemplateAsync(
@@ -185,8 +178,7 @@ public class WorkflowProfileManager : IScopedService
         {
             var row = await db.Issues.AsNoTracking()
                 .FirstOrDefaultAsync(r => r.IssueId == context.IssueId);
-            var issue = row is null ? null : IssueStore.Deserialize(row.State);
-            issueSelection = issue?.WorkflowProfileId;
+            issueSelection = ReadWorkflowProfileId(row?.State);
         }
 
         string? projectDefaultId = null;
@@ -199,7 +191,10 @@ public class WorkflowProfileManager : IScopedService
             disabledIds = context.RunExists ? null : projectProfile?.DisabledWorkflowProfileIds;
         }
 
-        var effectiveProfileId = _effectiveProfileResolver.Resolve(issueSelection, projectDefaultId, disabledIds);
+        var effectiveProfileId = WorkflowProfileCatalog.ResolveEffectiveProfileId(
+            issueSelection,
+            projectDefaultId,
+            disabledIds);
         return new EffectiveProfileContext(issueSelection, projectDefaultId, effectiveProfileId);
     }
 
@@ -270,6 +265,23 @@ public class WorkflowProfileManager : IScopedService
             }
 
             return value.GetString();
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static string? ReadWorkflowProfileId(string? stateJson)
+    {
+        if (string.IsNullOrWhiteSpace(stateJson)) return null;
+        try
+        {
+            using var doc = JsonDocument.Parse(stateJson);
+            return doc.RootElement.TryGetProperty("workflowProfileId", out var value)
+                && value.ValueKind == JsonValueKind.String
+                ? value.GetString()
+                : null;
         }
         catch
         {
