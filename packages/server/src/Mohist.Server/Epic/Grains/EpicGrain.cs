@@ -857,7 +857,8 @@ public class EpicGrain : Grain, IEpicGrain
                 domain.RecordStartAttemptFailure(next.Id, next.Number, "start-failed", now.UtcDateTime);
                 MapToRow(domain, row, now);
                 var pending = DrainPendingEvents(domain);
-                await PersistEpicEventsAsync(domain, pending, now);
+                await PersistEpicEventsAsync(db, domain, pending, now);
+                await db.SaveChangesAsync();
                 return ToDto(row);
             }
             throw;
