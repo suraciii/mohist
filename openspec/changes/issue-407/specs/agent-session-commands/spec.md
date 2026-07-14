@@ -13,7 +13,7 @@ Compact SHALL execute as an in-place context compaction: it MUST NOT rotate the 
 
 - **WHEN** Compact is applied to a session whose lineage currently has `N` entries
 - **THEN** after Compact the lineage SHALL still have exactly `N` entries in the same order
-- **AND** no `RuntimeSessionBound` rebind event SHALL be emitted by Compact
+- **AND** no `AgentSessionRuntimeBound` rebind event SHALL be emitted by Compact
 
 ### Requirement: Reset requests a replacement Runtime Session under an expected-binding guard
 
