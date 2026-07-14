@@ -1,0 +1,146 @@
+{
+  "project": "mohist-local",
+  "description": "Stamp full business lineage (issue/epic/workflow-run/stage) into CloudEvents envelope extensions at every producer, raise EventCatalog to the per-type required-attribute registry that guards the matrix, and reconcile all issueno/epicno readers to the unified protocol names.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Raise EventCatalog to the per-type lineage registry with a conformance helper",
+      "spec": "specs/event-catalog-conformance/spec.md#eventcatalog-declares-required-lineage-attributes-per-type",
+      "description": "Turn EventCatalog from the flat All name list into the protocol registry: every registered type declares the lineage attributes its envelope MUST always carry, grouped by family so workflow.stage.*/task.*/check.* inherit the workflow.* base plus stage. Preserve the existing All list as a derived introspection surface so current callers keep compiling. Add a conformance helper (e.g. EventCatalog.RequiredAttributes(type) plus a test-side EnvelopeConformance.AssertRequired(envelope, type)) that fails when an emitted envelope is missing any required attribute. Declaration is the single source of truth the producers (T-002..T-006) stamp against and that the distributed conformance assertions call.",
+      "acceptanceCriteria": [
+        "EventCatalog exposes, for every registered type, the set of always-required lineage attributes matching the matrix: workflow.run.* -> {projectid, workflowrunid}; workflow.stage.*/task.*/check.* -> {projectid, workflowrunid, stage}; issue.* -> {projectid, issueid, issue}; epic.* -> {projectid, epicid}; agent-session.* -> {projectid, sessionid}; runner.* -> {runnerid}; com.mohist.inbox.item-persisted -> {projectid, issueid, issue}.",
+        "Catalog-only types with no producer today (runner.disconnected, workflow.repair-scheduled) are declared in the registry with their matrix required attributes but are not exercised by the conformance check.",
+        "Conditional/affiliation-dependent attributes (issueid/issue/epicid on workflow.*, epicid on issue.*, agentid/issue/workflowrunid/stage on agent-session.*) are modelled as conditional and validated by the stamping scenarios in the producer tasks, not as always-required.",
+        "A unit test proves the helper: a synthetic envelope of a registered type carrying all required attributes passes, and one missing a required attribute fails (negative case proving the guard actually catches drift).",
+        "Existing callers of EventCatalog.All still compile; the build passes with TreatWarningsAsErrors (`npm test` server track)."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/server/src/Mohist.Server/Infrastructure/Events/EventCatalog.cs (registry + RequiredAttributes), the conformance helper, and a unit test with a passing positive and a failing negative case.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Authoritative matrix lives here first; T-002..T-006 stamp to match and assert via the helper. Keep the matrix inside EventCatalog (D4) — do not introduce a second LineageMatrix class."
+    },
+    {
+      "id": "T-002",
+      "title": "Stamp workflow-run identity and stage lineage in WorkflowRunStore",
+      "spec": "specs/event-lineage-stamping/spec.md#lineage-stamped-on-every-event-family-at-production-time",
+      "description": "Extend WorkflowRunStore.ToCloudEvent to stamp workflowrunid (always) and issue/issueid/epicid from run annotations when present, and to stamp stage by structural inspection of the WorkflowEvent union variants that expose a Stage member (Stage*, StageApproval*, FeedbackRequested, Task*, Check*), not by bus-type prefix. Stamping stays inside the existing append transaction and derives everything from the run's own metadata annotations — no issue/epic aggregate load. Absent affiliations are omitted, never empty.",
+      "acceptanceCriteria": [
+        "A workflow.run.* event whose annotations carry project id, issue id, and issue number stamps projectid, issueid, issue, and workflowrunid; the existing conditional-extensions path (only stamp when something is present) is preserved.",
+        "A workflow.* event for a run with no issue annotation omits issueid and issue while still carrying projectid and workflowrunid (no empty values).",
+        "Stage/task/check events stamp stage set to the stage name in addition to the workflow.* lineage; FeedbackRequested (typed workflow.feedback.requested) also stamps stage because it is structurally stage-bearing; WorkflowArtifactRecorded does not stamp stage because it carries no Stage member (D2).",
+        "WorkflowRunStore issues no cross-aggregate query (no issue/epic load) to stamp lineage.",
+        "TransactionalEventAppendSpecs (workflow) is updated to assert the new keys, the absent-annotation omission case, and that every emitted envelope satisfies EventCatalog.RequiredAttributes for its type via the conformance helper.",
+        "Server build + `npm test` pass."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/server/src/Mohist.Server/Infrastructure/Data/Workflow/WorkflowRunStore.cs updated; TransactionalEventAppendSpecs extended with lineage + stage assertions and conformance checks.",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Pattern-match the unwrapped WorkflowEvent variants to decide stage carriage (WorkflowEvent.cs lists which variants carry Stage). Use StringComparer.Ordinal for the extensions dict (already the convention here)."
+    },
+    {
+      "id": "T-003",
+      "title": "Stamp issue lineage (rename to issue, add epicid via join table) in IssueStore",
+      "spec": "specs/event-lineage-stamping/spec.md#lineage-stamped-on-every-event-family-at-production-time",
+      "description": "In IssueStore rename the stamped issue number from issueno to issue (the protocol name users will write in expressions), and stamp epicid when the issue belongs to an epic. Because the Issue aggregate does not own epic membership, resolve epicid with a single indexed lookup against db.EpicIssues (by ProjectId+IssueId) inside the existing append transaction — the one narrow cross-aggregate exception (D5); omit epicid when no link row exists. Keep stamping a production-time snapshot; do not rewrite history on later relationship changes.",
+      "acceptanceCriteria": [
+        "An issue.* event stamps projectid, issueid, and issue (the issue number); no issueno key is present.",
+        "An issue.* event for an issue linked to an epic additionally stamps epicid; an unaffiliated issue omits epicid entirely (no empty value).",
+        "epicid is resolved by a single indexed EpicIssues lookup (ProjectId+IssueId) inside the append transaction; no Epic grain call and no Epic domain logic is invoked.",
+        "BuildIdentityExtensions/ToCloudEvent still run within SaveAsync's transaction so the epicid snapshot is consistent with the append.",
+        "IssueTransactionalEventAppendSpecs asserts issue (not issueno), epicid presence when linked and absence when unaffiliated, and that each emitted envelope satisfies EventCatalog.RequiredAttributes for its type.",
+        "Server build + `npm test` pass."
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/server/src/Mohist.Server/Infrastructure/Data/Issue/IssueStore.cs updated; IssueTransactionalEventAppendSpecs extended with issue/epicid assertions and conformance checks.",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "db.EpicIssues is indexed on {ProjectId, IssueId} (MohistDbContext line 288). This is the only permitted cross-aggregate read; document it as such. Historical rows keep issueno (Non-Goal: no backfill); read-side fallback is handled in T-007."
+    },
+    {
+      "id": "T-004",
+      "title": "Drop epicno and keep project+epic identity in EpicGrain stamping",
+      "spec": "specs/event-lineage-stamping/spec.md#lineage-stamped-on-every-event-family-at-production-time",
+      "description": "Update both PersistEpicEventsAsync overloads in EpicGrain so epic.* events stamp only projectid and epicid, removing epicno (not a routing dimension per the matrix). Normalize the extensions dict to StringComparer.Ordinal for consistency with the stores. Extract the extension construction into a testable pure helper so the stamped attributes can be asserted without a full Orleans silo.",
+      "acceptanceCriteria": [
+        "An epic.* event stamps projectid and epicid and contains no epicno key.",
+        "Both PersistEpicEventsAsync overloads (post-commit and transactional) stamp the identical unified set.",
+        "A unit test (on the extracted helper, no silo required) asserts projectid+epicid present and epicno absent, and that the produced extensions satisfy EventCatalog.RequiredAttributes for an epic.* type.",
+        "Server build + `npm test` pass."
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/server/src/Mohist.Server/Epic/Grains/EpicGrain.cs updated (both stamping sites) with an extracted, unit-tested extension helper.",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Stamping sites are EpicGrain.cs:1098-1103 and 1148-1153. The transactional overload appends inside the caller's db context; keep that scope."
+    },
+    {
+      "id": "T-005",
+      "title": "Project AgentSession lineage from Metadata.Labels in AgentSessionStore",
+      "spec": "specs/event-lineage-stamping/spec.md#lineage-stamped-on-every-event-family-at-production-time",
+      "description": "Replace the current extensions: null in AgentSessionStore.ToCloudEvent by projecting the session's own Metadata.Labels onto extensions: projectid (mohist.io/project-id), sessionid (the session id), agentid (mohist.io/agent-id) when agent-origin, and issue/workflowrunid/stage (mohist.io/issue-number / mohist.io/source-id / mohist.io/stage) when the session originates from a workflow/issue. Absent labels are omitted, never empty. Stamping uses only the session's own metadata — no cross-aggregate query.",
+      "acceptanceCriteria": [
+        "An agent-session.* event whose labels carry project id, agent id, and an agent source kind stamps projectid, sessionid, and agentid.",
+        "A workflow/issue-origin session additionally stamps issue, workflowrunid, and stage from its labels; a session without those labels omits them (no empty values).",
+        "No cross-aggregate query is issued to stamp; all values come from Metadata.Labels (the session's own metadata).",
+        "AgentSessionTransactionalEventAppendSpecs is updated: the current 'projectid is NOT present' assertion is replaced by assertions that projectid/sessionid (and agentid/issue/workflowrunid/stage when labelled) are stamped, that absent labels are omitted, and that each envelope satisfies EventCatalog.RequiredAttributes for its type.",
+        "Server build + `npm test` pass."
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/server/src/Mohist.Server/Infrastructure/Data/Sessions/AgentSessionStore.cs updated; AgentSessionTransactionalEventAppendSpecs updated for lineage projection + conformance.",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Label key constants live in packages/server/src/Mohist.Server/Sessions/Services/AgentSessionQueryMetadataKeys.cs (mohist.io/*). The existing spec explicitly documents extensions: null as intentional (design OQ3) — that assertion is being superseded by this change."
+    },
+    {
+      "id": "T-006",
+      "title": "Lift issue lineage in the inbox-synthesized event and reconcile its own issueno read",
+      "spec": "specs/event-lineage-stamping/spec.md#lineage-stamped-on-every-event-family-at-production-time",
+      "description": "In InboxProjectionHandler, synthesize com.mohist.inbox.item-persisted with projectid plus issue and issueid lifted from the InboxItemPersistedHint already held in scope (no extra lookup). In the same file, update ResolveFromIssueExtensions to read the issue number from the issue key (with an issueno fallback so historical rows that were never backfilled still resolve), since IssueStore now stamps issue.",
+      "acceptanceCriteria": [
+        "The synthesized inbox.item-persisted envelope stamps projectid, issueid, and issue from the hint payload (no additional lookup).",
+        "ResolveFromIssueExtensions resolves the issue number from the issue key, falling back to issueno for pre-change historical rows, and still returns null when neither is parseable.",
+        "A spec covering the inbox synthesis path asserts projectid/issueid/issue are stamped and that the envelope satisfies EventCatalog.RequiredAttributes for com.mohist.inbox.item-persisted.",
+        "Server build + `npm test` pass."
+      ],
+      "priority": 6,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/server/src/Mohist.Server/Events/Subscriptions/InboxProjectionHandler.cs updated (synthesis stamping + dual-key read); inbox synthesis spec extended.",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Synthesis site is InboxProjectionHandler.cs:148-167; the issueno read is at :213. The InboxItemPersistedHint already carries IssueId/IssueNumber. The issueno fallback is the permanent history shim (Non-Goal forbids backfill)."
+    },
+    {
+      "id": "T-007",
+      "title": "Reconcile issueno/epicno readers (server handlers + web) to the unified names",
+      "spec": "specs/event-lineage-stamping/spec.md#user-visible-identity-uses-short-names-internal-ids-carry-the-id-suffix",
+      "description": "Update the remaining read-side consumers that key on the legacy names so lineage resolution stays consistent with the stamped names. EpicAutoDoneHandler and HermesIssueNotificationHandler read issue (with an issueno fallback for historical rows). The web envelope reader and any fixtures/docs referencing issueno or epicno move to issue / epicid. This lands in the same change as the producer rename so producers and consumers never disagree on the key (D3).",
+      "acceptanceCriteria": [
+        "EpicAutoDoneHandler (the two issueno reads in EpicProgressRecomputeDispatcher) resolves the issue number from issue, falling back to issueno for historical rows.",
+        "HermesIssueNotificationHandler.ResolveFromIssueExtensions reads issue with an issueno fallback.",
+        "packages/web event-envelope.ts documents issue (and epicid) instead of issueno/epicno; any web code/fixtures hardcoding issueno or epicno are updated to issue / epicid.",
+        "Server build + `npm test` pass; web `npm run typecheck -w packages/web` and `npm run test:run -w packages/web` pass.",
+        "No producer or consumer references issueno as the primary key or references epicno anywhere (only the intentional history-fallback reads remain)."
+      ],
+      "priority": 7,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "EpicAutoDoneHandler.cs, HermesIssueNotificationHandler.cs, and packages/web/src/app/providers/model/event-envelope.ts (+ fixtures) reconciled to issue/epicid with history fallback where rows are traversed.",
+      "dependsOn": ["T-003"],
+      "passes": false,
+      "notes": "Ship the rename atomically (D3): web only reads issue after the server stamps it. T-006 already handled InboxProjectionHandler's own read in the same file. Keep the dual-key issueno fallback minimal and permanent in history-traversing handlers (Non-Goal: no backfill)."
+    }
+  ]
+}
