@@ -433,13 +433,13 @@ public class EpicAutoDoneSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
-    public async Task ReconcileAfterTerminalAsync_EpicWithOpenLinkedIssue_DoesNotMarkDoneAndStatusUnchanged()
+    public async Task RecomputeProgressAsync_EpicWithOpenLinkedIssue_DoesNotMarkDoneAndStatusUnchanged()
     {
-        // Invariant 2 (reconcile-on-terminal-event path): the auto
-        // reconcile that fires when a linked issue reaches terminal
+        // Invariant 2 (recompute-progress-on-terminal-event path): the auto
+        // recompute that fires when a linked issue reaches terminal
         // must NOT flip the epic to done while an open linked issue
         // remains. With status idle and an open linked issue, the
-        // reconcile path leaves the epic idle (no TryStartNextAsync
+        // recompute path leaves the epic idle (no TryStartNextAsync
         // is invoked because status != running) and never marks done.
         await using var database = CreateDatabase();
         await SeedEpicAsync(database, status: "idle");
@@ -447,7 +447,7 @@ public class EpicAutoDoneSpecs
         await SeedLinkAsync(database, "epic_1", "issue_1", 1);
         var grain = CreateGrain(database.Factory, "project_1:epic_1");
 
-        var result = await grain.ReconcileAfterTerminalAsync();
+        var result = await grain.RecomputeProgressAsync();
 
         Assert.NotNull(result);
         Assert.Equal("idle", result!.Status);

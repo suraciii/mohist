@@ -8,7 +8,6 @@ using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
 using Microsoft.EntityFrameworkCore;
 using Orleans;
-using Orleans.Concurrency;
 using Orleans.Runtime;
 using LedgerRunnerWork = Mohist.Server.Infrastructure.Data.Runner.RunnerWork;
 using LedgerRunnerWorkStatus = Mohist.Server.Infrastructure.Data.Runner.RunnerWorkStatus;
@@ -30,7 +29,6 @@ namespace Mohist.Server.Runner.Grains;
 /// No work-completion wall clock — work liveness is the runner process's
 /// poll report; the only server-side timer is presence expiry.
 /// </summary>
-[Reentrant]
 public class RunnerGrain : Grain, IRunnerGrain, IRemindable
 {
     private RunnerStatus _status = RunnerStatus.Offline;
@@ -40,9 +38,7 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
     // no workflow records. The push model survives because an AgentJob owns a
     // single work item with no run to re-render from.
     private readonly IPersistentState<RunnerWorksState> _worksState;
-    private readonly SemaphoreSlim _worksStateWriteGate = new(1, 1);
     private readonly SemaphoreSlim _lifecycleGate = new(1, 1);
-    private readonly SemaphoreSlim _pollAdmissionGate = new(1, 1);
     private bool _pollAdmitted;
     private DateTimeOffset _lastPresenceAt;
     private IDisposable? _presenceTimer;
@@ -58,6 +54,8 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
     private readonly RunnerWorkStore _runnerWorks;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<RunnerGrain> _log;
+    private readonly IRunnerGrainAssignmentObserver _assignmentObserver;
+    private readonly IRunnerGrainCloseoutObserver _closeoutObserver;
 
     private static readonly TimeSpan PresenceTimeout = TimeSpan.FromMinutes(2);
     private static readonly TimeSpan PresenceCheckInterval = TimeSpan.FromSeconds(10);
@@ -69,7 +67,9 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
         RunnerWorkStore runnerWorks,
         ILogger<RunnerGrain> log,
         TimeProvider timeProvider,
-        [PersistentState("runner-works")] IPersistentState<RunnerWorksState> worksState)
+        [PersistentState("runner-works")] IPersistentState<RunnerWorksState> worksState,
+        IRunnerGrainAssignmentObserver? assignmentObserver = null,
+        IRunnerGrainCloseoutObserver? closeoutObserver = null)
     {
         _workflowRuns = workflowRuns;
         _definitions = definitions;
@@ -77,6 +77,8 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
         _log = log;
         _timeProvider = timeProvider;
         _worksState = worksState;
+        _assignmentObserver = assignmentObserver ?? NoopRunnerGrainAssignmentObserver.Instance;
+        _closeoutObserver = closeoutObserver ?? NoopRunnerGrainCloseoutObserver.Instance;
     }
 
     private string RunnerId => this.GetPrimaryKeyString();
@@ -155,27 +157,19 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
 
     public async Task UnregisterAsync()
     {
-        await _pollAdmissionGate.WaitAsync();
+        await _lifecycleGate.WaitAsync();
         try
         {
-            await _lifecycleGate.WaitAsync();
-            try
-            {
-                _log.LogInformation("Runner {Id} unregistered", RunnerId);
-                _status = RunnerStatus.Offline;
-                SetRunnerInfo(null);
-                await PersistAsync();
-                var registry = GrainFactory.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
-                await registry.UnregisterAsync(RunnerId);
-            }
-            finally
-            {
-                _lifecycleGate.Release();
-            }
+            _log.LogInformation("Runner {Id} unregistered", RunnerId);
+            _status = RunnerStatus.Offline;
+            SetRunnerInfo(null);
+            await PersistAsync();
+            var registry = GrainFactory.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
+            await registry.UnregisterAsync(RunnerId);
         }
         finally
         {
-            _pollAdmissionGate.Release();
+            _lifecycleGate.Release();
         }
 
         await CloseoutLostAsync();
@@ -231,138 +225,221 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
             return new RunnerWorkAssignmentResult(RunnerWorkAssignmentStatus.Rejected, "invalid-work");
         if (string.IsNullOrWhiteSpace(work.AgentJobId) || string.IsNullOrWhiteSpace(work.WorkId))
             return new RunnerWorkAssignmentResult(RunnerWorkAssignmentStatus.Rejected, "invalid-work");
-        if (_pollAdmitted)
-            return new RunnerWorkAssignmentResult(RunnerWorkAssignmentStatus.Rejected, "runner-reconciling");
 
-        await _pollAdmissionGate.WaitAsync();
-        try
-        {
-            await _lifecycleGate.WaitAsync();
-            try
-            {
-                var ownerId = work.AgentJobId!;
-                var existing = FindWork(work.WorkId, WorkDispatchOwnerKinds.AgentJob, ownerId);
-                if (existing is not null)
-                    return new RunnerWorkAssignmentResult(RunnerWorkAssignmentStatus.Assigned);
-
-                if (_status != RunnerStatus.Online || _info is null)
-                    return new RunnerWorkAssignmentResult(RunnerWorkAssignmentStatus.Rejected, "runner-offline");
-
-                var state = await GetRuntimeStateAsync();
-                var activeOwnerCount = state.ActiveWorks
-                    .Select(item => (item.OwnerKind, item.OwnerId))
-                    .Distinct()
-                    .Count();
-                if (activeOwnerCount >= MaxWorkflowSlots)
-                    return new RunnerWorkAssignmentResult(RunnerWorkAssignmentStatus.Rejected, "capacity-exhausted");
-
-                var takenAt = _timeProvider.GetUtcNow();
-                AddWork(new RunnerWork
-                {
-                    WorkId = work.WorkId,
-                    OwnerKind = WorkDispatchOwnerKinds.AgentJob,
-                    OwnerId = ownerId,
-                    WorkType = work.WorkType,
-                    Stage = work.Stage,
-                    Title = work.Title,
-                    Issue = work.Issue,
-                    Status = RunnerWorkStatus.Pending,
-                    CreatedAt = takenAt,
-                    DispatchSnapshot = work,
-                });
-                await PersistAsync();
-                await _runnerWorks.InsertOutstandingAsync(new LedgerRunnerWork(
-                    RunnerId,
-                    work.OwnerKind,
-                    ownerId,
-                    work.WorkId,
-                    takenAt,
-                    LedgerRunnerWorkStatus.Outstanding));
-                _log.LogInformation("Runner {Id} assigned work {WorkId} for agent-job {AgentJobId}", RunnerId, work.WorkId, work.AgentJobId);
-                return new RunnerWorkAssignmentResult(RunnerWorkAssignmentStatus.Assigned);
-            }
-            finally
-            {
-                _lifecycleGate.Release();
-            }
-        }
-        finally
-        {
-            _pollAdmissionGate.Release();
-        }
-    }
-
-    public Task<RunnerPollAdmission> TryBeginPollAsync()
-    {
-        if (!_pollAdmissionGate.Wait(0))
-            return Task.FromResult(new RunnerPollAdmission(false, 0));
-
-        _pollAdmitted = true;
-        return Task.FromResult(new RunnerPollAdmission(true, MaxWorkflowSlots));
-    }
-
-    public Task EndPollAsync()
-    {
-        if (!_pollAdmitted)
-            return Task.CompletedTask;
-
-        _pollAdmitted = false;
-        _pollAdmissionGate.Release();
-        return Task.CompletedTask;
-    }
-
-    public async Task<AgentJobPollState> ReconcileAgentJobsAsync(List<string> reportedWorkKeys)
-    {
-        var reported = reportedWorkKeys.ToHashSet(StringComparer.Ordinal);
-
+        await _assignmentObserver.AssignmentAdmissionAsync(RunnerId, work);
         await _lifecycleGate.WaitAsync();
         try
         {
-            while (true)
+            if (_pollAdmitted)
+                return new RunnerWorkAssignmentResult(RunnerWorkAssignmentStatus.Rejected, "runner-reconciling");
+
+            if (_status != RunnerStatus.Online || _info is null)
+                return new RunnerWorkAssignmentResult(RunnerWorkAssignmentStatus.Rejected, "runner-offline");
+
+            var ownerId = work.AgentJobId!;
+            var existing = FindWork(work.WorkId, WorkDispatchOwnerKinds.AgentJob, ownerId);
+            if (existing is not null)
+                return new RunnerWorkAssignmentResult(RunnerWorkAssignmentStatus.Assigned);
+
+            var state = await GetRuntimeStateAsync();
+            var activeOwnerCount = state.ActiveWorks
+                .Select(item => (item.OwnerKind, item.OwnerId))
+                .Distinct()
+                .Count();
+            if (activeOwnerCount >= MaxWorkflowSlots)
+                return new RunnerWorkAssignmentResult(RunnerWorkAssignmentStatus.Rejected, "capacity-exhausted");
+
+            var takenAt = _timeProvider.GetUtcNow();
+            AddWork(new RunnerWork
             {
-                var activeWorks = GetWorks()
-                    .Where(IsActiveAgentJobWork)
-                    .ToList();
-                var candidate = activeWorks.FirstOrDefault(work =>
-                    !reported.Contains(AgentJobWorkKey(work.OwnerId, work.WorkId)));
-
-                if (candidate is null)
-                    return new AgentJobPollState(activeWorks.Count, null);
-
-                var agentJobId = candidate.OwnerId;
-                var workId = candidate.WorkId;
-                var job = GrainFactory.GetGrain<IAgentJobGrain>(agentJobId);
-                if (!await job.IsWorkRunnableAsync(RunnerId, workId))
-                {
-                    _log.LogDebug(
-                        "Runner {Id} dropping work {WorkId} for agent-job {AgentJobId}: not runnable",
-                        RunnerId, workId, agentJobId);
-                    TryRemoveWork(workId, WorkDispatchOwnerKinds.AgentJob, agentJobId);
-                    await PersistAsync();
-                    await MarkRunnerWorkTerminalAsync(
-                        WorkDispatchOwnerKinds.AgentJob,
-                        agentJobId,
-                        workId,
-                        LedgerRunnerWorkStatus.Failed,
-                        "not-runnable");
-                    continue;
-                }
-
-                if (candidate.Status == RunnerWorkStatus.Pending)
-                {
-                    candidate.Status = RunnerWorkStatus.Running;
-                    candidate.StartedAt = _timeProvider.GetUtcNow();
-                    await PersistAsync();
-                }
-
-                return new AgentJobPollState(activeWorks.Count, candidate.DispatchSnapshot);
-            }
+                WorkId = work.WorkId,
+                OwnerKind = WorkDispatchOwnerKinds.AgentJob,
+                OwnerId = ownerId,
+                WorkType = work.WorkType,
+                Stage = work.Stage,
+                Title = work.Title,
+                Issue = work.Issue,
+                Status = RunnerWorkStatus.Pending,
+                CreatedAt = takenAt,
+                DispatchSnapshot = work,
+            });
+            await PersistAsync();
+            await _runnerWorks.InsertOutstandingAsync(new LedgerRunnerWork(
+                RunnerId,
+                work.OwnerKind,
+                ownerId,
+                work.WorkId,
+                takenAt,
+                LedgerRunnerWorkStatus.Outstanding));
+            _log.LogInformation("Runner {Id} assigned work {WorkId} for agent-job {AgentJobId}", RunnerId, work.WorkId, work.AgentJobId);
+            return new RunnerWorkAssignmentResult(RunnerWorkAssignmentStatus.Assigned);
         }
         finally
         {
             _lifecycleGate.Release();
         }
     }
+
+    public async Task<RunnerPollAdmission> TryBeginPollAsync()
+    {
+        await _lifecycleGate.WaitAsync();
+        try
+        {
+            if (_pollAdmitted)
+                return new RunnerPollAdmission(false, 0);
+
+            _pollAdmitted = true;
+            return new RunnerPollAdmission(true, MaxWorkflowSlots);
+        }
+        finally
+        {
+            _lifecycleGate.Release();
+        }
+    }
+
+    public async Task EndPollAsync()
+    {
+        await _lifecycleGate.WaitAsync();
+        try
+        {
+            _pollAdmitted = false;
+        }
+        finally
+        {
+            _lifecycleGate.Release();
+        }
+
+    }
+
+    public async Task<WorkItem?> TryClaimWorkflowAsync(
+        string workflowRunId,
+        string? projectId,
+        bool assignWorker)
+    {
+        await _lifecycleGate.WaitAsync();
+        try
+        {
+            if (_status != RunnerStatus.Online
+                || _info is null
+                || !string.Equals(_info.ProjectId, projectId, StringComparison.Ordinal))
+            {
+                return null;
+            }
+
+            var activeWorkflowCount = (await _workflowRuns.FindRunningAssignedToAsync(RunnerId)).Count;
+            var activeAgentJobCount = GetWorks()
+                .Where(IsActiveAgentJobWork)
+                .Select(work => work.OwnerId)
+                .Distinct(StringComparer.Ordinal)
+                .Count();
+            if (activeWorkflowCount + activeAgentJobCount >= MaxWorkflowSlots)
+                return null;
+
+            var workflow = GrainFactory.GetGrain<IWorkflowGrain>(workflowRunId);
+            if (assignWorker)
+            {
+                var assignment = await workflow.AssignWorkerAsync(RunnerId);
+                if (assignment.Status != WorkflowAssignmentStatus.Assigned)
+                    return null;
+            }
+
+            return await workflow.ClaimNextAsync(RunnerId);
+        }
+        finally
+        {
+            _lifecycleGate.Release();
+        }
+    }
+
+    public async Task<AgentJobPollState> ReconcileAgentJobsAsync(List<string> reportedWorkKeys)
+    {
+        var reported = reportedWorkKeys.ToHashSet(StringComparer.Ordinal);
+
+        // The cross-grain IsWorkRunnableAsync call must NOT happen while
+        // _lifecycleGate is held: AgentJobGrain.TryAssignToRunnerAsync calls
+        // back into AssignAgentJobAsync (which needs the same gate), and both
+        // grains are non-reentrant — holding the gate across the call forms a
+        // circular wait. Snapshot the candidate under the gate, release, do
+        // the cross-grain check outside, then re-acquire to mutate.
+        //
+        // _pollAdmitted stays true for the whole poll round (cleared only by
+        // DispatchService's finally → EndPollAsync), so AssignAgentJobAsync
+        // continues to reject with "runner-reconciling" while the gate is
+        // released — the works list cannot be mutated by assignment here.
+        while (true)
+        {
+            ReconcileCandidate? snapshot;
+            int activeCount;
+            await _lifecycleGate.WaitAsync();
+            try
+            {
+                var activeWorks = GetWorks()
+                    .Where(IsActiveAgentJobWork)
+                    .ToList();
+                activeCount = activeWorks.Count;
+                var candidate = activeWorks.FirstOrDefault(work =>
+                    !reported.Contains(AgentJobWorkKey(work.OwnerId, work.WorkId)));
+
+                if (candidate is null)
+                    return new AgentJobPollState(activeCount, null);
+
+                snapshot = new ReconcileCandidate(
+                    candidate.OwnerId,
+                    candidate.WorkId);
+            }
+            finally
+            {
+                _lifecycleGate.Release();
+            }
+
+            var job = GrainFactory.GetGrain<IAgentJobGrain>(snapshot.AgentJobId);
+            var runnable = await job.IsWorkRunnableAsync(RunnerId, snapshot.WorkId);
+
+            await _lifecycleGate.WaitAsync();
+            try
+            {
+                // Re-find the work under the gate: it may have been removed by
+                // a concurrent path (e.g. HandleTimeoutAsync closeout). If gone,
+                // skip to the next candidate.
+                var live = FindWork(snapshot.WorkId, WorkDispatchOwnerKinds.AgentJob, snapshot.AgentJobId);
+                if (live is null)
+                    continue;
+
+                if (!runnable)
+                {
+                    _log.LogDebug(
+                        "Runner {Id} dropping work {WorkId} for agent-job {AgentJobId}: not runnable",
+                        RunnerId, snapshot.WorkId, snapshot.AgentJobId);
+                    TryRemoveWork(snapshot.WorkId, WorkDispatchOwnerKinds.AgentJob, snapshot.AgentJobId);
+                    await PersistAsync();
+                    await MarkRunnerWorkTerminalAsync(
+                        WorkDispatchOwnerKinds.AgentJob,
+                        snapshot.AgentJobId,
+                        snapshot.WorkId,
+                        LedgerRunnerWorkStatus.Failed,
+                        "not-runnable");
+                    continue;
+                }
+
+                if (live.Status == RunnerWorkStatus.Pending)
+                {
+                    live.Status = RunnerWorkStatus.Running;
+                    live.StartedAt = _timeProvider.GetUtcNow();
+                    await PersistAsync();
+                }
+
+                return new AgentJobPollState(activeCount, live.DispatchSnapshot);
+            }
+            finally
+            {
+                _lifecycleGate.Release();
+            }
+        }
+    }
+
+    private sealed record ReconcileCandidate(
+        string AgentJobId,
+        string WorkId);
 
     public async Task<RunnerWorkReportResult> ReportAgentJobResultAsync(string agentJobId, string workId, WorkResult result)
     {
@@ -371,22 +448,30 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
         if (string.IsNullOrWhiteSpace(workId))
             return new RunnerWorkReportResult(string.Empty, null, false, "missing-work", WorkDispatchOwnerKinds.AgentJob, agentJobId);
 
-        var tracked = FindWork(workId, WorkDispatchOwnerKinds.AgentJob, agentJobId) is not null;
-
         var job = GrainFactory.GetGrain<IAgentJobGrain>(agentJobId);
         var accepted = await job.ReportResultAsync(RunnerId, workId, result);
 
-        if (tracked && accepted.Accepted)
+        var tracked = false;
+        await _lifecycleGate.WaitAsync();
+        try
         {
-            TryRemoveWork(workId, WorkDispatchOwnerKinds.AgentJob, agentJobId);
-            await PersistAsync();
-            var (terminalStatus, terminalReason) = ResolveTerminalStatus(result);
-            await MarkRunnerWorkTerminalAsync(
-                WorkDispatchOwnerKinds.AgentJob,
-                agentJobId,
-                workId,
-                terminalStatus,
-                terminalReason);
+            tracked = FindWork(workId, WorkDispatchOwnerKinds.AgentJob, agentJobId) is not null;
+            if (tracked && accepted.Accepted)
+            {
+                TryRemoveWork(workId, WorkDispatchOwnerKinds.AgentJob, agentJobId);
+                await PersistAsync();
+                var (terminalStatus, terminalReason) = ResolveTerminalStatus(result);
+                await MarkRunnerWorkTerminalAsync(
+                    WorkDispatchOwnerKinds.AgentJob,
+                    agentJobId,
+                    workId,
+                    terminalStatus,
+                    terminalReason);
+            }
+        }
+        finally
+        {
+            _lifecycleGate.Release();
         }
 
         var reason = !accepted.Accepted
@@ -540,24 +625,16 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
         if (slots <= 0)
             throw new ArgumentOutOfRangeException(nameof(slots), slots, "slots must be a positive integer");
 
-        await _pollAdmissionGate.WaitAsync();
+        await _lifecycleGate.WaitAsync();
         try
         {
-            await _lifecycleGate.WaitAsync();
-            try
-            {
-                await _definitions.UpdateSlotsAsync(RunnerId, slots);
-                _slots = slots;
-                _log.LogInformation("Runner {Id} slots updated to {Slots}", RunnerId, slots);
-            }
-            finally
-            {
-                _lifecycleGate.Release();
-            }
+            await _definitions.UpdateSlotsAsync(RunnerId, slots);
+            _slots = slots;
+            _log.LogInformation("Runner {Id} slots updated to {Slots}", RunnerId, slots);
         }
         finally
         {
-            _pollAdmissionGate.Release();
+            _lifecycleGate.Release();
         }
     }
 
@@ -598,12 +675,13 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
             _status = RunnerStatus.Offline;
             var registry = GrainFactory.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
             await registry.UnregisterAsync(RunnerId);
-            await CloseoutLostAsync();
         }
         finally
         {
             _lifecycleGate.Release();
         }
+
+        await CloseoutLostAsync();
     }
 
     private async Task CloseoutLostAsync()
@@ -637,6 +715,7 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
                 if (FindWork(entry.WorkId, entry.OwnerKind, entry.OwnerId) is null)
                     continue;
                 var job = GrainFactory.GetGrain<IAgentJobGrain>(entry.OwnerId);
+                await _closeoutObserver.AgentJobCloseoutStartingAsync(RunnerId, entry.OwnerId, entry.WorkId);
                 var reportResult = await job.ReportResultAsync(RunnerId, entry.WorkId, synthesizedFailure);
                 if (!reportResult.Accepted)
                     await job.FailAsync(synthesizedFailure.Message ?? "failed");
@@ -708,15 +787,7 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
 
     private async Task PersistAsync()
     {
-        await _worksStateWriteGate.WaitAsync();
-        try
-        {
-            await _worksState.WriteStateAsync();
-        }
-        finally
-        {
-            _worksStateWriteGate.Release();
-        }
+        await _worksState.WriteStateAsync();
     }
 
     private async Task MarkRunnerWorkTerminalAsync(

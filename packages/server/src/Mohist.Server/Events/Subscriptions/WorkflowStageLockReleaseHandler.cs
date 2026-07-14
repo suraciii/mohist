@@ -18,9 +18,10 @@ namespace Mohist.Server.Events.Subscriptions;
 /// resolves the workflow run id from the CloudEvent source URI
 /// (<c>/mohist/workflow-runs/{id}</c>).
 ///
-/// The grain uses <c>[Reentrant]</c> so the durable dispatcher can re-enter
-/// the grain without deadlocking when delivery overlaps the originating
-/// workflow call stack.
+/// The durable dispatcher awaits this handler's <see cref="ICloudEventHandler.HandleAsync"/>
+/// invocation. The handler resolves the target <see cref="IWorkflowGrain"/> and
+/// calls <c>ReleaseStageLocksAsync</c> on the await stack. Failures escape
+/// into the durable dispatcher's retry / dead-letter pipeline.
 /// </summary>
 [Subscription(Type = "com.mohist.workflow.stage.completed|com.mohist.workflow.stage.failed")]
 public sealed class WorkflowStageLockReleaseHandler : ICloudEventHandler

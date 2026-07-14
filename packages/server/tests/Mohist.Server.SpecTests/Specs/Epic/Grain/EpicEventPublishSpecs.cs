@@ -93,9 +93,9 @@ public class EpicEventPublishSpecs
         await grain.UnlinkIssueAsync("issue_1", ProjectId);
 
         var events = await eventStore.ListEpicEventsAsync(EpicId);
-        var unlinked = Assert.Single(events);
-        Assert.Equal(EventCatalog.ReverseDns.EpicIssueUnlinked, unlinked.Envelope.Type);
-        Assert.Equal("issue_1", unlinked.Envelope.Data!.Value.GetProperty("issueId").GetString());
+        var unlinked = events.FirstOrDefault(e => e.Envelope.Type == EventCatalog.ReverseDns.EpicIssueUnlinked);
+        Assert.NotNull(unlinked);
+        Assert.Equal("issue_1", unlinked!.Envelope.Data!.Value.GetProperty("issueId").GetString());
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
@@ -107,7 +107,7 @@ public class EpicEventPublishSpecs
         var time = new FakeTimeProvider(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero));
         await SeedEpicAsync(database);
         // Pin an open (in-progress) linked issue so the post-Resume
-        // reconcile path does not auto-mark the epic done — that would
+        // recompute path does not auto-mark the epic done — that would
         // emit an extra EpicStatusChanged event and obscure the
         // start→pause→resume sequence the spec calls out.
         await SeedIssueAsync(database);
@@ -120,13 +120,16 @@ public class EpicEventPublishSpecs
 
         var statusChanges = await eventStore.ListEpicEventsAsync(EpicId);
         // The grain may have emitted extra status events (e.g. running→
-        // running from a reconcile, in_progress issue start) before
+        // running from a recompute, in_progress issue start) before
         // our three deliberate transitions. The spec requires that
         // every transition persists its event, not that the count is
         // exactly 3 — assert the three we issued appear in order.
+        // Filter before mapping so non-status-changed events (e.g.
+        // EpicStartAttemptFailed from a transient issue-start failure)
+        // don't crash the property access.
         var transitions = statusChanges
+            .Where(e => e.Envelope.Type == EventCatalog.ReverseDns.EpicStatusChanged)
             .Select(e => (Type: e.Envelope.Type, Old: e.Envelope.Data?.GetProperty("oldStatus").GetString(), New: e.Envelope.Data?.GetProperty("newStatus").GetString()))
-            .Where(t => t.Type == EventCatalog.ReverseDns.EpicStatusChanged)
             .ToList();
         Assert.Contains(transitions, t => t.Old == "idle" && t.New == "running");
         var idleToRunning = transitions.FindIndex(t => t.Old == "idle" && t.New == "running");
@@ -185,7 +188,7 @@ public class EpicEventPublishSpecs
         var (database, eventStore) = CreateDatabaseWithRecordingEventStore();
         var time = new FakeTimeProvider(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero));
         await SeedEpicAsync(database);
-        // Pin an open linked issue so the post-Resume reconcile path
+        // Pin an open linked issue so the post-Resume recompute path
         // does not auto-mark the epic done before we can exercise the
         // remaining transitions (Update, SetStatus "closed").
         await SeedIssueAsync(database);
@@ -237,22 +240,24 @@ public class EpicEventPublishSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
-    public async Task EventStoreFailure_DoesNotPropagateAndStateStillCommits()
+    public async Task EventStoreFailure_AtomicRollback_PreventsTransitionWithoutEvent()
     {
+        // With atomic event persistence for status transitions, an event-store
+        // append failure rolls back the entire transaction — the epic does not
+        // end up in a committed state without its durable status-changed event.
+        // This ensures the EpicRunningStatusHandler recovery trigger is never
+        // lost relative to the state transition.
         var (database, _) = CreateDatabaseWithRecordingEventStore();
         var time = new FakeTimeProvider(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero));
         await SeedEpicAsync(database);
         var throwingStore = new ThrowingEventStore();
 
         var grain = CreateGrain(database.Factory, $"{ProjectId}:{EpicId}", throwingStore, time);
-        // Epic event writes stay on their existing best-effort path for this
-        // issue: epic producer convergence is explicitly out of scope.
-        await grain.StartAsync();
+        await Assert.ThrowsAsync<InvalidOperationException>(() => grain.StartAsync());
 
         await using var verify = database.CreateDbContext();
         var row = await verify.Epics.AsNoTracking().SingleAsync(e => e.Id == EpicId);
-        Assert.Equal("running", row.Status);
-        Assert.Equal(1, throwingStore.AppendCount);
+        Assert.Equal("idle", row.Status);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
@@ -310,6 +315,7 @@ public class EpicEventPublishSpecs
             (new EpicStatusChanged("idle", "running"), EventCatalog.ReverseDns.EpicStatusChanged, nameof(EpicStatusChanged)),
             (new EpicClosed(), EventCatalog.ReverseDns.EpicClosed, nameof(EpicClosed)),
             (new EpicReopened(), EventCatalog.ReverseDns.EpicReopened, nameof(EpicReopened)),
+            (new EpicStartAttemptFailed("issue_1", 1, "transient failure"), EventCatalog.ReverseDns.EpicStartAttemptFailed, nameof(EpicStartAttemptFailed)),
         };
 
         foreach (var (payload, expectedReverseDns, expectedStorageType) in variants)
@@ -350,6 +356,7 @@ public class EpicEventPublishSpecs
             EventCatalog.ReverseDns.EpicStatusChanged,
             EventCatalog.ReverseDns.EpicClosed,
             EventCatalog.ReverseDns.EpicReopened,
+            EventCatalog.ReverseDns.EpicStartAttemptFailed,
         };
         foreach (var type in expected)
             Assert.Contains(type, EventCatalog.All);

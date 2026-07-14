@@ -76,20 +76,7 @@ public sealed class AgentSubscriptionDispatchHandler : ICloudEventHandler
 
     public async Task HandleAsync(CloudEvent evt, CancellationToken ct)
     {
-        try
-        {
-            await DispatchAsync(evt, ct).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _log.LogWarning(ex,
-                "Subscription dispatch failed for event {EventType} {EventId}",
-                evt.Type, evt.Id);
-        }
+        await DispatchAsync(evt, ct).ConfigureAwait(false);
     }
 
     private async Task DispatchAsync(CloudEvent evt, CancellationToken ct)

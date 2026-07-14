@@ -175,6 +175,28 @@ public sealed class HermesIssueNotificationTests
     }
 
     [Fact]
+    public async Task SetupFailure_PropagatesToDispatcher()
+    {
+        // issue-363 T-002: setup/enqueue failures no longer get caught at
+        // the handler boundary. When the background dispatcher itself
+        // fails to enqueue, the exception reaches the durable dispatcher
+        // for retry/dead-lettering. The handler is synchronous here, so
+        // we directly use a dispatcher whose Dispatch call throws —
+        // matching a real failure mode (channel full / broker down).
+        var fixture = CreateFixture();
+        fixture.Dispatcher.ThrowOnDispatch = new InvalidOperationException("dispatcher unavailable");
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            fixture.Handler.HandleAsync(WorkflowEvent(
+                EventCatalog.ReverseDns.StageApprovalRequested,
+                "run_1",
+                new StageApprovalRequested("plan")), CancellationToken.None));
+        Assert.Equal("dispatcher unavailable", ex.Message);
+        Assert.Equal(0, fixture.Dispatcher.QueuedCount);
+        Assert.Empty(fixture.Client.Sent);
+    }
+
+    [Fact]
     public async Task DeliveryWork_IsQueuedWithoutAwaitingSlowWebhookSend()
     {
         var fixture = CreateFixture();
@@ -392,8 +414,14 @@ public sealed class HermesIssueNotificationTests
         private readonly Queue<Func<CancellationToken, Task>> _works = new();
 
         public int QueuedCount => _works.Count;
+        public Exception? ThrowOnDispatch { get; set; }
 
-        public void Dispatch(Func<CancellationToken, Task> work) => _works.Enqueue(work);
+        public void Dispatch(Func<CancellationToken, Task> work)
+        {
+            if (ThrowOnDispatch is not null)
+                throw ThrowOnDispatch;
+            _works.Enqueue(work);
+        }
 
         public async Task RunAllAsync(CancellationToken ct = default)
         {

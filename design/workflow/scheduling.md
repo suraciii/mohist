@@ -111,7 +111,7 @@ Pluggable policy point: default pure FIFO, can extend to `Priority DESC, ReadySi
 
 ## Capacity
 
-`slots` bounds all concurrently executing work owned by a runner. `BeginPoll` captures the current capacity while holding the runner's poll-admission gate through reconciliation; `UpdateAsync` waits for that gate, so a poll is linearized entirely before or after a capacity change. Agent admission cannot interleave with the same claim window. Process enforces nothing.
+`slots` bounds all concurrently executing work owned by a runner. `BeginPoll` prevents overlapping polls, but its capacity snapshot is informational only. Every fresh workflow claim rechecks the runner's live registration and capacity under the runner lifecycle gate. A capacity reduction constrains subsequent claims without cancelling work already running; an unregister ordered before a claim rejects that claim, while an unregister ordered after a claim closes it out. Agent admission rejects while a poll is admitted. Process enforces nothing.
 
 ## Report
 

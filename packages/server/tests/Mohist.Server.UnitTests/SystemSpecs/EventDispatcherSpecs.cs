@@ -174,8 +174,62 @@ public class EventDispatcherSpecs
     }
 
     [Fact]
-    public async Task DispatchAsync_AgentBestEffortFailure_MarksDeliveredWithoutDeadLetter()
+    public async Task DispatchAsync_AgentSubscriptionFailure_PropagatesToDispatcher_RetriesUntilDeadLetter()
     {
+        // issue-363 T-002: subscription dispatch no longer swallows exceptions
+        // locally. A launch failure must reach the dispatcher's retry/DLQ
+        // path so the durable delivery semantics recover from transient
+        // failures without losing events.
+        var time = new FakeTimeProvider(StartTime);
+        var events = new FakeEventStore();
+        var dlq = new FakeDeadLetterStore();
+        var handler = new AgentSubscriptionDispatchHandler(
+            new ThrowingScopeFactory(),
+            NullLogger<AgentSubscriptionDispatchHandler>.Instance);
+        var dispatcher = BuildDispatcher(
+            events,
+            dlq,
+            [new Subscription("*", handler, DispatchDynamic)],
+            time,
+            handlerMaxAttempts: 2);
+
+        events.Enqueue(FakeEventStore.Build(
+            type: IssueCompleted,
+            source: "/mohist/issues/issue_agent_failure",
+            eventId: "evt_agent_failure",
+            extensions: new Dictionary<string, string> { ["projectid"] = "project_agent" }));
+
+        await dispatcher.DispatchAsync(CancellationToken.None);
+        Assert.Empty(events.Marked);
+        Assert.Single(events.PendingUndelivered);
+        Assert.Empty(dlq.Written);
+
+        time.Advance(TimeSpan.FromSeconds(1));
+        await dispatcher.DispatchAsync(CancellationToken.None);
+
+        var deadLetter = Assert.Single(dlq.Written);
+        Assert.Equal("evt_agent_failure", deadLetter.EventId);
+        Assert.Equal(2, deadLetter.AttemptCount);
+        Assert.Contains("launch unavailable", deadLetter.ErrorMessage);
+        var marked = Assert.Single(events.Marked);
+        Assert.Equal("/mohist/issues/issue_agent_failure", marked.Source);
+        Assert.Empty(events.PendingUndelivered);
+
+        // The row is gone from the queue so a subsequent tick must not
+        // re-attempt the dispatch.
+        await dispatcher.DispatchAsync(CancellationToken.None);
+        Assert.Single(events.Marked);
+        Assert.Single(dlq.Written);
+    }
+
+    [Fact]
+    public async Task DispatchAsync_AgentSubscriptionFailure_RangeEnvelopeIsStillNoOp()
+    {
+        // The dispatcher-scoped retry/DLQ path runs only when an envelope
+        // proceeds into the launch pipeline. An envelope that lacks the
+        // projectid extension is a valid no-op outcome: the handler
+        // returns a completed task without throwing, so the dispatcher
+        // marks the row delivered without retry or dead-letter.
         var time = new FakeTimeProvider(StartTime);
         var events = new FakeEventStore();
         var dlq = new FakeDeadLetterStore();
@@ -190,9 +244,8 @@ public class EventDispatcherSpecs
 
         events.Enqueue(FakeEventStore.Build(
             type: IssueCompleted,
-            source: "/mohist/issues/issue_agent_best_effort",
-            eventId: "evt_agent_best_effort",
-            extensions: new Dictionary<string, string> { ["projectid"] = "project_agent" }));
+            source: "/mohist/issues/issue_agent_no_projectid",
+            eventId: "evt_agent_no_projectid"));
 
         await dispatcher.DispatchAsync(CancellationToken.None);
 

@@ -1,0 +1,288 @@
+# T-001 progress
+
+## Decisions
+- Removed `[Reentrant]` attribute and the `using Orleans.Concurrency;` line
+  from `WorkflowGrain.cs` (the namespace symbol is unused after the
+  attribute drops). `WorkflowGrain` had no scheduler-mediated self-call
+  (verified: only direct intra-grain helpers: `WorkflowStageLockCoordinator`,
+  `WorkflowStageInitializer`, `WorkflowWorkLifecycle`).
+- Replaced the stale `[Reentrant]` paragraph in
+  `WorkflowStageLockReleaseHandler.cs` (lines 21-23) with prose describing
+  the awaited dispatch model: the handler awaits the durable dispatcher's
+  `HandleAsync` invocation; failures escape into the retry/dead-letter
+  pipeline.
+
+## Codebase Patterns
+- WorkflowGrain uses the `WorkflowGrainFixture` (`InProcessTestCluster`
+  + `MigratedSqliteTemplate.CopyTo` + `FakeTimeProvider` + `RecordingEventStore`
+  + `InMemoryEventBus`), declared via
+  `[Collection("WorkflowGrain3")]` (loads balanced by name). Shared
+  setup lives in `WorkflowGrainSpecs` (e.g. `StartWorkflowAsync`,
+  `LoadRunAsync`, `DeactivateWorkflowAsync`).
+- Spec concurrency collection partitions reuse the same fixture type,
+  so a new concurrency spec file with `[Collection("WorkflowGrain3")]`
+  joins the existing serial class chain — that matches the
+  spec-sharding guidance in `design/testing.md`.
+- `IWorkflowRunStore.LoadAsync` returns the persisted `WorkflowRun`
+  directly; comparing it against `IWorkflowGrain.GetRunStatusAsync()`
+  (in-memory) gives the agreement assertion required by the spec.
+
+## Gotchas
+- `WorkflowRun.Start(Now())` will throw `InvalidOperationException` if
+  the run is not `Created`/`Paused`. The "started without a runner"
+  helper (`StartWorkflowWithoutRunnerAsync`) leaves the run in `Pending`,
+  which is the correct phase for `PauseAsync`/`StopAsync`/`ResumeAsync`
+  control races.
+- `StopAsync` throws `InvalidOperationException` when the run is
+  already `Stopped`; the catch helper `CatchAsync` makes this
+  assertable without exploding the test.
+- `PauseAsync` followed by `StopAsync` both succeed from `Pending`:
+  Pause moves to `Paused`; Stop is allowed from `Paused`. When fired
+  concurrently, exactly one ordering wins but both can succeed — the
+  spec asserts only that the final state is one of the two allowed
+  serialized outcomes, never on the order.
+- `dotnet test --no-build` runs only what's already built; if the
+  preceding `npm test` shows warnings about stale builds, the safe
+  re-run is `dotnet build <project>` first.
+
+## Verification
+- `npm run build` succeeds (Mohist.Server compiles with 0 warnings,
+  TreatWarningsAsErrors catches the dropped `using Orleans.Concurrency`).
+- `npm test` passes: 2863 server specs (including the 5 new
+  WorkflowGrainConcurrencySpecs), 1388 unit tests, 24 arch tests,
+  875 CLI tests, 4596 web tests, 1007 runner tests — all green.
+- All 5 new concurrency specs run through real Orleans runtime
+  (`InProcessTestCluster`) using `FakeTimeProvider` and
+  `MigratedSqliteTemplate.CopyTo`; no wall-clock waits, no order
+  dependencies.
+
+# T-002 progress
+
+## Decisions
+- `AgentSubscriptionDispatchHandler.HandleAsync` (`Events/Subscriptions/AgentSubscriptionDispatchHandler.cs:77-80`)
+  collapsed to a direct `await DispatchAsync(evt, ct)`. The previously swallow
+  try-catch was removed; envelope-level no-ops (no projectid on the envelope,
+  no active matched subscription, empty rendered prompt) survive as `return`
+  in `DispatchAsync` itself, and `OperationCanceledException`-when-cancelled
+  propagates by virtue of `DispatchAsync` simply throwing. `DeliveryFailure`
+  semantics now reach the durable dispatcher for retry/DLQ.
+- `HermesIssueNotificationHandler.HandleAsync` (`Events/Subscriptions/HermesIssueNotificationHandler.cs:48-60`)
+  lost its outer setup try-catch. The two `Task.CompletedTask` no-op returns
+  (no webhook configured / not a recognised notification type, and
+  notification type disabled in options) and the cooperative
+  `ct.ThrowIfCancellationRequested()` rethrow stay. The two-phase model is
+  preserved: `DeliverAsync`'s own try-catch (`DeliverAsync`, lines 62-86)
+  and `BackgroundHermesIssueNotificationDispatcher`'s `Task.Run` catch keep
+  the best-effort UI push channel's local error handling intact.
+- `RunnerWorkflowTerminalStatusHandler.HandleAsync` was already awaiting
+  `IRunnerWorkflowStatusRouter.RouteAsync` synchronously on the dispatch
+  stack (line 68). XML doc at lines 32-34 already describes the
+  awaited-delivery model with failures propagating to the durable dispatcher.
+  No stale detach/in-stack delivery/synchronous-callback deadlock wording
+  remains in the handler (verified via grep).
+
+## Codebase Patterns
+- For test fakes of `IHermesIssueNotificationDispatcher` that want to model
+  a setup-phase failure (dispatcher unavailable), add a `ThrowOnDispatch`
+  knob to the recording fake and throw synchronously from
+  `Dispatch(...)` — that gives a throwing-enqueue test variant while
+  preserving the default no-throw enqueue behaviour used elsewhere.
+- `RunnerWorkflowTerminalStatusHandler` is directly instantiable in unit
+  specs: `new RunnerWorkflowTerminalStatusHandler(router, NullLogger<...>.
+  Instance)` with a hand-rolled `IRunnerWorkflowStatusRouter` (the
+  production `RunnerWorkflowStatusRouter` swallows everything internally, so
+  propagate-only verification cannot use it). The "shared" existing
+  `[Collection("IntegrationRunner")]`-driven specs already exercise the
+  production router.
+
+## Gotchas
+- After dead-lettering in `EventDispatcherSpecs`, the dispatcher marks
+  the source row DispatchedAt; so an assertion `Assert.Empty(events.Marked)`
+  AFTER retry exhaustion will fail. Use
+  `Assert.Single(events.Marked)` + an empty `events.PendingUndelivered`
+  + a second tick that observes no double-fire to assert durable semantics.
+- The `_dispatcher.Dispatch(...)` call in `HermesIssueNotificationHandler`
+  is synchronous (void). Adding `ThrowOnDispatch` to the recording fake
+  works because the dispatcher throws synchronously and the handler
+  returns `Task.CompletedTask` immediately. The pattern under test is
+  "Throw in the synchronous dispatch enqueue path"; the test uses
+  `Assert.ThrowsAsync` because the handler's `HandleAsync` method is
+  returned synchronously but its async surface still propagates the
+  exception via the Task it returns.
+
+## Verification
+- `npm run build` succeeds (TreatWarningsAsErrors catches the missing
+  `using Mohist.Server.Events.Subscriptions;` in
+  `RunnerWorkflowTerminalStatusHandlerSpecs` after the new direct-instantiation
+  tests were added).
+- `npm test` passes: 2865 server specs (+2 new direct-instantiation
+  `RunnerWorkflowTerminalStatusHandlerSpecs.HandleAsync_*` specs;
+  +1 from the renamed `HandleAsync_LaunchFailure_PropagatesToDispatcher`
+  minus 0 removed), 1390 unit tests (+2 new `EventDispatcherSpecs` —
+  `DispatchAsync_AgentSubscriptionFailure_PropagatesToDispatcher_RetriesUntilDeadLetter`
+  and `DispatchAsync_AgentSubscriptionFailure_RangeEnvelopeIsStillNoOp`;
+  +1 new `HermesIssueNotificationTests.SetupFailure_PropagatesToDispatcher`),
+  24 arch tests, 875 CLI tests, 4596 web tests, 1007 runner tests — all
+  green.
+# T-003 progress
+
+## Decisions
+- Deleted `Events/Hosting/EpicReconciliationService.cs` (the
+  `BackgroundService` plus its `EpicReconciliationOptions`). The poll-driven
+  sweep's readiness behavior is preserved by adding a link-time
+  `RecomputeProgressInternalAsync` call in `EpicGrain.LinkIssueAsync`
+  (line 170) and `EpicGrain.LinkIssuesAsync` (line 371) with
+  `StartFailureMode.PreserveRunning`. Wake-from-done links keep their
+  direct `TryStartNextAsync` call at line 158.
+- Renamed the epic progress-recompute chain end-to-end:
+  - `IEpicGrain.ReconcileAfterTerminalAsync` → `RecomputeProgressAsync`
+  - `EpicGrain.ReconcileAfterTerminalInternalAsync` →
+    `RecomputeProgressInternalAsync` (now also called by the link-time
+    trigger and by `ResumeAsync` at line 562)
+  - `EpicReconcileDispatcher` → `EpicProgressRecomputeDispatcher`
+  - `EpicCancelledReconcileHandler` → `EpicCancelledHandler` (style-aligned
+    with `EpicAutoDoneHandler`)
+  - All XML doc comments and `<see cref>` references updated; `TreatWarningsAsErrors`
+    caught any missed reference at compile time
+- Added a private `StartFailureMode { PreserveRunning, Propagate }` enum
+  on `EpicGrain` so the terminal-event entry (`RecomputeProgressAsync`)
+  uses `Propagate` to let `IIssueGrain.StartWorkAsync` failures escape to
+  the durable dispatcher for retry/dead-lettering, while command paths
+  (`StartAsync`, link operations, `ResumeAsync`) retain the previous
+  running-but-idle behavior via the default `PreserveRunning`.
+- Removed `AddHostedService<EpicReconciliationService>()` from
+  `MohistServiceRegistration.cs:98`; retained `using Mohist.Server.Events.Hosting;`
+  because `DispatcherActivationService` is still registered.
+
+## Codebase Patterns
+- `EpicGrain.LinkIssueAsync` / `LinkIssuesAsync` now end with an
+  `if (wakeUpEpic) { TryStartNextAsync(...) } else if (status is non-terminal)
+  { RecomputeProgressInternalAsync(..., PreserveRunning) }` split. The
+  wake-from-done branch preserves the existing direct `TryStartNextAsync`
+  call; the non-wake non-terminal branch drives the new link-time recompute
+  so `TryStartNext` advances a running epic and `MarkDone` flips an
+  all-complete idle epic in the same commit. Closed is still rejected
+  outright before either branch fires.
+- `LinkIssuesAsync` tracks `hasLinkedAny` so the recompute only fires when
+  at least one item was actually linked — a batch where every item was
+  deduped or rejected must not trigger a `MarkDone` event from the
+  recompute.
+- `EpicMembershipSpecs` reuses the existing `LinkIssueAsync_TerminalPlusSecondNonTerminal_*`
+  test (idempotency + auto-done via link-time recompute) and now adds two
+  focused link-time recompute specs:
+  `LinkIssueAsync_RunningEpic_StartableIssueAdvancesViaLinkTimeRecompute`
+  and `LinkIssueAsync_IdleEpic_AllCompleteMembershipAtLinkTime_AutoMarksDone`.
+  Both wire the `RecordingGrainFactory` so `IssueStartCalls` /
+  `EpicActiveIssues` empty-set assertions can be observed without the
+  full Orleans runtime.
+
+## Gotchas
+- Adding a `RecordingGrainFactory` to a test file that already uses
+  `NullGrainFactory` requires `using Orleans;` because `IGrainFactory`,
+  `IGrainObserver`, `IAddressable`, and the `TGrainInterface`/`TGrainObserverInterface`
+  generics all live in `Orleans` (not `Microsoft.Orleans.Core`). The
+  build will fail with CS0246 / CS0738 if the `using Orleans;` directive
+  is missing or if `CreateObjectReference<TGrainObserverInterface>`'s
+  return type is mistakenly declared as `TGrainInterface`.
+- The renamed `EpicCancelledHandler` constructor was referenced by two
+  test call sites (`EpicAutoDoneHandlerSpecs` + `EpicCancelledHandler`).
+  Both kept their constructor-injection pattern; only the type name and
+  the generic type parameter (e.g., `NullLogger<EpicCancelledHandler>`)
+  changed. Tests that still hard-coded `EpicCancelledReconcileHandler` were
+  caught by `TreatWarningsAsErrors`.
+- `EpicAutoDoneHandler.cs` ended without a trailing newline after the
+  rename (the previous `\n}` was edited but no `\n` added). Adding a
+  trailing `\n` matches the file convention.
+
+## Verification
+- `npm run build` succeeds (Mohist.Server compiles with 0 warnings,
+  TreatWarningsAsErrors catches any leftover `see cref`/call-site
+  reference to the old names).
+- `npm test` passes: 2868 server specs (+2 new `EpicMembershipSpecs`
+  link-time recompute specs, all 299 Epic tests green), 1390 unit tests,
+  24 arch tests, 875 CLI tests, 4596 web tests, 1007 runner tests — all
+  green.
+- All Epic tests now pass through the renamed `RecomputeProgressAsync_*`
+  test methods in `EpicProgressionSpecs`, `EpicAutoDoneSpecs`, and
+  `EpicAutoDoneHandlerSpecs`. The new `RecomputeProgressAsync_*` tests
+  cover both `Propagate` (terminal-event dispatch path) and
+  `PreserveRunning` (command-path) failure contracts for
+  `IIssueGrain.StartWorkAsync`.
+- No remaining references to `EpicReconciliation*`,
+  `ReconcileAfterTerminal*`, `EpicReconcileDispatcher`, or
+  `EpicCancelledReconcileHandler` under `packages/server/src` or
+  `packages/server/tests` (grep returns zero matches). The
+  workflow-scheduling `DispatchService` reconcile (out of scope per #363)
+  remains untouched.
+
+# T-004 progress
+
+## Decisions
+- Removed `[Reentrant]` attribute from `RunnerGrain.cs` and dropped the
+  `using Orleans.Concurrency;` directive (the namespace is unused in the
+  implementation after the attribute drops; `[AlwaysInterleave]` lives on
+  `IRunnerGrain`).
+- Removed `_worksStateWriteGate` and `_pollAdmissionGate` from `RunnerGrain`;
+  `PersistAsync` now calls `_worksState.WriteStateAsync()` directly. Turn
+  serialization provides the necessary write ordering for non-interleaved
+  callers; `AssignAgentJobAsync`'s `PersistAsync` is protected by
+  `_lifecycleGate`.
+- Kept `_pollAdmitted` as a boolean flag only: `TryBeginPollAsync` sets it,
+  `EndPollAsync` clears it, and `AssignAgentJobAsync` rejects with
+  `runner-reconciling` while it is true.
+- Removed `_pollAdmissionGate` Wait/Release from `UnregisterAsync`,
+  `UpdateAsync`, and `AssignAgentJobAsync`; these methods now acquire only
+  `_lifecycleGate` for state mutations.
+- Moved `CloseoutLostAsync()` outside `_lifecycleGate` in `HandleTimeoutAsync`,
+  matching the existing `UnregisterAsync` pattern: set offline + unregister
+  inside the gate, release, then closeout.
+- Added `[AlwaysInterleave]` to `GetRuntimeStateAsync` and `AssignAgentJobAsync`
+  on `IRunnerGrain`; `GetSlotsAsync` already had it. This lets
+  `AgentJobGrain.TryAssignToRunnerAsync` proceed when `RunnerGrain`'s turn is
+  held by `HandleTimeoutAsync`/`UnregisterAsync` during closeout.
+- Updated `RunnerDefinitionStateSpecs` tests that asserted the old
+  `_pollAdmissionGate` blocking semantics:
+  - `UpdateAsync_WaitsForAdmittedPollAndNextAdmissionUsesNewCapacity` →
+    `UpdateAsync_DoesNotWaitForAdmittedPollAndNextAdmissionUsesNewCapacity`
+  - `UnregisterAsync_WaitsForAdmittedPollBeforeClearingRegistration` →
+    `UnregisterAsync_DoesNotWaitForAdmittedPollBeforeClearingRegistration`
+- Added `BlockAssignmentPrepared()` / `ReleaseAssignmentPrepared()` to
+  `ControllableAgentJobDispatchObserver` so the deadlock spec can pause the
+  agent job inside `TryAssignToRunnerAsync` while forcing the runner presence
+  timer to fire. The blocking is opt-in and reset between tests.
+
+## Codebase Patterns
+- RunnerGrain concurrency specs use the `AgentJobGrainFixture`
+  (`[Collection("AgentJobGrain")]`) because it provides the
+  `ControllableAgentJobDispatchObserver` needed to reproduce the reciprocal
+  Runner↔AgentJob deadlock scenario. The fixture still gives us
+  `InProcessTestCluster` + `MigratedSqliteTemplate.CopyTo` + `FakeTimeProvider`.
+- Poll admission remains single-writer: `TryBeginPollAsync` checks the
+  `_pollAdmitted` flag; with turn serialization, two concurrent calls execute
+  serially and exactly one wins.
+- `HandleTimeoutAsync` releasing `_lifecycleGate` before `CloseoutLostAsync`
+  is the critical fix: `AssignAgentJobAsync` (now `[AlwaysInterleave]`) can
+  acquire the gate during closeout, see the runner is offline, reject, and
+  free the AgentJob turn so `ReportResultAsync` can complete.
+
+## Gotchas
+- The deadlock spec's final agent-job failure reason depends on timing.
+  The test config sets `AgentJobOptions.DispatchRetryBound` to 5 s, while the
+  runner `PresenceTimeout` is 2 min. Advancing time to trigger the timeout
+  therefore also exceeds the dispatch retry bound, so the agent job may
+  self-fail with `runner-unavailable` before the closeout's `ReportResultAsync`
+  can set it to `runner-lost`. The spec asserts only the settled state:
+  runner offline, active works empty, agent job terminal. Do not assert the
+  exact failure reason.
+- `using Orleans.Concurrency` must be removed from `RunnerGrain.cs` after
+  `[Reentrant]` is dropped; the implementation does not reference
+  `[AlwaysInterleave]` (the attribute lives on the interface).
+- `RunnerDefinitionStateSpecs` used to assert the old hold-and-wait behavior
+  of `_pollAdmissionGate`. After removal, `UpdateAsync` and `UnregisterAsync`
+  proceed while a poll is admitted; the specs now verify that outcome.
+
+## Verification
+- `npm run build` succeeds (0 warnings, 0 errors).
+- `npm test` passes: 2874 server specs (+6 new `RunnerGrainConcurrencySpecs`;
+  the two renamed `RunnerDefinitionStateSpecs` still pass), 1390 unit tests,
+  24 arch tests, 875 CLI tests, 4596 web tests, 1007 runner tests — all green.

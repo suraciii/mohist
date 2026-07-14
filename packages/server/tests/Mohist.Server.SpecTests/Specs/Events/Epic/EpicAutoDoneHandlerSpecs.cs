@@ -1,9 +1,12 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Epic.Grains;
+using Mohist.Server.Epic.Domain.Events;
 using Mohist.Server.Epic.Services;
+using Mohist.Server.Events.Grains;
 using Mohist.Server.Events.Subscriptions;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Epic;
@@ -11,6 +14,8 @@ using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Domain.Events;
+using Mohist.Server.Issue.Grains;
+using Mohist.Server.Issue.Services;
 using Mohist.Server.SpecTests.Support;
 using Orleans;
 using System.Text.Json;
@@ -20,6 +25,8 @@ namespace Mohist.Server.SpecTests.Specs.Events;
 
 public class EpicAutoDoneHandlerSpecs
 {
+    private static readonly DateTimeOffset EventTime = new(2026, 7, 1, 0, 0, 0, TimeSpan.Zero);
+
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
@@ -153,7 +160,7 @@ public class EpicAutoDoneHandlerSpecs
         await handler.HandleAsync(evt, CancellationToken.None);
         await handler.HandleAsync(evt, CancellationToken.None);
 
-        // The first reconcile marks the epic terminal and releases active
+        // The first recompute marks the epic terminal and releases active
         // ownership; repeated terminal events then find no active owner.
         Assert.Single(grains.Calls);
         await using var verify = database.CreateDbContext();
@@ -219,6 +226,88 @@ public class EpicAutoDoneHandlerSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
+    public async Task DispatchAsync_CompletedEventSelectedIssueStartFailure_RetriesThenDeadLetters()
+    {
+        await using var database = CreateDatabase();
+        await SeedEpicAsync(database, status: "running");
+        await SeedIssueAsync(database, projectId: "project_1", issueId: "issue_completed", issueNumber: 1, status: IssueStatus.Done);
+        await SeedIssueAsync(database, projectId: "project_1", issueId: "issue_next", issueNumber: 2, status: IssueStatus.Backlog);
+        await SeedLinkAsync(database, epicId: "epic_1", issueId: "issue_completed", issueNumber: 1);
+        await SeedLinkAsync(database, epicId: "epic_1", issueId: "issue_next", issueNumber: 2);
+
+        var grains = new TestEpicGrainFactory(database.Factory) { ThrowOnIssueStart = true };
+        var handler = new EpicAutoDoneHandler(
+            new EpicQuerier(database.Factory, null!),
+            grains,
+            NullLogger<EpicAutoDoneHandler>.Instance);
+        var events = new CapturingEventStore();
+        var deadLetters = new CapturingDeadLetterStore(events);
+        var time = new FakeTimeProvider(new DateTimeOffset(2026, 7, 1, 0, 0, 0, TimeSpan.Zero));
+        var dispatcher = new EventDispatcherService(
+            events,
+            [new Subscription(
+                EventCatalog.ReverseDns.IssueCompleted,
+                handler,
+                (rawHandler, rawEvent, ct) =>
+                {
+                    var typedHandler = (ICloudEventHandler<IssueCompleted>)rawHandler;
+                    var typedEvent = new CloudEvent<IssueCompleted>(
+                        rawEvent.Id,
+                        rawEvent.Source,
+                        rawEvent.Type,
+                        rawEvent.Time,
+                        rawEvent.Data!.Value.Deserialize<IssueCompleted>(CloudEvent.JsonOptions)!,
+                        rawEvent.DataContentType,
+                        rawEvent.Subject,
+                        rawEvent.SpecVersion,
+                        rawEvent.Extensions);
+                    return typedHandler.HandleAsync(typedEvent, ct);
+                })],
+            deadLetters,
+            time,
+            Options.Create(new EventDispatcherOptions
+            {
+                BatchSize = 10,
+                MaxAttempts = 2,
+                BaseBackoff = TimeSpan.FromSeconds(1),
+                MaxBackoff = TimeSpan.FromSeconds(1),
+            }),
+            NullLogger<EventDispatcherService>.Instance);
+
+        await events.AppendAsync(new CloudEvent(
+            id: "evt_terminal_start_failure",
+            source: new Uri("/mohist/issues/issue_completed", UriKind.Relative),
+            type: EventCatalog.ReverseDns.IssueCompleted,
+            time: time.GetUtcNow(),
+            data: JsonSerializer.SerializeToElement(new IssueCompleted("wr_1"), CloudEvent.JsonOptions),
+            subject: "1",
+            extensions: new Dictionary<string, string>
+            {
+                ["projectid"] = "project_1",
+                ["issueid"] = "issue_completed",
+            }));
+
+        await dispatcher.DispatchAsync(CancellationToken.None);
+
+        Assert.Equal(["issue_next"], grains.IssueStartCalls);
+        Assert.Equal(1, events.PendingCount);
+        Assert.Empty(deadLetters.Written);
+
+        time.Advance(TimeSpan.FromSeconds(1));
+        await dispatcher.DispatchAsync(CancellationToken.None);
+
+        Assert.Equal(["issue_next", "issue_next"], grains.IssueStartCalls);
+        var deadLetter = Assert.Single(deadLetters.Written);
+        Assert.Equal("evt_terminal_start_failure", deadLetter.EventId);
+        Assert.Equal(2, deadLetter.AttemptCount);
+        Assert.Contains(nameof(EpicAutoDoneHandler), deadLetter.FailingHandler);
+        Assert.Contains("selected issue start failure", deadLetter.ErrorMessage);
+        Assert.Equal(0, events.PendingCount);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
     public async Task HandleAsync_MissingProjectIdExtension_NoOpsWithoutError()
     {
         await using var database = CreateDatabase();
@@ -259,10 +348,10 @@ public class EpicAutoDoneHandlerSpecs
     public async Task CancelledHandler_HasSubscriptionAttributeOnCancelledType()
     {
         // The IssueCancelled subscription is required: a cancelled in-progress
-        // issue must trigger reconcile so the next startable issue is
+        // issue must trigger recompute progress so the next startable issue is
         // advanced (otherwise the epic deadlocks on a cancelled slot).
         var attr = (SubscriptionAttribute?)Attribute.GetCustomAttribute(
-            typeof(EpicCancelledReconcileHandler), typeof(SubscriptionAttribute));
+            typeof(EpicCancelledHandler), typeof(SubscriptionAttribute));
         Assert.NotNull(attr);
         Assert.Equal(EventCatalog.ReverseDns.IssueCancelled, attr!.Type);
     }
@@ -270,7 +359,7 @@ public class EpicAutoDoneHandlerSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
-    public async Task CancelledHandler_CancelledIssue_InvokesReconcileOnOwningEpic()
+    public async Task CancelledHandler_CancelledIssue_InvokesRecomputeOnOwningEpic()
     {
         // Both terminal events funnel through the same grain method;
         // this verifies the new subscription delivers the same call.
@@ -281,14 +370,14 @@ public class EpicAutoDoneHandlerSpecs
 
         var querier = new EpicQuerier(database.Factory, null!);
         var grains = new TestEpicGrainFactory(database.Factory);
-        var handler = new EpicCancelledReconcileHandler(querier, grains, NullLogger<EpicCancelledReconcileHandler>.Instance);
+        var handler = new EpicCancelledHandler(querier, grains, NullLogger<EpicCancelledHandler>.Instance);
 
         var evt = BuildCancelledEvent(projectId: "project_1", issueId: "issue_1");
         await handler.HandleAsync(evt, CancellationToken.None);
 
-        // The grain call itself is the wiring contract — ReconcileAfterTerminalAsync
+        // The grain call itself is the wiring contract — RecomputeProgressAsync
         // advances the next startable issue via the EpicGrain (covered by
-        // EpicProgressionSpecs.ReconcileAfterTerminalAsync_RunningEpicOnCancelledInProgressIssue_AdvancesNext).
+        // EpicProgressionSpecs.RecomputeProgressAsync_RunningEpicOnCancelledInProgressIssue_AdvancesNext).
         var call = Assert.Single(grains.Calls);
         Assert.Equal("project_1:epic_1", call.GrainKey);
     }
@@ -307,7 +396,7 @@ public class EpicAutoDoneHandlerSpecs
 
         var querier = new EpicQuerier(database.Factory, null!);
         var grains = new TestEpicGrainFactory(database.Factory);
-        var handler = new EpicCancelledReconcileHandler(querier, grains, NullLogger<EpicCancelledReconcileHandler>.Instance);
+        var handler = new EpicCancelledHandler(querier, grains, NullLogger<EpicCancelledHandler>.Instance);
 
         await handler.HandleAsync(BuildCancelledEvent(projectId: "project_1", issueId: "issue_1"), CancellationToken.None);
 
@@ -325,7 +414,7 @@ public class EpicAutoDoneHandlerSpecs
 
         var querier = new EpicQuerier(database.Factory, null!);
         var grains = new TestEpicGrainFactory(database.Factory);
-        var handler = new EpicCancelledReconcileHandler(querier, grains, NullLogger<EpicCancelledReconcileHandler>.Instance);
+        var handler = new EpicCancelledHandler(querier, grains, NullLogger<EpicCancelledHandler>.Instance);
 
         var evt = BuildCancelledEvent(projectId: "project_1", issueId: "issue_unlinked");
         await handler.HandleAsync(evt, CancellationToken.None);
@@ -341,7 +430,7 @@ public class EpicAutoDoneHandlerSpecs
         // Duplicate terminal signals must converge to the same state
         // without erroring. After the terminal/open readiness change,
         // a running epic with only a cancelled linked issue has no open
-        // linked issue and auto-marks done on the first reconcile;
+        // linked issue and auto-marks done on the first recompute;
         // subsequent duplicate events see a terminal epic and no-op.
         await using var database = CreateDatabase();
         await SeedEpicAsync(database, status: "running");
@@ -350,7 +439,7 @@ public class EpicAutoDoneHandlerSpecs
 
         var querier = new EpicQuerier(database.Factory, null!);
         var grains = new TestEpicGrainFactory(database.Factory);
-        var handler = new EpicCancelledReconcileHandler(querier, grains, NullLogger<EpicCancelledReconcileHandler>.Instance);
+        var handler = new EpicCancelledHandler(querier, grains, NullLogger<EpicCancelledHandler>.Instance);
 
         var evt = BuildCancelledEvent(projectId: "project_1", issueId: "issue_1");
         await handler.HandleAsync(evt, CancellationToken.None);
@@ -369,7 +458,7 @@ public class EpicAutoDoneHandlerSpecs
     public async Task CancelledHandler_TerminalEpic_StaysTerminalNoError()
     {
         // Terminal epics must absorb the closed event without flipping
-        // state or throwing. ReconcileAfterTerminalAsync short-circuits
+        // state or throwing. RecomputeProgressAsync short-circuits
         // on done/closed.
         await using var database = CreateDatabase();
         await SeedEpicAsync(database, status: "done");
@@ -378,13 +467,13 @@ public class EpicAutoDoneHandlerSpecs
 
         var querier = new EpicQuerier(database.Factory, null!);
         var grains = new TestEpicGrainFactory(database.Factory);
-        var handler = new EpicCancelledReconcileHandler(querier, grains, NullLogger<EpicCancelledReconcileHandler>.Instance);
+        var handler = new EpicCancelledHandler(querier, grains, NullLogger<EpicCancelledHandler>.Instance);
 
         var evt = BuildCancelledEvent(projectId: "project_1", issueId: "issue_1");
         await handler.HandleAsync(evt, CancellationToken.None);
 
         // Retained terminal memberships are historical only; without a
-        // non-terminal owner there is no active epic to reconcile.
+        // non-terminal owner there is no active epic to recompute.
         Assert.Empty(grains.Calls);
         await using var verify = database.CreateDbContext();
         var stored = await verify.Epics.AsNoTracking().FirstAsync();
@@ -401,7 +490,7 @@ public class EpicAutoDoneHandlerSpecs
 
         var querier = new EpicQuerier(database.Factory, null!);
         var grains = new TestEpicGrainFactory(database.Factory);
-        var handler = new EpicCancelledReconcileHandler(querier, grains, NullLogger<EpicCancelledReconcileHandler>.Instance);
+        var handler = new EpicCancelledHandler(querier, grains, NullLogger<EpicCancelledHandler>.Instance);
 
         var evt = new CloudEvent<IssueCancelled>(
             id: Guid.NewGuid().ToString(),
@@ -427,7 +516,7 @@ public class EpicAutoDoneHandlerSpecs
 
         var querier = new EpicQuerier(database.Factory, null!);
         var grains = new TestEpicGrainFactory(database.Factory);
-        var handler = new EpicCancelledReconcileHandler(querier, grains, NullLogger<EpicCancelledReconcileHandler>.Instance);
+        var handler = new EpicCancelledHandler(querier, grains, NullLogger<EpicCancelledHandler>.Instance);
 
         var evt = new CloudEvent<IssueCancelled>(
             id: Guid.NewGuid().ToString(),
@@ -451,7 +540,7 @@ public class EpicAutoDoneHandlerSpecs
         // Out-of-order terminal signals (e.g. completed arrives
         // AFTER cancelled because the bus reordered them) must still end
         // at the correct epic state. Both handlers call the same
-        // idempotent reconcile method; the grain absorbs the
+        // idempotent recompute-progress method; the grain absorbs the
         // reordering without double-transition or stuck state.
         await using var database = CreateDatabase();
         await SeedEpicAsync(database, status: "running");
@@ -463,7 +552,7 @@ public class EpicAutoDoneHandlerSpecs
         var querier = new EpicQuerier(database.Factory, null!);
         var grains = new TestEpicGrainFactory(database.Factory);
         var completed = new EpicAutoDoneHandler(querier, grains, NullLogger<EpicAutoDoneHandler>.Instance);
-        var cancelled = new EpicCancelledReconcileHandler(querier, grains, NullLogger<EpicCancelledReconcileHandler>.Instance);
+        var cancelled = new EpicCancelledHandler(querier, grains, NullLogger<EpicCancelledHandler>.Instance);
 
         // Cancelled first, then completed (out of order).
         await cancelled.HandleAsync(BuildCancelledEvent("project_1", "issue_2"), CancellationToken.None);
@@ -475,12 +564,434 @@ public class EpicAutoDoneHandlerSpecs
         Assert.Single(grains.Calls);
     }
 
+    // --- Fix B: EpicIssueLinkedHandler (durable convergence for link) ---
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task IssueLinkedHandler_HasSubscriptionAttributeOnLinkedType()
+    {
+        var attr = (SubscriptionAttribute?)Attribute.GetCustomAttribute(
+            typeof(EpicIssueLinkedHandler), typeof(SubscriptionAttribute));
+        Assert.NotNull(attr);
+        Assert.Equal(EventCatalog.ReverseDns.EpicIssueLinked, attr!.Type);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task IssueLinkedHandler_LinkedEvent_InvokesRecomputeOnOwningEpic()
+    {
+        // Epic events carry projectid + epicid on the envelope (stamped by
+        // PersistEpicEventsAsync), so no reverse lookup is needed.
+        var grains = new TestEpicGrainFactory(CreateDatabase().Factory);
+        var handler = new EpicIssueLinkedHandler(grains, NullLogger<EpicIssueLinkedHandler>.Instance);
+
+        var evt = BuildEpicIssueLinkedEvent(projectId: "project_1", epicId: "epic_1", issueId: "issue_1", issueNumber: 1);
+        await handler.HandleAsync(evt, CancellationToken.None);
+
+        var call = Assert.Single(grains.Calls);
+        Assert.Equal("project_1:epic_1", call.GrainKey);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task IssueLinkedHandler_MissingProjectIdExtension_NoOps()
+    {
+        var grains = new TestEpicGrainFactory(CreateDatabase().Factory);
+        var handler = new EpicIssueLinkedHandler(grains, NullLogger<EpicIssueLinkedHandler>.Instance);
+
+        var evt = new CloudEvent<EpicIssueLinked>(
+            id: Guid.NewGuid().ToString(),
+            source: new Uri("/mohist/epic/epic_1", UriKind.Relative),
+            type: EventCatalog.ReverseDns.EpicIssueLinked,
+            time: DateTimeOffset.UtcNow,
+            data: new EpicIssueLinked("issue_1", 1),
+            subject: "1",
+            extensions: new Dictionary<string, string> { ["epicid"] = "epic_1" });
+
+        await handler.HandleAsync(evt, CancellationToken.None);
+        Assert.Empty(grains.Calls);
+    }
+
+    // --- Fix C-1: EpicDraftChangedHandler (undraft triggers recompute) ---
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task DraftChangedHandler_HasSubscriptionAttributeOnDraftChangedType()
+    {
+        var attr = (SubscriptionAttribute?)Attribute.GetCustomAttribute(
+            typeof(EpicDraftChangedHandler), typeof(SubscriptionAttribute));
+        Assert.NotNull(attr);
+        Assert.Equal(EventCatalog.ReverseDns.IssueDraftChanged, attr!.Type);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task DraftChangedHandler_Undraft_InvokesRecomputeOnOwningEpic()
+    {
+        await using var database = CreateDatabase();
+        await SeedEpicAsync(database, status: "running");
+        await SeedIssueAsync(database, projectId: "project_1", issueId: "issue_1", issueNumber: 1, status: Mohist.Server.Issue.Domain.IssueStatus.Backlog);
+        await SeedLinkAsync(database, epicId: "epic_1", issueId: "issue_1", issueNumber: 1);
+
+        var querier = new EpicQuerier(database.Factory, null!);
+        var grains = new TestEpicGrainFactory(database.Factory);
+        var handler = new EpicDraftChangedHandler(querier, grains, NullLogger<EpicDraftChangedHandler>.Instance);
+
+        // OldIsDraft=true, NewIsDraft=false — undraft to ready
+        var evt = BuildDraftChangedEvent(projectId: "project_1", issueId: "issue_1", oldIsDraft: true, newIsDraft: false);
+        await handler.HandleAsync(evt, CancellationToken.None);
+
+        var call = Assert.Single(grains.Calls);
+        Assert.Equal("project_1:epic_1", call.GrainKey);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task DraftChangedHandler_Drafting_IgnoresEvent()
+    {
+        // Drafting a ready issue (NewIsDraft=true) has no epic-progress
+        // effect; the handler's Filter rejects it.
+        var handler = new EpicDraftChangedHandler(
+            new EpicQuerier(CreateDatabase().Factory, null!),
+            new TestEpicGrainFactory(CreateDatabase().Factory),
+            NullLogger<EpicDraftChangedHandler>.Instance);
+
+        var evt = BuildDraftChangedEvent(projectId: "project_1", issueId: "issue_1", oldIsDraft: false, newIsDraft: true);
+        Assert.False(handler.Filter(evt));
+    }
+
+    // --- Fix item-4: EpicPrerequisiteRemovedHandler ---
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task PrerequisiteRemovedHandler_HasSubscriptionAttribute()
+    {
+        var attr = (SubscriptionAttribute?)Attribute.GetCustomAttribute(
+            typeof(EpicPrerequisiteRemovedHandler), typeof(SubscriptionAttribute));
+        Assert.NotNull(attr);
+        Assert.Equal(EventCatalog.ReverseDns.IssuePrerequisiteRemoved, attr!.Type);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task PrerequisiteRemovedHandler_RemovedPrereq_InvokesRecomputeOnOwningEpic()
+    {
+        await using var database = CreateDatabase();
+        await SeedEpicAsync(database, status: "running");
+        await SeedIssueAsync(database, projectId: "project_1", issueId: "issue_1", issueNumber: 1, status: Mohist.Server.Issue.Domain.IssueStatus.Backlog);
+        await SeedLinkAsync(database, epicId: "epic_1", issueId: "issue_1", issueNumber: 1);
+
+        var querier = new EpicQuerier(database.Factory, null!);
+        var grains = new TestEpicGrainFactory(database.Factory);
+        var handler = new EpicPrerequisiteRemovedHandler(querier, grains, NullLogger<EpicPrerequisiteRemovedHandler>.Instance);
+
+        var evt = BuildPrerequisiteRemovedEvent(projectId: "project_1", issueId: "issue_1", prereqNumber: 10);
+        await handler.HandleAsync(evt, CancellationToken.None);
+
+        var call = Assert.Single(grains.Calls);
+        Assert.Equal("project_1:epic_1", call.GrainKey);
+    }
+
+    // --- Fix: EpicIssueUnlinkedHandler + EpicIssueReopenedHandler ---
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task IssueUnlinkedHandler_HasSubscriptionAttribute()
+    {
+        var attr = (SubscriptionAttribute?)Attribute.GetCustomAttribute(
+            typeof(EpicIssueUnlinkedHandler), typeof(SubscriptionAttribute));
+        Assert.NotNull(attr);
+        Assert.Equal(EventCatalog.ReverseDns.EpicIssueUnlinked, attr!.Type);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task IssueUnlinkedHandler_UnlinkedEvent_InvokesRecomputeOnOwningEpic()
+    {
+        var grains = new TestEpicGrainFactory(CreateDatabase().Factory);
+        var handler = new EpicIssueUnlinkedHandler(grains, NullLogger<EpicIssueUnlinkedHandler>.Instance);
+
+        var evt = BuildEpicIssueUnlinkedEvent(projectId: "project_1", epicId: "epic_1", issueId: "issue_1", issueNumber: 1);
+        await handler.HandleAsync(evt, CancellationToken.None);
+
+        var call = Assert.Single(grains.Calls);
+        Assert.Equal("project_1:epic_1", call.GrainKey);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task IssueReopenedHandler_HasSubscriptionAttribute()
+    {
+        var attr = (SubscriptionAttribute?)Attribute.GetCustomAttribute(
+            typeof(EpicIssueReopenedHandler), typeof(SubscriptionAttribute));
+        Assert.NotNull(attr);
+        Assert.Equal(EventCatalog.ReverseDns.IssueReopened, attr!.Type);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task IssueReopenedHandler_ReopenedIssue_InvokesRecomputeOnOwningEpic()
+    {
+        await using var database = CreateDatabase();
+        await SeedEpicAsync(database, status: "running");
+        await SeedIssueAsync(database, projectId: "project_1", issueId: "issue_1", issueNumber: 1, status: Mohist.Server.Issue.Domain.IssueStatus.Backlog);
+        await SeedLinkAsync(database, epicId: "epic_1", issueId: "issue_1", issueNumber: 1);
+
+        var querier = new EpicQuerier(database.Factory, null!);
+        var grains = new TestEpicGrainFactory(database.Factory);
+        var handler = new EpicIssueReopenedHandler(querier, grains, NullLogger<EpicIssueReopenedHandler>.Instance);
+
+        var evt = new CloudEvent<IssueReopened>(
+            id: Guid.NewGuid().ToString(),
+            source: new Uri("/mohist/issue/issue_1", UriKind.Relative),
+            type: EventCatalog.ReverseDns.IssueReopened,
+            time: EventTime,
+            data: new IssueReopened(),
+            subject: "1",
+            extensions: new Dictionary<string, string>
+            {
+                ["projectid"] = "project_1",
+                ["issueid"] = "issue_1",
+                ["issueno"] = "1",
+            });
+        await handler.HandleAsync(evt, CancellationToken.None);
+
+        var call = Assert.Single(grains.Calls);
+        Assert.Equal("project_1:epic_1", call.GrainKey);
+    }
+
+    // --- Fix C-2: External prerequisite reverse lookup ---
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task HandleAsync_ExternalPrerequisiteCompletes_DispatchesToDependentEpic()
+    {
+        // An external prerequisite (issue 10) is NOT a member of the epic,
+        // but issue 2 (a member) depends on it. When issue 10 completes,
+        // the handler must reverse-look-up the dependent epic and recompute.
+        await using var database = CreateDatabase();
+        await SeedEpicAsync(database, status: "running");
+        // Member issue 2 depends on external prerequisite 10
+        await SeedIssueWithPrereqsAsync(database, projectId: "project_1", issueId: "issue_2", issueNumber: 2, prereqNumbers: [10]);
+        await SeedLinkAsync(database, epicId: "epic_1", issueId: "issue_2", issueNumber: 2);
+        // External prerequisite issue 10 — not linked to the epic
+        await SeedIssueAsync(database, projectId: "project_1", issueId: "issue_10", issueNumber: 10, status: Mohist.Server.Issue.Domain.IssueStatus.Done);
+
+        var querier = new EpicQuerier(database.Factory, null!);
+        var grains = new TestEpicGrainFactory(database.Factory);
+        var handler = new EpicAutoDoneHandler(querier, grains, NullLogger<EpicAutoDoneHandler>.Instance);
+
+        // issue_10 completes — it has no direct membership, but the
+        // prerequisite reverse lookup should find epic_1 via issue_2.
+        var evt = BuildCompletedEvent(projectId: "project_1", issueId: "issue_10");
+        evt = new CloudEvent<IssueCompleted>(
+            id: evt.Id,
+            source: evt.Source,
+            type: evt.Type,
+            time: evt.Time,
+            data: evt.Data,
+            subject: "10",
+            extensions: new Dictionary<string, string>
+            {
+                ["projectid"] = "project_1",
+                ["issueid"] = "issue_10",
+                ["issueno"] = "10",
+            });
+        await handler.HandleAsync(evt, CancellationToken.None);
+
+        var call = Assert.Single(grains.Calls);
+        Assert.Equal("project_1:epic_1", call.GrainKey);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task CancelledHandler_ExternalCancelledPrerequisite_DoesNotDispatchDependentEpic()
+    {
+        await using var database = CreateDatabase();
+        await SeedEpicAsync(database, status: "running");
+        await SeedIssueWithPrereqsAsync(database, projectId: "project_1", issueId: "issue_2", issueNumber: 2, prereqNumbers: [10]);
+        await SeedLinkAsync(database, epicId: "epic_1", issueId: "issue_2", issueNumber: 2);
+        await SeedIssueAsync(database, projectId: "project_1", issueId: "issue_10", issueNumber: 10, status: Mohist.Server.Issue.Domain.IssueStatus.Cancelled);
+
+        var querier = new EpicQuerier(database.Factory, null!);
+        var grains = new TestEpicGrainFactory(database.Factory);
+        var handler = new EpicCancelledHandler(querier, grains, NullLogger<EpicCancelledHandler>.Instance);
+        var evt = new CloudEvent<IssueCancelled>(
+            id: Guid.NewGuid().ToString(),
+            source: new Uri("/mohist/issues/issue_10", UriKind.Relative),
+            type: EventCatalog.ReverseDns.IssueCancelled,
+            time: EventTime,
+            data: new IssueCancelled("cancelled"),
+            subject: "10",
+            extensions: new Dictionary<string, string>
+            {
+                ["projectid"] = "project_1",
+                ["issueid"] = "issue_10",
+                ["issueno"] = "10",
+            });
+
+        await handler.HandleAsync(evt, CancellationToken.None);
+
+        Assert.Empty(grains.Calls);
+    }
+
+    // --- Fix D: EpicStartRetryHandler (start-attempt-failed triggers recompute) ---
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task StartRetryHandler_HasSubscriptionAttributeOnStartAttemptFailedType()
+    {
+        var attr = (SubscriptionAttribute?)Attribute.GetCustomAttribute(
+            typeof(EpicStartRetryHandler), typeof(SubscriptionAttribute));
+        Assert.NotNull(attr);
+        Assert.Equal(EventCatalog.ReverseDns.EpicStartAttemptFailed, attr!.Type);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task StartRetryHandler_StartAttemptFailedEvent_InvokesRecomputeOnOwningEpic()
+    {
+        var grains = new TestEpicGrainFactory(CreateDatabase().Factory);
+        var handler = new EpicStartRetryHandler(grains, NullLogger<EpicStartRetryHandler>.Instance);
+
+        var evt = BuildStartAttemptFailedEvent(projectId: "project_1", epicId: "epic_1", issueId: "issue_1", issueNumber: 1);
+        await handler.HandleAsync(evt, CancellationToken.None);
+
+        var call = Assert.Single(grains.Calls);
+        Assert.Equal("project_1:epic_1", call.GrainKey);
+    }
+
+    private static CloudEvent<EpicIssueLinked> BuildEpicIssueLinkedEvent(
+        string projectId, string epicId, string issueId, int issueNumber) =>
+        new(
+            id: Guid.NewGuid().ToString(),
+            source: new Uri($"/mohist/epic/{epicId}", UriKind.Relative),
+            type: EventCatalog.ReverseDns.EpicIssueLinked,
+            time: EventTime,
+            data: new EpicIssueLinked(issueId, issueNumber),
+            subject: epicId,
+            extensions: new Dictionary<string, string>
+            {
+                ["projectid"] = projectId,
+                ["epicid"] = epicId,
+                ["epicno"] = "1",
+            });
+
+    private static CloudEvent<EpicIssueUnlinked> BuildEpicIssueUnlinkedEvent(
+        string projectId, string epicId, string issueId, int issueNumber) =>
+        new(
+            id: Guid.NewGuid().ToString(),
+            source: new Uri($"/mohist/epic/{epicId}", UriKind.Relative),
+            type: EventCatalog.ReverseDns.EpicIssueUnlinked,
+            time: EventTime,
+            data: new EpicIssueUnlinked(issueId, issueNumber),
+            subject: epicId,
+            extensions: new Dictionary<string, string>
+            {
+                ["projectid"] = projectId,
+                ["epicid"] = epicId,
+                ["epicno"] = "1",
+            });
+
+    private static CloudEvent<IssueDraftChanged> BuildDraftChangedEvent(
+        string projectId, string issueId, bool oldIsDraft, bool newIsDraft) =>
+        new(
+            id: Guid.NewGuid().ToString(),
+            source: new Uri($"/mohist/issue/{issueId}", UriKind.Relative),
+            type: EventCatalog.ReverseDns.IssueDraftChanged,
+            time: EventTime,
+            data: new IssueDraftChanged(oldIsDraft, newIsDraft),
+            subject: "1",
+            extensions: new Dictionary<string, string>
+            {
+                ["projectid"] = projectId,
+                ["issueid"] = issueId,
+                ["issueno"] = "1",
+            });
+
+    private static CloudEvent<IssuePrerequisiteRemoved> BuildPrerequisiteRemovedEvent(
+        string projectId, string issueId, int prereqNumber) =>
+        new(
+            id: Guid.NewGuid().ToString(),
+            source: new Uri($"/mohist/issue/{issueId}", UriKind.Relative),
+            type: EventCatalog.ReverseDns.IssuePrerequisiteRemoved,
+            time: EventTime,
+            data: new IssuePrerequisiteRemoved(prereqNumber),
+            subject: "1",
+            extensions: new Dictionary<string, string>
+            {
+                ["projectid"] = projectId,
+                ["issueid"] = issueId,
+                ["issueno"] = "1",
+            });
+
+    private static CloudEvent<EpicStartAttemptFailed> BuildStartAttemptFailedEvent(
+        string projectId, string epicId, string issueId, int issueNumber) =>
+        new(
+            id: Guid.NewGuid().ToString(),
+            source: new Uri($"/mohist/epic/{epicId}", UriKind.Relative),
+            type: EventCatalog.ReverseDns.EpicStartAttemptFailed,
+            time: EventTime,
+            data: new EpicStartAttemptFailed(issueId, issueNumber, "transient failure"),
+            subject: epicId,
+            extensions: new Dictionary<string, string>
+            {
+                ["projectid"] = projectId,
+                ["epicid"] = epicId,
+                ["epicno"] = "1",
+            });
+
+    private static async Task SeedIssueWithPrereqsAsync(
+        TestDatabase database,
+        string projectId,
+        string issueId,
+        int issueNumber,
+        int[] prereqNumbers)
+    {
+        var issue = new Mohist.Server.Issue.Domain.Issue
+        {
+            Id = issueId,
+            ProjectId = projectId,
+            Number = issueNumber,
+            Title = $"Issue {issueNumber}",
+            Status = Mohist.Server.Issue.Domain.IssueStatus.Backlog,
+        };
+        foreach (var prereq in prereqNumbers)
+            issue.AddPrerequisite(prereq);
+        var json = IssueStore.Serialize(issue);
+        await using var db = database.CreateDbContext();
+        db.Issues.Add(new IssueRow
+        {
+            IssueId = issueId,
+            ProjectId = projectId,
+            Number = issueNumber,
+            State = json,
+        });
+        await db.SaveChangesAsync();
+    }
+
     private static CloudEvent<IssueCompleted> BuildCompletedEvent(string projectId, string issueId) =>
         new(
             id: Guid.NewGuid().ToString(),
             source: new Uri($"/mohist/issue/{issueId}", UriKind.Relative),
             type: EventCatalog.ReverseDns.IssueCompleted,
-            time: DateTimeOffset.UtcNow,
+            time: EventTime,
             data: new IssueCompleted("wr_1"),
             subject: "1",
             extensions: new Dictionary<string, string>
@@ -495,7 +1006,7 @@ public class EpicAutoDoneHandlerSpecs
             id: Guid.NewGuid().ToString(),
             source: new Uri($"/mohist/issue/{issueId}", UriKind.Relative),
             type: EventCatalog.ReverseDns.IssueCancelled,
-            time: DateTimeOffset.UtcNow,
+            time: EventTime,
             data: new IssueCancelled("cancel reason"),
             subject: "1",
             extensions: new Dictionary<string, string>
@@ -628,6 +1139,8 @@ public class EpicAutoDoneHandlerSpecs
     {
         private readonly IDbContextFactory<MohistDbContext> _dbFactory;
         public List<RecordedGrainCall> Calls { get; } = [];
+        public List<string> IssueStartCalls { get; } = [];
+        public bool ThrowOnIssueStart { get; init; }
 
         public TestEpicGrainFactory(IDbContextFactory<MohistDbContext> dbFactory)
         {
@@ -645,11 +1158,15 @@ public class EpicAutoDoneHandlerSpecs
                 NullLogger<EpicGrain>.Instance) { GrainKeyForTest = grainKey };
         }
 
+        private IIssueGrain GetIssueGrain(string issueId) => new TestIssueGrain(this, issueId);
+
         public TGrainInterface GetGrain<TGrainInterface>(string primaryKey, string? grainClassNamePrefix = null)
             where TGrainInterface : IGrainWithStringKey
         {
             if (typeof(TGrainInterface) == typeof(IEpicGrain))
                 return (TGrainInterface)(object)GetEpicGrain(primaryKey);
+            if (typeof(TGrainInterface) == typeof(IIssueGrain))
+                return (TGrainInterface)(object)GetIssueGrain(primaryKey);
             throw new NotSupportedException(typeof(TGrainInterface).FullName);
         }
 
@@ -669,6 +1186,8 @@ public class EpicAutoDoneHandlerSpecs
         {
             if (grainInterfaceType == typeof(IEpicGrain))
                 return GetEpicGrain(grainPrimaryKey);
+            if (grainInterfaceType == typeof(IIssueGrain))
+                return GetIssueGrain(grainPrimaryKey);
             throw new NotSupportedException(grainInterfaceType.FullName);
         }
         public IGrain GetGrain(Type grainInterfaceType, Guid grainPrimaryKey) => throw new NotSupportedException();
@@ -680,6 +1199,42 @@ public class EpicAutoDoneHandlerSpecs
         public IAddressable GetGrain(GrainId grainId, GrainInterfaceType interfaceType) => throw new NotSupportedException();
         public IAddressable GetGrain(Type interfaceType, IdSpan grainKey, string? grainClassNamePrefix = null) => throw new NotSupportedException();
         public IAddressable GetGrain(Type interfaceType, IdSpan grainKey) => throw new NotSupportedException();
+    }
+
+    private sealed class TestIssueGrain : IIssueGrain
+    {
+        private readonly TestEpicGrainFactory _owner;
+        private readonly string _issueId;
+
+        public TestIssueGrain(TestEpicGrainFactory owner, string issueId)
+        {
+            _owner = owner;
+            _issueId = issueId;
+        }
+
+        public Task<string> CreateAsync(string projectId, int number, string title, string? body, IReadOnlyDictionary<string, string>? labels, string? priority, string? repositoryRef = null, string? issueId = null, string? risk = null, bool isDraft = false, string[]? attachmentIds = null, string? workflowProfileId = null, int[]? prerequisiteNumbers = null) => throw new NotSupportedException();
+
+        public Task<string> StartWorkAsync(WorkflowProjectContext? project = null)
+        {
+            _owner.IssueStartCalls.Add(_issueId);
+            return _owner.ThrowOnIssueStart
+                ? Task.FromException<string>(new InvalidOperationException("selected issue start failure"))
+                : Task.FromResult("wr_test");
+        }
+
+        public Task CompleteWorkAsync(string workflowRunId) => throw new NotSupportedException();
+        public Task CancelAsync() => throw new NotSupportedException();
+        public Task UpdateAsync(string title, string? body) => throw new NotSupportedException();
+        public Task UpdateFullAsync(UpdateIssueData data) => throw new NotSupportedException();
+        public Task ArchiveAsync() => throw new NotSupportedException();
+        public Task UnarchiveAsync() => throw new NotSupportedException();
+        public Task ReopenAsync() => throw new NotSupportedException();
+        public Task<IssueWorkflowStatus?> GetWorkflowStatusAsync() => throw new NotSupportedException();
+        public Task<IssuePrerequisiteResult> AddPrerequisiteAsync(int prerequisiteNumber) => throw new NotSupportedException();
+        public Task RemovePrerequisiteAsync(int prerequisiteNumber) => throw new NotSupportedException();
+        public Task<IssueStartReadiness> GetStartReadinessAsync() => throw new NotSupportedException();
+        public Task<IssueCommentResult> AddCommentAsync(string body, string[]? attachmentIds = null) => throw new NotSupportedException();
+        public Task DeactivateForTestAsync() => throw new NotSupportedException();
     }
 
     public sealed record RecordedGrainCall(string GrainKey);
