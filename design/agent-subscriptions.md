@@ -37,7 +37,8 @@ RoutingRule（项目级，有序表）
 
 ## 求值语义
 
-事件到达（带 `projectid`）→ 取该项目 active 规则按 `Position` 升序：
+路由表是项目级的：信封无 `projectid` 的事件不进入任何路由表（与现有分发行为
+一致）。事件到达（带 `projectid`）→ 取该项目 active 规则按 `Position` 升序：
 
 1. 逐条求值 `Match`；不命中 → 下一条。
 2. 命中 → 渲染 `ResponsePrompt`，经 `IAgentLauncher` 启动 Agent；

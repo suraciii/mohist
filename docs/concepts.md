@@ -4,7 +4,7 @@
 
 ## 一句话版本
 
-> 你在 **Project** 里把产品目标拆成 **Issue**，由 **Workflow** 推进到 Done。多个相关 Issue 组成 **Epic**。Workflow 可通过 **Inline Agent** 直接执行 task；有稳定身份的 **Mohist Agent** 可以被启动，也可以通过订阅响应系统事件。需求探索由外部 **Skill** 完成，产物是可进入 Workflow 的 Issue。
+> 你在 **Project** 里把产品目标拆成 **Issue**，由 **Workflow** 推进到 Done。多个相关 Issue 组成 **Epic**。Workflow 可通过 **Inline Agent** 直接执行 task；有稳定身份的 **Mohist Agent** 可以被启动，也可以由事件路由规则触发、响应系统事件。需求探索由外部 **Skill** 完成，产物是可进入 Workflow 的 Issue。
 
 ## Project（项目）
 

@@ -8,7 +8,7 @@ Runtime 特有行为放在 [`runtimes/`](runtimes/README.md)，例如
 
 | 层次 | 概念 | 所有者 | 权威状态 |
 |---|---|---|---|
-| 定义 | Mohist Agent | Agent context | 身份、instructions、config、skills、subscriptions、状态 |
+| 定义 | Mohist Agent | Agent context | 身份、instructions、config、skills、状态 |
 | 工作 | TaskRun | Workflow context | Workflow task 生命周期、结果、输出、恢复 |
 | 工作 | AgentJob | Agent context | 一次 Mohist Agent 执行的生命周期与结果 |
 | 执行契约 | Action | Workflow context | 一次工作 dispatch 的 `uses` / `with` 输入输出契约 |
