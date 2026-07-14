@@ -2,12 +2,9 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
-using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Hosting;
-using Mohist.Server.Issue.Domain;
-using Mohist.Server.Issue.Services;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Services;
 
@@ -69,39 +66,6 @@ public class AgentSessionQuerier : IScopedService
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var terminalFacts = await LoadTerminalFactsAsync(db, sessions.Select(r => r.Session.Id), ct);
         return sessions.Select(record => ToWorkflowDto(record, terminalFacts.GetValueOrDefault(record.Session.Id))).ToList();
-    }
-
-    public async Task<IReadOnlyList<AgentSessionInfoDto>> ListCurrentAsync(string projectId, string? status = null, int limit = 50, CancellationToken ct = default)
-    {
-        await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var sessions = await _sessionQuery.ListByLabelsAsync(
-            AgentSessionDtoMapper.Labels((AgentSessionQueryMetadataKeys.ProjectId, projectId)),
-            AgentSessionQueryOrder.CreatedDescending,
-            limit,
-            status: status,
-            ct: ct);
-        sessions = await TranscriptReductions.ReconcileActiveSessionsAsync(db, sessions, ct);
-        var issueTitles = await IssueTitleLookup.LoadTitlesAsync(db, projectId, sessions.Select(r => r.IssueNumber()), ct);
-        var eventSummaries = await TranscriptReductions.LoadEventSummariesAsync(db, sessions.Select(r => r.Session.Id), ct);
-        return sessions.Select(record =>
-        {
-            var s = record.Session;
-            var events = eventSummaries.GetValueOrDefault(s.Id);
-            var issueNumber = record.IssueNumber();
-            return new AgentSessionInfoDto(
-            issueNumber,
-            IssueTitleLookup.Resolve(issueTitles, issueNumber),
-            record.Label(AgentSessionQueryMetadataKeys.Stage) ?? string.Empty,
-            s.Id,
-            AgentSessionJsonHelper.StatusName(s, Now()),
-            s.Settings.Model,
-            null,
-            s.Status.CreatedAt.ToString("o"),
-            null,
-            AgentSessionJsonHelper.LastActivityAt(s).ToString("o"),
-            AgentSessionDtoMapper.ToEventSummaryDto(events),
-            AgentSessionDtoMapper.ToUsageDto(AgentSessionJsonHelper.Usage(s)));
-        }).ToList();
     }
 
     public async Task<IReadOnlyList<AgentSessionSummaryDto>> ListSummariesByIssueAsync(string projectId, int issueNumber, CancellationToken ct = default)
@@ -597,9 +561,9 @@ public class AgentSessionQuerier : IScopedService
         var rows = await db.Issues.AsNoTracking()
             .Where(row => row.ProjectId == projectId && row.Number == issueNumber)
             .ToListAsync(ct);
-        var issue = IssueRowMapper.Deserialize(rows)
-            .FirstOrDefault(issue => IssueRowMapper.IsIssue(issue, projectId, issueNumber));
-        var workflowRunId = issue?.WorkflowRunId;
+        var workflowRunId = rows
+            .Select(row => ReadWorkflowRunId(row.State))
+            .FirstOrDefault(id => !string.IsNullOrWhiteSpace(id));
         if (workflowRunId is null) return null;
 
         return await _sessionQuery.FirstByLabelsAsync(
@@ -621,6 +585,22 @@ public class AgentSessionQuerier : IScopedService
             && string.Equals(record.Label(AgentSessionQueryMetadataKeys.SourceKind), "agent-launch", StringComparison.Ordinal)
             ? record
             : null;
+    }
+
+    private static string? ReadWorkflowRunId(string stateJson)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(stateJson);
+            return document.RootElement.TryGetProperty("workflowRunId", out var workflowRunId)
+                && workflowRunId.ValueKind == JsonValueKind.String
+                ? workflowRunId.GetString()
+                : null;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private WorkflowSessionDto ToWorkflowDto(AgentSessionRecord record, TerminalFact? terminalFact = null)

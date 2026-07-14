@@ -12,8 +12,10 @@ using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Infrastructure.Data.Runner;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Events;
+using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Issue.Domain.Events;
 using Mohist.Server.Issue.Services.WorkflowProfiles;
+using Mohist.Server.Runner.Grains;
 using Mohist.Server.Runner.Services;
 using Mohist.Server.Runner.Services.SignalR;
 using Mohist.Server.Sessions.Services;
@@ -565,6 +567,7 @@ public sealed class DispatcherFixture : IAsyncLifetime
         siloBuilder.Services.AddScoped<Mohist.Server.Runner.Services.WorkflowReportService>();
         siloBuilder.Services.AddScoped<WorkflowItemTranslator>();
         siloBuilder.Services.AddScoped<WorkflowSessionHealthService>();
+        siloBuilder.Services.AddSingleton<IAgentJobWorkCoordinator, AgentJobWorkCoordinator>();
         siloBuilder.Services.AddScoped<IssueWorkflowProfileRegistry>();
         siloBuilder.Services.AddScoped<EffectiveWorkflowProfileResolver>();
         siloBuilder.Services.AddSingleton<FakeRunnerWorkspaceClient>();

@@ -395,7 +395,7 @@ public sealed record AgentCostRollupRawData(
 
 /// <summary>
 /// The windowed cost figures produced by
-/// <see cref="Sessions.Services.AgentUsageReporter.GetCostWindowedAsync"/>. Both windows
+/// <see cref="AgentOps.Services.AgentUsageReporter.GetCostWindowedAsync"/>. Both windows
 /// are 30 days; the previous window is the same length as the current
 /// window and immediately precedes it. Both advance with the current
 /// time. <see cref="CurrentSpend"/> is the sum of in-window per-session

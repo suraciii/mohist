@@ -1,4 +1,3 @@
-using Mohist.Server.Agent.Grains;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Runner;
 using Mohist.Server.Infrastructure.Data.Workflow;
@@ -56,6 +55,7 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
     private readonly ILogger<RunnerGrain> _log;
     private readonly IRunnerGrainAssignmentObserver _assignmentObserver;
     private readonly IRunnerGrainCloseoutObserver _closeoutObserver;
+    private readonly IAgentJobWorkCoordinator _agentJobs;
 
     private static readonly TimeSpan PresenceTimeout = TimeSpan.FromMinutes(2);
     private static readonly TimeSpan PresenceCheckInterval = TimeSpan.FromSeconds(10);
@@ -68,6 +68,7 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
         ILogger<RunnerGrain> log,
         TimeProvider timeProvider,
         [PersistentState("runner-works")] IPersistentState<RunnerWorksState> worksState,
+        IAgentJobWorkCoordinator agentJobs,
         IRunnerGrainAssignmentObserver? assignmentObserver = null,
         IRunnerGrainCloseoutObserver? closeoutObserver = null)
     {
@@ -77,6 +78,7 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
         _log = log;
         _timeProvider = timeProvider;
         _worksState = worksState;
+        _agentJobs = agentJobs;
         _assignmentObserver = assignmentObserver ?? NoopRunnerGrainAssignmentObserver.Instance;
         _closeoutObserver = closeoutObserver ?? NoopRunnerGrainCloseoutObserver.Instance;
     }
@@ -392,8 +394,7 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
                 _lifecycleGate.Release();
             }
 
-            var job = GrainFactory.GetGrain<IAgentJobGrain>(snapshot.AgentJobId);
-            var runnable = await job.IsWorkRunnableAsync(RunnerId, snapshot.WorkId);
+            var runnable = await _agentJobs.IsWorkRunnableAsync(snapshot.AgentJobId, RunnerId, snapshot.WorkId);
 
             await _lifecycleGate.WaitAsync();
             try
@@ -448,8 +449,7 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
         if (string.IsNullOrWhiteSpace(workId))
             return new RunnerWorkReportResult(string.Empty, null, false, "missing-work", WorkDispatchOwnerKinds.AgentJob, agentJobId);
 
-        var job = GrainFactory.GetGrain<IAgentJobGrain>(agentJobId);
-        var accepted = await job.ReportResultAsync(RunnerId, workId, result);
+        var accepted = await _agentJobs.ReportAsync(agentJobId, RunnerId, workId, result);
 
         var tracked = false;
         await _lifecycleGate.WaitAsync();
@@ -714,11 +714,10 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
             {
                 if (FindWork(entry.WorkId, entry.OwnerKind, entry.OwnerId) is null)
                     continue;
-                var job = GrainFactory.GetGrain<IAgentJobGrain>(entry.OwnerId);
                 await _closeoutObserver.AgentJobCloseoutStartingAsync(RunnerId, entry.OwnerId, entry.WorkId);
-                var reportResult = await job.ReportResultAsync(RunnerId, entry.WorkId, synthesizedFailure);
+                var reportResult = await _agentJobs.ReportAsync(entry.OwnerId, RunnerId, entry.WorkId, synthesizedFailure);
                 if (!reportResult.Accepted)
-                    await job.FailAsync(synthesizedFailure.Message ?? "failed");
+                    await _agentJobs.FailAsync(entry.OwnerId, synthesizedFailure.Message ?? "failed");
 
                 TryRemoveWork(entry.WorkId, entry.OwnerKind, entry.OwnerId);
                 await PersistAsync();

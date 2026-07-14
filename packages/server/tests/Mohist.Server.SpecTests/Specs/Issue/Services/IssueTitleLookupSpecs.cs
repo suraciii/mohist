@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Mohist.Server.AgentOps.Services;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Infrastructure.Data.Sessions;
@@ -16,10 +17,9 @@ namespace Mohist.Server.SpecTests.Specs.Issue.Services;
 
 /// <summary>
 /// Specs for <see cref="IssueTitleLookup"/>: the Issue read-side
-/// batch-lookup + <c>Issue #{n}</c> fallback resolver that the Session
-/// read-side consumers
-/// (<see cref="AgentSessionQuerier.ListCurrentAsync"/> and
-/// <see cref="AgentActivityFeedAssembler"/>) share. Pins the
+/// batch-lookup + <c>Issue #{n}</c> fallback resolver shared by
+/// <see cref="AgentSessionListAssembler"/> and
+/// <see cref="AgentActivityFeedAssembler"/>. Pins the
 /// issue-370 T-004 spec scenarios:
 /// <list type="bullet">
 ///   <item><description>empty input yields an empty dictionary without
@@ -226,9 +226,9 @@ public class IssueTitleLookupSpecs
 
         DetachTracked(db);
 
-        var querier = scope.ServiceProvider.GetRequiredService<AgentSessionQuerier>();
+        var sessionList = scope.ServiceProvider.GetRequiredService<AgentSessionListAssembler>();
         var assembler = scope.ServiceProvider.GetRequiredService<AgentActivityFeedAssembler>();
-        var current = await querier.ListCurrentAsync(projectId, limit: 10);
+        var current = await sessionList.ListCurrentAsync(projectId, limit: 10);
         var activity = await assembler.GetActivityAsync(projectId, limit: 10);
 
         var fromQuerierPath = current.ToDictionary(session => session.IssueNumber, session => session.IssueTitle);

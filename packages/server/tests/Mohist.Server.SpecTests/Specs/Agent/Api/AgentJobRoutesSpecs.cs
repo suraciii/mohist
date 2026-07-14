@@ -334,10 +334,7 @@ public class AgentJobDispatchRouteSpecs
                     workspace = new { path = "/tmp/agent-job-route", projectId },
                 });
 
-            var jobGrain = _fixture.Grains.GetGrain<IAgentJobGrain>(jobKey);
-
-            await WaitForAgentJobStatusAsync(jobGrain, AgentJobStatus.Running, TimeSpan.FromSeconds(8));
-            var workId = (await jobGrain.GetRuntimeSnapshotAsync()).CurrentWorkId!;
+            var workId = await WaitForAgentJobDispatchAsync(jobKey, runnerId);
             var runnerGrain = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
             await runnerGrain.ReportAgentJobResultAsync(
                 jobKey,
@@ -361,7 +358,7 @@ public class AgentJobDispatchRouteSpecs
             Assert.Equal(new[] { "artifact-a" }, data.GetProperty("artifacts").EnumerateArray().Select(e => e.GetString()).ToArray());
             Assert.Equal(jobKey, data.GetProperty("jobId").GetString());
 
-            var snapshot = await jobGrain.GetRuntimeSnapshotAsync();
+            var snapshot = await _fixture.Grains.GetGrain<IAgentJobGrain>(jobKey).GetRuntimeSnapshotAsync();
             Assert.Equal(AgentJobStatus.Completed, snapshot.Status);
             Assert.Equal(runnerId, snapshot.RunnerId);
 
@@ -398,10 +395,7 @@ public class AgentJobDispatchRouteSpecs
                     workspace = new { path = "/tmp/agent-job-fail", projectId },
                 });
 
-            var jobGrain = _fixture.Grains.GetGrain<IAgentJobGrain>(jobKey);
-
-            await WaitForAgentJobStatusAsync(jobGrain, AgentJobStatus.Running, TimeSpan.FromSeconds(8));
-            var workId = (await jobGrain.GetRuntimeSnapshotAsync()).CurrentWorkId!;
+            var workId = await WaitForAgentJobDispatchAsync(jobKey, runnerId);
             var runnerGrain = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
             await runnerGrain.ReportAgentJobResultAsync(
                 jobKey,
@@ -452,10 +446,7 @@ public class AgentJobDispatchRouteSpecs
                     workspace = new { path = "/tmp/agent-job-workspace-only", projectId },
                 });
 
-            var jobGrain = _fixture.Grains.GetGrain<IAgentJobGrain>(jobKey);
-
-            await WaitForAgentJobStatusAsync(jobGrain, AgentJobStatus.Running, TimeSpan.FromSeconds(8));
-            var workId = (await jobGrain.GetRuntimeSnapshotAsync()).CurrentWorkId!;
+            var workId = await WaitForAgentJobDispatchAsync(jobKey, runnerId);
             var runnerGrain = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
             var polled = await runnerGrain.PollAsync(_fixture.Services);
 
@@ -512,9 +503,7 @@ public class AgentJobDispatchRouteSpecs
                     workspace = new { path = "/tmp/agent-job-http-report", projectId },
                 });
 
-            var jobGrain = _fixture.Grains.GetGrain<IAgentJobGrain>(jobKey);
-            await WaitForAgentJobStatusAsync(jobGrain, AgentJobStatus.Running, TimeSpan.FromSeconds(8));
-            var workId = (await jobGrain.GetRuntimeSnapshotAsync()).CurrentWorkId!;
+            var workId = await WaitForAgentJobDispatchAsync(jobKey, runnerId);
 
             var reportResponse = await _fixture.Client.PostAsJsonAsync(
                 $"/api/runner/{runnerId}/report",
@@ -573,9 +562,7 @@ public class AgentJobDispatchRouteSpecs
                     workspace = new { path = "/tmp/agent-job-http-poll", projectId },
                 });
 
-            var jobGrain = _fixture.Grains.GetGrain<IAgentJobGrain>(jobKey);
-            await WaitForAgentJobStatusAsync(jobGrain, AgentJobStatus.Running, TimeSpan.FromSeconds(8));
-            var workId = (await jobGrain.GetRuntimeSnapshotAsync()).CurrentWorkId!;
+            var workId = await WaitForAgentJobDispatchAsync(jobKey, runnerId);
 
             using var httpResponse = await _fixture.Client.PostAsync($"/api/runner/{runnerId}/poll", content: null);
             var httpBody = await httpResponse.ReadFirstDispatchElementAsync()
@@ -648,17 +635,12 @@ public class AgentJobDispatchRouteSpecs
             $"Runner '{runnerId}' to reach Online");
     }
 
-    private static async Task WaitForAgentJobStatusAsync(
-        IAgentJobGrain job,
-        AgentJobStatus expected,
-        TimeSpan timeout)
-        => await TestWait.ForAsync(
-            () => job.GetStatusAsync(),
-            s => s == expected,
-            timeout,
-            TimeSpan.FromMilliseconds(25),
-            $"Agent job to reach {expected}",
-            () => job.CheckTimeoutsAsync());
+    private async Task<string> WaitForAgentJobDispatchAsync(string agentJobId, string expectedRunnerId)
+    {
+        var assignment = await _fixture.AgentJobDispatches.WaitForRunnerAcceptedAsync(agentJobId);
+        Assert.Equal(expectedRunnerId, assignment.RunnerId);
+        return assignment.WorkId;
+    }
 
     private void WakeAgentJobValidationAwaiter() =>
         _fixture.TimeProvider.Advance(TimeSpan.FromMilliseconds(100));

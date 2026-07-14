@@ -5,12 +5,8 @@ namespace Mohist.Server.Issue.Services;
 
 /// <summary>
 /// Authoritative home for the issue-title batch lookup and the
-/// single-title fallback resolver that the Session read-side consumers
-/// (<see cref="Mohist.Server.Sessions.Services.AgentSessionQuerier"/>'s
-/// <c>ListCurrentAsync</c> projection and
-/// <see cref="Mohist.Server.Sessions.Services.AgentActivityFeedAssembler"/>'s
-/// activity-card projection) share by reading the same
-/// <c>(projectId, numbers)</c> tuple. Owned by the Issue read side
+/// single-title fallback resolver used by AgentOps read assemblies.
+/// Owned by the Issue read side
 /// because the lookup reads <c>db.Issues</c> + <see cref="IssueRowMapper.ByNumber"/> —
 /// both Issue-domain data — and matches the architecture rule of
 /// placing cross-domain read queries on the domain that owns the data
