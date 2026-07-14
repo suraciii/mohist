@@ -105,7 +105,7 @@
       "output": "packages/server/src/Mohist.Server/Infrastructure/Data/Sessions/AgentSessionStore.cs updated; AgentSessionTransactionalEventAppendSpecs updated for lineage projection + conformance.",
       "dependsOn": ["T-001"],
       "passes": false,
-      "notes": "Label key constants live in packages/server/src/Mohist.Server/Sessions/Services/AgentSessionQueryMetadataKeys.cs (mohist.io/*). The existing spec explicitly documents extensions: null as intentional (design OQ3) — that assertion is being superseded by this change."
+      "notes": "Label key constants live in packages/server/src/Mohist.Server/Sessions/Services/AgentSessionQueryMetadataKeys.cs (mohist.io/project-id, mohist.io/issue-number, mohist.io/source-id, mohist.io/stage, mohist.io/source-kind) and packages/server/src/Mohist.Server/Sessions/Services/GenericAgentSessionMetadata.cs (mohist.io/agent-id). The existing spec explicitly documents extensions: null as intentional (design OQ3) — that assertion is being superseded by this change."
     },
     {
       "id": "T-006",
