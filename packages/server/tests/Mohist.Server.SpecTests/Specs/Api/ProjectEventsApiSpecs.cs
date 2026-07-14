@@ -501,6 +501,33 @@ public class ProjectEventsApiSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
+    public async Task GetProjectEvents_SubSecondTimes_AreOrderedByFractionalPrecision()
+    {
+        var project = await CreateProjectAsync("subsecond");
+        var issueId = $"issue_{Guid.NewGuid():N}";
+        await SeedIssueAsync(project.Id, issueId, number: 1);
+
+        var baseTime = new DateTimeOffset(2026, 1, 1, 12, 0, 0, TimeSpan.Zero);
+        await AppendIssueEventAsync(issueId, project.Id, "com.mohist.issue.created",
+            time: baseTime.AddMilliseconds(900), subject: "late");
+        await AppendIssueEventAsync(issueId, project.Id, "com.mohist.issue.work-started",
+            time: baseTime.AddMilliseconds(100), subject: "early");
+        await AppendIssueEventAsync(issueId, project.Id, "com.mohist.issue.completed",
+            time: baseTime.AddMilliseconds(500), subject: "mid");
+
+        var response = await _client.GetDataAsync<List<ProjectEventResponseDto>>(
+            $"/api/projects/{project.Id}/events?limit=3");
+
+        Assert.Collection(
+            response,
+            entry => Assert.Equal("late", entry.Subject),
+            entry => Assert.Equal("mid", entry.Subject),
+            entry => Assert.Equal("early", entry.Subject));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
+    [Fact]
     public async Task GetProjectEvents_PreservesScalarAndArrayPayloads()
     {
         var project = await CreateProjectAsync("json-payloads");

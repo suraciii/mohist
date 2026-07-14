@@ -152,7 +152,7 @@ export function useIssueSessionDataSource(
   const [refreshedLegacyId, setRefreshedLegacyId] = useState<string | null>(null)
   useEffect(() => {
     if (!isLegacyIdRoute || !decodedSessionId || resolvedSessionName || sessionsLoading || sessionsFetching || refreshedLegacyId === decodedSessionId) return
-    void refetchSessions().finally(() => setRefreshedLegacyId(decodedSessionId))
+    void refetchSessions().then(() => setRefreshedLegacyId(decodedSessionId))
   }, [decodedSessionId, isLegacyIdRoute, refetchSessions, refreshedLegacyId, resolvedSessionName, sessionsFetching, sessionsLoading])
 
   const siblingNavHook = useSiblingSessionsHook(issue?.workflowRunId ?? null, {

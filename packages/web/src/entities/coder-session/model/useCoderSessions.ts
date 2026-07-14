@@ -37,10 +37,10 @@ export function useCoderSessions(
         return [...sessions]
       }
 
-      const refreshedById = new Map(sessions.map((session) => [session.id, session]))
+      const refreshedIds = new Set(sessions.map((session) => session.id))
       return [
         ...sessions,
-        ...previous.filter((session) => !refreshedById.has(session.id)),
+        ...previous.filter((session) => !refreshedIds.has(session.id)),
       ]
     })
   }, [sessions, isLoading])
