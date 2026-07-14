@@ -7,12 +7,14 @@ import { getCoderSessions } from '../api/client'
 
 export type CoderSessionsFetcher = typeof getCoderSessions
 
+const EMPTY_SESSIONS: CoderSessionSummary[] = []
+
 export function useCoderSessions(
   issueNumber: number,
   fetcher: CoderSessionsFetcher = getCoderSessions,
 ) {
   const { projectId } = useProject()
-  const { data: sessions = [], isLoading, isFetching, refetch } = useQuery({
+  const { data: sessions = EMPTY_SESSIONS, isLoading, isFetching, refetch } = useQuery({
     queryKey: ['issues', issueNumber, projectId, 'coder-sessions'],
     queryFn: () => fetcher(issueNumber, projectId),
     enabled: issueNumber > 0 && !!projectId,
@@ -37,11 +39,13 @@ export function useCoderSessions(
         return [...sessions]
       }
 
-      const refreshedIds = new Set(sessions.map((session) => session.id))
-      return [
-        ...sessions,
-        ...previous.filter((session) => !refreshedIds.has(session.id)),
-      ]
+      const fetchedIds = new Set(sessions.map((session) => session.id))
+      const liveOnly = previous.filter(
+        (session) =>
+          (session.status === 'running' || session.status === 'probing') &&
+          !fetchedIds.has(session.id),
+      )
+      return [...sessions, ...liveOnly]
     })
   }, [sessions, isLoading])
 
