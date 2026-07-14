@@ -33,14 +33,12 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         var factory = new TestDbContextFactory(_options);
         var runProfileManager = new WorkflowRunProfileManager(factory);
         var promptLoader = new Mohist.Server.Workflow.Services.Prompts.FilePromptLoader();
-        var registry = new Mohist.Server.Issue.Services.WorkflowProfiles.IssueWorkflowProfileRegistry(promptLoader, factory);
         _manager = new WorkflowProfileManager(
             factory,
             promptLoader,
             new PromptTemplateEngine(),
             WorkflowGrainTestHelpers.CreateEmptyConfigService(),
-            runProfileManager,
-            new Mohist.Server.Issue.Services.WorkflowProfiles.EffectiveWorkflowProfileResolver(registry));
+            runProfileManager);
 
         MigratedSqliteTemplate.CopyTo(_keeper);
     }

@@ -2,6 +2,7 @@
   "name": "mohist-monorepo",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "engines": {
     "node": ">=22.0.0",
     "npm": ">=10.0.0"
@@ -14,6 +15,9 @@
     "build": "dotnet build Mohist.sln -p:SkipWebBuild=true && npm run build --workspaces --if-present",
     "test": "dotnet test Mohist.sln -p:SkipWebBuild=true && npm run test:ci --workspaces --if-present",
     "verify": "npm run build && npm test",
+    "typecheck:scripts": "tsc -p tsconfig.scripts.json --noEmit",
+    "test:archscripts": "tsx --test scripts/*.test.ts",
+    "archtest": "npm run typecheck:scripts && npm run test:archscripts",
     "build:web": "npm run build -w packages/web",
     "build:runner": "npm run build -w packages/runner",
     "dev:runner": "npm run dev -w packages/runner",
@@ -23,7 +27,10 @@
     "install:cli": "dotnet pack packages/cli/Mohist.Cli/Mohist.Cli.csproj -c Release -o ./nupkg && dotnet tool install -g Mohist.Cli --add-source ./nupkg"
   },
   "devDependencies": {
+    "@types/node": "^22.15.0",
+    "@babel/parser": "^7.29.7",
     "concurrently": "^9.2.3",
-    "typescript": "npm:@typescript/typescript6@6.0.2"
+    "tsx": "^4.20.0",
+    "typescript": "7.0.2"
   }
 }

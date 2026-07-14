@@ -183,6 +183,7 @@ public class ArchitectureRules
         var featureRoots = new HashSet<string>(StringComparer.Ordinal)
         {
             "Agent",
+            "AgentOps",
             "Epic",
             "Issue",
             "Project",
@@ -291,16 +292,19 @@ public class ArchitectureRules
     // granularities), so Mohist.Server.Epic.* is measured as part of Issue, not as
     // a separate domain. Measuring it cross-domain would mis-flag subdomain-internal
     // coupling (Epic→IssueQuerier, IIssueGrain) as violations.
-    // AgentOps is not yet listed — it has no code landing point today (its classes
-    // still live under Sessions). Add it once issue #372 relocates them to
-    // Mohist.Server.AgentOps.* and defines its allowed-direction set.
     private static readonly string[] DomainNamespaces =
-        ["Agent", "Issue", "Workflow", "Project", "Runner", "Sessions"];
+        ["Agent", "AgentOps", "Issue", "Workflow", "Project", "Runner", "Sessions"];
 
     private static readonly (string from, string to)[] AllowedDomainDependencies =
     [
         ("Agent", "Runner"),
         ("Agent", "Sessions"),
+        ("AgentOps", "Agent"),
+        ("AgentOps", "Issue"),
+        ("AgentOps", "Project"),
+        ("AgentOps", "Runner"),
+        ("AgentOps", "Sessions"),
+        ("AgentOps", "Workflow"),
         ("Issue", "Workflow"),
         ("Issue", "Project"),
         ("Runner", "Sessions"),
@@ -320,29 +324,24 @@ public class ArchitectureRules
     [Fact]
     public void DomainModules_ShouldNotDependOnEachOther()
     {
-        for (int i = 0; i < DomainNamespaces.Length; i++)
+        foreach (var from in DomainNamespaces)
         {
-            for (int j = i + 1; j < DomainNamespaces.Length; j++)
+            foreach (var to in DomainNamespaces)
             {
-                var a = DomainNamespaces[i];
-                var b = DomainNamespaces[j];
+                if (from == to || AllowedDomainDependencies.Contains((from, to))) continue;
 
-                if (AllowedDomainDependencies.Contains((a, b)) ||
-                    AllowedDomainDependencies.Contains((b, a)))
-                    continue;
-
-                var aTypes = Types()
-                    .That().ResideInNamespace($"Mohist.Server.{a}", useRegularExpressions: true)
+                var fromTypes = Types()
+                    .That().ResideInNamespace($@"Mohist\.Server\.{from}(\.|$)", useRegularExpressions: true)
                     .And().DoNotResideInNamespace("OrleansCodeGen", true)
-                    .As($"{a}");
+                    .As($"{from}");
 
-                var bTypes = Types()
-                    .That().ResideInNamespace($"Mohist.Server.{b}", useRegularExpressions: true)
+                var toTypes = Types()
+                    .That().ResideInNamespace($@"Mohist\.Server\.{to}(\.|$)", useRegularExpressions: true)
                     .And().DoNotResideInNamespace("OrleansCodeGen", true)
-                    .As($"{b}");
+                    .As($"{to}");
 
-                Types().That().Are(aTypes)
-                    .Should().NotDependOnAny(bTypes)
+                Types().That().Are(fromTypes)
+                    .Should().NotDependOnAny(toTypes)
                     .Check(_architecture);
             }
         }
@@ -443,7 +442,7 @@ public class ArchitectureRules
         Assert.True(Directory.Exists(specsRoot), $"Spec root not found: {specsRoot}");
 
         var classRegex = new System.Text.RegularExpressions.Regex(
-            @"^\s*(?:public\s+)?(internal|private|protected)?\s*(?:static\s+|sealed\s+|abstract\s+|partial\s+)*class\s+(\w+Specs)\b",
+            @"^\s*(?:(public|internal|private|protected)\s+)?(?:static\s+|sealed\s+|abstract\s+|partial\s+)*class\s+(\w+Specs)\b",
             System.Text.RegularExpressions.RegexOptions.Multiline);
 
         var violations = new List<string>();
@@ -452,8 +451,8 @@ public class ArchitectureRules
             var src = File.ReadAllText(path);
             foreach (System.Text.RegularExpressions.Match m in classRegex.Matches(src))
             {
-                var access = m.Groups[1].Value;
-                if (!string.IsNullOrEmpty(access) && access != "public")
+                var access = m.Groups[1].Success ? m.Groups[1].Value : "default";
+                if (access != "public")
                 {
                     violations.Add($"{Path.GetRelativePath(specsRoot, path)}: {access} {m.Groups[2].Value}");
                 }

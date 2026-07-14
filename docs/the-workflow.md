@@ -184,7 +184,3 @@ Web UI 上每个 issue card 会用颜色点显示 health。
 - 想加新的 stage（如 deploy）？扩展 profile yaml
 
 详见 [Workflow Profile](workflow-profiles.md)。
-
----
-
-对应源码：`packages/server/src/Mohist.Server/Workflow/`、`Issue/Services/WorkflowProfiles/mohist-local.workflow.yaml`。

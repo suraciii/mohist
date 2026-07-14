@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Http;
+using Mohist.Server.AgentOps.Services;
 using Mohist.Server.Issue.Services;
 using Mohist.Server.Runner.Services;
 using Mohist.Server.Sessions;
@@ -24,7 +25,7 @@ public static class AgentRoutes
             return ApiResults.Ok(AgentStatusResponse.Create(activeAgents, runners, capacity));
         });
 
-        group.MapGet("/sessions", async (HttpContext context, string? status, int? limit, AgentSessionQuerier sessions) =>
+        group.MapGet("/sessions", async (HttpContext context, string? status, int? limit, AgentSessionListAssembler sessions) =>
         {
             var project = context.GetResolvedProject();
             return ApiResults.Ok(await sessions.ListCurrentAsync(project.Id, status, limit ?? 50));

@@ -31,7 +31,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Content Include="Issue/Services/WorkflowProfiles/*.workflow.yaml" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="Workflow/Services/Profiles/*.workflow.yaml" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="Workflow/Services/Prompts/builtins/*.prompt" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="Issue/Services/IssueTemplates/templates/*.md" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>

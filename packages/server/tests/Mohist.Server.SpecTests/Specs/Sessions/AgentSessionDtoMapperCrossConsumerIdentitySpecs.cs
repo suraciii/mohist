@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Mohist.Server.AgentOps.Services;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Issue;
@@ -45,10 +46,10 @@ public class AgentSessionDtoMapperCrossConsumerIdentitySpecs
         await SeedIssueAsync(dbFactory, projectId, issueNumber, "Shared issue title", workflowRunId: null);
         await SeedGenericSessionWithUsageAndTranscriptAsync(dbFactory, projectId, sessionId, issueNumber);
 
-        var querier = scope.ServiceProvider.GetRequiredService<AgentSessionQuerier>();
+        var sessionList = scope.ServiceProvider.GetRequiredService<AgentSessionListAssembler>();
         var assembler = scope.ServiceProvider.GetRequiredService<AgentActivityFeedAssembler>();
 
-        var current = await querier.ListCurrentAsync(projectId, limit: 10);
+        var current = await sessionList.ListCurrentAsync(projectId, limit: 10);
         var activity = await assembler.GetActivityAsync(projectId, limit: 10);
 
         var fromQuerierPath = Assert.Single(current, session => session.SessionId == sessionId);
