@@ -5,8 +5,9 @@ import { Input } from '@/shared/ui/components/input'
 import { Link } from 'react-router-dom'
 import { AlertTriangleIcon, SearchIcon, XIcon } from 'lucide-react'
 import type { AgentStatus } from '../../../entities/agent'
-import { IssueStatus, deriveAttentionItems, isIssueAttentionItem, type AttentionItem, type Issue } from '../../../entities/issue'
-import { useRunnerSummary } from '../../../entities/runner/api/queries'
+import { deriveLabelPairsFromIssues, formatLabelToken, IssueStatus, type Issue } from '../../../entities/issue'
+import { deriveAttentionItems, isIssueAttentionItem, type AttentionItem } from '../../../entities/agent-ops'
+import { useRunnerSummary } from '../../../entities/runner'
 import { StageColumn } from './StageColumn'
 import { IssueCard } from './IssueCard'
 import {
@@ -22,7 +23,6 @@ import {
   type BoardQueryState,
   type SortMode,
 } from '../model/board-query'
-import { deriveLabelPairsFromIssues, formatLabelToken } from '../../../entities/issue/model/labels'
 import { useProjectPath } from '../../../entities/project'
 import { getPriorityStyle } from '../../../shared/lib/label-colors'
 import { getStageColors } from '../model/stage-colors'

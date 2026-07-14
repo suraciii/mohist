@@ -8,7 +8,7 @@ import { useAgentStatus } from '../../../entities/agent'
 import { useWorkflowRunSessions } from '../../../entities/coder-session'
 import { EditIssueDialog } from '../../../features/edit-issue'
 import { WorkflowConvergencePanel } from '../../../widgets/issue-workflow'
-import { NotFoundPage } from '../../not-found/ui/NotFoundPage'
+import { NotFoundState } from '@/shared/ui/not-found-state'
 import { BranchBar, RuntimeDecisionSurface, WorkflowView, TaskProgressPanel, WorkflowSessionsPanel, IssueWorkflowProfileEditor, LatestArtifactsPanel, PrDeliverySummary, findPublishViaPrMetadata, WorkflowProfileControl, useRebaseRecovery } from '../../../widgets/issue-workflow'
 import { ActivityDialog, type EventTimelinePanelProps } from '../../../widgets/issue-event-timeline'
 import { formatTime } from '../../../shared/lib/format-time'
@@ -23,7 +23,7 @@ import {
   useIssueDetailMutations,
   type IssueDetailMutationDependencies,
 } from '../model/useIssueDetailMutations'
-import { deriveRuntimeDecision } from '../../../widgets/issue-workflow/model/derive-runtime-decision'
+import { deriveRuntimeDecision } from '../../../widgets/issue-workflow'
 import { buildExecutionSignal } from '../model/buildExecutionSignal'
 import { buildDriftRecoveryAction } from '../model/buildDriftRecoveryAction'
 import { ArchivedPill, DraftPill, PriorityChip, RuntimeSummaryPill } from './pills'
@@ -121,7 +121,7 @@ export function IssueDetailPage({
   const { data: commitsData } = useIssueCommits(issueNumber)
 
   if (isError) {
-    return <NotFoundPage />
+    return <NotFoundState />
   }
 
   if (isLoading || !issue) {

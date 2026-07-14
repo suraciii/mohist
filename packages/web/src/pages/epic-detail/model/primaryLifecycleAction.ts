@@ -1,4 +1,4 @@
-import { EpicStatus } from '../../../entities/epic/model/types'
+import { EpicStatus } from '../../../entities/epic'
 
 export type PrimaryLifecycleAction =
   | { kind: 'start-epic' }

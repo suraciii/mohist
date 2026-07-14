@@ -1,6 +1,6 @@
 import { CardSection } from '@/shared/ui/components/card-section'
 import { IssueModelSelector } from '../../../../features/select-issue-model'
-import { IssuePrerequisitePicker, type IssuePrerequisitePickerProps } from '../../../../features/prerequisite-picker'
+import { IssuePrerequisitePicker, type IssuePrerequisitePickerProps } from '../../../../entities/issue'
 import type { Issue, IssueStartBlocker } from '../../../../entities/issue'
 import type { IssueDetailMutations } from '../../model/useIssueDetailMutations'
 

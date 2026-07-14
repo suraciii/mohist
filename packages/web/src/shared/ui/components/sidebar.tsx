@@ -8,7 +8,7 @@ import { useIsMobile } from "@/shared/hooks/use-mobile"
 import { Button } from "@/shared/ui/components/button"
 import { Separator } from "@/shared/ui/components/separator"
 import { Skeleton } from "@/shared/ui/components/skeleton"
-import { registerShortcutHandler } from "@/features/settings-search/keyboard-shortcuts"
+import { registerShortcutHandler } from "@/shared/lib/keyboard-shortcuts"
 
 const SIDEBAR_COOKIE_NAME = "sidebar_state"
 const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 7

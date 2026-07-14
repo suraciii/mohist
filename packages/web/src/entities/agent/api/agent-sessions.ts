@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { QueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import type { AgentSessionTranscriptResponse, AgentSessionUsage } from '../../coder-session/model/types'
+import type { AgentSessionTranscriptResponse, AgentSessionUsage } from '../../coder-session/@x/agent-session'
 import { useProject } from '../../project/@x/project-context'
 import { projectApiPath, request } from '../../../shared/api/client'
 

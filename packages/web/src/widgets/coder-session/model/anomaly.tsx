@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import type { SessionCard, WaitingCard } from './activity-cards'
+import type { SessionCard, WaitingCard } from '@/entities/agent-ops'
 
 const THIRTY_SECONDS = 30_000
 const THIRTY_MINUTES = 30 * 60_000

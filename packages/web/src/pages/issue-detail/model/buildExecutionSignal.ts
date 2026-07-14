@@ -1,6 +1,5 @@
 import type { AgentStatus } from '../../../entities/agent'
-import type { RuntimeSummary } from '../../../widgets/issue-workflow'
-import type { ExecutionSignal } from '../../../widgets/issue-workflow/ui/RuntimeDecisionSurface'
+import type { ExecutionSignal, RuntimeSummary } from '../../../widgets/issue-workflow'
 
 export interface BuildExecutionSignalInput {
   activeSession: { sessionName: string; transcriptPath: string } | null

@@ -1,9 +1,10 @@
 import { Link } from 'react-router-dom'
 import { useProjectPath } from '@/entities/project'
-import type { IssueAttentionItem } from '@/entities/issue'
-import { ContextHealthIndicator, ContextUsageTrendMiniChart, type ContextUsageTrendSample } from '@/widgets/session-health'
+import type { IssueAttentionItem } from '@/entities/agent-ops'
+import { ContextHealthIndicator } from '@/shared/ui/context-health-indicator'
+import { ContextUsageTrendMiniChart, type ContextUsageTrendSample } from '@/shared/ui/context-usage-trend-mini-chart'
 import { formatCompact, formatCost } from '@/shared/lib/format-compact'
-import type { SessionCard } from '@/widgets/coder-session/model/activity-cards'
+import type { SessionCard } from '@/entities/agent-ops'
 
 export const STAGE_COLORS: Record<string, string> = {
   build: 'bg-purple-100 text-purple-700 border-purple-200 dark:bg-purple-900/40 dark:text-purple-200 dark:border-purple-800',

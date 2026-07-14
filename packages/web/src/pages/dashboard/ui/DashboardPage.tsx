@@ -4,21 +4,21 @@ import {
   useProject,
 } from '../../../entities/project'
 import { useAgentStatus, type AgentStatus } from '../../../entities/agent'
-import { CreateProjectDialog } from '../../../widgets/create-project-dialog'
+import { CreateProjectDialog } from '../../../features/create-project'
 import { DashboardDigestWidget } from '../../../widgets/dashboard-digest'
 import { DashboardCapacityZone } from '../../../widgets/dashboard-capacity'
 import { PulseZone } from '../../../widgets/dashboard-pulse'
-import { useActivityCards } from '../../../widgets/coder-session/model/activity-cards'
+import { useActivityCards } from '../../../entities/agent-ops'
 import { FactoryStatusHeadline } from '../../../widgets/factory-status'
 import { AttentionHero } from '../../../widgets/attention-hero'
 import { Button } from '../../../shared/ui/components/button'
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
 import {
-  deriveAttentionItems,
   isRunningIssue,
   useIssues,
   useRecentDigest,
 } from '../../../entities/issue'
+import { deriveAttentionItems } from '../../../entities/agent-ops'
 import { CheckCircle2Icon } from 'lucide-react'
 import { DashboardZone } from './DashboardZone'
 

@@ -1,6 +1,6 @@
 import { useRef, useEffect } from 'react'
-import type { FileBlock } from '../model/diffModel'
-import { classifyFile, DEFAULT_LARGE_DIFF_THRESHOLD } from '../model/diffModel'
+import type { FileBlock } from '@/shared/lib/diff-model'
+import { classifyFile, DEFAULT_LARGE_DIFF_THRESHOLD } from '@/shared/lib/diff-model'
 import { Button } from '@/shared/ui/components/button'
 
 interface UnifiedDiffPaneProps {

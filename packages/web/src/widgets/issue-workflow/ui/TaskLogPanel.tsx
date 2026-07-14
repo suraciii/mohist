@@ -17,7 +17,7 @@ import {
   unsubscribeTaskLog,
   type TaskLogDeltaEnvelopeWire,
 } from '../../../shared/api/events-hub'
-import type { StageTaskStatus } from '../../../entities/issue/model/stage-state'
+import type { StageTaskStatus } from '../../../entities/issue'
 import {
   deriveMilestones,
   isAcpAgentTask,

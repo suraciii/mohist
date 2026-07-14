@@ -1,4 +1,4 @@
-import type { InboxItemPersistedHintPayload } from '../../inbox/model/inbox-effects'
+import type { InboxItemPersistedHintPayload } from '../../inbox/@x/events'
 import type { AgentDetailEventMap } from '../../agent/@x/events'
 import { REVERSE_DNS_EVENT_TYPES } from '../../../shared/lib/canonical-event-types'
 

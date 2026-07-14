@@ -1,5 +1,5 @@
 import { Button } from '@/shared/ui/components/button'
-import type { IssueDiffResponse } from '../../../../entities/issue/model/git-changes'
+import type { IssueDiffResponse } from '../../../../entities/issue'
 
 export interface IssueDiffFilesSectionProps {
   diffData: IssueDiffResponse | undefined

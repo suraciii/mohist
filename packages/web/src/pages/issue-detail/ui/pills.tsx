@@ -1,4 +1,4 @@
-import type { RuntimeSummary } from '../../../widgets/issue-workflow/model/derive-runtime-decision'
+import type { RuntimeSummary } from '../../../widgets/issue-workflow'
 import { formatPriority, getPriorityStyle } from '../../../shared/lib/label-colors'
 
 export function PriorityChip({ priority }: { priority: string | null | undefined }) {

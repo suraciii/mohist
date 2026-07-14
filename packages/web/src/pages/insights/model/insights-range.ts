@@ -1,1 +1,1 @@
-export { DEFAULT_INSIGHTS_RANGE, INSIGHTS_RANGES, isInsightsRange, type InsightsRange } from '../../../entities/shared/insights-range'
+export { DEFAULT_INSIGHTS_RANGE, INSIGHTS_RANGES, isInsightsRange, type InsightsRange } from '../../../shared/config/insights-range'

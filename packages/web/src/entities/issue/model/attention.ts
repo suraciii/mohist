@@ -1,24 +1,11 @@
-import type { AgentStatus } from '../../agent'
-import { IssueHealth, IssueStatus, WorkflowStage, type Issue } from './issue'
+import { IssueHealth, WorkflowStage, type Issue } from './issue'
 
-export type AttentionItem =
-  | {
-      kind: 'approval-needed' | 'integration-failed' | 'blocked'
-      issueNumber: number
-      issueId: string
-      label: string
-      detail?: string
-    }
-  | {
-      kind: 'runner-unavailable' | 'runner-capacity-limited'
-      label: string
-      detail?: string
-    }
-
-export type IssueAttentionItem = Extract<AttentionItem, { issueId: string }>
-
-function isIssueAttentionItem(item: AttentionItem): item is IssueAttentionItem {
-  return 'issueId' in item
+export type IssueAttentionItem = {
+  kind: 'approval-needed' | 'integration-failed' | 'blocked'
+  issueNumber: number
+  issueId: string
+  label: string
+  detail?: string
 }
 
 function isIntegrateFailure(issue: Issue): boolean {
@@ -66,41 +53,4 @@ function issueNeedsOwnerAction(issue: Issue): boolean {
   return classifyIssueAttention(issue) !== null
 }
 
-function deriveAttentionItems(issues: Issue[], agentStatus: AgentStatus): AttentionItem[] {
-  const items: AttentionItem[] = []
-  const seen = new Set<string>()
-
-  for (const issue of issues) {
-    if (seen.has(issue.id)) continue
-
-    const item = classifyIssueAttention(issue)
-    if (item) {
-      seen.add(issue.id)
-      items.push(item)
-    }
-  }
-
-  const runnerAffectsActiveWorkflow = issues.some(
-    (issue) => issue.status === IssueStatus.InProgress && issue.health === IssueHealth.Active,
-  )
-  if (agentStatus.runnerAvailable === false && runnerAffectsActiveWorkflow) {
-    items.push({
-      kind: 'runner-unavailable',
-      label: 'Runner unavailable',
-      detail: agentStatus.runnerMessage ?? 'No runner is connected.',
-    })
-  } else if (agentStatus.runnerAvailable !== false) {
-    const capacity = agentStatus.capacity
-    if (capacity.max > 0 && capacity.active >= capacity.max) {
-      items.push({
-        kind: 'runner-capacity-limited',
-        label: 'Runner at capacity',
-        detail: `${capacity.active} of ${capacity.max} slots in use`,
-      })
-    }
-  }
-
-  return items
-}
-
-export { classifyIssueAttention, deriveAttentionItems, isIntegrateFailure, isIssueAttentionItem, issueNeedsOwnerAction }
+export { classifyIssueAttention, isIntegrateFailure, issueNeedsOwnerAction }

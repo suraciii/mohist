@@ -4,10 +4,10 @@ import type { ToolCallEntry, LoopProgress } from '../../../entities/coder-sessio
 import type { WorkflowStage } from '../../../entities/issue'
 import type { Round, RecoveryEvent, RecoveryStatus, PlanProgress, ContextHealthState } from '../model/useSessionTimeline'
 import { deriveToolCallTitle } from '../model/useSessionTimeline'
-import { PlanProgressPanel } from '../../issue-workflow/ui/PlanProgressPanel'
-import { ContextHealthBar } from '../../session-health/ui/ContextHealthBar'
-import { CompactionTimelineEntry } from '../../session-health/ui/CompactionTimelineEntry'
-import { CompactionCompactSummary } from '../../session-health/ui/CompactionCompactSummary'
+import { PlanProgressPanel } from './PlanProgressPanel'
+import { ContextHealthBar } from './session-health/ContextHealthBar'
+import { CompactionTimelineEntry } from './session-health/CompactionTimelineEntry'
+import { CompactionCompactSummary } from './session-health/CompactionCompactSummary'
 
 interface SessionTimelineProps {
   rounds: Round[]

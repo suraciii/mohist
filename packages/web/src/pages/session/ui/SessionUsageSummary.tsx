@@ -1,6 +1,6 @@
 import { formatCompact, formatCost } from '../../../shared/lib/format-compact'
 import type { AgentSessionUsage } from '../../../entities/coder-session'
-import { ContextHealthIndicator } from '../../../widgets/session-health'
+import { ContextHealthIndicator } from '../../../shared/ui/context-health-indicator'
 
 export interface SessionUsageSummaryProps {
   usage?: AgentSessionUsage | null

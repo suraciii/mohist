@@ -8,7 +8,7 @@ import {
 } from 'lucide-react'
 import type { ComponentType, SVGProps } from 'react'
 import { cn } from '@/shared/lib/utils'
-import type { RuntimeDecision, RuntimeSummary } from '../../../widgets/issue-workflow/model/derive-runtime-decision'
+import type { RuntimeDecision, RuntimeSummary } from '../../../widgets/issue-workflow'
 
 export interface StatusHeadlineStageProgress {
   stage?: string | null

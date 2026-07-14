@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react'
 import { PlusIcon } from 'lucide-react'
-import { CreateProjectDialog } from '@/widgets/create-project-dialog/ui/CreateProjectDialog'
+import { CreateProjectDialog } from '@/features/create-project'
 import { Button } from '@/shared/ui/components/button'
 import { SectionState } from './SectionState'
 

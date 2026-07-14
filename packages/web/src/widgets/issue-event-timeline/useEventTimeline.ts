@@ -1,7 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useIssueEvents } from '../../entities/issue'
-import { onTimelineEvent, type TimelineLiveEvent } from '../../entities/issue/model/timeline-events'
-import type { StoredCloudEventDto } from '../../entities/issue/model/types'
+import { onTimelineEvent, useIssueEvents, type TimelineLiveEvent, type StoredCloudEventDto } from '../../entities/issue'
 import { classifyEvent } from './model/classify'
 import { describeEvent } from './model/describe'
 import { classifySource } from './model/source-tag'

@@ -1,6 +1,5 @@
-import type { Issue } from '../../../entities/issue'
+import { parseLabelSearchParams, parseLabelToken, serializeLabelSearchParams, type Issue } from '../../../entities/issue'
 import type { Column } from './kanban-grouping'
-import { parseLabelSearchParams, parseLabelToken, serializeLabelSearchParams } from '../../../entities/issue/model/labels'
 
 export type SortMode = 'priority' | 'number' | 'updated'
 

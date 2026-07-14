@@ -1,6 +1,6 @@
 import { Outlet, useLocation } from 'react-router-dom'
 import { useProjects, useProject } from '../../../entities/project'
-import { CreateProjectDialog } from '../../create-project-dialog/ui/CreateProjectDialog'
+import { CreateProjectDialog } from '../../../features/create-project'
 import { useEffect, useState } from 'react'
 import { Button } from '@/shared/ui/components/button'
 

@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { StatusBar } from '../../../shared/ui/StatusBar'
-import { ActiveSessionCard, WaitingCard, RecentCard, UsageSnapshotLabel, useActivityCards, useActivityUsageSnapshot } from '../../../widgets/coder-session'
+import { useActivityCards } from '../../../entities/agent-ops'
+import { ActiveSessionCard, WaitingCard, RecentCard, UsageSnapshotLabel, useActivityUsageSnapshot } from '../../../widgets/coder-session'
 import { RunnerSummaryBadge } from '../../../widgets/runner-status'
 import { useProjectPath } from '../../../entities/project'
 

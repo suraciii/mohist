@@ -15,7 +15,7 @@ import type { SystemInfo, SystemUpdateStatusEnvelope } from '../../../entities/s
 import { Button } from '@/shared/ui/components/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/ui/components/select'
 import { CardSection } from '@/shared/ui/components/card-section'
-import type { SettingsSearchEntry } from '@/features/settings-search'
+import type { SettingsSearchEntry } from '../model/settings-search'
 import { getSectionMeta } from '../lib/sections'
 import { SectionState } from './SectionState'
 import { SettingsSection } from './SettingsSection'

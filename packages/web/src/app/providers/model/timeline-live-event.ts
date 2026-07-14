@@ -1,4 +1,4 @@
-import type { TimelineLiveEvent } from '../../../entities/issue/model/timeline-events'
+import type { TimelineLiveEvent } from '../../../entities/issue'
 
 export function readIssueNumber(parsed: Record<string, unknown>): number | null {
   const issueNumber = parsed.issueNumber ?? parsed.issueNo ?? parsed.number

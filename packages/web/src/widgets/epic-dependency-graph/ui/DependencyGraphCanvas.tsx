@@ -10,7 +10,7 @@ import {
   type NodeTypes,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import type { LinkedIssue } from '../../../entities/epic/model/types'
+import type { LinkedIssue } from '../../../entities/epic'
 import { buildGraphEdges, detectCycle } from '../model/graph'
 import { buildLayout, type GraphNodeData, isMemberNodeId, parseMemberNodeNumber } from '../model/layout'
 import { MemberFlowNode } from './MemberFlowNode'

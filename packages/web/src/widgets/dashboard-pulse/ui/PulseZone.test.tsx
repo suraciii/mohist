@@ -11,7 +11,7 @@ import type {
   AgentActivity,
   AgentActivitySession,
 } from '@/entities/agent/model/types'
-import { sessionToCard, useActivityCards } from '@/widgets/coder-session/model/activity-cards'
+import { sessionToCard, useActivityCards } from '@/entities/agent-ops'
 import { TEST_PROJECT } from '../../../../tests/test-utils'
 import { useMswServer } from '../../../../tests/support/msw'
 import { PulseZone } from './PulseZone'

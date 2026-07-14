@@ -1,4 +1,4 @@
-import type { SessionEvent } from '../../session/model/view'
+import type { SessionEvent } from '../../session/@x/session-view'
 
 export type SessionStatusKind = 'loading' | 'live' | 'probing' | 'finalizing' | 'completed' | 'failed' | 'stale'
 

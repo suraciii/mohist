@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { getFileContent } from '../../../entities/issue'
-import type { FileBlock } from '../model/diffModel'
-import { classifyFile, DEFAULT_LARGE_DIFF_THRESHOLD } from '../model/diffModel'
+import type { FileBlock } from '@/shared/lib/diff-model'
+import { classifyFile, DEFAULT_LARGE_DIFF_THRESHOLD } from '@/shared/lib/diff-model'
 import { useProject } from '../../../entities/project'
 import { Button } from '@/shared/ui/components/button'
 

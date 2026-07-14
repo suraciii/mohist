@@ -1,6 +1,6 @@
 import { Suspense, useCallback, useMemo, useState } from 'react'
 import { useProjectPath } from '../../../entities/project'
-import type { LinkedIssue } from '../../../entities/epic/model/types'
+import type { LinkedIssue } from '../../../entities/epic'
 import { DependencyGraphCanvas, type Renderability } from './DependencyGraphCanvas'
 
 export interface DependencyGraphWidgetProps {

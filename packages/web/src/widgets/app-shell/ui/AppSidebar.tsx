@@ -37,7 +37,7 @@ import {
   SidebarSeparator,
 } from '@/shared/ui/components/sidebar'
 import { Button } from '@/shared/ui/components/button'
-import { CreateProjectDialog } from '../../create-project-dialog/ui/CreateProjectDialog'
+import { CreateProjectDialog } from '../../../features/create-project'
 import type { Project } from '../../../entities/project'
 import type { ComponentType } from 'react'
 

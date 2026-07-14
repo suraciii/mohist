@@ -1,4 +1,4 @@
-import type { SessionChatPart, SessionChatTurn, SessionChatView, SessionEvent } from '../view'
+import type { SessionChatPart, SessionChatTurn, SessionChatView, SessionEvent } from '../types'
 import {
   defaultToolStatus,
   extractTextChunk,

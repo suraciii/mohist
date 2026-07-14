@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import type { DisplayTurn } from '../model/session-transcript-display'
 import { useTurnKeyboardNav } from '../model/useTurnKeyboardNav'
+import type { TurnRefsMap } from '../model/turn-refs'
 import { TurnList } from './TurnList'
 import { TurnTocRail, buildTurnTocEntries } from './TurnToc'
 import { TranscriptToolbar } from './TranscriptToolbar'
@@ -27,7 +28,7 @@ export function TranscriptEmptyState({ isRunning }: TranscriptEmptyStateProps) {
   )
 }
 
-export type TurnRefsMap = Map<number, HTMLDivElement>
+export type { TurnRefsMap } from '../model/turn-refs'
 
 interface SessionTranscriptLayoutProps {
   title: string

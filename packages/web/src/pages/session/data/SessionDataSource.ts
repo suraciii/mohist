@@ -1,5 +1,5 @@
 import type { SessionTurn, AgentSessionTranscriptResponse, SessionMetadata, SessionStatusKind, RuntimeSessionLineageEntry } from '../../../entities/coder-session'
-import type { DisplayTurn } from '../../../widgets/session-transcript/model/session-transcript-display'
+import type { DisplayTurn } from '../../../widgets/session-transcript'
 
 export type StatusKind = SessionStatusKind
 

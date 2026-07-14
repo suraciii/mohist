@@ -1,6 +1,6 @@
 import dagre from 'dagre'
 import type { Edge, Node } from '@xyflow/react'
-import type { LinkedIssue } from '../../../entities/epic/model/types'
+import type { LinkedIssue } from '../../../entities/epic'
 import type { ExternalGhostNode, GraphEdge } from './graph'
 import { deriveReadiness, type Readiness, statusColors } from './readiness'
 import { externalNodeKey, type ExternalNodeKey } from './graph'

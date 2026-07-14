@@ -7,10 +7,10 @@ import {
   IssueHealth,
   IssueStatus,
   WorkflowStage,
-  deriveAttentionItems,
   type ApprovalWaitMetricsResponse,
   type Issue,
 } from '../../../entities/issue'
+import { deriveAttentionItems } from '../../../entities/agent-ops'
 import { type AgentStatus } from '../../../entities/agent'
 import { ProjectProvider } from '../../../entities/project'
 import {

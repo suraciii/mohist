@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import type { AgentStatus } from '../../agent'
+import { deriveAttentionItems, isIssueAttentionItem, type AttentionItem } from '../../agent-ops'
 import { IssueHealth, IssueStatus, WorkflowStage, type Issue } from '..'
-import { classifyIssueAttention, deriveAttentionItems, isIntegrateFailure, isIssueAttentionItem, issueNeedsOwnerAction, type AttentionItem } from './attention'
-
+import { classifyIssueAttention, isIntegrateFailure, issueNeedsOwnerAction } from './attention'
 function makeAgentStatus(overrides: Partial<AgentStatus> = {}): AgentStatus {
   return {
     running: false,

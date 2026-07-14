@@ -1,4 +1,4 @@
-import type { SessionEvent, SessionTimelineRound, SessionTimelineToolCall, SessionTimelineView } from '../view'
+import type { SessionEvent, SessionTimelineRound, SessionTimelineToolCall, SessionTimelineView } from '../types'
 import {
   defaultToolStatus,
   extractTextChunk,

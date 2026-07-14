@@ -1,6 +1,5 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import type { UseMutationResult } from '@tanstack/react-query'
 import { ActivityIcon } from 'lucide-react'
 import { Button } from '@/shared/ui/components/button'
 import { Textarea } from '@/shared/ui/components/textarea'
@@ -11,28 +10,13 @@ import {
   type RuntimeSummary,
 } from '../model/derive-runtime-decision'
 import { getStopConsequenceCopy, invokeAction } from '../runtime-action-handlers'
+import type { RuntimeDecisionSurfaceMutations } from '../model/runtime-action-types'
+export type { RuntimeDecisionSurfaceMutations } from '../model/runtime-action-types'
 import { ArtifactOpener } from './ArtifactOpener'
 import type {
   ArtifactContentHook,
   ArtifactOpenerArtifactsHook,
 } from './ArtifactOpener'
-
-interface RuntimeActionMutation<TVariables = void> {
-  mutate: UseMutationResult<unknown, Error, TVariables, unknown>['mutate']
-  isPending: boolean
-  error: Error | null
-}
-
-export interface RuntimeDecisionSurfaceMutations {
-  approveMutation: RuntimeActionMutation
-  sendBackMutation: RuntimeActionMutation<{ stage: string; body: string }>
-  retryMutation: RuntimeActionMutation
-  resumeMutation: RuntimeActionMutation
-  rerunMutation: RuntimeActionMutation
-  forceStopMutation: RuntimeActionMutation
-  stopMutation: RuntimeActionMutation
-  startMutation: RuntimeActionMutation
-}
 
 export interface DecisionEvidence {
   issueNumber: number

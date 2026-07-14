@@ -1,4 +1,4 @@
-import type { RebaseConflictState } from '../../../entities/issue/model/drift'
+import type { RebaseConflictState } from '../../../entities/issue'
 import { REVERSE_DNS_EVENT_TYPES } from '../../../shared/lib/canonical-event-types'
 import { readIssueNumber } from './timeline-live-event'
 
@@ -125,5 +125,4 @@ export function decideReverseDnsOutcome(
   }
   return { handled: false }
 }
-
 

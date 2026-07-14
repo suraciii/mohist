@@ -6,7 +6,7 @@ import {
   type SessionTimelineToolCall,
   type SessionTimelineRecovery,
   type SessionTimelineCompaction,
-} from '../../../entities/session/model/view'
+} from '../../../entities/session'
 
 export interface RecoveryEvent {
   status: 'detected' | 'recovering' | 'recovered' | 'failed'

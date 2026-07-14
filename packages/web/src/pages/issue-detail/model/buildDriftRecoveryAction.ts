@@ -1,5 +1,4 @@
-import type { DriftRecoveryAction } from '../../../widgets/issue-workflow/ui/RuntimeDecisionSurface'
-import type { RebaseRecovery } from '../../../widgets/issue-workflow'
+import type { DriftRecoveryAction, RebaseRecovery } from '../../../widgets/issue-workflow'
 
 export interface BuildDriftRecoveryActionInput {
   drift: {

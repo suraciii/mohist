@@ -6,8 +6,8 @@ import { getStopConsequenceCopy, invokeAction } from '../../../widgets/issue-wor
 import type {
   RuntimeAvailableAction,
   RuntimeDecision,
-} from '../../../widgets/issue-workflow/model/derive-runtime-decision'
-import type { RuntimeDecisionSurfaceMutations } from '../../../widgets/issue-workflow/ui/RuntimeDecisionSurface'
+  RuntimeDecisionSurfaceMutations,
+} from '../../../widgets/issue-workflow'
 import { ConfirmationDrawer } from './ConfirmationDrawer'
 
 type ConfirmKind = 'stop' | 'send-back'

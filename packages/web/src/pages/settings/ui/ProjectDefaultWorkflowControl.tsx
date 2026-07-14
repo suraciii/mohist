@@ -6,7 +6,7 @@ import {
   useAllWorkflowProfiles,
   useWorkflowProfiles,
 } from '../../../entities/settings'
-import { includesWorkflowProfileId, workflowProfileIdEquals } from '../../../entities/settings/model/workflowProfileIds'
+import { includesWorkflowProfileId, workflowProfileIdEquals } from '../../../entities/settings'
 import { Button } from '@/shared/ui/components/button'
 import { CardSection } from '@/shared/ui/components/card-section'
 import { Label } from '@/shared/ui/components/label'

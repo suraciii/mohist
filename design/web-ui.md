@@ -33,6 +33,23 @@ UI uses friendly paths (`/projects/{pid}/issues/{num}`). API boundary resolves d
 - UI state stores view prefs, filters, drafts. Never workflow truth.
 - Runner details stay behind API. UI never depends on process internals.
 
+## 前端模块边界
+
+Web 按 Feature-Sliced Design 组织为 `app`、`pages`、`widgets`、`features`、`entities` 和
+`shared`。依赖只能从高层指向低层；同层切片不直接依赖，实体之间确有模型关系时才通过
+`entities/<entity>/@x` 声明窄契约。
+
+- `app` 只负责启动、Provider 和路由组合。它通过 page 或 widget 的 `index.ts` 消费路由
+  页面和应用壳，不读取其 `ui` 或 `model` 内部文件。
+- `pages` 拥有仅在一个路由内成立的交互和状态。Settings 搜索依赖 Settings 路由、tab 和
+  焦点目标，因此属于 `pages/settings`，不是可复用 feature。
+- `shared` 放置无业务归属的浏览器能力。Theme context 和快捷键声明/注册表由此层提供；
+  `app` 负责挂载 ThemeProvider，具体页面和通用组件只消费 shared API。
+- 多个领域 API 共用的静态筛选值属于 `shared/config`；资源不存在的展示属于
+  `shared/ui`。路由 page 只负责把这些通用能力放在相应的路由入口。
+- 切片对外只导出稳定的页面、组件或领域契约。内部 `ui`、`model`、`api` 路径不能成为
+  跨切片导入目标。
+
 ## Preference
 
 Dense, scannable screens. No landing pages.

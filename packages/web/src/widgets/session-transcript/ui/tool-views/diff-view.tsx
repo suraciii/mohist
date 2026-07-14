@@ -3,7 +3,7 @@ import { Button } from '@/shared/ui/components/button'
 import type { DisplayChangedFile } from '../../model/session-transcript-display'
 import { parseJsonSafely, parseEditInput } from '../../model/transcript-tool-utils'
 import { buildDiffFromEdit, buildDiffFromPatchText, type FileBlock } from '../../model/diff-builder'
-import { parseDiff, isLargeDiff } from '../../../issue-changed-files/model/diffModel'
+import { parseDiff, isLargeDiff } from '@/shared/lib/diff-model'
 
 interface PatchDiffViewProps {
   changedFiles: DisplayChangedFile[]
