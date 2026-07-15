@@ -103,3 +103,46 @@ T-002 progress
 - Server build: clean (0 warn, 0 err).
 - `Mohist.Server.SpecTests`: 2744 pass (was 2738; +6 from T-002's extended/new tests in `TransactionalEventAppendSpecs` + `WorkflowRunStoreSpecs`).
 - Full `npm test` suite: all 10,663 tests pass across server (1365 unit + 22 arch + 2744 spec + 865 cli), web (4653), runner (1014).
+
+---
+
+T-003 progress
+
+## Codebase Patterns (additions)
+- `Issue` already follows the cross-aggregate-reference pattern: `WorkflowRunId` is a nullable string the aggregate carries as a denormalized cache. `EpicId` rides the same field on the existing `State` JSON column, so no schema migration is needed and the read-side (`IssueRowMapper.Deserialize`) does not change. The `_epicId` field follows the same `NormalizeOptional` pattern as `_workflowRunId` (whitespace → null).
+- The `IssueTransactionalEventAppendSpecs` Sqlite fixture uses a single in-memory connection shared across all `[Fact]`s in the class. The unique index on `Issues.(ProjectId, Number)` therefore requires each test issue to use a distinct `Number`. `BuildIssue` now takes an optional `number:` so each test passes a unique int — the legacy constant `IssueNumber = 7` is no longer used by any test fixture but stays as the helper's default.
+
+## T-003 decisions / layout
+- `Issue.cs` gains a nullable `EpicId` (init-getter, normalized via the existing `NormalizeOptional` helper) and an eventless `SetEpicId(string?, DateTime?)` transition. The transition records no `IssueEvent` (denormalization only — the authoritative `EpicIssueLinked` / `EpicIssueUnlinked` events live on the epic stream).
+- `IIssueGrain.SetEpicAffiliationAsync(string? epicId)` is the synchronous push from the Epic domain. Implementation: idempotent (no-op when value unchanged); normalizes whitespace to null; persists via the existing `SaveIssueAsync()` flow, which calls `IssueStore.SaveAsync(key, state, [])` with an empty pending-events list. That overload is the same one used by every other state-only path on the grain (no domain event recorded).
+- `IssueLineage.BuildExtensions(state)` (new file at `packages/server/src/Mohist.Server/Infrastructure/Data/Issue/IssueLineage.cs`) is the pure helper that mirrors `WorkflowRunLineage.BuildExtensions(run, evt)`. It reads ONLY from the supplied `Issue` instance — no DB context, no grain call, no cross-aggregate query. The dictionary always stamps `{projectid, issueid, issue}`; `epicid` is added only when `state.EpicId` is non-null.
+- `IssueStore.SaveAsync(key, state, events, ct)` now calls `IssueLineage.BuildExtensions(state)` inside the EF Core transaction (it sits right after the source/subject resolution, before the per-event `ToCloudEvent` loop). Stamping stays consistent with the append because the extensions are derived from the same `state` instance the row is staged from. The legacy `BuildIdentityExtensions` private method is removed; its callers and tests are rewired to `IssueLineage`.
+- Eight test fakes that implement `IIssueGrain` (in `EpicBatchMembershipSpecs`, `EpicMembershipSpecs`, `EpicProgressionSpecs`, `EpicWakeUpSpecs`, `EpicRecoverySpecs`, `EpicAutoDoneHandlerSpecs`, `IssueWorkflowCompletionHandlerSpecs`) gained a one-line `SetEpicAffiliationAsync(string?) => throw new NotSupportedException()` stub so the interface still compiles. They are placeholders — T-004 (EpicGrain link/unlink → SetEpicAffiliationAsync) is what actually exercises them.
+
+## Tests added
+- `IssueTransactionalEventAppendSpecs` (extended for T-003):
+  - `SaveAsync_StampsProjectIdIssueIdAndIssueOnExtensions` (renamed from `...IssueNoOnExtensions`): now asserts `issue` (D3 rename), and pins the absence of `issueno` and `epicid` for an unaffiliated issue.
+  - `SaveAsync_IssueWithEpicAffiliation_StampsEpicIdOnExtensions`: D5 — a stateful `EpicId` produces an `epicid` stamp on every `issue.*` event.
+  - `SaveAsync_IssueWithoutEpicAffiliation_OmitsEpicIdEntirely`: absent affiliation = no key (no empty value).
+  - `SaveAsync_IssueWithoutEpicAffiliation_OmitsEpicId_AndEmptyStringEpicIdIsTreatedAsAbsent`: defensive — a whitespace-only `EpicId` is normalized to null by the property setter, so the envelope still omits `epicid`.
+  - `SaveAsync_StampedEnvelopes_SatisfyEventCatalogRequiredAttributes`: drives two representative issues (affiliated and unaffiliated) through the full production path and asserts each envelope passes `EnvelopeConformance.AssertRequired` and `Missing` is empty.
+  - `IssueLineage_BuildExtensions_StampsProjectIdIssueIdIssueAndOptionalEpicId`: pins the pure helper — `issue`/`projectid`/`issueid` always, `epicid` only when state carries one, never an `issueno` key.
+- `IssueDomainTests` (extended):
+  - `SetEpicId_StoresValueAndTouchesUpdatedAt_AndDoesNotEmitDomainEvent`: the eventless transition's contract — it touches `UpdatedAt` and adds NO entry to `PendingEvents`.
+  - `SetEpicId_NullClearsAffiliation`: null clears, matches the unlink path.
+  - `SetEpicId_NoOpWhenValueUnchanged`: idempotent; `UpdatedAt` is not bumped when value is already equal.
+  - `SetEpicId_WhitespaceIsNormalizedToNull`: matches the existing `NormalizeOptional` rule.
+  - `State_RoundTripsEpicId`: the `EpicId` field round-trips through the `State` JSON column.
+
+## Gotchas / hand-offs
+- The grain's `SetEpicAffiliationAsync` does NOT call `EnsureIssue()` (the issue is allowed to be null — link/unlink may target an issue that hasn't been activated yet on this silo). Instead it short-circuits when `_issue is null`. The state-only save then happens through `SaveIssueAsync()` which already handles a null `_issue` gracefully. This matches the EpicGrain call sites' expectations: EpicGrain's link/unlink `await` will route through Orleans, which deactivates the grain if needed, then activates it on the next call — at which point `OnActivateAsync` loads the state from the store and the in-memory `_issue` becomes available. If T-004's link call lands on an issue that has never been activated, the synchronous push will be a no-op on this code path; the durable `EpicIssueLinkedHandler` re-applies it later (per the design's "self-healing drift" mitigation).
+- `IssueLineage.BuildExtensions` runs INSIDE the EF Core transaction (right after the source/subject resolution, before the event loop). This keeps the `epicid` snapshot consistent with the append per D1.
+- The conformance spec test reads `entry.Envelope.Subject` against the issue number — keep that subject shape in mind for any later refactor of `IssueEventPersistence.IssueSource`/`subject`.
+- The `IssueWorkflowCompletionHandlerSpecs` and other `Epic*` test files have TWO grain fake classes (recording + throwing). Both got the new `SetEpicAffiliationAsync` stub via a single regex pass. If more fakes appear, follow the same pattern.
+
+## Verification
+- Server build: clean (0 warn, 0 err) on `packages/server/src/Mohist.Server`.
+- `Mohist.Server.SpecTests`: 2749 pass (was 2744; +5 from T-003's new tests in `IssueTransactionalEventAppendSpecs`).
+- `Mohist.Server.UnitTests`: 1370 pass (was 1365; +5 from new `SetEpicId_*` and `State_RoundTripsEpicId` tests in `IssueDomainTests`).
+- `Mohist.Server.ArchTests`: 22 pass.
+- Full `npm test` suite: all 10,673 tests pass across server (1370 unit + 22 arch + 2749 spec + 865 cli), web (4653), runner (1014).

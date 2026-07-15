@@ -92,6 +92,25 @@ public class IssueGrain : Grain, IIssueGrain
         return Task.CompletedTask;
     }
 
+    public async Task SetEpicAffiliationAsync(string? epicId)
+    {
+        if (_issue is null) return;
+        if (string.IsNullOrWhiteSpace(epicId))
+        {
+            if (_issue.EpicId is null) return;
+            _issue.SetEpicId(null);
+        }
+        else if (!string.Equals(_issue.EpicId, epicId, StringComparison.Ordinal))
+        {
+            _issue.SetEpicId(epicId);
+        }
+        else
+        {
+            return;
+        }
+        await SaveIssueAsync();
+    }
+
     public async Task<string?> ResolveRepositoryRefAsync(string projectId, string? repositoryRef)
     {
         if (!string.IsNullOrWhiteSpace(repositoryRef))

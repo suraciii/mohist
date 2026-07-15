@@ -21,6 +21,17 @@ public interface IIssueGrain : IGrainWithStringKey
     Task<IssueStartReadiness> GetStartReadinessAsync();
     Task<IssueCommentResult> AddCommentAsync(string body, string[]? attachmentIds = null);
     Task DeactivateForTestAsync();
+
+    /// <summary>
+    /// Set the issue's denormalized epic affiliation. Called by the Epic
+    /// domain at link/unlink time (D5 — issue events stamp
+    /// <c>epicid</c> from the issue's own state, no cross-aggregate
+    /// query). Persists via the state-only save path — no issue domain
+    /// event is recorded, since the authoritative
+    /// <c>EpicIssueLinked</c>/<c>EpicIssueUnlinked</c> events live on
+    /// the epic stream.
+    /// </summary>
+    Task SetEpicAffiliationAsync(string? epicId);
 }
 
 [GenerateSerializer]

@@ -66,7 +66,7 @@ public class IssueStore : IIssueStore
     {
         var source = IssueEventPersistence.IssueSource(state.Id);
         var subject = state.Number.ToString();
-        var extensions = BuildIdentityExtensions(state);
+        var extensions = IssueLineage.BuildExtensions(state);
 
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
@@ -125,16 +125,6 @@ public class IssueStore : IIssueStore
             subject: subject,
             specVersion: SpecVersion,
             extensions: extensions);
-    }
-
-    private static Dictionary<string, string> BuildIdentityExtensions(DomainIssue state)
-    {
-        return new Dictionary<string, string>(StringComparer.Ordinal)
-        {
-            ["projectid"] = state.ProjectId,
-            ["issueid"] = state.Id,
-            ["issueno"] = state.Number.ToString(),
-        };
     }
 
     public static DomainIssue? Deserialize(string json) =>

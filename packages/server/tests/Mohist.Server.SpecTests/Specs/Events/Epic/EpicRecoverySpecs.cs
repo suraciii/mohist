@@ -188,6 +188,7 @@ public class EpicRecoverySpecs
         public Task<IssueStartReadiness> GetStartReadinessAsync() => throw new NotSupportedException();
         public Task<IssueCommentResult> AddCommentAsync(string body, string[]? attachmentIds = null) => throw new NotSupportedException();
         public Task DeactivateForTestAsync() => throw new NotSupportedException();
+        public Task SetEpicAffiliationAsync(string? epicId) => throw new NotSupportedException();
     }
 }
 

@@ -168,6 +168,22 @@ public sealed partial class Issue
         Touch(now);
     }
 
+    /// <summary>
+    /// Eventless epic affiliation transition. The Epic domain owns the
+    /// <c>EpicIssueRow</c> join table as source of truth and writes this
+    /// value at link/unlink time; the authoritative
+    /// <c>EpicIssueLinked</c>/<c>EpicIssueUnlinked</c> events live on the
+    /// epic stream, so this transition does not record an issue domain
+    /// event — it is a denormalized projection, not a domain mutation.
+    /// </summary>
+    public void SetEpicId(string? epicId, DateTime? now = null)
+    {
+        var next = NormalizeOptional(epicId);
+        if (string.Equals(_epicId, next, StringComparison.Ordinal)) return;
+        _epicId = next;
+        Touch(now);
+    }
+
     public bool Complete(string workflowRunId, DateTime? now = null)
     {
         if (_workflowRunId != workflowRunId) return false;

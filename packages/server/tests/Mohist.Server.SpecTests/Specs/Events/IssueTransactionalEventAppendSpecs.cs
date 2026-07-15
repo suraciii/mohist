@@ -22,9 +22,15 @@ namespace Mohist.Server.SpecTests.Specs.Events;
 /// rolls back the state transaction and propagates (no
 /// log-and-swallow catch remains); durable event rows survive a
 /// crash-after-commit and remain readable on a fresh
-/// <c>DbContext</c>; events stamped by <c>IssueStore.SaveAsync</c>
-/// carry the issue's identity (<c>projectid</c>, <c>issueid</c>,
-/// <c>issueno</c>) in <c>extensions</c> (D5 identity stamping).
+/// <c>DbContext</c>. Also covers issue-412 T-003 lineage stamping:
+/// events stamped by <c>IssueStore.SaveAsync</c> carry the issue's
+/// identity (<c>projectid</c>, <c>issueid</c>, <c>issue</c>) in
+/// <c>extensions</c> (D3 — user-visible number uses the protocol
+/// <c>issue</c> key, no <c>issueno</c> key remains), additionally
+/// stamp <c>epicid</c> when <c>state.EpicId</c> is non-null (D5 — no
+/// cross-aggregate query), and every emitted envelope satisfies the
+/// catalog's declared required lineage attributes via the conformance
+/// helper.
 /// </summary>
 [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
 [Trait(Traits.Sut.Name, Traits.Sut.System)]
@@ -67,7 +73,7 @@ public class IssueTransactionalEventAppendSpecs : IAsyncLifetime
     public async Task SaveAsync_CommitsStateAndIssueEventRowsTogether()
     {
         var store = new IssueStore(_dbFactory, _eventStore, _grainFactory, NullLogger<IssueStore>.Instance);
-        var issue = BuildIssue("issue_txn_ok");
+        var issue = BuildIssue("issue_txn_ok", number: 1);
 
         await store.SaveAsync(issue.Id, issue, [
             new IssueCreated("Hello", "p2", new Dictionary<string, string>(), null, null),
@@ -88,7 +94,7 @@ public class IssueTransactionalEventAppendSpecs : IAsyncLifetime
     public async Task SaveAsync_EventRowWriteFailure_RollsBackStateAndEvents_AndDoesNotSwallow()
     {
         var store = new IssueStore(_dbFactory, new ThrowingEventStore(), _grainFactory, NullLogger<IssueStore>.Instance);
-        var issue = BuildIssue("issue_txn_fail");
+        var issue = BuildIssue("issue_txn_fail", number: 2);
 
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(
             () => store.SaveAsync(issue.Id, issue, [
@@ -106,7 +112,7 @@ public class IssueTransactionalEventAppendSpecs : IAsyncLifetime
     public async Task SaveAsync_CrashAfterCommit_IssueEventRowsRemainDurableOnFreshDbContext()
     {
         var store = new IssueStore(_dbFactory, _eventStore, _grainFactory, NullLogger<IssueStore>.Instance);
-        var issue = BuildIssue("issue_txn_crash");
+        var issue = BuildIssue("issue_txn_crash", number: 3);
 
         await store.SaveAsync(issue.Id, issue, [new IssueArchived()]);
 
@@ -125,10 +131,15 @@ public class IssueTransactionalEventAppendSpecs : IAsyncLifetime
     }
 
     [Fact]
-    public async Task SaveAsync_StampsProjectIdIssueIdAndIssueNoOnExtensions()
+    public async Task SaveAsync_StampsProjectIdIssueIdAndIssueOnExtensions()
     {
+        // Identity stamping at write time: every issue.* event carries
+        // the unified protocol key `issue` (replacing the legacy
+        // `issueno` — D3) alongside `projectid` / `issueid`. No
+        // `issueno` key is present. Epic id is absent because the
+        // test fixture issue has no EpicId.
         var store = new IssueStore(_dbFactory, _eventStore, _grainFactory, NullLogger<IssueStore>.Instance);
-        var issue = BuildIssue(IssueId);
+        var issue = BuildIssue(IssueId, number: 4);
 
         await store.SaveAsync(issue.Id, issue, [
             new IssueCreated("Hello", "p2", new Dictionary<string, string>(), null, null),
@@ -143,17 +154,144 @@ public class IssueTransactionalEventAppendSpecs : IAsyncLifetime
             Assert.Equal(ProjectId, stampedProjectId);
             Assert.True(entry.Envelope.Extensions.TryGetValue("issueid", out var stampedIssueId));
             Assert.Equal(IssueId, stampedIssueId);
-            Assert.True(entry.Envelope.Extensions.TryGetValue("issueno", out var stampedIssueNo));
-            Assert.Equal(IssueNumber.ToString(), stampedIssueNo);
-            Assert.Equal(IssueNumber.ToString(), entry.Envelope.Subject);
+            Assert.True(entry.Envelope.Extensions.TryGetValue("issue", out var stampedIssue));
+            Assert.Equal("4", stampedIssue);
+            Assert.False(entry.Envelope.Extensions.ContainsKey("issueno"));
+            Assert.False(entry.Envelope.Extensions.ContainsKey("epicid"));
+            Assert.Equal("4", entry.Envelope.Subject);
         }
+    }
+
+    [Fact]
+    public async Task SaveAsync_IssueWithEpicAffiliation_StampsEpicIdOnExtensions()
+    {
+        // D5 denormalization: when the issue's own state carries an
+        // EpicId (written by the Epic domain at link time, T-004),
+        // every issue.* event stamps `epicid` from that state. No
+        // cross-aggregate query is issued; the issue aggregate's
+        // own state is the sole source.
+        var store = new IssueStore(_dbFactory, _eventStore, _grainFactory, NullLogger<IssueStore>.Instance);
+        var issue = BuildIssue("issue_txn_with_epic", epicId: "epic_txn_1", number: 5);
+
+        await store.SaveAsync(issue.Id, issue, [
+            new IssueCreated("Hello", "p2", new Dictionary<string, string>(), null, null),
+            new IssueArchived(),
+        ]);
+
+        var stored = await _eventStore.ListIssueEventsAsync("issue_txn_with_epic");
+        Assert.Equal(2, stored.Count);
+        foreach (var entry in stored)
+        {
+            Assert.True(entry.Envelope.Extensions.TryGetValue("projectid", out var stampedProjectId));
+            Assert.Equal(ProjectId, stampedProjectId);
+            Assert.True(entry.Envelope.Extensions.TryGetValue("issueid", out var stampedIssueId));
+            Assert.Equal("issue_txn_with_epic", stampedIssueId);
+            Assert.True(entry.Envelope.Extensions.TryGetValue("issue", out var stampedIssue));
+            Assert.Equal("5", stampedIssue);
+            Assert.True(entry.Envelope.Extensions.TryGetValue("epicid", out var stampedEpicId));
+            Assert.Equal("epic_txn_1", stampedEpicId);
+            Assert.False(entry.Envelope.Extensions.ContainsKey("issueno"));
+        }
+    }
+
+    [Fact]
+    public async Task SaveAsync_IssueWithoutEpicAffiliation_OmitsEpicIdEntirely()
+    {
+        // Absent affiliation is omitted, never an empty value (the
+        // protocol contract). When state.EpicId is null, no `epicid`
+        // key is present on the envelope.
+        var store = new IssueStore(_dbFactory, _eventStore, _grainFactory, NullLogger<IssueStore>.Instance);
+        var issue = BuildIssue("issue_txn_no_epic", epicId: null, number: 6);
+
+        await store.SaveAsync(issue.Id, issue, [new IssueArchived()]);
+
+        var stored = Assert.Single(await _eventStore.ListIssueEventsAsync("issue_txn_no_epic"));
+        Assert.False(stored.Envelope.Extensions.ContainsKey("epicid"));
+        Assert.Contains("issue", stored.Envelope.Extensions.Keys);
+        Assert.Contains("projectid", stored.Envelope.Extensions.Keys);
+        Assert.Contains("issueid", stored.Envelope.Extensions.Keys);
+    }
+
+    [Fact]
+    public async Task SaveAsync_IssueWithoutEpicAffiliation_OmitsEpicId_AndEmptyStringEpicIdIsTreatedAsAbsent()
+    {
+        // Defensive: a whitespace-only EpicId in state is normalized to
+        // null by the property setter and therefore omits `epicid`
+        // from the stamped envelope.
+        var store = new IssueStore(_dbFactory, _eventStore, _grainFactory, NullLogger<IssueStore>.Instance);
+        var issue = BuildIssue("issue_txn_empty_epic", epicId: "   ", number: 8);
+
+        await store.SaveAsync(issue.Id, issue, [new IssueArchived()]);
+
+        var stored = Assert.Single(await _eventStore.ListIssueEventsAsync("issue_txn_empty_epic"));
+        Assert.Null(issue.EpicId);
+        Assert.False(stored.Envelope.Extensions.ContainsKey("epicid"));
+    }
+
+    [Fact]
+    public async Task SaveAsync_StampedEnvelopes_SatisfyEventCatalogRequiredAttributes()
+    {
+        // Conformance check (D8): every emitted envelope satisfies
+        // the catalog's declared required lineage attributes for
+        // its type — `issue.*` requires {projectid, issueid, issue}.
+        // Drives an issue with and without an epic affiliation.
+        var store = new IssueStore(_dbFactory, _eventStore, _grainFactory, NullLogger<IssueStore>.Instance);
+
+        var affiliatedIssue = BuildIssue("issue_txn_conformance_with_epic", epicId: "epic_txn_conformance", number: 11);
+        await store.SaveAsync(affiliatedIssue.Id, affiliatedIssue, [
+            new IssueCreated("Hello", "p2", new Dictionary<string, string>(), null, null),
+            new IssueArchived(),
+        ]);
+
+        var unaffiliatedIssue = BuildIssue("issue_txn_conformance_no_epic", epicId: null, number: 12);
+        await store.SaveAsync(unaffiliatedIssue.Id, unaffiliatedIssue, [
+            new IssueCreated("Hello", "p2", new Dictionary<string, string>(), null, null),
+            new IssueReopened(),
+        ]);
+
+        var affiliated = await _eventStore.ListIssueEventsAsync("issue_txn_conformance_with_epic");
+        var unaffiliated = await _eventStore.ListIssueEventsAsync("issue_txn_conformance_no_epic");
+        Assert.Equal(2, affiliated.Count);
+        Assert.Equal(2, unaffiliated.Count);
+
+        foreach (var entry in affiliated.Concat(unaffiliated))
+        {
+            // Throws when an attribute is missing or empty.
+            EnvelopeConformance.AssertRequired(entry.Envelope);
+            var missing = EnvelopeConformance.Missing(entry.Envelope);
+            Assert.Empty(missing);
+        }
+    }
+
+    [Fact]
+    public void IssueLineage_BuildExtensions_StampsProjectIdIssueIdIssueAndOptionalEpicId()
+    {
+        // The pure helper is what the store's transactional save calls.
+        // Stamping must read ONLY from the supplied issue state — no
+        // hidden database calls — so we exercise it with a
+        // hand-constructed state and confirm every lineage key.
+        var affiliated = BuildIssue("issue_lineage_with_epic", epicId: "epic_lineage_1", number: 15);
+        var extensions = IssueLineage.BuildExtensions(affiliated);
+        Assert.Equal(ProjectId, extensions["projectid"]);
+        Assert.Equal("issue_lineage_with_epic", extensions["issueid"]);
+        Assert.Equal("15", extensions["issue"]);
+        Assert.Equal("epic_lineage_1", extensions["epicid"]);
+        Assert.False(extensions.ContainsKey("issueno"));
+
+        var unaffiliated = BuildIssue("issue_lineage_no_epic", epicId: null, number: 16);
+        var noEpicExtensions = IssueLineage.BuildExtensions(unaffiliated);
+        Assert.Equal(ProjectId, noEpicExtensions["projectid"]);
+        Assert.Equal("issue_lineage_no_epic", noEpicExtensions["issueid"]);
+        Assert.Equal("16", noEpicExtensions["issue"]);
+        Assert.False(noEpicExtensions.ContainsKey("epicid"));
+        Assert.False(noEpicExtensions.ContainsKey("issueno"));
     }
 
     [Fact]
     public async Task SaveAsync_NoEvents_StillCommitsStateRow()
     {
         var store = new IssueStore(_dbFactory, _eventStore, _grainFactory, NullLogger<IssueStore>.Instance);
-        var issue = BuildIssue("issue_txn_state_only");
+        var issue = BuildIssue("issue_txn_state_only", number: 13);
 
         await store.SaveAsync(issue.Id, issue, []);
 
@@ -171,7 +309,7 @@ public class IssueTransactionalEventAppendSpecs : IAsyncLifetime
         // events (e.g. an issue that has been touched but did not
         // transition). It continues to commit the state row cleanly.
         var store = new IssueStore(_dbFactory, _eventStore, _grainFactory, NullLogger<IssueStore>.Instance);
-        var issue = BuildIssue("issue_txn_no_events_path");
+        var issue = BuildIssue("issue_txn_no_events_path", number: 14);
 
         await store.SaveAsync(issue.Id, issue);
 
@@ -180,15 +318,16 @@ public class IssueTransactionalEventAppendSpecs : IAsyncLifetime
         Assert.Empty(await _eventStore.ListIssueEventsAsync("issue_txn_no_events_path"));
     }
 
-    private static DomainIssue BuildIssue(string id)
+    private static DomainIssue BuildIssue(string id, string? epicId = null, int? number = null)
     {
         return new DomainIssue
         {
             Id = id,
             ProjectId = ProjectId,
-            Number = IssueNumber,
+            Number = number ?? IssueNumber,
             Title = "Transaction probe",
             Priority = "p2",
+            EpicId = epicId,
         };
     }
 

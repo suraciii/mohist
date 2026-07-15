@@ -793,5 +793,6 @@ public class EpicMembershipSpecs
         public Task<Mohist.Server.Issue.Services.IssueStartReadiness> GetStartReadinessAsync() => throw new NotSupportedException();
         public Task<Mohist.Server.Issue.Grains.IssueCommentResult> AddCommentAsync(string body, string[]? attachmentIds = null) => throw new NotSupportedException();
         public Task DeactivateForTestAsync() => throw new NotSupportedException();
+        public Task SetEpicAffiliationAsync(string? epicId) => throw new NotSupportedException();
     }
 }

@@ -221,4 +221,74 @@ public class IssueDomainTests
         Assert.Equal(now, reloaded!.CompletedAt);
         Assert.Equal(Mohist.Server.Issue.Domain.IssueStatus.Done, reloaded.Status);
     }
+
+    [Fact]
+    public void SetEpicId_StoresValueAndTouchesUpdatedAt_AndDoesNotEmitDomainEvent()
+    {
+        // SetEpicId is the eventless denormalized projection of epic
+        // affiliation (D5). The authoritative EpicIssueLinked /
+        // EpicIssueUnlinked events live on the epic stream — the
+        // issue aggregate records no domain event for this transition.
+        var issue = Mohist.Server.Issue.Domain.Issue.Create(
+            "issue_1", "project-1", 1, "Feature",
+            now: new DateTime(2026, 6, 5, 1, 0, 0, DateTimeKind.Utc));
+        issue.StartWorkflow("wr_1", new DateTime(2026, 6, 5, 1, 30, 0, DateTimeKind.Utc));
+        var beforeTouch = issue.UpdatedAt;
+        var pendingBefore = issue.PendingEvents.Count;
+
+        issue.SetEpicId("epic_42", new DateTime(2026, 6, 5, 1, 45, 0, DateTimeKind.Utc));
+
+        Assert.Equal("epic_42", issue.EpicId);
+        Assert.Equal(new DateTime(2026, 6, 5, 1, 45, 0, DateTimeKind.Utc), issue.UpdatedAt);
+        Assert.True(issue.UpdatedAt > beforeTouch);
+        Assert.Equal(pendingBefore, issue.PendingEvents.Count);
+    }
+
+    [Fact]
+    public void SetEpicId_NullClearsAffiliation()
+    {
+        var issue = Mohist.Server.Issue.Domain.Issue.Create("issue_1", "project-1", 1, "Feature");
+        issue.SetEpicId("epic_42");
+
+        Assert.Equal("epic_42", issue.EpicId);
+
+        issue.SetEpicId(null);
+
+        Assert.Null(issue.EpicId);
+    }
+
+    [Fact]
+    public void SetEpicId_NoOpWhenValueUnchanged()
+    {
+        var issue = Mohist.Server.Issue.Domain.Issue.Create("issue_1", "project-1", 1, "Feature");
+        issue.SetEpicId("epic_42", new DateTime(2026, 6, 5, 2, 0, 0, DateTimeKind.Utc));
+        var beforeTouch = issue.UpdatedAt;
+
+        issue.SetEpicId("epic_42", new DateTime(2026, 6, 5, 3, 0, 0, DateTimeKind.Utc));
+
+        Assert.Equal(beforeTouch, issue.UpdatedAt);
+    }
+
+    [Fact]
+    public void SetEpicId_WhitespaceIsNormalizedToNull()
+    {
+        var issue = Mohist.Server.Issue.Domain.Issue.Create("issue_1", "project-1", 1, "Feature");
+
+        issue.SetEpicId("   ");
+
+        Assert.Null(issue.EpicId);
+    }
+
+    [Fact]
+    public void State_RoundTripsEpicId()
+    {
+        var issue = Mohist.Server.Issue.Domain.Issue.Create("issue_1", "project-1", 1, "Feature");
+        issue.SetEpicId("epic_42");
+
+        var json = IssueStore.Serialize(issue);
+        var reloaded = IssueStore.Deserialize(json);
+
+        Assert.NotNull(reloaded);
+        Assert.Equal("epic_42", reloaded!.EpicId);
+    }
 }

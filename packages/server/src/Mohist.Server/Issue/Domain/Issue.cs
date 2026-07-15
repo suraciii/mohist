@@ -14,6 +14,7 @@ public sealed partial class Issue
     private DateTime? _archivedAt;
     private DateTime? _completedAt;
     private string? _workflowRunId;
+    private string? _epicId;
     private IssueStatus _status = IssueStatus.Backlog;
     private int[] _prerequisiteNumbers = [];
     private IssueRepositoryRef? _repositoryRef;
@@ -87,6 +88,21 @@ public sealed partial class Issue
     {
         get => _workflowRunId;
         init => _workflowRunId = NormalizeOptional(value);
+    }
+
+    /// <summary>
+    /// Epic affiliation reference. A denormalized cache of the issue's
+    /// current epic membership — the Epic domain owns the
+    /// <c>EpicIssueRow</c> join table as source of truth and writes this
+    /// field at link/unlink time. <c>null</c> means "no epic affiliation".
+    /// The protocol requires <c>issue.*</c> events to stamp <c>epicid</c>
+    /// from this field at emit time without issuing a cross-aggregate
+    /// query.
+    /// </summary>
+    public string? EpicId
+    {
+        get => _epicId;
+        init => _epicId = NormalizeOptional(value);
     }
 
     public IssueStatus Status
