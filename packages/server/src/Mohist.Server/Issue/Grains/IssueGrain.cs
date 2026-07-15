@@ -283,17 +283,8 @@ public class IssueGrain : Grain, IIssueGrain
             throw;
         }
 
-        try
-        {
-            await _workflowRunStore.SynchronizeEpicAffiliationAsync(wrId, issue.Id);
-        }
-        catch (DbUpdateConcurrencyException ex)
-        {
-            _log.LogWarning(ex,
-                "Issue {Key} started workflow {WrId} but lineage synchronization is deferred to membership recovery",
-                GrainKey,
-                wrId);
-        }
+        await _workflowRunStore.SynchronizeEpicAffiliationAsync(wrId, issue.Id);
+        await wfGrain.ActivateAsync();
         _log.LogInformation("Issue {Key} started workflow {WrId}", GrainKey, wrId);
         return wrId;
     }
@@ -314,6 +305,8 @@ public class IssueGrain : Grain, IIssueGrain
                 return null;
             }
 
+            await _workflowRunStore.SynchronizeEpicAffiliationAsync(workflowRunId, issue.Id);
+            await workflow.ActivateAsync();
             _log.LogInformation("Issue {IssueId} reusing workflow run {WorkflowRunId}", issue.Id, workflowRunId);
             return workflowRunId;
         }

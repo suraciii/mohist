@@ -140,6 +140,37 @@ public class WorkflowRunStoreSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
+    public async Task SaveInitialAsync_GuardedRunIsNotAssignableUntilItsIssueBindingActivatesIt()
+    {
+        using var factory = new FakeWorkflowRunStoreDbContextFactory();
+        var eventStore = new EventStore(factory, NullLogger<EventStore>.Instance);
+        var store = new WorkflowRunStore(factory, eventStore, new NullDispatchGrainFactory(), NullLogger<WorkflowRunStore>.Instance);
+        await using (var seed = factory.CreateDbContext())
+        {
+            seed.Issues.Add(new IssueRow
+            {
+                IssueId = IssueId,
+                State = "{}",
+                LineageVersion = 1,
+            });
+            await seed.SaveChangesAsync();
+        }
+
+        var run = CreateRun("wr_prebind", epicId: null);
+        await store.SaveInitialAsync(run, [new WorkflowRunStarted()], new WorkflowStartLineageGuard(IssueId, 1));
+
+        var querier = new WorkflowRunQuerier(factory);
+        Assert.Empty(await querier.FindAssignableAsync(ProjectId));
+
+        run.ActivateForDispatch(FixedTime);
+        await store.SaveAsync(run);
+
+        Assert.Equal([run.Id], await querier.FindAssignableAsync(ProjectId));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
     public async Task SaveAsync_WithIssueAnnotation_StampsIssueIdOnPersistedEventExtensions()
     {
         using var factory = new FakeWorkflowRunStoreDbContextFactory();

@@ -77,7 +77,7 @@ public static partial class WorkflowRunExtensions
                 ?? throw new InvalidOperationException($"Current stage {run.CurrentStageId} not found");
         }
 
-        public IReadOnlyList<WorkflowEvent> Start(DateTimeOffset now)
+        public IReadOnlyList<WorkflowEvent> Start(DateTimeOffset now, bool dispatchable = true)
         {
             if (run.Status != WorkflowRunStatus.Created && run.Status != WorkflowRunStatus.Paused)
                 throw new InvalidOperationException($"WorkflowRun is {run.Status}");
@@ -87,14 +87,29 @@ public static partial class WorkflowRunExtensions
             if (current.Status == StageRunStatus.Pending)
                 current.Status = StageRunStatus.Running;
 
-            SetStatusAndTrackReadySince(run, wasPaused
-                ? ActiveOrWaitingForDispatchStatus(run)
-                : WorkflowRunStatus.Pending,
-                now);
+            if (dispatchable)
+                SetStatusAndTrackReadySince(run, wasPaused
+                    ? ActiveOrWaitingForDispatchStatus(run)
+                    : WorkflowRunStatus.Pending,
+                    now);
             run.StartedAt ??= now;
             return wasPaused
                 ? [new WorkflowRunResumed()]
                 : [new WorkflowRunStarted(), new StageStarted(current.Id)];
+        }
+
+        public void ActivateForDispatch(DateTimeOffset now)
+        {
+            if (run.Status == WorkflowRunStatus.Created)
+            {
+                SetStatusAndTrackReadySince(run, WorkflowRunStatus.Pending, now);
+                return;
+            }
+
+            if (run.Status is WorkflowRunStatus.Pending or WorkflowRunStatus.Ready or WorkflowRunStatus.Running)
+                return;
+
+            throw new InvalidOperationException($"WorkflowRun is {run.Status}, activation requires Created or an active status");
         }
 
         public IReadOnlyList<WorkflowEvent> Pause()
@@ -120,7 +135,7 @@ public static partial class WorkflowRunExtensions
 
         public IReadOnlyList<WorkflowEvent> Stop()
         {
-            if (run.Status is not (WorkflowRunStatus.Pending or WorkflowRunStatus.Ready or WorkflowRunStatus.Running or WorkflowRunStatus.AwaitingApproval or WorkflowRunStatus.Paused))
+            if (run.Status is not (WorkflowRunStatus.Created or WorkflowRunStatus.Pending or WorkflowRunStatus.Ready or WorkflowRunStatus.Running or WorkflowRunStatus.AwaitingApproval or WorkflowRunStatus.Paused))
                 throw new InvalidOperationException($"WorkflowRun is {run.Status}, stop requires a non-terminal started state");
 
             run.ClearStaleApprovalGate();

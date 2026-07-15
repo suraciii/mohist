@@ -8,6 +8,7 @@ namespace Mohist.Server.Workflow.Grains;
 public interface IWorkflowGrain : IGrainWithStringKey
 {
     Task StartAsync(WorkflowStartInput? input = null);
+    Task ActivateAsync();
     Task ResumeAsync();
     Task PauseAsync(string? reason = null);
     Task StopAsync(string? reason = null);

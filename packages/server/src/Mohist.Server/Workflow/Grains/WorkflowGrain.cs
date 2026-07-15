@@ -97,6 +97,7 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
     public async Task StartAsync(WorkflowStartInput? input = null)
     {
         var isInitialStart = _run is null;
+        var isGuardedIssueStart = isInitialStart && input?.LineageGuard is not null;
         if (_run is null)
         {
             var metadata = input?.Metadata ?? BuildRunMetadata(input);
@@ -108,7 +109,7 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
             _run.Workspace = input?.Workspace;
         }
 
-        var events = _run.Start(Now());
+        var events = _run.Start(Now(), dispatchable: !isGuardedIssueStart);
 
         _log.LogInformation("Workflow {Id} started, stage={Stage}", GrainKey, _run.CurrentStageId);
         try
@@ -122,6 +123,15 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
             _runReloadRequired = false;
             throw;
         }
+    }
+
+    public async Task ActivateAsync()
+    {
+        EnsureRun();
+        var wasCreated = _run.Status == WorkflowRunStatus.Created;
+        _run.ActivateForDispatch(Now());
+        if (wasCreated)
+            await SaveRunAsync();
     }
 
     public async Task ResumeAsync()

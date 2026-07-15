@@ -20,7 +20,7 @@ namespace Mohist.Server.SpecTests.Specs.Issue.Domain;
 public class BackfillIssueEpicAffiliationMigrationSpecs
 {
     private static readonly DateTimeOffset FirstLinkTime = new(2026, 7, 1, 0, 0, 0, TimeSpan.Zero);
-    private const string AtomicSnapshotMigration = "20260715083000_AddAtomicLineageSnapshots";
+    private const string AtomicSnapshotMigration = "20260715123000_ReconcileLineageSnapshotsFromMembership";
 
     [Fact]
     public async Task Migration_BackfillsActiveAndTerminalMembershipsWithDeterministicFallback()
@@ -86,7 +86,7 @@ public class BackfillIssueEpicAffiliationMigrationSpecs
     }
 
     [Fact]
-    public async Task Migration_IsIdempotentAndPreservesLiveAffiliationAndHistoricalExtensions()
+    public async Task Migration_ReplacesStaleJsonAffiliationWithCurrentMembershipAndPreservesHistoricalExtensions()
     {
         await using var database = CreateDatabase("20260714120000_AddProjectEventReadKeys");
         await using var context = database.CreateDbContext();
@@ -117,7 +117,8 @@ public class BackfillIssueEpicAffiliationMigrationSpecs
         await migrator.MigrateAsync(AtomicSnapshotMigration);
 
         var persisted = await context.Issues.AsNoTracking().SingleAsync(row => row.IssueId == "issue_live");
-        Assert.Equal("epic_live", IssueStore.Deserialize(persisted.State)!.EpicId);
+        Assert.Equal("epic_backfill", IssueStore.Deserialize(persisted.State)!.EpicId);
+        Assert.Equal("epic_backfill", persisted.EpicId);
         var historical = await context.IssueEvents.AsNoTracking().SingleAsync(row => row.EventId == "evt_historical");
         Assert.Equal(historicalExtensions, historical.ExtensionsJson);
     }
@@ -133,6 +134,7 @@ public class BackfillIssueEpicAffiliationMigrationSpecs
         issueState.SetEpicId("epic_snapshot", FirstLinkTime.UtcDateTime);
         issue.State = IssueStore.Serialize(issueState);
         await SeedIssueAsync(context, issue);
+        context.EpicIssues.Add(NewLink("epic_snapshot", issue.IssueId, 1, FirstLinkTime));
 
         var workflow = new Mohist.Server.Workflow.Domain.Run.WorkflowRun
         {
@@ -152,6 +154,7 @@ public class BackfillIssueEpicAffiliationMigrationSpecs
             INSERT INTO "WorkflowRuns" ("WorkflowRunId", "State", "ETag")
             VALUES ({workflow.Id}, {JSON.Serialize(workflow)}, 1)
             """);
+        await context.SaveChangesAsync();
 
         await migrator.MigrateAsync(AtomicSnapshotMigration);
         context.ChangeTracker.Clear();
@@ -173,6 +176,7 @@ public class BackfillIssueEpicAffiliationMigrationSpecs
         issueState.SetEpicId("epic_linked", FirstLinkTime.UtcDateTime);
         issue.State = IssueStore.Serialize(issueState);
         await SeedIssueAsync(context, issue);
+        context.EpicIssues.Add(NewLink("epic_linked", issue.IssueId, 1, FirstLinkTime));
 
         var workflow = new Mohist.Server.Workflow.Domain.Run.WorkflowRun
         {
@@ -191,6 +195,7 @@ public class BackfillIssueEpicAffiliationMigrationSpecs
             INSERT INTO "WorkflowRuns" ("WorkflowRunId", "State", "ETag")
             VALUES ({workflow.Id}, {JSON.Serialize(workflow)}, 1)
             """);
+        await context.SaveChangesAsync();
 
         await migrator.MigrateAsync(AtomicSnapshotMigration);
         context.ChangeTracker.Clear();
@@ -212,10 +217,12 @@ public class BackfillIssueEpicAffiliationMigrationSpecs
         var unlinked = NewIssue("issue_current_none", 2);
         await SeedIssueAsync(context, linked);
         await SeedIssueAsync(context, unlinked);
+        context.EpicIssues.Add(NewLink("epic_current", linked.IssueId, 1, FirstLinkTime));
 
         await SeedWorkflowAsync(context, "wr_current_link", linked.IssueId, "epic_stale");
         await SeedWorkflowAsync(context, "wr_current_none", unlinked.IssueId, "epic_stale");
         await SeedWorkflowAsync(context, "wr_unmatched_issue", "issue_missing", "epic_annotation");
+        await context.SaveChangesAsync();
 
         await migrator.MigrateAsync(AtomicSnapshotMigration);
         context.ChangeTracker.Clear();
