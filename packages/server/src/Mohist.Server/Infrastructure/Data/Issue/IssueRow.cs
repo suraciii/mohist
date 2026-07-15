@@ -14,4 +14,5 @@ public class IssueRow
     public bool? IsDraft { get; set; }
     public string? PrerequisiteNumbersJson { get; set; }
     public string? Risk { get; set; }
+    public string? EpicId { get; set; }
 }

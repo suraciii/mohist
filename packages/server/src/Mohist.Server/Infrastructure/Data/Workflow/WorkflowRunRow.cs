@@ -12,6 +12,9 @@ public class WorkflowRunRow
     [Required]
     public string State { get; set; } = "{}";
 
+    [MaxLength(64)]
+    public string? EpicId { get; set; }
+
     [DatabaseGenerated(DatabaseGeneratedOption.Computed)]
     public string? MetadataProjectId { get; set; }
 

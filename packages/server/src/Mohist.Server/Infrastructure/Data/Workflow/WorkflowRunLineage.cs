@@ -20,6 +20,26 @@ namespace Mohist.Server.Infrastructure.Data.Workflow;
 /// </remarks>
 public static class WorkflowRunLineage
 {
+    internal static void ApplyEpicAffiliation(WorkflowRun run, string? epicId)
+    {
+        var annotations = run.Metadata.Annotations is null
+            ? new Dictionary<string, string>(StringComparer.Ordinal)
+            : new Dictionary<string, string>(run.Metadata.Annotations, StringComparer.Ordinal);
+
+        if (string.IsNullOrWhiteSpace(epicId))
+            annotations.Remove("epicId");
+        else
+            annotations["epicId"] = epicId;
+
+        run.Metadata = run.Metadata with { Annotations = annotations };
+    }
+
+    internal static string? EpicAffiliationOf(WorkflowRun run) =>
+        run.Metadata.Annotations?.GetValueOrDefault("epicId") is { } epicId
+        && !string.IsNullOrWhiteSpace(epicId)
+            ? epicId
+            : null;
+
     /// <summary>
     /// Build the <c>extensions</c> dictionary for the given workflow event.
     /// <c>workflowrunid</c> is always stamped (the run is the producer);

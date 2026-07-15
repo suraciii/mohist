@@ -104,23 +104,44 @@ public class WorkflowRunStore : IWorkflowRunStore
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var entity = await db.WorkflowRuns.FindAsync([workflowRunId], ct);
         if (entity is null) return null;
-        return Deserialize(entity.State);
+        var run = Deserialize(entity.State);
+        if (run is not null)
+            WorkflowRunLineage.ApplyEpicAffiliation(run, entity.EpicId);
+        return run;
+    }
+
+    internal static async Task StageEpicAffiliationAsync(
+        MohistDbContext db,
+        string? workflowRunId,
+        string? epicId,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(workflowRunId)) return;
+
+        var entity = await db.WorkflowRuns.FindAsync([workflowRunId], ct);
+        if (entity is not null)
+            entity.EpicId = string.IsNullOrWhiteSpace(epicId) ? null : epicId;
     }
 
     private static async Task StageRunAsync(MohistDbContext db, WorkflowRun run, CancellationToken ct)
     {
-        var json = JSON.Serialize(run);
         var entity = await db.WorkflowRuns.FindAsync([run.Id], ct);
 
         if (entity is null)
         {
-            var newEntity = new WorkflowRunRow { WorkflowRunId = run.Id, State = json };
+            var newEntity = new WorkflowRunRow
+            {
+                WorkflowRunId = run.Id,
+                State = JSON.Serialize(run),
+                EpicId = WorkflowRunLineage.EpicAffiliationOf(run),
+            };
             db.WorkflowRuns.Add(newEntity);
             db.Entry(newEntity).Property<long>("ETag").CurrentValue = 1;
             return;
         }
 
-        entity.State = json;
+        WorkflowRunLineage.ApplyEpicAffiliation(run, entity.EpicId);
+        entity.State = JSON.Serialize(run);
         var entry = db.Entry(entity);
         entry.Property<long>("ETag").CurrentValue = entry.Property<long>("ETag").OriginalValue + 1;
     }

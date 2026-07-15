@@ -307,6 +307,7 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.IssueId).HasMaxLength(256);
             entity.Property(e => e.State).IsRequired();
             entity.Property(e => e.Risk).HasMaxLength(16);
+            entity.Property(e => e.EpicId).HasMaxLength(64);
             entity.Property(e => e.ProjectId)
                 .HasComputedColumnSql("COALESCE(json_extract(State, '$.projectId'), json_extract(State, '$.ProjectId'))", stored: true);
             entity.Property(e => e.Number)
@@ -573,6 +574,7 @@ public class MohistDbContext : DbContext
             entity.HasKey(e => e.WorkflowRunId);
             entity.Property(e => e.WorkflowRunId).HasMaxLength(50);
             entity.Property(e => e.State).IsRequired();
+            entity.Property(e => e.EpicId).HasMaxLength(64);
             entity.Property<long>("ETag").IsConcurrencyToken();
             entity.Property(e => e.MetadataProjectId)
                 .HasComputedColumnSql("COALESCE(json_extract(State, '$.metadata.annotations.projectId'), json_extract(State, '$.Metadata.Annotations.projectId'), json_extract(State, '$.Metadata.Annotations.ProjectId'))", stored: true);

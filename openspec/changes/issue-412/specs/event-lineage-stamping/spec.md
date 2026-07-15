@@ -69,15 +69,15 @@ Lineage attributes SHALL record affiliation as it exists at the instant the even
 
 Producers SHALL NOT issue cross-aggregate queries to gather lineage for stamping. Lineage SHALL be derived solely from the producing aggregate's own state or from annotations/labels already attached to it.
 
-#### Scenario: Workflow store stamps from run annotations without loading the issue
+#### Scenario: Workflow store stamps from its persisted run snapshot without loading the issue
 
 - **WHEN** the workflow run store produces an event for a run
-- **THEN** it derives `projectid`, `issueid`, and `issue` from the run's own metadata annotations, and does not load the issue aggregate to stamp them
+- **THEN** it derives `projectid`, `issueid`, and `issue` from the run's own metadata annotations, derives the current `epicid` from its own persisted lineage snapshot, and does not load the issue aggregate to stamp them
 
-#### Scenario: Issue store stamps epicid from its own state, not a membership lookup
+#### Scenario: Issue store stamps epicid from its own lineage snapshot, not a membership lookup
 
-- **WHEN** the issue store produces an event for an issue whose own state carries an `EpicId`
-- **THEN** it stamps `epicid` from that own state, and issues no query against the epic-issue membership table (or any other aggregate) to gather it
+- **WHEN** the issue store produces an event for an issue whose own persisted lineage snapshot carries an `EpicId`
+- **THEN** it hydrates its own state from that snapshot, stamps `epicid`, and issues no query against the epic-issue membership table (or any other aggregate) to gather it
 
 ### Requirement: User-visible identity uses short names; internal ids carry the id suffix
 

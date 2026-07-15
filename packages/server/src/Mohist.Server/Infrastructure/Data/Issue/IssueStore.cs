@@ -42,7 +42,9 @@ public class IssueStore : IIssueStore
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
         var row = await db.Issues.FindAsync(key);
-        return row is null ? null : Deserialize(row.State);
+        var issue = row is null ? null : Deserialize(row.State);
+        issue?.SetEpicId(row!.EpicId);
+        return issue;
     }
 
     public async Task SaveAsync(string key, DomainIssue state)
@@ -86,20 +88,16 @@ public class IssueStore : IIssueStore
 
     public Task<IReadOnlyList<DomainIssue>> ListAsync() => throw new NotImplementedException();
 
-    internal static async Task StageEpicAffiliationAsync(
+    internal static async Task<string?> StageEpicAffiliationAsync(
         MohistDbContext db,
         string issueId,
         string? epicId,
-        DateTime occurredAt,
         CancellationToken ct = default)
     {
         var row = await db.Issues.FindAsync(new object[] { issueId }, ct)
             ?? throw new InvalidOperationException($"Issue '{issueId}' was not found while staging epic affiliation.");
-        var issue = Deserialize(row.State)
-            ?? throw new InvalidOperationException($"Issue '{issueId}' has invalid persisted state.");
-        issue.SetEpicId(epicId, occurredAt);
-        row.State = Serialize(issue);
-        row.Risk = issue.Risk;
+        row.EpicId = NormalizeEpicId(epicId);
+        return row.WorkflowRunId;
     }
 
     private static async Task StageIssueAsync(MohistDbContext db, DomainIssue state, CancellationToken ct)
@@ -107,15 +105,24 @@ public class IssueStore : IIssueStore
         var row = await db.Issues.FindAsync(new object[] { state.Id }, ct);
         if (row is null)
         {
-            db.Issues.Add(new IssueRow { IssueId = state.Id, State = Serialize(state), Risk = state.Risk });
+            db.Issues.Add(new IssueRow
+            {
+                IssueId = state.Id,
+                State = Serialize(state),
+                Risk = state.Risk,
+                EpicId = NormalizeEpicId(state.EpicId),
+            });
         }
         else
         {
-            state.SetEpicId(Deserialize(row.State)?.EpicId);
+            state.SetEpicId(row.EpicId);
             row.State = Serialize(state);
             row.Risk = state.Risk;
         }
     }
+
+    private static string? NormalizeEpicId(string? epicId) =>
+        string.IsNullOrWhiteSpace(epicId) ? null : epicId;
 
     private static CloudEvent ToCloudEvent(DomainIssueEvent evt, string source, string subject, IReadOnlyDictionary<string, string> extensions)
     {

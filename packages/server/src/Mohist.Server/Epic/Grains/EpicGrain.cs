@@ -7,6 +7,7 @@ using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Epic;
 using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Infrastructure.Data.Issue;
+using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Domain;
@@ -137,7 +138,7 @@ public class EpicGrain : Grain, IEpicGrain
             });
         }
         MapToRow(domain, row, now);
-        await IssueStore.StageEpicAffiliationAsync(db, issueId, epicId, now.UtcDateTime);
+        await StageIssueLineageSnapshotAsync(db, issueId, epicId);
         var pending = DrainPendingEvents(domain);
         // Append the EpicIssueLinked event into the same transaction so the
         // durable recompute trigger (EpicIssueLinkedHandler) is committed
@@ -160,12 +161,8 @@ public class EpicGrain : Grain, IEpicGrain
             throw;
         }
 
-        // D5 push: after the epic transaction commits, denormalize the
-        // affiliation onto Issue state so IssueStore can stamp epicid
-        // without a cross-aggregate query. The synchronous call is
-        // best-effort: if it fails, the durable
-        // EpicIssueLinked/EpicIssueUnlinked handlers re-apply the same
-        // intent (drift is bounded and self-healing).
+        // Refresh the active Issue aggregate after the committed scalar
+        // snapshots make subsequent Issue and Workflow appends atomic.
         await PushEpicAffiliationAsync(issueId, projectId, "link");
 
         if (wakeUpEpic)
@@ -325,7 +322,7 @@ public class EpicGrain : Grain, IEpicGrain
                 });
             }
             MapToRow(domain, row, now);
-            await IssueStore.StageEpicAffiliationAsync(db, item.IssueId, epicId, now.UtcDateTime);
+            await StageIssueLineageSnapshotAsync(db, item.IssueId, epicId);
             var pending = DrainPendingEvents(domain);
             // Append EpicIssueLinked atomically with the membership row so
             // the durable recompute trigger is never lost on crash/append
@@ -361,9 +358,8 @@ public class EpicGrain : Grain, IEpicGrain
             outcomes.Add(BatchMembershipOutcome.Linked(item.Identifier, item.IssueId, item.IssueNumber));
             hasLinkedAny = true;
 
-            // D5 push: best-effort, fire-and-log denormalization. Drift
-            // is bounded and self-healing via the durable
-            // EpicIssueLinkedHandler (see single-link comment above).
+            // Refresh the active Issue aggregate after the scalar snapshots
+            // commit with this membership change.
             await PushEpicAffiliationAsync(item.IssueId, projectId, "link");
         }
 
@@ -422,14 +418,12 @@ public class EpicGrain : Grain, IEpicGrain
         MapToRow(domain, row, now);
         var affiliationAfterUnlink = await EpicIssueAffiliationResolver.ResolveAsync(
             db, projectId, issueId, excludedEpicId: epicId);
-        await IssueStore.StageEpicAffiliationAsync(db, issueId, affiliationAfterUnlink, now.UtcDateTime);
+        await StageIssueLineageSnapshotAsync(db, issueId, affiliationAfterUnlink);
         var pending = DrainPendingEvents(domain);
         await PersistEpicEventsAsync(db, domain, pending, now);
         await db.SaveChangesAsync();
-        // D5 push: after the unlink transaction commits, clear the
-        // denormalized affiliation on Issue state so subsequent issue.*
-        // events stop stamping epicid. Best-effort: if the call fails,
-        // the durable EpicIssueUnlinkedHandler re-applies null.
+        // Refresh the active Issue aggregate after the scalar snapshots
+        // commit with this membership change.
         await PushEpicAffiliationAsync(issueId, projectId, "unlink");
         await RecomputeProgressInternalAsync(
             db,
@@ -497,7 +491,7 @@ public class EpicGrain : Grain, IEpicGrain
             MapToRow(domain, row, now);
             var affiliationAfterUnlink = await EpicIssueAffiliationResolver.ResolveAsync(
                 db, projectId, item.IssueId, excludedEpicId: epicId);
-            await IssueStore.StageEpicAffiliationAsync(db, item.IssueId, affiliationAfterUnlink, now.UtcDateTime);
+            await StageIssueLineageSnapshotAsync(db, item.IssueId, affiliationAfterUnlink);
             var pending = DrainPendingEvents(domain);
             await PersistEpicEventsAsync(db, domain, pending, now);
             await db.SaveChangesAsync();
@@ -505,8 +499,8 @@ public class EpicGrain : Grain, IEpicGrain
             outcomes.Add(BatchMembershipOutcome.Unlinked(item.Identifier, item.IssueId, item.IssueNumber));
             hasUnlinkedAny = true;
 
-            // D5 push: best-effort — drift is bounded by the durable
-            // EpicIssueUnlinkedHandler.
+            // Refresh the active Issue aggregate after the scalar snapshots
+            // commit with this membership change.
             await PushEpicAffiliationAsync(item.IssueId, projectId, "unlink");
         }
 
@@ -1193,17 +1187,20 @@ public class EpicGrain : Grain, IEpicGrain
     private static EpicDto ToDto(EpicRow epic) =>
         new(epic.Id, epic.Number, epic.Title, epic.Description, epic.Priority, epic.Status, epic.CreatedAt.ToString("o"), epic.UpdatedAt.ToString("o"), epic.PauseReason);
 
+    private static async Task StageIssueLineageSnapshotAsync(
+        MohistDbContext db,
+        string issueId,
+        string? epicId)
+    {
+        var workflowRunId = await IssueStore.StageEpicAffiliationAsync(db, issueId, epicId);
+        await WorkflowRunStore.StageEpicAffiliationAsync(db, workflowRunId, epicId);
+    }
+
     /// <summary>
-    /// Best-effort denormalization push (D5): after an epic
-    /// link/unlink transaction commits, resolve the current affiliation
-    /// from the authoritative membership rows and propagate it onto the
-    /// linked issue's own state via
-    /// <see cref="IIssueGrain.SetEpicAffiliationAsync"/>. The call is
-    /// awaited but failures are logged, not surfaced: the durable
-    /// <c>EpicIssueLinkedHandler</c>/<c>EpicIssueUnlinkedHandler</c>
-    /// re-apply the same denormalization on every redelivery, so drift
-    /// between the join row (<c>EpicIssueRow</c>) and the issue's
-    /// denormalized <c>EpicId</c> is bounded and self-healing.
+    /// Refreshes an active Issue aggregate from the committed lineage
+    /// snapshot. Membership transactions already update the Issue and
+    /// WorkflowRun snapshots atomically, so a failed refresh cannot make
+    /// emitted envelopes stale; durable handlers retry it for active state.
     /// </summary>
     private async Task PushEpicAffiliationAsync(string issueId, string projectId, string operation)
     {

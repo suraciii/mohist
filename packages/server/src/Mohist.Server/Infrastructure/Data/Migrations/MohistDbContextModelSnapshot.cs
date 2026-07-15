@@ -826,6 +826,10 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasMaxLength(256)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("EpicId")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
                     b.Property<bool?>("IsArchived")
                         .ValueGeneratedOnAddOrUpdate()
                         .HasColumnType("INTEGER")
@@ -1690,6 +1694,10 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.Property<long>("ETag")
                         .IsConcurrencyToken()
                         .HasColumnType("INTEGER");
+
+                    b.Property<string>("EpicId")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
 
                     b.Property<string>("MetadataProjectId")
                         .ValueGeneratedOnAddOrUpdate()

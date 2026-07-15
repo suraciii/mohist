@@ -34,6 +34,11 @@ public class WorkflowArtifactBindingSpecs : WorkflowGrainSpecs
 
         var (work, runnerId) = await PollWorkAnyAsync();
         var uploadId = await SeedPendingUploadAsync(work.WorkflowRunId, work.WorkId, "task-1.1", "review.md");
+        await using (var lineageDb = CreateDb())
+        {
+            await WorkflowRunStore.StageEpicAffiliationAsync(lineageDb, work.WorkflowRunId, "epic_artifact");
+            await lineageDb.SaveChangesAsync();
+        }
 
         await ReportAsync(runnerId, work.WorkId, new WorkResult("completed", ArtifactUploadIds: [uploadId]));
 
@@ -48,6 +53,19 @@ public class WorkflowArtifactBindingSpecs : WorkflowGrainSpecs
         Assert.Single(artifacts);
         Assert.Equal("review.md", artifacts[0].Path);
         Assert.Equal("task-1.1", artifacts[0].TaskRunId);
+
+        var events = (await EventStore.ListAsync(work.WorkflowRunId)).ToList();
+        var artifactIndex = events.FindIndex(entry =>
+            entry.Envelope.Type == EventCatalog.ReverseDns.WorkflowArtifactRecorded);
+        var completedIndex = events.FindIndex(entry =>
+            entry.Envelope.Type == EventCatalog.ReverseDns.TaskCompleted);
+        Assert.True(artifactIndex >= 0);
+        Assert.True(completedIndex > artifactIndex);
+        Assert.Equal(work.WorkflowRunId, events[artifactIndex].Envelope.Extensions[EventCatalog.Lineage.WorkflowRunId]);
+        Assert.Equal(TestProjectId(work.WorkflowRunId), events[artifactIndex].Envelope.Extensions[EventCatalog.Lineage.ProjectId]);
+        Assert.Equal(TestIssueId(work.WorkflowRunId), events[artifactIndex].Envelope.Extensions[EventCatalog.Lineage.IssueId]);
+        Assert.Equal("epic_artifact", events[artifactIndex].Envelope.Extensions[EventCatalog.Lineage.EpicId]);
+        Assert.False(events[artifactIndex].Envelope.Extensions.ContainsKey(EventCatalog.Lineage.Stage));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]

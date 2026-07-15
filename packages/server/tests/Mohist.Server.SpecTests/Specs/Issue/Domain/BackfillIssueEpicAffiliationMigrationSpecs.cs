@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.Extensions.Logging.Abstractions;
+using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Epic;
 using Mohist.Server.Infrastructure.Data.Events;
@@ -19,6 +20,7 @@ namespace Mohist.Server.SpecTests.Specs.Issue.Domain;
 public class BackfillIssueEpicAffiliationMigrationSpecs
 {
     private static readonly DateTimeOffset FirstLinkTime = new(2026, 7, 1, 0, 0, 0, TimeSpan.Zero);
+    private const string AtomicSnapshotMigration = "20260715083000_AddAtomicLineageSnapshots";
 
     [Fact]
     public async Task Migration_BackfillsActiveAndTerminalMembershipsWithDeterministicFallback()
@@ -27,11 +29,10 @@ public class BackfillIssueEpicAffiliationMigrationSpecs
         await using var context = database.CreateDbContext();
         var migrator = context.GetService<IMigrator>();
 
-        context.Issues.AddRange(
-            NewIssue("issue_active", 1),
-            NewIssue("issue_done", 2),
-            NewIssue("issue_closed", 3),
-            NewIssue("issue_tied", 4));
+        await SeedIssueAsync(context, NewIssue("issue_active", 1));
+        await SeedIssueAsync(context, NewIssue("issue_done", 2));
+        await SeedIssueAsync(context, NewIssue("issue_closed", 3));
+        await SeedIssueAsync(context, NewIssue("issue_tied", 4));
         context.EpicIssues.AddRange(
             NewLink("epic_active", "issue_active", 1, FirstLinkTime),
             NewLink("epic_done", "issue_done", 2, FirstLinkTime),
@@ -48,7 +49,7 @@ public class BackfillIssueEpicAffiliationMigrationSpecs
         });
         await context.SaveChangesAsync();
 
-        await migrator.MigrateAsync("20260715000000_BackfillIssueEpicAffiliation");
+        await migrator.MigrateAsync(AtomicSnapshotMigration);
 
         var states = await context.Issues.AsNoTracking()
             .OrderBy(row => row.IssueId)
@@ -57,6 +58,13 @@ public class BackfillIssueEpicAffiliationMigrationSpecs
         Assert.Equal("epic_done", states["issue_done"].EpicId);
         Assert.Equal("epic_closed", states["issue_closed"].EpicId);
         Assert.Equal("epic_a", states["issue_tied"].EpicId);
+        var snapshots = await context.Issues.AsNoTracking()
+            .OrderBy(row => row.IssueId)
+            .ToDictionaryAsync(row => row.IssueId, row => row.EpicId);
+        Assert.Equal("epic_active", snapshots["issue_active"]);
+        Assert.Equal("epic_done", snapshots["issue_done"]);
+        Assert.Equal("epic_closed", snapshots["issue_closed"]);
+        Assert.Equal("epic_a", snapshots["issue_tied"]);
 
         var eventStore = new EventStore(database.Factory, NullLogger<EventStore>.Instance);
         var issueStore = new IssueStore(database.Factory, eventStore, null!, NullLogger<IssueStore>.Instance);
@@ -89,7 +97,7 @@ public class BackfillIssueEpicAffiliationMigrationSpecs
         liveIssue.State = IssueStore.Serialize(liveState);
         const string historicalExtensions = "{\"issueno\":\"1\",\"custom\":\"preserve\"}";
 
-        context.Issues.Add(liveIssue);
+        await SeedIssueAsync(context, liveIssue);
         context.EpicIssues.Add(NewLink("epic_backfill", "issue_live", 1, FirstLinkTime));
         context.IssueEvents.Add(new IssueEventRow
         {
@@ -105,13 +113,53 @@ public class BackfillIssueEpicAffiliationMigrationSpecs
         });
         await context.SaveChangesAsync();
 
-        await migrator.MigrateAsync("20260715000000_BackfillIssueEpicAffiliation");
-        await migrator.MigrateAsync("20260715000000_BackfillIssueEpicAffiliation");
+        await migrator.MigrateAsync(AtomicSnapshotMigration);
+        await migrator.MigrateAsync(AtomicSnapshotMigration);
 
         var persisted = await context.Issues.AsNoTracking().SingleAsync(row => row.IssueId == "issue_live");
         Assert.Equal("epic_live", IssueStore.Deserialize(persisted.State)!.EpicId);
         var historical = await context.IssueEvents.AsNoTracking().SingleAsync(row => row.EventId == "evt_historical");
         Assert.Equal(historicalExtensions, historical.ExtensionsJson);
+    }
+
+    [Fact]
+    public async Task Migration_CopiesIssueAndWorkflowEpicSnapshotsFromCurrentState()
+    {
+        await using var database = CreateDatabase("20260715000000_BackfillIssueEpicAffiliation");
+        await using var context = database.CreateDbContext();
+        var migrator = context.GetService<IMigrator>();
+        var issue = NewIssue("issue_snapshot", 1);
+        var issueState = IssueStore.Deserialize(issue.State)!;
+        issueState.SetEpicId("epic_snapshot", FirstLinkTime.UtcDateTime);
+        issue.State = IssueStore.Serialize(issueState);
+        await SeedIssueAsync(context, issue);
+
+        var workflow = new Mohist.Server.Workflow.Domain.Run.WorkflowRun
+        {
+            Id = "wr_snapshot",
+            Metadata = new Mohist.Server.Workflow.Domain.Run.WorkflowRunMetadata(
+                Name: null,
+                CreatedAt: FirstLinkTime,
+                Annotations: new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["projectId"] = "project_1",
+                    ["issueId"] = issue.IssueId,
+                    ["epicId"] = "epic_snapshot",
+                }),
+            Stages = [],
+        };
+        await context.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO "WorkflowRuns" ("WorkflowRunId", "State", "ETag")
+            VALUES ({workflow.Id}, {JSON.Serialize(workflow)}, 1)
+            """);
+
+        await migrator.MigrateAsync(AtomicSnapshotMigration);
+        context.ChangeTracker.Clear();
+
+        var persistedIssue = await context.Issues.SingleAsync(row => row.IssueId == issue.IssueId);
+        var persistedWorkflow = await context.WorkflowRuns.SingleAsync(row => row.WorkflowRunId == workflow.Id);
+        Assert.Equal("epic_snapshot", persistedIssue.EpicId);
+        Assert.Equal("epic_snapshot", persistedWorkflow.EpicId);
     }
 
     private static IssueRow NewIssue(string issueId, int number)
@@ -132,6 +180,12 @@ public class BackfillIssueEpicAffiliationMigrationSpecs
             State = IssueStore.Serialize(issue),
         };
     }
+
+    private static Task SeedIssueAsync(MohistDbContext context, IssueRow issue) =>
+        context.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO "Issues" ("IssueId", "State", "Risk")
+            VALUES ({issue.IssueId}, {issue.State}, {issue.Risk})
+            """);
 
     private static EpicIssueRow NewLink(string epicId, string issueId, int issueNumber, DateTimeOffset createdAt) => new()
     {

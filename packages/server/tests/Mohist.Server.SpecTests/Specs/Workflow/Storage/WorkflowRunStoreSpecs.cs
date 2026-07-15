@@ -225,6 +225,51 @@ public class WorkflowRunStoreSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
+    public async Task SaveAsync_UsesCurrentEpicSnapshotAfterLinkAndUnlink()
+    {
+        using var factory = new FakeWorkflowRunStoreDbContextFactory();
+        var eventStore = new EventStore(factory, NullLogger<EventStore>.Instance);
+        var store = new WorkflowRunStore(factory, eventStore, new NullDispatchGrainFactory(), NullLogger<WorkflowRunStore>.Instance);
+        var run = new WorkflowRun
+        {
+            Id = WorkflowRunId,
+            Metadata = new WorkflowRunMetadata(
+                Name: null,
+                CreatedAt: FixedTime,
+                Annotations: new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["projectId"] = ProjectId,
+                    ["issueId"] = IssueId,
+                    ["issueNumber"] = "1",
+                }),
+            Stages = [],
+        };
+
+        await store.SaveAsync(run, [new WorkflowRunStarted()]);
+
+        await using (var link = factory.CreateDbContext())
+        {
+            await WorkflowRunStore.StageEpicAffiliationAsync(link, run.Id, "epic_workflow");
+            await link.SaveChangesAsync();
+        }
+        await store.SaveAsync(run, [new WorkflowRunResumed()]);
+
+        await using (var unlink = factory.CreateDbContext())
+        {
+            await WorkflowRunStore.StageEpicAffiliationAsync(unlink, run.Id, null);
+            await unlink.SaveChangesAsync();
+        }
+        await store.SaveAsync(run, [new WorkflowRunPaused()]);
+
+        var events = await eventStore.ListAsync(run.Id);
+        Assert.False(events[0].Envelope.Extensions.ContainsKey(EventCatalog.Lineage.EpicId));
+        Assert.Equal("epic_workflow", events[1].Envelope.Extensions[EventCatalog.Lineage.EpicId]);
+        Assert.False(events[2].Envelope.Extensions.ContainsKey(EventCatalog.Lineage.EpicId));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
     public async Task LoadAsync_LegacyExhaustedRecovery_RetryPersistsFreshRecoveryRound()
     {
         using var factory = new FakeWorkflowRunStoreDbContextFactory();
