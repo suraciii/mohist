@@ -24,6 +24,12 @@ The Files/Diff evidence page (`/issues/<number>/files`) MUST render a single rec
 - **WHEN** the diff or commits response reports `available: false` with reason `branch_missing`
 - **THEN** the page MUST render the recoverable error surface with the same recovery actions as the transport-error path
 
+#### Scenario: Server-reported git error renders the recoverable surface
+
+- **WHEN** the diff or commits response reports `available: false` with reason `git_error`
+- **THEN** the page MUST render the recoverable error surface with the same recovery actions as the transport-error path
+- **AND** the surface MUST NOT fall back to a generic message that drops the git-error cause
+
 #### Scenario: Not-started state renders the recoverable surface
 
 - **WHEN** the diff or commits response reports `available: false` with reason `not_started`
