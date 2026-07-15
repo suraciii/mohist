@@ -150,7 +150,7 @@ public static partial class IssueRoutes
                     text,
                 });
 
-            return ApiResults.Ok(new { status = "sent" });
+            return ApiResults.Ok(new AgentSessionFollowupResult(sessionId));
         });
     }
 }

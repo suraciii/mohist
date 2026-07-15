@@ -707,7 +707,7 @@ internal static class AgentCommands
     {
         var cmd = new Command(
             "followup",
-            "Send followup text to a running generic AgentSession. Sends POST /api/projects/:projectId/agent-sessions/:sessionId/followup.");
+            "Send follow-up text to an AgentSession. It joins an active turn or starts a user-initiated turn when idle without creating a TaskRun or AgentJob. Sends POST /api/projects/:projectId/agent-sessions/:sessionId/followup.");
         var sessionIdArg = new Argument<string>("session-id") { Description = "Agent session id returned by launch" };
         var textOpt = new Option<string?>("--text") { Description = "Followup text (mutually exclusive with --text-file and --text-stdin)" };
         var textFileOpt = new Option<string?>("--text-file") { Description = "Read followup text from a UTF-8 file path (recommended for long messages; mutually exclusive with --text and --text-stdin)" };

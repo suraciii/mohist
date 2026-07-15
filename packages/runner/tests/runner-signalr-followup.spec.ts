@@ -253,6 +253,15 @@ describe("RunnerSignalRClient ReceiveFollowup handler", () => {
       }),
       expect.any(AbortSignal),
     )
+    const workflowCalls = runtimeEvents.mock.calls as unknown as Array<[
+      string,
+      string,
+      string,
+      { runtimeEvents: Array<{ payload: Record<string, unknown> }> },
+      AbortSignal,
+    ]>
+    const workflowEventBatch = workflowCalls[0]?.[3]
+    expect(workflowEventBatch.runtimeEvents[0]?.payload).not.toHaveProperty("acpSessionId")
   })
 
   it("Followup_DropsWhenResolverReturnsNullAndDoesNotThrow", async () => {
@@ -468,6 +477,14 @@ describe("RunnerSignalRClient routes follow-ups to generic sessions", () => {
       }),
       expect.any(AbortSignal),
     )
+    const genericCalls = agentSessionRuntimeEvents.mock.calls as unknown as Array<[
+      string,
+      string,
+      { runtimeEvents: Array<{ payload: Record<string, unknown> }> },
+      AbortSignal,
+    ]>
+    const genericEventBatch = genericCalls[0]?.[2]
+    expect(genericEventBatch.runtimeEvents[0]?.payload).not.toHaveProperty("acpSessionId")
     expect(workflowRuntimeEvents).not.toHaveBeenCalled()
   })
 

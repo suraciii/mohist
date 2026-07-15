@@ -80,6 +80,9 @@ public class CliAgentSessionCommandSpecs
         Assert.Contains("--text", stdout, StringComparison.Ordinal);
         Assert.Contains("--text-file", stdout, StringComparison.Ordinal);
         Assert.Contains("--text-stdin", stdout, StringComparison.Ordinal);
+        Assert.Contains("joins an active turn", stdout, StringComparison.Ordinal);
+        Assert.Contains("user-initiated turn when idle", stdout, StringComparison.Ordinal);
+        Assert.Contains("without creating a TaskRun or AgentJob", stdout, StringComparison.Ordinal);
     }
 
     [Fact]

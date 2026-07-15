@@ -220,7 +220,7 @@ internal static partial class IssueCommands
     {
         var cmd = new Command(
             "followup",
-            "Send followup text to a running issue workflow session. Sends POST /api/projects/:projectId/issues/:number/sessions/:name/followup.");
+            "Send follow-up text to an AgentSession. It joins an active turn or starts a user-initiated turn when idle without creating a TaskRun or AgentJob. Sends POST /api/projects/:projectId/issues/:number/sessions/:name/followup.");
         var numberArg = NumberArg();
         var nameArg = SessionNameArg();
         var textOpt = new Option<string?>("--text") { Description = "Followup text (mutually exclusive with --text-file and --text-stdin)" };

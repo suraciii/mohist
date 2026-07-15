@@ -34,7 +34,10 @@ public class SessionFollowupApiSpecs
     [Fact]
     public async Task FollowupEndpoint_ActiveSessionOnlineRunner_ReturnsSent()
     {
-        var (project, issue, workflowRunId, _) = await CreateAndStartSessionAsync("followup-ok", sessionName: "plan", attachAndStart: true);
+        var (project, issue, workflowRunId, session) = await CreateAndStartSessionAsync("followup-ok", sessionName: "plan", attachAndStart: true);
+        var sessionState = await _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id).GetAsync();
+        Assert.Equal("active", sessionState?.Status);
+        var tasksBefore = await GetWorkflowTaskSnapshotAsync(issue.Id);
         var tracker = _fixture.Services.GetRequiredService<RunnerConnectionTracker>();
         var runnerHub = _fixture.Services.GetRequiredService<IHubContext<RunnerHub>>() as RecordingRunnerHubContext
             ?? throw new InvalidOperationException("Recording runner hub context was not registered.");
@@ -47,7 +50,9 @@ public class SessionFollowupApiSpecs
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
             var body = await response.Content.ReadAsStringAsync();
             using var doc = JsonDocument.Parse(body);
-            Assert.Equal("sent", doc.RootElement.GetProperty("data").GetProperty("status").GetString());
+            var data = doc.RootElement.GetProperty("data");
+            Assert.Equal(session.Id, data.GetProperty("sessionId").GetString());
+            Assert.Equal("sent", data.GetProperty("status").GetString());
 
             var sent = Assert.Single(runnerHub.SentMessages);
             Assert.Equal("conn-followup-1", sent.ConnectionId);
@@ -56,6 +61,9 @@ public class SessionFollowupApiSpecs
             Assert.Equal(workflowRunId, payload.GetProperty("workflowRunId").GetString());
             Assert.Equal("plan", payload.GetProperty("sessionName").GetString());
             Assert.Equal("加个登出", payload.GetProperty("text").GetString());
+
+            var tasksAfter = await GetWorkflowTaskSnapshotAsync(issue.Id);
+            Assert.Equal(tasksBefore, tasksAfter);
         }
         finally
         {
@@ -174,6 +182,15 @@ public class SessionFollowupApiSpecs
 
     private Task<HttpResponseMessage> PostFollowupAsync(string projectId, int issueNumber, string sessionName, object body) =>
         _client.PostAsJsonAsync($"/api/projects/{projectId}/issues/{issueNumber}/sessions/{sessionName}/followup", body);
+
+    private async Task<string[]> GetWorkflowTaskSnapshotAsync(string issueId)
+    {
+        var status = await _fixture.Grains.GetGrain<IIssueGrain>(issueId).GetWorkflowStatusAsync();
+        return status?.Workflow?.Stages
+            .SelectMany(stage => stage.Tasks)
+            .Select(task => $"{task.Id}:{task.Status}")
+            .ToArray() ?? [];
+    }
 
     private async Task<(ProjectDto Project, IssueDto Issue, string WorkflowRunId, CreatedSession Session)> CreateAndStartSessionAsync(
         string name,

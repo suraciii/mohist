@@ -8,15 +8,12 @@ using Mohist.Server.Sessions.Services;
 namespace Mohist.Server.Api;
 
 /// <summary>
-/// AgentSession cancel endpoint addressed by canonical stable session id.
-/// The handler attempts to cancel the
-/// running turn via a new server→runner <c>CancelAgentSession</c> SignalR
-/// invocation and returns the resulting session state honestly. The
-/// cancel is best-effort over ACP: when the underlying agent does not
-/// support cancellation the response states the session is not currently
-/// cancellable; when the session is already terminal the server
-/// short-circuits and returns the current terminal state without calling
-/// the runner at all.
+/// Canonical AgentSession cancel endpoint for either source, addressed by the
+/// stable session id. Cancel is intentionally outside the Compact/Reset idle
+/// boundary: it interrupts only the current turn and never deletes the
+/// AgentSession, transcript, lineage, or other persisted session state. The
+/// interrupt is best-effort over the execution backend, and the route returns
+/// the state reported by that backend.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -63,7 +60,7 @@ public static class AgentSessionCancelRoutes
                 return ApiResults.Ok(new { state = target.TerminalState });
 
             // The session is not terminal. If no runner ever bound itself
-            // (RunnerId empty), there is no live ACP session to cancel —
+            // (RunnerId empty), there is no live runtime session to cancel —
             // mirror the "not-cancellable" contract rather than faking
             // success. The state name reuses the same value the runner
             // reports so the HTTP shape is uniform.
@@ -114,10 +111,10 @@ public static class AgentSessionCancelRoutes
 /// session state it actually observed so the API can never pretend
 /// success. Recognised values:
 /// <list type="bullet">
-///   <item><c>cancelled</c> — the runner sent <c>session/cancel</c> to the
-///     underlying agent (and the agent advertises / supports it).</item>
-///   <item><c>not-cancellable</c> — the runner has no live ACP session
-///     entry for the target, or the agent does not support cancellation.</item>
+///   <item><c>cancelled</c> — the runner sent a cancel request to the
+///     current runtime session.</item>
+///   <item><c>not-cancellable</c> — the runner has no live runtime session
+///     for the target, or the backend does not support cancellation.</item>
 ///   <item><c>completed</c> / <c>failed</c> / <c>stopped</c> — the session
 ///     transitioned to a terminal state as a side effect of the cancel
 ///     request; the API surfaces the same value so the caller can react

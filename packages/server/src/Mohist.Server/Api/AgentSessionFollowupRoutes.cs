@@ -10,12 +10,14 @@ using Mohist.Server.Sessions.Services;
 namespace Mohist.Server.Api;
 
 /// <summary>
-/// Agent-launch followup endpoint addressed by canonical AgentSession id.
-/// The issue-scoped
+/// Canonical follow-up endpoint for AgentSessions from either source.
+/// Follow-up joins the active turn or starts a user-initiated turn when the
+/// session is idle; neither case creates a TaskRun or AgentJob. The issue-scoped
 /// <c>POST /api/projects/{projectRef}/issues/{number}/sessions/{name}/followup</c>
 /// route (<see cref="IssueRoutes.MapIssueSessions"/>) is a Workflow lookup
-/// alias that resolves to the same canonical AgentSession grain before using
-/// its Workflow-shaped runner target. The resolver in
+/// alias that resolves to the same stable AgentSession id and returns the same
+/// <see cref="AgentSessionFollowupResult"/> shape before using its
+/// Workflow-shaped runner target. The resolver in
 /// <see cref="AgentSessionQuerier.ResolveGenericFollowupTargetAsync"/> reads
 /// the runner id from the session's Runtime state.
 /// </summary>
@@ -125,7 +127,7 @@ public static class AgentSessionFollowupRoutes
                     text,
                 });
 
-            return ApiResults.Ok(new { status = "sent" });
+            return ApiResults.Ok(new AgentSessionFollowupResult(target.SessionId));
         });
 
         return app;
@@ -139,3 +141,5 @@ public static class AgentSessionFollowupRoutes
 /// or runner lookup, mirroring the issue-scoped followup body shape.
 /// </summary>
 public sealed record GenericFollowupRequest(string? Text = null);
+
+public sealed record AgentSessionFollowupResult(string SessionId, string Status = "sent");
