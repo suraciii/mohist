@@ -1,0 +1,13 @@
+## Codebase Patterns
+
+- AgentSession state is persisted as JSON by AgentSessionStore. Optional Runtime parameters deserialize old state as null, and reads do not save or rewrite that state.
+- OpenAgentSessionCommand.AgentRuntime is authoritative when AgentSessionGrain creates a session. AttachPhysicalSession derives lineage and event Runtime from the persisted current binding, so it cannot relabel a legacy binding.
+- AgentSessionExtensions.IsRuntimeSessionMissing owns the binding check and accepts the backend-registration predicate. AgentSessionGrain currently registers only `opencode`; adding another runtime later must update that authority rather than infer a runtime from runner presence.
+- Compact and Reset enforce runtime presence inside the grain. Follow-up performs the same grain preflight before any SignalR send. Routes map RuntimeSessionMissingException to HTTP 409 `runtime_session_missing` with the stable sessionId and a Reset hint.
+- JSON.Options omits null values, so legacy AgentSessionRuntimeBound events do not expose a synthetic Runtime field.
+
+## T-001
+
+- Runtime is persisted on AgentSessionRuntime and RuntimeSessionLineageEntry and emitted on AgentSessionRuntimeBound. Legacy rows remain null and are never backfilled.
+- Missing bindings, null legacy runtimes, and retired `acp` runtimes are rejected before recovery mutation or follow-up dispatch. Recovery rejection leaves transcript state unchanged.
+- Verification: focused runtime/event unit tests passed 12/12; focused session grain/API/store specs passed 48/48; full `npm test` passed (CLI 865, server unit 1351, architecture 22, server spec 2749, Web 4653, Runner 1014). The first full run exposed an unrelated order-sensitive Epic lifecycle failure; that test passed alone and the complete rerun passed.

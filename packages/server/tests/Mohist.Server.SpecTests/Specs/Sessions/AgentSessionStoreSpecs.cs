@@ -1,3 +1,4 @@
+using System.Text.Json.Nodes;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -70,6 +71,51 @@ public class AgentSessionStoreSpecs : IAsyncLifetime
         Assert.Equal("runner-1", rehydrated.Runtime.RunnerId);
         Assert.Equal("/work", rehydrated.Runtime.WorkDir);
         Assert.Equal("opencode", Assert.Single(rehydrated.Status.RuntimeSessionLineage!).Runtime);
+    }
+
+    [Fact]
+    public async Task Load_LegacyStateWithoutRuntime_RemainsQueryableWithoutRewrite()
+    {
+        var createdAt = new DateTime(2026, 7, 15, 0, 0, 0, DateTimeKind.Utc);
+        var session = AgentSession.Create(
+            $"legacy-session-{Guid.NewGuid():N}",
+            "runner-1",
+            "/work",
+            now: createdAt,
+            runtime: "opencode");
+        session.AttachPhysicalSession(
+            "legacy-runtime-session",
+            model: null,
+            workDir: "/work",
+            changeDir: null,
+            processPid: null,
+            now: createdAt.AddMinutes(1));
+        await _store.SaveAsync(session.Id, session);
+
+        string legacyState;
+        await using (var db = new MohistDbContext(_options))
+        {
+            var row = await db.AgentSessions.SingleAsync(candidate => candidate.Id == session.Id);
+            var state = JsonNode.Parse(row.State)!.AsObject();
+            state["runtime"]!.AsObject().Remove("runtime");
+            state["status"]!["runtimeSessionLineage"]![0]!.AsObject().Remove("runtime");
+            legacyState = state.ToJsonString();
+            row.State = legacyState;
+            await db.SaveChangesAsync();
+        }
+
+        var rehydrated = await _store.LoadAsync(session.Id);
+
+        Assert.NotNull(rehydrated);
+        Assert.Equal("legacy-runtime-session", rehydrated!.Status.AgentRuntimeSessionId);
+        Assert.Null(rehydrated.Runtime.Runtime);
+        Assert.Null(Assert.Single(rehydrated.Status.RuntimeSessionLineage!).Runtime);
+        await using var verificationDb = new MohistDbContext(_options);
+        var persistedState = await verificationDb.AgentSessions
+            .Where(candidate => candidate.Id == session.Id)
+            .Select(candidate => candidate.State)
+            .SingleAsync();
+        Assert.Equal(legacyState, persistedState);
     }
 
     [Fact]

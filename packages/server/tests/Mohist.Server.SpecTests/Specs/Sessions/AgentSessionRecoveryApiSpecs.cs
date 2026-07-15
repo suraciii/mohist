@@ -201,9 +201,13 @@ public class AgentSessionRecoveryApiSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Theory]
-    [InlineData("compact")]
-    [InlineData("reset")]
-    public async Task RecoveryEndpoint_LegacyBindingWithoutRuntime_ReturnsRuntimeSessionMissing(string operation)
+    [InlineData("compact", null)]
+    [InlineData("reset", null)]
+    [InlineData("compact", "acp")]
+    [InlineData("reset", "acp")]
+    public async Task RecoveryEndpoint_LegacyBackendBinding_ReturnsRuntimeSessionMissing(
+        string operation,
+        string? runtime)
     {
         var (project, issue, _, currentSession) = await CreateAndStartSessionAsync(
             $"{operation}-legacy-missing",
@@ -212,7 +216,7 @@ public class AgentSessionRecoveryApiSpecs
         var transcriptPath = $"/api/projects/{project.Id}/issues/{issue.Number}/sessions/plan/transcript";
         var transcriptBefore = await _client.GetStringAsync(transcriptPath);
 
-        await RemovePersistedRuntimeAsync(currentSession.Id);
+        await SetPersistedRuntimeAsync(currentSession.Id, runtime);
 
         using var response = await _client.PostAsync(
             $"/api/projects/{project.Id}/issues/{issue.Number}/sessions/plan/{operation}",
@@ -233,7 +237,7 @@ public class AgentSessionRecoveryApiSpecs
         Assert.Equal(transcriptBefore, await _client.GetStringAsync(transcriptPath));
     }
 
-    private async Task RemovePersistedRuntimeAsync(string sessionId)
+    private async Task SetPersistedRuntimeAsync(string sessionId, string? runtimeName)
     {
         await using var db = await _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>().CreateDbContextAsync();
         var row = await db.AgentSessions.SingleAsync(r => r.Id == sessionId);
@@ -241,7 +245,21 @@ public class AgentSessionRecoveryApiSpecs
             ?? throw new InvalidOperationException($"Session {sessionId} state could not be parsed.");
         var runtime = state["runtime"]?.AsObject()
             ?? throw new InvalidOperationException($"Session {sessionId} state has no runtime binding.");
-        runtime.Remove("runtime");
+        if (runtimeName is null)
+            runtime.Remove("runtime");
+        else
+            runtime["runtime"] = runtimeName;
+
+        if (state["status"]?["runtimeSessionLineage"] is JsonArray lineage && lineage.Count > 0)
+        {
+            var current = lineage[lineage.Count - 1]?.AsObject()
+                ?? throw new InvalidOperationException($"Session {sessionId} current lineage entry is invalid.");
+            if (runtimeName is null)
+                current.Remove("runtime");
+            else
+                current["runtime"] = runtimeName;
+        }
+
         row.State = state.ToJsonString();
         await db.SaveChangesAsync();
 
