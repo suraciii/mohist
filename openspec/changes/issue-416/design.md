@@ -1,121 +1,304 @@
 ## Context
 
-当前 Mohist 的 Project 已经存储 `RepositoriesJson` 并解析为多仓库列表（`ProjectInfo.Repositories` / `RepositoryInfo`），但业务规则并不完整：
+Project Space owns repository declarations. The current `ProjectGrain` can persist an
+empty `RepositoriesJson` list, lets callers rename a repository or change its default
+state through a general update, and promotes another repository when the default is
+deleted.
 
-- `ProjectGrain.CreateAsync` 仍创建空仓库列表，导致 Project 创建后没有可用执行资源。
-- `RemoveRepositoryAsync` 在删除 default 仓库时会静默提升下一个仓库，破坏可预期性。
-- `UpdateRepositoryAsync` 允许重命名和修改 `IsDefault`，使资源名作为稳定引用句柄的语义变弱。
-- 现有 Project 数据需要升级到"恰好一个 default"不变式。
-- CLI 的 `project create` 仍接受无 `--path` 的调用，而 `repo update` 仍暴露 `--new-name`/`--set-default`。
+The existing persistence shape already stores repository declarations in
+`Projects.RepositoriesJson`; `RepositoryInfo` contains the required execution metadata:
+`name`, `gitUrl`, `baseBranch`, and `isDefault`. The change therefore strengthens the
+Project model and its API rather than adding a repository aggregate, join table, Runner
+protocol, or Issue field.
 
-本 issue 在已有仓库资源模型的基础上，完成 Project 对仓库资源的所有权、生命周期、default 不变式、CLI 命令面以及既有数据迁移，使 Project 成为跨多个代码库的产品工作空间，同时为后续 issue 的目标仓库绑定提供稳定的引用模型。
+`mo repo` is the only repository-management command group. `mo project create` currently
+sends only a name, so it cannot establish the first declaration. The CLI already has an
+`ICommandExecutor` seam for Git inspection and shared project resolution, output, and
+HTTP-envelope helpers.
+
+Constraints:
+
+- Repository declarations are Project-local resources. Their resource name is the stable
+  handle; this change does not consume that handle from Issue state.
+- A usable Project must always have exactly one default declaration. The Project aggregate
+  is the sole writer of that invariant.
+- A local path is bootstrap input for the CLI only. It is never Project or repository
+  metadata sent to the server.
+- The existing `RepositoriesJson` column remains the persistence boundary. No schema or
+  Runner protocol change is required.
 
 ## Goals / Non-Goals
 
 **Goals:**
 
-- 每个 Project 拥有至少一个命名仓库资源，资源名在 Project 内唯一（不区分大小写），恰好一个是 default。
-- 仓库资源具备完整的生命周期：add、update（只改 Git URL / base branch）、set-default、delete（非 default 可删）。
-- Project 创建必须原子地带入一个初始仓库，并设为 default；`mo project create --path <path>` 从本地 Git 仓库解析元数据。
-- 既有 Project 的仓库数据升级到 default 不变式，保留原有名称、Git URL、base branch、顺序，不破坏已有 issue 的执行。
-- 完成 `mo repo` 命令组及其错误输出、table/json 渲染。
-- 保持 Runner 协议不变：issue 未指定仓库时仍使用 Project default 的 Git URL 和 base branch。
+- Make creation and every successful Project mutation preserve one or more complete
+  repository declarations with exactly one default.
+- Normalize persisted declarations before the server accepts traffic, without guessing
+  missing repository metadata.
+- Expose a single project-scoped `mo repo` command surface and make `mo project create
+  --path` produce the initial declaration from local Git metadata.
+- Keep server and CLI failures actionable, deterministic, and free of partial mutation.
 
 **Non-Goals:**
 
-- issue 的目标仓库绑定与执行分流（后续 issue）。
-- 跨 Project 共享仓库声明。
-- 多仓库协同发布。
-- 为 Web UI 新增仓库管理界面（只要求 API 消费者能兼容新契约）。
+- Do not add, persist, query, or change Issue-specific repository selection.
+- Do not prevent deletion based on Issue state, introduce cross-Project repository sharing,
+  or coordinate a change across repositories.
+- Do not add a Web repository-management screen, a Runner checkout protocol, or a local
+  checkout path to Project state.
 
 ## Decisions
 
-### 1. 复用并收紧现有 `ProjectInfo.Repositories` 模型
+### D1: Repository declarations remain Project-owned state, with one domain policy for their invariants
 
-现有 `ProjectInfo` 已包含 `List<RepositoryInfo>`，`RepositoryInfo` 已包含 `Name`、`GitUrl`、`BaseBranch`、`IsDefault`。不再引入新的数据库列或聚合根，只收紧规则。
+`RepositoryInfo` remains the serialized declaration shape:
 
-- **Rationale**: 减少数据迁移量；已有持久化格式 `RepositoriesJson` 与后续目标仓库引用直接对应；Orleans grain 已围绕该模型实现。
-- **Alternatives considered**: 把仓库拆成独立表/聚合根。 rejected：本 issue 范围是 Project 子域内的资源声明，无需跨 Project 共享，独立表会增加 Join 与事务复杂度。
+| Field | Meaning | Rule |
+|---|---|---|
+| `Name` | Project-local stable resource name | Non-empty; unique with `OrdinalIgnoreCase`; immutable after creation |
+| `GitUrl` | Git address used by execution | Non-empty |
+| `BaseBranch` | Branch used as the repository base | Non-empty after normalization; omitted or blank input becomes `main` |
+| `IsDefault` | Project-wide default marker | Exactly one entry is `true` |
 
-### 2. 将"恰好一个 default"作为 grain 层的聚合不变式，而非仅 API 校验
+`ProjectInfo.Repositories` remains the ordered collection stored in `RepositoriesJson`.
+Introduce one small, pure Project-domain policy for repository declarations. It validates a
+complete list, normalizes a legacy list, and applies add, metadata-update, default-select,
+and remove operations. `ProjectGrain` invokes that policy before replacing its in-memory
+list and persists the resulting list once. The startup upgrade invokes the same validation
+and normalization policy, so the default-selection rule cannot diverge between normal
+commands and historical data.
 
-`ProjectGrain` 在每次变更后都确保列表中恰好一个 `IsDefault = true`：add 时按需切换、set-default 时原子重置、update 不改变 default、delete 不允许删除 default。`ProjectInfo` 在反序列化/生成时做防御性校验，API/CLI 只负责转发与报错。
+The policy does not become a grain, repository store, or public API. `ProjectGrain` remains
+the state authority and the only normal mutation entry point.
 
-- **Rationale**: 聚合根是 Orleans grain，其状态是事实来源；把不变式放在 grain 中可保证所有调用路径（API、内部测试、未来其他 grain）一致。
-- **Alternatives considered**: 在 API 层或数据库层做校验。 rejected：API 层易被绕过，数据库层无法表达业务错误语义。
+The supported transitions are deliberately narrow:
 
-### 3. Project 创建改为 repository-backed 原子操作
+| Operation | Result |
+|---|---|
+| Create Project | Creates one complete declaration and marks it default in the same persistence operation as the Project |
+| Add | Rejects a duplicate or incomplete declaration; preserves the current default unless `setDefault` is true |
+| Update | Changes only supplied `gitUrl` and/or `baseBranch`; requires at least one field and preserves name/default state |
+| Set default | Finds the named declaration before changing the collection, then makes it the sole default; selecting the current default is a no-op |
+| Delete | Removes only an existing non-default declaration; a default deletion is a conflict and does not choose a replacement |
 
-`ProjectGrain.CreateAsync` 接收初始仓库元数据（name, gitUrl, baseBranch），在创建 Project 行时一并写入 `RepositoriesJson`，并标记为 default。API 与 CLI 都拒绝无初始仓库的创建请求。
+Every operation validates before changing the collection. Missing names return not-found;
+validation and conflict failures leave the list and default selection unchanged. The Project
+query model resolves the flagged default rather than falling back to the first list entry;
+the invariant and startup upgrade make a fallback unnecessary and would otherwise hide
+corrupt state.
 
-- **Rationale**: 保证"每个可用 Project 至少有一个仓库"这条不变式从创建时就成立，避免后续分支处理。
-- **Alternatives considered**: 先创建空 Project，再调用 add repository。 rejected：两步操作会在中间状态暴露无仓库的 Project，且需要补偿逻辑。
+**Alternative considered:** keep validation in routes and let each grain method update the
+list independently. Rejected because create, API mutations, and the upgrade would each need
+to reproduce ordering, case-insensitive uniqueness, and default logic. A single pure policy
+keeps untrusted persisted data and live changes subject to the same rules without adding a
+new runtime boundary.
 
-### 4. 删除 default 仓库时直接拒绝，而不是自动提升
+### D2: Project creation accepts an initial declaration and has no repository-less success path
 
-`RemoveRepositoryAsync` 检查目标仓库 `IsDefault`，若是则抛出/返回冲突错误，提示先 `set-default`；不再执行任何静默提升。
+The project-create request changes to contain the Project name and an initial repository
+declaration:
 
-- **Rationale**: 提案明确这是 BREAKING 行为；自动提升会隐藏用户意图，且可能把错误仓库变成执行入口。
-- **Alternatives considered**: 删除 default 时如果还有其他仓库，按声明顺序提升第一个。 rejected：与提案冲突，且会让命令成功语义不可预期。
+```json
+{
+  "name": "product-a",
+  "repository": {
+    "name": "product-a",
+    "gitUrl": "git@example.com:team/product-a.git",
+    "baseBranch": "main"
+  }
+}
+```
 
-### 5. `update` 只更新元数据，重命名和切换 default 走专门命令
+`isDefault` is not accepted for the initial declaration. The server derives it as `true`.
+`ProjectRoutes` validates the request and passes the complete declaration to a revised
+`IProjectGrain.CreateAsync`. The grain writes the Project row only after the initial
+declaration is valid and part of the serialized state. A failed validation or persistence
+operation therefore cannot expose an empty Project.
 
-`UpdateRepositoryAsync` 不再接受 `newName` 和 `isDefault` 参数；API 的 `UpdateRepositoryRequest` 只保留 `GitUrl` 和 `BaseBranch`。CLI `repo update` 拒绝 `--new-name` 和 `--set-default`。`repo set-default` 是切换 default 的唯一入口。
+The existing Web project-create client must send this complete declaration through its
+existing API boundary. This is request-contract alignment only; repository listing and
+management UI are not added here.
 
-- **Rationale**: 资源名是后续 issue 中 issue 目标仓库绑定的稳定引用；让 update 同时改身份和 default 会造成命令语义重叠和误操作风险。
-- **Alternatives considered**: 保留 `newName` 但限制使用场景。 rejected：任何重命名都会破坏稳定引用，不如直接禁止。
+### D3: Repository HTTP endpoints keep their resource paths and separate metadata updates from default selection
 
-### 6. 数据迁移采用一次性 startup migration + 读取时防御性校验
+Repository operations remain under the resolved Project resource. Successful mutations
+return the updated Project, which gives clients the resulting collection and default state.
 
-通过 EF Core migration 升级 schema 版本（如需要），并在应用启动时读取 `Projects.RepositoriesJson`，对每个 Project 执行：
+| Endpoint | Request body | Semantics |
+|---|---|---|
+| `GET /api/projects/{projectRef}/repositories` | none | Returns the declaration list in order |
+| `POST /api/projects/{projectRef}/repositories` | `{ name, gitUrl, baseBranch?, setDefault? }` | Adds one declaration; `setDefault` selects it atomically |
+| `PATCH /api/projects/{projectRef}/repositories/{name}` | `{ gitUrl?, baseBranch? }` | Updates metadata only; at least one field is required |
+| `PATCH /api/projects/{projectRef}/repositories/{name}` | `{ setDefault: true }` | Selects the named declaration as the sole default |
+| `DELETE /api/projects/{projectRef}/repositories/{name}` | none | Deletes a non-default declaration |
 
-1. 解析 JSON 为 `List<RepositoryInfo>`；
-2. 校验每个仓库有非空 name、gitUrl、baseBranch；
-3. 校验 name 不区分大小写唯一；
-4. 按以下规则确定 default：
-   - 已标记 default 的取第一个；
-   - 无 default 时取声明顺序第一个；
-   - 多个 default 时保留第一个标记的，其余设为非 default；
-5. 将修正后的 JSON 写回数据库。
+`PATCH` accepts either a metadata update or the explicit default-selection command, never a
+mix of both. It does not accept `newName`, `isDefault`, or `setDefault: false`. This keeps
+the stable resource name and default transition out of a general patch operation.
 
-若某 Project 数据无法恢复（空列表、缺少必填字段、大小写冲突），则记录可操作的诊断并停止启动，不自动修改数据。
+Route handlers translate domain outcomes into the existing error envelope:
 
-- **Rationale**: 一次性纠正所有历史数据；失败即停避免部分升级导致不一致；保留顺序和元数据确保现有 issue 可继续执行。
-- **Alternatives considered**: 在首次访问每个 Project 时惰性修复。 rejected：启动时校验更可控，便于运行集成测试和迁移 spec；失败早暴露比运行中突然发现更安全。
+| Condition | HTTP result | Required diagnostic |
+|---|---|---|
+| Blank required metadata, absent initial declaration, or empty update | `400` | Names the missing or invalid input |
+| Case-insensitive duplicate name | `409` | Identifies the conflicting repository name |
+| Attempted default deletion | `409` | Identifies the default and tells the caller to select another default first |
+| Unknown Project or repository | `404` | Identifies the unresolved Project or repository |
 
-### 7. CLI `project create --path` 在本地解析 Git 元数据
+The API exposes `isDefault` only as the resulting state. It never accepts a client request
+to clear a default without choosing another declaration.
 
-CLI 读取给定路径的 `.git` 目录，解析 remote origin URL 与当前 HEAD 分支，作为初始仓库的 `gitUrl` 和 `baseBranch`。资源名优先从仓库目录名或 remote 仓库名推导，要求非空。路径本身不发送到 server，也不持久化。
+### D4: A startup data upgrade establishes the invariant before serving requests
 
-- **Rationale**: 保持单仓库场景"一条命令起步"的体验，同时确保 server 只保存声明式资源模型。
-- **Alternatives considered**: 把本地路径发到 server 让 server 解析。 rejected：server 不应访问 CLI 本地路径，且 runner 需要的是 Git URL；把解析放在 CLI 也避免 server 引入 Git 依赖。
+No EF schema migration is necessary because `RepositoriesJson` already persists all four
+declaration fields. Add an idempotent Project repository upgrade immediately after
+`db.Database.Migrate()` and before either host instance starts accepting requests. Factor the
+database initialization sequence used by `Program` and `BuildAlternateApp` so both execute
+the same migration and upgrade sequence.
 
-### 8. 错误模型保持 actionable，冲突/不存在/未解析 Project 都直接返回
+The upgrade reads Projects in deterministic `Id` order, deserializes their declarations, and
+uses the domain policy to create a proposed normalized list:
 
-Server 使用带类型的结果或异常码（如 `RepositoryConflictError`、`RepositoryNotFoundError`、`ProjectNotFoundError`），CLI 将其渲染为可读消息并明确下一步操作（如 `mo repo set-default <other>`）。
+- one existing default remains default;
+- with no default, the first declaration becomes default;
+- with multiple defaults, the first marked declaration remains default and later marked
+  declarations are cleared;
+- list order, names, Git URLs, and base branches are preserved exactly.
 
-- **Rationale**: specs 对错误输出有明确验收标准；actionable 错误降低用户误操作成本。
-- **Alternatives considered**: 统一返回 400 不区分错误类型。 rejected：CLI 无法给出精准提示，且不符合验收标准。
+The upgrade first validates every Project and prepares all changed JSON values. It then writes
+the complete set in one database transaction. A malformed JSON document, empty declaration
+list with no recoverable metadata, blank required field, or case-insensitive name conflict
+aborts initialization with a diagnostic naming the Project and relevant declarations. No
+Project row is modified when validation fails. Successful reruns find an already-valid list
+and write nothing.
+
+Existing Project and Issue identities remain unchanged. Execution paths that use a Project's
+default declaration continue to receive the same Git URL and base branch once a valid
+single-repository declaration is marked default. This is continuity of the existing default
+resolution path, not a change to Issue repository data or behavior.
+
+**Alternative considered:** silently use the first declaration whenever a read observes no
+default. Rejected because it permits invalid persistent state to continue and makes default
+selection depend on an incidental order. The startup upgrade makes the repair deterministic;
+unrecoverable data stops with an operator-actionable error instead of invented metadata.
+
+### D5: `mo project create --path` resolves Git metadata locally and sends only the declaration
+
+`mo project create <name> --path <path>` requires `--path`. The command uses the existing
+`ICommandExecutor` seam and a private bootstrap helper in the project command module to
+resolve all initial-repository fields before issuing HTTP:
+
+1. Canonicalize `<path>` and verify it is a Git work tree with a reachable `HEAD` commit.
+2. Resolve the work-tree root. Its directory name is the deterministic repository resource
+   name.
+3. Read `origin` with `git -C <root> remote get-url origin`; an absent or blank value is not
+   a usable Git URL.
+4. Resolve the base branch from `refs/remotes/origin/HEAD`; if that symbolic reference is
+   unavailable, use the checked-out branch only when it is a named branch. A detached HEAD
+   or no branch is an actionable failure.
+5. Send the D2 create body. The original path, work-tree root, remote alias, and any local
+   checkout data are never included in the request.
+
+The command does not fall back to `main` for an unknown Git branch: `main` is the default
+only for an explicitly added repository whose optional base-branch argument is omitted. A
+failed local inspection produces no HTTP request.
+
+No new process abstraction is introduced. The helper uses the injected executor already
+available through `MohistCliApi`; CLI tests provide command results through a fake executor.
+
+### D6: `mo repo` is the single management surface and renders repository state
+
+`RepositoryCommands` owns the complete command group:
+
+```text
+mo repo list
+mo repo add <name> --git-url <url> [--base-branch <branch>] [--set-default]
+mo repo update <name> [--git-url <url>] [--base-branch <branch>]
+mo repo set-default <name>
+mo repo delete <name>
+```
+
+Every subcommand reuses `ProjectRefOption()`, `OutputOption()`, and
+`api.ResolveProject(project, projectId)`. Thus `--project` is canonical,
+`--project-id` remains its alias, and missing explicit or active scope fails before any HTTP
+request. `repository` remains an optional root alias; `delete` is canonical, with existing
+`remove` and `rm` aliases retained as equivalent convenience commands.
+
+`add` normalizes an omitted or blank `--base-branch` to `main` in its request and sends
+`setDefault` only when requested. `update` requires at least one supported metadata option;
+the parser rejects `--new-name` and `--set-default`, so callers cannot bypass the separate
+identity and default transitions. `set-default` sends only `{ "setDefault": true }`.
+
+All commands use the shared `Print*WithOutputAsync` helpers. JSON output prints the successful
+server data. Table output uses the repository renderer for both a list and a successful
+mutation result: when the result is an updated Project, the renderer reads its
+`repositories` collection. The table has `name`, `git URL`, `base branch`, and `default`
+columns and visibly marks the sole default. It never renders legacy `path` or `remote`
+columns, nor the unrelated Project-list empty state.
+
+The CLI does not reconstruct server errors. It preserves the server's readable error envelope
+and non-zero exit code, so duplicate, missing-repository, default-delete, and Project
+resolution failures retain their actionable diagnostics.
+
+### D7: Coverage follows the product boundary and uses existing fakes
+
+Server Project specs cover creation with a default, default-preserving add, case-insensitive
+duplicate rejection, metadata-only update, idempotent selection, default-delete conflict,
+and no mutation on validation/not-found failures. API specs verify request shapes, status
+codes, returned repository state, and the absence of repository-less creation.
+
+Add a focused data-upgrade spec using a migrated in-memory SQLite template. It seeds historical
+`RepositoriesJson` rows directly and verifies valid-default preservation, deterministic
+normalization, order/metadata preservation, and full rollback on invalid input. It does not
+run a production database or external Git process.
+
+CLI specs use `RecordingHttpHandler`, `FakeFileSystem`, and a configurable fake
+`ICommandExecutor`. They cover Git-path bootstrap success and each local-resolution failure;
+the two project-scope forms; active-project fallback; all five `mo repo` commands; add's
+`main` default; parser rejection of unsupported update options; default-delete error
+propagation; and table/JSON rendering. No CLI test uses a real repository, network, process,
+or wall-clock wait.
 
 ## Risks / Trade-offs
 
-- **[Risk] 数据迁移失败会阻塞应用启动。** -> Mitigation: 迁移逻辑在独立 migration 或 startup task 中执行，并在失败时输出具体 Project ID 和原因，运维人员可手动修复数据后重启；集成测试覆盖空数据、多 default、大小写冲突等场景。
-- **[Risk] 删除 default 由"静默提升"改为"拒绝"是 BREAKING，可能影响脚本或用户习惯。** -> Mitigation: 这是提案明确要求的破坏性变更；CLI 错误提示直接给出 `mo repo set-default <name>` 命令，降低学习成本。
-- **[Risk] `project create --path` 要求本地路径是有效 Git 仓库，可能让 CI/自动化场景多一步准备。** -> Mitigation: 这是"仓库资源模型"落地的必要前提；后续仍可通过 API 直接传入 name/gitUrl/baseBranch 创建 Project，CLI 只是其中一种入口。
-- **[Risk] 大小写不敏感的资源名在跨平台存储时可能产生歧义。** -> Mitigation: 在 grain 和 CLI 层统一使用 `StringComparer.OrdinalIgnoreCase` 做 name 校验；返回资源名时保留用户原始输入。
-- **[Risk] Runner 与 issue 启动仍使用 default 仓库，若迁移后 default 选择规则与管理员预期不同，会影响现有 issue。** -> Mitigation: 迁移规则确定性地取"第一个声明"或"第一个已标记 default"，与现有单仓库场景完全一致；多仓库旧数据是 edge case，可通过迁移诊断提前发现。
+- **Repository-less historical data:** there is no safe source from which to invent a name,
+  Git URL, or base branch. The server refuses to start and identifies the Project rather than
+  silently creating unusable state. The operator supplies or repairs the declaration and
+  restarts.
+- **Startup availability:** a transaction-wide preflight makes malformed legacy data block
+  startup. This is intentional: serving an invalid Project would reintroduce the missing-
+  default state the change eliminates.
+- **Creation API is breaking:** all consumers must provide initial metadata. The CLI owns
+  local discovery; the Web client must collect/provide metadata through its existing create
+  boundary rather than relying on a server-side path.
+- **Git branch inference can fail for unusual clones:** an unset `origin/HEAD` falls back only
+  to a named checked-out branch. Detached or unborn repositories fail before creation with a
+  specific explanation; no branch is guessed.
+- **CLI mutation output has a Project-shaped response:** the repository table renderer accepts
+  either a list response or the `repositories` member of an updated Project. This is kept in
+  the renderer, not duplicated across five command handlers.
 
 ## Migration Plan
 
-1. **Schema & code migration**: 新增 EF Core migration（或 startup data migration）并在 `IHostApplicationLifetime` 启动早期执行仓库数据升级。
-2. **Deployment**: 部署新版 server；启动时自动读取所有 Project 的 `RepositoriesJson`，校验并规范化 default；成功后服务才接收流量。
-3. **Rollback**: 若迁移失败，启动停止，旧版本 server 仍可运行；回滚只需重新部署旧版本。迁移脚本只读取和重写 `RepositoriesJson`，不修改 schema 列或 issue 数据，因此回滚风险低。
-4. **CLI rollout**: 同步发布新版 CLI，使 `mo project create` 要求 `--path`。旧 CLI 仍可调用 API，但 server 会拒绝无初始仓库的请求，提示升级 CLI。
-5. **Verification**: 运行 server spec/unit 测试、CLI spec 测试，重点覆盖单仓库升级、多仓库 default 规范化、default 删除拒绝、project create --path 成功与失败路径。
+1. Add the repository domain policy and revise the Project grain interface, creation, query
+   default lookup, and route contracts. Preserve the existing `RepositoriesJson` storage
+   shape.
+2. Add the deterministic startup upgrade and its data specs. Invoke it after EF migration in
+   both server startup paths, before `StartAsync`.
+3. Update the existing Web creation request to supply initial repository metadata; do not add
+   repository-management UI.
+4. Add `--path` Git bootstrap to `ProjectCommands`; replace name-only creation specs with
+   fake-Git bootstrap specs.
+5. Align `RepositoryCommands`, the repository table renderer, and CLI specs with the approved
+   command surface and output behavior.
+6. Verify with the focused server and CLI test suites, then run the required repository build
+   and test commands from `AGENTS.md`.
+
+Rollback is a code revert. The upgrade is idempotent and only adds or normalizes
+`isDefault` flags within existing serialized declarations; it does not alter schema, Project
+identity, Issue identity, Git URL, base branch, name, or declaration order.
 
 ## Open Questions
 
-- 是否需要在 migration 中把无法修复的 legacy Project 标记为 archived/readonly，而不是完全阻塞启动？（当前提案要求停止升级，但可讨论降级体验。）
-- `repo update` 失败后，CLI table 输出是否应该展示当前仓库状态以方便用户确认？
-- 仓库资源名是否引入限制字符集（如 DNS-label 或仅 `[a-zA-Z0-9_-]`）？当前 spec 只要求非空，可考虑与 Project name 规则保持一致。
-- Web UI 是否需要同步隐藏旧的 project-level path/branch 展示，避免用户困惑？本 issue 声明不加 Web 管理能力，但展示层可能需要小调整。
+- None blocking. Repository declarations are deliberately prepared as stable names for later
+  work, but this design does not define how any Issue references them.
