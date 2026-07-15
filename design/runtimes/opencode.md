@@ -328,9 +328,13 @@ Mohist 跟随这些真实内部调用路径，而不是假设每个生成的 V2 
 
 ## 实装差距
 
-当前 Runner 仍使用 `@agentclientprotocol/sdk`、`mohist/acp-agent`、ACP liveness 与 log
-heuristics、CLI model parsing、private compaction metadata 和 `acpSessionId` wire fields。
-当前 Compact 仍合成 Mohist 侧 transcript state，而不是请求 Runtime 压缩物理 Session；
-Reset 会清空 runtime binding，并让下一次任务创建新的物理 Session。Workflow schema 也仍把
-`expect` 放在 `with` 内；内置 profile 中写在 task 顶层的 `expect` 被当前解析器静默
-丢弃，从未生效。这些路径是相对目标设计的实现债务，必须在同一次替换中移除。
+issue-407 已落地 OpenCode 替换所需的稳定身份与命令契约：Compact 保持当前 Runtime
+绑定；Reset 只在 Session 空闲且 expected binding 仍为 current 时应用 replacement；
+两者的 API 与 CLI 响应都保持同一稳定 `sessionId`。Canonical wire 使用 `runtime` +
+`runtimeSessionId`，当前 Runtime Session 缺失时命令明确失败并提示 Reset。
+
+Runtime adapter 替换仍由 issue-409 负责。当前 Runner 仍使用
+`@agentclientprotocol/sdk`、`mohist/acp-agent`、ACP liveness 与 log heuristics、CLI model
+parsing 和 private compaction metadata；正文中的 OpenCode SDK Session 调用尚未接入。
+Workflow schema 也仍把 `expect` 放在 `with` 内，内置 profile 中写在 task 顶层的
+`expect` 被当前解析器静默丢弃，从未生效。

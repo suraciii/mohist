@@ -64,3 +64,9 @@
 - Follow-up `session.input` events carry the physical binding as `runtimeSessionId` for both Workflow and generic targets; `acpSessionId` is absent.
 - Canonical Cancel accepts Workflow and Agent-launch sessions, interrupts only the current turn, and leaves the stable sessionId, source, runtime binding, transcript, and lineage unchanged. It remains outside the Compact/Reset idle boundary.
 - Verification: focused server Follow-up/Cancel specs passed 41/41; runner Follow-up specs passed 27/27 and Cancel specs passed 9/9; runner source and test typechecks passed; focused CLI session specs passed 98/98.
+
+## T-009
+
+- The three implementation-gap footnotes now identify issue-407's stable AgentSession identity, Compact binding preservation, guarded Reset replacement, canonical `runtime` + `runtimeSessionId` wire, and explicit missing-runtime Reset hint as landed behavior.
+- The remaining OpenCode adapter and SDK integration gap stays attributed to issue-409; the spec bodies were not changed. The product CLI reference uses only product/domain terms and does not expose handler, grain, or wire-field details.
+- Verification: focused Workflow/named-agent CLI session specs passed 62/62; documentation assertions and `git diff --check` passed.

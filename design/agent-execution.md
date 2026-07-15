@@ -167,8 +167,13 @@ Runtime adapter 接收由 Mohist 定义的回合 / Session 请求并返回规范
 
 ## 实装差距
 
-当前代码已经分离 Agent、AgentJob 与 AgentSession aggregate，dispatch 也区分 Workflow
-和 AgentJob 所有权，但术语和 adapter 边界仍泄漏旧模型：`GenericAgentSession` 表示
-Agent launch 来源的 Session，AgentJob 默认使用由 Workflow 拥有的 `mohist/acp-agent`
-Action，ACP Action 自身还按两种所有者分支。OpenCode 替换必须让 AgentJob 走由 Agent
-拥有的 execution request，同时让两条路径共享 `OpenCodeRuntime`。
+issue-407 已落地 AgentSession 的稳定身份和统一 Session 命令契约：Workflow 与 Agent
+launch 来源解析到同一种规范 AgentSession；Compact 保持当前 Runtime 绑定；Reset 只在
+Session 空闲且 expected binding 仍为 current 时替换绑定。API 与 CLI 响应保持同一稳定
+`sessionId`，wire 以 `runtime` + `runtimeSessionId` 表示物理绑定；当前 Runtime Session
+缺失时，命令明确失败并提示 Reset。
+
+OpenCode adapter 替换仍是实装差距：`GenericAgentSession` 术语尚未收敛，AgentJob 仍默认
+使用由 Workflow 拥有的 `mohist/acp-agent` Action，ACP Action 自身还按两种所有者分支。
+issue-409 需要让 AgentJob 走由 Agent 拥有的 execution request，同时让两条路径共享
+`OpenCodeRuntime`。

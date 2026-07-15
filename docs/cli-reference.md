@@ -408,9 +408,10 @@ mo update runner                    仅升级执行器
 - 当前 `mo issue workflow config` 仍支持 inline template 和 Issue Prompt；目标命令面只
   保留 Profile 选择与 Issue Variables。
 - **查单条动词未收敛**：本文的目标动词是 `get`，当前实装中 issue / project / epic / agent 等主要资源用的是 `show`（`get` 已用于 skills、template、config 等）。操作类文档（快速上手、Issue 管理等）按当前实装写 `show`，保证示例可直接运行；动词收敛到 `get` 随各命令组改进 issue 推进。
-- `mo agent session compact/reset` 尚未交付；当前只有 Workflow 来源的 Session 提供
-对应 CLI 入口。两种来源会随统一 AgentSession 模型和 `mohist/opencode` 替换一起
-对齐。
+- issue-407 已交付两种来源统一的 Compact / Reset 命令面。`compact` 原地压缩并保持
+  当前 Runtime Session；`reset` 只在 Session 空闲且原绑定仍为当前绑定时建立没有旧上下文的
+  Runtime Session。两者都保持并返回同一稳定 Session ID。当前 Runtime Session 不存在时，
+  命令会明确失败并提示 Reset。
 - 其它命令面随各命令组改进 issue 进一步对齐到本文。
 
 ## 典型工作流脚本
