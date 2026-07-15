@@ -3,7 +3,7 @@
 Profile = **template**（选择哪个 `WorkflowDefinition`）+ **variables**（`VariableBundle`）。
 
 Prompt 不属于 Profile，见 [`../prompt-management.md`](../prompt-management.md)。Action
-输入输出见 [`actions.md`](actions.md)，内置 Workflow 见 [`builtin-workflows/`](builtin-workflows/README.md)。
+输入输出见 [`actions.md`](actions.md)，内置 Workflow 见 [`builtin-workflows.md`](builtin-workflows.md)。
 
 ## 架构
 
@@ -20,6 +20,19 @@ WorkflowGrain -> IWorkflowProfileProvider（port，只使用 Workflow 类型）
 - `WorkflowRun` 保存执行状态与 Profile 身份，不保存 Profile body，也没有
   `RuntimeVariables`。
 - `TaskRun.Output` = `JsonElement?`，与 `WithInput` 对齐。
+
+## 与 Issue 的依赖方向
+
+`Issue → Workflow` 单向。Workflow 不认识 issue，只操作抽象的 run、
+`WorkflowDefinition` 与 variables。
+
+| 概念 | 归属 |
+|---|---|
+| `WorkflowDefinition`（type + engine） | Workflow（`Workflow/Domain/Definition/`） |
+| workflow profile（template + variables） | Issue / Project（它们的配置） |
+| prompts | Project Space（见 [`../prompt-management.md`](../prompt-management.md)） |
+| 默认 `WorkflowDefinition` 内容（yaml） | application config（composition root） |
+| projection（attention 等） | Issue（只读消费） |
 
 ## VariableBundle
 
@@ -94,19 +107,14 @@ Task-level `expect` 使用相同的 template lookup 规则，但单独展开；�
 
 ## Runtime 写入：setVars
 
-Task 成功后，通过 `setVars` 把 Action output 投影到 Run Profile：
+Task 成功后，通过 `setVars` 把 Action output 投影到 Run Profile。投影规则（path
+语义、只能修改 `vars.*`、失败即 task 失败）以 [`actions.md`](actions.md) 为准。
+Profile 侧事实：
 
-```yaml
-setVars:
-  change.id: output.changeId
-```
-
-- 左侧是 `vars` 下的 path，右侧是 Action output 的 JSON path。
 - 只 patch `workflow_run_profile.Variables`，不修改 Project / Issue Profile，也不修改
   `WorkflowRun` 执行状态。
 - Runner 先从 output 提取值，再调用
-  `PATCH /api/workflow-runs/{id}/workflow-profile/variables`，最后报告 task complete；
-  任一步失败都让 task 失败。
+  `PATCH /api/workflow-runs/{id}/workflow-profile/variables`，最后报告 task complete。
 
 ## 读取 API
 
@@ -126,3 +134,10 @@ issue profile       /projects/:p/issues/:n/workflow-profile
 run profile         /workflow-runs/:id/workflow-profile
 effective           /workflow-runs/:id (/yaml, /variables/effective)
 ```
+
+## 实装差距
+
+默认 `WorkflowDefinition` 内容应归属 application config 层：
+`mohist-local.workflow.yaml` 已移至 `Workflow/Services/Profiles/`，但 Issue 侧仍留有
+`MohistWorkflow` 薄封装（`Issue/Services/WorkflowProfiles/MohistWorkflow.cs`），待收编
+以消除跨 context 反向依赖。

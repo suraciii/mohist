@@ -94,9 +94,8 @@ Events append in same transaction as state save. Dispatcher is the sole notifier
 Mohist does not own AI chat. Explore belongs to external agent skills (mohist-explore, etc.).
 
 External skills read projects, call `mo` CLI, write files. Never touch Mohist DB.
-Runner may adapt OpenCode or another runtime for Workflow TaskRun and AgentJob work. The
-runtime adapter and `mohist/opencode` Action are not Mohist Agent product entities. Concept
-ownership is defined in [`agent-execution.md`](agent-execution.md).
+Runner may adapt OpenCode or another runtime for Workflow TaskRun and AgentJob work.
+Agent/Session ownership invariants: [`agent-execution.md`](agent-execution.md).
 
 ## Constraints
 

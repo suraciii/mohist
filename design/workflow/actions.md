@@ -102,23 +102,17 @@ Recovery `when` 可以匹配任意字段，例如 `errorCode=base-moved`、`prom
 
 ## OpenCode Action
 
-`mohist/opencode` 是 Runtime 特有的 Action。Workflow 直接使用时形成 Inline Agent；
-Action 本身不是 Mohist Agent，也不解析 Agent 定义。Runtime 已由 `uses` 选择，因此输入
+`mohist/opencode` 是 Runtime 特有的 Action；它与 Agent / Session 的所有权关系（直接
+使用即 Inline Agent、不解析 Agent 定义等不变量）见
+[`../agent-execution.md`](../agent-execution.md)。Runtime 已由 `uses` 选择，因此输入
 不需要 `kind` 或 `type` discriminator。
 
-```yaml
-uses: mohist/opencode
-with:
-  session: plan
-  prompt: ${{ prompts.proposal }}
-  options: ${{ vars.agent }}
-```
-
 Action 只接收展开后的 `prompt`、可选逻辑 `session` 名称和可选 OpenCode 模型
-`options`。`options` 中除 `model` 与 `variant` 之外的键被忽略并记入诊断，不使回合
-失败。Workflow 把 `expect` 作为 task 完成契约单独提供。Action 不会把
-`vars.agent` 当作隐藏 fallback。除非 expectation 命中 promise marker，否则 output 为
-`null`；命中时只返回：
+`options`（`model` / `variant`）。`options` 通常由 `${{ vars.agent }}` 整值展开而来，
+模板展开语义与示例见 [`profile.md`](profile.md)。`options` 中除 `model` 与 `variant`
+之外的键被忽略并记入诊断，不使回合失败。Workflow 把 `expect` 作为 task 完成契约
+单独提供。Action 不会把 `vars.agent` 当作隐藏 fallback。除非 expectation 命中
+promise marker，否则 output 为 `null`；命中时只返回：
 
 ```json
 { "promise": "PASS" }
@@ -128,8 +122,7 @@ Action 只接收展开后的 `prompt`、可选逻辑 `session` 名称和可选 O
 Runtime 都不产生它。
 
 Runtime Session 身份、model、usage、transcript、诊断信息和 expectation 明细保存在
-各自所属模型中，不复制到 Action output。概念所有权见
-[`../agent-execution.md`](../agent-execution.md)，OpenCode 实现见
+各自所属模型中，不复制到 Action output。OpenCode 实现见
 [`../runtimes/opencode.md`](../runtimes/opencode.md)。
 
 ## GitHub PR Action
@@ -147,4 +140,4 @@ Workflow Action。
 checks 失败时返回 `errorCode: pr-checks-failed`。Action 不做隐式自动修复，profile 必须
 声明显式 recovery。
 
-完整 task graph 见 [`builtin-workflows/github-pr.md`](builtin-workflows/github-pr.md)。
+完整 task graph 见 [`builtin-workflows.md`](builtin-workflows.md)。

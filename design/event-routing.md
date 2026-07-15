@@ -5,9 +5,8 @@ status: wip
 # Agent 事件路由（Routing Table）
 
 Mohist Agent 通过项目级**事件路由表**自动响应系统事件，取代手动 launch。
-本文的 Agent 均指 Mohist Agent（Named Agent），不是 Inline Agent 或 OpenCode
-runtime 的 `agent` 选项。生命周期所有权与 Session 关系见
-[`agent-execution.md`](agent-execution.md)；信封协议与匹配表达式语法见
+本文的 Agent 均指 Mohist Agent（Named Agent，术语与所有权不变量见
+[`agent-execution.md`](agent-execution.md)）；信封协议与匹配表达式语法见
 [`event-protocol.md`](event-protocol.md)。
 
 本设计取代早期「订阅 + 优先级仲裁」模型（AgentSubscription + Arbitrate），

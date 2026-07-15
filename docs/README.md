@@ -48,13 +48,15 @@
 > 在你的机器上长跑，以及出问题时怎么办。
 
 - [Self-host 部署](self-host.md) —— NAS / 家用服务器 / 笔记本长跑
+- [Hermes 通知](hermes-notifications.md) —— 审批点、失败、完成推送到你的聊天工具
 - [故障恢复](troubleshooting.md) —— 失败、blocked、drift 怎么办
 
 ## 板块 7：产品方案（WIP）
 
 > 还没实装、但已对齐需求的产品方案。**这些功能当前不存在**，文档记录的是方向与用户需求，不是可用能力。落地后会搬到上面的板块并去掉 WIP 标记。
 
-- [Agent 事件路由](agent-subscriptions.md) —— 项目级路由表：一条表达式订阅任何实体的事件，按序触发 Agent 响应
+- [Agent 事件路由](event-routing.md) —— 项目级路由表：一条表达式订阅任何实体的事件，按序触发 Agent 响应
+- [移动端 PWA 与推送](mobile-pwa.md) —— 手机上看进度、收推送的方案记录（暂缓）
 
 ## 写作约束
 
@@ -64,6 +66,7 @@
 - **改前先核对差距**：动手修改任何事实陈述前，先看文内「实装差距」小节是否已标注该处未对齐——避免把 spec 改回现状。
 - **WIP 产品方案**：尚未对齐需求、还在探索方向的产品方案收录在「板块 7」，用 frontmatter `status: wip-not-implemented` 标注，用「将支持 / 计划 / （开放）」等表述。需求对齐、spec 定稿后搬到对应板块，移除 WIP 标记。
 - **语言统一**：正文使用中文；产品规范术语、配置字段、命令和代码符号保留原名。
+- **不用技术语言**：正文不出现 API 端点、字段名、组件类名、源码路径——这些属于 `design/`。唯一例外：文末可以有一行「对应源码：」页脚，指向实现入口。
 - **术语一致**：Project / Issue / Workflow / Epic / Inline Agent / Mohist Agent / AgentSession / Skill 等术语在各篇保持一致。
 
 发现过时描述欢迎提 issue。

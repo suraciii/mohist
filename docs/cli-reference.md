@@ -17,8 +17,7 @@
 
 资源子命令的 `-o` 与 `--project` 覆盖范围：
 
-- `list`、`show` 和 session 子命令支持 `-o table|json`。
-- `list` 支持 `-o table|json`；所有子命令支持 `--project`/`--project-id`。
+- `list`、`get` 和 session 子命令支持 `-o table|json`。
 - 项目作用域命令通常接受 `--project <name>` 和 `--project-id <id>`，但**并非**所有子命令都同时接受两者——`--project` 走名解析、`--project-id` 走 id 解析，缺哪个就报参数错。具体每个命令的 flag 集合以 `mo <命令> --help` 为准。
 
 `--project` 与 `--project-id` 互斥——同一个命令不能同时传两个，会本地失败、不发请求。
@@ -365,9 +364,11 @@ mo update runner                    仅升级执行器
 
 ## 实装差距
 
-`mo agent session compact/reset` 尚未交付；当前只有 Workflow 来源的 Session 提供
+- **查单条动词未收敛**：本文的目标动词是 `get`，当前实装中 issue / project / epic / agent 等主要资源用的是 `show`（`get` 已用于 skills、template、config 等）。操作类文档（快速上手、Issue 管理等）按当前实装写 `show`，保证示例可直接运行；动词收敛到 `get` 随各命令组改进 issue 推进。
+- `mo agent session compact/reset` 尚未交付；当前只有 Workflow 来源的 Session 提供
 对应 CLI 入口。两种来源会随统一 AgentSession 模型和 `mohist/opencode` 替换一起
-对齐。其它命令面随各命令组改进 issue 进一步对齐到本文。
+对齐。
+- 其它命令面随各命令组改进 issue 进一步对齐到本文。
 
 ## 典型工作流脚本
 

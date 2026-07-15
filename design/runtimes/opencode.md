@@ -2,9 +2,9 @@
 
 ## 决策
 
-`mohist/opencode` 是直接基于 `@opencode-ai/sdk/v2` 实现的 Runtime 特有 Action。
-Workflow 直接使用它时形成 Inline Agent；Action 本身不是 Agent，也不会解析 Mohist
-Agent。完整概念和生命周期模型见 [`agent-execution.md`](../agent-execution.md)。
+`mohist/opencode` 是直接基于 `@opencode-ai/sdk/v2` 实现的 Runtime 特有 Action。它与
+Agent / Session 的所有权模型（Inline Agent、工作所有者、共享 Runtime 不制造依赖等
+不变量）见 [`agent-execution.md`](../agent-execution.md)。
 
 ACP adapter 直接移除，不保留 fallback。现有 AgentJob 执行也必须离开 ACP，通过
 由 Agent 拥有的 executor 使用同一个 `OpenCodeRuntime` 能力，而不是依赖 Workflow Action
@@ -43,8 +43,8 @@ Runtime。OpenCode 的默认 agent、tools、plugins、permissions 与自动压�
 仍含遗留键（如 `type`、liveness 配置）的已持久化 `vars.agent` 可以继续绑定，直到
 写入路径完成收敛。`model` 或 `variant` 存在但不是字符串时，返回 invalid input。
 
-Action 不读取 Workflow variables。`TaskWithExpander` 在 dispatch 前把
-`options: ${{ vars.agent }}` 展开为 object，展开后的 Action Input 是本次执行唯一的配置
+Action 不读取 Workflow variables。`with` 在 dispatch 前完成模板展开（语义与示例见
+[`profile.md`](../workflow/profile.md)），展开后的 Action Input 是本次执行唯一的配置
 事实。`variant` 可以和 `model` 一起提供，也可以单独提供；省略 `model` 时，OpenCode
 把它应用到当前或默认 model。
 

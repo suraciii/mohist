@@ -149,7 +149,7 @@ mo issue approve 42     # 通过，进下一阶段
 mo issue reject 42 --message "Missing error handling in proposal"  # 打回，Inline Agent 重做当前阶段
 ```
 
-Workflow 不关心审批者是 owner、Mohist Agent 还是脚本。你手动处理时，`reject` 必须带理由，用 `--message`（或 `-m`）说明需要重做什么。需要更长上下文时，可以先 add comment，再用简短 reject message 指向它：
+`reject` 必须带理由，用 `--message`（或 `-m`）说明需要重做什么（审批者可以是人也可以是自动化，见 [核心概念 · Approval](concepts.md#approval审批)）。需要更长上下文时，可以先 add comment，再用简短 reject message 指向它：
 
 ```bash
 mo issue comment add 42 --body "Reject because: missing error handling in proposal"
@@ -191,7 +191,7 @@ mo issue force-stop 42
 # 永久停止（stop）—— terminal，不能 resume
 mo issue stop 42
 
-# 完全关闭（close）—— issue 进入终态
+# 完全关闭（close）—— issue 进入 cancelled 终态
 mo issue close 42
 
 # 重新打开（reopen）—— 已关闭的 issue 重新激活
@@ -202,7 +202,7 @@ mo issue reopen 42
 |---|---|---|
 | `force-stop` | 暂时停止、Inline Agent 卡住、想保留恢复入口 | 终止当前回合，workflow 进入可 `resume` 的 paused 状态 |
 | `stop` | 确定不再继续这次 workflow | 永久停止 workflow run，terminal，不能 resume |
-| `close` | 这个 issue 不做了 | 进入 closed 终态，可 reopen |
+| `close` | 这个 issue 不做了 | 进入 cancelled 终态，可 reopen |
 | `reopen` | 误关了，或想再做 | 回到 backlog |
 
 ## 恢复（失败后怎么办）
@@ -244,37 +244,7 @@ mo issue update 42 --label kind=bug --label area=web
 
 ## CLI 完整命令一览
 
-```
-mo issue create <title> [--repo <仓库>] [--parent <编号>] [options]
-mo issue list [--repo <仓库>] [--parent <编号>] [options]
-mo issue show <number>
-mo issue update <number> [options]
-mo issue start <number>
-mo issue approve <number>
-mo issue reject <number> --message <message>
-mo issue close <number>
-mo issue reopen <number>
-mo issue retry <number>
-mo issue rerun <number>
-mo issue rerun <number> --from-stage <stage>
-mo issue force-stop <number>
-mo issue resume <number>
-mo issue stop <number>
-mo issue rebase <number>
-mo issue archive <number>
-mo issue unarchive <number>
-mo issue comment add <number> [--body <text>|--body-file <path>]
-mo issue prereq add <number> <prereq-number>
-mo issue prereq remove <number> <prereq-number>
-mo issue logs <number>
-mo issue events <number>
-mo issue diff <number>
-mo issue commits <number>
-mo issue sessions <number>     # AgentSession 记录
-mo issue workflow [options]    # workflow 子命令
-```
-
-完整选项看 `mo issue <command> --help`。
+`mo issue` 的完整命令面见 [CLI 参考 · Issue](cli-reference.md#issue工作项)（命令面的唯一 spec，本篇只保留操作场景示例）。完整选项看 `mo issue <command> --help`。
 
 ---
 

@@ -121,7 +121,7 @@ Plan 完成后，issue 会停在 **awaiting approval** 状态，表示 workflow 
 
 ## 9. 审批 Plan
 
-进入 issue 详情页，看 `LatestArtifactsPanel` 里的产物：
+进入 issue 详情页，看最新产物面板里的产物：
 
 - `proposal.md` — Inline Agent 对这个需求的理解
 - `design.md` — 设计决策

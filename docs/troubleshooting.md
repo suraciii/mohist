@@ -18,13 +18,15 @@ mo issue show <number>
 
 ## 健康度对照表
 
-| Health | 含义 | 你该做什么 |
-|---|---|---|
-| `active` | 正在跑 | 等 |
-| `paused` | 等审批决策或手动 stop | Approve / Reject / Resume |
-| `blocked` | 失败了，需要介入 | 看下面"恢复动作" |
-| `cancelled` | 终态（你 close 了） | Reopen（如需要） |
-| `done` | 终态（完成了） | 验收 / 归档 |
+各 health 状态的语义见 [工作流详解 · 健康度](the-workflow.md#健康度health)。本篇只关心每个状态对应的动作：
+
+| Health | 你该做什么 |
+|---|---|
+| `active` | 等 |
+| `paused` | Approve / Reject / Resume |
+| `blocked` | 看下面"恢复动作" |
+| `cancelled` | Reopen（如需要） |
+| `done` | 验收 / 归档 |
 
 ## 恢复动作速查
 
@@ -94,7 +96,7 @@ mo issue sessions <n>   # 看 AI 的挣扎过程
 
 **你的选择**：
 
-- 等 convergence 自动修复（看 WorkflowConvergencePanel）
+- 等 convergence 自动修复（看收敛面板）
 - Reject 让 AI 重新 build
 - Approve 接受现状（review 的问题不致命）
 

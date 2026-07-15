@@ -6,7 +6,7 @@ status: wip
 
 本文定义 Mohist 事件信封的统一协议：任何实体的关键事件都可以被同一个路由器、
 同一种表达式订阅到。事件的持久化与分发机制见 [`eventbus.md`](eventbus.md)；
-Agent 侧的消费面（路由表）见 [`agent-subscriptions.md`](agent-subscriptions.md)。
+Agent 侧的消费面（路由表）见 [`event-routing.md`](event-routing.md)。
 
 ## 三个正交轴
 
@@ -127,7 +127,7 @@ event.type == "com.mohist.issue.completed" && has(event.epicid)
 一个路由器（`eventbus.md` 的单分发器），两类消费者，同一协议：
 
 - **系统消费者**：编译期注册的 `[Subscription]` handler；
-- **用户消费者**：Agent 路由表（见 `agent-subscriptions.md`）。
+- **用户消费者**：Agent 路由表（见 `event-routing.md`）。
 
 两者共用同一 matcher 语义。**对称性即验收标准**：若某事件系统 handler 能路由到
 而用户表达式订不到，即协议破损。
@@ -145,5 +145,6 @@ event.type == "com.mohist.issue.completed" && has(event.epicid)
 
 - `projectid` 已普遍印制；`issueid` 仅 workflow / issue 事件有；`issue`（number）、
   `epicid`、`workflowrunid` 等均未印。
-- 订阅过滤为三个固定字段（Type 通配 + Source/Subject 精确），表达式未实装。
+- 订阅过滤为三个固定字段（Type 通配 + Source/Subject 精确），表达式未实装；
+  `[Subscription]` 当前的 Type glob 语法见 [`eventbus.md`](eventbus.md) 的实装差距小节。
 - `EventCatalog` 仍是纯常量表，无必印属性声明与 conformance 测试。

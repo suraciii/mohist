@@ -69,7 +69,7 @@ Draft → Plan → Build → Check → Integrate → Done
 - **Check** — Inline Agent review 自己的产出
 - **Integrate** — 合并分支回 base branch
 
-某些阶段（默认是 Plan 和 Check）完成后会进入**审批点**。Workflow 只关心是否收到 approve / reject 决策，不关心审批者是 owner、Mohist Agent 还是脚本。
+某些阶段（默认是 Plan 和 Check）完成后会进入**审批点**，等待 approve / reject 决策；审批者不限定是谁，见下文 [Approval（审批）](#approval审批)。
 
 详见 [工作流详解](the-workflow.md)。
 
@@ -78,7 +78,8 @@ Draft → Plan → Build → Check → Integrate → Done
 Workflow 不是写死的。产品模型支持多个 **Workflow Profile**，每个 issue 可以选一个用。
 
 当前内置 profile：
-- `mohist/local` — 完整 5 阶段流程（默认）
+- `mohist/local` — 完整 5 阶段流程，本地合并（默认）
+- `mohist/github-pr` — Integrate 阶段走 GitHub PR
 
 详见 [Workflow Profile](workflow-profiles.md)。
 
@@ -124,19 +125,7 @@ Mohist 分发两个 Skill：
 | `mohist` | 在外部 agent 里操作 Mohist（创建 issue、审批、查状态） |
 | `mohist-explore` | 从产品视角探索需求，产出可进入 workflow 的结构化 issue |
 
-工作流：
-
-```
-你在 OpenCode/Claude Code 里探索需求
-  ↓（mohist-explore skill 引导）
-产出结构化 issue body
-  ↓（mohist skill 创建 issue）
-Issue 进入 Mohist workflow
-  ↓
-Inline Agent 按 workflow 执行到 Done
-```
-
-详见 [Skill 机制](skills.md)。
+典型路径：在外部 agent 里用 `mohist-explore` 探索需求、产出结构化 issue body，再用 `mohist` 创建 issue，进入 Mohist workflow 执行到 Done。完整工作流见 [Skill 机制](skills.md)。
 
 ## 它们怎么咬合
 
