@@ -53,13 +53,14 @@ public static partial class IssueRoutes
             string name,
             AgentSessionQuerier sessions,
             IGrainFactory grains,
+            ISessionCommandDispatcher commands,
             CancellationToken ct) =>
         {
             var project = GetRequiredProject(ctx);
             var sessionId = await sessions.ResolveIssueSessionIdAsync(project.Id, number, name, ct);
             if (sessionId is null) return ApiResults.NotFound($"Session {name} not found");
 
-            return await AgentSessionRecoveryRoutes.ExecuteCompactAsync(sessionId, grains);
+            return await AgentSessionRecoveryRoutes.ExecuteCompactAsync(sessionId, grains, commands, ct);
         });
 
         group.MapPost("/{number:int}/sessions/{name}/reset", async (
@@ -69,6 +70,7 @@ public static partial class IssueRoutes
             string name,
             AgentSessionQuerier sessions,
             IGrainFactory grains,
+            ISessionCommandDispatcher commands,
             CancellationToken ct) =>
         {
             var project = GetRequiredProject(ctx);
@@ -78,7 +80,8 @@ public static partial class IssueRoutes
             return await AgentSessionRecoveryRoutes.ExecuteResetAsync(
                 sessionId,
                 grains,
-                $"Session {name} not found");
+                commands,
+                ct);
         });
 
         group.MapPost("/{number:int}/sessions/{name}/followup", async (

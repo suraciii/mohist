@@ -6,6 +6,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Runner.Grains;
+using Mohist.Server.Runner.Services.SignalR;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.SpecTests.Support;
@@ -26,6 +27,23 @@ public class AgentSessionRecoveryApiSpecs
     {
         _fixture = fixture;
         _client = fixture.Client;
+
+        var runnerHub = fixture.Services.GetRequiredService<RecordingRunnerHubContext>();
+        runnerHub.Clear();
+        runnerHub.SetInvocationResponseFactory("SessionCommand", arguments =>
+        {
+            var request = Assert.IsType<SessionCommandRequest>(Assert.Single(arguments));
+            return request.Command switch
+            {
+                SessionCommandKind.Compact => new SessionCommandResult(Ok: true),
+                SessionCommandKind.Reset => new SessionCommandResult(
+                    Ok: true,
+                    RuntimeSessionId: $"{request.RuntimeSessionId}-replacement"),
+                _ => new SessionCommandResult(Ok: false, Error: SessionCommandError.Unavailable),
+            };
+        });
+        fixture.Services.GetRequiredService<RunnerConnectionTracker>()
+            .Register(_runnerId, $"connection-{_runnerId}");
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -45,6 +63,18 @@ public class AgentSessionRecoveryApiSpecs
         Assert.False(data.TryGetProperty("agentSessionId", out _));
         Assert.Equal("compact", data.GetProperty("operation").GetString());
         Assert.True(data.GetProperty("wasCompacted").GetBoolean());
+
+        var request = AssertSingleSessionCommandInvocation();
+        Assert.Equal(SessionCommandKind.Compact, request.Command);
+        Assert.Equal(currentSession.Id, request.SessionId);
+        Assert.Equal("opencode", request.Runtime);
+        Assert.Equal(currentSession.Id, request.RuntimeSessionId);
+        Assert.Equal(_runnerId, request.RunnerId);
+        Assert.Equal($"/workspaces/{project.Id}", request.WorkDir);
+        Assert.Null(request.ExpectedRuntimeSessionId);
+
+        var persisted = await _fixture.Grains.GetGrain<IAgentSessionGrain>(currentSession.Id).GetAsync();
+        Assert.Equal(currentSession.Id, persisted?.AgentSessionId);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -62,6 +92,7 @@ public class AgentSessionRecoveryApiSpecs
         Assert.Equal("session_active", doc.RootElement.GetProperty("code").GetString());
         Assert.Contains("active", doc.RootElement.GetProperty("error").GetString() ?? string.Empty, StringComparison.OrdinalIgnoreCase);
         Assert.Equal(currentSession.Id, doc.RootElement.GetProperty("details").GetProperty("sessionId").GetString());
+        Assert.Empty(RunnerHub.Invocations);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -93,12 +124,71 @@ public class AgentSessionRecoveryApiSpecs
         Assert.False(data.TryGetProperty("agentSessionId", out _));
         Assert.Equal("reset", data.GetProperty("operation").GetString());
         Assert.False(data.GetProperty("wasCompacted").GetBoolean());
-        Assert.False(data.TryGetProperty("agentSessionId", out _));
 
-        using var runnerSession = await _client.GetAsync(RunnerSessionPath(currentSession));
-        Assert.Equal(HttpStatusCode.OK, runnerSession.StatusCode);
-        var runnerData = await runnerSession.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.False(runnerData.TryGetProperty("acpSessionId", out _));
+        var request = AssertSingleSessionCommandInvocation();
+        Assert.Equal(SessionCommandKind.Reset, request.Command);
+        Assert.Equal(currentSession.Id, request.SessionId);
+        Assert.Equal(currentSession.Id, request.RuntimeSessionId);
+        Assert.Equal(currentSession.Id, request.ExpectedRuntimeSessionId);
+
+        var persisted = await _fixture.Grains.GetGrain<IAgentSessionGrain>(currentSession.Id).GetAsync();
+        Assert.Equal($"{currentSession.Id}-replacement", persisted?.AgentSessionId);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
+    public async Task CompactEndpoint_HandlerConflict_ReturnsIdleBoundaryConflict()
+    {
+        var (project, issue, _, currentSession) = await CreateAndStartSessionAsync(
+            "compact-handler-conflict",
+            sessionName: "plan",
+            attachIdle: true);
+        RunnerHub.SetInvocationResponse(
+            "SessionCommand",
+            new SessionCommandResult(Ok: false, Error: SessionCommandError.Conflict));
+
+        using var response = await _client.PostAsync(
+            $"/api/projects/{project.Id}/issues/{issue.Number}/sessions/plan/compact",
+            content: null);
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal("session_active", doc.RootElement.GetProperty("code").GetString());
+        Assert.Equal(currentSession.Id, doc.RootElement.GetProperty("details").GetProperty("sessionId").GetString());
+        Assert.Equal(SessionCommandKind.Compact, AssertSingleSessionCommandInvocation().Command);
+        Assert.Equal(currentSession.Id, (await _fixture.Grains
+            .GetGrain<IAgentSessionGrain>(currentSession.Id)
+            .GetAsync())?.AgentSessionId);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
+    public async Task ResetEndpoint_HandlerMissing_ReturnsRuntimeSessionMissingWithResetHint()
+    {
+        var (project, issue, _, currentSession) = await CreateAndStartSessionAsync(
+            "reset-handler-missing",
+            sessionName: "build",
+            attachIdle: true);
+        RunnerHub.SetInvocationResponse(
+            "SessionCommand",
+            new SessionCommandResult(Ok: false, Error: SessionCommandError.Missing));
+
+        using var response = await _client.PostAsync(
+            $"/api/projects/{project.Id}/issues/{issue.Number}/sessions/build/reset",
+            content: null);
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal("runtime_session_missing", doc.RootElement.GetProperty("code").GetString());
+        var details = doc.RootElement.GetProperty("details");
+        Assert.Equal(currentSession.Id, details.GetProperty("sessionId").GetString());
+        Assert.Equal("reset", details.GetProperty("hint").GetString());
+        Assert.Contains("Reset", doc.RootElement.GetProperty("error").GetString(), StringComparison.Ordinal);
+        Assert.Equal(currentSession.Id, (await _fixture.Grains
+            .GetGrain<IAgentSessionGrain>(currentSession.Id)
+            .GetAsync())?.AgentSessionId);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -115,6 +205,7 @@ public class AgentSessionRecoveryApiSpecs
         using var doc = JsonDocument.Parse(body);
         Assert.Equal("session_active", doc.RootElement.GetProperty("code").GetString());
         Assert.Equal(currentSession.Id, doc.RootElement.GetProperty("details").GetProperty("sessionId").GetString());
+        Assert.Empty(RunnerHub.Invocations);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -424,6 +515,17 @@ public class AgentSessionRecoveryApiSpecs
             .ToArray();
     }
 
+    private RecordingRunnerHubContext RunnerHub =>
+        _fixture.Services.GetRequiredService<RecordingRunnerHubContext>();
+
+    private SessionCommandRequest AssertSingleSessionCommandInvocation()
+    {
+        var invocation = Assert.Single(RunnerHub.Invocations);
+        Assert.Equal($"connection-{_runnerId}", invocation.ConnectionId);
+        Assert.Equal("SessionCommand", invocation.Method);
+        return Assert.IsType<SessionCommandRequest>(Assert.Single(invocation.Arguments));
+    }
+
     private async Task<AgentSessionInfo> CreateAgentLaunchSessionAsync(
         ProjectDto project,
         string name,
@@ -431,11 +533,12 @@ public class AgentSessionRecoveryApiSpecs
         bool idle)
     {
         var sessionId = $"agent-recovery-{Guid.NewGuid():N}";
+        var workDir = $"/workspaces/{project.Id}";
         var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
         await grain.OpenAsync(new OpenAgentSessionCommand(
             RunnerId: _runnerId,
             AgentRuntime: "opencode",
-            WorkDir: project.Path,
+            WorkDir: workDir,
             Model: null,
             Metadata: GenericAgentSessionMetadata.Metadata(new GenericAgentSessionContext(
                 ProjectId: project.Id,
@@ -447,7 +550,7 @@ public class AgentSessionRecoveryApiSpecs
             await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand(
                 AgentSessionId: sessionId,
                 Model: null,
-                WorkDir: project.Path,
+                WorkDir: workDir,
                 ChangeDir: null,
                 ProcessPid: 1234));
         }

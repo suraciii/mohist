@@ -34,3 +34,11 @@
 - Reset retains T-003's current-binding pass-through until T-005 supplies SessionCommandResult.RuntimeSessionId. Followup and Cancel already preserve canonical AgentSession identity; the Workflow followup runner target remains source-shaped for transport compatibility and is outside recovery routing.
 - Recovery route specs create Agent-launch-labeled sessions with GenericAgentSessionMetadata directly. Using the product Agent launcher made idle recovery setup nondeterministic because its dispatched AgentJob continued recording activity; direct grain setup keeps the route spec isolated and fake-time deterministic.
 - Verification: pre-refactor workflow recovery specs passed 14/14; focused recovery API specs passed 22/22; full `npm test` passed (CLI 865, server unit 1351, architecture 22, server spec 2761, Web 4653, Runner 1014).
+
+## T-005
+
+- SessionCommandRequest/Result are Mohist-owned contracts mirrored by the server and runner. The request contains only stable session/runtime binding facts plus compact/reset; no Workflow Action Input or Agent definition enters the handler boundary.
+- AgentSessionGrain.PrepareSessionCommandAsync performs runtime-presence and idle preflight and snapshots the current binding. RunnerSessionCommandDispatcher invokes the owning runner's dedicated `SessionCommand` SignalR handler; Reset passes the returned replacement runtimeSessionId into the existing expected-binding-guarded grain transition, while Compact accepts no replacement id.
+- Handler `missing` and `conflict` results map to the existing runtime_session_missing Reset hint and shared session_active conflict. A runner without #409's runtime implementation returns unavailable rather than fabricating a compact or replacement session.
+- Contract coverage uses a fake runner handler to pin compact, reset, conflict, and missing request/result behavior. Active-session API specs also assert the runner is not invoked before the server idle boundary passes.
+- Verification: focused recovery specs passed 28/28; focused SessionCommand unit tests passed 5/5; runner source/test typechecks passed; full `npm test` passed (CLI 865, server unit 1356, architecture 22, server spec 2763, Web 4653, Runner 1019).

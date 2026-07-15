@@ -1,4 +1,5 @@
 using Mohist.Server.Sessions.Domain;
+using Mohist.Server.Sessions.Services;
 
 namespace Mohist.Server.Sessions.Grains;
 
@@ -9,6 +10,7 @@ public interface IAgentSessionGrain : IGrainWithStringKey
     Task<IReadOnlyList<AgentSessionRuntimeEventInfo>> AppendRuntimeEventsAsync(AppendAgentSessionRuntimeEventsCommand command);
     Task<AgentSessionRecoveryResult> CompactAsync(CompactAgentSessionCommand command);
     Task<AgentSessionRecoveryResult> ResetAsync(ResetAgentSessionCommand command);
+    Task<SessionCommandRequest> PrepareSessionCommandAsync(SessionCommandKind command);
     Task<AgentSessionInfo?> GetAsync();
     Task EnsureRuntimeSessionPresentAsync();
 

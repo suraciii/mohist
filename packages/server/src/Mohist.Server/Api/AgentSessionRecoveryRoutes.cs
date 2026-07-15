@@ -29,6 +29,7 @@ public static class AgentSessionRecoveryRoutes
             string sessionId,
             AgentSessionResolver sessions,
             IGrainFactory grains,
+            ISessionCommandDispatcher commands,
             CancellationToken ct) =>
         {
             var project = context.GetResolvedProject();
@@ -36,7 +37,7 @@ public static class AgentSessionRecoveryRoutes
             if (canonicalSessionId is null)
                 return ApiResults.NotFound($"Agent session {sessionId} not found");
 
-            return await ExecuteCompactAsync(canonicalSessionId, grains);
+            return await ExecuteCompactAsync(canonicalSessionId, grains, commands, ct);
         });
 
         group.MapPost("/{sessionId}/reset", async (
@@ -45,6 +46,7 @@ public static class AgentSessionRecoveryRoutes
             string sessionId,
             AgentSessionResolver sessions,
             IGrainFactory grains,
+            ISessionCommandDispatcher commands,
             CancellationToken ct) =>
         {
             var project = context.GetResolvedProject();
@@ -55,26 +57,33 @@ public static class AgentSessionRecoveryRoutes
             return await ExecuteResetAsync(
                 canonicalSessionId,
                 grains,
-                $"Agent session {sessionId} not found");
+                commands,
+                ct);
         });
 
         return app;
     }
 
-    internal static async Task<IResult> ExecuteCompactAsync(string sessionId, IGrainFactory grains)
+    internal static async Task<IResult> ExecuteCompactAsync(
+        string sessionId,
+        IGrainFactory grains,
+        ISessionCommandDispatcher commands,
+        CancellationToken ct)
     {
         var grain = grains.GetGrain<IAgentSessionGrain>(sessionId);
         try
         {
+            var request = await grain.PrepareSessionCommandAsync(SessionCommandKind.Compact);
+            var commandResult = await commands.DispatchAsync(request, ct);
+            if (MapCommandResult(request, commandResult) is { } commandFailure)
+                return commandFailure;
+
             var result = await grain.CompactAsync(new CompactAgentSessionCommand());
             return ApiResults.Ok(result);
         }
         catch (RuntimeSessionMissingException ex)
         {
-            return ApiResults.Conflict(
-                ex.Message,
-                "runtime_session_missing",
-                new { sessionId = ex.SessionId, hint = "reset" });
+            return RuntimeSessionMissingResult(ex);
         }
         catch (InvalidOperationException ex) when (ex.Message.Contains("currently active", StringComparison.OrdinalIgnoreCase))
         {
@@ -85,26 +94,25 @@ public static class AgentSessionRecoveryRoutes
     internal static async Task<IResult> ExecuteResetAsync(
         string sessionId,
         IGrainFactory grains,
-        string notFoundMessage)
+        ISessionCommandDispatcher commands,
+        CancellationToken ct)
     {
         var grain = grains.GetGrain<IAgentSessionGrain>(sessionId);
         try
         {
-            var current = await grain.GetAsync();
-            if (current is null) return ApiResults.NotFound(notFoundMessage);
+            var request = await grain.PrepareSessionCommandAsync(SessionCommandKind.Reset);
+            var commandResult = await commands.DispatchAsync(request, ct);
+            if (MapCommandResult(request, commandResult) is { } commandFailure)
+                return commandFailure;
 
-            var expectedRuntimeSessionId = current.AgentSessionId;
             var result = await grain.ResetAsync(new ResetAgentSessionCommand(
-                ExpectedRuntimeSessionId: expectedRuntimeSessionId,
-                ReplacementRuntimeSessionId: expectedRuntimeSessionId!));
+                ExpectedRuntimeSessionId: request.ExpectedRuntimeSessionId,
+                ReplacementRuntimeSessionId: commandResult.RuntimeSessionId!));
             return ApiResults.Ok(result);
         }
         catch (RuntimeSessionMissingException ex)
         {
-            return ApiResults.Conflict(
-                ex.Message,
-                "runtime_session_missing",
-                new { sessionId = ex.SessionId, hint = "reset" });
+            return RuntimeSessionMissingResult(ex);
         }
         catch (StaleRuntimeSessionBindingException ex)
         {
@@ -122,4 +130,56 @@ public static class AgentSessionRecoveryRoutes
             return ApiResults.Conflict(ex.Message, "session_active", new { sessionId });
         }
     }
+
+    private static IResult? MapCommandResult(
+        SessionCommandRequest request,
+        SessionCommandResult result)
+    {
+        if (result.Ok)
+        {
+            var valid = result.Error is null
+                && (request.Command switch
+                {
+                    SessionCommandKind.Compact => result.RuntimeSessionId is null,
+                    SessionCommandKind.Reset => !string.IsNullOrWhiteSpace(result.RuntimeSessionId)
+                        && !string.Equals(result.RuntimeSessionId, request.RuntimeSessionId, StringComparison.Ordinal),
+                    _ => false,
+                });
+            return valid ? null : InvalidRunnerResult(request.SessionId);
+        }
+
+        if (result.RuntimeSessionId is not null || result.Error is null)
+            return InvalidRunnerResult(request.SessionId);
+
+        return result.Error switch
+        {
+            SessionCommandError.Conflict => ApiResults.Conflict(
+                $"AgentSession {request.SessionId} is currently active; Compact and Reset require an idle session.",
+                "session_active",
+                new { sessionId = request.SessionId }),
+            SessionCommandError.Missing => RuntimeSessionMissingResult(new RuntimeSessionMissingException(
+                request.SessionId,
+                request.RuntimeSessionId,
+                request.Runtime)),
+            SessionCommandError.Unavailable => ApiResults.Fail(
+                "Runner is unavailable",
+                503,
+                "runner_unavailable",
+                new { sessionId = request.SessionId, runnerId = request.RunnerId }),
+            _ => InvalidRunnerResult(request.SessionId),
+        };
+    }
+
+    private static IResult RuntimeSessionMissingResult(RuntimeSessionMissingException ex) =>
+        ApiResults.Conflict(
+            ex.Message,
+            "runtime_session_missing",
+            new { sessionId = ex.SessionId, hint = "reset" });
+
+    private static IResult InvalidRunnerResult(string sessionId) =>
+        ApiResults.Fail(
+            "Runner returned an invalid SessionCommand result",
+            502,
+            "runner_invalid_response",
+            new { sessionId });
 }

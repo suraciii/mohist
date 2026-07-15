@@ -26,6 +26,14 @@ import { registerWorkspaceRemovalHandler } from "./workspace-removal-handler.js"
 import { registerFollowupHandler } from "./followup-handler.js"
 import { registerCancelHandler } from "./cancel-handler.js"
 import { registerWorkflowRunStatusHandler } from "./workflow-run-status-handler.js"
+import {
+  registerSessionCommandHandler,
+  type SessionCommand,
+  type SessionCommandError,
+  type SessionCommandHandler,
+  type SessionCommandRequest,
+  type SessionCommandResult,
+} from "./session-command-handler.js"
 
 export {
   isUnderRunnerRoot,
@@ -41,6 +49,11 @@ export type {
   FollowupTargetResolver,
   ReceiveFollowupPayload,
   ReceiveWorkflowRunStatusPayload,
+  SessionCommand,
+  SessionCommandError,
+  SessionCommandHandler,
+  SessionCommandRequest,
+  SessionCommandResult,
   WorkspaceQuery,
 }
 
@@ -49,6 +62,7 @@ export interface RunnerSignalRClientOptions {
   onReconnected?: (connectionId: string) => void
   serverConnection?: ServerConnection | null
   followupTargetResolver?: FollowupTargetResolver | null
+  sessionCommandHandler?: SessionCommandHandler | null
   registry?: WorkspaceRegistry | null
 }
 
@@ -60,6 +74,7 @@ export class RunnerSignalRClient {
   private readonly onReconnected: ((connectionId: string) => void) | undefined
   private readonly serverConnection: ServerConnection | null
   private readonly followupTargetResolver: FollowupTargetResolver | null
+  private readonly sessionCommandHandler: SessionCommandHandler | null
 
   constructor(
     serverUrl: string,
@@ -82,6 +97,7 @@ export class RunnerSignalRClient {
     this.workspaceManager = new WorkspaceManager(runnerRoot, this.registry)
     this.serverConnection = options.serverConnection ?? null
     this.followupTargetResolver = options.followupTargetResolver ?? null
+    this.sessionCommandHandler = options.sessionCommandHandler ?? null
 
     this.registerHandlers()
     this.registerLifecycleCallbacks()
@@ -130,6 +146,10 @@ export class RunnerSignalRClient {
 
     registerCancelHandler(this.connection, {
       followupTargetResolver: this.followupTargetResolver,
+    })
+
+    registerSessionCommandHandler(this.connection, {
+      handler: this.sessionCommandHandler,
     })
 
     registerWorkflowRunStatusHandler(this.connection, {

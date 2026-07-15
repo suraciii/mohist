@@ -192,6 +192,27 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         return BuildRecoveryResult(session, usedBefore, size, "reset", wasCompacted: false);
     }
 
+    public async Task<SessionCommandRequest> PrepareSessionCommandAsync(SessionCommandKind command)
+    {
+        if (command is not SessionCommandKind.Compact and not SessionCommandKind.Reset)
+            throw new ArgumentOutOfRangeException(nameof(command), command, "Unsupported session command");
+
+        var session = await GetRequiredAsync();
+        EnsureRuntimeSessionPresent(session);
+        EnsureSessionIdleForRecovery(session);
+
+        return new SessionCommandRequest(
+            SessionId: session.Id,
+            Runtime: session.Runtime.Runtime!,
+            RuntimeSessionId: session.Status.AgentRuntimeSessionId!,
+            RunnerId: session.Runtime.RunnerId,
+            WorkDir: session.Runtime.WorkDir,
+            Command: command,
+            ExpectedRuntimeSessionId: command == SessionCommandKind.Reset
+                ? session.Status.AgentRuntimeSessionId
+                : null);
+    }
+
     private static void EnsureRuntimeSessionPresent(AgentSession session)
     {
         if (!session.IsRuntimeSessionMissing(IsRuntimeRegistered)) return;
