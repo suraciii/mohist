@@ -132,6 +132,40 @@ public class IssueGrainEventSaveFailureSpecs
         Assert.Contains("must reload", ex.Message);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task EventAwareSaveFailure_QuarantinesActivation_EpicAffiliationMustNotPersistDirtyState()
+    {
+        const string projectId = "proj-fault";
+        const string issueId = "issue-fault-affiliation";
+        const int issueNumber = 903;
+
+        await using (var scope = _fixture.Services.CreateAsyncScope())
+        await using (var db = scope.ServiceProvider.GetRequiredService<IDbContextFactory<MohistDbContext>>().CreateDbContext())
+        {
+            await SeedIssueAsync(db, projectId, issueId, issueNumber, IssueStatus.Cancelled);
+        }
+
+        var failingStore = new FailingIssueStore(_fixture.Services, failEventsSaveOnce: true);
+        IssueGrain grain;
+        await using (var scope = _fixture.Services.CreateAsyncScope())
+        {
+            grain = CreateGrain(scope.ServiceProvider, failingStore, issueId);
+            await grain.OnActivateAsync(CancellationToken.None);
+        }
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => grain.ReopenAsync());
+        var eventAwareSaves = failingStore.EventAwareSaveAttempts;
+        var stateOnlySaves = failingStore.StateOnlySaveAttempts;
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => grain.SetEpicAffiliationAsync("epic_1"));
+
+        Assert.Contains("must reload", ex.Message);
+        Assert.Equal(eventAwareSaves, failingStore.EventAwareSaveAttempts);
+        Assert.Equal(stateOnlySaves, failingStore.StateOnlySaveAttempts);
+    }
+
     private static IssueGrain CreateGrain(
         IServiceProvider services,
         IIssueStore stateStore,
@@ -193,6 +227,9 @@ public class IssueGrainEventSaveFailureSpecs
         private readonly IIssueStore _delegate;
         private int _eventsSaveFailures;
 
+        public int EventAwareSaveAttempts { get; private set; }
+        public int StateOnlySaveAttempts { get; private set; }
+
         public FailingIssueStore(IServiceProvider scopeFactory, bool failEventsSaveOnce)
         {
             _delegate = new IssueStore(
@@ -205,10 +242,15 @@ public class IssueGrainEventSaveFailureSpecs
 
         public Task<DomainIssue?> LoadAsync(string key) => _delegate.LoadAsync(key);
 
-        public Task SaveAsync(string key, DomainIssue state) => _delegate.SaveAsync(key, state);
+        public Task SaveAsync(string key, DomainIssue state)
+        {
+            StateOnlySaveAttempts++;
+            return _delegate.SaveAsync(key, state);
+        }
 
         public async Task SaveAsync(string key, DomainIssue state, IReadOnlyList<IssueEvent> events, CancellationToken ct = default)
         {
+            EventAwareSaveAttempts++;
             if (_eventsSaveFailures > 0)
             {
                 _eventsSaveFailures--;

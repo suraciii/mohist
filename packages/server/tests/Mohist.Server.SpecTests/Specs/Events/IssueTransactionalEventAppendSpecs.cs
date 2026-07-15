@@ -213,15 +213,17 @@ public class IssueTransactionalEventAppendSpecs : IAsyncLifetime
     }
 
     [Fact]
-    public async Task SaveAsync_AffiliationChangesOnlyAffectSubsequentStoredEvents()
+    public async Task SaveAsync_AffiliationStagedBeforeEvent_UsesCommittedLinkAndUnlinkSnapshots()
     {
         var store = new IssueStore(_dbFactory, _eventStore, _grainFactory, NullLogger<IssueStore>.Instance);
         var issue = BuildIssue("issue_txn_snapshot", number: 17);
 
         await store.SaveAsync(issue.Id, issue, [new IssueArchived()]);
-        issue.SetEpicId("epic_snapshot");
+
+        await StageEpicAffiliationAsync(issue.Id, "epic_snapshot");
         await store.SaveAsync(issue.Id, issue, [new IssueReopened()]);
-        issue.SetEpicId(null);
+
+        await StageEpicAffiliationAsync(issue.Id, null);
         await store.SaveAsync(issue.Id, issue, [new IssueArchived()]);
 
         var stored = await _eventStore.ListIssueEventsAsync(issue.Id);
@@ -229,6 +231,17 @@ public class IssueTransactionalEventAppendSpecs : IAsyncLifetime
         Assert.False(stored[0].Envelope.Extensions.ContainsKey(EventCatalog.Lineage.EpicId));
         Assert.Equal("epic_snapshot", stored[1].Envelope.Extensions[EventCatalog.Lineage.EpicId]);
         Assert.False(stored[2].Envelope.Extensions.ContainsKey(EventCatalog.Lineage.EpicId));
+    }
+
+    private async Task StageEpicAffiliationAsync(string issueId, string? epicId)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        await IssueStore.StageEpicAffiliationAsync(
+            db,
+            issueId,
+            epicId,
+            new DateTime(2026, 7, 15, 0, 0, 0, DateTimeKind.Utc));
+        await db.SaveChangesAsync();
     }
 
     [Fact]

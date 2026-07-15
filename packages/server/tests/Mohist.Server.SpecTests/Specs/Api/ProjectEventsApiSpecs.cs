@@ -118,7 +118,7 @@ public class ProjectEventsApiSpecs
         var t0 = FixedTime.AddHours(-10);
         for (var i = 0; i < 205; i++)
         {
-            await AppendIssueEventAsync(issueId, project.Id, $"com.mohist.test.event-{i}",
+            await AppendIssueEventAsync(issueId, project.Id, $"test.event-{i}",
                 time: t0.AddMinutes(i), subject: "1");
         }
 
@@ -126,8 +126,8 @@ public class ProjectEventsApiSpecs
             $"/api/projects/{project.Id}/events");
 
         Assert.Equal(200, response.Count);
-        Assert.Equal("com.mohist.test.event-204", response[0].Type);
-        Assert.Equal("com.mohist.test.event-5", response[^1].Type);
+        Assert.Equal("test.event-204", response[0].Type);
+        Assert.Equal("test.event-5", response[^1].Type);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -206,7 +206,7 @@ public class ProjectEventsApiSpecs
         var t0 = FixedTime.AddHours(-2);
         for (var i = 0; i < 5; i++)
         {
-            await AppendIssueEventAsync(issueId, project.Id, $"com.mohist.test.event-{i}",
+            await AppendIssueEventAsync(issueId, project.Id, $"test.event-{i}",
                 time: t0.AddMinutes(i), subject: "1");
         }
 
@@ -214,8 +214,8 @@ public class ProjectEventsApiSpecs
             $"/api/projects/{project.Id}/events?limit=2");
 
         Assert.Equal(2, response.Count);
-        Assert.Equal("com.mohist.test.event-4", response[0].Type);
-        Assert.Equal("com.mohist.test.event-3", response[1].Type);
+        Assert.Equal("test.event-4", response[0].Type);
+        Assert.Equal("test.event-3", response[1].Type);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -722,7 +722,7 @@ public class ProjectEventsApiSpecs
             {
                 ["projectid"] = projectId,
                 ["issueid"] = issueId,
-                ["issueno"] = subject ?? "1",
+                ["issue"] = subject ?? "1",
             });
     }
 
@@ -746,6 +746,9 @@ public class ProjectEventsApiSpecs
             {
                 ["projectid"] = projectId,
                 ["issueid"] = issueId,
+                ["issue"] = subject ?? "1",
+                ["workflowrunid"] = workflowRunId,
+                ["stage"] = "test",
             });
     }
 
@@ -764,7 +767,11 @@ public class ProjectEventsApiSpecs
             time ?? FixedTime,
             subject,
             data,
-            extensions: new Dictionary<string, string>(StringComparer.Ordinal));
+            extensions: new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["projectid"] = projectId,
+                ["sessionid"] = sessionId,
+            });
     }
 
     private async Task AppendEpicEventAsync(

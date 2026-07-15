@@ -9,10 +9,13 @@ public static class EpicIssueAffiliationResolver
         MohistDbContext db,
         string projectId,
         string issueId,
+        string? excludedEpicId = null,
         CancellationToken ct = default)
     {
         var activeEpicId = await db.EpicActiveIssues.AsNoTracking()
-            .Where(row => row.ProjectId == projectId && row.IssueId == issueId)
+            .Where(row => row.ProjectId == projectId
+                && row.IssueId == issueId
+                && (excludedEpicId == null || row.EpicId != excludedEpicId))
             .OrderBy(row => row.EpicId)
             .Select(row => row.EpicId)
             .FirstOrDefaultAsync(ct);
@@ -20,7 +23,9 @@ public static class EpicIssueAffiliationResolver
             return activeEpicId;
 
         var retainedLinks = await db.EpicIssues.AsNoTracking()
-            .Where(row => row.ProjectId == projectId && row.IssueId == issueId)
+            .Where(row => row.ProjectId == projectId
+                && row.IssueId == issueId
+                && (excludedEpicId == null || row.EpicId != excludedEpicId))
             .Select(row => new { row.EpicId, row.CreatedAt })
             .ToListAsync(ct);
         return retainedLinks

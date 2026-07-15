@@ -6,6 +6,7 @@ using Mohist.Server.Epic.Services;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Epic;
 using Mohist.Server.Infrastructure.Data.Events;
+using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Domain;
@@ -136,6 +137,7 @@ public class EpicGrain : Grain, IEpicGrain
             });
         }
         MapToRow(domain, row, now);
+        await IssueStore.StageEpicAffiliationAsync(db, issueId, epicId, now.UtcDateTime);
         var pending = DrainPendingEvents(domain);
         // Append the EpicIssueLinked event into the same transaction so the
         // durable recompute trigger (EpicIssueLinkedHandler) is committed
@@ -323,6 +325,7 @@ public class EpicGrain : Grain, IEpicGrain
                 });
             }
             MapToRow(domain, row, now);
+            await IssueStore.StageEpicAffiliationAsync(db, item.IssueId, epicId, now.UtcDateTime);
             var pending = DrainPendingEvents(domain);
             // Append EpicIssueLinked atomically with the membership row so
             // the durable recompute trigger is never lost on crash/append
@@ -417,6 +420,9 @@ public class EpicGrain : Grain, IEpicGrain
         if (link is not null) db.EpicIssues.Remove(link);
         await ReleaseActiveMembershipAsync(db, projectId, epicId, issueId);
         MapToRow(domain, row, now);
+        var affiliationAfterUnlink = await EpicIssueAffiliationResolver.ResolveAsync(
+            db, projectId, issueId, excludedEpicId: epicId);
+        await IssueStore.StageEpicAffiliationAsync(db, issueId, affiliationAfterUnlink, now.UtcDateTime);
         var pending = DrainPendingEvents(domain);
         await PersistEpicEventsAsync(db, domain, pending, now);
         await db.SaveChangesAsync();
@@ -489,6 +495,9 @@ public class EpicGrain : Grain, IEpicGrain
             if (link is not null) db.EpicIssues.Remove(link);
             await ReleaseActiveMembershipAsync(db, projectId, epicId, item.IssueId);
             MapToRow(domain, row, now);
+            var affiliationAfterUnlink = await EpicIssueAffiliationResolver.ResolveAsync(
+                db, projectId, item.IssueId, excludedEpicId: epicId);
+            await IssueStore.StageEpicAffiliationAsync(db, item.IssueId, affiliationAfterUnlink, now.UtcDateTime);
             var pending = DrainPendingEvents(domain);
             await PersistEpicEventsAsync(db, domain, pending, now);
             await db.SaveChangesAsync();

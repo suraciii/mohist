@@ -168,7 +168,8 @@ public class DeadLetterStoreSpecs : IAsyncLifetime
             source: new Uri("/mohist/issues/issue_atomic", UriKind.Relative),
             type: "com.mohist.issue.completed",
             time: FirstTime,
-            data: JsonSerializer.SerializeToElement(new { value = 1 }));
+            data: JsonSerializer.SerializeToElement(new { value = 1 }),
+            extensions: IssueExtensions("issue_atomic"));
         await _events.AppendAsync(envelope);
         var sourceEvent = Assert.Single(await _events.ListUndeliveredAsync());
         var deadLetter = FromSource(
@@ -372,7 +373,8 @@ public class DeadLetterStoreSpecs : IAsyncLifetime
             source: new Uri("/mohist/issues/issue_retry_target", UriKind.Relative),
             type: "com.mohist.issue.completed",
             time: FirstTime,
-            data: JsonSerializer.SerializeToElement(new { value = 1 }));
+            data: JsonSerializer.SerializeToElement(new { value = 1 }),
+            extensions: IssueExtensions("issue_retry_target"));
         await _events.AppendAsync(envelope);
         var sourceEvent = Assert.Single(await _events.ListUndeliveredAsync());
 
@@ -416,7 +418,13 @@ public class DeadLetterStoreSpecs : IAsyncLifetime
             source: new Uri("/mohist/workflow-runs/wfr_retry_origin", UriKind.Relative),
             type: "com.mohist.workflow.task.completed",
             time: FirstTime,
-            data: JsonSerializer.SerializeToElement(new { value = 1 }));
+            data: JsonSerializer.SerializeToElement(new { value = 1 }),
+            extensions: new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [EventCatalog.Lineage.ProjectId] = "project_1",
+                [EventCatalog.Lineage.WorkflowRunId] = "wfr_retry_origin",
+                [EventCatalog.Lineage.Stage] = "test",
+            });
         await _events.AppendAsync(envelope);
         var sourceEvent = Assert.Single(await _events.ListUndeliveredAsync());
 
@@ -436,6 +444,13 @@ public class DeadLetterStoreSpecs : IAsyncLifetime
         Assert.Equal(sourceEvent.Source, requeued.Source);
         Assert.Equal(sourceEvent.Id, requeued.Id);
     }
+
+    private static Dictionary<string, string> IssueExtensions(string issueId) => new(StringComparer.Ordinal)
+    {
+        [EventCatalog.Lineage.ProjectId] = "project_1",
+        [EventCatalog.Lineage.IssueId] = issueId,
+        [EventCatalog.Lineage.Issue] = "1",
+    };
 
     private static DeadLetterRow BuildRow(
         string origin,

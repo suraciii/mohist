@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
@@ -74,6 +75,43 @@ public class BackfillIssueEpicAffiliationMigrationSpecs
             var persisted = Assert.Single(await eventStore.ListIssueEventsAsync(issueId));
             Assert.Equal(expectedEpicId, persisted.Envelope.Extensions[EventCatalog.Lineage.EpicId]);
         }
+    }
+
+    [Fact]
+    public async Task Migration_IsIdempotentAndPreservesLiveAffiliationAndHistoricalExtensions()
+    {
+        await using var database = CreateDatabase("20260714120000_AddProjectEventReadKeys");
+        await using var context = database.CreateDbContext();
+        var migrator = context.GetService<IMigrator>();
+        var liveIssue = NewIssue("issue_live", 1);
+        var liveState = IssueStore.Deserialize(liveIssue.State)!;
+        liveState.SetEpicId("epic_live", FirstLinkTime.UtcDateTime);
+        liveIssue.State = IssueStore.Serialize(liveState);
+        const string historicalExtensions = "{\"issueno\":\"1\",\"custom\":\"preserve\"}";
+
+        context.Issues.Add(liveIssue);
+        context.EpicIssues.Add(NewLink("epic_backfill", "issue_live", 1, FirstLinkTime));
+        context.IssueEvents.Add(new IssueEventRow
+        {
+            Id = 1,
+            Source = IssueEventPersistence.IssueSource("issue_live"),
+            EventId = "evt_historical",
+            Type = EventCatalog.ReverseDns.IssueCreated,
+            Time = FirstLinkTime,
+            SpecVersion = "1.0",
+            DataContentType = "application/json",
+            Data = JsonSerializer.SerializeToElement(new { }, CloudEvent.JsonOptions),
+            ExtensionsJson = historicalExtensions,
+        });
+        await context.SaveChangesAsync();
+
+        await migrator.MigrateAsync("20260715000000_BackfillIssueEpicAffiliation");
+        await migrator.MigrateAsync("20260715000000_BackfillIssueEpicAffiliation");
+
+        var persisted = await context.Issues.AsNoTracking().SingleAsync(row => row.IssueId == "issue_live");
+        Assert.Equal("epic_live", IssueStore.Deserialize(persisted.State)!.EpicId);
+        var historical = await context.IssueEvents.AsNoTracking().SingleAsync(row => row.EventId == "evt_historical");
+        Assert.Equal(historicalExtensions, historical.ExtensionsJson);
     }
 
     private static IssueRow NewIssue(string issueId, int number)

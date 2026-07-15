@@ -183,6 +183,23 @@ public class AgentSessionTransactionalEventAppendSpecs : IAsyncLifetime
     }
 
     [Fact]
+    public async Task SaveAsync_AgentLaunchSessionWithIssueContext_OmitsIssueLineage()
+    {
+        var store = new AgentSessionStore(_dbFactory, _eventStore, _grainFactory, NullLogger<AgentSessionStore>.Instance);
+        var session = BuildSession("agent_txn_agent_launch_issue", BuildAgentLaunchLabels(
+            projectId: "proj_agent_launch",
+            agentId: "agent_lineage_1",
+            issueNumber: 42));
+
+        await store.SaveAsync(session.Id, session, [new AgentSessionRuntimeBound("acp-1", null)]);
+
+        var stored = Assert.Single(await _eventStore.ListAgentSessionEventsAsync(session.Id));
+        Assert.False(stored.Envelope.Extensions.ContainsKey(EventCatalog.Lineage.Issue));
+        Assert.False(stored.Envelope.Extensions.ContainsKey(EventCatalog.Lineage.WorkflowRunId));
+        Assert.False(stored.Envelope.Extensions.ContainsKey(EventCatalog.Lineage.Stage));
+    }
+
+    [Fact]
     public async Task SaveAsync_WorkflowOriginSession_StampsIssueWorkflowRunIdAndStageFromLabels()
     {
         // T-005 / D6: a workflow-origin session whose labels carry the
@@ -344,11 +361,12 @@ public class AgentSessionTransactionalEventAppendSpecs : IAsyncLifetime
         return session;
     }
 
-    private static AgentSessionMetadata BuildAgentLaunchLabels(string projectId, string agentId) =>
+    private static AgentSessionMetadata BuildAgentLaunchLabels(string projectId, string agentId, int? issueNumber = null) =>
         GenericAgentSessionMetadata.Metadata(new GenericAgentSessionContext(
             ProjectId: projectId,
             AgentId: agentId,
-            AgentName: $"{agentId}-name"));
+            AgentName: $"{agentId}-name",
+            IssueNumber: issueNumber));
 
     private static AgentSessionMetadata BuildWorkflowOriginLabels(
         string projectId,

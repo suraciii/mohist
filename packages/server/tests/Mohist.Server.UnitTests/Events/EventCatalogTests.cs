@@ -260,12 +260,14 @@ public class EnvelopeConformanceTests
         Assert.Contains(EventCatalog.Lineage.WorkflowRunId, ex.MissingAttributes);
     }
 
-    [Fact]
-    public void AssertRequired_EnvelopeWithEmptyValueForRequired_Fails()
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void AssertRequired_EnvelopeWithBlankValueForRequired_Fails(string projectId)
     {
         var envelope = NewEnvelope(
             EventCatalog.ReverseDns.WorkflowRunStarted,
-            (EventCatalog.Lineage.ProjectId, ""),
+            (EventCatalog.Lineage.ProjectId, projectId),
             (EventCatalog.Lineage.WorkflowRunId, "wr_1"));
 
         var ex = Assert.Throws<EnvelopeConformanceException>(() => EnvelopeConformance.AssertRequired(envelope));

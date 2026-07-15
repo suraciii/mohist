@@ -171,6 +171,42 @@ public class EpicRecoverySpecs
 
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task UnlinkedAffiliationReplay_WriteFailureRetainsThenClearsAffiliationOnRedelivery()
+    {
+        await _fixture.ResetAsync();
+        await _fixture.SeedIssueAsync(ProjectId, IssueId, 1, IssueStatus.Backlog, epicId: EpicId);
+        await _fixture.SeedLinkAsync(ProjectId, EpicId, IssueId, 1);
+        await _fixture.SeedActiveLinkAsync(ProjectId, EpicId, IssueId, 1);
+        await _fixture.RemoveLinkAsync(ProjectId, EpicId, IssueId);
+
+        var grains = new FlakyAffiliationGrainFactory(_fixture.DbFactory);
+        var handler = new EpicIssueUnlinkedHandler(grains, _fixture.DbFactory, NullLogger<EpicIssueUnlinkedHandler>.Instance);
+        var dispatcher = CreateDispatcher(
+            new Subscription(EventCatalog.ReverseDns.EpicIssueUnlinked, handler, DispatchEpicIssueUnlinkedAsync));
+
+        await _fixture.EventStore.AppendAsync(EpicEvent(
+            ProjectId,
+            EpicId,
+            EventCatalog.ReverseDns.EpicIssueUnlinked,
+            new EpicIssueUnlinked(IssueId, 1)));
+        var pending = Assert.Single(await _fixture.EventStore.ListUndeliveredAsync());
+
+        await dispatcher.DispatchAsync(CancellationToken.None);
+
+        Assert.Equal(1, grains.AffiliationAttempts);
+        Assert.Equal(EpicId, await _fixture.GetIssueEpicIdAsync(ProjectId, IssueId));
+        Assert.False(await _fixture.IsDispatchedAsync(pending.Origin, pending.Source, pending.Id));
+
+        await dispatcher.DispatchAsync(CancellationToken.None);
+
+        Assert.Equal(2, grains.AffiliationAttempts);
+        Assert.Null(await _fixture.GetIssueEpicIdAsync(ProjectId, IssueId));
+        Assert.True(await _fixture.IsDispatchedAsync(pending.Origin, pending.Source, pending.Id));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -544,7 +580,7 @@ public sealed class EpicRecoveryFixture : IAsyncLifetime
         await db.SaveChangesAsync();
     }
 
-    public async Task SeedIssueAsync(string projectId, string issueId, int number, IssueStatus status)
+    public async Task SeedIssueAsync(string projectId, string issueId, int number, IssueStatus status, string? epicId = null)
     {
         var issue = new Mohist.Server.Issue.Domain.Issue
         {
@@ -554,6 +590,7 @@ public sealed class EpicRecoveryFixture : IAsyncLifetime
             Title = "Recovery issue",
             Priority = "p2",
             Status = status,
+            EpicId = epicId,
         };
         await using var db = CreateDbContext();
         db.Issues.Add(new IssueRow
@@ -591,6 +628,18 @@ public sealed class EpicRecoveryFixture : IAsyncLifetime
             IssueNumber = issueNumber,
             CreatedAt = TimeProvider.GetUtcNow(),
         });
+        await db.SaveChangesAsync();
+    }
+
+    public async Task RemoveLinkAsync(string projectId, string epicId, string issueId)
+    {
+        await using var db = CreateDbContext();
+        var link = await db.EpicIssues.SingleAsync(row =>
+            row.ProjectId == projectId && row.EpicId == epicId && row.IssueId == issueId);
+        var active = await db.EpicActiveIssues.SingleAsync(row =>
+            row.ProjectId == projectId && row.EpicId == epicId && row.IssueId == issueId);
+        db.EpicIssues.Remove(link);
+        db.EpicActiveIssues.Remove(active);
         await db.SaveChangesAsync();
     }
 

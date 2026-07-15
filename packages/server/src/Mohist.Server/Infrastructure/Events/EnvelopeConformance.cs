@@ -28,7 +28,7 @@ public static class EnvelopeConformance
         var missing = new List<string>(required.Count);
         foreach (var attribute in required)
         {
-            if (!extensions.TryGetValue(attribute, out var value) || string.IsNullOrEmpty(value))
+            if (!extensions.TryGetValue(attribute, out var value) || string.IsNullOrWhiteSpace(value))
             {
                 missing.Add(attribute);
             }
@@ -56,6 +56,11 @@ public static class EnvelopeConformance
     public static void AssertRequired(CloudEvent envelope)
     {
         ArgumentNullException.ThrowIfNull(envelope);
+        if (EventCatalog.IsMohistProtocolType(envelope.Type)
+            && !EventCatalog.HasLineageDeclaration(envelope.Type))
+        {
+            throw new UnregisteredMohistEventTypeException(envelope.Type);
+        }
         var missing = Missing(envelope);
         if (missing.Count > 0)
         {
@@ -77,6 +82,17 @@ public static class EnvelopeConformance
         {
             throw new EnvelopeConformanceException(type, missing);
         }
+    }
+}
+
+public sealed class UnregisteredMohistEventTypeException : Exception
+{
+    public string EventType { get; }
+
+    public UnregisteredMohistEventTypeException(string eventType)
+        : base($"Mohist event type '{eventType}' is not registered in EventCatalog.")
+    {
+        EventType = eventType;
     }
 }
 

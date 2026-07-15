@@ -517,8 +517,7 @@ internal sealed class EpicIssueAffiliationDispatcher
         if (!extensions.TryGetValue(EventCatalog.Lineage.ProjectId, out var projectId)
             || string.IsNullOrWhiteSpace(projectId))
         {
-            throw new InvalidOperationException(
-                $"Affiliation event '{eventId}' is missing its required projectid extension.");
+            return;
         }
         if (string.IsNullOrWhiteSpace(issueId))
         {
@@ -527,7 +526,7 @@ internal sealed class EpicIssueAffiliationDispatcher
         }
 
         await using var db = await _dbFactory.CreateDbContextAsync(ct).ConfigureAwait(false);
-        var epicId = await EpicIssueAffiliationResolver.ResolveAsync(db, projectId, issueId, ct).ConfigureAwait(false);
+        var epicId = await EpicIssueAffiliationResolver.ResolveAsync(db, projectId, issueId, ct: ct).ConfigureAwait(false);
         var grain = _grains.GetGrain<Mohist.Server.Issue.Grains.IIssueGrain>(
             Mohist.Server.Infrastructure.Orleans.GrainKey.Issue(issueId));
         await grain.SetEpicAffiliationAsync(epicId).ConfigureAwait(false);

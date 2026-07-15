@@ -268,6 +268,9 @@ public static class EventCatalog
     /// </summary>
     public static bool HasLineageDeclaration(string type) => LineageRequired.ContainsKey(type);
 
+    public static bool IsMohistProtocolType(string type) =>
+        type.StartsWith("com.mohist.", StringComparison.Ordinal);
+
     /// <summary>
     /// Reverse-DNS type values for new emits. Producers should prefer these over
     /// the legacy snake_case names. The string constants must be referenced by

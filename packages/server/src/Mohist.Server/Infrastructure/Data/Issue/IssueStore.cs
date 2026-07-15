@@ -48,17 +48,7 @@ public class IssueStore : IIssueStore
     public async Task SaveAsync(string key, DomainIssue state)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
-        var row = await db.Issues.FindAsync(state.Id);
-        var json = Serialize(state);
-        if (row is null)
-        {
-            db.Issues.Add(new IssueRow { IssueId = state.Id, State = json, Risk = state.Risk });
-        }
-        else
-        {
-            row.State = json;
-            row.Risk = state.Risk;
-        }
+        await StageIssueAsync(db, state, CancellationToken.None);
         await db.SaveChangesAsync();
     }
 
@@ -66,13 +56,12 @@ public class IssueStore : IIssueStore
     {
         var source = IssueEventPersistence.IssueSource(state.Id);
         var subject = state.Number.ToString();
-        var extensions = IssueLineage.BuildExtensions(state);
-
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
         try
         {
             await StageIssueAsync(db, state, ct);
+            var extensions = IssueLineage.BuildExtensions(state);
             foreach (var evt in events)
             {
                 if (evt is null) continue;
@@ -97,17 +86,33 @@ public class IssueStore : IIssueStore
 
     public Task<IReadOnlyList<DomainIssue>> ListAsync() => throw new NotImplementedException();
 
+    internal static async Task StageEpicAffiliationAsync(
+        MohistDbContext db,
+        string issueId,
+        string? epicId,
+        DateTime occurredAt,
+        CancellationToken ct = default)
+    {
+        var row = await db.Issues.FindAsync(new object[] { issueId }, ct)
+            ?? throw new InvalidOperationException($"Issue '{issueId}' was not found while staging epic affiliation.");
+        var issue = Deserialize(row.State)
+            ?? throw new InvalidOperationException($"Issue '{issueId}' has invalid persisted state.");
+        issue.SetEpicId(epicId, occurredAt);
+        row.State = Serialize(issue);
+        row.Risk = issue.Risk;
+    }
+
     private static async Task StageIssueAsync(MohistDbContext db, DomainIssue state, CancellationToken ct)
     {
         var row = await db.Issues.FindAsync(new object[] { state.Id }, ct);
-        var json = Serialize(state);
         if (row is null)
         {
-            db.Issues.Add(new IssueRow { IssueId = state.Id, State = json, Risk = state.Risk });
+            db.Issues.Add(new IssueRow { IssueId = state.Id, State = Serialize(state), Risk = state.Risk });
         }
         else
         {
-            row.State = json;
+            state.SetEpicId(Deserialize(row.State)?.EpicId);
+            row.State = Serialize(state);
             row.Risk = state.Risk;
         }
     }

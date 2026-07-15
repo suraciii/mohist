@@ -238,14 +238,12 @@ public class EventDispatcherImmediateTriggerSpecs
             Metadata = new WorkflowRunMetadata(
                 Name: null,
                 CreatedAt: EventTime,
-                Annotations: issueId is null
-                    ? null
-                    : new Dictionary<string, string>(StringComparer.Ordinal)
-                    {
-                        ["projectId"] = "proj_poke",
-                        ["issueId"] = issueId,
-                        ["issueNumber"] = "1",
-                    }),
+                Annotations: new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["projectId"] = "proj_poke",
+                    ["issueId"] = issueId ?? string.Empty,
+                    ["issueNumber"] = issueId is null ? string.Empty : "1",
+                }),
             Stages = [],
         };
     }
@@ -266,6 +264,11 @@ public class EventDispatcherImmediateTriggerSpecs
             Id = id,
             Runtime = new Mohist.Server.Sessions.Domain.AgentSessionRuntime("runner-1", null),
             Settings = new Mohist.Server.Sessions.Domain.AgentSessionSettings("opencode"),
+            Metadata = new Mohist.Server.Sessions.Domain.AgentSessionMetadata(
+                new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    [Mohist.Server.Sessions.Services.AgentSessionQueryMetadataKeys.ProjectId] = "proj_poke",
+                }),
         };
         session.Status = session.Status with
         {

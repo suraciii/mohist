@@ -29,6 +29,8 @@ namespace Mohist.Server.SpecTests.Support;
 /// </summary>
 internal static class InboxProjectionTestSupport
 {
+    public static readonly DateTimeOffset FixedEventTime = new(2026, 7, 15, 0, 0, 0, TimeSpan.Zero);
+
     public static InboxProjectionHandler CreateHandler(TestDatabase database) =>
         CreateHandler(database, new NoopEventPublisher());
 
@@ -62,7 +64,7 @@ internal static class InboxProjectionTestSupport
             id: eventId,
             source: new Uri($"/mohist/issues/{issueId}", UriKind.Relative),
             type: type,
-            time: DateTimeOffset.UtcNow,
+            time: FixedEventTime,
             data: null,
             extensions: new Dictionary<string, string>(StringComparer.Ordinal)
             {

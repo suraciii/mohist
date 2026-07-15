@@ -69,11 +69,6 @@ public static class AgentSessionLineage
             {
                 extensions[EventCatalog.Lineage.AgentId] = agentId;
             }
-            if (Equals(sourceKind, "agent-launch")
-                && TryGetNonEmpty(labels!, GenericAgentSessionMetadata.IssueNumber, out var issueNumber))
-            {
-                extensions[EventCatalog.Lineage.Issue] = issueNumber;
-            }
         }
 
         StampSessionIdentity(extensions, session);

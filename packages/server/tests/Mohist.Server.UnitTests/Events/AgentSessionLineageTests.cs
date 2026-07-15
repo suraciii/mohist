@@ -51,13 +51,13 @@ public class AgentSessionLineageTests
     }
 
     [Fact]
-    public void BuildExtensions_AgentLaunchSessionWithIssueContext_StampsIssue()
+    public void BuildExtensions_AgentLaunchSessionWithIssueContext_OmitsIssue()
     {
         var session = BuildAgentLaunchSession(issueNumber: IssueNumber);
 
         var extensions = AgentSessionLineage.BuildExtensions(session);
 
-        Assert.Equal(IssueNumber.ToString(), extensions[EventCatalog.Lineage.Issue]);
+        Assert.False(extensions.ContainsKey(EventCatalog.Lineage.Issue));
     }
 
     [Fact]

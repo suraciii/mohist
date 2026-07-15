@@ -94,6 +94,7 @@ public class IssueGrain : Grain, IIssueGrain
 
     public async Task SetEpicAffiliationAsync(string? epicId)
     {
+        RejectIfReloadRequired();
         if (_issue is null) return;
         if (string.IsNullOrWhiteSpace(epicId))
         {

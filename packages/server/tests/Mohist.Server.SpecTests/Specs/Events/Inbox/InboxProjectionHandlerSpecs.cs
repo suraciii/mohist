@@ -509,7 +509,7 @@ public class InboxProjectionHandlerSpecs
             id: "evt-no-number",
             source: new Uri("/mohist/issue/issue_orphan", UriKind.Relative),
             type: EventCatalog.ReverseDns.IssueWorkStarted,
-            time: DateTimeOffset.UtcNow,
+            time: InboxProjectionTestSupport.FixedEventTime,
             data: null,
             extensions: new Dictionary<string, string>
             {
@@ -542,7 +542,7 @@ public class InboxProjectionHandlerSpecs
             id: "evt-both",
             source: new Uri("/mohist/issue/issue_both", UriKind.Relative),
             type: EventCatalog.ReverseDns.IssueWorkStarted,
-            time: DateTimeOffset.UtcNow,
+            time: InboxProjectionTestSupport.FixedEventTime,
             data: null,
             extensions: new Dictionary<string, string>(StringComparer.Ordinal)
             {
