@@ -238,12 +238,7 @@ public class IssueGrain : Grain, IIssueGrain
                 Metadata: new WorkflowRunMetadata(
                     Name: null,
                     CreatedAt: DateTimeOffset.UtcNow,
-                    Annotations: new Dictionary<string, string>(StringComparer.Ordinal)
-                    {
-                        ["projectId"] = projectContext.Id,
-                        ["issueId"] = issue.Id,
-                        ["issueNumber"] = issue.Number.ToString(),
-                    }),
+                    Annotations: BuildWorkflowAnnotations(issue, projectContext.Id)),
                 Workspace: workspace));
 
         _issue!.Start(wrId, undeliveredPrerequisites);
@@ -326,6 +321,19 @@ public class IssueGrain : Grain, IIssueGrain
             repo.Name,
             repo.GitUrl,
             repo.BaseBranch);
+    }
+
+    private static Dictionary<string, string> BuildWorkflowAnnotations(Domain.Issue issue, string projectId)
+    {
+        var annotations = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["projectId"] = projectId,
+            ["issueId"] = issue.Id,
+            ["issueNumber"] = issue.Number.ToString(),
+        };
+        if (!string.IsNullOrWhiteSpace(issue.EpicId))
+            annotations["epicId"] = issue.EpicId;
+        return annotations;
     }
 
     private WorkspaceIdentity BuildWorkspaceIdentity(Domain.Issue issue, WorkflowProjectContext projectContext, string workflowRunId)

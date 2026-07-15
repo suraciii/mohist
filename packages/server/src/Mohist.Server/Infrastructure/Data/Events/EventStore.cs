@@ -46,6 +46,8 @@ public class EventStore : IEventStore
 
     public async Task AppendAsync(MohistDbContext db, CloudEvent envelope, CancellationToken ct = default)
     {
+        EnvelopeConformance.AssertRequired(envelope);
+
         var source = envelope.Source.ToString();
 
         if (source.StartsWith(AgentSessionEventPersistence.SourcePrefix, StringComparison.Ordinal))

@@ -10,6 +10,24 @@ namespace Mohist.Server.Infrastructure.Events;
 internal static class IssueEventSerializer
 {
     private static readonly JsonSerializerOptions JsonOptions = JSON.Options;
+    private static readonly IReadOnlyDictionary<Type, string> BusTypes = new Dictionary<Type, string>
+    {
+        [typeof(IssueCreated)] = EventCatalog.ReverseDns.IssueCreated,
+        [typeof(IssueLabelsChanged)] = EventCatalog.ReverseDns.IssueLabelsChanged,
+        [typeof(IssuePriorityChanged)] = EventCatalog.ReverseDns.IssuePriorityChanged,
+        [typeof(IssueDraftChanged)] = EventCatalog.ReverseDns.IssueDraftChanged,
+        [typeof(IssuePrerequisiteAdded)] = EventCatalog.ReverseDns.IssuePrerequisiteAdded,
+        [typeof(IssuePrerequisiteRemoved)] = EventCatalog.ReverseDns.IssuePrerequisiteRemoved,
+        [typeof(IssueWorkflowProfileChanged)] = EventCatalog.ReverseDns.IssueWorkflowProfileChanged,
+        [typeof(IssueWorkStarted)] = EventCatalog.ReverseDns.IssueWorkStarted,
+        [typeof(IssueCompleted)] = EventCatalog.ReverseDns.IssueCompleted,
+        [typeof(IssueCancelled)] = EventCatalog.ReverseDns.IssueCancelled,
+        [typeof(IssueArchived)] = EventCatalog.ReverseDns.IssueArchived,
+        [typeof(IssueUnarchived)] = EventCatalog.ReverseDns.IssueUnarchived,
+        [typeof(IssueReopened)] = EventCatalog.ReverseDns.IssueReopened,
+    };
+
+    internal static IReadOnlyCollection<string> ProducedTypes => BusTypes.Values.ToArray();
 
     /// <summary>
     /// Storage-facing type: the variant's CLR type name (matches the
@@ -20,23 +38,13 @@ internal static class IssueEventSerializer
     /// <summary>
     /// CloudEvents 1.0.2 reverse-DNS <c>type</c> string for the bus.
     /// </summary>
-    public static string BusType(IssueEvent payload) => Unwrap(payload) switch
+    public static string BusType(IssueEvent payload)
     {
-        IssueCreated => "com.mohist.issue.created",
-        IssueLabelsChanged => "com.mohist.issue.labels-changed",
-        IssuePriorityChanged => "com.mohist.issue.priority-changed",
-        IssueDraftChanged => "com.mohist.issue.draft-changed",
-        IssuePrerequisiteAdded => "com.mohist.issue.prerequisite-added",
-        IssuePrerequisiteRemoved => "com.mohist.issue.prerequisite-removed",
-        IssueWorkflowProfileChanged => "com.mohist.issue.workflow-profile-changed",
-        IssueWorkStarted => "com.mohist.issue.work-started",
-        IssueCompleted => EventCatalog.ReverseDns.IssueCompleted,
-        IssueCancelled => EventCatalog.ReverseDns.IssueCancelled,
-        IssueArchived => "com.mohist.issue.archived",
-        IssueUnarchived => "com.mohist.issue.unarchived",
-        IssueReopened => "com.mohist.issue.reopened",
-        _ => throw new InvalidOperationException($"No CloudEvents type for {Unwrap(payload).GetType().Name}"),
-    };
+        var variant = Unwrap(payload);
+        return BusTypes.TryGetValue(variant.GetType(), out var type)
+            ? type
+            : throw new InvalidOperationException($"No CloudEvents type for {variant.GetType().Name}");
+    }
 
     public static JsonElement ToData(IssueEvent payload) =>
         JsonSerializer.SerializeToElement(Unwrap(payload), JsonOptions);

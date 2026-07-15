@@ -24,6 +24,7 @@ public class AgentSessionLineageTests
     private const string WorkflowRunId = "wr_lineage_1";
     private const string Stage = "build";
     private const int IssueNumber = 42;
+    private static readonly DateTime FixedTime = new(2026, 7, 15, 0, 0, 0, DateTimeKind.Utc);
 
     [Fact]
     public void BuildExtensions_AgentLaunchSession_StampsProjectSessionAndAgentId()
@@ -47,6 +48,16 @@ public class AgentSessionLineageTests
         Assert.False(extensions.ContainsKey("issue"));
         Assert.False(extensions.ContainsKey("workflowrunid"));
         Assert.False(extensions.ContainsKey("stage"));
+    }
+
+    [Fact]
+    public void BuildExtensions_AgentLaunchSessionWithIssueContext_StampsIssue()
+    {
+        var session = BuildAgentLaunchSession(issueNumber: IssueNumber);
+
+        var extensions = AgentSessionLineage.BuildExtensions(session);
+
+        Assert.Equal(IssueNumber.ToString(), extensions[EventCatalog.Lineage.Issue]);
     }
 
     [Fact]
@@ -91,7 +102,7 @@ public class AgentSessionLineageTests
     }
 
     [Fact]
-    public void BuildExtensions_EmptyLabels_StampsOnlySessionId()
+    public void BuildExtensions_EmptyLabels_FailsBecauseProjectOwnershipIsRequired()
     {
         // A session with no labels still gets sessionid stamped (the
         // session id is the producer's own identity). projectid and
@@ -104,22 +115,17 @@ public class AgentSessionLineageTests
         };
         session.Status = session.Status with
         {
-            CreatedAt = DateTime.UtcNow,
-            LastDataAt = DateTime.UtcNow,
+            CreatedAt = FixedTime,
+            LastDataAt = FixedTime,
         };
 
-        var extensions = AgentSessionLineage.BuildExtensions(session);
+        var ex = Assert.Throws<InvalidOperationException>(() => AgentSessionLineage.BuildExtensions(session));
 
-        Assert.Equal(SessionId, extensions["sessionid"]);
-        Assert.False(extensions.ContainsKey("projectid"));
-        Assert.False(extensions.ContainsKey("agentid"));
-        Assert.False(extensions.ContainsKey("issue"));
-        Assert.False(extensions.ContainsKey("workflowrunid"));
-        Assert.False(extensions.ContainsKey("stage"));
+        Assert.Contains("project-id", ex.Message);
     }
 
     [Fact]
-    public void BuildExtensions_AbsentProjectLabel_OmitsProjectId()
+    public void BuildExtensions_AbsentProjectLabel_FailsBecauseProjectOwnershipIsRequired()
     {
         // projectid is stamped only when the project-id label is present.
         // Whitespace-only label is treated as absent — omission IS the
@@ -130,14 +136,13 @@ public class AgentSessionLineageTests
             Runtime = new AgentSessionRuntime("runner-1", null),
             Settings = new AgentSessionSettings("opencode"),
         };
-        session.Status = session.Status with { CreatedAt = DateTime.UtcNow, LastDataAt = DateTime.UtcNow };
+        session.Status = session.Status with { CreatedAt = FixedTime, LastDataAt = FixedTime };
         session.Metadata = session.Metadata
             .WithLabel(AgentSessionQueryMetadataKeys.ProjectId, "   ");
 
-        var extensions = AgentSessionLineage.BuildExtensions(session);
+        var ex = Assert.Throws<InvalidOperationException>(() => AgentSessionLineage.BuildExtensions(session));
 
-        Assert.False(extensions.ContainsKey("projectid"));
-        Assert.Equal(SessionId, extensions["sessionid"]);
+        Assert.Contains("project-id", ex.Message);
     }
 
     [Fact]
@@ -193,7 +198,7 @@ public class AgentSessionLineageTests
         EnvelopeConformance.AssertRequired(extensions, EventCatalog.ReverseDns.AgentSessionRuntimeBound);
     }
 
-    private static AgentSession BuildAgentLaunchSession()
+    private static AgentSession BuildAgentLaunchSession(int? issueNumber = null)
     {
         var session = new AgentSession
         {
@@ -203,14 +208,16 @@ public class AgentSessionLineageTests
         };
         session.Status = session.Status with
         {
-            CreatedAt = DateTime.UtcNow,
-            LastDataAt = DateTime.UtcNow,
+            CreatedAt = FixedTime,
+            LastDataAt = FixedTime,
         };
         session.Metadata = session.Metadata
             .WithLabel(AgentSessionQueryMetadataKeys.ProjectId, ProjectId)
             .WithLabel(AgentSessionQueryMetadataKeys.SourceKind, "agent-launch")
             .WithLabel(GenericAgentSessionMetadata.AgentId, AgentId)
             .WithLabel(GenericAgentSessionMetadata.AgentName, AgentName);
+        if (issueNumber is not null)
+            session.Metadata = session.Metadata.WithLabel(GenericAgentSessionMetadata.IssueNumber, issueNumber.Value.ToString());
         return session;
     }
 
@@ -230,8 +237,8 @@ public class AgentSessionLineageTests
         };
         session.Status = session.Status with
         {
-            CreatedAt = DateTime.UtcNow,
-            LastDataAt = DateTime.UtcNow,
+            CreatedAt = FixedTime,
+            LastDataAt = FixedTime,
         };
         session.Metadata = new AgentSessionMetadata(WorkflowAgentSessionMetadata.Labels(labels), null);
         return session;

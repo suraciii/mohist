@@ -53,6 +53,7 @@ public class WorkflowRunStoreSpecs
     private const string ProjectId = "proj_workflow_store";
     private const string IssueId = "issue_ws_1";
     private const string WorkflowRunId = "wr_ws_1";
+    private static readonly DateTimeOffset FixedTime = new(2026, 7, 15, 0, 0, 0, TimeSpan.Zero);
 
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
@@ -141,7 +142,7 @@ public class WorkflowRunStoreSpecs
             Id = WorkflowRunId,
             Metadata = new WorkflowRunMetadata(
                 Name: null,
-                CreatedAt: DateTimeOffset.UtcNow,
+                CreatedAt: FixedTime,
                 Annotations: new Dictionary<string, string>(StringComparer.Ordinal)
                 {
                     ["projectId"] = ProjectId,
@@ -161,14 +162,8 @@ public class WorkflowRunStoreSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public async Task SaveAsync_WithoutProjectAnnotation_StampsWorkflowRunIdOnly()
+    public async Task SaveAsync_WithoutProjectAnnotation_FailsBecauseProjectOwnershipIsRequired()
     {
-        // Absent affiliations are omitted, never empty (AC / T-002). A
-        // WorkflowRun that has no metadata at all still has a
-        // workflowrunid stamp because the run itself IS the producer
-        // — that's the only required attribute when nothing else is
-        // present. projectid/issueid/issue stay absent (no phantom
-        // empty values).
         using var factory = new FakeWorkflowRunStoreDbContextFactory();
         var eventStore = new EventStore(factory, NullLogger<EventStore>.Instance);
         var store = new WorkflowRunStore(factory, eventStore, new NullDispatchGrainFactory(), NullLogger<WorkflowRunStore>.Instance);
@@ -182,15 +177,11 @@ public class WorkflowRunStoreSpecs
             Stages = [],
         };
 
-        await store.SaveAsync(run, [new WorkflowRunFailed("failed")]);
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => store.SaveAsync(run, [new WorkflowRunFailed("failed")]));
 
-        var stored = Assert.Single(await eventStore.ListAsync(WorkflowRunId));
-        Assert.True(stored.Envelope.Extensions.TryGetValue("workflowrunid", out var stampedRunId));
-        Assert.Equal(WorkflowRunId, stampedRunId);
-        Assert.False(stored.Envelope.Extensions.ContainsKey("projectid"));
-        Assert.False(stored.Envelope.Extensions.ContainsKey("issueid"));
-        Assert.False(stored.Envelope.Extensions.ContainsKey("issue"));
-        Assert.False(stored.Envelope.Extensions.ContainsKey("stage"));
+        Assert.Contains("projectId", ex.Message);
+        Assert.Empty(await eventStore.ListAsync(WorkflowRunId));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]

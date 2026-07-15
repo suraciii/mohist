@@ -584,8 +584,9 @@ public class EpicAutoDoneHandlerSpecs
     {
         // Epic events carry projectid + epicid on the envelope (stamped by
         // PersistEpicEventsAsync), so no reverse lookup is needed.
-        var grains = new TestEpicGrainFactory(CreateDatabase().Factory);
-        var handler = new EpicIssueLinkedHandler(grains, NullLogger<EpicIssueLinkedHandler>.Instance);
+        var database = CreateDatabase();
+        var grains = new TestEpicGrainFactory(database.Factory);
+        var handler = new EpicIssueLinkedHandler(grains, database.Factory, NullLogger<EpicIssueLinkedHandler>.Instance);
 
         var evt = BuildEpicIssueLinkedEvent(projectId: "project_1", epicId: "epic_1", issueId: "issue_1", issueNumber: 1);
         await handler.HandleAsync(evt, CancellationToken.None);
@@ -599,8 +600,9 @@ public class EpicAutoDoneHandlerSpecs
     [Fact]
     public async Task IssueLinkedHandler_MissingProjectIdExtension_NoOps()
     {
-        var grains = new TestEpicGrainFactory(CreateDatabase().Factory);
-        var handler = new EpicIssueLinkedHandler(grains, NullLogger<EpicIssueLinkedHandler>.Instance);
+        var database = CreateDatabase();
+        var grains = new TestEpicGrainFactory(database.Factory);
+        var handler = new EpicIssueLinkedHandler(grains, database.Factory, NullLogger<EpicIssueLinkedHandler>.Instance);
 
         var evt = new CloudEvent<EpicIssueLinked>(
             id: Guid.NewGuid().ToString(),
@@ -718,8 +720,9 @@ public class EpicAutoDoneHandlerSpecs
     [Fact]
     public async Task IssueUnlinkedHandler_UnlinkedEvent_InvokesRecomputeOnOwningEpic()
     {
-        var grains = new TestEpicGrainFactory(CreateDatabase().Factory);
-        var handler = new EpicIssueUnlinkedHandler(grains, NullLogger<EpicIssueUnlinkedHandler>.Instance);
+        var database = CreateDatabase();
+        var grains = new TestEpicGrainFactory(database.Factory);
+        var handler = new EpicIssueUnlinkedHandler(grains, database.Factory, NullLogger<EpicIssueUnlinkedHandler>.Instance);
 
         var evt = BuildEpicIssueUnlinkedEvent(projectId: "project_1", epicId: "epic_1", issueId: "issue_1", issueNumber: 1);
         await handler.HandleAsync(evt, CancellationToken.None);

@@ -43,40 +43,36 @@ public static class AgentSessionLineage
 
         var extensions = new Dictionary<string, string>(StringComparer.Ordinal);
         var labels = session.Metadata.Labels;
+        var projectId = RequiredProjectId(labels, session.Id);
+        extensions[EventCatalog.Lineage.ProjectId] = projectId;
 
-        if (labels is null)
-        {
-            StampSessionIdentity(extensions, session);
-            return extensions;
-        }
-
-        if (TryGetNonEmpty(labels, AgentSessionQueryMetadataKeys.ProjectId, out var projectId))
-        {
-            extensions[EventCatalog.Lineage.ProjectId] = projectId;
-        }
-
-        var sourceKind = TryGetNonEmpty(labels, AgentSessionQueryMetadataKeys.SourceKind, out var kind) ? kind : null;
+        var sourceKind = TryGetNonEmpty(labels!, AgentSessionQueryMetadataKeys.SourceKind, out var kind) ? kind : null;
 
         if (Equals(sourceKind, WorkflowSourceKind))
         {
-            if (TryGetNonEmpty(labels, AgentSessionQueryMetadataKeys.IssueNumber, out var issueNumber))
+            if (TryGetNonEmpty(labels!, AgentSessionQueryMetadataKeys.IssueNumber, out var issueNumber))
             {
                 extensions[EventCatalog.Lineage.Issue] = issueNumber;
             }
-            if (TryGetNonEmpty(labels, AgentSessionQueryMetadataKeys.WorkflowRunId, out var workflowRunId))
+            if (TryGetNonEmpty(labels!, AgentSessionQueryMetadataKeys.WorkflowRunId, out var workflowRunId))
             {
                 extensions[EventCatalog.Lineage.WorkflowRunId] = workflowRunId;
             }
-            if (TryGetNonEmpty(labels, AgentSessionQueryMetadataKeys.Stage, out var stage))
+            if (TryGetNonEmpty(labels!, AgentSessionQueryMetadataKeys.Stage, out var stage))
             {
                 extensions[EventCatalog.Lineage.Stage] = stage;
             }
         }
         else
         {
-            if (TryGetNonEmpty(labels, GenericAgentSessionMetadata.AgentId, out var agentId))
+            if (TryGetNonEmpty(labels!, GenericAgentSessionMetadata.AgentId, out var agentId))
             {
                 extensions[EventCatalog.Lineage.AgentId] = agentId;
+            }
+            if (Equals(sourceKind, "agent-launch")
+                && TryGetNonEmpty(labels!, GenericAgentSessionMetadata.IssueNumber, out var issueNumber))
+            {
+                extensions[EventCatalog.Lineage.Issue] = issueNumber;
             }
         }
 
@@ -102,5 +98,17 @@ public static class AgentSessionLineage
         }
         value = string.Empty;
         return false;
+    }
+
+    private static string RequiredProjectId(IReadOnlyDictionary<string, string>? labels, string sessionId)
+    {
+        if (labels is not null
+            && TryGetNonEmpty(labels, AgentSessionQueryMetadataKeys.ProjectId, out var projectId))
+        {
+            return projectId;
+        }
+
+        throw new InvalidOperationException(
+            $"Agent session '{sessionId}' cannot emit events without the required project-id label.");
     }
 }

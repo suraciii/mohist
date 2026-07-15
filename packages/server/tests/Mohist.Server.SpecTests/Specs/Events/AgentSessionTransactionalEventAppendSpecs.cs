@@ -38,6 +38,7 @@ namespace Mohist.Server.SpecTests.Specs.Events;
 [Trait(Traits.Sut.Name, Traits.Sut.System)]
 public class AgentSessionTransactionalEventAppendSpecs : IAsyncLifetime
 {
+    private static readonly DateTime FixedTime = new(2026, 7, 15, 0, 0, 0, DateTimeKind.Utc);
     private readonly SqliteConnection _keeper;
     private readonly DbContextOptions<MohistDbContext> _options;
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
@@ -235,21 +236,19 @@ public class AgentSessionTransactionalEventAppendSpecs : IAsyncLifetime
     }
 
     [Fact]
-    public async Task SaveAsync_SessionWithoutProjectIdLabel_OmitsProjectId()
+    public async Task SaveAsync_SessionWithoutProjectIdLabel_FailsBecauseProjectOwnershipIsRequired()
     {
         // T-005 / D6: a session whose Metadata.Labels is empty (or
         // carries no project-id label) does NOT stamp projectid.
         // sessionid is still stamped from the session's own id; absent
         // affiliation is omitted, never an empty value.
         var store = new AgentSessionStore(_dbFactory, _eventStore, _grainFactory, NullLogger<AgentSessionStore>.Instance);
-        var session = BuildSession("agent_txn_no_project");
+        var session = BuildSession("agent_txn_no_project", new AgentSessionMetadata());
 
-        await store.SaveAsync(session.Id, session, [new AgentSessionRuntimeBound("acp-1", null)]);
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => store.SaveAsync(session.Id, session, [new AgentSessionRuntimeBound("acp-1", null)]));
 
-        var stored = Assert.Single(await _eventStore.ListAgentSessionEventsAsync("agent_txn_no_project"));
-        Assert.False(stored.Envelope.Extensions.ContainsKey("projectid"));
-        Assert.False(stored.Envelope.Extensions.ContainsKey("agentid"));
-        Assert.Equal("agent_txn_no_project", stored.Envelope.Extensions["sessionid"]);
+        Assert.Contains("project-id", ex.Message);
     }
 
     [Fact]
@@ -268,7 +267,7 @@ public class AgentSessionTransactionalEventAppendSpecs : IAsyncLifetime
         await store.SaveAsync(agentLaunch.Id, agentLaunch, [
             new AgentSessionRuntimeBound("acp-1", null),
             new AgentSessionUsageRecorded(new AgentUsageSummary()),
-            new AgentSessionContextHealthUpdated("green", 40d, 400, 1000, DateTime.UtcNow),
+            new AgentSessionContextHealthUpdated("green", 40d, 400, 1000, FixedTime),
         ]);
 
         var workflowOrigin = BuildSession("agent_txn_conformance_workflow", BuildWorkflowOriginLabels(
@@ -278,7 +277,7 @@ public class AgentSessionTransactionalEventAppendSpecs : IAsyncLifetime
             stage: "review"));
         await store.SaveAsync(workflowOrigin.Id, workflowOrigin, [
             new AgentSessionRuntimeBound("acp-1", null),
-            new AgentSessionContextExhausted("context_exhaustion", 96d, 960, 1000, DateTime.UtcNow),
+            new AgentSessionContextExhausted("context_exhaustion", 96d, 960, 1000, FixedTime),
         ]);
 
         var agentEvents = await _eventStore.ListAgentSessionEventsAsync("agent_txn_conformance_agent");
@@ -332,7 +331,10 @@ public class AgentSessionTransactionalEventAppendSpecs : IAsyncLifetime
             Id = id,
             Runtime = new AgentSessionRuntime("runner-1", null),
             Settings = new AgentSessionSettings("opencode"),
-            Metadata = metadata ?? new AgentSessionMetadata(),
+            Metadata = metadata ?? new AgentSessionMetadata(new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [AgentSessionQueryMetadataKeys.ProjectId] = "proj_default_session",
+            }),
         };
         session.Status = session.Status with
         {

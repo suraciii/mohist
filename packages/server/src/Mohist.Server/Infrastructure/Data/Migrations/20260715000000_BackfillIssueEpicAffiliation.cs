@@ -8,7 +8,7 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
     /// <summary>
     /// One-time idempotent backfill of the denormalized <c>epicId</c> field in
     /// the <c>Issues.State</c> JSON column for issues already linked to an
-    /// active epic at cutover. The <c>epicId</c> field was added to the
+    /// epic at cutover. The <c>epicId</c> field was added to the
     /// <c>Issue</c> aggregate in issue #412 (T-003) so issue.* events can
     /// stamp <c>epicid</c> from their own state — without a cross-aggregate
     /// query at stamp time (D5).
@@ -20,23 +20,14 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
     /// failure (self-healing drift). The backfill here covers the rows that
     /// were already linked before any of those code paths existed.
     ///
-    /// The source of truth for membership is <c>EpicIssues</c> (history
-    /// join) constrained by <c>EpicActiveIssues</c> (at-most-one active
-    /// owner per issue). Only <c>EpicActiveIssues</c> rows are reflected
-    /// on the issue, since terminal-history rows should leave the issue's
-    /// denormalized cache clear (matches the live write path, which only
-    /// stamps while an <see cref="Mohist.Server.Infrastructure.Data.Epic.EpicActiveIssueRow"/>
-    /// exists).
+    /// The source of truth for membership is <c>EpicIssues</c>. Active
+    /// membership wins; when an issue has only retained terminal links,
+    /// the most recently created link wins, with epic id as a deterministic
+    /// tie-breaker. This matches the live affiliation resolver.
     ///
     /// Idempotency: a row is updated only when <c>epicId</c> is currently
     /// absent or null (the backfill guard); rows that already carry a
-    /// live-written or already-backfilled value are left alone. Only rows
-    /// backed by an <c>EpicActiveIssues</c> entry are touched; rows with
-    /// no active membership have their <c>epicId</c> explicitly cleared
-    /// only when it was previously set by some other path (the rare edge
-    /// case of a stale cache after an unlink that did not push the
-    /// durable handler) — handled implicitly because the live write path
-    /// is the only other setter and it always lands.
+    /// live-written or already-backfilled value are left alone.
     ///
     /// No <c>BuildTargetModel</c> snapshot is provided because this
     /// migration does not modify the EF model — it is a pure data
@@ -57,16 +48,26 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                 """
                 UPDATE Issues
                 SET State = json_set(State, '$.epicId', (
-                    SELECT a."EpicId"
-                    FROM "EpicActiveIssues" a
-                    WHERE a."ProjectId" = Issues."ProjectId"
-                      AND a."IssueId" = Issues."IssueId"
+                    SELECT "EpicId"
+                    FROM (
+                        SELECT a."EpicId", 0 AS "Priority", a."CreatedAt"
+                        FROM "EpicActiveIssues" a
+                        WHERE a."ProjectId" = Issues."ProjectId"
+                          AND a."IssueId" = Issues."IssueId"
+                        UNION ALL
+                        SELECT l."EpicId", 1 AS "Priority", l."CreatedAt"
+                        FROM "EpicIssues" l
+                        WHERE l."ProjectId" = Issues."ProjectId"
+                          AND l."IssueId" = Issues."IssueId"
+                    )
+                    ORDER BY "Priority", "CreatedAt" DESC, "EpicId"
+                    LIMIT 1
                 ))
                 WHERE json_extract(State, '$.epicId') IS NULL
                   AND EXISTS (
-                      SELECT 1 FROM "EpicActiveIssues" a
-                      WHERE a."ProjectId" = Issues."ProjectId"
-                        AND a."IssueId" = Issues."IssueId"
+                      SELECT 1 FROM "EpicIssues" l
+                      WHERE l."ProjectId" = Issues."ProjectId"
+                        AND l."IssueId" = Issues."IssueId"
                   );
                 """);
         }

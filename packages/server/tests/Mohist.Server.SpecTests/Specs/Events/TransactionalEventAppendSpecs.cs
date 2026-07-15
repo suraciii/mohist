@@ -35,6 +35,7 @@ public class TransactionalEventAppendSpecs : IAsyncLifetime
 {
     private const string ProjectId = "proj_txn";
     private const string IssueId = "issue_txn_1";
+    private static readonly DateTimeOffset FixedTime = new(2026, 7, 15, 0, 0, 0, TimeSpan.Zero);
 
     private readonly SqliteConnection _keeper;
     private readonly DbContextOptions<MohistDbContext> _options;
@@ -169,7 +170,26 @@ public class TransactionalEventAppendSpecs : IAsyncLifetime
             Assert.Equal("1", stampedIssue);
             Assert.True(entry.Envelope.Extensions.TryGetValue("workflowrunid", out var stampedRunId));
             Assert.Equal("wr_txn_identity", stampedRunId);
+            Assert.False(entry.Envelope.Extensions.ContainsKey("epicid"));
         }
+    }
+
+    [Fact]
+    public async Task SaveAsync_EpicAffiliatedRun_StampsEpicIdOnRunStageTaskAndCheckEvents()
+    {
+        var store = new WorkflowRunStore(_dbFactory, _eventStore, _grainFactory, NullLogger<WorkflowRunStore>.Instance);
+        var run = BuildRun("wr_txn_epic", includeAnnotations: true, epicId: "epic_txn_1");
+
+        await store.SaveAsync(run, [
+            new WorkflowRunStarted(),
+            new StageStarted("build"),
+            new TaskStarted("build", "task_1", "worker_1"),
+            new CheckPassed("build", "lint", null),
+        ]);
+
+        var stored = await _eventStore.ListAsync("wr_txn_epic");
+        Assert.Equal(4, stored.Count);
+        Assert.All(stored, entry => Assert.Equal("epic_txn_1", entry.Envelope.Extensions["epicid"]));
     }
 
     [Fact]
@@ -268,7 +288,7 @@ public class TransactionalEventAppendSpecs : IAsyncLifetime
         var run = BuildRun("wr_txn_artifact", includeAnnotations: true);
 
         await store.SaveAsync(run, [
-            new WorkflowArtifactRecorded("wr_txn_artifact", "task_a", "logs/build.log", DateTimeOffset.UtcNow),
+            new WorkflowArtifactRecorded("wr_txn_artifact", "task_a", "logs/build.log", FixedTime),
         ]);
 
         var stored = Assert.Single(await _eventStore.ListAsync("wr_txn_artifact"));
@@ -279,7 +299,7 @@ public class TransactionalEventAppendSpecs : IAsyncLifetime
     }
 
     [Fact]
-    public async Task SaveAsync_NoMetadataAnnotations_StampsOnlyWorkflowRunId()
+    public async Task SaveAsync_NoProjectAnnotation_FailsBecauseProjectOwnershipIsRequired()
     {
         // A run that has no metadata at all (defensive) still has a
         // workflowrunid stamp because the run itself IS the producer,
@@ -291,19 +311,34 @@ public class TransactionalEventAppendSpecs : IAsyncLifetime
             Id = "wr_txn_no_meta",
             Metadata = new WorkflowRunMetadata(
                 Name: null,
-                CreatedAt: DateTimeOffset.UtcNow),
+                CreatedAt: FixedTime),
             Stages = [],
         };
 
-        await store.SaveAsync(run, [new WorkflowRunCompleted()]);
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => store.SaveAsync(run, [new WorkflowRunCompleted()]));
 
-        var stored = Assert.Single(await _eventStore.ListAsync("wr_txn_no_meta"));
-        Assert.True(stored.Envelope.Extensions.TryGetValue("workflowrunid", out var stampedRunId));
-        Assert.Equal("wr_txn_no_meta", stampedRunId);
-        Assert.False(stored.Envelope.Extensions.ContainsKey("projectid"));
-        Assert.False(stored.Envelope.Extensions.ContainsKey("issueid"));
-        Assert.False(stored.Envelope.Extensions.ContainsKey("issue"));
-        Assert.False(stored.Envelope.Extensions.ContainsKey("stage"));
+        Assert.Contains("projectId", ex.Message);
+    }
+
+    [Fact]
+    public async Task EventStore_RegisteredEnvelopeMissingRequiredLineage_FailsBeforePersistence()
+    {
+        var envelope = new CloudEvent(
+            id: "evt_missing_project",
+            source: new Uri("/mohist/workflow-runs/wr_missing_project", UriKind.Relative),
+            type: EventCatalog.ReverseDns.WorkflowRunStarted,
+            time: FixedTime,
+            data: System.Text.Json.JsonSerializer.SerializeToElement(new WorkflowRunStarted(), CloudEvent.JsonOptions),
+            extensions: new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [EventCatalog.Lineage.WorkflowRunId] = "wr_missing_project",
+            });
+
+        var ex = await Assert.ThrowsAsync<EnvelopeConformanceException>(() => _eventStore.AppendAsync(envelope));
+
+        Assert.Contains(EventCatalog.Lineage.ProjectId, ex.MissingAttributes);
+        Assert.Empty(await _eventStore.ListAsync("wr_missing_project"));
     }
 
     [Fact]
@@ -321,7 +356,7 @@ public class TransactionalEventAppendSpecs : IAsyncLifetime
             new TaskStarted("build", "task_a", "worker_a"),
             new CheckPassed("review", "lint", null),
             new FeedbackRequested("code-review", "fb_1", null),
-            new WorkflowArtifactRecorded("wr_txn_conformance", "task_a", "logs.txt", DateTimeOffset.UtcNow),
+            new WorkflowArtifactRecorded("wr_txn_conformance", "task_a", "logs.txt", FixedTime),
         ]);
 
         var stored = await _eventStore.ListAsync("wr_txn_conformance");
@@ -365,7 +400,7 @@ public class TransactionalEventAppendSpecs : IAsyncLifetime
         Assert.Null(WorkflowRunLineage.StageOf(new WorkflowRunStopped()));
         Assert.Null(WorkflowRunLineage.StageOf(new WorkflowRunCompleted()));
         Assert.Null(WorkflowRunLineage.StageOf(new WorkflowRunFailed("boom")));
-        Assert.Null(WorkflowRunLineage.StageOf(new WorkflowArtifactRecorded("wr_1", "task_a", "logs.txt", DateTimeOffset.UtcNow)));
+        Assert.Null(WorkflowRunLineage.StageOf(new WorkflowArtifactRecorded("wr_1", "task_a", "logs.txt", FixedTime)));
     }
 
     [Fact]
@@ -384,7 +419,7 @@ public class TransactionalEventAppendSpecs : IAsyncLifetime
         Assert.Empty(await _eventStore.ListAsync("wr_txn_state_only"));
     }
 
-    private static WorkflowRun BuildRun(string id, bool includeAnnotations)
+    private static WorkflowRun BuildRun(string id, bool includeAnnotations, string? epicId = null)
     {
         Dictionary<string, string>? annotations = null;
         if (includeAnnotations)
@@ -394,6 +429,7 @@ public class TransactionalEventAppendSpecs : IAsyncLifetime
                 ["projectId"] = ProjectId,
                 ["issueId"] = IssueId,
                 ["issueNumber"] = "1",
+                ["epicId"] = epicId ?? string.Empty,
             };
         }
         return new WorkflowRun

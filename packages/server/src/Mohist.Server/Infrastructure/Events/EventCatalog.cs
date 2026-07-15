@@ -12,42 +12,11 @@ namespace Mohist.Server.Infrastructure.Events;
 public static class EventCatalog
 {
     /// <summary>
-    /// All registered CloudEvents <c>type</c> values. New events must be added here
-    /// AND must have a producer that calls <c>bus.Emit</c> with that exact type string.
-    /// Generic session runtime event names are listed here for subscription discovery,
-    /// but they flow through the dedicated transcript SignalR channel instead of the
-    /// domain EventBridge path.
+    /// Protocol CloudEvents <c>type</c> values. Every entry has a required-lineage
+    /// declaration below; adding a type without one fails during static initialization.
     /// </summary>
     public static readonly IReadOnlyList<string> All = new[]
     {
-        // === Agent-detail / transcript vocabulary (legacy agent-detail names) ===
-        "tool_call",
-        "agent_text_chunk",
-        "main_tool_call",
-        "coder_session_started",
-        "coder_session_completed",
-        "coder_session_failed",
-        "coder_session_cancelled",
-        "coder_session_status_changed",
-        "coder_recovery_status",
-        "plan_session_update",
-        "plan_round_start",
-        "plan_round_complete",
-        // === Generic session runtime event names (transcript channel) ===
-        "session.input",
-        "message.delta",
-        "reasoning.delta",
-        "tool_call.started",
-        "tool_call.updated",
-        "tool_call.completed",
-        "session.closed",
-        "session.liveness",
-        "usage.updated",
-        "model.resolved",
-        "compaction",
-        "compaction_event",
-        "context_health_update",
-        // === Reverse-DNS names (com.mohist.*) — preferred for new emits ===
         ReverseDns.WorkflowRunStarted,
         ReverseDns.WorkflowRunResumed,
         ReverseDns.WorkflowRunPaused,
@@ -101,6 +70,49 @@ public static class EventCatalog
         ReverseDns.EpicClosed,
         ReverseDns.EpicReopened,
         ReverseDns.EpicStartAttemptFailed,
+    };
+
+    /// <summary>
+    /// Transcript-only vocabulary carried on the dedicated session channel.
+    /// These are not CloudEvents protocol entries and intentionally have no
+    /// lineage declaration.
+    /// </summary>
+    public static readonly IReadOnlyList<string> TranscriptTypes = new[]
+    {
+        "tool_call",
+        "agent_text_chunk",
+        "main_tool_call",
+        "coder_session_started",
+        "coder_session_completed",
+        "coder_session_failed",
+        "coder_session_cancelled",
+        "coder_session_status_changed",
+        "coder_recovery_status",
+        "plan_session_update",
+        "plan_round_start",
+        "plan_round_complete",
+        "session.input",
+        "message.delta",
+        "reasoning.delta",
+        "tool_call.started",
+        "tool_call.updated",
+        "tool_call.completed",
+        "session.closed",
+        "session.liveness",
+        "usage.updated",
+        "model.resolved",
+        "compaction",
+        "compaction_event",
+        "context_health_update",
+    };
+
+    public static readonly IReadOnlySet<string> CatalogOnlyTypes = new HashSet<string>(StringComparer.Ordinal)
+    {
+        ReverseDns.WorkflowRunRetrying,
+        ReverseDns.WorkflowRunRerunning,
+        ReverseDns.CheckStarted,
+        ReverseDns.RepairScheduled,
+        ReverseDns.RunnerDisconnected,
     };
 
     // === Lineage attribute names ===
@@ -202,6 +214,39 @@ public static class EventCatalog
         // === inbox-synthesized ===
         [ReverseDns.InboxItemPersisted] = [Lineage.ProjectId, Lineage.IssueId, Lineage.Issue],
     };
+
+    static EventCatalog()
+    {
+        ValidateDeclarations(All, LineageRequired);
+    }
+
+    internal static void ValidateDeclarations(
+        IReadOnlyCollection<string> registeredTypes,
+        IReadOnlyDictionary<string, IReadOnlyList<string>> declarations)
+    {
+        ArgumentNullException.ThrowIfNull(registeredTypes);
+        ArgumentNullException.ThrowIfNull(declarations);
+
+        var duplicateTypes = registeredTypes
+            .GroupBy(type => type, StringComparer.Ordinal)
+            .Where(group => group.Count() > 1)
+            .Select(group => group.Key)
+            .ToArray();
+        var undeclared = registeredTypes.Where(type => !declarations.ContainsKey(type)).ToArray();
+        var unregistered = declarations.Keys.Where(type => !registeredTypes.Contains(type, StringComparer.Ordinal)).ToArray();
+        var empty = declarations
+            .Where(pair => pair.Value.Count == 0 || pair.Value.Any(string.IsNullOrWhiteSpace))
+            .Select(pair => pair.Key)
+            .ToArray();
+        if (duplicateTypes.Length != 0 || undeclared.Length != 0 || unregistered.Length != 0 || empty.Length != 0)
+        {
+            throw new InvalidOperationException(
+                $"Event catalog lineage declarations are invalid. Duplicates: {string.Join(", ", duplicateTypes)}. " +
+                $"Undeclared: {string.Join(", ", undeclared)}. " +
+                $"Unregistered: {string.Join(", ", unregistered)}. " +
+                $"Empty: {string.Join(", ", empty)}.");
+        }
+    }
 
     /// <summary>
     /// The set of lineage attributes the given event <paramref name="type"/> MUST

@@ -10,6 +10,20 @@ namespace Mohist.Server.Infrastructure.Events;
 internal static class EpicEventSerializer
 {
     private static readonly JsonSerializerOptions JsonOptions = JSON.Options;
+    private static readonly IReadOnlyDictionary<Type, string> BusTypes = new Dictionary<Type, string>
+    {
+        [typeof(EpicCreated)] = EventCatalog.ReverseDns.EpicCreated,
+        [typeof(EpicUpdated)] = EventCatalog.ReverseDns.EpicUpdated,
+        [typeof(EpicPriorityChanged)] = EventCatalog.ReverseDns.EpicPriorityChanged,
+        [typeof(EpicIssueLinked)] = EventCatalog.ReverseDns.EpicIssueLinked,
+        [typeof(EpicIssueUnlinked)] = EventCatalog.ReverseDns.EpicIssueUnlinked,
+        [typeof(EpicStatusChanged)] = EventCatalog.ReverseDns.EpicStatusChanged,
+        [typeof(EpicClosed)] = EventCatalog.ReverseDns.EpicClosed,
+        [typeof(EpicReopened)] = EventCatalog.ReverseDns.EpicReopened,
+        [typeof(EpicStartAttemptFailed)] = EventCatalog.ReverseDns.EpicStartAttemptFailed,
+    };
+
+    internal static IReadOnlyCollection<string> ProducedTypes => BusTypes.Values.ToArray();
 
     /// <summary>
     /// Storage-facing type: the variant's CLR type name (matches the
@@ -20,19 +34,13 @@ internal static class EpicEventSerializer
     /// <summary>
     /// CloudEvents 1.0.2 reverse-DNS <c>type</c> string for the bus.
     /// </summary>
-    public static string BusType(EpicEvent payload) => Unwrap(payload) switch
+    public static string BusType(EpicEvent payload)
     {
-        EpicCreated => EventCatalog.ReverseDns.EpicCreated,
-        EpicUpdated => EventCatalog.ReverseDns.EpicUpdated,
-        EpicPriorityChanged => EventCatalog.ReverseDns.EpicPriorityChanged,
-        EpicIssueLinked => EventCatalog.ReverseDns.EpicIssueLinked,
-        EpicIssueUnlinked => EventCatalog.ReverseDns.EpicIssueUnlinked,
-        EpicStatusChanged => EventCatalog.ReverseDns.EpicStatusChanged,
-        EpicClosed => EventCatalog.ReverseDns.EpicClosed,
-        EpicReopened => EventCatalog.ReverseDns.EpicReopened,
-        EpicStartAttemptFailed => EventCatalog.ReverseDns.EpicStartAttemptFailed,
-        _ => throw new InvalidOperationException($"No CloudEvents type for {Unwrap(payload).GetType().Name}"),
-    };
+        var variant = Unwrap(payload);
+        return BusTypes.TryGetValue(variant.GetType(), out var type)
+            ? type
+            : throw new InvalidOperationException($"No CloudEvents type for {variant.GetType().Name}");
+    }
 
     public static JsonElement ToData(EpicEvent payload) =>
         JsonSerializer.SerializeToElement(Unwrap(payload), JsonOptions);

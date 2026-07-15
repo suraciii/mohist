@@ -98,11 +98,12 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
     {
         if (_run is null)
         {
-            var metadata = input?.Metadata;
+            var metadata = input?.Metadata ?? BuildRunMetadata(input);
+            RequireProjectOwnership(metadata);
             var projectId = metadata?.Annotations?.GetValueOrDefault("projectId");
             var issueId = metadata?.Annotations?.GetValueOrDefault("issueId");
             var structure = await _profileManager.LoadStructureAsync(GrainKey, projectId, issueId);
-            _run = WorkflowRun.Create(GrainKey, structure, Now(), metadata ?? BuildRunMetadata(null));
+            _run = WorkflowRun.Create(GrainKey, structure, Now(), metadata);
             _run.Workspace = input?.Workspace;
         }
 
@@ -499,6 +500,16 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
     {
         if (input is null) return null;
         return new WorkflowRunMetadata(input.Name, Now(), input.Labels, input.Annotations);
+    }
+
+    private void RequireProjectOwnership(WorkflowRunMetadata? metadata)
+    {
+        if (metadata?.Annotations?.TryGetValue("projectId", out var projectId) == true
+            && !string.IsNullOrWhiteSpace(projectId))
+            return;
+
+        throw new InvalidOperationException(
+            $"Workflow '{GrainKey}' cannot start without the required projectId annotation.");
     }
 
     private async Task ClearStoppedRunStaleApprovalGateAsync(CancellationToken ct)

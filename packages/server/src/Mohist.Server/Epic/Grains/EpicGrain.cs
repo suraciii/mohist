@@ -164,7 +164,7 @@ public class EpicGrain : Grain, IEpicGrain
         // best-effort: if it fails, the durable
         // EpicIssueLinked/EpicIssueUnlinked handlers re-apply the same
         // intent (drift is bounded and self-healing).
-        await PushEpicAffiliationAsync(issueId, epicId, "link");
+        await PushEpicAffiliationAsync(issueId, projectId, "link");
 
         if (wakeUpEpic)
         {
@@ -361,7 +361,7 @@ public class EpicGrain : Grain, IEpicGrain
             // D5 push: best-effort, fire-and-log denormalization. Drift
             // is bounded and self-healing via the durable
             // EpicIssueLinkedHandler (see single-link comment above).
-            await PushEpicAffiliationAsync(item.IssueId, epicId, "link");
+            await PushEpicAffiliationAsync(item.IssueId, projectId, "link");
         }
 
         // Per design D4: if this batch woke the epic from done to running,
@@ -424,7 +424,7 @@ public class EpicGrain : Grain, IEpicGrain
         // denormalized affiliation on Issue state so subsequent issue.*
         // events stop stamping epicid. Best-effort: if the call fails,
         // the durable EpicIssueUnlinkedHandler re-applies null.
-        await PushEpicAffiliationAsync(issueId, null, "unlink");
+        await PushEpicAffiliationAsync(issueId, projectId, "unlink");
         await RecomputeProgressInternalAsync(
             db,
             projectId,
@@ -498,7 +498,7 @@ public class EpicGrain : Grain, IEpicGrain
 
             // D5 push: best-effort — drift is bounded by the durable
             // EpicIssueUnlinkedHandler.
-            await PushEpicAffiliationAsync(item.IssueId, null, "unlink");
+            await PushEpicAffiliationAsync(item.IssueId, projectId, "unlink");
         }
 
         if (hasUnlinkedAny)
@@ -1186,8 +1186,9 @@ public class EpicGrain : Grain, IEpicGrain
 
     /// <summary>
     /// Best-effort denormalization push (D5): after an epic
-    /// link/unlink transaction commits, propagate the new affiliation
-    /// onto the linked issue's own state via
+    /// link/unlink transaction commits, resolve the current affiliation
+    /// from the authoritative membership rows and propagate it onto the
+    /// linked issue's own state via
     /// <see cref="IIssueGrain.SetEpicAffiliationAsync"/>. The call is
     /// awaited but failures are logged, not surfaced: the durable
     /// <c>EpicIssueLinkedHandler</c>/<c>EpicIssueUnlinkedHandler</c>
@@ -1195,10 +1196,13 @@ public class EpicGrain : Grain, IEpicGrain
     /// between the join row (<c>EpicIssueRow</c>) and the issue's
     /// denormalized <c>EpicId</c> is bounded and self-healing.
     /// </summary>
-    private async Task PushEpicAffiliationAsync(string issueId, string? epicId, string operation)
+    private async Task PushEpicAffiliationAsync(string issueId, string projectId, string operation)
     {
+        string? epicId = null;
         try
         {
+            await using var db = await _dbFactory.CreateDbContextAsync();
+            epicId = await EpicIssueAffiliationResolver.ResolveAsync(db, projectId, issueId);
             var issueGrain = _grains.GetGrain<IIssueGrain>(Mohist.Server.Infrastructure.Orleans.GrainKey.Issue(issueId));
             await issueGrain.SetEpicAffiliationAsync(epicId);
         }

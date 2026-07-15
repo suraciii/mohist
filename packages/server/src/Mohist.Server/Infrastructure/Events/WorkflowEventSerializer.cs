@@ -8,6 +8,30 @@ namespace Mohist.Server.Infrastructure.Events;
 internal static class WorkflowEventSerializer
 {
     private static readonly JsonSerializerOptions JsonOptions = JSON.Options;
+    private static readonly IReadOnlyDictionary<Type, string> BusTypes = new Dictionary<Type, string>
+    {
+        [typeof(WorkflowRunStarted)] = EventCatalog.ReverseDns.WorkflowRunStarted,
+        [typeof(WorkflowRunResumed)] = EventCatalog.ReverseDns.WorkflowRunResumed,
+        [typeof(WorkflowRunPaused)] = EventCatalog.ReverseDns.WorkflowRunPaused,
+        [typeof(WorkflowRunStopped)] = EventCatalog.ReverseDns.WorkflowRunStopped,
+        [typeof(WorkflowRunCompleted)] = EventCatalog.ReverseDns.WorkflowRunCompleted,
+        [typeof(WorkflowRunFailed)] = EventCatalog.ReverseDns.WorkflowRunFailed,
+        [typeof(StageStarted)] = EventCatalog.ReverseDns.StageStarted,
+        [typeof(StageCompleted)] = EventCatalog.ReverseDns.StageCompleted,
+        [typeof(StageFailed)] = EventCatalog.ReverseDns.StageFailed,
+        [typeof(StageApprovalRequested)] = EventCatalog.ReverseDns.StageApprovalRequested,
+        [typeof(StageApprovalResolved)] = EventCatalog.ReverseDns.StageApprovalResolved,
+        [typeof(FeedbackRequested)] = EventCatalog.ReverseDns.FeedbackRequested,
+        [typeof(TaskStarted)] = EventCatalog.ReverseDns.TaskStarted,
+        [typeof(TaskCompleted)] = EventCatalog.ReverseDns.TaskCompleted,
+        [typeof(TaskFailed)] = EventCatalog.ReverseDns.TaskFailed,
+        [typeof(CheckPassed)] = EventCatalog.ReverseDns.CheckPassed,
+        [typeof(CheckFailed)] = EventCatalog.ReverseDns.CheckFailed,
+        [typeof(CheckPending)] = EventCatalog.ReverseDns.CheckPending,
+        [typeof(WorkflowArtifactRecorded)] = EventCatalog.ReverseDns.WorkflowArtifactRecorded,
+    };
+
+    internal static IReadOnlyCollection<string> ProducedTypes => BusTypes.Values.ToArray();
 
     public static string Type(WorkflowEvent payload) => Unwrap(payload).GetType().Name;
 
@@ -17,29 +41,13 @@ internal static class WorkflowEventSerializer
     /// <c>EventRow.Type</c> (via <see cref="Type"/>) for storage compatibility;
     /// the CloudEvents bus uses this mapping instead.
     /// </summary>
-    public static string BusType(WorkflowEvent payload) => Unwrap(payload) switch
+    public static string BusType(WorkflowEvent payload)
     {
-        WorkflowRunStarted => EventCatalog.ReverseDns.WorkflowRunStarted,
-        WorkflowRunResumed => EventCatalog.ReverseDns.WorkflowRunResumed,
-        WorkflowRunPaused => EventCatalog.ReverseDns.WorkflowRunPaused,
-        WorkflowRunStopped => EventCatalog.ReverseDns.WorkflowRunStopped,
-        WorkflowRunCompleted => EventCatalog.ReverseDns.WorkflowRunCompleted,
-        WorkflowRunFailed => EventCatalog.ReverseDns.WorkflowRunFailed,
-        StageStarted => EventCatalog.ReverseDns.StageStarted,
-        StageCompleted => EventCatalog.ReverseDns.StageCompleted,
-        StageFailed => EventCatalog.ReverseDns.StageFailed,
-        StageApprovalRequested => EventCatalog.ReverseDns.StageApprovalRequested,
-        StageApprovalResolved => EventCatalog.ReverseDns.StageApprovalResolved,
-        FeedbackRequested => EventCatalog.ReverseDns.FeedbackRequested,
-        TaskStarted => EventCatalog.ReverseDns.TaskStarted,
-        TaskCompleted => EventCatalog.ReverseDns.TaskCompleted,
-        TaskFailed => EventCatalog.ReverseDns.TaskFailed,
-        CheckPassed => EventCatalog.ReverseDns.CheckPassed,
-        CheckFailed => EventCatalog.ReverseDns.CheckFailed,
-        CheckPending => EventCatalog.ReverseDns.CheckPending,
-        WorkflowArtifactRecorded => EventCatalog.ReverseDns.WorkflowArtifactRecorded,
-        _ => throw new InvalidOperationException($"No CloudEvents type for {Unwrap(payload).GetType().Name}"),
-    };
+        var variant = Unwrap(payload);
+        return BusTypes.TryGetValue(variant.GetType(), out var type)
+            ? type
+            : throw new InvalidOperationException($"No CloudEvents type for {variant.GetType().Name}");
+    }
 
     /// <summary>
     /// Extract the workflow run id (source) and the issue number subject

@@ -1,7 +1,10 @@
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Mohist.Server.Epic.Grains;
 using Mohist.Server.Epic.Services;
+using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Data.Epic;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Issue.Domain.Events;
 
@@ -210,17 +213,18 @@ public sealed class EpicIssueLinkedHandler : ICloudEventHandler<Epic.Domain.Even
     [ActivatorUtilitiesConstructor]
     public EpicIssueLinkedHandler(
         IGrainFactory grains,
+        IDbContextFactory<MohistDbContext> dbFactory,
         ILogger<EpicIssueLinkedHandler> log)
     {
         _dispatcher = new EpicEventRecomputeDispatcher(grains, log);
-        _affiliationDispatcher = new EpicIssueAffiliationDispatcher(grains, log);
+        _affiliationDispatcher = new EpicIssueAffiliationDispatcher(grains, dbFactory);
     }
 
     public bool Filter(CloudEvent<Epic.Domain.Events.EpicIssueLinked> evt) => true;
 
     public async Task HandleAsync(CloudEvent<Epic.Domain.Events.EpicIssueLinked> evt, CancellationToken ct)
     {
-        await _affiliationDispatcher.DispatchAsync(evt.Id, evt.Data.IssueId, epicId: evt.Extensions.GetValueOrDefault("epicid"), isLink: true, ct).ConfigureAwait(false);
+        await _affiliationDispatcher.DispatchAsync(evt.Id, evt.Extensions, evt.Data.IssueId, ct).ConfigureAwait(false);
         await _dispatcher.DispatchAsync(evt.Id, evt.Extensions, evtType: "issue-linked", ct).ConfigureAwait(false);
     }
 }
@@ -240,17 +244,18 @@ public sealed class EpicIssueUnlinkedHandler : ICloudEventHandler<Epic.Domain.Ev
     [ActivatorUtilitiesConstructor]
     public EpicIssueUnlinkedHandler(
         IGrainFactory grains,
+        IDbContextFactory<MohistDbContext> dbFactory,
         ILogger<EpicIssueUnlinkedHandler> log)
     {
         _dispatcher = new EpicEventRecomputeDispatcher(grains, log);
-        _affiliationDispatcher = new EpicIssueAffiliationDispatcher(grains, log);
+        _affiliationDispatcher = new EpicIssueAffiliationDispatcher(grains, dbFactory);
     }
 
     public bool Filter(CloudEvent<Epic.Domain.Events.EpicIssueUnlinked> evt) => true;
 
     public async Task HandleAsync(CloudEvent<Epic.Domain.Events.EpicIssueUnlinked> evt, CancellationToken ct)
     {
-        await _affiliationDispatcher.DispatchAsync(evt.Id, evt.Data.IssueId, epicId: null, isLink: false, ct).ConfigureAwait(false);
+        await _affiliationDispatcher.DispatchAsync(evt.Id, evt.Extensions, evt.Data.IssueId, ct).ConfigureAwait(false);
         await _dispatcher.DispatchAsync(evt.Id, evt.Extensions, evtType: "issue-unlinked", ct).ConfigureAwait(false);
     }
 }
@@ -494,46 +499,37 @@ internal sealed class EpicEventRecomputeDispatcher
 internal sealed class EpicIssueAffiliationDispatcher
 {
     private readonly IGrainFactory _grains;
-    private readonly ILogger _log;
-
-    public EpicIssueAffiliationDispatcher(IGrainFactory grains, ILogger log)
+    private readonly IDbContextFactory<MohistDbContext> _dbFactory;
+    public EpicIssueAffiliationDispatcher(
+        IGrainFactory grains,
+        IDbContextFactory<MohistDbContext> dbFactory)
     {
         _grains = grains;
-        _log = log;
+        _dbFactory = dbFactory;
     }
 
     public async Task DispatchAsync(
         string eventId,
+        IReadOnlyDictionary<string, string> extensions,
         string issueId,
-        string? epicId,
-        bool isLink,
         CancellationToken ct)
     {
+        if (!extensions.TryGetValue(EventCatalog.Lineage.ProjectId, out var projectId)
+            || string.IsNullOrWhiteSpace(projectId))
+        {
+            throw new InvalidOperationException(
+                $"Affiliation event '{eventId}' is missing its required projectid extension.");
+        }
         if (string.IsNullOrWhiteSpace(issueId))
         {
-            _log.LogDebug(
-                "{EvtType} event missing issue id in payload; skipping affiliation push (event {EventId})",
-                isLink ? "issue-linked" : "issue-unlinked", eventId);
-            return;
+            throw new InvalidOperationException(
+                $"Affiliation event '{eventId}' is missing its issue id payload.");
         }
-        // Same best-effort posture as EpicGrain.PushEpicAffiliationAsync
-        // (D5): a synchronous failure here is logged but does not
-        // surface — the next redelivery re-applies. Without the
-        // try/catch, a failure in the durable handler would also fail
-        // its outer dispatch and let the dispatcher dead-letter the
-        // EpicIssueLinked/EpicIssueUnlinked event, taking the recompute
-        // convergence path with it.
-        try
-        {
-            var grain = _grains.GetGrain<Mohist.Server.Issue.Grains.IIssueGrain>(
-                Mohist.Server.Infrastructure.Orleans.GrainKey.Issue(issueId));
-            await grain.SetEpicAffiliationAsync(isLink ? epicId : null).ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            _log.LogWarning(ex,
-                "Durable affiliation push failed for issue {IssueId} (target epic {EpicId}); dispatcher will re-apply on redelivery (event {EventId})",
-                issueId, epicId ?? "<null>", eventId);
-        }
+
+        await using var db = await _dbFactory.CreateDbContextAsync(ct).ConfigureAwait(false);
+        var epicId = await EpicIssueAffiliationResolver.ResolveAsync(db, projectId, issueId, ct).ConfigureAwait(false);
+        var grain = _grains.GetGrain<Mohist.Server.Issue.Grains.IIssueGrain>(
+            Mohist.Server.Infrastructure.Orleans.GrainKey.Issue(issueId));
+        await grain.SetEpicAffiliationAsync(epicId).ConfigureAwait(false);
     }
 }

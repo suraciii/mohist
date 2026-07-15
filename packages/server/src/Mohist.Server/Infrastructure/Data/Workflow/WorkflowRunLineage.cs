@@ -33,25 +33,39 @@ public static class WorkflowRunLineage
         ArgumentNullException.ThrowIfNull(run);
 
         var annotations = run.Metadata?.Annotations;
-        var projectId = annotations?.GetValueOrDefault("projectId");
+        var projectId = RequiredAnnotation(annotations, "projectId", run.Id);
         var issueId = annotations?.GetValueOrDefault("issueId");
         var issueNumber = annotations?.GetValueOrDefault("issueNumber");
+        var epicId = annotations?.GetValueOrDefault("epicId");
         var stage = StageOf(evt);
 
         var extensions = new Dictionary<string, string>(StringComparer.Ordinal)
         {
             [EventCatalog.Lineage.WorkflowRunId] = run.Id,
+            [EventCatalog.Lineage.ProjectId] = projectId,
         };
-        if (!string.IsNullOrWhiteSpace(projectId))
-            extensions[EventCatalog.Lineage.ProjectId] = projectId;
         if (!string.IsNullOrWhiteSpace(issueId))
             extensions[EventCatalog.Lineage.IssueId] = issueId;
         if (!string.IsNullOrWhiteSpace(issueNumber))
             extensions[EventCatalog.Lineage.Issue] = issueNumber;
+        if (!string.IsNullOrWhiteSpace(epicId))
+            extensions[EventCatalog.Lineage.EpicId] = epicId;
         if (!string.IsNullOrWhiteSpace(stage))
             extensions[EventCatalog.Lineage.Stage] = stage!;
 
         return extensions;
+    }
+
+    private static string RequiredAnnotation(
+        IReadOnlyDictionary<string, string>? annotations,
+        string key,
+        string workflowRunId)
+    {
+        if (annotations?.TryGetValue(key, out var value) == true && !string.IsNullOrWhiteSpace(value))
+            return value;
+
+        throw new InvalidOperationException(
+            $"Workflow run '{workflowRunId}' cannot emit events without the required '{key}' annotation.");
     }
 
     /// <summary>

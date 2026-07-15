@@ -19,6 +19,41 @@ public class EventCatalogTests
     }
 
     [Fact]
+    public void All_HasExactlyOneLineageDeclarationPerProtocolType()
+    {
+        Assert.All(EventCatalog.All, type => Assert.True(EventCatalog.HasLineageDeclaration(type), type));
+        Assert.DoesNotContain(EventCatalog.All, type => EventCatalog.RequiredAttributes(type).Count == 0);
+    }
+
+    [Fact]
+    public void ProducedTypes_CoverEveryNonCatalogOnlyProtocolType()
+    {
+        var produced = WorkflowEventSerializer.ProducedTypes
+            .Concat(IssueEventSerializer.ProducedTypes)
+            .Concat(AgentSessionEventSerializer.ProducedTypes)
+            .Concat(EpicEventSerializer.ProducedTypes)
+            .Append(EventCatalog.ReverseDns.InboxItemPersisted)
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+        var expected = EventCatalog.All
+            .Where(type => !EventCatalog.CatalogOnlyTypes.Contains(type))
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.Equal(expected, produced);
+    }
+
+    [Fact]
+    public void ValidateDeclarations_RegisteredTypeWithoutDeclaration_Fails()
+    {
+        var ex = Assert.Throws<InvalidOperationException>(() => EventCatalog.ValidateDeclarations(
+            ["com.mohist.example.created"],
+            new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal)));
+
+        Assert.Contains("Undeclared: com.mohist.example.created", ex.Message);
+    }
+
+    [Fact]
     public void RequiredAttributes_WorkflowRunTypes_CarryProjectIdAndWorkflowRunIdOnly()
     {
         var expected = new[] { EventCatalog.Lineage.ProjectId, EventCatalog.Lineage.WorkflowRunId };

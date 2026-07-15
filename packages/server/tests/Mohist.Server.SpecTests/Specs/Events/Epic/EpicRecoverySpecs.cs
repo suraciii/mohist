@@ -1,12 +1,15 @@
+using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
 using EnvironmentAbstractions.TestHelpers;
 using Mohist.Server.Epic.Domain.Events;
 using Mohist.Server.Epic.Grains;
+using Mohist.Server.Epic.Services;
 using Mohist.Server.Events.Grains;
 using Mohist.Server.Events.Subscriptions;
 using Mohist.Server.Infrastructure.Data.Db;
@@ -55,10 +58,22 @@ public class EpicRecoverySpecs
         await _fixture.ResetAsync();
         await _fixture.SeedEpicAsync(ProjectId, EpicId, "running");
         await _fixture.SeedIssueAsync(ProjectId, IssueId, 1, IssueStatus.Done);
+        var grains = new FlakyAffiliationGrainFactory(_fixture.DbFactory, failFirst: false);
+        var handler = new EpicIssueLinkedHandler(grains, _fixture.DbFactory, NullLogger<EpicIssueLinkedHandler>.Instance);
+        var dispatcher = CreateDispatcher(
+            new Subscription(EventCatalog.ReverseDns.EpicIssueLinked, handler, DispatchEpicIssueLinkedAsync));
 
         await using (var db = _fixture.CreateDbContext())
         {
             db.EpicIssues.Add(new EpicIssueRow
+            {
+                ProjectId = ProjectId,
+                EpicId = EpicId,
+                IssueId = IssueId,
+                IssueNumber = 1,
+                CreatedAt = _fixture.TimeProvider.GetUtcNow(),
+            });
+            db.EpicActiveIssues.Add(new EpicActiveIssueRow
             {
                 ProjectId = ProjectId,
                 EpicId = EpicId,
@@ -75,11 +90,83 @@ public class EpicRecoverySpecs
             await _fixture.EventStore.ListUndeliveredAsync(),
             evt => evt.Type == EventCatalog.ReverseDns.EpicIssueLinked);
 
-        await _fixture.Dispatcher.DispatchAsync(CancellationToken.None);
-        await _fixture.Dispatcher.DispatchAsync(CancellationToken.None);
+        await dispatcher.DispatchAsync(CancellationToken.None);
 
-        Assert.Equal("done", await _fixture.GetEpicStatusAsync(ProjectId, EpicId));
+        var errors = await _fixture.ListDeadLetterErrorsAsync();
+        Assert.True(errors.Count == 0, string.Join(Environment.NewLine, errors));
+        Assert.Equal(EpicId, await _fixture.GetIssueEpicIdAsync(ProjectId, IssueId));
+        Assert.Equal(1, grains.RecomputeCalls);
         Assert.True(await _fixture.IsDispatchedAsync(linked.Origin, linked.Source, linked.Id));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task AffiliationReplay_UsesCurrentMembershipWhenSourcesDeliverOutOfCausalOrder()
+    {
+        await _fixture.ResetAsync();
+        await _fixture.SeedEpicAsync(ProjectId, "epic_z", "running");
+        await _fixture.SeedEpicAsync(ProjectId, "epic_a", "running");
+        await _fixture.SeedIssueAsync(ProjectId, IssueId, 1, IssueStatus.Backlog);
+        await _fixture.SeedLinkAsync(ProjectId, "epic_a", IssueId, 1);
+        await _fixture.SeedActiveLinkAsync(ProjectId, "epic_a", IssueId, 1);
+        var grains = new FlakyAffiliationGrainFactory(_fixture.DbFactory, failFirst: false);
+        var linkedHandler = new EpicIssueLinkedHandler(grains, _fixture.DbFactory, NullLogger<EpicIssueLinkedHandler>.Instance);
+        var unlinkedHandler = new EpicIssueUnlinkedHandler(grains, _fixture.DbFactory, NullLogger<EpicIssueUnlinkedHandler>.Instance);
+        var dispatcher = CreateDispatcher(
+            new Subscription(EventCatalog.ReverseDns.EpicIssueLinked, linkedHandler, DispatchEpicIssueLinkedAsync),
+            new Subscription(EventCatalog.ReverseDns.EpicIssueUnlinked, unlinkedHandler, DispatchEpicIssueUnlinkedAsync));
+
+        await using (var db = _fixture.CreateDbContext())
+        {
+            await _fixture.EventStore.AppendAsync(db, EpicEvent(ProjectId, "epic_z",
+                EventCatalog.ReverseDns.EpicIssueUnlinked, new EpicIssueUnlinked(IssueId, 1)));
+            await _fixture.EventStore.AppendAsync(db, EpicEvent(ProjectId, "epic_a",
+                EventCatalog.ReverseDns.EpicIssueLinked, new EpicIssueLinked(IssueId, 1)));
+            await db.SaveChangesAsync();
+        }
+
+        var undelivered = await _fixture.EventStore.ListUndeliveredAsync();
+        Assert.Equal(
+            [EventCatalog.ReverseDns.EpicIssueLinked, EventCatalog.ReverseDns.EpicIssueUnlinked],
+            undelivered.Select(evt => evt.Type));
+
+        await dispatcher.DispatchAsync(CancellationToken.None);
+
+        Assert.Equal("epic_a", await _fixture.GetIssueEpicIdAsync(ProjectId, IssueId));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task AffiliationReplay_WriteFailureLeavesEventPendingUntilLaterAttemptPersistsAffiliation()
+    {
+        await _fixture.ResetAsync();
+        await _fixture.SeedIssueAsync(ProjectId, IssueId, 1, IssueStatus.Backlog);
+        await _fixture.SeedLinkAsync(ProjectId, EpicId, IssueId, 1);
+        var grains = new FlakyAffiliationGrainFactory(_fixture.DbFactory);
+        var handler = new EpicIssueLinkedHandler(grains, _fixture.DbFactory, NullLogger<EpicIssueLinkedHandler>.Instance);
+        var dispatcher = CreateDispatcher(
+            new Subscription(EventCatalog.ReverseDns.EpicIssueLinked, handler, DispatchEpicIssueLinkedAsync));
+
+        await _fixture.EventStore.AppendAsync(EpicEvent(
+            ProjectId,
+            EpicId,
+            EventCatalog.ReverseDns.EpicIssueLinked,
+            new EpicIssueLinked(IssueId, 1)));
+        var pending = Assert.Single(await _fixture.EventStore.ListUndeliveredAsync());
+
+        await dispatcher.DispatchAsync(CancellationToken.None);
+
+        Assert.Equal(1, grains.AffiliationAttempts);
+        Assert.False(await _fixture.IsDispatchedAsync(pending.Origin, pending.Source, pending.Id));
+        Assert.Null(await _fixture.GetIssueEpicIdAsync(ProjectId, IssueId));
+
+        await dispatcher.DispatchAsync(CancellationToken.None);
+
+        Assert.Equal(2, grains.AffiliationAttempts);
+        Assert.Equal(EpicId, await _fixture.GetIssueEpicIdAsync(ProjectId, IssueId));
+        Assert.True(await _fixture.IsDispatchedAsync(pending.Origin, pending.Source, pending.Id));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]
@@ -127,6 +214,20 @@ public class EpicRecoverySpecs
         Assert.Empty(await verify.DeadLetters.AsNoTracking().ToListAsync());
     }
 
+    private EventDispatcherService CreateDispatcher(params Subscription[] subscriptions) => new(
+        _fixture.EventStore,
+        subscriptions,
+        new DeadLetterStore(_fixture.DbFactory),
+        _fixture.TimeProvider,
+        Options.Create(new EventDispatcherOptions
+        {
+            BatchSize = 10,
+            MaxAttempts = 3,
+            BaseBackoff = TimeSpan.Zero,
+            MaxBackoff = TimeSpan.Zero,
+        }),
+        NullLogger<EventDispatcherService>.Instance);
+
     private CloudEvent EpicEvent(string projectId, string epicId, string type, object data) => new(
         id: Guid.NewGuid().ToString(),
         source: new Uri(EpicEventPersistence.EpicSource(epicId), UriKind.Relative),
@@ -138,8 +239,43 @@ public class EpicRecoverySpecs
         {
             ["projectid"] = projectId,
             ["epicid"] = epicId,
-            ["epicno"] = "1",
         });
+
+    private static Task DispatchEpicIssueLinkedAsync(object rawHandler, CloudEvent rawEvent, CancellationToken ct)
+    {
+        var handler = (ICloudEventHandler<EpicIssueLinked>)rawHandler;
+        var payload = rawEvent.Data?.Deserialize<EpicIssueLinked>(CloudEvent.JsonOptions)
+            ?? throw new InvalidOperationException("Epic issue-linked payload was missing.");
+        var typed = new CloudEvent<EpicIssueLinked>(
+            rawEvent.Id,
+            rawEvent.Source,
+            rawEvent.Type,
+            rawEvent.Time,
+            payload,
+            rawEvent.DataContentType,
+            rawEvent.Subject,
+            rawEvent.SpecVersion,
+            rawEvent.Extensions);
+        return handler.HandleAsync(typed, ct);
+    }
+
+    private static Task DispatchEpicIssueUnlinkedAsync(object rawHandler, CloudEvent rawEvent, CancellationToken ct)
+    {
+        var handler = (ICloudEventHandler<EpicIssueUnlinked>)rawHandler;
+        var payload = rawEvent.Data?.Deserialize<EpicIssueUnlinked>(CloudEvent.JsonOptions)
+            ?? throw new InvalidOperationException("Epic issue-unlinked payload was missing.");
+        var typed = new CloudEvent<EpicIssueUnlinked>(
+            rawEvent.Id,
+            rawEvent.Source,
+            rawEvent.Type,
+            rawEvent.Time,
+            payload,
+            rawEvent.DataContentType,
+            rawEvent.Subject,
+            rawEvent.SpecVersion,
+            rawEvent.Extensions);
+        return handler.HandleAsync(typed, ct);
+    }
 
     private sealed class StartFailingGrainFactory : IGrainFactory
     {
@@ -193,7 +329,122 @@ public class EpicRecoverySpecs
         public Task<IssueStartReadiness> GetStartReadinessAsync() => throw new NotSupportedException();
         public Task<IssueCommentResult> AddCommentAsync(string body, string[]? attachmentIds = null) => throw new NotSupportedException();
         public Task DeactivateForTestAsync() => throw new NotSupportedException();
-        public Task SetEpicAffiliationAsync(string? epicId) => Task.CompletedTask;
+        public Task SetEpicAffiliationAsync(string? epicId) =>
+            throw new InvalidOperationException("simulated affiliation write failure");
+    }
+
+    private sealed class FlakyAffiliationGrainFactory : IGrainFactory
+    {
+        private readonly FlakyAffiliationIssueGrain _issue;
+        private readonly NoopEpicGrain _epic = new();
+
+        public FlakyAffiliationGrainFactory(IDbContextFactory<MohistDbContext> dbFactory, bool failFirst = true)
+        {
+            _issue = new FlakyAffiliationIssueGrain(dbFactory, failFirst);
+        }
+
+        public int AffiliationAttempts => _issue.AffiliationAttempts;
+        public int RecomputeCalls => _epic.RecomputeCalls;
+
+        public TGrainInterface GetGrain<TGrainInterface>(string primaryKey, string? grainClassNamePrefix = null)
+            where TGrainInterface : IGrainWithStringKey
+        {
+            if (typeof(TGrainInterface) == typeof(IIssueGrain))
+                return (TGrainInterface)(object)_issue;
+            if (typeof(TGrainInterface) == typeof(IEpicGrain))
+                return (TGrainInterface)(object)_epic;
+            throw new NotSupportedException(typeof(TGrainInterface).Name);
+        }
+
+        public TGrainInterface GetGrain<TGrainInterface>(Guid primaryKey, string? grainClassNamePrefix = null)
+            where TGrainInterface : IGrainWithGuidKey => throw new NotSupportedException();
+        public TGrainInterface GetGrain<TGrainInterface>(long primaryKey, string? grainClassNamePrefix = null)
+            where TGrainInterface : IGrainWithIntegerKey => throw new NotSupportedException();
+        public TGrainInterface GetGrain<TGrainInterface>(Guid primaryKey, string keyExtension, string? grainClassNamePrefix = null)
+            where TGrainInterface : IGrainWithGuidCompoundKey => throw new NotSupportedException();
+        public TGrainInterface GetGrain<TGrainInterface>(long primaryKey, string keyExtension, string? grainClassNamePrefix = null)
+            where TGrainInterface : IGrainWithIntegerCompoundKey => throw new NotSupportedException();
+        public TGrainObserverInterface CreateObjectReference<TGrainObserverInterface>(IGrainObserver obj)
+            where TGrainObserverInterface : IGrainObserver => throw new NotSupportedException();
+        public void DeleteObjectReference<TGrainObserverInterface>(IGrainObserver obj)
+            where TGrainObserverInterface : IGrainObserver => throw new NotSupportedException();
+        public IGrain GetGrain(Type grainInterfaceType, string grainPrimaryKey) => throw new NotSupportedException();
+        public IGrain GetGrain(Type grainInterfaceType, Guid grainPrimaryKey) => throw new NotSupportedException();
+        public IGrain GetGrain(Type grainInterfaceType, long grainPrimaryKey) => throw new NotSupportedException();
+        public IGrain GetGrain(Type grainInterfaceType, Guid grainPrimaryKey, string keyExtension) => throw new NotSupportedException();
+        public IGrain GetGrain(Type grainInterfaceType, long grainPrimaryKey, string keyExtension) => throw new NotSupportedException();
+        public TGrainInterface GetGrain<TGrainInterface>(GrainId grainId) where TGrainInterface : IAddressable => throw new NotSupportedException();
+        public IAddressable GetGrain(GrainId grainId) => throw new NotSupportedException();
+        public IAddressable GetGrain(GrainId grainId, GrainInterfaceType interfaceType) => throw new NotSupportedException();
+        public IAddressable GetGrain(Type interfaceType, IdSpan grainKey, string? grainClassNamePrefix = null) => throw new NotSupportedException();
+        public IAddressable GetGrain(Type interfaceType, IdSpan grainKey) => throw new NotSupportedException();
+    }
+
+    private sealed class FlakyAffiliationIssueGrain : IIssueGrain
+    {
+        private readonly IDbContextFactory<MohistDbContext> _dbFactory;
+        private readonly bool _failFirst;
+
+        public FlakyAffiliationIssueGrain(IDbContextFactory<MohistDbContext> dbFactory, bool failFirst)
+        {
+            _dbFactory = dbFactory;
+            _failFirst = failFirst;
+        }
+
+        public int AffiliationAttempts { get; private set; }
+
+        public async Task SetEpicAffiliationAsync(string? epicId)
+        {
+            AffiliationAttempts++;
+            if (_failFirst && AffiliationAttempts == 1)
+                throw new InvalidOperationException("simulated affiliation write failure");
+
+            await using var db = await _dbFactory.CreateDbContextAsync();
+            var row = await db.Issues.SingleAsync(issue => issue.IssueId == IssueId);
+            var issue = IssueStore.Deserialize(row.State) ?? throw new InvalidOperationException("Issue state was missing.");
+            issue.SetEpicId(epicId);
+            row.State = IssueStore.Serialize(issue);
+            await db.SaveChangesAsync();
+        }
+
+        public Task<string> StartWorkAsync(WorkflowProjectContext? project = null) => throw new NotSupportedException();
+        public Task<string> CreateAsync(string projectId, int number, string title, string? body, IReadOnlyDictionary<string, string>? labels, string? priority, string? repositoryRef = null, string? issueId = null, string? risk = null, bool isDraft = false, string[]? attachmentIds = null, string? workflowProfileId = null, int[]? prerequisiteNumbers = null) => throw new NotSupportedException();
+        public Task CompleteWorkAsync(string workflowRunId) => throw new NotSupportedException();
+        public Task CancelAsync() => throw new NotSupportedException();
+        public Task UpdateAsync(string title, string? body) => throw new NotSupportedException();
+        public Task UpdateFullAsync(UpdateIssueData data) => throw new NotSupportedException();
+        public Task ArchiveAsync() => throw new NotSupportedException();
+        public Task UnarchiveAsync() => throw new NotSupportedException();
+        public Task ReopenAsync() => throw new NotSupportedException();
+        public Task<IssueWorkflowStatus?> GetWorkflowStatusAsync() => throw new NotSupportedException();
+        public Task<IssuePrerequisiteResult> AddPrerequisiteAsync(int prerequisiteNumber) => throw new NotSupportedException();
+        public Task RemovePrerequisiteAsync(int prerequisiteNumber) => throw new NotSupportedException();
+        public Task<IssueStartReadiness> GetStartReadinessAsync() => throw new NotSupportedException();
+        public Task<IssueCommentResult> AddCommentAsync(string body, string[]? attachmentIds = null) => throw new NotSupportedException();
+        public Task DeactivateForTestAsync() => throw new NotSupportedException();
+    }
+
+    private sealed class NoopEpicGrain : IEpicGrain
+    {
+        public int RecomputeCalls { get; private set; }
+
+        public Task<Mohist.Server.Epic.Services.EpicDto> CreateAsync(string projectId, string title, string? description, string? priority) => throw new NotSupportedException();
+        public Task LinkIssueAsync(string issueId, int issueNumber, string projectId) => throw new NotSupportedException();
+        public Task UnlinkIssueAsync(string issueId, string projectId) => throw new NotSupportedException();
+        public Task<IReadOnlyList<BatchMembershipOutcome>> LinkIssuesAsync(IReadOnlyList<BatchMembershipRequestItem> issues, string projectId) => throw new NotSupportedException();
+        public Task<IReadOnlyList<BatchMembershipOutcome>> UnlinkIssuesAsync(IReadOnlyList<BatchMembershipRequestItem> issues, string projectId) => throw new NotSupportedException();
+        public Task<Mohist.Server.Epic.Services.EpicDto> SetStatusAsync(string status) => throw new NotSupportedException();
+        public Task<Mohist.Server.Epic.Services.EpicDto> PauseAsync(string? reason) => throw new NotSupportedException();
+        public Task<Mohist.Server.Epic.Services.EpicDto> ResumeAsync() => throw new NotSupportedException();
+        public Task<Mohist.Server.Epic.Services.EpicDto> StartAsync() => throw new NotSupportedException();
+        public Task<Mohist.Server.Epic.Services.EpicDto> ReopenAsync() => throw new NotSupportedException();
+        public Task<Mohist.Server.Epic.Services.EpicDto?> UpdateAsync(string? title, string? description, string? priority) => throw new NotSupportedException();
+        public Task<Mohist.Server.Epic.Services.EpicDto?> AutoMarkDoneIfReadyAsync() => throw new NotSupportedException();
+        public Task<Mohist.Server.Epic.Services.EpicDto?> RecomputeProgressAsync()
+        {
+            RecomputeCalls++;
+            return Task.FromResult<Mohist.Server.Epic.Services.EpicDto?>(null);
+        }
     }
 }
 
@@ -229,16 +480,6 @@ public sealed class EpicRecoveryFixture : IAsyncLifetime
             siloBuilder.Services.AddDbContextFactory<MohistDbContext>(options => options.UseSqlite(connectionString));
             siloBuilder.Services.AddSingleton<IEventStore, EventStore>();
             siloBuilder.Services.AddSingleton<IDeadLetterStore, DeadLetterStore>();
-            // Issue-412 T-004: the EpicIssueLinkedHandler/UnlinkedHandler
-            // now route a denormalization push through IIssueGrain
-            // (SetEpicAffiliationAsync) in addition to RecomputeProgress.
-            // The silo must therefore host IssueGrain's full DI graph —
-            // otherwise the push fails and the dispatcher's redelivery
-            // doubles up on work. Scan the production conventional
-            // services so IssueStore, IssueRepositoryResolver,
-            // IssueIdentityResolver, workflow profile managers, and the
-            // rest register themselves (AddScoped<IScopedService>+Scrutor
-            // mirror of MohistServiceRegistration.AddMohistConventionalServices).
             siloBuilder.Services.AddMohistConventionalServices();
             siloBuilder.Services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
             siloBuilder.Services.AddSingleton<IEnvironmentVariableProvider, MockEnvironmentVariableProvider>();
@@ -247,6 +488,7 @@ public sealed class EpicRecoveryFixture : IAsyncLifetime
             siloBuilder.Services.AddSingleton<AttachmentService>();
             siloBuilder.Services.AddCloudEventHandlers([
                 typeof(EpicIssueLinkedHandler),
+                typeof(EpicIssueUnlinkedHandler),
                 typeof(EpicRunningStatusHandler),
                 typeof(EpicStartRetryHandler),
             ]);
@@ -338,6 +580,20 @@ public sealed class EpicRecoveryFixture : IAsyncLifetime
         await db.SaveChangesAsync();
     }
 
+    public async Task SeedActiveLinkAsync(string projectId, string epicId, string issueId, int issueNumber)
+    {
+        await using var db = CreateDbContext();
+        db.EpicActiveIssues.Add(new EpicActiveIssueRow
+        {
+            ProjectId = projectId,
+            EpicId = epicId,
+            IssueId = issueId,
+            IssueNumber = issueNumber,
+            CreatedAt = TimeProvider.GetUtcNow(),
+        });
+        await db.SaveChangesAsync();
+    }
+
     public async Task SetIssueStatusAsync(string projectId, string issueId, IssueStatus status)
     {
         await using var db = CreateDbContext();
@@ -372,6 +628,22 @@ public sealed class EpicRecoveryFixture : IAsyncLifetime
         };
     }
 
+    public async Task<string?> GetIssueEpicIdAsync(string projectId, string issueId)
+    {
+        await using var db = CreateDbContext();
+        var row = await db.Issues.AsNoTracking()
+            .SingleAsync(issue => issue.ProjectId == projectId && issue.IssueId == issueId);
+        return IssueStore.Deserialize(row.State)?.EpicId;
+    }
+
+    public async Task<IReadOnlyList<string>> ListDeadLetterErrorsAsync()
+    {
+        await using var db = CreateDbContext();
+        return await db.DeadLetters.AsNoTracking()
+            .Select(row => $"{row.ErrorMessage}{Environment.NewLine}{row.ErrorStack}")
+            .ToListAsync();
+    }
+
     private sealed class RecoveryDbContextFactory : IDbContextFactory<MohistDbContext>
     {
         private readonly DbContextOptions<MohistDbContext> _options;
@@ -383,4 +655,5 @@ public sealed class EpicRecoveryFixture : IAsyncLifetime
 
         public MohistDbContext CreateDbContext() => new(_options);
     }
+
 }
