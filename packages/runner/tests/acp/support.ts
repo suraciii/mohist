@@ -332,7 +332,6 @@ export function thoughtUpdate(sessionId: string, text: string) {
 export function createSharedSessionFixture(
   scenario: "thought-liveness" | "probe-send-failed" | "resolved-model" | "compaction",
   options?: {
-    cachedModel?: string
     newSessionId?: string
     sessionRecord?: { acpSessionId: string; model?: string | null }
   },
@@ -352,7 +351,7 @@ export function createSharedSessionFixture(
 
   const serverConnection = new FakeServerConnection()
   const acpSessionManager = new AcpSessionManager()
-  acpSessionManager.set(acpSessionManager.workflowKey("workflow-1", "shared-session"), { sessionId: "shared-session-1", workDir: "D:/fake/work", model: options?.cachedModel })
+  acpSessionManager.set(acpSessionManager.workflowKey("workflow-1", "shared-session"), { sessionId: "shared-session-1", workDir: "D:/fake/work" })
   serverConnection.nextEnsureWorkflowAgentSession = options?.sessionRecord ? { ...options.sessionRecord, workDir: "D:/fake/work" } : { acpSessionId: "shared-session-1", workDir: "D:/fake/work" }
   const connection = clientConnection
   if (scenario === "probe-send-failed") {

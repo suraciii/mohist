@@ -21,7 +21,6 @@ export interface SharedAcpConnection {
 export interface SessionEntry {
   sessionId: string
   workDir: string
-  model?: string
 }
 
 export class AcpSessionManager {
