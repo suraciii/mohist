@@ -19,3 +19,10 @@
 - Reset's ReplacementRuntimeSessionId is the temporary seam for the runtime handler result. The workflow route still supplies it through the existing BuildNewAgentSessionId helper; T-003/T-005 must replace that temporary source with the runner SessionCommand result and remove route-side minting.
 - Compact and Reset use the same active-session exception message containing the stable sessionId, so both workflow conflicts expose the same session_active shape.
 - Verification: focused recovery/runtime unit tests passed 33/33; focused grain/API/event specs passed 29/29; full `npm test` passed (CLI 865, server unit 1351, architecture 22, server spec 2753, Web 4653, Runner 1014). The first full run caught and corrected stale-scenario test data before the clean rerun.
+
+## T-003
+
+- AgentSessionRecoveryResult now exposes only the stable Id; the physical AgentSessionId/runtime binding is absent from Compact and Reset responses.
+- Workflow Reset reads the persisted current runtime binding through AgentSessionGrain.GetAsync. Until T-005 supplies the runner-created replacement, the route passes that same binding through ReplacementRuntimeSessionId, so the route neither mints nor rotates an id; T-005 must replace this pass-through with SessionCommandResult.RuntimeSessionId.
+- Workflow recovery API specs assert both responses keep the addressed stable Id and omit agentSessionId. BuildNewAgentSessionId and its route-side GUID generation are removed.
+- Verification: the pre-change and post-change focused recovery API/grain specs passed 19/19; full `npm test` passed (CLI 865, server unit 1351, architecture 22, server spec 2753, Web 4653, Runner 1014).

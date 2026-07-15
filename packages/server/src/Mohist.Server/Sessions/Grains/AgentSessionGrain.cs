@@ -345,7 +345,6 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         var usage = AgentSessionJsonHelper.Usage(session);
         return new AgentSessionRecoveryResult(
             session.Id,
-            session.Status.AgentRuntimeSessionId,
             AgentSessionJsonHelper.StatusName(session, Now()),
             usage.ContextWindowSize ?? size,
             usage.ContextWindowUsed ?? usedBefore,

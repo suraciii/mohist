@@ -31,7 +31,7 @@ public class AgentSessionRecoveryApiSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
-    public async Task CompactEndpoint_InactiveSession_ReturnsUpdatedMetrics()
+    public async Task CompactEndpoint_InactiveSession_ReturnsStableSessionIdOnly()
     {
         var (project, issue, work, currentSession) = await CreateAndStartSessionAsync("compact-inactive", sessionName: "plan", attachIdle: true);
 
@@ -42,6 +42,7 @@ public class AgentSessionRecoveryApiSpecs
         using var doc = JsonDocument.Parse(body);
         var data = doc.RootElement.GetProperty("data");
         Assert.Equal(currentSession.Id, data.GetProperty("id").GetString());
+        Assert.False(data.TryGetProperty("agentSessionId", out _));
         Assert.Equal("compact", data.GetProperty("operation").GetString());
         Assert.True(data.GetProperty("wasCompacted").GetBoolean());
     }
@@ -78,7 +79,7 @@ public class AgentSessionRecoveryApiSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
-    public async Task ResetEndpoint_InactiveSession_ReturnsClearedMetrics()
+    public async Task ResetEndpoint_InactiveSession_ReturnsStableSessionIdOnly()
     {
         var (project, issue, _, currentSession) = await CreateAndStartSessionAsync("reset-inactive", sessionName: "build", attachIdle: true);
 
@@ -89,6 +90,7 @@ public class AgentSessionRecoveryApiSpecs
         using var doc = JsonDocument.Parse(body);
         var data = doc.RootElement.GetProperty("data");
         Assert.Equal(currentSession.Id, data.GetProperty("id").GetString());
+        Assert.False(data.TryGetProperty("agentSessionId", out _));
         Assert.Equal("reset", data.GetProperty("operation").GetString());
         Assert.False(data.GetProperty("wasCompacted").GetBoolean());
         Assert.False(data.TryGetProperty("agentSessionId", out _));
@@ -297,7 +299,7 @@ public class AgentSessionRecoveryApiSpecs
         }
         else if (attachIdle)
         {
-            await _client.PostOkAsync(RunnerAgentSessionAttachPath(currentSession), new { agentSessionId = currentSession.Id, workDir = project.Path, processPid = 1234 });
+            await _client.PostOkAsync(RunnerAgentSessionAttachPath(currentSession), new { agentSessionId = currentSession.Id, workDir = $"/workspaces/{project.Id}", processPid = 1234 });
             _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(6));
         }
 

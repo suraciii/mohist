@@ -97,9 +97,10 @@ public static partial class IssueRoutes
                 var current = await grain.GetAsync();
                 if (current is null) return ApiResults.NotFound($"Session {name} not found");
 
+                var expectedRuntimeSessionId = current.AgentSessionId;
                 var result = await grain.ResetAsync(new ResetAgentSessionCommand(
-                    ExpectedRuntimeSessionId: current.AgentSessionId,
-                    ReplacementRuntimeSessionId: BuildNewAgentSessionId()));
+                    ExpectedRuntimeSessionId: expectedRuntimeSessionId,
+                    ReplacementRuntimeSessionId: expectedRuntimeSessionId!));
                 return ApiResults.Ok(result);
             }
             catch (RuntimeSessionMissingException ex)
@@ -195,8 +196,6 @@ public static partial class IssueRoutes
             return ApiResults.Ok(new { status = "sent" });
         });
     }
-
-    private static string BuildNewAgentSessionId() => Guid.NewGuid().ToString("N");
 }
 
 public sealed record FollowupRequest(string? Text);

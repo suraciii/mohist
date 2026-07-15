@@ -187,7 +187,7 @@ public class AgentSessionGrainRecoveryTranscriptFailureSpecs : AgentSessionGrain
         // recovery events. The transcript flush stays pending for the next
         // flush cycle.
         var grain = NewGrain();
-        await grain.OpenAsync(new OpenAgentSessionCommand("runner-1", "test"));
+        var opened = await grain.OpenAsync(new OpenAgentSessionCommand("runner-1", "test"));
         await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand("runtime-before"));
         Fixture.TimeProvider.Advance(TimeSpan.FromMinutes(6));
         var openedSaveCount = Fixture.StateStore.SaveCount;
@@ -199,8 +199,8 @@ public class AgentSessionGrainRecoveryTranscriptFailureSpecs : AgentSessionGrain
 
         // The recovery command succeeds even though the transcript failed:
         // the compaction domain event committed atomically without replacing
-        // the physical runtime session.
-        Assert.Equal("runtime-before", result.AgentSessionId);
+        // the physical runtime session or logical AgentSession identity.
+        Assert.Equal(opened.Id, result.Id);
         Assert.True(result.WasCompacted);
 
         // Exactly one recovery save happened (the event-aware commit). A
@@ -213,19 +213,6 @@ public class AgentSessionGrainRecoveryTranscriptFailureSpecs : AgentSessionGrain
         Assert.Contains("transcript store down", transcriptError.Exception?.Message ?? string.Empty);
     }
 
-    [Fact]
-    public async Task ResetAsync_ClearsRuntimeBinding()
-    {
-        var grain = NewGrain();
-        await grain.OpenAsync(new OpenAgentSessionCommand("runner-1", "test"));
-        await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand("runtime-before"));
-        Fixture.TimeProvider.Advance(TimeSpan.FromMinutes(6));
-
-        var result = await grain.ResetAsync(new ResetAgentSessionCommand());
-
-        Assert.Null(result.AgentSessionId);
-        Assert.Null((await grain.GetAsync())?.AgentSessionId);
-    }
 }
 
 [Trait(Traits.Speed.Name, Traits.Speed.Grain)]

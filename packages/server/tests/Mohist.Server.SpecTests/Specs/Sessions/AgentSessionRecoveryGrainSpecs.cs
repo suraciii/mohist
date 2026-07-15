@@ -33,7 +33,6 @@ public sealed class AgentSessionRecoveryGrainSpecs : IClassFixture<AgentSessionG
         Assert.Equal("runtime-before-compact", lineage.AgentRuntimeSessionId);
         Assert.Equal("opencode", lineage.Runtime);
         Assert.Equal(sessionId, result.Id);
-        Assert.Equal("runtime-before-compact", result.AgentSessionId);
 
         var recoveryEvents = _fixture.StateStore.Events.Skip(eventCountBefore).ToArray();
         Assert.IsType<AgentSessionContextCompacted>(Assert.Single(recoveryEvents).Value);
@@ -61,7 +60,6 @@ public sealed class AgentSessionRecoveryGrainSpecs : IClassFixture<AgentSessionG
             entry => Assert.Equal("runtime-before-reset", entry.AgentRuntimeSessionId),
             entry => Assert.Equal("runtime-after-reset", entry.AgentRuntimeSessionId));
         Assert.Equal(sessionId, result.Id);
-        Assert.Equal("runtime-after-reset", result.AgentSessionId);
 
         var recoveryEvent = Assert.Single(_fixture.StateStore.Events.Skip(eventCountBefore));
         var runtimeBound = Assert.IsType<AgentSessionRuntimeBound>(recoveryEvent.Value);

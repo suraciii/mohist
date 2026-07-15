@@ -90,7 +90,6 @@ public sealed record AgentSessionInfo(
 [GenerateSerializer]
 public sealed record AgentSessionRecoveryResult(
     [property: Id(0)] string Id,
-    [property: Id(1)] string? AgentSessionId,
     [property: Id(2)] string Status,
     [property: Id(3)] long? ContextWindowSize,
     [property: Id(4)] long? ContextWindowUsed,
