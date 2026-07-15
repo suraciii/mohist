@@ -199,6 +199,52 @@ public class BackfillIssueEpicAffiliationMigrationSpecs
         Assert.Equal("epic_linked", persistedWorkflow.EpicId);
     }
 
+    [Fact]
+    public async Task Migration_PrefersCurrentIssueSnapshotOverStaleWorkflowAnnotation()
+    {
+        await using var database = CreateDatabase("20260715000000_BackfillIssueEpicAffiliation");
+        await using var context = database.CreateDbContext();
+        var migrator = context.GetService<IMigrator>();
+        var linked = NewIssue("issue_current_link", 1);
+        var linkedState = IssueStore.Deserialize(linked.State)!;
+        linkedState.SetEpicId("epic_current", FirstLinkTime.UtcDateTime);
+        linked.State = IssueStore.Serialize(linkedState);
+        var unlinked = NewIssue("issue_current_none", 2);
+        await SeedIssueAsync(context, linked);
+        await SeedIssueAsync(context, unlinked);
+
+        await SeedWorkflowAsync(context, "wr_current_link", linked.IssueId, "epic_stale");
+        await SeedWorkflowAsync(context, "wr_current_none", unlinked.IssueId, "epic_stale");
+
+        await migrator.MigrateAsync(AtomicSnapshotMigration);
+        context.ChangeTracker.Clear();
+
+        Assert.Equal("epic_current", (await context.WorkflowRuns.SingleAsync(row => row.WorkflowRunId == "wr_current_link")).EpicId);
+        Assert.Null((await context.WorkflowRuns.SingleAsync(row => row.WorkflowRunId == "wr_current_none")).EpicId);
+    }
+
+    private static Task SeedWorkflowAsync(MohistDbContext context, string workflowId, string issueId, string epicId)
+    {
+        var workflow = new Mohist.Server.Workflow.Domain.Run.WorkflowRun
+        {
+            Id = workflowId,
+            Metadata = new Mohist.Server.Workflow.Domain.Run.WorkflowRunMetadata(
+                Name: null,
+                CreatedAt: FirstLinkTime,
+                Annotations: new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["projectId"] = "project_1",
+                    ["issueId"] = issueId,
+                    ["epicId"] = epicId,
+                }),
+            Stages = [],
+        };
+        return context.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO "WorkflowRuns" ("WorkflowRunId", "State", "ETag")
+            VALUES ({workflow.Id}, {JSON.Serialize(workflow)}, 1)
+            """);
+    }
+
     private static IssueRow NewIssue(string issueId, int number)
     {
         var issue = new DomainIssue

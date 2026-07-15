@@ -194,12 +194,7 @@ public class EpicGrain : Grain, IEpicGrain
         }
     }
 
-    public Task<IReadOnlyList<BatchMembershipOutcome>> LinkIssuesAsync(
-        IReadOnlyList<BatchMembershipRequestItem> issues,
-        string projectId) =>
-        RetryMembershipContentionAsync(() => LinkIssuesOnceAsync(issues, projectId));
-
-    private async Task<IReadOnlyList<BatchMembershipOutcome>> LinkIssuesOnceAsync(
+    public async Task<IReadOnlyList<BatchMembershipOutcome>> LinkIssuesAsync(
         IReadOnlyList<BatchMembershipRequestItem> issues,
         string projectId)
     {
@@ -334,9 +329,12 @@ public class EpicGrain : Grain, IEpicGrain
                 });
             }
             MapToRow(domain, row, now);
-            var affiliation = willInsertActiveRow
-                ? epicId
-                : await EpicIssueAffiliationResolver.ResolveAsync(db, projectId, item.IssueId);
+            var affiliation = epicId;
+            if (!willInsertActiveRow
+                && await GetActiveMembershipOwnerAsync(db, projectId, item.IssueId, epicId) is { } activeOwner)
+            {
+                affiliation = activeOwner.EpicId;
+            }
             await StageIssueLineageSnapshotAsync(db, item.IssueId, affiliation);
             var pending = DrainPendingEvents(domain);
             // Append EpicIssueLinked atomically with the membership row so
@@ -349,7 +347,12 @@ public class EpicGrain : Grain, IEpicGrain
             }
             catch (DbUpdateConcurrencyException)
             {
-                throw;
+                var remaining = dedupByIssueId.Values.Skip(outcomes.Count).ToArray();
+                var retried = await LinkIssuesAsync(remaining, projectId);
+                outcomes.AddRange(retried);
+                if (hasLinkedAny)
+                    await RecomputeProgressAsync();
+                return outcomes;
             }
             catch (DbUpdateException) when (willInsertActiveRow)
             {
@@ -462,12 +465,7 @@ public class EpicGrain : Grain, IEpicGrain
             StartFailureMode.PreserveRunning);
     }
 
-    public Task<IReadOnlyList<BatchMembershipOutcome>> UnlinkIssuesAsync(
-        IReadOnlyList<BatchMembershipRequestItem> issues,
-        string projectId) =>
-        RetryMembershipContentionAsync(() => UnlinkIssuesOnceAsync(issues, projectId));
-
-    private async Task<IReadOnlyList<BatchMembershipOutcome>> UnlinkIssuesOnceAsync(
+    public async Task<IReadOnlyList<BatchMembershipOutcome>> UnlinkIssuesAsync(
         IReadOnlyList<BatchMembershipRequestItem> issues,
         string projectId)
     {
@@ -525,7 +523,19 @@ public class EpicGrain : Grain, IEpicGrain
             await StageIssueLineageSnapshotAsync(db, item.IssueId, affiliationAfterUnlink);
             var pending = DrainPendingEvents(domain);
             await PersistEpicEventsAsync(db, domain, pending, now);
-            await db.SaveChangesAsync();
+            try
+            {
+                await db.SaveChangesAsync();
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                var remaining = dedupByIssueId.Values.Skip(outcomes.Count).ToArray();
+                var retried = await UnlinkIssuesAsync(remaining, projectId);
+                outcomes.AddRange(retried);
+                if (hasUnlinkedAny)
+                    await RecomputeProgressAsync();
+                return outcomes;
+            }
             existingLinks.Remove(item.IssueId);
             outcomes.Add(BatchMembershipOutcome.Unlinked(item.Identifier, item.IssueId, item.IssueNumber));
             hasUnlinkedAny = true;

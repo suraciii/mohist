@@ -32,17 +32,22 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                 WHERE "EpicId" IS NULL;
 
                 UPDATE "WorkflowRuns"
-                SET "EpicId" = COALESCE(
-                    NULLIF(TRIM(COALESCE(
+                SET "EpicId" = CASE
+                    WHEN EXISTS (SELECT 1 FROM "Issues"
+                        WHERE "IssueId" = COALESCE(
+                            json_extract("WorkflowRuns"."State", '$.metadata.annotations.issueId'),
+                            json_extract("WorkflowRuns"."State", '$.Metadata.Annotations.issueId'),
+                            json_extract("WorkflowRuns"."State", '$.Metadata.Annotations.IssueId')))
+                    THEN (SELECT "EpicId" FROM "Issues"
+                        WHERE "IssueId" = COALESCE(
+                            json_extract("WorkflowRuns"."State", '$.metadata.annotations.issueId'),
+                            json_extract("WorkflowRuns"."State", '$.Metadata.Annotations.issueId'),
+                            json_extract("WorkflowRuns"."State", '$.Metadata.Annotations.IssueId')))
+                    ELSE NULLIF(TRIM(COALESCE(
                         json_extract("State", '$.metadata.annotations.epicId'),
                         json_extract("State", '$.Metadata.Annotations.epicId'),
-                        json_extract("State", '$.Metadata.Annotations.EpicId'))), ''),
-                    (SELECT "EpicId" FROM "Issues"
-                     WHERE "IssueId" = COALESCE(
-                         json_extract("WorkflowRuns"."State", '$.metadata.annotations.issueId'),
-                         json_extract("WorkflowRuns"."State", '$.Metadata.Annotations.issueId'),
-                         json_extract("WorkflowRuns"."State", '$.Metadata.Annotations.IssueId')))
-                )
+                        json_extract("State", '$.Metadata.Annotations.EpicId'))), '')
+                END
                 WHERE "EpicId" IS NULL;
                 """);
         }

@@ -315,7 +315,8 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.Status)
                 .HasComputedColumnSql("COALESCE(json_extract(State, '$.status'), json_extract(State, '$.Status'))");
             entity.Property(e => e.WorkflowRunId)
-                .HasComputedColumnSql("COALESCE(json_extract(State, '$.workflowRunId'), json_extract(State, '$.WorkflowRunId'))", stored: true);
+                .HasComputedColumnSql("COALESCE(json_extract(State, '$.workflowRunId'), json_extract(State, '$.WorkflowRunId'))", stored: true)
+                .IsConcurrencyToken();
             entity.Property(e => e.Title)
                 .HasComputedColumnSql("COALESCE(json_extract(State, '$.title'), json_extract(State, '$.Title'))");
             entity.Property(e => e.Priority)

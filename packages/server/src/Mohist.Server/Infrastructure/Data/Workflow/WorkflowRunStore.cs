@@ -117,9 +117,13 @@ public class WorkflowRunStore : IWorkflowRunStore
         for (var attempt = 1; ; attempt++)
         {
             await using var db = await _dbFactory.CreateDbContextAsync(ct);
+            var workflow = await db.WorkflowRuns.FindAsync([workflowRunId], ct);
+            if (workflow is null) return;
             var issue = await db.Issues.FindAsync([issueId], ct)
                 ?? throw new InvalidOperationException($"Issue '{issueId}' was not found while synchronizing workflow lineage.");
-            await StageEpicAffiliationAsync(db, workflowRunId, issue.EpicId, ct);
+            workflow.EpicId = string.IsNullOrWhiteSpace(issue.EpicId) ? null : issue.EpicId;
+            var entry = db.Entry(workflow);
+            entry.Property<long>("ETag").CurrentValue = entry.Property<long>("ETag").OriginalValue + 1;
 
             try
             {
@@ -132,6 +136,14 @@ public class WorkflowRunStore : IWorkflowRunStore
                     "Workflow {WorkflowRunId} lineage synchronization conflicted on attempt {Attempt}; retrying",
                     workflowRunId,
                     attempt);
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                _log.LogWarning(
+                    "Workflow {WorkflowRunId} lineage synchronization remained contended after {Attempts} attempts; a membership replay will reconcile it",
+                    workflowRunId,
+                    maxAttempts);
+                return;
             }
         }
     }

@@ -192,8 +192,10 @@ public class EpicBatchMembershipSpecs
         await SeedEpicAsync(database, epicId: "epic_active", status: "idle", number: 1);
         await SeedEpicAsync(database, epicId: "epic_done", status: "done", number: 2);
         await SeedIssueAsync(database, issueId: "issue_terminal", issueNumber: 1, status: IssueStatus.Done);
+        await SeedIssueAsync(database, issueId: "issue_open", issueNumber: 2);
 
         var activeGrain = CreateGrain(database.Factory, $"{ProjectId}:epic_active");
+        await activeGrain.LinkIssueAsync("issue_open", 2, ProjectId);
         await activeGrain.LinkIssueAsync("issue_terminal", 1, ProjectId);
 
         var doneGrain = CreateGrain(database.Factory, $"{ProjectId}:epic_done");
