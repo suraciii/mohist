@@ -30,7 +30,7 @@ public class CliAgentSessionCommandSpecs
     }
 
     [Fact]
-    public async Task SessionHelp_ListsAllSixSubcommands()
+    public async Task SessionHelp_ListsAllEightSubcommands()
     {
         var (http, _, output, error, fileSystem, executor) = SetupEnv((_, _) =>
             throw new InvalidOperationException("API must not be called for help"));
@@ -44,6 +44,8 @@ public class CliAgentSessionCommandSpecs
         Assert.Contains("show", stdout, StringComparison.Ordinal);
         Assert.Contains("transcript", stdout, StringComparison.Ordinal);
         Assert.Contains("launch", stdout, StringComparison.Ordinal);
+        Assert.Contains("compact", stdout, StringComparison.Ordinal);
+        Assert.Contains("reset", stdout, StringComparison.Ordinal);
         Assert.Contains("followup", stdout, StringComparison.Ordinal);
         Assert.Contains("cancel", stdout, StringComparison.Ordinal);
     }

@@ -138,7 +138,7 @@ internal static partial class IssueCommands
 
     private static Command BuildSessionCompact(MohistCliApi api)
     {
-        var cmd = new Command("compact", "Compact the session and return a new session id");
+        var cmd = new Command("compact", "Compact the session in place");
         var numberArg = NumberArg();
         var nameArg = SessionNameArg();
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
@@ -178,7 +178,7 @@ internal static partial class IssueCommands
 
     private static Command BuildSessionReset(MohistCliApi api)
     {
-        var cmd = new Command("reset", "Reset the session so its next task creates a fresh runtime session");
+        var cmd = new Command("reset", "Reset the session in place");
         var numberArg = NumberArg();
         var nameArg = SessionNameArg();
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();

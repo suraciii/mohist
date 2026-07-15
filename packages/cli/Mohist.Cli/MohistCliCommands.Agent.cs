@@ -352,12 +352,14 @@ internal static class AgentCommands
     {
         var session = new Command(
             "session",
-            "Manage a generic AgentSession launched from an Agent profile (issue-129). Subcommands: list <agent>, show <sessionId>, transcript <sessionId>, launch <agent>, followup <sessionId>, cancel <sessionId>.");
+            "Manage a generic AgentSession launched from an Agent profile (issue-129). Subcommands: list <agent>, show <sessionId>, transcript <sessionId>, launch <agent>, compact <sessionId>, reset <sessionId>, followup <sessionId>, cancel <sessionId>.");
 
         session.Subcommands.Add(BuildSessionList(api));
         session.Subcommands.Add(BuildSessionShow(api));
         session.Subcommands.Add(BuildSessionTranscript(api));
         session.Subcommands.Add(BuildSessionLaunch(api));
+        session.Subcommands.Add(BuildSessionCompact(api));
+        session.Subcommands.Add(BuildSessionReset(api));
         session.Subcommands.Add(BuildSessionFollowup(api));
         session.Subcommands.Add(BuildSessionCancel(api));
 
@@ -654,6 +656,48 @@ internal static class AgentCommands
                     mode,
                     nameof(MohistCliApi.TableShape.AgentSessionLaunch),
                     rawJson: true);
+            }
+        });
+        return cmd;
+    }
+
+    private static Command BuildSessionCompact(MohistCliApi api) =>
+        BuildSessionRecovery(api, "compact", "Compact the session in place");
+
+    private static Command BuildSessionReset(MohistCliApi api) =>
+        BuildSessionRecovery(api, "reset", "Reset the session in place");
+
+    private static Command BuildSessionRecovery(MohistCliApi api, string operation, string description)
+    {
+        var cmd = new Command(operation, description);
+        var sessionIdArg = new Argument<string>("session-id") { Description = "Stable AgentSession id returned by launch" };
+        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
+        var outputOpt = MohistCliCommands.OutputOption(defaultValue: "table");
+
+        cmd.Arguments.Add(sessionIdArg);
+        cmd.Options.Add(projectOpt);
+        cmd.Options.Add(projectIdOpt);
+        cmd.Options.Add(outputOpt);
+        cmd.SetAction(ctx =>
+        {
+            var sessionId = ctx.GetValue(sessionIdArg);
+            var project = ctx.GetValue(projectOpt);
+            var projectId = ctx.GetValue(projectIdOpt);
+            var output = ctx.GetValue(outputOpt);
+            return RecoverAsync();
+
+            async Task<int> RecoverAsync()
+            {
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
+                if (resolveExit != 0) return resolveExit;
+                var (mode, exit) = api.ResolveOutputMode(output);
+                if (exit != 0) return exit;
+
+                return await api.PrintPostWithOutputAsync(
+                    ProjectAgentSessionsPath(resolvedProjectId, $"/{MohistCliCommands.Escape(sessionId!)}/{operation}"),
+                    new { },
+                    mode,
+                    nameof(MohistCliApi.TableShape.SessionRecovery));
             }
         });
         return cmd;
