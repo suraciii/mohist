@@ -185,6 +185,7 @@ public class IssueWorkflowReadPathSpecs
     {
         return new IssueGrain(
             stateStore,
+            services.GetRequiredService<IWorkflowRunStore>(),
             services.GetRequiredService<IssueWorkflowProfileRegistry>(),
             services.GetRequiredService<WorkflowQuerier>(),
             services.GetRequiredService<IDbContextFactory<MohistDbContext>>(),

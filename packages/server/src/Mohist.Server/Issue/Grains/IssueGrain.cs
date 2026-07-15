@@ -28,6 +28,7 @@ public class IssueGrain : Grain, IIssueGrain
     private Domain.Issue? _issue;
     private bool _issueReloadRequired;
     private readonly IIssueStore _issueStore;
+    private readonly IWorkflowRunStore _workflowRunStore;
     private readonly IssueWorkflowProfileRegistry _profiles;
     private readonly WorkflowQuerier _workflowQuerier;
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
@@ -43,6 +44,7 @@ public class IssueGrain : Grain, IIssueGrain
 
     public IssueGrain(
         IIssueStore issueStore,
+        IWorkflowRunStore workflowRunStore,
         IssueWorkflowProfileRegistry profiles,
         WorkflowQuerier workflowQuerier,
         IDbContextFactory<MohistDbContext> dbFactory,
@@ -57,6 +59,7 @@ public class IssueGrain : Grain, IIssueGrain
         ILogger<IssueGrain> log)
     {
         _issueStore = issueStore;
+        _workflowRunStore = workflowRunStore;
         _profiles = profiles;
         _workflowQuerier = workflowQuerier;
         _dbFactory = dbFactory;
@@ -261,6 +264,8 @@ public class IssueGrain : Grain, IIssueGrain
             }
             throw;
         }
+
+        await _workflowRunStore.SynchronizeEpicAffiliationAsync(wrId, issue.Id);
         _log.LogInformation("Issue {Key} started workflow {WrId}", GrainKey, wrId);
         return wrId;
     }

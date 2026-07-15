@@ -69,7 +69,14 @@ public class EpicGrain : Grain, IEpicGrain
         return ToDto(row);
     }
 
-    public async Task LinkIssueAsync(string issueId, int issueNumber, string projectId)
+    public Task LinkIssueAsync(string issueId, int issueNumber, string projectId) =>
+        RetryMembershipContentionAsync(async () =>
+        {
+            await LinkIssueOnceAsync(issueId, issueNumber, projectId);
+            return true;
+        });
+
+    private async Task LinkIssueOnceAsync(string issueId, int issueNumber, string projectId)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
         var parts = GrainKey.Split(':');
@@ -187,7 +194,12 @@ public class EpicGrain : Grain, IEpicGrain
         }
     }
 
-    public async Task<IReadOnlyList<BatchMembershipOutcome>> LinkIssuesAsync(
+    public Task<IReadOnlyList<BatchMembershipOutcome>> LinkIssuesAsync(
+        IReadOnlyList<BatchMembershipRequestItem> issues,
+        string projectId) =>
+        RetryMembershipContentionAsync(() => LinkIssuesOnceAsync(issues, projectId));
+
+    private async Task<IReadOnlyList<BatchMembershipOutcome>> LinkIssuesOnceAsync(
         IReadOnlyList<BatchMembershipRequestItem> issues,
         string projectId)
     {
@@ -322,7 +334,10 @@ public class EpicGrain : Grain, IEpicGrain
                 });
             }
             MapToRow(domain, row, now);
-            await StageIssueLineageSnapshotAsync(db, item.IssueId, epicId);
+            var affiliation = willInsertActiveRow
+                ? epicId
+                : await EpicIssueAffiliationResolver.ResolveAsync(db, projectId, item.IssueId);
+            await StageIssueLineageSnapshotAsync(db, item.IssueId, affiliation);
             var pending = DrainPendingEvents(domain);
             // Append EpicIssueLinked atomically with the membership row so
             // the durable recompute trigger is never lost on crash/append
@@ -331,6 +346,10 @@ public class EpicGrain : Grain, IEpicGrain
             try
             {
                 await db.SaveChangesAsync();
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                throw;
             }
             catch (DbUpdateException) when (willInsertActiveRow)
             {
@@ -395,7 +414,14 @@ public class EpicGrain : Grain, IEpicGrain
         return outcomes;
     }
 
-    public async Task UnlinkIssueAsync(string issueId, string projectId)
+    public Task UnlinkIssueAsync(string issueId, string projectId) =>
+        RetryMembershipContentionAsync(async () =>
+        {
+            await UnlinkIssueOnceAsync(issueId, projectId);
+            return true;
+        });
+
+    private async Task UnlinkIssueOnceAsync(string issueId, string projectId)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
         var parts = GrainKey.Split(':');
@@ -436,7 +462,12 @@ public class EpicGrain : Grain, IEpicGrain
             StartFailureMode.PreserveRunning);
     }
 
-    public async Task<IReadOnlyList<BatchMembershipOutcome>> UnlinkIssuesAsync(
+    public Task<IReadOnlyList<BatchMembershipOutcome>> UnlinkIssuesAsync(
+        IReadOnlyList<BatchMembershipRequestItem> issues,
+        string projectId) =>
+        RetryMembershipContentionAsync(() => UnlinkIssuesOnceAsync(issues, projectId));
+
+    private async Task<IReadOnlyList<BatchMembershipOutcome>> UnlinkIssuesOnceAsync(
         IReadOnlyList<BatchMembershipRequestItem> issues,
         string projectId)
     {
@@ -1186,6 +1217,24 @@ public class EpicGrain : Grain, IEpicGrain
 
     private static EpicDto ToDto(EpicRow epic) =>
         new(epic.Id, epic.Number, epic.Title, epic.Description, epic.Priority, epic.Status, epic.CreatedAt.ToString("o"), epic.UpdatedAt.ToString("o"), epic.PauseReason);
+
+    private async Task<T> RetryMembershipContentionAsync<T>(Func<Task<T>> operation)
+    {
+        const int maxAttempts = 3;
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                return await operation();
+            }
+            catch (DbUpdateConcurrencyException) when (attempt < maxAttempts)
+            {
+                _log.LogInformation(
+                    "Epic membership lineage update conflicted on attempt {Attempt}; retrying from persisted state",
+                    attempt);
+            }
+        }
+    }
 
     private static async Task StageIssueLineageSnapshotAsync(
         MohistDbContext db,

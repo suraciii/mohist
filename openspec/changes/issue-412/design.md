@@ -10,7 +10,7 @@ The event envelope already has two stable axes — `type` (what happened) and `s
 - `EventCatalog` is a flat `IReadOnlyList<string>` of type names (`Infrastructure/Events/EventCatalog.cs:17-100`) — no per-type required-attribute declaration, no conformance.
 - Read-side handlers key on `issueno` (`EpicAutoDoneHandler.cs:374,388`, `HermesIssueNotificationHandler.cs:163`, `InboxProjectionHandler.cs:213`) and the web envelope reader documents `issueno` (`packages/web/.../event-envelope.ts:28-29`).
 
-The target protocol is `design/event-protocol.md:57-73` (the stamping matrix). Persistence needs no schema change — the `ExtensionsJson` JSON column has existed on all event tables since migration `20260609154024_AddWorkflowRunEvents`.
+The target protocol is `design/event-protocol.md:57-73` (the stamping matrix). Issue and WorkflowRun persist scalar `EpicId` producer snapshots, initialized from the affiliation visible during the schema migration; event rows remain immutable.
 
 **Architectural constraint that drives the key decision:** Issue and Epic are separate aggregates (`design/architecture.md`, facts/decisions separation). The Issue aggregate's own state carries no epic reference today — epic↔issue membership lives in the `EpicIssueRow` join table owned by the Epic domain. The protocol forbids cross-aggregate queries for stamping, yet AC2 requires `epicid` on `issue.*` events; the only way to satisfy both is to give `Issue` a denormalized `EpicId` written by the Epic domain at link/unlink (D5) — the same cross-aggregate-reference pattern `Issue` already uses for `WorkflowRunId`.
 
@@ -72,7 +72,7 @@ A spec test (in `tests/Mohist.Server.SpecTests`, alongside the existing `*Transa
 
 1. **Schema migration:** add nullable `Issues.EpicId` and `WorkflowRuns.EpicId` lineage snapshot columns. Backfill them from the already-denormalized `State` JSON; no historical event row is changed.
 2. **Server first:** add `Issue.EpicId` + the `IssueGrain.SetEpicAffiliationAsync` command + atomic scalar snapshot staging in the `EpicGrain` membership transaction (D5), update the five producers (D1, D2, D5, D6, D7), raise `EventCatalog` to the registry (D4), add the conformance spec (D8), and reconcile the three `issueno`-reading handlers (D3) — all in one server change. The build's `TreatWarningsAsErrors` plus the conformance test gate correctness.
-3. **Backfill:** the new migration copies current Issue and WorkflowRun `epicId` JSON values into their scalar snapshots. The earlier membership-state backfill remains the source for Issue JSON on installations upgrading from before this change; no historical event is rewritten.
+3. **Backfill:** the new migration copies current Issue affiliation and resolves each WorkflowRun from its explicit annotation or its associated Issue snapshot. The earlier membership-state backfill remains the source for Issue JSON on installations upgrading from before this change; no historical event is rewritten.
 4. **Web:** update the envelope reader and the fixtures that hardcode `epicno`/`issueno` to `issue`/`epicid` in the same release.
 5. **Deploy:** coordinated server + web release (single workspace, no external API consumers).
 6. **History:** left as-is; historical events keep their old partial stamping and old key names (Non-Goal). Read-side dual-key fallback (see Risks) covers the transition for handlers that read history.

@@ -186,6 +186,29 @@ public class EpicBatchMembershipSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
+    public async Task LinkIssuesAsync_TerminalTargetPreservesExistingActiveAffiliationSnapshot()
+    {
+        var database = CreateDatabase();
+        await SeedEpicAsync(database, epicId: "epic_active", status: "idle", number: 1);
+        await SeedEpicAsync(database, epicId: "epic_done", status: "done", number: 2);
+        await SeedIssueAsync(database, issueId: "issue_terminal", issueNumber: 1, status: IssueStatus.Done);
+
+        var activeGrain = CreateGrain(database.Factory, $"{ProjectId}:epic_active");
+        await activeGrain.LinkIssueAsync("issue_terminal", 1, ProjectId);
+
+        var doneGrain = CreateGrain(database.Factory, $"{ProjectId}:epic_done");
+        var outcomes = await doneGrain.LinkIssuesAsync(
+            [new BatchMembershipRequestItem("1", "issue_terminal", 1)], ProjectId);
+
+        Assert.Equal("linked", Assert.Single(outcomes).Status);
+        await using var verify = database.CreateDbContext();
+        var issue = await verify.Issues.SingleAsync(row => row.IssueId == "issue_terminal");
+        Assert.Equal("epic_active", issue.EpicId);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
     public async Task UnlinkIssuesAsync_RemovesOnlyRequestedMembers_RemainingIntact()
     {
         var database = CreateDatabase();

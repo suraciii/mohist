@@ -32,10 +32,17 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                 WHERE "EpicId" IS NULL;
 
                 UPDATE "WorkflowRuns"
-                SET "EpicId" = NULLIF(TRIM(COALESCE(
-                    json_extract("State", '$.metadata.annotations.epicId'),
-                    json_extract("State", '$.Metadata.Annotations.epicId'),
-                    json_extract("State", '$.Metadata.Annotations.EpicId'))), '')
+                SET "EpicId" = COALESCE(
+                    NULLIF(TRIM(COALESCE(
+                        json_extract("State", '$.metadata.annotations.epicId'),
+                        json_extract("State", '$.Metadata.Annotations.epicId'),
+                        json_extract("State", '$.Metadata.Annotations.EpicId'))), ''),
+                    (SELECT "EpicId" FROM "Issues"
+                     WHERE "IssueId" = COALESCE(
+                         json_extract("WorkflowRuns"."State", '$.metadata.annotations.issueId'),
+                         json_extract("WorkflowRuns"."State", '$.Metadata.Annotations.issueId'),
+                         json_extract("WorkflowRuns"."State", '$.Metadata.Annotations.IssueId')))
+                )
                 WHERE "EpicId" IS NULL;
                 """);
         }

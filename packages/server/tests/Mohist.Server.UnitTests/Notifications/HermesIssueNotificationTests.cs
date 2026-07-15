@@ -598,6 +598,9 @@ public sealed class HermesIssueNotificationTests
             Items.TryGetValue(workflowRunId, out var run);
             return Task.FromResult(run);
         }
+
+        public Task SynchronizeEpicAffiliationAsync(string workflowRunId, string issueId, CancellationToken ct = default) =>
+            Task.CompletedTask;
     }
 
     private sealed class TestOptionsMonitor<T> : IOptionsMonitor<T>

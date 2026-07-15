@@ -162,6 +162,43 @@ public class BackfillIssueEpicAffiliationMigrationSpecs
         Assert.Equal("epic_snapshot", persistedWorkflow.EpicId);
     }
 
+    [Fact]
+    public async Task Migration_CopiesLinkedIssueSnapshotForLegacyWorkflowWithoutEpicAnnotation()
+    {
+        await using var database = CreateDatabase("20260715000000_BackfillIssueEpicAffiliation");
+        await using var context = database.CreateDbContext();
+        var migrator = context.GetService<IMigrator>();
+        var issue = NewIssue("issue_legacy_workflow", 1);
+        var issueState = IssueStore.Deserialize(issue.State)!;
+        issueState.SetEpicId("epic_linked", FirstLinkTime.UtcDateTime);
+        issue.State = IssueStore.Serialize(issueState);
+        await SeedIssueAsync(context, issue);
+
+        var workflow = new Mohist.Server.Workflow.Domain.Run.WorkflowRun
+        {
+            Id = "wr_legacy_workflow",
+            Metadata = new Mohist.Server.Workflow.Domain.Run.WorkflowRunMetadata(
+                Name: null,
+                CreatedAt: FirstLinkTime,
+                Annotations: new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["projectId"] = "project_1",
+                    ["issueId"] = issue.IssueId,
+                }),
+            Stages = [],
+        };
+        await context.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO "WorkflowRuns" ("WorkflowRunId", "State", "ETag")
+            VALUES ({workflow.Id}, {JSON.Serialize(workflow)}, 1)
+            """);
+
+        await migrator.MigrateAsync(AtomicSnapshotMigration);
+        context.ChangeTracker.Clear();
+
+        var persistedWorkflow = await context.WorkflowRuns.SingleAsync(row => row.WorkflowRunId == workflow.Id);
+        Assert.Equal("epic_linked", persistedWorkflow.EpicId);
+    }
+
     private static IssueRow NewIssue(string issueId, int number)
     {
         var issue = new DomainIssue

@@ -16,6 +16,7 @@ public interface IWorkflowRunStore
     Task SaveAsync(WorkflowRun run, CancellationToken ct = default);
     Task SaveAsync(WorkflowRun run, IReadOnlyList<WorkflowEvent> events, CancellationToken ct = default);
     Task<WorkflowRun?> LoadAsync(string workflowRunId, CancellationToken ct = default);
+    Task SynchronizeEpicAffiliationAsync(string workflowRunId, string issueId, CancellationToken ct = default);
 }
 
 public class WorkflowRunStore : IWorkflowRunStore
@@ -110,6 +111,31 @@ public class WorkflowRunStore : IWorkflowRunStore
         return run;
     }
 
+    public async Task SynchronizeEpicAffiliationAsync(string workflowRunId, string issueId, CancellationToken ct = default)
+    {
+        const int maxAttempts = 3;
+        for (var attempt = 1; ; attempt++)
+        {
+            await using var db = await _dbFactory.CreateDbContextAsync(ct);
+            var issue = await db.Issues.FindAsync([issueId], ct)
+                ?? throw new InvalidOperationException($"Issue '{issueId}' was not found while synchronizing workflow lineage.");
+            await StageEpicAffiliationAsync(db, workflowRunId, issue.EpicId, ct);
+
+            try
+            {
+                await db.SaveChangesAsync(ct);
+                return;
+            }
+            catch (DbUpdateConcurrencyException) when (attempt < maxAttempts)
+            {
+                _log.LogDebug(
+                    "Workflow {WorkflowRunId} lineage synchronization conflicted on attempt {Attempt}; retrying",
+                    workflowRunId,
+                    attempt);
+            }
+        }
+    }
+
     internal static async Task StageEpicAffiliationAsync(
         MohistDbContext db,
         string? workflowRunId,
@@ -120,7 +146,11 @@ public class WorkflowRunStore : IWorkflowRunStore
 
         var entity = await db.WorkflowRuns.FindAsync([workflowRunId], ct);
         if (entity is not null)
+        {
             entity.EpicId = string.IsNullOrWhiteSpace(epicId) ? null : epicId;
+            var entry = db.Entry(entity);
+            entry.Property<long>("ETag").CurrentValue = entry.Property<long>("ETag").OriginalValue + 1;
+        }
     }
 
     private static async Task StageRunAsync(MohistDbContext db, WorkflowRun run, CancellationToken ct)

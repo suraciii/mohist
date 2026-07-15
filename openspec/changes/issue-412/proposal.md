@@ -34,5 +34,5 @@ An event knows who emitted it (`source`) and what happened (`type`), but not whi
 - **Consumers of the renamed `issueno`** (read path updates during reconciliation):
   - `Events/Subscriptions/EpicAutoDoneHandler.cs:374,388`, `Events/Subscriptions/HermesIssueNotificationHandler.cs:163`, `Events/Subscriptions/InboxProjectionHandler.cs:213`.
   - `packages/web/src/app/providers/model/event-envelope.ts:28-29` (doc/read), and web test fixtures using `epicno`/`issueno`.
-- **Persistence**: no schema migration — lineage rides in the existing `ExtensionsJson` JSON column present on all four event tables since `20260609154024_AddWorkflowRunEvents`. Historical rows keep their already-stamped attributes (Non-Goal: no backfill).
+- **Persistence**: Issue and WorkflowRun carry durable `EpicId` producer snapshots. A schema migration initializes those snapshots from the affiliation visible at cutover; historical event rows keep their already-stamped attributes (Non-Goal: no event backfill).
 - **Conformance tests**: new spec covering all production paths; no web/CLI/runner contract change.

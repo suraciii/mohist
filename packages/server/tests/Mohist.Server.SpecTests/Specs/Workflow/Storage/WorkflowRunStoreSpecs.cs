@@ -252,6 +252,7 @@ public class WorkflowRunStoreSpecs
             await WorkflowRunStore.StageEpicAffiliationAsync(link, run.Id, "epic_workflow");
             await link.SaveChangesAsync();
         }
+        run = (await store.LoadAsync(run.Id))!;
         await store.SaveAsync(run, [new WorkflowRunResumed()]);
 
         await using (var unlink = factory.CreateDbContext())
@@ -259,6 +260,7 @@ public class WorkflowRunStoreSpecs
             await WorkflowRunStore.StageEpicAffiliationAsync(unlink, run.Id, null);
             await unlink.SaveChangesAsync();
         }
+        run = (await store.LoadAsync(run.Id))!;
         await store.SaveAsync(run, [new WorkflowRunPaused()]);
 
         var events = await eventStore.ListAsync(run.Id);
