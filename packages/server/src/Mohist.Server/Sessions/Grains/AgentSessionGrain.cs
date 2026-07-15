@@ -149,14 +149,19 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             ? await AgentSessionSummaryBuilder.BuildAsync(_dbFactory, session.Id, command.MaxSummaryChars)
             : command.Summary!;
 
-        var (events, transcriptEntries) = ApplyRecoveryTransitions(
-            session,
+        var events = session.RecordCompaction(
             usedBefore,
             usedBefore,
             size,
             "summary",
             summary,
-            clearRuntimeSession: false,
+            now);
+        var transcriptEntries = BuildCompactionTranscriptEntries(
+            session,
+            usedBefore,
+            usedBefore,
+            size,
+            summary,
             now);
 
         await PersistRecoveryAsync(session, events, transcriptEntries);
@@ -169,23 +174,20 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         var session = await GetRequiredAsync();
         EnsureRuntimeSessionPresent(session);
         EnsureSessionIdleForRecovery(session);
+        session.EnsureExpectedRuntimeSession(command.ExpectedRuntimeSessionId);
 
         var now = Now();
         var usage = AgentSessionJsonHelper.Usage(session);
         var usedBefore = usage.ContextWindowUsed;
         var size = usage.ContextWindowSize;
 
-        var (events, transcriptEntries) = ApplyRecoveryTransitions(
-            session,
-            usedBefore,
+        var events = session.RebindRuntimeSession(
+            command.ReplacementRuntimeSessionId,
             usedBefore,
             size,
-            "reset",
-            summary: null,
-            clearRuntimeSession: true,
             now);
 
-        await PersistRecoveryAsync(session, events, transcriptEntries);
+        await PersistRecoveryAsync(session, events, []);
 
         return BuildRecoveryResult(session, usedBefore, size, "reset", wasCompacted: false);
     }
@@ -202,49 +204,41 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
     private void EnsureSessionIdleForRecovery(AgentSession session)
     {
         if (AgentSessionJsonHelper.StatusName(session, Now()) == "active")
-            throw new InvalidOperationException("Cannot recover a session that is currently active.");
+            throw new InvalidOperationException(
+                $"AgentSession {session.Id} is currently active; Compact and Reset require an idle session.");
     }
 
-    private (IReadOnlyList<AgentSessionEvent> Events, IReadOnlyList<RuntimeEventEnvelope> TranscriptEntries) ApplyRecoveryTransitions(
+    private IReadOnlyList<RuntimeEventEnvelope> BuildCompactionTranscriptEntries(
         AgentSession session,
         long? usedBefore,
         long? usedAfter,
         long? size,
-        string strategy,
         string? summary,
-        bool clearRuntimeSession,
         DateTime now)
     {
-        var previousAgentSessionId = session.Status.AgentRuntimeSessionId;
-        var events = new List<AgentSessionEvent>();
-        if (clearRuntimeSession)
-            events.AddRange(session.ClearRuntimeSession(usedAfter, size, now));
-        events.AddRange(session.RecordCompaction(usedBefore, usedAfter, size, strategy, summary, now));
-
-        var transcriptEntries = new List<RuntimeEventEnvelope>
-        {
+        return
+        [
             new()
             {
                 Id = -(_realtimeSequence + 1),
                 SessionId = session.Id,
-                AgentSessionId = previousAgentSessionId,
+                AgentSessionId = session.Status.AgentRuntimeSessionId,
                 Sequence = ++_realtimeSequence,
                 Type = "compaction",
-                PayloadJson = BuildCompactionPayload(strategy, usedBefore, usedAfter, size, summary, now),
+                PayloadJson = BuildCompactionPayload("summary", usedBefore, usedAfter, size, summary, now),
                 CreatedAt = now,
             },
             new()
             {
                 Id = -(_realtimeSequence + 1),
                 SessionId = session.Id,
-                AgentSessionId = previousAgentSessionId,
+                AgentSessionId = session.Status.AgentRuntimeSessionId,
                 Sequence = ++_realtimeSequence,
                 Type = "compaction_event",
-                PayloadJson = BuildCompactionEventPayload(strategy, usedBefore, usedAfter, size, summary, now),
+                PayloadJson = BuildCompactionEventPayload("summary", usedBefore, usedAfter, size, summary, now),
                 CreatedAt = now,
             }
-        };
-        return (events, transcriptEntries);
+        ];
     }
 
     private static string BuildCompactionPayload(
@@ -304,7 +298,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         }
         catch
         {
-            // Recovery transitions have
+            // The recovery transition has
             // already mutated the live session. The store rolled back, so the
             // committed state and AgentSessionEvents rows are unchanged.
             // Quarantine the activation so the mutated in-memory session is
@@ -315,12 +309,12 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             throw;
         }
         // The state/event transaction committed atomically. The recovery
-        // transitions are durable; a later Compact/Reset retry must not
+        // transition is durable; a later Compact/Reset retry must not
         // re-append them. Treat the transcript like the normal flush path:
         // if its save fails, the committed domain events stay committed and
         // the un-committed transcript flush stays in _transcript for the next
         // retry. The recovery command returns success because the domain
-        // fact is persistent; only the transcript
+        // fact (rebind or compaction) is persistent; only the transcript
         // evidence is pending.
         _session = session;
         if (transcript is not null)

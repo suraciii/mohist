@@ -117,7 +117,7 @@ public class AgentSessionContextEventPublishingSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
-    public async Task ResetAsync_EmitsCompactionEventWithoutSummary()
+    public async Task ResetAsync_DoesNotEmitCompactionEvent()
     {
         var sessionId = Guid.NewGuid().ToString("N");
         var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
@@ -127,14 +127,14 @@ public class AgentSessionContextEventPublishingSpecs
 
         _fixture.RecordingTranscriptPublisher.Clear();
 
-        await grain.ResetAsync(new ResetAgentSessionCommand());
+        await grain.ResetAsync(new ResetAgentSessionCommand(
+            ExpectedRuntimeSessionId: "runtime-before-reset",
+            ReplacementRuntimeSessionId: "runtime-after-reset"));
 
         var compactionEvents = _fixture.RecordingTranscriptPublisher.Published
             .Where(e => e.Type == "compaction_event")
             .ToList();
-        Assert.Single(compactionEvents);
-        var envelope = compactionEvents[0];
-        Assert.Equal("reset", envelope.Payload.GetProperty("strategy").GetString());
+        Assert.Empty(compactionEvents);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]

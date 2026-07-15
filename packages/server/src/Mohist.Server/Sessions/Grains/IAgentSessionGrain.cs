@@ -53,7 +53,9 @@ public sealed record CompactAgentSessionCommand(
     [property: Id(1)] int? MaxSummaryChars = null);
 
 [GenerateSerializer]
-public sealed record ResetAgentSessionCommand;
+public sealed record ResetAgentSessionCommand(
+    [property: Id(0)] string? ExpectedRuntimeSessionId,
+    [property: Id(1)] string ReplacementRuntimeSessionId);
 
 [GenerateSerializer]
 public sealed record AgentSessionRuntimeEventInput(

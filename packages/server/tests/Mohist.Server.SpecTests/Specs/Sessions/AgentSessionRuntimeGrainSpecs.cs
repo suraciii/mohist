@@ -58,7 +58,7 @@ public sealed class AgentSessionRuntimeGrainSpecs : IClassFixture<AgentSessionGr
         var opened = await grain.OpenAsync(new OpenAgentSessionCommand("runner-1", "opencode"));
 
         var exception = await Assert.ThrowsAsync<RuntimeSessionMissingException>(() =>
-            grain.CompactAsync(new CompactAgentSessionCommand("replacement-session")));
+            grain.CompactAsync(new CompactAgentSessionCommand()));
 
         Assert.Equal(opened.Id, exception.SessionId);
         Assert.Contains(opened.Id, exception.Message, StringComparison.Ordinal);
@@ -75,7 +75,9 @@ public sealed class AgentSessionRuntimeGrainSpecs : IClassFixture<AgentSessionGr
         await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand("legacy-runtime-session"));
 
         var exception = await Assert.ThrowsAsync<RuntimeSessionMissingException>(() =>
-            grain.ResetAsync(new ResetAgentSessionCommand("replacement-session")));
+            grain.ResetAsync(new ResetAgentSessionCommand(
+                ExpectedRuntimeSessionId: "legacy-runtime-session",
+                ReplacementRuntimeSessionId: "replacement-session")));
 
         Assert.Equal(opened.Id, exception.SessionId);
         Assert.Equal("legacy-runtime-session", exception.RuntimeSessionId);

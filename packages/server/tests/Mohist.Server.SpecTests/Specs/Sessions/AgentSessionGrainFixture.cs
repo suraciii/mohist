@@ -78,6 +78,7 @@ public sealed class AgentSessionGrainFixture : IAsyncLifetime
 public sealed class FakeAgentSessionStore : IAgentSessionStore
 {
     public AgentSession? State { get; private set; }
+    public List<AgentSessionEvent> Events { get; } = [];
     public int SaveCount { get; private set; }
     public Exception? NextException { get; set; }
 
@@ -86,6 +87,7 @@ public sealed class FakeAgentSessionStore : IAgentSessionStore
         NextException = null;
         SaveCount = 0;
         State = null;
+        Events.Clear();
     }
 
     public Task<AgentSession?> LoadAsync(string key) => Task.FromResult(State);
@@ -106,6 +108,7 @@ public sealed class FakeAgentSessionStore : IAgentSessionStore
         ThrowIfPending();
         SaveCount++;
         State = state;
+        Events.AddRange(events);
         return Task.CompletedTask;
     }
 

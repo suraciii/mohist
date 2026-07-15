@@ -51,7 +51,7 @@ public class AgentSessionRecoveryApiSpecs
     [Fact]
     public async Task CompactEndpoint_ActiveSession_ReturnsConflict()
     {
-        var (project, issue, _, _) = await CreateAndStartSessionAsync("compact-active", sessionName: "plan", attachAndStart: true);
+        var (project, issue, _, currentSession) = await CreateAndStartSessionAsync("compact-active", sessionName: "plan", attachAndStart: true);
 
         using var response = await _client.PostAsync($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/plan/compact", content: null);
 
@@ -60,6 +60,7 @@ public class AgentSessionRecoveryApiSpecs
         using var doc = JsonDocument.Parse(body);
         Assert.Equal("session_active", doc.RootElement.GetProperty("code").GetString());
         Assert.Contains("active", doc.RootElement.GetProperty("error").GetString() ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(currentSession.Id, doc.RootElement.GetProperty("details").GetProperty("sessionId").GetString());
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -103,7 +104,7 @@ public class AgentSessionRecoveryApiSpecs
     [Fact]
     public async Task ResetEndpoint_ActiveSession_ReturnsConflict()
     {
-        var (project, issue, _, _) = await CreateAndStartSessionAsync("reset-active", sessionName: "build", attachAndStart: true);
+        var (project, issue, _, currentSession) = await CreateAndStartSessionAsync("reset-active", sessionName: "build", attachAndStart: true);
 
         using var response = await _client.PostAsync($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/build/reset", content: null);
 
@@ -111,6 +112,7 @@ public class AgentSessionRecoveryApiSpecs
         var body = await response.Content.ReadAsStringAsync();
         using var doc = JsonDocument.Parse(body);
         Assert.Equal("session_active", doc.RootElement.GetProperty("code").GetString());
+        Assert.Equal(currentSession.Id, doc.RootElement.GetProperty("details").GetProperty("sessionId").GetString());
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]

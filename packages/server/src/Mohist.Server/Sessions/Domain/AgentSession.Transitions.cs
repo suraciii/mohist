@@ -157,23 +157,16 @@ public static partial class AgentSessionExtensions
             return events;
         }
 
-        public IReadOnlyList<AgentSessionEvent> ClearRuntimeSession(
-            long? contextWindowUsedAfter,
-            long? contextWindowSizeAfter,
-            DateTime now)
+        public void EnsureExpectedRuntimeSession(string? expectedRuntimeSessionId)
         {
-            session.Status = session.Status with
+            var actualRuntimeSessionId = session.Status.AgentRuntimeSessionId;
+            if (!string.Equals(expectedRuntimeSessionId, actualRuntimeSessionId, StringComparison.Ordinal))
             {
-                AgentRuntimeSessionId = null,
-                BoundAt = null,
-                LastDataAt = now,
-                UsageSummary = (session.Status.UsageSummary ?? new AgentUsageSummary()) with
-                {
-                    ContextWindowUsed = contextWindowUsedAfter,
-                    ContextWindowSize = contextWindowSizeAfter ?? (session.Status.UsageSummary ?? new AgentUsageSummary()).ContextWindowSize,
-                }
-            };
-            return [];
+                throw new StaleRuntimeSessionBindingException(
+                    session.Id,
+                    expectedRuntimeSessionId,
+                    actualRuntimeSessionId);
+            }
         }
 
         public IReadOnlyList<AgentSessionEvent> RecordCompaction(

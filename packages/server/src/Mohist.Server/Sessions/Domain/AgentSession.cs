@@ -71,6 +71,37 @@ public sealed class RuntimeSessionMissingException : InvalidOperationException
     }
 }
 
+[Serializable]
+[GenerateSerializer]
+public sealed class StaleRuntimeSessionBindingException : InvalidOperationException
+{
+    public StaleRuntimeSessionBindingException(
+        string sessionId,
+        string? expectedRuntimeSessionId,
+        string? actualRuntimeSessionId)
+        : base(BuildMessage(sessionId, expectedRuntimeSessionId, actualRuntimeSessionId))
+    {
+        SessionId = sessionId;
+        ExpectedRuntimeSessionId = expectedRuntimeSessionId;
+        ActualRuntimeSessionId = actualRuntimeSessionId;
+    }
+
+    [Id(0)]
+    public string SessionId { get; }
+    [Id(1)]
+    public string? ExpectedRuntimeSessionId { get; }
+    [Id(2)]
+    public string? ActualRuntimeSessionId { get; }
+
+    private static string BuildMessage(
+        string sessionId,
+        string? expectedRuntimeSessionId,
+        string? actualRuntimeSessionId) =>
+        $"Reset rejected for AgentSession {sessionId}: expected runtime session " +
+        $"'{expectedRuntimeSessionId ?? "none"}', but the current binding is " +
+        $"'{actualRuntimeSessionId ?? "none"}'.";
+}
+
 [GenerateSerializer]
 public sealed record AgentSessionMetadata(
     [property: Id(0)] IReadOnlyDictionary<string, string>? Labels = null,

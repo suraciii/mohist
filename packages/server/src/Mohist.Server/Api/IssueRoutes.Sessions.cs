@@ -74,7 +74,7 @@ public static partial class IssueRoutes
             }
             catch (InvalidOperationException ex) when (ex.Message.Contains("currently active", StringComparison.OrdinalIgnoreCase))
             {
-                return ApiResults.Conflict("Cannot compact while session is active", "session_active", new { sessionId });
+                return ApiResults.Conflict(ex.Message, "session_active", new { sessionId });
             }
         });
 
@@ -94,7 +94,12 @@ public static partial class IssueRoutes
             var grain = grains.GetGrain<IAgentSessionGrain>(sessionId);
             try
             {
-                var result = await grain.ResetAsync(new ResetAgentSessionCommand());
+                var current = await grain.GetAsync();
+                if (current is null) return ApiResults.NotFound($"Session {name} not found");
+
+                var result = await grain.ResetAsync(new ResetAgentSessionCommand(
+                    ExpectedRuntimeSessionId: current.AgentSessionId,
+                    ReplacementRuntimeSessionId: BuildNewAgentSessionId()));
                 return ApiResults.Ok(result);
             }
             catch (RuntimeSessionMissingException ex)
@@ -104,9 +109,20 @@ public static partial class IssueRoutes
                     "runtime_session_missing",
                     new { sessionId = ex.SessionId, hint = "reset" });
             }
+            catch (StaleRuntimeSessionBindingException ex)
+            {
+                return ApiResults.Conflict(
+                    ex.Message,
+                    "stale_binding",
+                    new
+                    {
+                        sessionId = ex.SessionId,
+                        actualRuntimeSessionId = ex.ActualRuntimeSessionId,
+                    });
+            }
             catch (InvalidOperationException ex) when (ex.Message.Contains("currently active", StringComparison.OrdinalIgnoreCase))
             {
-                return ApiResults.Conflict("Cannot reset while session is active", "session_active", new { sessionId });
+                return ApiResults.Conflict(ex.Message, "session_active", new { sessionId });
             }
         });
 
@@ -180,6 +196,7 @@ public static partial class IssueRoutes
         });
     }
 
+    private static string BuildNewAgentSessionId() => Guid.NewGuid().ToString("N");
 }
 
 public sealed record FollowupRequest(string? Text);

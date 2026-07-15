@@ -11,3 +11,11 @@
 - Runtime is persisted on AgentSessionRuntime and RuntimeSessionLineageEntry and emitted on AgentSessionRuntimeBound. Legacy rows remain null and are never backfilled.
 - Missing bindings, null legacy runtimes, and retired `acp` runtimes are rejected before recovery mutation or follow-up dispatch. Recovery rejection leaves transcript state unchanged.
 - Verification: focused runtime/event unit tests passed 12/12; focused session grain/API/store specs passed 48/48; full `npm test` passed (CLI 865, server unit 1351, architecture 22, server spec 2749, Web 4653, Runner 1014). The first full run exposed an unrelated order-sensitive Epic lifecycle failure; that test passed alone and the complete rerun passed.
+
+## T-002
+
+- Compact now records AgentSessionContextCompacted and compaction transcript evidence only; it preserves runtime, runtimeSessionId, stable sessionId, and lineage and emits no AgentSessionRuntimeBound.
+- Reset checks the shared idle boundary and ExpectedRuntimeSessionId before RebindRuntimeSession. StaleRuntimeSessionBindingException carries the stable sessionId plus expected and actual bindings; the workflow route maps it to stale_binding without mutation.
+- Reset's ReplacementRuntimeSessionId is the temporary seam for the runtime handler result. The workflow route still supplies it through the existing BuildNewAgentSessionId helper; T-003/T-005 must replace that temporary source with the runner SessionCommand result and remove route-side minting.
+- Compact and Reset use the same active-session exception message containing the stable sessionId, so both workflow conflicts expose the same session_active shape.
+- Verification: focused recovery/runtime unit tests passed 33/33; focused grain/API/event specs passed 29/29; full `npm test` passed (CLI 865, server unit 1351, architecture 22, server spec 2753, Web 4653, Runner 1014). The first full run caught and corrected stale-scenario test data before the clean rerun.
