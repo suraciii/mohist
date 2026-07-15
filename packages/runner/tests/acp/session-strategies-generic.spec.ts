@@ -119,8 +119,8 @@ class GenericFakeAgent {
 
 class FakeServerConnection {
   readonly calls: Array<{ event: string; type?: string; payload?: unknown; body?: unknown; sessionName?: string; sessionId?: string }> = []
-  nextGetGenericSession: { runtimeSessionId?: string | null; workDir?: string; model?: string | null } | null = null
-  nextGenericSession: { runtimeSessionId?: string; workDir?: string; model?: string | null } = { runtimeSessionId: "acp-session-1", workDir: "D:/work" }
+  nextGetGenericSession: { runtimeSessionId?: string | null; runtime?: string | null; workDir?: string; model?: string | null } | null = null
+  nextGenericSession: { runtimeSessionId?: string; runtime?: string | null; workDir?: string; model?: string | null } = { runtimeSessionId: "acp-session-1", runtime: "opencode", workDir: "D:/work" }
 
   async getAgentSession(_projectId: string, sessionId: string) {
     this.calls.push({ event: "getAgentSession", sessionId })
@@ -148,7 +148,7 @@ class FakeServerConnection {
 
   async openWorkflowAgentSession() {
     this.calls.push({ event: "openWorkflowAgentSession" })
-    return { runtimeSessionId: "wf-acp-1", workDir: "D:/work" }
+    return { runtimeSessionId: "wf-acp-1", runtime: "opencode", workDir: "D:/work" }
   }
 
   async attachWorkflowAgentSession() {
@@ -242,8 +242,8 @@ describe("runAcpAgentSession — generic session dispatch", () => {
 
   it("PreMintedGenericSessionWithoutRuntimeSessionId_OpensBeforeRunning", async () => {
     const fixture = createGenericFixture()
-    fixture.serverConnection.nextGetGenericSession = { runtimeSessionId: null, workDir: "D:/work" }
-    fixture.serverConnection.nextGenericSession = { runtimeSessionId: undefined, workDir: "D:/work" }
+    fixture.serverConnection.nextGetGenericSession = { runtimeSessionId: null, runtime: "opencode", workDir: "D:/work" }
+    fixture.serverConnection.nextGenericSession = { runtimeSessionId: undefined, runtime: "opencode", workDir: "D:/work" }
 
     const result = await runDefaultModelAction(fixture.context({ with: { prompt: "run minted session" } as never }))
 
@@ -253,6 +253,21 @@ describe("runAcpAgentSession — generic session dispatch", () => {
     expect(events.indexOf("openAgentSession")).toBeGreaterThan(events.indexOf("getAgentSession"))
     expect(events).toContain("attachAgentSession")
     expect(events).not.toContain("openWorkflowAgentSession")
+  })
+
+  it.each(["acp", undefined])("GenericSessionWithUnsupportedRuntime_DoesNotResumeAndGuidesReset", async (runtime) => {
+    const fixture = createGenericFixture()
+    fixture.serverConnection.nextGetGenericSession = {
+      runtimeSessionId: "legacy-runtime-session",
+      runtime,
+      workDir: "D:/work",
+    }
+
+    const result = await acpAgentAction(fixture.context({ with: { prompt: "continue" } as never }))
+
+    expect(result.status).toBe("failure")
+    expect(result.message).toContain("Reset")
+    expect(fixture.agent.calls).not.toContainEqual(expect.objectContaining({ event: "resumeSession" }))
   })
 
   it("GenericSession_StoresCachedEntryUnderGenericKey", async () => {
@@ -322,6 +337,7 @@ describe("runAcpAgentSession — generic session dispatch", () => {
     const fixture = createGenericFixture()
     fixture.serverConnection.nextGetGenericSession = {
       runtimeSessionId: "persisted-acp-session",
+      runtime: "opencode",
       workDir: "D:/work",
       model: "kimi-for-coding/k2p6",
     }
@@ -362,6 +378,6 @@ describe("runAcpAgentSession — generic session dispatch", () => {
     const attachCall = fixture.serverConnection.calls.find((entry) => entry.event === "attachAgentSession")
     expect(attachCall).toBeTruthy()
     expect(attachCall?.sessionId).toBe("session-abc")
-    expect(attachCall?.body).toMatchObject({ agentSessionId: "acp-session-1", workDir: "D:/work" })
+    expect(attachCall?.body).toMatchObject({ runtimeSessionId: "acp-session-1", workDir: "D:/work" })
   })
 })

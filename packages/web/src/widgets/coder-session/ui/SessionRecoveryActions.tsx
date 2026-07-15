@@ -11,13 +11,18 @@ import {
   DialogTitle,
 } from '@/shared/ui/components/dialog'
 import { cn } from '@/shared/lib/utils'
-import { compactSession, resetSession } from '../../../entities/coder-session'
+import {
+  compactGenericSession,
+  compactSession,
+  resetGenericSession,
+  resetSession,
+} from '../../../entities/coder-session'
 import { useProject } from '../../../entities/project'
 
 const INACTIVE_TOOLTIP = 'Unavailable while session is active'
 const ACTIVE_STATUSES = new Set(['running', 'active', 'live'])
 const RESET_CONFIRM_BODY =
-  'This will clear all session context. The agent will lose all conversation history.'
+  'A new runtime session will start without prior context. Transcript and audit history remain available.'
 
 function isSessionActive(status: string | null | undefined): boolean {
   if (!status) return false
@@ -43,6 +48,7 @@ function resolveErrorMessage(err: unknown): string {
 export interface SessionRecoveryActionsProps {
   issueNumber: number
   sessionName: string
+  genericSessionId?: string
   status: string | null | undefined
   onSuccess?: () => void
   className?: string
@@ -55,6 +61,7 @@ export interface SessionRecoveryActionsProps {
    */
   bare?: boolean
   clients?: SessionRecoveryActionsClients
+  genericClients?: GenericSessionRecoveryActionsClients
 }
 
 export interface SessionRecoveryActionsClients {
@@ -62,14 +69,25 @@ export interface SessionRecoveryActionsClients {
   reset: typeof resetSession
 }
 
+export interface GenericSessionRecoveryActionsClients {
+  compact: typeof compactGenericSession
+  reset: typeof resetGenericSession
+}
+
 const defaultClients: SessionRecoveryActionsClients = {
   compact: compactSession,
   reset: resetSession,
 }
 
+const defaultGenericClients: GenericSessionRecoveryActionsClients = {
+  compact: compactGenericSession,
+  reset: resetGenericSession,
+}
+
 export function SessionRecoveryActions({
   issueNumber,
   sessionName,
+  genericSessionId,
   status,
   onSuccess,
   className,
@@ -77,6 +95,7 @@ export function SessionRecoveryActions({
   resetLabel = 'Reset',
   bare = false,
   clients = defaultClients,
+  genericClients = defaultGenericClients,
 }: SessionRecoveryActionsProps) {
   const { projectId } = useProject()
   const active = isSessionActive(status)
@@ -92,7 +111,9 @@ export function SessionRecoveryActions({
       if (!projectId) {
         return Promise.reject(new ApiError('Project is required', 400))
       }
-      return clients.compact(issueNumber, sessionName, projectId)
+      return genericSessionId
+        ? genericClients.compact(genericSessionId, projectId)
+        : clients.compact(issueNumber, sessionName, projectId)
     },
     onSuccess: () => {
       setInlineError(null)
@@ -108,7 +129,9 @@ export function SessionRecoveryActions({
       if (!projectId) {
         return Promise.reject(new ApiError('Project is required', 400))
       }
-      return clients.reset(issueNumber, sessionName, projectId)
+      return genericSessionId
+        ? genericClients.reset(genericSessionId, projectId)
+        : clients.reset(issueNumber, sessionName, projectId)
     },
     onSuccess: () => {
       setResetDialogOpen(false)

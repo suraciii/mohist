@@ -304,7 +304,7 @@ public static class RunnerRoutes
             try
             {
                 var session = await sessions.GetGrain(sessionId).AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand(
-                    req.AgentSessionId, req.Model, req.WorkDir, req.ChangeDir, req.ProcessPid));
+                    req.RuntimeSessionId, req.Model, req.WorkDir, req.ChangeDir, req.ProcessPid));
                 return Results.Ok(ToRunnerAgentSession(projectId, workflowRunId, sessionName, session));
             }
             catch (InvalidOperationException ex)
@@ -388,7 +388,7 @@ public static class RunnerRoutes
             try
             {
                 var session = await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand(
-                    req.AgentSessionId, req.Model, req.WorkDir, req.ChangeDir, req.ProcessPid));
+                    req.RuntimeSessionId, req.Model, req.WorkDir, req.ChangeDir, req.ProcessPid));
                 return Results.Ok(ToRunnerGenericAgentSession(session));
             }
             catch (InvalidOperationException ex)
@@ -623,7 +623,7 @@ public record RunnerGenericAgentSessionResponse(
     string? Model = null,
     string? ResolvedModel = null,
     string? Runtime = null);
-public record AgentSessionAttachRequest(string AgentSessionId, string? Model = null, string? WorkDir = null, string? ChangeDir = null, int? ProcessPid = null);
+public record AgentSessionAttachRequest(string RuntimeSessionId, string? Model = null, string? WorkDir = null, string? ChangeDir = null, int? ProcessPid = null);
 public record AgentSessionRuntimeEventsRequest(string? WorkId, string? WorkType, string? Stage, IReadOnlyList<AgentSessionRuntimeEventRequest> RuntimeEvents);
 public record AgentSessionRuntimeEventRequest(string Type, System.Text.Json.JsonElement Payload);
 public record WorkDispatchResponse(

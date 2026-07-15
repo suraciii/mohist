@@ -119,6 +119,7 @@ export function SessionDetailShell({
     meta,
     statusKind,
     isRunning,
+    canFollowup = isRunning,
     displayTurns,
     sessionTurns: turns,
     siblingNav,
@@ -147,6 +148,7 @@ export function SessionDetailShell({
     healthStatus,
     hasRecoveryActions,
     recoverySessionName,
+    recoverySessionId,
     runtimeSessionLineage,
     viewedRuntimeSessionId,
     buildLineageTargetPath,
@@ -163,6 +165,7 @@ export function SessionDetailShell({
 
   const displayStatusKind: StatusKind = isFinalizing && isRunning ? 'finalizing' : statusKind
   const displayTurnCount = meta?.turnCount ?? turns.length
+  const hasContextUsage = contextWindowUsed != null || contextWindowSize != null
 
   // Build recovery bar content (not hooks, just derived values)
   const lineageLink = runtimeSessionLineage && runtimeSessionLineage.length >= 2 && buildLineageTargetPath ? (
@@ -177,19 +180,22 @@ export function SessionDetailShell({
     <div className="flex flex-col gap-2">
       {hasRecoveryActions && (
         <div className="flex flex-row flex-wrap gap-2 items-start justify-between md:flex-nowrap">
-          <div className="flex-1 min-w-0">
-            <ContextHealthBar
-              contextWindowUsed={contextWindowUsed}
-              contextWindowSize={contextWindowSize}
-              contextUsagePercent={contextUsagePercent}
-              healthStatus={healthStatus}
-            />
-          </div>
-          {recoverySessionName && (
+          {hasContextUsage && (
+            <div className="flex-1 min-w-0">
+              <ContextHealthBar
+                contextWindowUsed={contextWindowUsed}
+                contextWindowSize={contextWindowSize}
+                contextUsagePercent={contextUsagePercent}
+                healthStatus={healthStatus}
+              />
+            </div>
+          )}
+          {(recoverySessionName || recoverySessionId) && (
             <div className="contents md:block md:shrink-0">
               <SessionRecoveryActions
                 issueNumber={issueNumber}
-                sessionName={recoverySessionName}
+                sessionName={recoverySessionName ?? ''}
+                genericSessionId={recoverySessionId ?? undefined}
                 status={meta?.status ?? null}
                 onSuccess={handleRecoverySuccess}
                 bare
@@ -387,12 +393,12 @@ export function SessionDetailShell({
           ) : isRunning ? <SessionWaitingState /> : <SessionEmptyState />}
         </div>
 
-        {(hasTurns || isRunning) && (
+        {(hasTurns || canFollowup) && (
           <div data-testid="session-followup-composer-region">
             <SessionFollowupComposer
               onSend={sendFollowup}
               isSending={followupIsPending}
-              disabled={!isRunning}
+              disabled={!canFollowup}
             />
           </div>
         )}

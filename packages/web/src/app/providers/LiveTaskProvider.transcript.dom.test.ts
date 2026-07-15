@@ -44,12 +44,12 @@ describe('LiveTaskProvider transcript routing', () => {
     const unwrapped = __testing__.unwrapTranscriptEnvelope({
       type: 'reasoning.delta',
       sessionId: 'session-84',
-      agentSessionId: 'acp-84',
+      runtimeSessionId: 'runtime-84',
       payload: { text: 'thinking' },
     })
 
     expect(unwrapped?.detail).toMatchObject({
-      runtimeSessionId: 'acp-84',
+      runtimeSessionId: 'runtime-84',
       sessionId: 'session-84',
       text: 'thinking',
     })
@@ -60,7 +60,6 @@ describe('LiveTaskProvider transcript routing', () => {
       type: 'message.delta',
       sessionId: 'session-84',
       runtimeSessionId: 'runtime-84',
-      agentSessionId: 'internal-runtime-84',
       payload: { text: 'working' },
     })
 

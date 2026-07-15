@@ -215,7 +215,7 @@ describe('SessionRecoveryActions — reset action and confirmation dialog', () =
 
     const dialog = screen.getByTestId('session-recovery-reset-dialog')
     expect(dialog).toBeInTheDocument()
-    expect(dialog).toHaveTextContent('This will clear all session context. The agent will lose all conversation history.')
+    expect(dialog).toHaveTextContent('A new runtime session will start without prior context. Transcript and audit history remain available.')
   })
 
   it('renders Cancel and "Reset Session" buttons inside the dialog', () => {

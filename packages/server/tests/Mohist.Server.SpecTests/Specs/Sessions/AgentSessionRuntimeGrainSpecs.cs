@@ -22,7 +22,7 @@ public sealed class AgentSessionRuntimeGrainSpecs : IClassFixture<AgentSessionGr
     {
         var grain = NewGrain();
 
-        await grain.OpenAsync(new OpenAgentSessionCommand("runner-1", "opencode", WorkDir: "/work"));
+        await grain.OpenAsync(OpenCommand());
         await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand("runtime-session-1"));
 
         Assert.Equal("opencode", _fixture.StateStore.State!.Runtime.Runtime);
@@ -39,6 +39,11 @@ public sealed class AgentSessionRuntimeGrainSpecs : IClassFixture<AgentSessionGr
             sessionId,
             runnerId: string.Empty,
             workDir: "/work",
+            metadata: new AgentSessionMetadata()
+                .WithLabel("mohist.io/project-id", "project-1")
+                .WithLabel("mohist.io/source-kind", "workflow")
+                .WithLabel("mohist.io/source-id", "workflow-1")
+                .WithLabel("mohist.io/session-name", "build"),
             now: _fixture.TimeProvider.GetUtcNow().UtcDateTime,
             runtime: null);
         await _fixture.StateStore.SaveAsync(sessionId, legacy);
@@ -55,7 +60,7 @@ public sealed class AgentSessionRuntimeGrainSpecs : IClassFixture<AgentSessionGr
     public async Task Compact_MissingBindingThrowsRuntimeSessionMissing()
     {
         var grain = NewGrain();
-        var opened = await grain.OpenAsync(new OpenAgentSessionCommand("runner-1", "opencode"));
+        var opened = await grain.OpenAsync(OpenCommand());
 
         var exception = await Assert.ThrowsAsync<RuntimeSessionMissingException>(() =>
             grain.CompactAsync(new CompactAgentSessionCommand()));
@@ -68,20 +73,21 @@ public sealed class AgentSessionRuntimeGrainSpecs : IClassFixture<AgentSessionGr
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
-    public async Task Reset_UnregisteredRuntimeThrowsBeforeActiveConflict()
+    public async Task Reset_UnregisteredRuntimeEstablishesReplacementBinding()
     {
         var grain = NewGrain();
-        var opened = await grain.OpenAsync(new OpenAgentSessionCommand("runner-1", "acp"));
+        var opened = await grain.OpenAsync(OpenCommand("acp"));
         await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand("legacy-runtime-session"));
+        _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(6));
 
-        var exception = await Assert.ThrowsAsync<RuntimeSessionMissingException>(() =>
-            grain.ResetAsync(new ResetAgentSessionCommand(
-                ExpectedRuntimeSessionId: "legacy-runtime-session",
-                ReplacementRuntimeSessionId: "replacement-session")));
+        var result = await grain.ResetAsync(new ResetAgentSessionCommand(
+            ExpectedRuntimeSessionId: "legacy-runtime-session",
+            ReplacementRuntimeSessionId: "replacement-session"));
 
-        Assert.Equal(opened.Id, exception.SessionId);
-        Assert.Equal("legacy-runtime-session", exception.RuntimeSessionId);
-        Assert.Equal("acp", exception.Runtime);
+        Assert.Equal(opened.Id, result.Id);
+        var rebound = await grain.GetAsync();
+        Assert.Equal("replacement-session", rebound?.AgentSessionId);
+        Assert.Equal("opencode", rebound?.Runtime);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
@@ -90,7 +96,7 @@ public sealed class AgentSessionRuntimeGrainSpecs : IClassFixture<AgentSessionGr
     public async Task RuntimeBinding_RemainsAvailableAfterReactivation()
     {
         var grain = NewGrain();
-        await grain.OpenAsync(new OpenAgentSessionCommand("runner-1", "opencode", WorkDir: "/work"));
+        await grain.OpenAsync(OpenCommand());
         await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand("runtime-session-1"));
 
         await grain.DeactivateForTestAsync();
@@ -104,4 +110,14 @@ public sealed class AgentSessionRuntimeGrainSpecs : IClassFixture<AgentSessionGr
 
     private IAgentSessionGrain NewGrain() =>
         _fixture.Grains.GetGrain<IAgentSessionGrain>($"runtime-grain-{Guid.NewGuid():N}");
+
+    private static OpenAgentSessionCommand OpenCommand(string runtime = "opencode") => new(
+        "runner-1",
+        runtime,
+        WorkDir: "/work",
+        Metadata: new AgentSessionMetadata()
+            .WithLabel("mohist.io/project-id", "project-1")
+            .WithLabel("mohist.io/source-kind", "workflow")
+            .WithLabel("mohist.io/source-id", "workflow-1")
+            .WithLabel("mohist.io/session-name", "build"));
 }

@@ -20,6 +20,7 @@ export interface SessionDataSourceResult {
 
   statusKind: StatusKind
   isRunning: boolean
+  canFollowup?: boolean
 
   followupIsPending: boolean
   sendFollowup: (text: string) => void
@@ -36,6 +37,7 @@ export interface SessionDataSourceResult {
 
   hasRecoveryActions: boolean
   recoverySessionName: string | null
+  recoverySessionId?: string | null
   runtimeSessionLineage: RuntimeSessionLineageEntry[] | null
   viewedRuntimeSessionId: string | null
   buildLineageTargetPath: ((runtimeId: string) => string) | null

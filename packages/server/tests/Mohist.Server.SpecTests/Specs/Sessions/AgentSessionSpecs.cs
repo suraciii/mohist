@@ -42,7 +42,7 @@ public class AgentSessionSpecs
     public async Task LoadLatestEventsActivity_DoesNotSuppressTerminalOrLivenessEventTypes()
     {
         var (project, issue, _, session) = await CreateStartedAgentSessionAsync("activity-no-filter", title: "Activity no filter");
-        await _client.PostOkAsync(RunnerAgentSessionAttachPath(session), new { agentSessionId = session.Id, workDir = $"/workspaces/{project.Id}", processPid = 1234 });
+        await _client.PostOkAsync(RunnerAgentSessionAttachPath(session), new { runtimeSessionId = session.Id, workDir = $"/workspaces/{project.Id}", processPid = 1234 });
 
         await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(session), new
         {
@@ -76,7 +76,7 @@ public class AgentSessionSpecs
 
         var currentWorkflowRunId = (await issueGrain.GetWorkflowStatusAsync())!.WorkflowRunId!;
         var currentSession = await OpenRunnerSessionAsync(project.Id, issue.Number, currentWorkflowRunId, "plan", work, "Plan session");
-        await _client.PostOkAsync(RunnerAgentSessionAttachPath(currentSession), new { agentSessionId = currentSession.Id, workDir = $"/workspaces/{project.Id}", processPid = 1234 });
+        await _client.PostOkAsync(RunnerAgentSessionAttachPath(currentSession), new { runtimeSessionId = currentSession.Id, workDir = $"/workspaces/{project.Id}", processPid = 1234 });
         await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(currentSession), new
         {
             runtimeEvents = new object[]
@@ -248,7 +248,7 @@ public class AgentSessionSpecs
 
         var currentWorkflowRunId = (await issueGrain.GetWorkflowStatusAsync())!.WorkflowRunId!;
         var currentSession = await OpenRunnerSessionAsync(project.Id, issue.Number, currentWorkflowRunId, "plan", work, "Plan session");
-        await _client.PostOkAsync(RunnerAgentSessionAttachPath(currentSession), new { agentSessionId = currentSession.Id, workDir = $"/workspaces/{project.Id}", processPid = 1234 });
+        await _client.PostOkAsync(RunnerAgentSessionAttachPath(currentSession), new { runtimeSessionId = currentSession.Id, workDir = $"/workspaces/{project.Id}", processPid = 1234 });
         await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(currentSession), new
         {
             runtimeEvents = new object[]
@@ -314,9 +314,9 @@ public class AgentSessionSpecs
     public async Task RunnerAttach_DifferentPhysicalSession_RebindsRuntimeSession()
     {
         var (_, _, _, session) = await CreateStartedAgentSessionAsync("attach-conflict", start: false);
-        await _client.PostOkAsync(RunnerAgentSessionAttachPath(session), new { agentSessionId = "acp-1", workDir = "/work", processPid = 1234 });
+        await _client.PostOkAsync(RunnerAgentSessionAttachPath(session), new { runtimeSessionId = "acp-1", workDir = "/work", processPid = 1234 });
 
-        using var response = await _client.PostAsJsonAsync(RunnerAgentSessionAttachPath(session), new { agentSessionId = "acp-2", workDir = "/work", processPid = 1234 });
+        using var response = await _client.PostAsJsonAsync(RunnerAgentSessionAttachPath(session), new { runtimeSessionId = "acp-2", workDir = "/work", processPid = 1234 });
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var rebound = await _fixture.Grains
@@ -366,7 +366,7 @@ public class AgentSessionSpecs
 
         var currentWorkflowRunId = (await issueGrain.GetWorkflowStatusAsync())!.WorkflowRunId!;
         var session = await OpenRunnerSessionAsync(project.Id, issue.Number, currentWorkflowRunId, "plan", work, "Plan session");
-        await _client.PostOkAsync(RunnerAgentSessionAttachPath(session), new { agentSessionId = session.Id, workDir = $"/workspaces/{project.Id}", processPid = 1234 });
+        await _client.PostOkAsync(RunnerAgentSessionAttachPath(session), new { runtimeSessionId = session.Id, workDir = $"/workspaces/{project.Id}", processPid = 1234 });
         var runtimeEvents = Enumerable.Range(0, 96)
             .Select(i => new { type = "reasoning.delta", payload = new { text = i.ToString("D2"), messageId = "reasoning-1" } })
             .Cast<object>()
@@ -403,7 +403,7 @@ public class AgentSessionSpecs
 
         var currentWorkflowRunId = (await issueGrain.GetWorkflowStatusAsync())!.WorkflowRunId!;
         var session = await OpenRunnerSessionAsync(project.Id, issue.Number, currentWorkflowRunId, "plan", work, "Plan session");
-        await _client.PostOkAsync(RunnerAgentSessionAttachPath(session), new { agentSessionId = session.Id, workDir = $"/workspaces/{project.Id}", processPid = 1234 });
+        await _client.PostOkAsync(RunnerAgentSessionAttachPath(session), new { runtimeSessionId = session.Id, workDir = $"/workspaces/{project.Id}", processPid = 1234 });
 
         await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(session), new
         {
@@ -1273,7 +1273,7 @@ var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/i
             Metadata: WorkflowSessionMetadata(project.Id, issue.Number, work.WorkflowRunId, sessionName, work.WorkId, work.WorkType, work.Stage, work.Title)));
         var session = new CreatedSession(project.Id, issue.Number, work.WorkflowRunId, sessionName, info);
         if (start)
-            await _client.PostOkAsync(RunnerAgentSessionAttachPath(session), new { agentSessionId = session.Id, workDir = $"/workspaces/{project.Id}", processPid = 1234 });
+            await _client.PostOkAsync(RunnerAgentSessionAttachPath(session), new { runtimeSessionId = session.Id, workDir = $"/workspaces/{project.Id}", processPid = 1234 });
         return (project, issue, work, session);
     }
 

@@ -106,7 +106,7 @@ public class WorkflowSessionSpecs
         });
         await PostRawAsync<RunnerAgentSessionDto>(RunnerAgentSessionAttachPath("runner-1", projectId, workflowRunId, sessionName), new
         {
-            agentSessionId = "acp-1",
+            runtimeSessionId = "acp-1",
             workDir = "/workspace",
             model = "openai/gpt-4o",
             processPid = 123,
@@ -183,7 +183,7 @@ public class WorkflowSessionSpecs
 
         await _client.PostOkAsync(RunnerAgentSessionAttachPath(_runnerId, project.Id, workflowRunId, sessionName), new
         {
-            agentSessionId = sessionId,
+            runtimeSessionId = sessionId,
             workDir = $"/workspaces/{project.Id}",
             processPid = 1234
         });

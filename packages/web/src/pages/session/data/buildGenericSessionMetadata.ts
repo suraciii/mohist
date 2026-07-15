@@ -28,8 +28,8 @@ export function buildGenericSessionMetadata(summary: GenericAgentSessionSummaryD
     sessionId: summary.sessionId,
     sessionName: summary.agentName,
     issueId: '',
-    runtimeSessionId: summary.sessionId,
-    runtime: null,
+    runtimeSessionId: summary.runtimeSessionId ?? '',
+    runtime: summary.runtime,
     executionId: null,
     title: summary.agentName,
     status: summary.status,
@@ -68,5 +68,6 @@ export function buildGenericSessionMetadata(summary: GenericAgentSessionSummaryD
           contextUsagePercent: summary.usage.contextUsagePercent ?? null,
         }
       : undefined,
+    runtimeSessionLineage: summary.runtimeSessionLineage,
   }
 }

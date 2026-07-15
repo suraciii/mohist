@@ -98,16 +98,21 @@ public static class AgentSessionRecoveryRoutes
         CancellationToken ct)
     {
         var grain = grains.GetGrain<IAgentSessionGrain>(sessionId);
+        SessionCommandRequest? request = null;
         try
         {
-            var request = await grain.PrepareSessionCommandAsync(SessionCommandKind.Reset);
+            request = await grain.BeginResetAsync();
             var commandResult = await commands.DispatchAsync(request, ct);
             if (MapCommandResult(request, commandResult) is { } commandFailure)
+            {
+                await grain.AbandonResetAsync(request.OperationId!);
                 return commandFailure;
+            }
 
-            var result = await grain.ResetAsync(new ResetAgentSessionCommand(
-                ExpectedRuntimeSessionId: request.ExpectedRuntimeSessionId,
-                ReplacementRuntimeSessionId: commandResult.RuntimeSessionId!));
+            var result = await grain.CompleteResetAsync(new CompleteResetAgentSessionCommand(
+                request.OperationId!,
+                commandResult.RuntimeSessionId!,
+                commandResult.Runtime!));
             return ApiResults.Ok(result);
         }
         catch (RuntimeSessionMissingException ex)
@@ -116,6 +121,8 @@ public static class AgentSessionRecoveryRoutes
         }
         catch (StaleRuntimeSessionBindingException ex)
         {
+            if (!string.IsNullOrWhiteSpace(request?.OperationId))
+                await grain.AbandonResetAsync(request.OperationId);
             return ApiResults.Conflict(
                 ex.Message,
                 "stale_binding",
@@ -127,6 +134,8 @@ public static class AgentSessionRecoveryRoutes
         }
         catch (InvalidOperationException ex) when (ex.Message.Contains("currently active", StringComparison.OrdinalIgnoreCase))
         {
+            if (!string.IsNullOrWhiteSpace(request?.OperationId))
+                await grain.AbandonResetAsync(request.OperationId);
             return ApiResults.Conflict(ex.Message, "session_active", new { sessionId });
         }
     }
@@ -142,13 +151,14 @@ public static class AgentSessionRecoveryRoutes
                 {
                     SessionCommandKind.Compact => result.RuntimeSessionId is null,
                     SessionCommandKind.Reset => !string.IsNullOrWhiteSpace(result.RuntimeSessionId)
-                        && !string.Equals(result.RuntimeSessionId, request.RuntimeSessionId, StringComparison.Ordinal),
+                        && !string.Equals(result.RuntimeSessionId, request.RuntimeSessionId, StringComparison.Ordinal)
+                        && string.Equals(result.Runtime, request.Runtime, StringComparison.OrdinalIgnoreCase),
                     _ => false,
                 });
             return valid ? null : InvalidRunnerResult(request.SessionId);
         }
 
-        if (result.RuntimeSessionId is not null || result.Error is null)
+        if (result.RuntimeSessionId is not null || result.Runtime is not null || result.Error is null)
             return InvalidRunnerResult(request.SessionId);
 
         return result.Error switch

@@ -172,7 +172,6 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
     public async Task<AgentSessionRecoveryResult> ResetAsync(ResetAgentSessionCommand command)
     {
         var session = await GetRequiredAsync();
-        EnsureRuntimeSessionPresent(session);
         EnsureSessionIdleForRecovery(session);
         session.EnsureExpectedRuntimeSession(command.ExpectedRuntimeSessionId);
 
@@ -185,7 +184,8 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             command.ReplacementRuntimeSessionId,
             usedBefore,
             size,
-            now);
+            now,
+            command.ReplacementRuntime);
 
         await PersistRecoveryAsync(session, events, []);
 
@@ -194,24 +194,92 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
 
     public async Task<SessionCommandRequest> PrepareSessionCommandAsync(SessionCommandKind command)
     {
-        if (command is not SessionCommandKind.Compact and not SessionCommandKind.Reset)
+        if (command == SessionCommandKind.Reset)
+            return await BeginResetAsync();
+        if (command != SessionCommandKind.Compact)
             throw new ArgumentOutOfRangeException(nameof(command), command, "Unsupported session command");
 
         var session = await GetRequiredAsync();
         EnsureRuntimeSessionPresent(session);
         EnsureSessionIdleForRecovery(session);
 
-        return new SessionCommandRequest(
+        return BuildSessionCommandRequest(session, SessionCommandKind.Compact);
+    }
+
+    public async Task<SessionCommandRequest> BeginResetAsync()
+    {
+        var session = await GetRequiredAsync();
+        EnsureSessionIdleForRecovery(session);
+
+        if (session.Status.PendingReset is { } pending)
+            return BuildSessionCommandRequest(session, SessionCommandKind.Reset, pending);
+
+        if (string.IsNullOrWhiteSpace(session.Runtime.RunnerId))
+            throw new RuntimeSessionMissingException(session.Id, session.Status.AgentRuntimeSessionId, session.Runtime.Runtime);
+
+        var replacementRuntime = IsRuntimeRegistered(session.Runtime.Runtime ?? string.Empty)
+            ? session.Runtime.Runtime!
+            : OpenCodeRuntime;
+        var reservation = new AgentSessionResetReservation(
+            Guid.NewGuid().ToString("N"),
+            session.Status.AgentRuntimeSessionId,
+            replacementRuntime,
+            Now());
+        session.Status = session.Status with { PendingReset = reservation };
+        await CommitAsync(session, []);
+        return BuildSessionCommandRequest(session, SessionCommandKind.Reset, reservation);
+    }
+
+    public async Task<AgentSessionRecoveryResult> CompleteResetAsync(CompleteResetAgentSessionCommand command)
+    {
+        var session = await GetRequiredAsync();
+        var reservation = session.Status.PendingReset;
+        if (reservation is null || !string.Equals(reservation.OperationId, command.OperationId, StringComparison.Ordinal))
+            throw new StaleRuntimeSessionBindingException(session.Id, command.OperationId, reservation?.OperationId);
+        if (!string.Equals(reservation.Runtime, command.ReplacementRuntime, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException($"Reset replacement runtime for AgentSession {session.Id} does not match its reservation.");
+
+        EnsureSessionIdleForRecovery(session);
+        session.EnsureExpectedRuntimeSession(reservation.ExpectedRuntimeSessionId);
+
+        var now = Now();
+        var usage = AgentSessionJsonHelper.Usage(session);
+        var usedBefore = usage.ContextWindowUsed;
+        var size = usage.ContextWindowSize;
+        var events = session.RebindRuntimeSession(
+            command.ReplacementRuntimeSessionId,
+            usedBefore,
+            size,
+            now,
+            command.ReplacementRuntime);
+        session.Status = session.Status with { PendingReset = null };
+        await PersistRecoveryAsync(session, events, []);
+        return BuildRecoveryResult(session, usedBefore, size, "reset", wasCompacted: false);
+    }
+
+    public async Task AbandonResetAsync(string operationId)
+    {
+        var session = await GetRequiredAsync();
+        if (!string.Equals(session.Status.PendingReset?.OperationId, operationId, StringComparison.Ordinal))
+            return;
+
+        session.Status = session.Status with { PendingReset = null };
+        await CommitAsync(session, []);
+    }
+
+    private static SessionCommandRequest BuildSessionCommandRequest(
+        AgentSession session,
+        SessionCommandKind command,
+        AgentSessionResetReservation? reservation = null) =>
+        new(
             SessionId: session.Id,
-            Runtime: session.Runtime.Runtime!,
-            RuntimeSessionId: session.Status.AgentRuntimeSessionId!,
+            Runtime: reservation?.Runtime ?? session.Runtime.Runtime!,
+            RuntimeSessionId: session.Status.AgentRuntimeSessionId,
             RunnerId: session.Runtime.RunnerId,
             WorkDir: session.Runtime.WorkDir,
             Command: command,
-            ExpectedRuntimeSessionId: command == SessionCommandKind.Reset
-                ? session.Status.AgentRuntimeSessionId
-                : null);
-    }
+            ExpectedRuntimeSessionId: reservation?.ExpectedRuntimeSessionId,
+            OperationId: reservation?.OperationId);
 
     private static void EnsureRuntimeSessionPresent(AgentSession session)
     {
@@ -605,7 +673,8 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             var envelope = new TranscriptEnvelope(
                 Id: row.Id.ToString(),
                 SessionId: row.SessionId,
-                AgentSessionId: row.AgentSessionId,
+                RuntimeSessionId: row.AgentSessionId,
+                Runtime: session.Runtime.Runtime,
                 Sequence: row.Sequence,
                 Type: row.Type,
                 Payload: payload,

@@ -38,7 +38,8 @@ public class AgentSessionRecoveryApiSpecs
                 SessionCommandKind.Compact => new SessionCommandResult(Ok: true),
                 SessionCommandKind.Reset => new SessionCommandResult(
                     Ok: true,
-                    RuntimeSessionId: $"{request.RuntimeSessionId}-replacement"),
+                    RuntimeSessionId: $"{request.RuntimeSessionId ?? "new"}-replacement",
+                    Runtime: request.Runtime),
                 _ => new SessionCommandResult(Ok: false, Error: SessionCommandError.Unavailable),
             };
         });
@@ -307,7 +308,7 @@ public class AgentSessionRecoveryApiSpecs
     [Theory]
     [InlineData("compact")]
     [InlineData("reset")]
-    public async Task CanonicalRecoveryEndpoint_MissingAgentLaunchBinding_ReturnsResetHint(string operation)
+    public async Task CanonicalRecoveryEndpoint_MissingAgentLaunchBinding_CompactReturnsResetHintAndResetRecovers(string operation)
     {
         var (project, _) = await CreateProjectAndIssueAsync($"{operation}-agent-missing");
         var session = await CreateAgentLaunchSessionAsync(
@@ -320,12 +321,24 @@ public class AgentSessionRecoveryApiSpecs
             $"/api/projects/{project.Id}/agent-sessions/{session.Id}/{operation}",
             content: null);
 
-        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
-        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        Assert.Equal("runtime_session_missing", doc.RootElement.GetProperty("code").GetString());
-        var details = doc.RootElement.GetProperty("details");
-        Assert.Equal(session.Id, details.GetProperty("sessionId").GetString());
-        Assert.Equal("reset", details.GetProperty("hint").GetString());
+        if (operation == "compact")
+        {
+            Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+            using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            Assert.Equal("runtime_session_missing", doc.RootElement.GetProperty("code").GetString());
+            var details = doc.RootElement.GetProperty("details");
+            Assert.Equal(session.Id, details.GetProperty("sessionId").GetString());
+            Assert.Equal("reset", details.GetProperty("hint").GetString());
+        }
+        else
+        {
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            Assert.Equal(session.Id, doc.RootElement.GetProperty("data").GetProperty("id").GetString());
+            var rebound = await _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id).GetAsync();
+            Assert.Equal("opencode", rebound?.Runtime);
+            Assert.False(string.IsNullOrWhiteSpace(rebound?.AgentSessionId));
+        }
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -430,7 +443,7 @@ public class AgentSessionRecoveryApiSpecs
     [InlineData("reset", null)]
     [InlineData("compact", "acp")]
     [InlineData("reset", "acp")]
-    public async Task RecoveryEndpoint_LegacyBackendBinding_ReturnsRuntimeSessionMissing(
+    public async Task RecoveryEndpoint_LegacyBackendBinding_CompactFailsAndResetEstablishesOpenCodeBinding(
         string operation,
         string? runtime)
     {
@@ -447,14 +460,24 @@ public class AgentSessionRecoveryApiSpecs
             $"/api/projects/{project.Id}/issues/{issue.Number}/sessions/plan/{operation}",
             content: null);
 
-        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
-        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        Assert.Equal("runtime_session_missing", doc.RootElement.GetProperty("code").GetString());
-        var details = doc.RootElement.GetProperty("details");
-        Assert.Equal(currentSession.Id, details.GetProperty("sessionId").GetString());
-        Assert.Equal("reset", details.GetProperty("hint").GetString());
-        Assert.Contains(currentSession.Id, doc.RootElement.GetProperty("error").GetString(), StringComparison.Ordinal);
-        Assert.Contains("Reset", doc.RootElement.GetProperty("error").GetString(), StringComparison.Ordinal);
+        if (operation == "compact")
+        {
+            Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+            using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            Assert.Equal("runtime_session_missing", doc.RootElement.GetProperty("code").GetString());
+            var details = doc.RootElement.GetProperty("details");
+            Assert.Equal(currentSession.Id, details.GetProperty("sessionId").GetString());
+            Assert.Equal("reset", details.GetProperty("hint").GetString());
+        }
+        else
+        {
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            Assert.Equal(currentSession.Id, doc.RootElement.GetProperty("data").GetProperty("id").GetString());
+            var persisted = await _fixture.Grains.GetGrain<IAgentSessionGrain>(currentSession.Id).GetAsync();
+            Assert.Equal("opencode", persisted?.Runtime);
+            Assert.EndsWith("-replacement", persisted?.AgentSessionId, StringComparison.Ordinal);
+        }
 
         using var metadataResponse = await _client.GetAsync(
             $"/api/projects/{project.Id}/issues/{issue.Number}/sessions/plan");
@@ -585,11 +608,11 @@ public class AgentSessionRecoveryApiSpecs
 
         if (attachAndStart)
         {
-            await _client.PostOkAsync(RunnerAgentSessionAttachPath(currentSession), new { agentSessionId = currentSession.Id, workDir = $"/workspaces/{project.Id}", processPid = 1234 });
+            await _client.PostOkAsync(RunnerAgentSessionAttachPath(currentSession), new { runtimeSessionId = currentSession.Id, workDir = $"/workspaces/{project.Id}", processPid = 1234 });
         }
         else if (attachIdle)
         {
-            await _client.PostOkAsync(RunnerAgentSessionAttachPath(currentSession), new { agentSessionId = currentSession.Id, workDir = $"/workspaces/{project.Id}", processPid = 1234 });
+            await _client.PostOkAsync(RunnerAgentSessionAttachPath(currentSession), new { runtimeSessionId = currentSession.Id, workDir = $"/workspaces/{project.Id}", processPid = 1234 });
             _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(6));
         }
 

@@ -30,7 +30,7 @@ function request(command: "compact" | "reset"): SessionCommandRequest {
     runnerId: "runner-1",
     workDir: "/work/project",
     command,
-    ...(command === "reset" ? { expectedRuntimeSessionId: "runtime-1" } : {}),
+    ...(command === "reset" ? { expectedRuntimeSessionId: "runtime-1", operationId: "reset-1" } : {}),
   }
 }
 
@@ -61,6 +61,7 @@ describe("SessionCommand contract", () => {
     const fakeHandler = vi.fn(async (): Promise<SessionCommandResult> => ({
       ok: true,
       runtimeSessionId: "runtime-2",
+      runtime: "opencode",
     }))
     const invoke = register(fakeHandler)
     const reset = request("reset")
@@ -68,7 +69,36 @@ describe("SessionCommand contract", () => {
     const result = await invoke(reset)
 
     expect(fakeHandler).toHaveBeenCalledWith(reset)
-    expect(result).toEqual({ ok: true, runtimeSessionId: "runtime-2" })
+    expect(result).toEqual({ ok: true, runtimeSessionId: "runtime-2", runtime: "opencode" })
+  })
+
+  it("deduplicates duplicate reset operation ids before invoking the runtime handler", async () => {
+    let release!: () => void
+    const deferred = new Promise<void>((resolve) => { release = resolve })
+    const fakeHandler = vi.fn(async (): Promise<SessionCommandResult> => {
+      await deferred
+      return { ok: true, runtimeSessionId: "runtime-2", runtime: "opencode" }
+    })
+    const invoke = register(fakeHandler)
+
+    const first = invoke(request("reset"))
+    const duplicate = invoke(request("reset"))
+    release()
+
+    await expect(Promise.all([first, duplicate])).resolves.toEqual([
+      { ok: true, runtimeSessionId: "runtime-2", runtime: "opencode" },
+      { ok: true, runtimeSessionId: "runtime-2", runtime: "opencode" },
+    ])
+    expect(fakeHandler).toHaveBeenCalledTimes(1)
+  })
+
+  it("rejects a reset without the reserved expected binding", async () => {
+    const fakeHandler = vi.fn(async (): Promise<SessionCommandResult> => ({ ok: true }))
+    const invoke = register(fakeHandler)
+    const invalid = { ...request("reset"), expectedRuntimeSessionId: "runtime-stale" }
+
+    await expect(invoke(invalid)).resolves.toEqual({ ok: false, error: "unavailable" })
+    expect(fakeHandler).not.toHaveBeenCalled()
   })
 
   it.each<SessionCommandError>(["conflict", "missing"])(

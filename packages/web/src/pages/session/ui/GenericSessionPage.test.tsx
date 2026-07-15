@@ -75,6 +75,8 @@ function baseSummary(overrides: Record<string, any> = {}) {
     sessionId: 'sess-abc',
     agentId: 'agent-1',
     agentName: 'Test Agent',
+    runtimeSessionId: 'rt-abc',
+    runtime: 'opencode',
     status: 'completed',
     createdAt: '2026-06-15T10:00:00.000Z',
     lastActivityAt: '2026-06-15T10:30:00.000Z',
@@ -263,12 +265,12 @@ describe('GenericSessionPage', () => {
       })
     })
 
-    it('omits Compact/Reset recovery actions', async () => {
+    it('renders Compact/Reset recovery actions addressed by the stable session id', async () => {
       _summaryData = baseSummary()
       mocks.transcriptTurns = [makeTurn()]
       renderPage()
       await waitFor(() => {
-        expect(screen.queryByTestId('session-recovery-actions')).not.toBeInTheDocument()
+        expect(screen.getByTestId('session-recovery-actions')).toBeInTheDocument()
       })
     })
 

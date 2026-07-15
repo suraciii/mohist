@@ -510,11 +510,11 @@ export function createAcpSessionUpdateHandler(options: {
   }
 }
 
-export async function attachSessionToServer(context: ActionContext, agentSessionId: string, processPid: number | null, agentConfig: { model?: string } | undefined, resolvedModel?: string) {
+export async function attachSessionToServer(context: ActionContext, runtimeSessionId: string, processPid: number | null, agentConfig: { model?: string } | undefined, resolvedModel?: string) {
   const target = sessionTargetFromContext(context)
   if (!target || !context.serverConnection) return
 
-  const body = { agentSessionId, workDir: context.workDir, processPid, model: agentConfig?.model ?? stringInput(context.with, "model"), ...(resolvedModel ? { resolvedModel } : {}) }
+  const body = { runtimeSessionId, workDir: context.workDir, processPid, model: agentConfig?.model ?? stringInput(context.with, "model"), ...(resolvedModel ? { resolvedModel } : {}) }
   if (target.kind === "workflow") {
     await context.serverConnection.attachWorkflowAgentSession(
       target.projectId,

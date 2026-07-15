@@ -261,11 +261,7 @@ describe("RunnerSignalRClient CancelAgentSession handler", () => {
     expect(cancel).not.toHaveBeenCalled()
   })
 
-  it("WorkflowShapedTarget_RepliesNotCancellable", async () => {
-    // The product cancel endpoint only addresses generic sessions today;
-    // a `workflow` target through this method is treated as
-    // not-cancellable (the issue-scoped session lifecycle has no cancel
-    // surface) rather than being misrouted to the followup code path.
+  it("WorkflowShapedTarget_ResolvesAndCancelsTheWorkflowRuntimeSession", async () => {
     const cancel = vi.fn(async () => undefined)
     const connection: MockConnection = { prompt: vi.fn(), cancel }
     const resolver = vi.fn(() => ({ connection: connection as never, sessionId: "acp-1", projectId: "proj-1" }))
@@ -277,8 +273,8 @@ describe("RunnerSignalRClient CancelAgentSession handler", () => {
       target: { kind: "workflow", projectId: "proj-1", workflowRunId: "wr-1", sessionName: "work-1" },
     })) as { state: string }
 
-    expect(reply).toEqual({ state: "not-cancellable" })
-    expect(cancel).not.toHaveBeenCalled()
+    expect(reply).toEqual({ state: "cancelled" })
+    expect(cancel).toHaveBeenCalledWith({ sessionId: "acp-1" })
   })
 
   it("GenericTargetWithoutSessionId_RepliesNotCancellable", async () => {

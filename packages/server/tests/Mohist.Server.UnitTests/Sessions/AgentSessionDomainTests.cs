@@ -9,9 +9,10 @@ public class AgentSessionDomainTests
     private static AgentSession CreateSession()
     {
         var metadata = new AgentSessionMetadata()
-            .WithLabel("owner", "proj")
-            .WithLabel("source", "wf")
-            .WithLabel("name", "session");
+            .WithLabel("mohist.io/project-id", "proj")
+            .WithLabel("mohist.io/source-kind", "workflow")
+            .WithLabel("mohist.io/source-id", "wf")
+            .WithLabel("mohist.io/session-name", "session");
 
         var session = AgentSession.Create(
             "proj/wf/session",
@@ -31,9 +32,9 @@ public class AgentSessionDomainTests
         var session = CreateSession();
 
         Assert.Equal("proj/wf/session", session.Id);
-        Assert.Equal("proj", session.Metadata.Label("owner"));
-        Assert.Equal("wf", session.Metadata.Label("source"));
-        Assert.Equal("session", session.Metadata.Label("name"));
+        Assert.Equal("proj", session.Metadata.Label("mohist.io/project-id"));
+        Assert.Equal("wf", session.Metadata.Label("mohist.io/source-id"));
+        Assert.Equal("session", session.Metadata.Label("mohist.io/session-name"));
         Assert.Null(session.Metadata.Label("work"));
         Assert.Null(session.Metadata.Annotation("title"));
         Assert.Equal("runner-1", session.Runtime.RunnerId);
@@ -41,6 +42,35 @@ public class AgentSessionDomainTests
         Assert.Null(session.Status.AgentRuntimeSessionId);
         Assert.Equal(new DateTime(2026, 6, 5, 0, 0, 0, DateTimeKind.Utc), session.Status.CreatedAt);
         Assert.NotNull(session.Status.UsageSummary);
+    }
+
+    [Fact]
+    public void MetadataMerge_PreservesSourceAndAcceptsAnnotationsOnly()
+    {
+        var metadata = new AgentSessionMetadata()
+            .WithLabel("mohist.io/project-id", "project-1")
+            .WithLabel("mohist.io/source-kind", "workflow")
+            .WithLabel("mohist.io/source-id", "workflow-1")
+            .WithLabel("mohist.io/session-name", "build");
+
+        var merged = metadata.Merge(new AgentSessionMetadata(
+            Annotations: new Dictionary<string, string> { ["title"] = "Build" }));
+
+        Assert.Equal("workflow", merged.Label("mohist.io/source-kind"));
+        Assert.Equal("Build", merged.Annotation("title"));
+        Assert.Throws<InvalidOperationException>(() => metadata.Merge(new AgentSessionMetadata(
+            Labels: new Dictionary<string, string> { ["mohist.io/source-kind"] = "agent-launch" })));
+    }
+
+    [Fact]
+    public void Create_RequiresACompleteKnownSource()
+    {
+        Assert.Throws<InvalidOperationException>(() => AgentSession.Create(
+            "source-required",
+            "runner-1",
+            "/work",
+            metadata: new AgentSessionMetadata(),
+            now: new DateTime(2026, 6, 5, 0, 0, 0, DateTimeKind.Utc)));
     }
 
     [Fact]

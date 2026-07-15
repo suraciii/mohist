@@ -146,6 +146,7 @@ export interface CoderSessionSummary {
   failureReason: string | null
   eventSummary?: AgentSessionEventSummary
   usage?: AgentSessionUsage
+  runtimeSessionLineage?: RuntimeSessionLineageEntry[] | null
 }
 
 export interface WorkflowRunSession {
@@ -221,6 +222,7 @@ export interface SessionMetadata {
   hasUnknownTools?: boolean
   eventSummary?: AgentSessionEventSummary
   usage?: AgentSessionUsage
+  runtimeSessionLineage?: RuntimeSessionLineageEntry[] | null
 }
 
 export interface TextPart {

@@ -107,11 +107,36 @@ public sealed class AgentSessionRecoveryGrainSpecs : IClassFixture<AgentSessionG
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
+    public async Task Reset_ConcurrentBeginsReuseOneReservationAndPermitOneCompletion()
+    {
+        var (grain, sessionId) = await CreateAttachedSessionAsync("runtime-before-reset");
+
+        var first = await grain.BeginResetAsync();
+        var duplicate = await grain.BeginResetAsync();
+
+        Assert.Equal(first.OperationId, duplicate.OperationId);
+        Assert.Equal("runtime-before-reset", first.ExpectedRuntimeSessionId);
+        Assert.Equal("opencode", first.Runtime);
+
+        var result = await grain.CompleteResetAsync(new CompleteResetAgentSessionCommand(
+            first.OperationId!,
+            "runtime-after-reset",
+            "opencode"));
+
+        Assert.Equal(sessionId, result.Id);
+        await Assert.ThrowsAsync<StaleRuntimeSessionBindingException>(() => grain.CompleteResetAsync(
+            new CompleteResetAgentSessionCommand(first.OperationId!, "unused-replacement", "opencode")));
+        Assert.Equal("runtime-after-reset", (await grain.GetAsync())?.AgentSessionId);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
     public async Task CompactAndReset_ActiveSession_ReturnIdenticalConflictWithoutMutation()
     {
         var sessionId = $"recovery-grain-{Guid.NewGuid():N}";
         var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
-        await grain.OpenAsync(new OpenAgentSessionCommand("runner-1", "opencode", WorkDir: "/work"));
+        await grain.OpenAsync(OpenCommand());
         await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand("runtime-active"));
         var saveCountBefore = _fixture.StateStore.SaveCount;
         var eventCountBefore = _fixture.StateStore.Events.Count;
@@ -135,9 +160,19 @@ public sealed class AgentSessionRecoveryGrainSpecs : IClassFixture<AgentSessionG
     {
         var sessionId = $"recovery-grain-{Guid.NewGuid():N}";
         var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
-        await grain.OpenAsync(new OpenAgentSessionCommand("runner-1", "opencode", WorkDir: "/work"));
+        await grain.OpenAsync(OpenCommand());
         await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand(runtimeSessionId));
         _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(6));
         return (grain, sessionId);
     }
+
+    private static OpenAgentSessionCommand OpenCommand() => new(
+        "runner-1",
+        "opencode",
+        WorkDir: "/work",
+        Metadata: new AgentSessionMetadata()
+            .WithLabel("mohist.io/project-id", "project-1")
+            .WithLabel("mohist.io/source-kind", "workflow")
+            .WithLabel("mohist.io/source-id", "workflow-1")
+            .WithLabel("mohist.io/session-name", "build"));
 }

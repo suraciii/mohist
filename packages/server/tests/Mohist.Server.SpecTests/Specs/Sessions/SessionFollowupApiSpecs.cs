@@ -74,6 +74,35 @@ public class SessionFollowupApiSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
+    public async Task FollowupEndpoint_IdleLiveSession_StartsUserTurnWithoutCreatingTask()
+    {
+        var (project, issue, _, session) = await CreateAndStartSessionAsync("followup-idle", sessionName: "plan", attachAndStart: true);
+        _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(6));
+        Assert.NotEqual("active", (await _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id).GetAsync())?.Status);
+        var tasksBefore = await GetWorkflowTaskSnapshotAsync(issue.Id);
+
+        var tracker = _fixture.Services.GetRequiredService<RunnerConnectionTracker>();
+        var runnerHub = _fixture.Services.GetRequiredService<IHubContext<RunnerHub>>() as RecordingRunnerHubContext
+            ?? throw new InvalidOperationException("Recording runner hub context was not registered.");
+        runnerHub.Clear();
+        tracker.Register(_runnerId, "conn-followup-idle");
+        try
+        {
+            using var response = await PostFollowupAsync(project.Id, issue.Number, "plan", new { text = "start an idle turn" });
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            Assert.Equal("ReceiveFollowup", Assert.Single(runnerHub.SentMessages).Method);
+            Assert.Equal(tasksBefore, await GetWorkflowTaskSnapshotAsync(issue.Id));
+        }
+        finally
+        {
+            tracker.Unregister(_runnerId);
+        }
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
     public async Task FollowupEndpoint_EmptyText_ReturnsBadRequest()
     {
         var (project, issue, _, _) = await CreateAndStartSessionAsync("followup-empty", sessionName: "plan");
@@ -216,7 +245,7 @@ public class SessionFollowupApiSpecs
 
         if (attachAndStart)
         {
-            await _client.PostOkAsync(RunnerAgentSessionAttachPath(currentSession), new { agentSessionId = currentSession.Id, workDir = $"/workspaces/{project.Id}", processPid = 1234 });
+            await _client.PostOkAsync(RunnerAgentSessionAttachPath(currentSession), new { runtimeSessionId = currentSession.Id, workDir = $"/workspaces/{project.Id}", processPid = 1234 });
         }
 
         return (project, issue, currentWorkflowRunId, currentSession);

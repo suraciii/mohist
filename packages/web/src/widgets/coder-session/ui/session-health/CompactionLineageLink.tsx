@@ -111,7 +111,7 @@ export function CompactionLineageLink({
           />
         </svg>
         <span className="uppercase tracking-wide text-info" data-testid="compaction-lineage-link-label">
-          Compaction chain
+          Runtime session history
         </span>
         {predecessor && (
           <>

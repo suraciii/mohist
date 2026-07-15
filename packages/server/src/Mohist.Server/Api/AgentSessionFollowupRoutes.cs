@@ -90,15 +90,9 @@ public static class AgentSessionFollowupRoutes
                     new { sessionId = ex.SessionId, hint = "reset" });
             }
 
-            if (!target.IsActive)
+            if (!string.IsNullOrWhiteSpace(target.TerminalState))
                 return ApiResults.Conflict("Session is no longer active", "session_inactive");
 
-            // IsActive=true implies a runner has opened and reported
-            // runtime events, so RunnerId is guaranteed to be present.
-            // Defensive guard for the (impossible-by-construction) case
-            // where a session reads as active without a bound runner —
-            // surface it as 503 (the runner lookup will fail) rather than
-            // crash the handler.
             if (string.IsNullOrWhiteSpace(target.RunnerId))
                 return ApiResults.Fail(
                     "Runner is offline",

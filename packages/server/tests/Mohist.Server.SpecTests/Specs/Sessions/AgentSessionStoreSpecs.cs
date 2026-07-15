@@ -52,6 +52,7 @@ public class AgentSessionStoreSpecs : IAsyncLifetime
             $"session-{Guid.NewGuid():N}",
             "runner-1",
             "/work",
+            metadata: WorkflowMetadata(),
             now: createdAt,
             runtime: "opencode");
         session.AttachPhysicalSession(
@@ -81,6 +82,7 @@ public class AgentSessionStoreSpecs : IAsyncLifetime
             $"legacy-session-{Guid.NewGuid():N}",
             "runner-1",
             "/work",
+            metadata: WorkflowMetadata(),
             now: createdAt,
             runtime: "opencode");
         session.AttachPhysicalSession(
@@ -99,6 +101,11 @@ public class AgentSessionStoreSpecs : IAsyncLifetime
             var state = JsonNode.Parse(row.State)!.AsObject();
             state["runtime"]!.AsObject().Remove("runtime");
             state["status"]!["runtimeSessionLineage"]![0]!.AsObject().Remove("runtime");
+            var labels = state["metadata"]!["labels"]!.AsObject();
+            labels.Remove("mohist.io/project-id");
+            labels.Remove("mohist.io/source-kind");
+            labels.Remove("mohist.io/source-id");
+            labels.Remove("mohist.io/session-name");
             legacyState = state.ToJsonString();
             row.State = legacyState;
             await db.SaveChangesAsync();
@@ -142,6 +149,13 @@ public class AgentSessionStoreSpecs : IAsyncLifetime
         var part = Assert.Single(partRows);
         Assert.Equal("hello world", part.Text);
     }
+
+    private static AgentSessionMetadata WorkflowMetadata() =>
+        new AgentSessionMetadata()
+            .WithLabel("mohist.io/project-id", "project-1")
+            .WithLabel("mohist.io/source-kind", "workflow")
+            .WithLabel("mohist.io/source-id", "workflow-1")
+            .WithLabel("mohist.io/session-name", "build");
 
     [Fact]
     public async Task SavePartsAsync_NewCorrelationKey_InsertsAdditionalPart()

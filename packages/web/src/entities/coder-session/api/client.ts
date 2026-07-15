@@ -35,7 +35,6 @@ export function getAgentSessionEvents(number: number, name: string, projectId?: 
 
 export interface SessionRecoveryResult {
   id: string
-  agentSessionId?: string | null
   status: string
   contextWindowSize?: number | null
   contextWindowUsed?: number | null
@@ -63,6 +62,26 @@ export function resetSession(
 ): Promise<SessionRecoveryResult> {
   return request<SessionRecoveryResult>(
     projectApiPath(projectId, `/issues/${number}/sessions/${encodeURIComponent(name)}/reset`),
+    { method: 'POST' },
+  )
+}
+
+export function compactGenericSession(
+  sessionId: string,
+  projectId?: string | null,
+): Promise<SessionRecoveryResult> {
+  return request<SessionRecoveryResult>(
+    projectApiPath(projectId, `/agent-sessions/${encodeURIComponent(sessionId)}/compact`),
+    { method: 'POST' },
+  )
+}
+
+export function resetGenericSession(
+  sessionId: string,
+  projectId?: string | null,
+): Promise<SessionRecoveryResult> {
+  return request<SessionRecoveryResult>(
+    projectApiPath(projectId, `/agent-sessions/${encodeURIComponent(sessionId)}/reset`),
     { method: 'POST' },
   )
 }

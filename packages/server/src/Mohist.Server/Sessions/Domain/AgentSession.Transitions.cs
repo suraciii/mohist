@@ -53,7 +53,7 @@ public static partial class AgentSessionExtensions
                 LastDataAt = now,
                 RuntimeSessionLineage = isNewRuntimeBinding
                     ? AppendLineageEntry(session.Status.RuntimeSessionLineage, agentSessionId, now,
-                        runtime: session.Runtime.Runtime)
+                         runtime: session.Runtime.Runtime)
                     : session.Status.RuntimeSessionLineage
             };
             var events = new List<AgentSessionEvent>();
@@ -148,6 +148,7 @@ public static partial class AgentSessionExtensions
                     ? AppendLineageEntry(session.Status.RuntimeSessionLineage, newAgentSessionId, now,
                         seedPrevious: oldAgentSessionId,
                         seedPreviousRuntime: oldAgentSessionId is null ? null : oldRuntime,
+                        seedPreviousBoundAt: session.Status.BoundAt,
                         runtime: nextRuntime)
                     : session.Status.RuntimeSessionLineage
             };
@@ -279,6 +280,7 @@ public static partial class AgentSessionExtensions
             DateTime now,
             string? seedPrevious = null,
             string? seedPreviousRuntime = null,
+            DateTime? seedPreviousBoundAt = null,
             string? runtime = null)
         {
             var entries = lineage is null
@@ -289,7 +291,7 @@ public static partial class AgentSessionExtensions
                 && !string.IsNullOrEmpty(seedPrevious)
                 && !string.Equals(seedPrevious, newAgentSessionId, StringComparison.Ordinal))
             {
-                entries.Add(new RuntimeSessionLineageEntry(seedPrevious, now, seedPreviousRuntime));
+                entries.Add(new RuntimeSessionLineageEntry(seedPrevious, seedPreviousBoundAt ?? now, seedPreviousRuntime));
             }
 
             entries.Add(new RuntimeSessionLineageEntry(newAgentSessionId, now, runtime));

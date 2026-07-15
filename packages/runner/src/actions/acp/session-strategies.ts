@@ -44,6 +44,7 @@ const DEFAULT_LIVENESS_QUIET_THRESHOLD_MS = 5 * 60 * 1000
 const DEFAULT_PROBE_TIMEOUT_MS = 30 * 1000
 const DEFAULT_EXPECTATION_REPAIR_LIMIT = 1
 const MAX_AGENT_TEXT_LENGTH = 2 * 1024 * 1024
+const SUPPORTED_RUNTIME = "opencode"
 
 export interface AcpSessionResult {
   text: string
@@ -92,6 +93,7 @@ export async function runAcpWorkflowAgentSession(context: ActionContext, prompt:
     }, context.signal)
 
     if (session.runtimeSessionId) {
+      if (!isSupportedRuntimeBinding(session)) return missingRuntimeBindingResult()
       const cached = manager.get(key)
       if (cached?.sessionId === session.runtimeSessionId) {
         return runPromptOnExistingWorkflowAgentSession(context, prompt, cached)
@@ -143,6 +145,7 @@ export async function runAcpGenericAgentSession(context: ActionContext, prompt: 
     : await serverConnection.openAgentSession(projectId, sessionId, openBody, context.signal)
 
   if (session.runtimeSessionId) {
+    if (!isSupportedRuntimeBinding(session)) return missingRuntimeBindingResult()
     const cached = manager.get(key)
     if (cached?.sessionId === session.runtimeSessionId) {
       return runPromptOnExistingWorkflowAgentSession(context, prompt, cached)
@@ -155,6 +158,19 @@ export async function runAcpGenericAgentSession(context: ActionContext, prompt: 
   const result = await runNewWorkflowAgentSession(context, prompt)
   if (result.success && result.acpSessionId) manager.set(key, { sessionId: result.acpSessionId, workDir: context.workDir })
   return result
+}
+
+function isSupportedRuntimeBinding(session: { runtime?: string | null }): boolean {
+  return session.runtime?.toLowerCase() === SUPPORTED_RUNTIME
+}
+
+function missingRuntimeBindingResult(): AcpSessionResult {
+  return {
+    text: "",
+    success: false,
+    error: "Runtime session is unavailable. Reset the AgentSession to establish a new binding.",
+    exitCode: 1,
+  }
 }
 
 export async function runPromptOnExistingWorkflowAgentSession(context: ActionContext, prompt: string, entry: { sessionId: string; workDir: string }): Promise<AcpSessionResult> {

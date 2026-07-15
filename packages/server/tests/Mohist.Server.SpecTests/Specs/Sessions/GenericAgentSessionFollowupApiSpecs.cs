@@ -100,6 +100,8 @@ public class GenericAgentSessionFollowupApiSpecs : IAsyncLifetime
     public async Task GenericFollowupEndpoint_IdleSession_StartsUserTurnWithoutCreatingWorkUnit()
     {
         var (project, sessionId, runtimeSessionId) = await CreateIdleGenericSessionAsync("gen-followup-idle");
+        _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(6));
+        Assert.NotEqual("active", (await _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId).GetAsync())?.Status);
         var runner = _fixture.Grains.GetGrain<IRunnerGrain>(_runnerId);
         var activeWorksBefore = await GetActiveWorkSnapshotAsync(runner);
         Assert.Empty(activeWorksBefore);
@@ -145,7 +147,7 @@ public class GenericAgentSessionFollowupApiSpecs : IAsyncLifetime
 
         using var get = await _client.GetAsync($"/api/runner/{_runnerId}/agent-sessions/{otherProject.Id}/{launched.SessionId}");
         using var open = await _client.PostAsJsonAsync($"/api/runner/{_runnerId}/agent-sessions/{otherProject.Id}/{launched.SessionId}/open", new { workId = "bad-open" });
-        using var attach = await _client.PostAsJsonAsync($"/api/runner/{_runnerId}/agent-sessions/{otherProject.Id}/{launched.SessionId}/attach", new { agentSessionId = "bad-acp" });
+        using var attach = await _client.PostAsJsonAsync($"/api/runner/{_runnerId}/agent-sessions/{otherProject.Id}/{launched.SessionId}/attach", new { runtimeSessionId = "bad-acp" });
         using var events = await _client.PostAsJsonAsync($"/api/runner/{_runnerId}/agent-sessions/{otherProject.Id}/{launched.SessionId}/runtime-events", new
         {
             runtimeEvents = new[] { new { type = "session.input", payload = new { text = "bad" } } }
@@ -569,7 +571,7 @@ public class GenericAgentSessionFollowupApiSpecs : IAsyncLifetime
             $"/api/runner/{runnerId}/agent-sessions/{launched.Project.Id}/{launched.SessionId}/attach",
             new
             {
-                agentSessionId = launched.SessionId,
+                runtimeSessionId = launched.SessionId,
                 workDir = WorkDirFor(launched.Project.Id),
                 processPid = 1234,
             });

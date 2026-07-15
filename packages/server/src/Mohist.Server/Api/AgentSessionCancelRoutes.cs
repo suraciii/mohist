@@ -3,6 +3,8 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.SignalR;
 using Mohist.Server.Project.Services;
 using Mohist.Server.Runner.Services.SignalR;
+using Mohist.Server.Sessions.Domain;
+using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Sessions.Services;
 
 namespace Mohist.Server.Api;
@@ -43,65 +45,81 @@ public static class AgentSessionCancelRoutes
             string projectRef,
             string sessionId,
             AgentSessionQuerier sessions,
+            IGrainFactory grains,
             IHubContext<RunnerHub> runnerHub,
             RunnerConnectionTracker connections,
             CancellationToken ct) =>
         {
             var project = context.GetResolvedProject();
-            var target = await sessions.ResolveGenericCancelTargetAsync(project.Id, sessionId, ct);
-            if (target is null)
-                return ApiResults.NotFound($"Agent session {sessionId} not found");
-
-            // Terminal short-circuit: the session is already in
-            // completed/failed/stopped. Return the current terminal state
-            // honestly without calling the runner — there is no turn to
-            // cancel and the runner cannot change the recorded outcome.
-            if (!string.IsNullOrEmpty(target.TerminalState))
-                return ApiResults.Ok(new { state = target.TerminalState });
-
-            // The session is not terminal. If no runner ever bound itself
-            // (RunnerId empty), there is no live runtime session to cancel —
-            // mirror the "not-cancellable" contract rather than faking
-            // success. The state name reuses the same value the runner
-            // reports so the HTTP shape is uniform.
-            if (string.IsNullOrWhiteSpace(target.RunnerId))
-                return ApiResults.Ok(new { state = "not-cancellable" });
-
-            var connectionId = connections.GetConnectionId(target.RunnerId);
-            if (string.IsNullOrWhiteSpace(connectionId))
-                return ApiResults.Ok(new { state = "not-cancellable" });
-
-            // Server → runner invocation. The runner handler is
-            // `CancelAgentSession` (distinct from `ReceiveFollowup`): it
-            // MUST return a { state: ... } reply. The reply types
-            // accepted are "cancelled", "not-cancellable", or a
-            // terminal-state name (completed/failed/stopped). The route
-            // never invents a state — it mirrors the runner's reported
-            // value verbatim so the API cannot fake success.
-            var reply = await runnerHub.Clients.Client(connectionId).InvokeAsync<AgentSessionCancelReply>(
-                "CancelAgentSession",
-                new
-                {
-                    target = new
-                    {
-                        kind = "generic",
-                        projectId = project.Id,
-                        sessionId = target.SessionId,
-                    },
-                },
-                ct);
-
-            if (reply is null || string.IsNullOrWhiteSpace(reply.State))
-                return ApiResults.Fail(
-                    "Runner did not report a cancel state",
-                    502,
-                    "runner_no_response",
-                    new { sessionId });
-
-            return ApiResults.Ok(new { state = reply.State });
+            return await ExecuteCancelAsync(project.Id, sessionId, sessions, grains, runnerHub, connections, ct);
         });
 
         return app;
+    }
+
+    internal static async Task<IResult> ExecuteCancelAsync(
+        string projectId,
+        string sessionId,
+        AgentSessionQuerier sessions,
+        IGrainFactory grains,
+        IHubContext<RunnerHub> runnerHub,
+        RunnerConnectionTracker connections,
+        CancellationToken ct)
+    {
+        var target = await sessions.ResolveCancelTargetAsync(projectId, sessionId, ct);
+        if (target is null)
+            return ApiResults.NotFound($"Agent session {sessionId} not found");
+
+        if (!string.IsNullOrEmpty(target.TerminalState))
+            return ApiResults.Ok(new { state = target.TerminalState });
+
+        try
+        {
+            await grains.GetGrain<IAgentSessionGrain>(target.SessionId).EnsureRuntimeSessionPresentAsync();
+        }
+        catch (RuntimeSessionMissingException ex)
+        {
+            return ApiResults.Conflict(
+                ex.Message,
+                "runtime_session_missing",
+                new { sessionId = ex.SessionId, hint = "reset" });
+        }
+
+        if (string.IsNullOrWhiteSpace(target.RunnerId))
+            return ApiResults.Ok(new { state = "not-cancellable" });
+
+        var connectionId = connections.GetConnectionId(target.RunnerId);
+        if (string.IsNullOrWhiteSpace(connectionId))
+            return ApiResults.Ok(new { state = "not-cancellable" });
+
+        object wireTarget = string.Equals(target.SourceKind, "workflow", StringComparison.Ordinal)
+            ? new
+            {
+                kind = "workflow",
+                projectId,
+                workflowRunId = target.WorkflowRunId,
+                sessionName = target.SessionName,
+            }
+            : new
+            {
+                kind = "generic",
+                projectId,
+                sessionId = target.SessionId,
+            };
+
+        var reply = await runnerHub.Clients.Client(connectionId).InvokeAsync<AgentSessionCancelReply>(
+            "CancelAgentSession",
+            new { target = wireTarget },
+            ct);
+
+        if (reply is null || string.IsNullOrWhiteSpace(reply.State))
+            return ApiResults.Fail(
+                "Runner did not report a cancel state",
+                502,
+                "runner_no_response",
+                new { sessionId });
+
+        return ApiResults.Ok(new { state = reply.State });
     }
 }
 

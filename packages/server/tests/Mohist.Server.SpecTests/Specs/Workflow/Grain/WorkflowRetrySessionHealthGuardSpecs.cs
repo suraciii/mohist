@@ -366,7 +366,7 @@ public class WorkflowRetrySessionHealthGuardSpecs
             $"/api/runner/{runnerId}/sessions/{Uri.EscapeDataString(projectId)}/{Uri.EscapeDataString(workflowRunId)}/{Uri.EscapeDataString(sessionName)}/attach",
             new
             {
-                agentSessionId = sessionId,
+                runtimeSessionId = sessionId,
                 workDir = "/tmp/retry-guard",
                 processPid = 4321,
             });

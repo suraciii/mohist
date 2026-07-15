@@ -19,7 +19,7 @@ public sealed class AgentSession
         string? runtime = null)
     {
         var createdAt = now ?? DateTime.UtcNow;
-        return new AgentSession
+        var session = new AgentSession
         {
             Id = id,
             Metadata = metadata ?? new AgentSessionMetadata(),
@@ -27,12 +27,14 @@ public sealed class AgentSession
             Settings = new AgentSessionSettings(),
             Status = AgentSessionStatusSnapshot.Created(createdAt)
         };
+        session.ValidateState();
+        return session;
     }
 
     private static string? NormalizeRuntime(string? runtime) =>
         string.IsNullOrWhiteSpace(runtime) ? null : runtime.Trim();
 
-    public void ValidateState()
+    public void ValidateState(bool allowLegacySource = false)
     {
         if (string.IsNullOrWhiteSpace(Id))
             throw new InvalidOperationException("AgentSession state requires a non-empty Id.");
@@ -40,6 +42,7 @@ public sealed class AgentSession
             throw new InvalidOperationException("AgentSession state requires a Runtime.");
         if (Status.CreatedAt == default)
             throw new InvalidOperationException("AgentSession state requires CreatedAt to be set.");
+        Metadata.ValidateSource(allowLegacySource);
     }
 }
 
@@ -123,12 +126,65 @@ public sealed record AgentSessionMetadata(
         var next = this;
         if (other.Labels is not null)
             foreach (var (key, value) in other.Labels)
+            {
+                if (IsSourceLabel(key))
+                {
+                    var current = next.Label(key);
+                    if (current is null)
+                        throw new InvalidOperationException($"AgentSession source label '{key}' cannot be added after creation.");
+                    if (!string.Equals(current, value, StringComparison.Ordinal))
+                        throw new InvalidOperationException($"AgentSession source label '{key}' is immutable.");
+                    continue;
+                }
                 next = next.WithLabel(key, value);
+            }
         if (other.Annotations is not null)
             foreach (var (key, value) in other.Annotations)
                 next = next.WithAnnotation(key, value);
+        next.ValidateSource();
         return next;
     }
+
+    public void ValidateSource(bool allowLegacySource = false)
+    {
+        var kind = Label(SourceKindKey);
+        if (kind is null)
+        {
+            if (allowLegacySource && !HasSourceLabel()) return;
+            throw new InvalidOperationException("AgentSession source requires exactly one known source kind.");
+        }
+
+        if (string.IsNullOrWhiteSpace(Label(ProjectIdKey)))
+            throw new InvalidOperationException("AgentSession source requires a project label.");
+
+        if (string.Equals(kind, "workflow", StringComparison.Ordinal))
+        {
+            if (string.IsNullOrWhiteSpace(Label(WorkflowRunIdKey)) || string.IsNullOrWhiteSpace(Label(SessionNameKey)))
+                throw new InvalidOperationException("Workflow AgentSession source requires workflow run and session name labels.");
+            return;
+        }
+
+        if (string.Equals(kind, "agent-launch", StringComparison.Ordinal))
+        {
+            if (string.IsNullOrWhiteSpace(Label(AgentIdKey)))
+                throw new InvalidOperationException("Agent-launch AgentSession source requires an agent label.");
+            return;
+        }
+
+        throw new InvalidOperationException($"Unknown AgentSession source kind '{kind}'.");
+    }
+
+    private const string ProjectIdKey = "mohist.io/project-id";
+    private const string SourceKindKey = "mohist.io/source-kind";
+    private const string WorkflowRunIdKey = "mohist.io/source-id";
+    private const string SessionNameKey = "mohist.io/session-name";
+    private const string AgentIdKey = "mohist.io/agent-id";
+
+    private static bool IsSourceLabel(string key) =>
+        key is ProjectIdKey or SourceKindKey or WorkflowRunIdKey or SessionNameKey or AgentIdKey;
+
+    private bool HasSourceLabel() =>
+        Labels?.Keys.Any(IsSourceLabel) == true;
 
     private static IReadOnlyDictionary<string, string> With(IReadOnlyDictionary<string, string>? source, string key, string value)
     {
@@ -175,7 +231,8 @@ public sealed record AgentSessionStatusSnapshot(
     DateTime? LastDataAt = null,
     AgentUsageSummary? UsageSummary = null,
     IReadOnlyList<RuntimeSessionLineageEntry>? RuntimeSessionLineage = null,
-    IReadOnlyList<ContextUsageHistoryEntry>? ContextUsageHistory = null)
+    IReadOnlyList<ContextUsageHistoryEntry>? ContextUsageHistory = null,
+    AgentSessionResetReservation? PendingReset = null)
 {
     public static AgentSessionStatusSnapshot Created(DateTime now) =>
         new(CreatedAt: now, UsageSummary: new AgentUsageSummary(), RuntimeSessionLineage: [], ContextUsageHistory: []);
@@ -203,3 +260,9 @@ public sealed record AgentUsageSummary(
 public sealed record ContextUsageHistoryEntry(
     [property: JsonPropertyName("at")] DateTime At,
     [property: JsonPropertyName("percent")] double Percent);
+
+public sealed record AgentSessionResetReservation(
+    string OperationId,
+    string? ExpectedRuntimeSessionId,
+    string Runtime,
+    DateTime StartedAt);

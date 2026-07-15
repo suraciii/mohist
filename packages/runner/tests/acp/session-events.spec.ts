@@ -33,7 +33,7 @@ function providerDefaultModelWarningContext(context: Parameters<typeof acpAgentA
 
 describe("mohist/acp-agent shared session observability", () => {
   it("ResumedSessionExposesCurrentModelId_RunnerEmitsResolvedModelEventWithResumeSource", async () => {
-    const shared = createSharedSessionFixture("resolved-model", { sessionRecord: { runtimeSessionId: "server-session-1" } })
+    const shared = createSharedSessionFixture("resolved-model", { sessionRecord: { runtimeSessionId: "server-session-1", runtime: "opencode" } })
 
     const context = contextWithOverrides({
       prompt: "resume and report",
@@ -55,7 +55,7 @@ describe("mohist/acp-agent shared session observability", () => {
   })
 
   it("CompactionConfigNotSpecified_DefaultsApplied_ResumeSessionReceivesOpencodeCompactionMeta", async () => {
-    const shared = createSharedSessionFixture("resolved-model", { sessionRecord: { runtimeSessionId: "server-session-1" } })
+    const shared = createSharedSessionFixture("resolved-model", { sessionRecord: { runtimeSessionId: "server-session-1", runtime: "opencode" } })
 
     const context = contextWithOverrides({
       prompt: "resume with defaults",
@@ -76,7 +76,7 @@ describe("mohist/acp-agent shared session observability", () => {
   })
 
   it("CompactionConfigExplicitlySet_ForwardedToResumeSessionMeta", async () => {
-    const shared = createSharedSessionFixture("resolved-model", { sessionRecord: { runtimeSessionId: "server-session-1" } })
+    const shared = createSharedSessionFixture("resolved-model", { sessionRecord: { runtimeSessionId: "server-session-1", runtime: "opencode" } })
 
     const context = contextWithOverrides({
       prompt: "resume with custom compaction",

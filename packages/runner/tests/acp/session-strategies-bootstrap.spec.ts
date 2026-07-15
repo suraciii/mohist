@@ -105,7 +105,7 @@ describe("mohist/acp-agent new and ephemeral sessions", () => {
     expect(fixture.serverConnection.calls).toContainEqual(expect.objectContaining({
       event: "attachWorkflowAgentSession",
       sessionName: "build",
-      body: expect.objectContaining({ agentSessionId: "fake-session-1" }),
+      body: expect.objectContaining({ runtimeSessionId: "fake-session-1" }),
     }))
     expect(fixture.timeline.findIndex((entry) => entry.event === "newSession")).toBeLessThan(fixture.timeline.findIndex((entry) => entry.event === "attachWorkflowAgentSession"))
     expect(fixture.timeline.findIndex((entry) => entry.event === "attachWorkflowAgentSession")).toBeLessThan(fixture.timeline.findIndex((entry) => entry.event === "unstable_setSessionModel"))

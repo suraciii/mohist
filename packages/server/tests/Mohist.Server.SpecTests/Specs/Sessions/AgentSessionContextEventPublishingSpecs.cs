@@ -38,7 +38,7 @@ public class AgentSessionContextEventPublishingSpecs
     {
         var sessionId = Guid.NewGuid().ToString("N");
         var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
-        await grain.OpenAsync(new OpenAgentSessionCommand(_runnerId, "opencode", WorkDir: "/work"));
+        await grain.OpenAsync(OpenCommand());
 
         _fixture.RecordingTranscriptPublisher.Clear();
 
@@ -95,7 +95,7 @@ public class AgentSessionContextEventPublishingSpecs
     {
         var sessionId = Guid.NewGuid().ToString("N");
         var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
-        await grain.OpenAsync(new OpenAgentSessionCommand(_runnerId, "opencode", WorkDir: "/work"));
+        await grain.OpenAsync(OpenCommand());
         await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand("runtime-before-compact"));
         _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(6));
 
@@ -121,7 +121,7 @@ public class AgentSessionContextEventPublishingSpecs
     {
         var sessionId = Guid.NewGuid().ToString("N");
         var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
-        await grain.OpenAsync(new OpenAgentSessionCommand(_runnerId, "opencode", WorkDir: "/work"));
+        await grain.OpenAsync(OpenCommand());
         await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand("runtime-before-reset"));
         _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(6));
 
@@ -144,7 +144,7 @@ public class AgentSessionContextEventPublishingSpecs
     {
         var sessionId = Guid.NewGuid().ToString("N");
         var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
-        await grain.OpenAsync(new OpenAgentSessionCommand(_runnerId, "opencode", WorkDir: "/work"));
+        await grain.OpenAsync(OpenCommand());
 
         // Bring usage to 96%.
         await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
@@ -180,7 +180,7 @@ public class AgentSessionContextEventPublishingSpecs
     {
         var sessionId = Guid.NewGuid().ToString("N");
         var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
-        await grain.OpenAsync(new OpenAgentSessionCommand(_runnerId, "opencode", WorkDir: "/work"));
+        await grain.OpenAsync(OpenCommand());
 
         // Bring usage to 50% (green) — first snapshot.
         await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
@@ -199,4 +199,10 @@ public class AgentSessionContextEventPublishingSpecs
         Assert.Equal("green", health.Envelope.Data!.Value.GetProperty("healthStatus").GetString());
         Assert.Equal(50d, health.Envelope.Data!.Value.GetProperty("contextUsagePercent").GetDouble());
     }
+
+    private OpenAgentSessionCommand OpenCommand() => new(
+        _runnerId,
+        "opencode",
+        WorkDir: "/work",
+        Metadata: WorkflowAgentSessionMetadata.Metadata(new WorkflowAgentSessionContext("project-1", "workflow-1", "build")));
 }

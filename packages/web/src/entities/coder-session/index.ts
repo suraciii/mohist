@@ -4,12 +4,14 @@ export { useFollowupMutation } from './model/useFollowupMutation'
 export type { FollowupMutationInput } from './model/useFollowupMutation'
 export {
   compactSession,
+  compactGenericSession,
   getAgentSessionEvents,
   getAgentSessionMetadata,
   getAgentSessionTranscript,
   getWorkflowRunSessions,
   postFollowup,
   resetSession,
+  resetGenericSession,
 } from './api/client'
 export type { SessionRecoveryResult, SessionFollowupResult } from './api/client'
 export { clampPercent, isContextHealthStatus } from './lib/context-health'

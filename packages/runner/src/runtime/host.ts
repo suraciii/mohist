@@ -1,6 +1,10 @@
 import type { RunnerOptions, RunnerRegistration } from "../core/types.js"
 import { ServerConnection } from "../server/connection.js"
-import { RunnerSignalRClient } from "../server/runner-signalr.js"
+import {
+  RunnerSignalRClient,
+  type SessionCommandRequest,
+  type SessionCommandResult,
+} from "../server/runner-signalr.js"
 import { createDefaultRegistry } from "../actions/registry.js"
 import "../core/prompt-registry.js"
 import { WorkspaceManager } from "./workspace.js"
@@ -136,9 +140,18 @@ export class RunnerHost {
         onReconnected: () => this.onDispatchReconnected(),
         serverConnection: this.connection,
         followupTargetResolver: (target) => this.resolveFollowupTarget(target),
+        sessionCommandHandler: (request) => this.handleSessionCommand(request),
         registry: this.workspaceRegistry,
       },
     )
+  }
+
+  private handleSessionCommand(request: SessionCommandRequest): SessionCommandResult {
+    if (request.runtime !== "opencode") return { ok: false, error: "missing" }
+    if (request.command === "reset" && request.expectedRuntimeSessionId !== request.runtimeSessionId) {
+      return { ok: false, error: "conflict" }
+    }
+    return { ok: false, error: "unavailable" }
   }
 
   // Issue-129 T-004: branches on `target.kind` so the same resolver

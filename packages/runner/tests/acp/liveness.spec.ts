@@ -191,7 +191,7 @@ describe("mohist/acp-agent cancelAndReturn bounded cleanup", () => {
 
   it("SharedSessionCancelHangs_NoProcessIsKilled", async () => {
     useAcpFakeTimers()
-    const shared = createSharedSessionFixture("thought-liveness", { sessionRecord: { runtimeSessionId: "server-session-1" } })
+    const shared = createSharedSessionFixture("thought-liveness", { sessionRecord: { runtimeSessionId: "server-session-1", runtime: "opencode" } })
     shared.agent.cancelHangs = true
 
     const result = await runWithDefaultModelWarning("shared-session", () => acpAgentAction(contextWithOverrides({

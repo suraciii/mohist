@@ -245,6 +245,8 @@ public sealed record GenericAgentSessionSummaryDto(
     string SessionId,
     string AgentId,
     string AgentName,
+    [property: JsonPropertyName("runtimeSessionId")] string? RuntimeSessionId,
+    [property: JsonPropertyName("runtime")] string? Runtime,
     [property: JsonPropertyName("status")] string Status,
     string CreatedAt,
     string? LastActivityAt,
@@ -253,7 +255,8 @@ public sealed record GenericAgentSessionSummaryDto(
     int? ToolCallCount,
     int? ToolErrorCount,
     [property: JsonPropertyName("contextRefs")] GenericAgentSessionSummaryContextRefsDto? ContextRefs,
-    [property: JsonPropertyName("usage")] AgentUsageDto Usage);
+    [property: JsonPropertyName("usage")] AgentUsageDto Usage,
+    [property: JsonPropertyName("runtimeSessionLineage")] IReadOnlyList<RuntimeSessionLineageEntryDto>? RuntimeSessionLineage);
 
 /// <summary>
 /// Lightweight association entry returned by the issue/epic agent-session

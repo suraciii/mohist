@@ -120,7 +120,7 @@ public static partial class IssueRoutes
             if (target is null)
                 return ApiResults.NotFound($"Session {name} not found");
 
-            if (!target.IsActive)
+            if (!string.IsNullOrWhiteSpace(target.TerminalState))
                 return ApiResults.Conflict("Session is no longer active", "session_inactive");
 
             var connectionId = connections.GetConnectionId(target.RunnerId);
@@ -151,6 +151,31 @@ public static partial class IssueRoutes
                 });
 
             return ApiResults.Ok(new AgentSessionFollowupResult(sessionId));
+        });
+
+        group.MapPost("/{number:int}/sessions/{name}/cancel", async (
+            HttpContext ctx,
+            string projectRef,
+            int number,
+            string name,
+            AgentSessionQuerier sessions,
+            IGrainFactory grains,
+            IHubContext<RunnerHub> runnerHub,
+            RunnerConnectionTracker connections,
+            CancellationToken ct) =>
+        {
+            var project = GetRequiredProject(ctx);
+            var sessionId = await sessions.ResolveIssueSessionIdAsync(project.Id, number, name, ct);
+            if (sessionId is null) return ApiResults.NotFound($"Session {name} not found");
+
+            return await AgentSessionCancelRoutes.ExecuteCancelAsync(
+                project.Id,
+                sessionId,
+                sessions,
+                grains,
+                runnerHub,
+                connections,
+                ct);
         });
     }
 }

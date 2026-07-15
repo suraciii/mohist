@@ -80,6 +80,8 @@ export function useGenericSessionDataSource(
   const rawStatus = summary?.status ?? ''
   const apiStatusKind = meta?.statusKind
   const isRunning = (rawStatus === 'active' || rawStatus === 'running' || rawStatus === 'probing') && apiStatusKind !== 'completed' && apiStatusKind !== 'failed'
+  const terminal = rawStatus === 'completed' || rawStatus === 'failed' || rawStatus === 'stopped' || rawStatus === 'cancelled'
+  const canFollowup = !terminal && !!summary?.runtimeSessionId && !!summary.runtime
 
   const statusKind: StatusKind = meta
     ? (meta.statusKind ?? getSessionStatusKind(rawStatus, meta.lastActivityAt, isRunning))
@@ -111,7 +113,7 @@ export function useGenericSessionDataSource(
   } = useTranscript({
     issueNumber: 0,
     sessionId,
-    runtimeSessionId: sessionId,
+    runtimeSessionId: summary?.runtimeSessionId ?? '',
     initialTurns: initialTurns.length > 0 ? initialTurns : undefined,
     sessionQueryKeys: [metadataQueryKey, transcriptQueryKey],
     isRunning,
@@ -150,8 +152,6 @@ export function useGenericSessionDataSource(
     : undefined
   const workflowContextLabel = workflowContextPath ? 'Workflow context' : undefined
 
-  const hasData = meta?.usage?.contextWindowUsed != null || meta?.usage?.contextWindowSize != null
-
   const sendFollowup = useCallback((text: string) => {
     genericFollowup.mutate({ sessionId, text })
   }, [genericFollowup, sessionId])
@@ -179,6 +179,7 @@ export function useGenericSessionDataSource(
     initialTurns,
     statusKind: displayStatusKind,
     isRunning,
+    canFollowup,
     followupIsPending: genericFollowup.isPending,
     sendFollowup,
     cancel,
@@ -186,10 +187,11 @@ export function useGenericSessionDataSource(
     contextWindowSize: meta?.usage?.contextWindowSize ?? null,
     contextUsagePercent: meta?.usage?.contextUsagePercent ?? null,
     healthStatus: meta?.usage?.healthStatus ?? null,
-    hasRecoveryActions: hasData,
+    hasRecoveryActions: !!summary,
     recoverySessionName: null,
-    runtimeSessionLineage: null,
-    viewedRuntimeSessionId: null,
+    recoverySessionId: sessionId || null,
+    runtimeSessionLineage: summary?.runtimeSessionLineage ?? null,
+    viewedRuntimeSessionId: summary?.runtimeSessionId ?? null,
     buildLineageTargetPath: null,
     metadataQueryKey,
     transcriptQueryKey,

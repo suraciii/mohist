@@ -424,7 +424,7 @@ public class GenericAgentSessionTranscriptAxisSpecs : IAsyncLifetime
             $"/api/runner/{_runnerId}/agent-sessions/{projectId}/{sessionId}/attach",
             new
             {
-                agentSessionId = sessionId,
+                runtimeSessionId = sessionId,
                 workDir = projectId,
                 processPid = 4321,
             });

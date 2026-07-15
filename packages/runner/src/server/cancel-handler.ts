@@ -4,10 +4,9 @@
 // cluster's dependency surface is explicit (D3) and so the cancel reply
 // path can be exercised independently of the other push handlers.
 //
-// Behaviour is byte-identical to the inline implementation:
+// Behaviour:
 //   - returns `{ state: "not-cancellable" }` for: null/missing payload,
-//     missing `target`, workflow-shaped target, generic target missing
-//     `sessionId`, no registered resolver, resolver returning null,
+//     missing or malformed `target`, no registered resolver, resolver returning null,
 //     resolver throwing (logged), connection without `cancel`, cancel
 //     send rejection (logged)
 //   - returns `{ state: "cancelled" }` only when:
@@ -41,9 +40,7 @@ export function registerCancelHandler(
 // pushes a `CancelAgentSession` SignalR invocation carrying a
 // `SessionTarget` and expects a `{ state: ... }` reply that the HTTP
 // endpoint mirrors verbatim. The handler branches on the same
-// `target.kind` discriminator introduced in T-004 (workflow vs generic)
-// but today only the generic path is reachable from the product API
-// because the issue-scoped session lifecycle has no cancel surface.
+// `target.kind` discriminator introduced in T-004 (workflow vs generic).
 //
 // The runner reports the state it actually observed:
 //   - `cancelled` — a live ACP session entry exists for the target AND
@@ -69,22 +66,28 @@ async function handleCancel(
     return { state: "not-cancellable" }
   }
 
-  // The cancel endpoint only addresses generic sessions today, so any
-  // other `target.kind` (or missing kind) is treated as not-cancellable.
   const target = payload.target
-  if (target.kind !== "generic" || !target.sessionId) {
-    return { state: "not-cancellable" }
-  }
+  const sessionTarget: SessionTarget | null = target.kind === "workflow"
+    && target.workflowRunId
+    && target.sessionName
+    ? {
+        kind: "workflow",
+        projectId: target.projectId ?? "",
+        workflowRunId: target.workflowRunId,
+        sessionName: target.sessionName,
+      }
+    : target.kind === "generic" && target.sessionId
+      ? {
+          kind: "generic",
+          projectId: target.projectId ?? "",
+          sessionId: target.sessionId,
+        }
+      : null
+  if (!sessionTarget || !sessionTarget.projectId) return { state: "not-cancellable" }
 
   const resolver = deps.followupTargetResolver ?? null
   if (!resolver) {
     return { state: "not-cancellable" }
-  }
-
-  const sessionTarget: SessionTarget = {
-    kind: "generic",
-    projectId: target.projectId ?? "",
-    sessionId: target.sessionId,
   }
 
   let resolved: FollowupTarget | null

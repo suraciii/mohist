@@ -20,7 +20,8 @@ namespace Mohist.Server.Infrastructure.Events;
 public sealed record TranscriptEnvelope(
     [property: JsonPropertyName("id")] string Id,
     [property: JsonPropertyName("sessionId")] string SessionId,
-    [property: JsonPropertyName("agentSessionId")] string? AgentSessionId,
+    [property: JsonPropertyName("runtimeSessionId")] string? RuntimeSessionId,
+    [property: JsonPropertyName("runtime")] string? Runtime,
     [property: JsonPropertyName("sequence")] long Sequence,
     [property: JsonPropertyName("type")] string Type,
     [property: JsonPropertyName("payload")] JsonElement Payload,

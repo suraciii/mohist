@@ -31,7 +31,7 @@ public class AgentSessionLifecycleDedupSpecs
         var session = await CreateSessionWithoutAttachAsync("dedup-attach-started");
 
         await _fixture.Client.PostOkAsync(RunnerAgentSessionAttachPath(session),
-            new { agentSessionId = session.Id, workDir = "/tmp", processPid = 4321 });
+            new { runtimeSessionId = session.Id, workDir = "/tmp", processPid = 4321 });
         await AppendEventsAsync(session, new
         {
             runtimeEvents = new object[]
@@ -59,7 +59,7 @@ public class AgentSessionLifecycleDedupSpecs
         var session = await CreateSessionWithoutAttachAsync("attach-append");
 
         await _fixture.Client.PostOkAsync(RunnerAgentSessionAttachPath(session),
-            new { agentSessionId = session.Id, workDir = "/tmp", processPid = 4321 });
+            new { runtimeSessionId = session.Id, workDir = "/tmp", processPid = 4321 });
         await AppendEventsAsync(session, new
         {
             runtimeEvents = new object[]
@@ -319,7 +319,7 @@ public class AgentSessionLifecycleDedupSpecs
         var session = await CreateSessionWithoutAttachAsync(name);
 
         await _fixture.Client.PostOkAsync(RunnerAgentSessionAttachPath(session),
-            new { agentSessionId = session.Id, workDir = "/tmp", processPid = 4321 });
+            new { runtimeSessionId = session.Id, workDir = "/tmp", processPid = 4321 });
 
         return session;
     }

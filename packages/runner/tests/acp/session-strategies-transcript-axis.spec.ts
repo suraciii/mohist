@@ -140,8 +140,8 @@ class TranscriptAxisFakeAgent {
 
 class FakeServerConnectionForTranscriptAxis {
   readonly calls: Array<{ event: string; type?: string; payload?: unknown; body?: unknown; sessionId?: string }> = []
-  nextGetGenericSession: { runtimeSessionId?: string | null; workDir?: string; model?: string | null } | null = null
-  nextGenericSession: { runtimeSessionId: string; workDir: string; model?: string | null } = { runtimeSessionId: "acp-session-1", workDir: "D:/work" }
+  nextGetGenericSession: { runtimeSessionId?: string | null; runtime?: string | null; workDir?: string; model?: string | null } | null = null
+  nextGenericSession: { runtimeSessionId: string; runtime?: string | null; workDir: string; model?: string | null } = { runtimeSessionId: "acp-session-1", runtime: "opencode", workDir: "D:/work" }
 
   async getAgentSession(_projectId: string, sessionId: string) {
     this.calls.push({ event: "getAgentSession", sessionId })
@@ -169,7 +169,7 @@ class FakeServerConnectionForTranscriptAxis {
 
   async openWorkflowAgentSession() {
     this.calls.push({ event: "openWorkflowAgentSession" })
-    return { runtimeSessionId: "wf-acp-1", workDir: "D:/work" }
+    return { runtimeSessionId: "wf-acp-1", runtime: "opencode", workDir: "D:/work" }
   }
 
   async attachWorkflowAgentSession() {
@@ -181,7 +181,7 @@ class FakeServerConnectionForTranscriptAxis {
   }
 }
 
-function createTranscriptAxisFixture(opts: { nextGenericSession?: { runtimeSessionId: string; workDir: string; model?: string | null } } = {}) {
+function createTranscriptAxisFixture(opts: { nextGenericSession?: { runtimeSessionId: string; runtime?: string | null; workDir: string; model?: string | null } } = {}) {
   const agent = new TranscriptAxisFakeAgent()
   const [clientStream, agentStream] = linkedStreams()
   const sessionUpdateHandlers = new Map<string, (notification: SessionNotification) => Promise<void>>()

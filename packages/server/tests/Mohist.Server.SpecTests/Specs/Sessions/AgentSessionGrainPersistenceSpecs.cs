@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
+using Mohist.Server.Sessions.Services;
 using Mohist.Server.SpecTests.Support;
 using Orleans.Core.Internal;
 using Xunit;
@@ -18,6 +19,11 @@ public abstract class AgentSessionGrainPersistenceSpecsBase : IClassFixture<Agen
     }
 
     protected IAgentSessionGrain NewGrain() => Fixture.Grains.GetGrain<IAgentSessionGrain>($"agent-session-spec-{Guid.NewGuid():N}");
+
+    protected OpenAgentSessionCommand Open(string runtime = "test") => new(
+        "runner-1",
+        runtime,
+        Metadata: WorkflowAgentSessionMetadata.Metadata(new WorkflowAgentSessionContext("project-1", "workflow-1", "build")));
 
     protected Task WaitUntilAsync(
         IAgentSessionGrain grain,
@@ -46,7 +52,7 @@ public class AgentSessionGrainPersistSuccessSpecs : AgentSessionGrainPersistence
     public async Task PersistCallback_Success_SavesStateAndTranscriptAndDisposesTimer()
     {
         var grain = NewGrain();
-        await grain.OpenAsync(new OpenAgentSessionCommand("runner-1", "test"));
+        await grain.OpenAsync(Open());
 
         await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
             new List<AgentSessionRuntimeEventInput>
@@ -101,7 +107,7 @@ public class AgentSessionGrainPersistStateFailureSpecs : AgentSessionGrainPersis
         // covered by IssueGrainEventSaveFailureSpecs, which constructs the
         // grain directly so DeactivateOnIdle does not reload it.)
         var grain = NewGrain();
-        await grain.OpenAsync(new OpenAgentSessionCommand("runner-1", "test"));
+        await grain.OpenAsync(Open());
 
         await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
             new List<AgentSessionRuntimeEventInput>
@@ -140,7 +146,7 @@ public class AgentSessionGrainPersistTranscriptFailureSpecs : AgentSessionGrainP
         // the next flush must retry only the transcript and never re-save
         // state (which would re-append already-committed lifecycle events).
         var grain = NewGrain();
-        await grain.OpenAsync(new OpenAgentSessionCommand("runner-1", "test"));
+        await grain.OpenAsync(Open());
 
         Fixture.TranscriptStore.NextException = new InvalidOperationException("transcript store down");
 
@@ -187,8 +193,8 @@ public class AgentSessionGrainRecoveryTranscriptFailureSpecs : AgentSessionGrain
         // recovery events. The transcript flush stays pending for the next
         // flush cycle.
         var grain = NewGrain();
-        var opened = await grain.OpenAsync(new OpenAgentSessionCommand("runner-1", "test"));
-        await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand("runtime-before"));
+        var opened = await grain.OpenAsync(Open("opencode"));
+        await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand("runtime-before-compact"));
         Fixture.TimeProvider.Advance(TimeSpan.FromMinutes(6));
         var openedSaveCount = Fixture.StateStore.SaveCount;
 
@@ -225,7 +231,7 @@ public class AgentSessionGrainDeactivationSpecs : AgentSessionGrainPersistenceSp
     public async Task Deactivation_FlushesPendingStateAndTranscript()
     {
         var grain = NewGrain();
-        await grain.OpenAsync(new OpenAgentSessionCommand("runner-1", "test"));
+        await grain.OpenAsync(Open());
 
         await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
             new List<AgentSessionRuntimeEventInput>
@@ -246,7 +252,7 @@ public class AgentSessionGrainDeactivationSpecs : AgentSessionGrainPersistenceSp
     public async Task Deactivation_NoPendingData_DoesNotFlushAgain()
     {
         var grain = NewGrain();
-        await grain.OpenAsync(new OpenAgentSessionCommand("runner-1", "test"));
+        await grain.OpenAsync(Open());
 
         await DeactivateAsync(grain);
 
@@ -259,7 +265,7 @@ public class AgentSessionGrainDeactivationSpecs : AgentSessionGrainPersistenceSp
     public async Task Deactivation_TranscriptSaveFailure_LogsError()
     {
         var grain = NewGrain();
-        await grain.OpenAsync(new OpenAgentSessionCommand("runner-1", "test"));
+        await grain.OpenAsync(Open());
 
         Fixture.TranscriptStore.NextException = new InvalidOperationException("transcript store down");
 

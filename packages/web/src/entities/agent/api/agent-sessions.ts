@@ -1,7 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { QueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import type { AgentSessionTranscriptResponse, AgentSessionUsage } from '../../coder-session/@x/agent-session'
+import type {
+  AgentSessionTranscriptResponse,
+  AgentSessionUsage,
+  RuntimeSessionLineageEntry,
+} from '../../coder-session/@x/agent-session'
 import { useProject } from '../../project/@x/project-context'
 import { projectApiPath, request } from '../../../shared/api/client'
 
@@ -29,6 +33,8 @@ export interface GenericAgentSessionSummaryDto {
   sessionId: string
   agentId: string
   agentName: string
+  runtimeSessionId: string | null
+  runtime: string | null
   status: string
   createdAt: string
   lastActivityAt: string | null
@@ -38,6 +44,7 @@ export interface GenericAgentSessionSummaryDto {
   toolErrorCount: number | null
   contextRefs: AgentSessionListContextRefsDto | null
   usage: AgentSessionUsage
+  runtimeSessionLineage: RuntimeSessionLineageEntry[] | null
 }
 
 export interface AgentSessionLaunchResponse {

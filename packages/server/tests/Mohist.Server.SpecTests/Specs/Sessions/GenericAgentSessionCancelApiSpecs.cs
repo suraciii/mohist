@@ -114,7 +114,18 @@ public class GenericAgentSessionCancelApiSpecs : IAsyncLifetime
             var invocation = Assert.Single(runnerHub.Invocations);
             Assert.Equal("CancelAgentSession", invocation.Method);
             var payload = JsonSerializer.SerializeToElement(invocation.Arguments.Single());
-            Assert.Equal(sessionId, payload.GetProperty("target").GetProperty("sessionId").GetString());
+            var target = payload.GetProperty("target");
+            if (sourceKind == "workflow")
+            {
+                Assert.Equal("workflow", target.GetProperty("kind").GetString());
+                Assert.True(target.TryGetProperty("workflowRunId", out _));
+                Assert.True(target.TryGetProperty("sessionName", out _));
+            }
+            else
+            {
+                Assert.Equal("generic", target.GetProperty("kind").GetString());
+                Assert.Equal(sessionId, target.GetProperty("sessionId").GetString());
+            }
 
             var queryable = await _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId).GetAsync();
             Assert.Equal(sessionId, queryable?.Id);
@@ -487,7 +498,7 @@ public class GenericAgentSessionCancelApiSpecs : IAsyncLifetime
             $"/api/runner/{runnerId}/agent-sessions/{project.Id}/{sessionId}/attach",
             new
             {
-                agentSessionId = sessionId,
+                runtimeSessionId = sessionId,
                 workDir = $"/workspaces/{project.Id}",
                 processPid = 1234,
             });

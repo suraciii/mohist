@@ -11,6 +11,9 @@ public interface IAgentSessionGrain : IGrainWithStringKey
     Task<AgentSessionRecoveryResult> CompactAsync(CompactAgentSessionCommand command);
     Task<AgentSessionRecoveryResult> ResetAsync(ResetAgentSessionCommand command);
     Task<SessionCommandRequest> PrepareSessionCommandAsync(SessionCommandKind command);
+    Task<SessionCommandRequest> BeginResetAsync();
+    Task<AgentSessionRecoveryResult> CompleteResetAsync(CompleteResetAgentSessionCommand command);
+    Task AbandonResetAsync(string operationId);
     Task<AgentSessionInfo?> GetAsync();
     Task EnsureRuntimeSessionPresentAsync();
 
@@ -57,7 +60,14 @@ public sealed record CompactAgentSessionCommand(
 [GenerateSerializer]
 public sealed record ResetAgentSessionCommand(
     [property: Id(0)] string? ExpectedRuntimeSessionId,
-    [property: Id(1)] string ReplacementRuntimeSessionId);
+    [property: Id(1)] string ReplacementRuntimeSessionId,
+    [property: Id(2)] string ReplacementRuntime = "opencode");
+
+[GenerateSerializer]
+public sealed record CompleteResetAgentSessionCommand(
+    [property: Id(0)] string OperationId,
+    [property: Id(1)] string ReplacementRuntimeSessionId,
+    [property: Id(2)] string ReplacementRuntime);
 
 [GenerateSerializer]
 public sealed record AgentSessionRuntimeEventInput(
@@ -105,7 +115,7 @@ public sealed record AgentSessionRecoveryResult(
 public sealed record AgentSessionRuntimeEventInfo(
     [property: Id(0)] string Id,
     [property: Id(1)] string SessionId,
-    [property: Id(2)] string? AgentSessionId,
+    [property: Id(2)] string? RuntimeSessionId,
     [property: Id(3)] long Sequence,
     [property: Id(4)] string Type,
     [property: Id(5)] string PayloadJson,
