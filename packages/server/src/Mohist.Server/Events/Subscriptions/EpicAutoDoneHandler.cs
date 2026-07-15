@@ -516,6 +516,8 @@ internal sealed class EpicEventRecomputeDispatcher
 /// </summary>
 internal sealed class EpicIssueAffiliationDispatcher
 {
+    private const int MaxStabilizationAttempts = 3;
+
     private readonly IGrainFactory _grains;
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     public EpicIssueAffiliationDispatcher(
@@ -543,14 +545,19 @@ internal sealed class EpicIssueAffiliationDispatcher
                 $"Affiliation event '{eventId}' is missing its issue id payload.");
         }
 
-        string? epicId;
-        await using (var db = await _dbFactory.CreateDbContextAsync(ct).ConfigureAwait(false))
-        {
-            epicId = await EpicIssueAffiliationResolver.ResolveAsync(db, projectId, issueId, ct: ct).ConfigureAwait(false);
-        }
         var grain = _grains.GetGrain<Mohist.Server.Issue.Grains.IIssueGrain>(
             Mohist.Server.Infrastructure.Orleans.GrainKey.Issue(issueId));
-        await grain.SetEpicAffiliationAsync(epicId).ConfigureAwait(false);
+        for (var attempt = 0; attempt < MaxStabilizationAttempts; attempt++)
+        {
+            var resolved = await ResolveAsync(projectId, issueId, ct).ConfigureAwait(false);
+            await grain.SetEpicAffiliationAsync(resolved).ConfigureAwait(false);
+
+            if (string.Equals(resolved, await ResolveAsync(projectId, issueId, ct).ConfigureAwait(false), StringComparison.Ordinal))
+                return;
+        }
+
+        throw new InvalidOperationException(
+            $"Affiliation event '{eventId}' did not stabilize for issue '{issueId}'.");
     }
 
     public async Task DispatchEpicAsync(
@@ -580,5 +587,11 @@ internal sealed class EpicIssueAffiliationDispatcher
 
         foreach (var issueId in issueIds)
             await DispatchAsync(eventId, extensions, issueId, ct).ConfigureAwait(false);
+    }
+
+    private async Task<string?> ResolveAsync(string projectId, string issueId, CancellationToken ct)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct).ConfigureAwait(false);
+        return await EpicIssueAffiliationResolver.ResolveAsync(db, projectId, issueId, ct: ct).ConfigureAwait(false);
     }
 }

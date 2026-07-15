@@ -25,7 +25,7 @@ export function routeTranscriptEventName(name: string): string {
 /**
  * Wire shape from the SignalR bus. The server now sends the full CloudEvents
  * 1.0.2 envelope; the Web reads {@link payload} for the original event body
- * and {@link extensions} for routing metadata (projectid, issueid, issue,
+ * and merges {@link extensions} routing metadata (projectid, issueid, issue,
  * workflowrunid, epicid, stage, agentid, sessionid, runnerid — see
  * `EventCatalog.Lineage` on the server). The user-visible issue number rides
  * under the `issue` key (the unified protocol name; `issueno` is the legacy
@@ -39,6 +39,38 @@ export function routeTranscriptEventName(name: string): string {
  * not the CloudEvents-spec lowercase `specversion`. The structural
  * check here matches what the server actually emits.
  */
+function hasIssueNumber(payload: Record<string, unknown>): boolean {
+  return typeof payload.issueNumber === 'number'
+    || typeof payload.issueNo === 'number'
+    || typeof payload.number === 'number'
+}
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0
+}
+
+function mergeIssueLineage(
+  payload: Record<string, unknown>,
+  extensions: Record<string, unknown> | null,
+): Record<string, unknown> {
+  const extensionIssue = extensions?.issue
+  const shouldAddIssueNumber = !hasIssueNumber(payload) && isNonEmptyString(extensionIssue)
+  const shouldAddIssueId = !isNonEmptyString(payload.issueId) && isNonEmptyString(extensions?.issueid)
+  if (!shouldAddIssueNumber && !shouldAddIssueId) return payload
+
+  const normalized = { ...payload }
+  if (shouldAddIssueNumber) {
+    const issueNumber = Number(extensionIssue)
+    if (Number.isFinite(issueNumber)) {
+      normalized.issueNumber = issueNumber
+    }
+  }
+  if (shouldAddIssueId) {
+    normalized.issueId = extensions.issueid
+  }
+  return normalized
+}
+
 export function unwrapEnvelope(rawData: unknown): Record<string, unknown> {
   if (!rawData || typeof rawData !== 'object') {
     return {}
@@ -56,7 +88,7 @@ export function unwrapEnvelope(rawData: unknown): Record<string, unknown> {
   ) {
     const payload = candidate.payload ?? candidate.data
     if (payload && typeof payload === 'object') {
-      return payload as Record<string, unknown>
+      return mergeIssueLineage(payload as Record<string, unknown>, asRecord(candidate.extensions))
     }
     return {}
   }

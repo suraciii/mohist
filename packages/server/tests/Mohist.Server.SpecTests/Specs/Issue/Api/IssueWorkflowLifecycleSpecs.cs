@@ -8,7 +8,9 @@ using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Issue;
+using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Infrastructure.Serialization;
+using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Services;
@@ -317,6 +319,24 @@ public class IssueWorkflowLifecycleSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
+    public async Task EventDispatcher_RedeliversInterruptedBindingAndConfirmsPreparedRun()
+    {
+        var (_, _, _, issueId, workflowRunId) = await SeedIssueInProgressAsync();
+        await ResetBindingToPreparedAsync(issueId, workflowRunId);
+        await MarkIssueWorkStartedUndeliveredAsync(issueId);
+
+        using var scope = _services.CreateScope();
+        var dispatcher = scope.ServiceProvider.GetRequiredService<EventDispatcherService>();
+        await dispatcher.DispatchAsync(CancellationToken.None);
+
+        Assert.Equal(WorkflowRunStatus.Pending, (await LoadWorkflowRunAsync(workflowRunId))!.Status);
+        Assert.False((await LoadIssueBindingStateAsync(issueId)).Pending);
+        await AssertIssueWorkStartedDispatchedAsync(issueId);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
     public async Task EnsureWorkflowBindingAsync_ClearsMarkerAfterWorkflowConfirmationCommitted()
     {
         var (_, _, _, issueId, workflowRunId) = await SeedIssueInProgressAsync();
@@ -544,6 +564,38 @@ public class IssueWorkflowLifecycleSpecs
         state["workflowBindingPending"] = JsonSerializer.SerializeToElement(true, JSON.Options);
         row.State = JsonSerializer.Serialize(state, JSON.Options);
         await db.SaveChangesAsync();
+    }
+
+    private async Task MarkIssueWorkStartedUndeliveredAsync(string issueId)
+    {
+        var options = new DbContextOptionsBuilder<MohistDbContext>()
+            .UseSqlite(_connectionString)
+            .Options;
+
+        await using var db = new MohistDbContext(options);
+        var row = await db.IssueEvents
+            .Where(entry => entry.Source == IssueEventPersistence.IssueSource(issueId)
+                && entry.Type == EventCatalog.ReverseDns.IssueWorkStarted)
+            .OrderByDescending(entry => entry.Id)
+            .FirstAsync();
+        row.DispatchedAt = null;
+        await db.SaveChangesAsync();
+    }
+
+    private async Task AssertIssueWorkStartedDispatchedAsync(string issueId)
+    {
+        var options = new DbContextOptionsBuilder<MohistDbContext>()
+            .UseSqlite(_connectionString)
+            .Options;
+
+        await using var db = new MohistDbContext(options);
+        var row = await db.IssueEvents
+            .AsNoTracking()
+            .Where(entry => entry.Source == IssueEventPersistence.IssueSource(issueId)
+                && entry.Type == EventCatalog.ReverseDns.IssueWorkStarted)
+            .OrderByDescending(entry => entry.Id)
+            .FirstAsync();
+        Assert.NotNull(row.DispatchedAt);
     }
 
     private async Task<IssueInfo?> GetIssueInfoAsync(string projectId, int number)

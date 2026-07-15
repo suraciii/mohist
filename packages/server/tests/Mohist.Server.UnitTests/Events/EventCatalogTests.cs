@@ -145,17 +145,14 @@ public class EventCatalogTests
     }
 
     [Fact]
-    public void RequiredAttributes_CatalogOnlyCheckStarted_DeclaresStageBaseDespiteNoProducer()
+    public void UnproducibleWorkflowCheckStarted_IsNotCataloged()
     {
-        Assert.True(EventCatalog.HasLineageDeclaration(EventCatalog.ReverseDns.CheckStarted));
-        Assert.Equal(
-            new[]
-            {
-                EventCatalog.Lineage.ProjectId,
-                EventCatalog.Lineage.WorkflowRunId,
-                EventCatalog.Lineage.Stage,
-            },
-            EventCatalog.RequiredAttributes(EventCatalog.ReverseDns.CheckStarted));
+        const string type = "com.mohist.workflow.check.started";
+
+        Assert.DoesNotContain(type, EventCatalog.All);
+        Assert.DoesNotContain(type, EventCatalog.CatalogOnlyTypes);
+        Assert.False(EventCatalog.HasLineageDeclaration(type));
+        Assert.Empty(EventCatalog.RequiredAttributes(type));
     }
 
     [Fact]

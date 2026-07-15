@@ -314,13 +314,25 @@ public class AgentSessionTransactionalEventAppendSpecs : IAsyncLifetime
     public async Task SaveAsync_NoEvents_StillCommitsStateRow()
     {
         var store = new AgentSessionStore(_dbFactory, _eventStore, _grainFactory, NullLogger<AgentSessionStore>.Instance);
-        var session = BuildSession("agent_txn_state_only");
+        var session = BuildSession("agent_txn_state_only", new AgentSessionMetadata());
 
         await store.SaveAsync(session.Id, session, []);
 
         var loaded = await store.LoadAsync("agent_txn_state_only");
         Assert.NotNull(loaded);
         Assert.Empty(await _eventStore.ListAgentSessionEventsAsync("agent_txn_state_only"));
+    }
+
+    [Fact]
+    public async Task SaveAsync_OnlyNullEventsWithoutProjectLabel_StillCommitsStateRow()
+    {
+        var store = new AgentSessionStore(_dbFactory, _eventStore, _grainFactory, NullLogger<AgentSessionStore>.Instance);
+        var session = BuildSession("agent_txn_state_only_no_project", new AgentSessionMetadata());
+
+        await store.SaveAsync(session.Id, session, [null!]);
+
+        Assert.NotNull(await store.LoadAsync(session.Id));
+        Assert.Empty(await _eventStore.ListAgentSessionEventsAsync(session.Id));
     }
 
     [Fact]

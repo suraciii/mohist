@@ -34,7 +34,6 @@ public static class EventCatalog
         ReverseDns.TaskStarted,
         ReverseDns.TaskCompleted,
         ReverseDns.TaskFailed,
-        ReverseDns.CheckStarted,
         ReverseDns.CheckPassed,
         ReverseDns.CheckFailed,
         ReverseDns.CheckPending,
@@ -110,7 +109,6 @@ public static class EventCatalog
     {
         ReverseDns.WorkflowRunRetrying,
         ReverseDns.WorkflowRunRerunning,
-        ReverseDns.CheckStarted,
         ReverseDns.RepairScheduled,
         ReverseDns.RunnerDisconnected,
     };
@@ -163,7 +161,6 @@ public static class EventCatalog
         [ReverseDns.TaskFailed] = WorkflowStageBase,
 
         // === workflow.check.* ===
-        [ReverseDns.CheckStarted] = WorkflowStageBase,
         [ReverseDns.CheckPassed] = WorkflowStageBase,
         [ReverseDns.CheckFailed] = WorkflowStageBase,
         [ReverseDns.CheckPending] = WorkflowStageBase,
@@ -298,7 +295,6 @@ public static class EventCatalog
         public const string TaskStarted = "com.mohist.workflow.task.started";
         public const string TaskCompleted = "com.mohist.workflow.task.completed";
         public const string TaskFailed = "com.mohist.workflow.task.failed";
-        public const string CheckStarted = "com.mohist.workflow.check.started";
         public const string CheckPassed = "com.mohist.workflow.check.passed";
         public const string CheckFailed = "com.mohist.workflow.check.failed";
         public const string CheckPending = "com.mohist.workflow.check.pending";

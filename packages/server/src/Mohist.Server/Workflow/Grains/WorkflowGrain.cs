@@ -33,7 +33,9 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
     private readonly WorkflowStageInitializer _stageInitializer;
     private readonly WorkflowWorkLifecycle _workLifecycle;
 
-    private string GrainKey => this.GetPrimaryKeyString();
+    private string GrainKey => string.IsNullOrEmpty(GrainKeyForTest) ? this.GetPrimaryKeyString() : GrainKeyForTest;
+
+    internal string GrainKeyForTest { get; set; } = string.Empty;
 
     public WorkflowGrain(
         IWorkflowRunStore runStore,
@@ -106,6 +108,7 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
     public async Task PrepareIssueStartAsync(WorkflowStartInput input)
     {
         ArgumentNullException.ThrowIfNull(input);
+        RejectIfRunReloadRequired();
         if (_run is not null)
         {
             if (_run.Status == WorkflowRunStatus.AwaitingBinding) return;
@@ -258,6 +261,7 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
     public async Task RerunAsync()
     {
         EnsureRun();
+        RejectRecoveryControlWhileAwaitingBinding();
         var rerunStageId = _run.CurrentStageId;
         await ReleaseCurrentStageLocksAsync("rerun");
         var events = _run.Rerun(Now());
@@ -499,7 +503,7 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
         if (_run is null)
             throw new InvalidOperationException($"Workflow '{GrainKey}' has no workflow run");
         if (_runReloadRequired)
-            throw new InvalidOperationException($"Workflow '{GrainKey}' must reload after a failed event-aware save");
+            throw new InvalidOperationException($"Workflow '{GrainKey}' must reload after a failed save");
     }
 
     // For entry points that return a result (not throw) when no run exists, a
@@ -509,7 +513,14 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
     private void RejectIfRunReloadRequired()
     {
         if (_runReloadRequired)
-            throw new InvalidOperationException($"Workflow '{GrainKey}' must reload after a failed event-aware save");
+            throw new InvalidOperationException($"Workflow '{GrainKey}' must reload after a failed save");
+    }
+
+    private void RejectRecoveryControlWhileAwaitingBinding()
+    {
+        if (_run?.Status == WorkflowRunStatus.AwaitingBinding)
+            throw new InvalidOperationException(
+                $"Workflow '{GrainKey}' is awaiting issue binding; retry, rerun, and rerun-from-stage are unavailable.");
     }
 
     private async Task CommitAsync(
@@ -599,9 +610,16 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
         }
         catch (DbUpdateConcurrencyException ex)
         {
+            MarkRunReloadRequired();
             _log.LogWarning(ex,
                 "Workflow {Id} save failed because the persisted run ETag changed; deactivating grain to reload state",
                 GrainKey);
+            DeactivateOnIdle();
+            throw;
+        }
+        catch
+        {
+            MarkRunReloadRequired();
             DeactivateOnIdle();
             throw;
         }

@@ -452,7 +452,7 @@ public sealed class ProjectEventFilter
         "com.mohist.workflow.stage.completed", "com.mohist.workflow.stage.approval-resolved",
         "com.mohist.workflow.stage.failed", "com.mohist.workflow.stage.approval-requested",
         "com.mohist.workflow.feedback.requested", "com.mohist.workflow.task.started",
-        "com.mohist.workflow.task.completed", "com.mohist.workflow.task.failed", "com.mohist.workflow.check.started",
+        "com.mohist.workflow.task.completed", "com.mohist.workflow.task.failed",
         "com.mohist.workflow.check.passed", "com.mohist.workflow.check.failed", "com.mohist.workflow.check.pending",
         "com.mohist.workflow.repair-scheduled", "com.mohist.workflow.artifact.recorded",
     ];

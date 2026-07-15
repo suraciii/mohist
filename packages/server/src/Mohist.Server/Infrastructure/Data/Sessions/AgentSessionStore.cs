@@ -63,7 +63,7 @@ public class AgentSessionStore : IAgentSessionStore
     {
         var source = AgentSessionEventPersistence.AgentSessionSource(state.Id);
         var subject = state.Id;
-        var extensions = AgentSessionLineage.BuildExtensions(state);
+        IReadOnlyDictionary<string, string>? extensions = null;
 
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
@@ -73,6 +73,7 @@ public class AgentSessionStore : IAgentSessionStore
             foreach (var evt in events)
             {
                 if (evt is null) continue;
+                extensions ??= AgentSessionLineage.BuildExtensions(state);
                 var envelope = ToCloudEvent(evt, source, subject, extensions);
                 await _eventStore.AppendAsync(db, envelope, ct);
             }

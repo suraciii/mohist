@@ -61,6 +61,23 @@ public class WorkflowRunStatusTransitionTests
     }
 
     [Fact]
+    public void AwaitingBinding_RejectsRecoveryControlsWithoutMutation()
+    {
+        var run = CreateRun();
+        run.PrepareForIssueBinding();
+        var stage = run.CurrentStage();
+
+        Assert.Throws<InvalidOperationException>(() => run.Retry(DateTimeOffset.UnixEpoch));
+        Assert.Throws<InvalidOperationException>(() => run.Rerun(DateTimeOffset.UnixEpoch));
+        Assert.Throws<InvalidOperationException>(() => run.RerunFromStage(stage.Id, DateTimeOffset.UnixEpoch));
+
+        Assert.Equal(WorkflowRunStatus.AwaitingBinding, run.Status);
+        Assert.Same(stage, run.CurrentStage());
+        Assert.Equal(1, stage.Attempt);
+        Assert.Null(run.Assignment);
+    }
+
+    [Fact]
     public void AssignWorker_MovesPendingToReady_AndStoresWorkerOnAssignment()
     {
         var run = BuildPendingRun();

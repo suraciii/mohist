@@ -77,7 +77,6 @@ const WORKFLOW_EVENT_TYPES: Record<string, EventTypeInfo> = {
   'com.mohist.workflow.task.started': { label: 'task started', attention: 'routine' },
   'com.mohist.workflow.task.completed': { label: 'task completed', attention: 'routine' },
   'com.mohist.workflow.task.failed': { label: 'task failed', attention: 'failure' },
-  'com.mohist.workflow.check.started': { label: 'check started', attention: 'routine' },
   'com.mohist.workflow.check.passed': { label: 'check passed', attention: 'routine' },
   'com.mohist.workflow.check.failed': { label: 'check failed', attention: 'failure' },
   'com.mohist.workflow.check.pending': { label: 'check pending', attention: 'blocked' },

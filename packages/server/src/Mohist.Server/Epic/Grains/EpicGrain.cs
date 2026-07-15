@@ -1,3 +1,4 @@
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Mohist.Server.Epic.Domain;
@@ -19,6 +20,8 @@ namespace Mohist.Server.Epic.Grains;
 
 public class EpicGrain : Grain, IEpicGrain
 {
+    private const int MaxAffiliationStabilizationAttempts = 3;
+
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly IGrainFactory _grains;
     private readonly TimeProvider _timeProvider;
@@ -349,7 +352,7 @@ public class EpicGrain : Grain, IEpicGrain
                     await RecomputeProgressAsync();
                 return outcomes;
             }
-            catch (DbUpdateException) when (willInsertActiveRow)
+            catch (DbUpdateException ex) when (willInsertActiveRow && IsActiveMembershipPrimaryKeyCollision(ex))
             {
                 // Concurrent claim won the race — surface as conflict and
                 // continue with the remaining batch items so the rest of
@@ -1197,16 +1200,21 @@ public class EpicGrain : Grain, IEpicGrain
 
     private async Task PushEpicAffiliationAsync(string issueId, string projectId, string operation)
     {
-        string? epicId = null;
+        string? resolvedEpicId = null;
         try
         {
-            await using (var db = await _dbFactory.CreateDbContextAsync())
+            var issue = _grains.GetGrain<IIssueGrain>(Mohist.Server.Infrastructure.Orleans.GrainKey.Issue(issueId));
+            for (var attempt = 0; attempt < MaxAffiliationStabilizationAttempts; attempt++)
             {
-                epicId = await EpicIssueAffiliationResolver.ResolveAsync(db, projectId, issueId);
+                resolvedEpicId = await ResolveEpicAffiliationAsync(projectId, issueId);
+                await issue.SetEpicAffiliationAsync(resolvedEpicId);
+
+                if (string.Equals(resolvedEpicId, await ResolveEpicAffiliationAsync(projectId, issueId), StringComparison.Ordinal))
+                    return;
             }
 
-            var issue = _grains.GetGrain<IIssueGrain>(Mohist.Server.Infrastructure.Orleans.GrainKey.Issue(issueId));
-            await issue.SetEpicAffiliationAsync(epicId);
+            throw new InvalidOperationException(
+                $"Epic {operation} affiliation push did not stabilize for issue {issueId}.");
         }
         catch (Exception ex)
         {
@@ -1214,7 +1222,21 @@ public class EpicGrain : Grain, IEpicGrain
                 "Epic {Operation} affiliation push failed for issue {IssueId} (resolved epic {EpicId}); durable event handling will retry",
                 operation,
                 issueId,
-                epicId ?? "<none>");
+                resolvedEpicId ?? "<none>");
         }
     }
+
+    private async Task<string?> ResolveEpicAffiliationAsync(string projectId, string issueId)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        return await EpicIssueAffiliationResolver.ResolveAsync(db, projectId, issueId);
+    }
+
+    private static bool IsActiveMembershipPrimaryKeyCollision(DbUpdateException exception) =>
+        exception.InnerException is SqliteException sqlite
+            && sqlite.SqliteErrorCode == 19
+            && sqlite.SqliteExtendedErrorCode == 1555
+            && sqlite.Message.Contains(
+                "UNIQUE constraint failed: EpicActiveIssues.ProjectId, EpicActiveIssues.IssueId",
+                StringComparison.Ordinal);
 }

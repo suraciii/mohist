@@ -16,6 +16,7 @@ using Mohist.Server.Issue.Services;
 using Mohist.Server.Project.Services;
 using Mohist.Server.SpecTests.Support;
 using System.Data;
+using System.Data.Common;
 using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Epic.Grain;
@@ -369,6 +370,37 @@ public class EpicBatchMembershipSpecs
             .Where(link => link.ProjectId == ProjectId && link.EpicId == "epic_target" && link.IssueId == "issue_race")
             .ToListAsync();
         Assert.Empty(targetLinks);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task LinkIssuesAsync_WhenEpicEventInsertFails_RethrowsAndRollsBackLink()
+    {
+        var database = CreateDatabase();
+        await SeedEpicAsync(database, epicId: "epic_target", status: "idle", number: 1);
+        await SeedIssueAsync(database, issueId: "issue_event_failure", issueNumber: 1);
+        var factory = database.CreateFactory(new FailEpicEventInsertInterceptor());
+        var grain = new EpicGrain(
+            factory,
+            new NullGrainFactory(),
+            new FakeTimeProvider(new DateTimeOffset(2026, 7, 1, 12, 0, 0, TimeSpan.Zero)),
+            new EventStore(factory, NullLogger<EventStore>.Instance),
+            NullLogger<EpicGrain>.Instance)
+        {
+            GrainKeyForTest = $"{ProjectId}:epic_target",
+        };
+
+        await Assert.ThrowsAsync<DbUpdateException>(() => grain.LinkIssuesAsync(
+            [new BatchMembershipRequestItem("1", "issue_event_failure", 1)], ProjectId));
+
+        await using var verify = database.CreateDbContext();
+        Assert.Empty(await verify.EpicIssues.AsNoTracking()
+            .Where(link => link.ProjectId == ProjectId && link.EpicId == "epic_target")
+            .ToListAsync());
+        Assert.Empty(await verify.EpicEvents.AsNoTracking()
+            .Where(evt => evt.Source == EpicEventPersistence.EpicSource("epic_target"))
+            .ToListAsync());
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
@@ -894,6 +926,56 @@ public class EpicBatchMembershipSpecs
             parameter.ParameterName = name;
             parameter.Value = value;
             command.Parameters.Add(parameter);
+        }
+    }
+
+    private sealed class FailEpicEventInsertInterceptor : DbCommandInterceptor
+    {
+        public override InterceptionResult<int> NonQueryExecuting(
+            DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<int> result)
+        {
+            ThrowIfEpicEventInsert(command);
+            return result;
+        }
+
+        public override ValueTask<InterceptionResult<int>> NonQueryExecutingAsync(
+            DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<int> result,
+            CancellationToken cancellationToken = default)
+        {
+            ThrowIfEpicEventInsert(command);
+            return ValueTask.FromResult(result);
+        }
+
+        public override InterceptionResult<DbDataReader> ReaderExecuting(
+            DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<DbDataReader> result)
+        {
+            ThrowIfEpicEventInsert(command);
+            return result;
+        }
+
+        public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+            DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<DbDataReader> result,
+            CancellationToken cancellationToken = default)
+        {
+            ThrowIfEpicEventInsert(command);
+            return ValueTask.FromResult(result);
+        }
+
+        private static void ThrowIfEpicEventInsert(DbCommand command)
+        {
+            if (command.CommandText.Contains("INSERT", StringComparison.OrdinalIgnoreCase)
+                && command.CommandText.Contains("EpicEvents", StringComparison.Ordinal))
+            {
+                throw new DbUpdateException("simulated EpicEvents insert failure");
+            }
         }
     }
 
