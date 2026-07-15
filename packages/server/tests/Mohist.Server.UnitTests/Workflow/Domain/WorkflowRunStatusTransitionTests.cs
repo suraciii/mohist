@@ -15,6 +15,7 @@ public class WorkflowRunStatusTransitionTests
         Assert.Equal(
             [
                 nameof(WorkflowRunStatus.Created),
+                nameof(WorkflowRunStatus.AwaitingBinding),
                 nameof(WorkflowRunStatus.Pending),
                 nameof(WorkflowRunStatus.Ready),
                 nameof(WorkflowRunStatus.Running),
@@ -39,6 +40,24 @@ public class WorkflowRunStatusTransitionTests
         Assert.NotEqual(WorkflowRunStatus.Running, run.Status);
         Assert.IsType<WorkflowRunStarted>(WorkflowEventSerializer.Unwrap(events[0]));
         Assert.IsType<StageStarted>(WorkflowEventSerializer.Unwrap(events[1]));
+    }
+
+    [Fact]
+    public void ConfirmIssueBinding_StartsOnlyAfterPreparation()
+    {
+        var run = CreateRun();
+
+        run.PrepareForIssueBinding();
+        Assert.Equal(WorkflowRunStatus.AwaitingBinding, run.Status);
+        Assert.Throws<InvalidOperationException>(() => run.AssignTo(WorkerId, DateTimeOffset.UnixEpoch));
+
+        var events = run.ConfirmIssueBinding(DateTimeOffset.UnixEpoch);
+
+        Assert.Equal(WorkflowRunStatus.Pending, run.Status);
+        Assert.Collection(events,
+            evt => Assert.IsType<WorkflowRunStarted>(WorkflowEventSerializer.Unwrap(evt)),
+            evt => Assert.IsType<StageStarted>(WorkflowEventSerializer.Unwrap(evt)));
+        Assert.Empty(run.ConfirmIssueBinding(DateTimeOffset.UnixEpoch));
     }
 
     [Fact]

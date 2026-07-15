@@ -186,7 +186,7 @@ public class EpicBatchMembershipSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
-    public async Task LinkIssuesAsync_TerminalTargetPreservesExistingActiveAffiliationSnapshot()
+    public async Task LinkIssuesAsync_DoesNotWriteIssueSnapshotInsideEpicTransaction()
     {
         var database = CreateDatabase();
         await SeedEpicAsync(database, epicId: "epic_active", status: "idle", number: 1);
@@ -205,7 +205,9 @@ public class EpicBatchMembershipSpecs
         Assert.Equal("linked", Assert.Single(outcomes).Status);
         await using var verify = database.CreateDbContext();
         var issue = await verify.Issues.SingleAsync(row => row.IssueId == "issue_terminal");
-        Assert.Equal("epic_active", issue.EpicId);
+        Assert.Null(issue.EpicId);
+        Assert.Equal("epic_active", (await verify.EpicActiveIssues.SingleAsync(
+            row => row.IssueId == "issue_terminal")).EpicId);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
@@ -930,6 +932,7 @@ public class EpicBatchMembershipSpecs
             _owner.IssueStartCalls.Add(IssueId);
             return "wr_test";
         }
+        public Task EnsureWorkflowBindingAsync(string workflowRunId) => throw new NotSupportedException();
         public Task CompleteWorkAsync(string workflowRunId) => throw new NotSupportedException();
         public Task CancelAsync() => throw new NotSupportedException();
         public Task UpdateAsync(string title, string? body) => throw new NotSupportedException();

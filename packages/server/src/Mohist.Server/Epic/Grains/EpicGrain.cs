@@ -6,8 +6,6 @@ using Mohist.Server.Epic.Services;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Epic;
 using Mohist.Server.Infrastructure.Data.Events;
-using Mohist.Server.Infrastructure.Data.Issue;
-using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Domain;
@@ -64,8 +62,8 @@ public class EpicGrain : Grain, IEpicGrain
         var row = MapToRow(epic, now);
         db.Epics.Add(row);
         var pending = DrainPendingEvents(epic);
+        await PersistEpicEventsAsync(db, epic, pending, now);
         await db.SaveChangesAsync();
-        await PersistEpicEventsAsync(epic, pending, now);
         return ToDto(row);
     }
 
@@ -145,7 +143,6 @@ public class EpicGrain : Grain, IEpicGrain
             });
         }
         MapToRow(domain, row, now);
-        await StageIssueLineageSnapshotAsync(db, issueId, epicId);
         var pending = DrainPendingEvents(domain);
         // Append the EpicIssueLinked event into the same transaction so the
         // durable recompute trigger (EpicIssueLinkedHandler) is committed
@@ -168,8 +165,6 @@ public class EpicGrain : Grain, IEpicGrain
             throw;
         }
 
-        // Refresh the active Issue aggregate after the committed scalar
-        // snapshots make subsequent Issue and Workflow appends atomic.
         await PushEpicAffiliationAsync(issueId, projectId, "link");
 
         if (wakeUpEpic)
@@ -335,13 +330,6 @@ public class EpicGrain : Grain, IEpicGrain
                 });
             }
             MapToRow(domain, row, now);
-            var affiliation = epicId;
-            if (!willInsertActiveRow
-                && await GetActiveMembershipOwnerAsync(db, projectId, item.IssueId, epicId) is { } activeOwner)
-            {
-                affiliation = activeOwner.EpicId;
-            }
-            await StageIssueLineageSnapshotAsync(db, item.IssueId, affiliation);
             var pending = DrainPendingEvents(domain);
             // Append EpicIssueLinked atomically with the membership row so
             // the durable recompute trigger is never lost on crash/append
@@ -386,9 +374,6 @@ public class EpicGrain : Grain, IEpicGrain
             existingLinks.Add(item.IssueId);
             outcomes.Add(BatchMembershipOutcome.Linked(item.Identifier, item.IssueId, item.IssueNumber));
             hasLinkedAny = true;
-
-            // Refresh the active Issue aggregate after the scalar snapshots
-            // commit with this membership change.
             await PushEpicAffiliationAsync(item.IssueId, projectId, "link");
         }
 
@@ -452,14 +437,9 @@ public class EpicGrain : Grain, IEpicGrain
         if (link is not null) db.EpicIssues.Remove(link);
         await ReleaseActiveMembershipAsync(db, projectId, epicId, issueId);
         MapToRow(domain, row, now);
-        var affiliationAfterUnlink = await EpicIssueAffiliationResolver.ResolveAsync(
-            db, projectId, issueId, excludedEpicId: epicId);
-        await StageIssueLineageSnapshotAsync(db, issueId, affiliationAfterUnlink);
         var pending = DrainPendingEvents(domain);
         await PersistEpicEventsAsync(db, domain, pending, now);
         await db.SaveChangesAsync();
-        // Refresh the active Issue aggregate after the scalar snapshots
-        // commit with this membership change.
         await PushEpicAffiliationAsync(issueId, projectId, "unlink");
         await RecomputeProgressInternalAsync(
             db,
@@ -531,9 +511,6 @@ public class EpicGrain : Grain, IEpicGrain
             if (link is not null) db.EpicIssues.Remove(link);
             await ReleaseActiveMembershipAsync(db, projectId, epicId, item.IssueId);
             MapToRow(domain, row, now);
-            var affiliationAfterUnlink = await EpicIssueAffiliationResolver.ResolveAsync(
-                db, projectId, item.IssueId, excludedEpicId: epicId);
-            await StageIssueLineageSnapshotAsync(db, item.IssueId, affiliationAfterUnlink);
             var pending = DrainPendingEvents(domain);
             await PersistEpicEventsAsync(db, domain, pending, now);
             try
@@ -553,9 +530,6 @@ public class EpicGrain : Grain, IEpicGrain
             existingLinks.Remove(item.IssueId);
             outcomes.Add(BatchMembershipOutcome.Unlinked(item.Identifier, item.IssueId, item.IssueNumber));
             hasUnlinkedAny = true;
-
-            // Refresh the active Issue aggregate after the scalar snapshots
-            // commit with this membership change.
             await PushEpicAffiliationAsync(item.IssueId, projectId, "unlink");
         }
 
@@ -601,8 +575,8 @@ public class EpicGrain : Grain, IEpicGrain
         if (row.Status is EpicStatusName.Done or EpicStatusName.Closed)
             await ReleaseActiveMembershipsAsync(db, projectId, epicId);
         var pending = DrainPendingEvents(domain);
+        await PersistEpicEventsAsync(db, domain, pending, now);
         await db.SaveChangesAsync();
-        await PersistEpicEventsAsync(domain, pending, now);
         return ToDto(row);
     }
 
@@ -715,13 +689,10 @@ public class EpicGrain : Grain, IEpicGrain
         if (row.Status is EpicStatusName.Done or EpicStatusName.Closed)
             await ReleaseActiveMembershipsAsync(db, projectId, epicId);
         var pending = DrainPendingEvents(domain);
+        await PersistEpicEventsAsync(db, domain, pending, now);
         await db.SaveChangesAsync();
-        if (row.Status is EpicStatusName.Done or EpicStatusName.Closed)
-        {
-            await RestageIssueLineageSnapshotsAsync(db, projectId, links.Select(link => link.IssueId));
-            await db.SaveChangesAsync();
-        }
-        await PersistEpicEventsAsync(domain, pending, now);
+        foreach (var issueId in links.Select(link => link.IssueId).Distinct(StringComparer.Ordinal))
+            await PushEpicAffiliationAsync(issueId, projectId, "status");
         return ToDto(row);
     }
 
@@ -768,10 +739,10 @@ public class EpicGrain : Grain, IEpicGrain
         }
 
         var pending = DrainPendingEvents(domain);
+        await PersistEpicEventsAsync(db, domain, pending, now);
         await db.SaveChangesAsync();
-        await RestageIssueLineageSnapshotsAsync(db, projectId, links.Select(link => link.IssueId));
-        await db.SaveChangesAsync();
-        await PersistEpicEventsAsync(domain, pending, now);
+        foreach (var issueId in links.Select(link => link.IssueId).Distinct(StringComparer.Ordinal))
+            await PushEpicAffiliationAsync(issueId, projectId, "reopen");
         return ToDto(row);
     }
 
@@ -793,8 +764,8 @@ public class EpicGrain : Grain, IEpicGrain
         domain.Update(title, description, priority, now.UtcDateTime);
         MapToRow(domain, row, now);
         var pending = DrainPendingEvents(domain);
+        await PersistEpicEventsAsync(db, domain, pending, now);
         await db.SaveChangesAsync();
-        await PersistEpicEventsAsync(domain, pending, now);
         return ToDto(row);
     }
 
@@ -867,10 +838,10 @@ public class EpicGrain : Grain, IEpicGrain
             MapToRow(domain, row, now);
             await ReleaseActiveMembershipsAsync(db, projectId, epicId);
             var pending = DrainPendingEvents(domain);
+            await PersistEpicEventsAsync(db, domain, pending, now);
             await db.SaveChangesAsync();
-            await RestageIssueLineageSnapshotsAsync(db, projectId, links.Select(link => link.IssueId));
-            await db.SaveChangesAsync();
-            await PersistEpicEventsAsync(domain, pending, now);
+            foreach (var issueId in links.Select(link => link.IssueId).Distinct(StringComparer.Ordinal))
+                await PushEpicAffiliationAsync(issueId, projectId, "auto-done");
             return ToDto(row);
         }
 
@@ -982,10 +953,10 @@ public class EpicGrain : Grain, IEpicGrain
         MapToRow(domain, row, now);
         await ReleaseActiveMembershipsAsync(db, projectId, epicId);
         var pending = DrainPendingEvents(domain);
+        await PersistEpicEventsAsync(db, domain, pending, now);
         await db.SaveChangesAsync();
-        await RestageIssueLineageSnapshotsAsync(db, projectId, links.Select(link => link.IssueId));
-        await db.SaveChangesAsync();
-        await PersistEpicEventsAsync(domain, pending, now);
+        foreach (var issueId in links.Select(link => link.IssueId).Distinct(StringComparer.Ordinal))
+            await PushEpicAffiliationAsync(issueId, projectId, "auto-done");
         return ToDto(row);
     }
 
@@ -1172,55 +1143,8 @@ public class EpicGrain : Grain, IEpicGrain
     }
 
     /// <summary>
-    /// Post-commit, best-effort persistence of every domain event the
-    /// aggregate recorded since the last drain. Epic event persistence is
-    /// intentionally still outside the transaction for this issue: a crash or
-    /// store error between state commit and event append loses that mutation's
-    /// events, while authoritative epic state remains in <c>EpicRow</c>.
-    /// </summary>
-    private async Task PersistEpicEventsAsync(
-        EpicAggregate epic,
-        IReadOnlyList<Epic.Domain.Events.EpicEvent> events,
-        DateTimeOffset now)
-    {
-        if (events.Count == 0) return;
-        var source = EpicEventPersistence.EpicSource(epic.Id);
-        var subject = epic.Number.ToString();
-        var extensions = EpicLineage.BuildExtensions(epic);
-
-        try
-        {
-            foreach (var evt in events)
-            {
-                var type = EpicEventSerializer.BusType(evt);
-                var dataJson = EpicEventSerializer.ToData(evt);
-                var envelope = new CloudEvent(
-                    id: Guid.NewGuid().ToString(),
-                    source: new Uri(source, UriKind.Relative),
-                    type: type,
-                    time: now,
-                    data: dataJson,
-                    subject: subject,
-                    extensions: extensions);
-
-                await _eventStore.AppendAsync(envelope, CancellationToken.None);
-            }
-        }
-        catch (Exception ex)
-        {
-            _log.LogError(ex,
-                "Post-commit epic event persistence failed for epic {EpicId} ({ProjectId})",
-                epic.Id, epic.ProjectId);
-        }
-    }
-
-    /// <summary>
-    /// Atomically persists events into the caller's <paramref name="db"/>
-    /// context, so they survive or roll back with the epic state transition
-    /// in the same <c>SaveChangesAsync</c> call. Used for recovery-critical
-    /// events (<c>EpicIssueLinked</c>, <c>EpicStartAttemptFailed</c>) whose
-    /// loss would leave an epic stuck running-but-idle with no durable
-    /// recompute trigger.
+    /// Stages every Epic domain event in the aggregate's database context so
+    /// state and events commit or roll back together in one SaveChanges call.
     /// </summary>
     private async Task PersistEpicEventsAsync(
         MohistDbContext db,
@@ -1271,48 +1195,26 @@ public class EpicGrain : Grain, IEpicGrain
         }
     }
 
-    private static async Task StageIssueLineageSnapshotAsync(
-        MohistDbContext db,
-        string issueId,
-        string? epicId)
-    {
-        var workflowRunId = await IssueStore.StageEpicAffiliationAsync(db, issueId, epicId);
-        await WorkflowRunStore.StageEpicAffiliationAsync(db, workflowRunId, epicId);
-    }
-
-    private static async Task RestageIssueLineageSnapshotsAsync(
-        MohistDbContext db,
-        string projectId,
-        IEnumerable<string> issueIds)
-    {
-        foreach (var issueId in issueIds.Distinct(StringComparer.Ordinal))
-        {
-            var epicId = await EpicIssueAffiliationResolver.ResolveAsync(db, projectId, issueId);
-            await StageIssueLineageSnapshotAsync(db, issueId, epicId);
-        }
-    }
-
-    /// <summary>
-    /// Refreshes an active Issue aggregate from the committed lineage
-    /// snapshot. Membership transactions already update the Issue and
-    /// WorkflowRun snapshots atomically, so a failed refresh cannot make
-    /// emitted envelopes stale; durable handlers retry it for active state.
-    /// </summary>
     private async Task PushEpicAffiliationAsync(string issueId, string projectId, string operation)
     {
         string? epicId = null;
         try
         {
-            await using var db = await _dbFactory.CreateDbContextAsync();
-            epicId = await EpicIssueAffiliationResolver.ResolveAsync(db, projectId, issueId);
-            var issueGrain = _grains.GetGrain<IIssueGrain>(Mohist.Server.Infrastructure.Orleans.GrainKey.Issue(issueId));
-            await issueGrain.SetEpicAffiliationAsync(epicId);
+            await using (var db = await _dbFactory.CreateDbContextAsync())
+            {
+                epicId = await EpicIssueAffiliationResolver.ResolveAsync(db, projectId, issueId);
+            }
+
+            var issue = _grains.GetGrain<IIssueGrain>(Mohist.Server.Infrastructure.Orleans.GrainKey.Issue(issueId));
+            await issue.SetEpicAffiliationAsync(epicId);
         }
         catch (Exception ex)
         {
             _log.LogWarning(ex,
-                "Epic {Operation} denormalization push failed for issue {IssueId} (target epic {EpicId}); durable handler will re-apply",
-                operation, issueId, epicId ?? "<null>");
+                "Epic {Operation} affiliation push failed for issue {IssueId} (resolved epic {EpicId}); durable event handling will retry",
+                operation,
+                issueId,
+                epicId ?? "<none>");
         }
     }
 }

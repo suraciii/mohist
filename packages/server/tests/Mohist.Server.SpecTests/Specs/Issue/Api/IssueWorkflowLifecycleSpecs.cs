@@ -7,6 +7,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Infrastructure.Serialization;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Grains;
@@ -234,6 +235,65 @@ public class IssueWorkflowLifecycleSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
+    public async Task EnsureWorkflowBindingAsync_RecreatesRunAfterIssueBindingWasCommitted()
+    {
+        var (_, _, _, issueId, workflowRunId) = await SeedIssueInProgressAsync();
+        await _grains.GetGrain<IIssueGrain>(issueId).DeactivateForTestAsync();
+        await _grains.GetGrain<IWorkflowGrain>(workflowRunId).DeactivateForTestAsync();
+        await DeleteWorkflowRunAsync(workflowRunId);
+        await MarkIssueBindingPendingAsync(issueId);
+        await _grains.GetGrain<IManagementGrain>(0).ForceActivationCollection(TimeSpan.Zero);
+
+        await _grains.GetGrain<IIssueGrain>(issueId).EnsureWorkflowBindingAsync(workflowRunId);
+
+        var restored = await LoadWorkflowRunAsync(workflowRunId);
+        Assert.NotNull(restored);
+        Assert.Equal(WorkflowRunStatus.Pending, restored!.Status);
+        Assert.True(restored.IssueLineageVersion > 0);
+
+        var settled = await LoadIssueBindingStateAsync(issueId);
+        Assert.False(settled.Pending);
+        await _grains.GetGrain<IIssueGrain>(issueId).EnsureWorkflowBindingAsync(workflowRunId);
+        Assert.Equal(settled, await LoadIssueBindingStateAsync(issueId));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task EnsureWorkflowBindingAsync_ConfirmsPreparedRun()
+    {
+        var (_, _, _, issueId, workflowRunId) = await SeedIssueInProgressAsync();
+        await ResetBindingToPreparedAsync(issueId, workflowRunId);
+
+        await _grains.GetGrain<IIssueGrain>(issueId).EnsureWorkflowBindingAsync(workflowRunId);
+
+        Assert.Equal(WorkflowRunStatus.Pending, (await LoadWorkflowRunAsync(workflowRunId))!.Status);
+        Assert.False((await LoadIssueBindingStateAsync(issueId)).Pending);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task EnsureWorkflowBindingAsync_ClearsMarkerAfterWorkflowConfirmationCommitted()
+    {
+        var (_, _, _, issueId, workflowRunId) = await SeedIssueInProgressAsync();
+        await ResetBindingToPreparedAsync(issueId, workflowRunId);
+        var pending = await LoadIssueBindingStateAsync(issueId);
+
+        await _grains.GetGrain<IWorkflowGrain>(workflowRunId).ConfirmIssueBindingAsync(
+            new WorkflowIssueBinding(issueId, EpicId: null, pending.Version));
+
+        Assert.Equal(WorkflowRunStatus.Pending, (await LoadWorkflowRunAsync(workflowRunId))!.Status);
+        Assert.True((await LoadIssueBindingStateAsync(issueId)).Pending);
+
+        await _grains.GetGrain<IIssueGrain>(issueId).EnsureWorkflowBindingAsync(workflowRunId);
+
+        Assert.False((await LoadIssueBindingStateAsync(issueId)).Pending);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
     public async Task StartWorkAsync_WhenPrerequisiteIncomplete_DoesNotCreateWorkflowRunOrWorkspace()
     {
         var (projectId, _) = await SeedProjectAsync();
@@ -385,6 +445,62 @@ public class IssueWorkflowLifecycleSpecs
         var row = await db.WorkflowRuns.AsNoTracking()
             .FirstOrDefaultAsync(x => x.WorkflowRunId == workflowRunId);
         return row is null ? null : JSON.Deserialize<WorkflowRun>(row.State);
+    }
+
+    private async Task DeleteWorkflowRunAsync(string workflowRunId)
+    {
+        var options = new DbContextOptionsBuilder<MohistDbContext>()
+            .UseSqlite(_connectionString)
+            .Options;
+
+        await using var db = new MohistDbContext(options);
+        var row = await db.WorkflowRuns.FindAsync(workflowRunId)
+            ?? throw new InvalidOperationException($"Workflow run {workflowRunId} was not stored");
+        db.WorkflowRuns.Remove(row);
+        await db.SaveChangesAsync();
+    }
+
+    private async Task ResetBindingToPreparedAsync(string issueId, string workflowRunId)
+    {
+        var original = await LoadWorkflowRunAsync(workflowRunId)
+            ?? throw new InvalidOperationException($"Workflow run {workflowRunId} was not stored");
+        await _grains.GetGrain<IIssueGrain>(issueId).DeactivateForTestAsync();
+        await _grains.GetGrain<IWorkflowGrain>(workflowRunId).DeactivateForTestAsync();
+        await DeleteWorkflowRunAsync(workflowRunId);
+        await MarkIssueBindingPendingAsync(issueId);
+        await _grains.GetGrain<IManagementGrain>(0).ForceActivationCollection(TimeSpan.Zero);
+
+        await _grains.GetGrain<IWorkflowGrain>(workflowRunId).PrepareIssueStartAsync(
+            new WorkflowStartInput(Metadata: original.Metadata, Workspace: original.Workspace));
+        Assert.Equal(WorkflowRunStatus.AwaitingBinding, (await LoadWorkflowRunAsync(workflowRunId))!.Status);
+    }
+
+    private async Task<(bool Pending, long Version)> LoadIssueBindingStateAsync(string issueId)
+    {
+        var options = new DbContextOptionsBuilder<MohistDbContext>()
+            .UseSqlite(_connectionString)
+            .Options;
+
+        await using var db = new MohistDbContext(options);
+        var row = await db.Issues.AsNoTracking().SingleAsync(issue => issue.IssueId == issueId);
+        var issue = IssueStore.Deserialize(row.State)
+            ?? throw new InvalidOperationException($"Issue {issueId} state was not stored");
+        return (issue.WorkflowBindingPending, row.LineageVersion);
+    }
+
+    private async Task MarkIssueBindingPendingAsync(string issueId)
+    {
+        var options = new DbContextOptionsBuilder<MohistDbContext>()
+            .UseSqlite(_connectionString)
+            .Options;
+
+        await using var db = new MohistDbContext(options);
+        var row = await db.Issues.SingleAsync(issue => issue.IssueId == issueId);
+        var state = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(row.State, JSON.Options)
+            ?? throw new InvalidOperationException($"Issue {issueId} state was not stored");
+        state["workflowBindingPending"] = JsonSerializer.SerializeToElement(true, JSON.Options);
+        row.State = JsonSerializer.Serialize(state, JSON.Options);
+        await db.SaveChangesAsync();
     }
 
     private async Task<IssueInfo?> GetIssueInfoAsync(string projectId, int number)

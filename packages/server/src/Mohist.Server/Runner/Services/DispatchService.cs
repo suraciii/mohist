@@ -87,26 +87,9 @@ public sealed class DispatchService : IScopedService
         if (spare <= 0)
             return new RunnerPollResponse(dispatches);
 
-        await ActivateBoundGatedStartsAsync(info.ProjectId, ct);
         await AddAssignablePendingDispatchesAsync(runner, info.ProjectId, runnerId, workerId, spare, dispatches, ct);
 
         return new RunnerPollResponse(dispatches);
-    }
-
-    private async Task ActivateBoundGatedStartsAsync(string? projectId, CancellationToken ct)
-    {
-        foreach (var workflowRunId in await _workflowRuns.FindGatedStartsAsync(projectId, ct: ct))
-        {
-            try
-            {
-                var workflow = _grains.GetGrain<IWorkflowGrain>(workflowRunId);
-                await workflow.ActivateAsync();
-            }
-            catch (Exception ex)
-            {
-                _log.LogWarning(ex, "DispatchService failed to activate bound workflow start {WorkflowRunId}", workflowRunId);
-            }
-        }
     }
 
     private static HashSet<string> ReportedWorkKeys(RunnerPollRequest req) =>

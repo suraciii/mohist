@@ -289,6 +289,24 @@ public sealed class EpicRunningStatusHandler : ICloudEventHandler<Epic.Domain.Ev
         _dispatcher.DispatchAsync(evt.Id, evt.Extensions, evtType: "status-changed", ct);
 }
 
+[Subscription(Type = EventCatalog.ReverseDns.EpicStatusChanged)]
+public sealed class EpicAffiliationStatusChangedHandler : ICloudEventHandler<Epic.Domain.Events.EpicStatusChanged>
+{
+    private readonly EpicIssueAffiliationDispatcher _dispatcher;
+
+    public EpicAffiliationStatusChangedHandler(
+        IGrainFactory grains,
+        IDbContextFactory<MohistDbContext> dbFactory)
+    {
+        _dispatcher = new EpicIssueAffiliationDispatcher(grains, dbFactory);
+    }
+
+    public bool Filter(CloudEvent<Epic.Domain.Events.EpicStatusChanged> evt) => true;
+
+    public Task HandleAsync(CloudEvent<Epic.Domain.Events.EpicStatusChanged> evt, CancellationToken ct) =>
+        _dispatcher.DispatchEpicAsync(evt.Id, evt.Extensions, ct);
+}
+
 /// <summary>
 /// Subscribes to <c>com.mohist.epic.start-attempt-failed</c> and re-drives
 /// <see cref="IEpicGrain.RecomputeProgressAsync"/> on the epic. When
@@ -525,10 +543,42 @@ internal sealed class EpicIssueAffiliationDispatcher
                 $"Affiliation event '{eventId}' is missing its issue id payload.");
         }
 
-        await using var db = await _dbFactory.CreateDbContextAsync(ct).ConfigureAwait(false);
-        var epicId = await EpicIssueAffiliationResolver.ResolveAsync(db, projectId, issueId, ct: ct).ConfigureAwait(false);
+        string? epicId;
+        await using (var db = await _dbFactory.CreateDbContextAsync(ct).ConfigureAwait(false))
+        {
+            epicId = await EpicIssueAffiliationResolver.ResolveAsync(db, projectId, issueId, ct: ct).ConfigureAwait(false);
+        }
         var grain = _grains.GetGrain<Mohist.Server.Issue.Grains.IIssueGrain>(
             Mohist.Server.Infrastructure.Orleans.GrainKey.Issue(issueId));
         await grain.SetEpicAffiliationAsync(epicId).ConfigureAwait(false);
+    }
+
+    public async Task DispatchEpicAsync(
+        string eventId,
+        IReadOnlyDictionary<string, string> extensions,
+        CancellationToken ct)
+    {
+        if (!extensions.TryGetValue(EventCatalog.Lineage.ProjectId, out var projectId)
+            || string.IsNullOrWhiteSpace(projectId)
+            || !extensions.TryGetValue(EventCatalog.Lineage.EpicId, out var epicId)
+            || string.IsNullOrWhiteSpace(epicId))
+        {
+            throw new InvalidOperationException(
+                $"Epic affiliation event '{eventId}' is missing projectid or epicid.");
+        }
+
+        IReadOnlyList<string> issueIds;
+        await using (var db = await _dbFactory.CreateDbContextAsync(ct).ConfigureAwait(false))
+        {
+            issueIds = await db.EpicIssues.AsNoTracking()
+                .Where(link => link.ProjectId == projectId && link.EpicId == epicId)
+                .OrderBy(link => link.IssueId)
+                .Select(link => link.IssueId)
+                .ToListAsync(ct)
+                .ConfigureAwait(false);
+        }
+
+        foreach (var issueId in issueIds)
+            await DispatchAsync(eventId, extensions, issueId, ct).ConfigureAwait(false);
     }
 }

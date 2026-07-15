@@ -75,12 +75,6 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
         await ClearStoppedRunStaleApprovalGateAsync(ct);
 
         _cachedAssignedWorkerId = _run?.Assignment?.WorkerId;
-        if (_run is { DispatchActivated: false, Status: WorkflowRunStatus.Created })
-        {
-            await ActivateAsync();
-            if (_run.DispatchActivated == false && _run.StartedAt is not null)
-                await StopAsync("unbound workflow-start recovery");
-        }
     }
 
     public override async Task OnDeactivateAsync(DeactivationReason reason, CancellationToken ct)
@@ -102,49 +96,85 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
 
     public async Task StartAsync(WorkflowStartInput? input = null)
     {
-        var isInitialStart = _run is null;
-        var isGuardedIssueStart = isInitialStart && input?.LineageGuard is not null;
-        if (_run is null)
-        {
-            var metadata = input?.Metadata ?? BuildRunMetadata(input);
-            RequireProjectOwnership(metadata);
-            var projectId = metadata?.Annotations?.GetValueOrDefault("projectId");
-            var issueId = metadata?.Annotations?.GetValueOrDefault("issueId");
-            var structure = await _profileManager.LoadStructureAsync(GrainKey, projectId, issueId);
-            _run = WorkflowRun.Create(GrainKey, structure, Now(), metadata);
-            _run.Workspace = input?.Workspace;
-        }
+        await EnsureCreatedRunAsync(input);
+        var events = _run!.Start(Now());
 
-        var events = _run.Start(Now(), dispatchable: !isGuardedIssueStart);
-
-        _log.LogInformation("Workflow {Id} started, stage={Stage}", GrainKey, _run.CurrentStageId);
-        try
-        {
-            await CommitAsync(events, lineageGuard: isInitialStart ? input?.LineageGuard : null);
-        }
-        catch (WorkflowStartLineageChangedException) when (isInitialStart)
-        {
-            _run = null;
-            _runDirty = false;
-            _runReloadRequired = false;
-            throw;
-        }
+        _log.LogInformation("Workflow {Id} started, stage={Stage}", GrainKey, _run!.CurrentStageId);
+        await CommitAsync(events);
     }
 
-    public async Task ActivateAsync()
+    public async Task PrepareIssueStartAsync(WorkflowStartInput input)
     {
+        ArgumentNullException.ThrowIfNull(input);
+        if (_run is not null)
+        {
+            if (_run.Status == WorkflowRunStatus.AwaitingBinding) return;
+            throw new InvalidOperationException($"Workflow '{GrainKey}' is already {_run.Status}.");
+        }
+
+        await EnsureCreatedRunAsync(input);
+        if (string.IsNullOrWhiteSpace(GetIssueId()))
+            throw new InvalidOperationException($"Workflow '{GrainKey}' cannot await binding without an issue id.");
+        _run!.PrepareForIssueBinding();
+        await SaveRunAsync();
+    }
+
+    public async Task ConfirmIssueBindingAsync(WorkflowIssueBinding binding)
+    {
+        ArgumentNullException.ThrowIfNull(binding);
         EnsureRun();
-        if (_run.DispatchActivated != false) return;
-        var issueId = GetIssueId();
-        if (string.IsNullOrWhiteSpace(issueId))
-            throw new InvalidOperationException($"Workflow '{GrainKey}' has a gated start without an issue id.");
+        RequireIssueBinding(binding.IssueId);
+        if (!ApplyIssueLineage(binding.EpicId, binding.IssueLineageVersion)) return;
 
-        var lineage = await _runStore.SynchronizeBoundStartAsync(GrainKey, issueId);
-        if (lineage is null) return;
-
-        WorkflowRunLineage.ApplyEpicAffiliation(_run, lineage.EpicId);
-        var events = _run.ActivateForDispatch(Now());
+        var events = _run!.ConfirmIssueBinding(Now());
         await CommitAsync(events);
+    }
+
+    public async Task ApplyIssueLineageAsync(WorkflowIssueLineage lineage)
+    {
+        ArgumentNullException.ThrowIfNull(lineage);
+        EnsureRun();
+        RequireIssueBinding(lineage.IssueId);
+        if (!ApplyIssueLineage(lineage.EpicId, lineage.IssueLineageVersion)) return;
+        await SaveRunAsync();
+    }
+
+    private void RequireIssueBinding(string issueId)
+    {
+        var expectedIssueId = GetIssueId();
+        if (!string.Equals(expectedIssueId, issueId, StringComparison.Ordinal))
+            throw new InvalidOperationException(
+                $"Workflow '{GrainKey}' belongs to issue '{expectedIssueId ?? "<none>"}', not '{issueId}'.");
+    }
+
+    private bool ApplyIssueLineage(string? epicId, long issueLineageVersion)
+    {
+        if (issueLineageVersion < _run!.IssueLineageVersion) return false;
+
+        var currentEpicId = WorkflowRunLineage.EpicAffiliationOf(_run);
+        if (issueLineageVersion == _run.IssueLineageVersion)
+        {
+            if (!string.Equals(currentEpicId, epicId, StringComparison.Ordinal))
+                throw new InvalidOperationException(
+                    $"Workflow '{GrainKey}' received conflicting issue lineage revision {issueLineageVersion}.");
+            return _run.Status == WorkflowRunStatus.AwaitingBinding;
+        }
+
+        WorkflowRunLineage.ApplyEpicAffiliation(_run, epicId);
+        _run.IssueLineageVersion = issueLineageVersion;
+        return true;
+    }
+
+    private async Task EnsureCreatedRunAsync(WorkflowStartInput? input)
+    {
+        if (_run is not null) return;
+        var metadata = input?.Metadata ?? BuildRunMetadata(input);
+        RequireProjectOwnership(metadata);
+        var projectId = metadata?.Annotations?.GetValueOrDefault("projectId");
+        var issueId = metadata?.Annotations?.GetValueOrDefault("issueId");
+        var structure = await _profileManager.LoadStructureAsync(GrainKey, projectId, issueId);
+        _run = WorkflowRun.Create(GrainKey, structure, Now(), metadata);
+        _run.Workspace = input?.Workspace;
     }
 
     public async Task ResumeAsync()
@@ -167,7 +197,7 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
     {
         EnsureRun();
 
-        if (_run.Status is not (WorkflowRunStatus.Created or WorkflowRunStatus.Pending or WorkflowRunStatus.Ready or WorkflowRunStatus.Running or WorkflowRunStatus.AwaitingApproval or WorkflowRunStatus.Paused))
+        if (_run.Status is not (WorkflowRunStatus.Created or WorkflowRunStatus.AwaitingBinding or WorkflowRunStatus.Pending or WorkflowRunStatus.Ready or WorkflowRunStatus.Running or WorkflowRunStatus.AwaitingApproval or WorkflowRunStatus.Paused))
             throw new InvalidOperationException($"Cannot stop workflow in {_run.Status} state");
 
         var stopEvents = _run.Stop();
@@ -318,7 +348,7 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
     {
         RejectIfRunReloadRequired();
         if (_run is null) return new WorkflowAssignmentResult(WorkflowAssignmentStatus.Rejected, Reason: "missing");
-        if (_run.Status.IsTerminal() || _run.Status is WorkflowRunStatus.Created or WorkflowRunStatus.Paused or WorkflowRunStatus.AwaitingApproval)
+        if (_run.Status.IsTerminal() || _run.Status is WorkflowRunStatus.Created or WorkflowRunStatus.AwaitingBinding or WorkflowRunStatus.Paused or WorkflowRunStatus.AwaitingApproval)
             return new WorkflowAssignmentResult(WorkflowAssignmentStatus.Rejected, Reason: "not-runnable");
         if (_run.Assignment is not null)
         {
@@ -485,14 +515,13 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
     private async Task CommitAsync(
         IReadOnlyList<WorkflowEvent> events,
         string? reason = null,
-        CancellationToken ct = default,
-        WorkflowStartLineageGuard? lineageGuard = null)
+        CancellationToken ct = default)
     {
         if (_run is not null)
         {
             var resolved = await _stageInitializer.InitializeFreshStagesAsync(events);
             _runDirty = true;
-            await SaveRunAsync(resolved, lineageGuard);
+            await SaveRunAsync(resolved);
             events = resolved;
         }
 
@@ -578,22 +607,14 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
         }
     }
 
-    private async Task SaveRunAsync(IReadOnlyList<WorkflowEvent> events, WorkflowStartLineageGuard? lineageGuard = null)
+    private async Task SaveRunAsync(IReadOnlyList<WorkflowEvent> events)
     {
         if (_run is null) return;
 
         try
         {
-            if (lineageGuard is null)
-                await _runStore.SaveAsync(_run, events);
-            else
-                await _runStore.SaveInitialAsync(_run, events, lineageGuard);
+            await _runStore.SaveAsync(_run, events);
             _runDirty = false;
-        }
-        catch (WorkflowStartLineageChangedException)
-        {
-            _runDirty = false;
-            throw;
         }
         catch (DbUpdateConcurrencyException ex)
         {

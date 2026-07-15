@@ -34,15 +34,14 @@ public class WorkflowArtifactBindingSpecs : WorkflowGrainSpecs
 
         var (work, runnerId) = await PollWorkAnyAsync();
         var uploadId = await SeedPendingUploadAsync(work.WorkflowRunId, work.WorkId, "task-1.1", "review.md");
-        await using (var lineageDb = CreateDb())
-        {
-            await WorkflowRunStore.StageEpicAffiliationAsync(lineageDb, work.WorkflowRunId, "epic_artifact");
-            await lineageDb.SaveChangesAsync();
-        }
+        var workflow = Grains.GetGrain<IWorkflowGrain>(work.WorkflowRunId);
+        await workflow.ApplyIssueLineageAsync(new WorkflowIssueLineage(
+            TestIssueId(work.WorkflowRunId),
+            "epic_artifact",
+            1));
 
         await ReportAsync(runnerId, work.WorkId, new WorkResult("completed", ArtifactUploadIds: [uploadId]));
 
-        var workflow = Grains.GetGrain<IWorkflowGrain>(work.WorkflowRunId);
         var status = await workflow.GetRunStatusAsync();
         Assert.Equal("Completed", status);
 

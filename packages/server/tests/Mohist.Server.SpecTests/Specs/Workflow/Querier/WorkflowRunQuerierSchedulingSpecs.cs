@@ -350,6 +350,7 @@ public class WorkflowRunQuerierSchedulingSpecs
         var statuses = new (string suffix, WorkflowRunStatus status)[]
         {
             ("created", WorkflowRunStatus.Created),
+            ("awaiting-binding", WorkflowRunStatus.AwaitingBinding),
             ("pending", WorkflowRunStatus.Pending),
             ("ready", WorkflowRunStatus.Ready),
             ("running", WorkflowRunStatus.Running),

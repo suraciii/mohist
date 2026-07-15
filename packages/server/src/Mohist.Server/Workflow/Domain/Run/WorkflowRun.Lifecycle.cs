@@ -77,7 +77,15 @@ public static partial class WorkflowRunExtensions
                 ?? throw new InvalidOperationException($"Current stage {run.CurrentStageId} not found");
         }
 
-        public IReadOnlyList<WorkflowEvent> Start(DateTimeOffset now, bool dispatchable = true)
+        public void PrepareForIssueBinding()
+        {
+            if (run.Status == WorkflowRunStatus.AwaitingBinding) return;
+            if (run.Status != WorkflowRunStatus.Created)
+                throw new InvalidOperationException($"WorkflowRun is {run.Status}, prepare requires Created");
+            run.Status = WorkflowRunStatus.AwaitingBinding;
+        }
+
+        public IReadOnlyList<WorkflowEvent> Start(DateTimeOffset now)
         {
             if (run.Status != WorkflowRunStatus.Created && run.Status != WorkflowRunStatus.Paused)
                 throw new InvalidOperationException($"WorkflowRun is {run.Status}");
@@ -87,26 +95,21 @@ public static partial class WorkflowRunExtensions
             if (current.Status == StageRunStatus.Pending)
                 current.Status = StageRunStatus.Running;
 
-            run.DispatchActivated = dispatchable;
-            if (dispatchable)
-                SetStatusAndTrackReadySince(run, wasPaused
-                    ? ActiveOrWaitingForDispatchStatus(run)
-                    : WorkflowRunStatus.Pending,
-                    now);
+            SetStatusAndTrackReadySince(run, wasPaused
+                ? ActiveOrWaitingForDispatchStatus(run)
+                : WorkflowRunStatus.Pending,
+                now);
             run.StartedAt ??= now;
             return wasPaused
                 ? [new WorkflowRunResumed()]
                 : [new WorkflowRunStarted(), new StageStarted(current.Id)];
         }
 
-        public IReadOnlyList<WorkflowEvent> ActivateForDispatch(DateTimeOffset now)
+        public IReadOnlyList<WorkflowEvent> ConfirmIssueBinding(DateTimeOffset now)
         {
-            if (run.DispatchActivated != false) return [];
-            if (run.Status != WorkflowRunStatus.Created)
-                throw new InvalidOperationException($"WorkflowRun is {run.Status}, activation requires Created");
-
-            run.DispatchActivated = true;
-            return run.Advance(now);
+            if (run.Status != WorkflowRunStatus.AwaitingBinding) return [];
+            run.Status = WorkflowRunStatus.Created;
+            return run.Start(now);
         }
 
         public IReadOnlyList<WorkflowEvent> Pause()
@@ -132,7 +135,7 @@ public static partial class WorkflowRunExtensions
 
         public IReadOnlyList<WorkflowEvent> Stop()
         {
-            if (run.Status is not (WorkflowRunStatus.Created or WorkflowRunStatus.Pending or WorkflowRunStatus.Ready or WorkflowRunStatus.Running or WorkflowRunStatus.AwaitingApproval or WorkflowRunStatus.Paused))
+            if (run.Status is not (WorkflowRunStatus.Created or WorkflowRunStatus.AwaitingBinding or WorkflowRunStatus.Pending or WorkflowRunStatus.Ready or WorkflowRunStatus.Running or WorkflowRunStatus.AwaitingApproval or WorkflowRunStatus.Paused))
                 throw new InvalidOperationException($"WorkflowRun is {run.Status}, stop requires a non-terminal started state");
 
             run.ClearStaleApprovalGate();

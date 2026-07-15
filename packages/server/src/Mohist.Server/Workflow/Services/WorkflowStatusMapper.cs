@@ -8,9 +8,12 @@ namespace Mohist.Server.Workflow.Services;
 public static class WorkflowStatusMapper
 {
     public static string FrontendStatus(string raw) =>
-        raw.Equals("AwaitingApproval", StringComparison.Ordinal)
-            ? "awaiting-approval"
-            : raw.ToLowerInvariant();
+        raw switch
+        {
+            "AwaitingApproval" => "awaiting-approval",
+            "AwaitingBinding" => "awaiting-binding",
+            _ => raw.ToLowerInvariant(),
+        };
     public static WorkflowStatusView? BuildStatusView(
         WorkflowRun? run,
         WorkflowDefinition? definition)

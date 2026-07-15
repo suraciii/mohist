@@ -8,6 +8,7 @@ public class WorkflowStatusMapperFrontendStatusTests
 {
     [Theory]
     [InlineData("Created", "created")]
+    [InlineData("AwaitingBinding", "awaiting-binding")]
     [InlineData("Pending", "pending")]
     [InlineData("Ready", "ready")]
     [InlineData("Running", "running")]

@@ -487,7 +487,7 @@ public class EpicMembershipSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
-    public async Task SetStatusAsync_Closed_RestagesIssueAndWorkflowToRetainedMembership()
+    public async Task SetStatusAsync_Closed_DoesNotWriteIssueOrWorkflowSnapshotsInsideEpicTransaction()
     {
         var database = CreateDatabase();
         await SeedEpicAsync(database, epicId: "epic_closing", status: "idle", number: 1);
@@ -502,8 +502,9 @@ public class EpicMembershipSpecs
         await grain.SetStatusAsync("closed");
 
         await using var verify = database.CreateDbContext();
-        Assert.Equal("epic_retained", (await verify.Issues.SingleAsync(row => row.IssueId == "issue_1")).EpicId);
-        Assert.Equal("epic_retained", (await verify.WorkflowRuns.SingleAsync(row => row.WorkflowRunId == "workflow_1")).EpicId);
+        Assert.Equal("epic_closing", (await verify.Issues.SingleAsync(row => row.IssueId == "issue_1")).EpicId);
+        Assert.Equal("epic_closing", (await verify.WorkflowRuns.SingleAsync(row => row.WorkflowRunId == "workflow_1")).EpicId);
+        Assert.Empty(await verify.EpicActiveIssues.Where(row => row.EpicId == "epic_closing").ToListAsync());
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
@@ -832,6 +833,7 @@ public class EpicMembershipSpecs
             _owner.IssueStartCalls.Add(IssueId);
             return "wr_test";
         }
+        public Task EnsureWorkflowBindingAsync(string workflowRunId) => throw new NotSupportedException();
         public Task CompleteWorkAsync(string workflowRunId) => throw new NotSupportedException();
         public Task CancelAsync() => throw new NotSupportedException();
         public Task UpdateAsync(string title, string? body) => throw new NotSupportedException();

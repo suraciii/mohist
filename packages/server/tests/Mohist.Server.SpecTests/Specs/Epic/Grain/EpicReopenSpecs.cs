@@ -249,7 +249,7 @@ public class EpicReopenSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
-    public async Task ReopenAsync_RestagesIssueAndWorkflowToItsReclaimedActiveMembership()
+    public async Task ReopenAsync_DoesNotWriteIssueOrWorkflowSnapshotsInsideEpicTransaction()
     {
         var database = CreateDatabase();
         await SeedEpicAsync(database, epicId: "epic_reopened", status: "closed", number: 1);
@@ -263,8 +263,10 @@ public class EpicReopenSpecs
         await grain.ReopenAsync();
 
         await using var verify = database.CreateDbContext();
-        Assert.Equal("epic_reopened", (await verify.Issues.SingleAsync(row => row.IssueId == "issue_1")).EpicId);
-        Assert.Equal("epic_reopened", (await verify.WorkflowRuns.SingleAsync(row => row.WorkflowRunId == "workflow_1")).EpicId);
+        Assert.Equal("epic_retained", (await verify.Issues.SingleAsync(row => row.IssueId == "issue_1")).EpicId);
+        Assert.Equal("epic_retained", (await verify.WorkflowRuns.SingleAsync(row => row.WorkflowRunId == "workflow_1")).EpicId);
+        Assert.Equal("epic_reopened", (await verify.EpicActiveIssues.SingleAsync(
+            row => row.IssueId == "issue_1")).EpicId);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]

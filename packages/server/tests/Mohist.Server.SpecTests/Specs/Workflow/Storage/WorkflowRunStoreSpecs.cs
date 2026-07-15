@@ -97,7 +97,7 @@ public class WorkflowRunStoreSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public async Task SaveInitialAsync_RejectsStaleIssueLineageThenStampsTheReloadedEpicSnapshot()
+    public async Task SaveAsync_UsesTheWorkflowOwnedLineageSnapshot()
     {
         using var factory = new FakeWorkflowRunStoreDbContextFactory();
         var eventStore = new EventStore(factory, NullLogger<EventStore>.Instance);
@@ -109,59 +109,34 @@ public class WorkflowRunStoreSpecs
             {
                 IssueId = IssueId,
                 State = "{}",
-                LineageVersion = 1,
+                EpicId = "epic_from_issue_row",
+                LineageVersion = 7,
             });
             await seed.SaveChangesAsync();
         }
 
-        var staleRun = CreateRun("wr_initial_stale", epicId: null);
-        var staleGuard = new WorkflowStartLineageGuard(IssueId, 1);
+        var run = CreateRun("wr_owned_lineage", epicId: "epic_from_workflow");
+        await store.SaveAsync(run, [new WorkflowRunStarted()]);
 
-        await using (var link = factory.CreateDbContext())
-        {
-            await IssueStore.StageEpicAffiliationAsync(link, IssueId, "epic_committed");
-            await link.SaveChangesAsync();
-        }
-
-        await Assert.ThrowsAsync<WorkflowStartLineageChangedException>(
-            () => store.SaveInitialAsync(staleRun, [new WorkflowRunStarted()], staleGuard));
-        Assert.Empty(await eventStore.ListAsync(staleRun.Id));
-
-        var reloadedRun = CreateRun("wr_initial_reloaded", epicId: "epic_committed");
-        await store.SaveInitialAsync(
-            reloadedRun,
-            [new WorkflowRunStarted()],
-            new WorkflowStartLineageGuard(IssueId, 2));
-
-        var started = Assert.Single(await eventStore.ListAsync(reloadedRun.Id));
-        Assert.Equal("epic_committed", started.Envelope.Extensions[EventCatalog.Lineage.EpicId]);
+        var started = Assert.Single(await eventStore.ListAsync(run.Id));
+        Assert.Equal("epic_from_workflow", started.Envelope.Extensions[EventCatalog.Lineage.EpicId]);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public async Task SaveInitialAsync_GuardedRunIsNotAssignableUntilItsIssueBindingActivatesIt()
+    public async Task SaveAsync_AwaitingBindingRunIsNotAssignable()
     {
         using var factory = new FakeWorkflowRunStoreDbContextFactory();
         var eventStore = new EventStore(factory, NullLogger<EventStore>.Instance);
         var store = new WorkflowRunStore(factory, eventStore, new NullDispatchGrainFactory(), NullLogger<WorkflowRunStore>.Instance);
-        await using (var seed = factory.CreateDbContext())
-        {
-            seed.Issues.Add(new IssueRow
-            {
-                IssueId = IssueId,
-                State = "{}",
-                LineageVersion = 1,
-            });
-            await seed.SaveChangesAsync();
-        }
-
         var run = CreateRun("wr_prebind", epicId: null);
-        run.DispatchActivated = false;
-        await store.SaveInitialAsync(run, [new WorkflowRunStarted()], new WorkflowStartLineageGuard(IssueId, 1));
+        run.PrepareForIssueBinding();
+        await store.SaveAsync(run);
 
         var querier = new WorkflowRunQuerier(factory);
         Assert.Empty(await querier.FindAssignableAsync(ProjectId));
+        Assert.Equal(WorkflowRunStatus.AwaitingBinding, (await store.LoadAsync(run.Id))!.Status);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]
@@ -318,20 +293,10 @@ public class WorkflowRunStoreSpecs
 
         await store.SaveAsync(run, [new WorkflowRunStarted()]);
 
-        await using (var link = factory.CreateDbContext())
-        {
-            await WorkflowRunStore.StageEpicAffiliationAsync(link, run.Id, "epic_workflow");
-            await link.SaveChangesAsync();
-        }
-        run = (await store.LoadAsync(run.Id))!;
+        run.Metadata.Annotations!["epicId"] = "epic_workflow";
         await store.SaveAsync(run, [new WorkflowRunResumed()]);
 
-        await using (var unlink = factory.CreateDbContext())
-        {
-            await WorkflowRunStore.StageEpicAffiliationAsync(unlink, run.Id, null);
-            await unlink.SaveChangesAsync();
-        }
-        run = (await store.LoadAsync(run.Id))!;
+        run.Metadata.Annotations.Remove("epicId");
         await store.SaveAsync(run, [new WorkflowRunPaused()]);
 
         var events = await eventStore.ListAsync(run.Id);

@@ -599,8 +599,6 @@ public sealed class HermesIssueNotificationTests
             return Task.FromResult(run);
         }
 
-        public Task SynchronizeEpicAffiliationAsync(string workflowRunId, string issueId, CancellationToken ct = default) =>
-            Task.CompletedTask;
     }
 
     private sealed class TestOptionsMonitor<T> : IOptionsMonitor<T>

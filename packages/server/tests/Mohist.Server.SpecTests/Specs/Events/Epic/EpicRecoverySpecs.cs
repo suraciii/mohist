@@ -139,6 +139,34 @@ public class EpicRecoverySpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
+    public async Task StatusReplay_ReResolvesAllRetainedMembersAfterTerminalAndReopen()
+    {
+        await _fixture.ResetAsync();
+        await _fixture.SeedEpicAsync(ProjectId, "epic_z", "done");
+        await _fixture.SeedEpicAsync(ProjectId, "epic_a", "done");
+        await _fixture.SeedIssueAsync(ProjectId, IssueId, 1, IssueStatus.Backlog, epicId: "epic_z");
+        await _fixture.SeedLinkAsync(ProjectId, "epic_z", IssueId, 1);
+        await _fixture.SeedLinkAsync(ProjectId, "epic_a", IssueId, 1);
+        var grains = new FlakyAffiliationGrainFactory(_fixture.DbFactory, failFirst: false);
+        var handler = new EpicAffiliationStatusChangedHandler(grains, _fixture.DbFactory);
+
+        await handler.HandleAsync(
+            EpicStatusEvent(ProjectId, "epic_z", "running", "done"),
+            CancellationToken.None);
+
+        Assert.Equal("epic_a", await _fixture.GetIssueEpicIdAsync(ProjectId, IssueId));
+
+        await _fixture.SeedActiveLinkAsync(ProjectId, "epic_z", IssueId, 1);
+        await handler.HandleAsync(
+            EpicStatusEvent(ProjectId, "epic_z", "done", "idle"),
+            CancellationToken.None);
+
+        Assert.Equal("epic_z", await _fixture.GetIssueEpicIdAsync(ProjectId, IssueId));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
     public async Task AffiliationReplay_WriteFailureLeavesEventPendingUntilLaterAttemptPersistsAffiliation()
     {
         await _fixture.ResetAsync();
@@ -166,6 +194,40 @@ public class EpicRecoverySpecs
 
         Assert.Equal(2, grains.AffiliationAttempts);
         Assert.Equal(EpicId, await _fixture.GetIssueEpicIdAsync(ProjectId, IssueId));
+        Assert.True(await _fixture.IsDispatchedAsync(pending.Origin, pending.Source, pending.Id));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task AffiliationReplay_DownstreamFailureAfterIssueCommitKeepsEventPending()
+    {
+        await _fixture.ResetAsync();
+        await _fixture.SeedIssueAsync(ProjectId, IssueId, 1, IssueStatus.Backlog);
+        await _fixture.SeedLinkAsync(ProjectId, EpicId, IssueId, 1);
+        var grains = new FlakyAffiliationGrainFactory(
+            _fixture.DbFactory,
+            failFirst: false,
+            failAfterWriteFirst: true);
+        var handler = new EpicIssueLinkedHandler(grains, _fixture.DbFactory, NullLogger<EpicIssueLinkedHandler>.Instance);
+        var dispatcher = CreateDispatcher(
+            new Subscription(EventCatalog.ReverseDns.EpicIssueLinked, handler, DispatchEpicIssueLinkedAsync));
+
+        await _fixture.EventStore.AppendAsync(EpicEvent(
+            ProjectId,
+            EpicId,
+            EventCatalog.ReverseDns.EpicIssueLinked,
+            new EpicIssueLinked(IssueId, 1)));
+        var pending = Assert.Single(await _fixture.EventStore.ListUndeliveredAsync());
+
+        await dispatcher.DispatchAsync(CancellationToken.None);
+
+        Assert.Equal(EpicId, await _fixture.GetIssueEpicIdAsync(ProjectId, IssueId));
+        Assert.False(await _fixture.IsDispatchedAsync(pending.Origin, pending.Source, pending.Id));
+
+        await dispatcher.DispatchAsync(CancellationToken.None);
+
+        Assert.Equal(2, grains.AffiliationAttempts);
         Assert.True(await _fixture.IsDispatchedAsync(pending.Origin, pending.Source, pending.Id));
     }
 
@@ -277,6 +339,22 @@ public class EpicRecoverySpecs
             ["epicid"] = epicId,
         });
 
+    private CloudEvent<EpicStatusChanged> EpicStatusEvent(
+        string projectId,
+        string epicId,
+        string oldStatus,
+        string newStatus) => new(
+            Guid.NewGuid().ToString(),
+            new Uri(EpicEventPersistence.EpicSource(epicId), UriKind.Relative),
+            EventCatalog.ReverseDns.EpicStatusChanged,
+            _fixture.TimeProvider.GetUtcNow(),
+            new EpicStatusChanged(oldStatus, newStatus),
+            extensions: new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [EventCatalog.Lineage.ProjectId] = projectId,
+                [EventCatalog.Lineage.EpicId] = epicId,
+            });
+
     private static Task DispatchEpicIssueLinkedAsync(object rawHandler, CloudEvent rawEvent, CancellationToken ct)
     {
         var handler = (ICloudEventHandler<EpicIssueLinked>)rawHandler;
@@ -351,6 +429,7 @@ public class EpicRecoverySpecs
     {
         public Task<string> StartWorkAsync(WorkflowProjectContext? project = null) =>
             throw new InvalidOperationException("simulated StartWorkAsync failure");
+        public Task EnsureWorkflowBindingAsync(string workflowRunId) => throw new NotSupportedException();
         public Task<string> CreateAsync(string projectId, int number, string title, string? body, IReadOnlyDictionary<string, string>? labels, string? priority, string? repositoryRef = null, string? issueId = null, string? risk = null, bool isDraft = false, string[]? attachmentIds = null, string? workflowProfileId = null, int[]? prerequisiteNumbers = null) => throw new NotSupportedException();
         public Task CompleteWorkAsync(string workflowRunId) => throw new NotSupportedException();
         public Task CancelAsync() => throw new NotSupportedException();
@@ -374,9 +453,12 @@ public class EpicRecoverySpecs
         private readonly FlakyAffiliationIssueGrain _issue;
         private readonly NoopEpicGrain _epic = new();
 
-        public FlakyAffiliationGrainFactory(IDbContextFactory<MohistDbContext> dbFactory, bool failFirst = true)
+        public FlakyAffiliationGrainFactory(
+            IDbContextFactory<MohistDbContext> dbFactory,
+            bool failFirst = true,
+            bool failAfterWriteFirst = false)
         {
-            _issue = new FlakyAffiliationIssueGrain(dbFactory, failFirst);
+            _issue = new FlakyAffiliationIssueGrain(dbFactory, failFirst, failAfterWriteFirst);
         }
 
         public int AffiliationAttempts => _issue.AffiliationAttempts;
@@ -420,11 +502,16 @@ public class EpicRecoverySpecs
     {
         private readonly IDbContextFactory<MohistDbContext> _dbFactory;
         private readonly bool _failFirst;
+        private readonly bool _failAfterWriteFirst;
 
-        public FlakyAffiliationIssueGrain(IDbContextFactory<MohistDbContext> dbFactory, bool failFirst)
+        public FlakyAffiliationIssueGrain(
+            IDbContextFactory<MohistDbContext> dbFactory,
+            bool failFirst,
+            bool failAfterWriteFirst)
         {
             _dbFactory = dbFactory;
             _failFirst = failFirst;
+            _failAfterWriteFirst = failAfterWriteFirst;
         }
 
         public int AffiliationAttempts { get; private set; }
@@ -441,9 +528,13 @@ public class EpicRecoverySpecs
             issue.SetEpicId(epicId);
             row.State = IssueStore.Serialize(issue);
             await db.SaveChangesAsync();
+
+            if (_failAfterWriteFirst && AffiliationAttempts == 1)
+                throw new InvalidOperationException("simulated downstream workflow propagation failure");
         }
 
         public Task<string> StartWorkAsync(WorkflowProjectContext? project = null) => throw new NotSupportedException();
+        public Task EnsureWorkflowBindingAsync(string workflowRunId) => throw new NotSupportedException();
         public Task<string> CreateAsync(string projectId, int number, string title, string? body, IReadOnlyDictionary<string, string>? labels, string? priority, string? repositoryRef = null, string? issueId = null, string? risk = null, bool isDraft = false, string[]? attachmentIds = null, string? workflowProfileId = null, int[]? prerequisiteNumbers = null) => throw new NotSupportedException();
         public Task CompleteWorkAsync(string workflowRunId) => throw new NotSupportedException();
         public Task CancelAsync() => throw new NotSupportedException();

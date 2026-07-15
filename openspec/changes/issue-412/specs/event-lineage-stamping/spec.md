@@ -65,6 +65,37 @@ Lineage attributes SHALL record affiliation as it exists at the instant the even
 - **WHEN** an issue that previously emitted events while unaffiliated is later linked to an epic
 - **THEN** the previously emitted events retain their original extensions (no `epicid`), and only events produced after the linking carry `epicid`
 
+### Requirement: Cross-aggregate lineage propagation respects aggregate consistency boundaries
+
+Each aggregate SHALL update only its own state and SHALL append only its own domain events in a database transaction. Epic membership/status changes SHALL propagate to Issue and WorkflowRun through durable reactions and idempotent aggregate commands. No Epic transaction SHALL write Issue or WorkflowRun state, and no WorkflowRun transaction SHALL read or lock Issue state.
+
+An event SHALL stamp the latest affiliation revision applied by its producing aggregate. Cross-aggregate propagation is causal and eventually consistent; a committed membership change SHALL NOT be treated as having atomically changed another aggregate.
+
+#### Scenario: Epic membership commit does not write producer aggregates
+
+- **WHEN** an Epic links, unlinks, terminalizes, or reopens membership
+- **THEN** its transaction contains only Epic-owned state and Epic events
+- **AND** a durable reaction subsequently commands each affected Issue, whose own transaction updates its lineage snapshot
+- **AND** the current WorkflowRun applies that Issue lineage in its own transaction
+- **AND** an optional post-commit command may accelerate the same idempotent propagation without joining either downstream aggregate to the Epic transaction
+
+#### Scenario: Workflow start waits for durable Issue binding
+
+- **WHEN** Issue starts work
+- **THEN** it first commits `WorkflowRunId`, `WorkflowBindingPending = true`, and `IssueWorkStarted` without creating a WorkflowRun in that transaction
+- **AND** the durable reaction creates the referenced WorkflowRun as queryable, non-assignable `AwaitingBinding` when it is missing
+- **AND** confirms it with the Issue lineage revision and makes it dispatchable
+- **AND** Issue clears `WorkflowBindingPending` in its own transaction after confirmation
+- **AND** redelivery recovers a crash before creation, between preparation and confirmation, or before clearing the marker
+- **AND** delayed delivery is a no-op after the marker is clear
+- **AND** duplicate confirmation is idempotent
+- **AND** ordinary WorkflowGrain activation and runner polling do not perform cross-aggregate binding discovery
+
+#### Scenario: Duplicate and delayed propagation is idempotent
+
+- **WHEN** an Epic or Issue lineage reaction is delivered more than once or after a later delivery
+- **THEN** re-resolution and lineage revision checks prevent an older affiliation from overwriting the producer's newer applied snapshot
+
 ### Requirement: Stamping uses only identity the aggregate already holds
 
 Producers SHALL NOT issue cross-aggregate queries to gather lineage for stamping. Lineage SHALL be derived solely from the producing aggregate's own state or from annotations/labels already attached to it.

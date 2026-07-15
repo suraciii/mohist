@@ -2,6 +2,7 @@ import type { WorkItemOrigin, StageApprovalState, WorkflowTaskCause, WorkflowFai
 
 export type WorkflowRunStatus =
   | 'created'
+  | 'awaiting-binding'
   | 'pending'
   | 'ready'
   | 'running'
@@ -94,4 +95,3 @@ export interface WorkflowStageRun {
   completedAt: string | null
   updatedAt?: string
 }
-

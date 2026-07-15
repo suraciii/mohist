@@ -89,19 +89,6 @@ public class IssueStore : IIssueStore
 
     public Task<IReadOnlyList<DomainIssue>> ListAsync() => throw new NotImplementedException();
 
-    internal static async Task<string?> StageEpicAffiliationAsync(
-        MohistDbContext db,
-        string issueId,
-        string? epicId,
-        CancellationToken ct = default)
-    {
-        var row = await db.Issues.FindAsync(new object[] { issueId }, ct)
-            ?? throw new InvalidOperationException($"Issue '{issueId}' was not found while staging epic affiliation.");
-        row.EpicId = NormalizeEpicId(epicId);
-        row.LineageVersion++;
-        return row.WorkflowRunId;
-    }
-
     private static async Task StageIssueAsync(MohistDbContext db, DomainIssue state, CancellationToken ct)
     {
         var row = await db.Issues.FindAsync(new object[] { state.Id }, ct);
@@ -119,10 +106,10 @@ public class IssueStore : IIssueStore
         }
         else
         {
-            state.SetEpicId(row.EpicId);
             state.SetLineageVersion(row.LineageVersion + 1);
             row.State = Serialize(state);
             row.Risk = state.Risk;
+            row.EpicId = NormalizeEpicId(state.EpicId);
             row.LineageVersion++;
         }
     }

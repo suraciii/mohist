@@ -8,6 +8,7 @@ public interface IIssueGrain : IGrainWithStringKey
 {
     Task<string> CreateAsync(string projectId, int number, string title, string? body, IReadOnlyDictionary<string, string>? labels, string? priority, string? repositoryRef = null, string? issueId = null, string? risk = null, bool isDraft = false, string[]? attachmentIds = null, string? workflowProfileId = null, int[]? prerequisiteNumbers = null);
     Task<string> StartWorkAsync(WorkflowProjectContext? project = null);
+    Task EnsureWorkflowBindingAsync(string workflowRunId);
     Task CompleteWorkAsync(string workflowRunId);
     Task CancelAsync();
     Task UpdateAsync(string title, string? body);
@@ -23,10 +24,9 @@ public interface IIssueGrain : IGrainWithStringKey
     Task DeactivateForTestAsync();
 
     /// <summary>
-    /// Refresh the issue's denormalized epic affiliation after the Epic
-    /// membership transaction has committed its producer-owned lineage
-    /// snapshots. No issue domain event is recorded, since the authoritative
-    /// <c>EpicIssueLinked</c>/<c>EpicIssueUnlinked</c> events live on the epic stream.
+    /// Apply the affiliation resolved by durable Epic coordination. Issue
+    /// persists its own producer snapshot and propagates its revision to the
+    /// current WorkflowRun in a separate aggregate command.
     /// </summary>
     Task SetEpicAffiliationAsync(string? epicId);
 }

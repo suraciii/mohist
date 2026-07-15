@@ -134,9 +134,10 @@ public class RunnerWorkflowStatusRouterSpecs
         public Task<string?> GetAssignedWorkerIdAsync() => Task.FromResult(AssignedWorkerId);
         public Task<string?> GetRunStatusAsync() => Task.FromResult<string?>(Status.ToString());
 
-        // Unused members — stubbed because the router only calls these two.
         public Task StartAsync(WorkflowStartInput? input = null) => Task.CompletedTask;
-        public Task ActivateAsync() => Task.CompletedTask;
+        public Task PrepareIssueStartAsync(WorkflowStartInput input) => Task.CompletedTask;
+        public Task ConfirmIssueBindingAsync(WorkflowIssueBinding binding) => Task.CompletedTask;
+        public Task ApplyIssueLineageAsync(WorkflowIssueLineage lineage) => Task.CompletedTask;
         public Task ResumeAsync() => Task.CompletedTask;
         public Task PauseAsync(string? reason = null) => Task.CompletedTask;
         public Task StopAsync(string? reason = null) => Task.CompletedTask;

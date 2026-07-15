@@ -166,7 +166,7 @@ public class IssueTransactionalEventAppendSpecs : IAsyncLifetime
     public async Task SaveAsync_IssueWithEpicAffiliation_StampsEpicIdOnExtensions()
     {
         // D5 denormalization: when the issue's own state carries an
-        // EpicId (written by the Epic domain at link time, T-004),
+        // EpicId (applied to Issue by durable Epic coordination, T-004),
         // every issue.* event stamps `epicid` from that state. No
         // cross-aggregate query is issued; the issue aggregate's
         // own state is the sole source.
@@ -213,17 +213,17 @@ public class IssueTransactionalEventAppendSpecs : IAsyncLifetime
     }
 
     [Fact]
-    public async Task SaveAsync_AffiliationStagedBeforeEvent_UsesCommittedLinkAndUnlinkSnapshots()
+    public async Task SaveAsync_UsesAggregateOwnedLinkAndUnlinkSnapshots()
     {
         var store = new IssueStore(_dbFactory, _eventStore, _grainFactory, NullLogger<IssueStore>.Instance);
         var issue = BuildIssue("issue_txn_snapshot", number: 17);
 
         await store.SaveAsync(issue.Id, issue, [new IssueArchived()]);
 
-        await StageEpicAffiliationAsync(issue.Id, "epic_snapshot");
+        issue.SetEpicId("epic_snapshot");
         await store.SaveAsync(issue.Id, issue, [new IssueReopened()]);
 
-        await StageEpicAffiliationAsync(issue.Id, null);
+        issue.SetEpicId(null);
         await store.SaveAsync(issue.Id, issue, [new IssueArchived()]);
 
         var stored = await _eventStore.ListIssueEventsAsync(issue.Id);
@@ -234,57 +234,21 @@ public class IssueTransactionalEventAppendSpecs : IAsyncLifetime
     }
 
     [Fact]
-    public async Task StageEpicAffiliation_RejectsStaleWritersAndReappliesFromCurrentIssueState()
+    public async Task SaveAsync_AffiliationChangeAdvancesTheIssueLineageRevision()
     {
         var store = new IssueStore(_dbFactory, _eventStore, _grainFactory, NullLogger<IssueStore>.Instance);
         var issue = BuildIssue("issue_txn_atomic_affiliation", number: 18);
         await store.SaveAsync(issue.Id, issue);
+        var initialRevision = issue.LineageVersion;
 
-        await using var link = await _dbFactory.CreateDbContextAsync();
-        await IssueStore.StageEpicAffiliationAsync(link, issue.Id, "epic_atomic");
-
-        var afterLinkRead = (await store.LoadAsync(issue.Id))!;
-        afterLinkRead.Update("Changed after link snapshot read", null, null, null,
-            new DateTime(2026, 7, 15, 0, 0, 0, DateTimeKind.Utc));
-        await store.SaveAsync(afterLinkRead.Id, afterLinkRead);
-        await Assert.ThrowsAsync<DbUpdateConcurrencyException>(() => link.SaveChangesAsync());
-
-        await StageEpicAffiliationAsync(issue.Id, "epic_atomic");
+        issue.SetEpicId("epic_atomic");
+        await store.SaveAsync(issue.Id, issue, [new IssueArchived()]);
 
         var linked = (await store.LoadAsync(issue.Id))!;
-        Assert.Equal("Changed after link snapshot read", linked.Title);
         Assert.Equal("epic_atomic", linked.EpicId);
-        await store.SaveAsync(linked.Id, linked, [new IssueArchived()]);
-
-        await using var unlink = await _dbFactory.CreateDbContextAsync();
-        await IssueStore.StageEpicAffiliationAsync(unlink, issue.Id, null);
-
-        var afterUnlinkRead = (await store.LoadAsync(issue.Id))!;
-        afterUnlinkRead.Update("Changed after unlink snapshot read", null, null, null,
-            new DateTime(2026, 7, 15, 0, 1, 0, DateTimeKind.Utc));
-        await store.SaveAsync(afterUnlinkRead.Id, afterUnlinkRead);
-        await Assert.ThrowsAsync<DbUpdateConcurrencyException>(() => unlink.SaveChangesAsync());
-
-        await StageEpicAffiliationAsync(issue.Id, null);
-
-        var unlinked = (await store.LoadAsync(issue.Id))!;
-        Assert.Equal("Changed after unlink snapshot read", unlinked.Title);
-        Assert.Null(unlinked.EpicId);
-        await store.SaveAsync(unlinked.Id, unlinked, [new IssueReopened()]);
-
-        var stored = await _eventStore.ListIssueEventsAsync(issue.Id);
-        Assert.Equal("epic_atomic", stored[0].Envelope.Extensions[EventCatalog.Lineage.EpicId]);
-        Assert.False(stored[1].Envelope.Extensions.ContainsKey(EventCatalog.Lineage.EpicId));
-    }
-
-    private async Task StageEpicAffiliationAsync(string issueId, string? epicId)
-    {
-        await using var db = await _dbFactory.CreateDbContextAsync();
-        await IssueStore.StageEpicAffiliationAsync(
-            db,
-            issueId,
-            epicId);
-        await db.SaveChangesAsync();
+        Assert.Equal(initialRevision + 1, linked.LineageVersion);
+        var stored = Assert.Single(await _eventStore.ListIssueEventsAsync(issue.Id));
+        Assert.Equal("epic_atomic", stored.Envelope.Extensions[EventCatalog.Lineage.EpicId]);
     }
 
     [Fact]

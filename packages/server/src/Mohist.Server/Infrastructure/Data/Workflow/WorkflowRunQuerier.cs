@@ -91,44 +91,6 @@ public sealed class WorkflowRunQuerier
             .ToListAsync(ct);
     }
 
-    public async Task<IReadOnlyList<string>> FindGatedStartsAsync(
-        string? projectId = null,
-        int limit = 4,
-        CancellationToken ct = default)
-    {
-        await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var query = db.WorkflowRuns.AsNoTracking()
-            .Where(workflow => workflow.Status == StatusString(WorkflowRunStatus.Created))
-            .Select(workflow => new { workflow.WorkflowRunId, workflow.State, workflow.MetadataProjectId });
-
-        if (!string.IsNullOrWhiteSpace(projectId))
-            query = query.Where(row => row.MetadataProjectId == projectId);
-
-        if (limit <= 0)
-            return [];
-
-        var candidates = await query
-            .OrderBy(row => row.WorkflowRunId)
-            .Take(limit * 4)
-            .ToListAsync(ct);
-        var gated = new List<string>();
-        foreach (var candidate in candidates)
-        {
-            try
-            {
-                if (JSON.Deserialize<WorkflowRun>(WorkflowRunStore.MigrateLegacyWorkflowRunJson(candidate.State))?.DispatchActivated == false)
-                    gated.Add(candidate.WorkflowRunId);
-            }
-            catch (Exception)
-            {
-            }
-
-            if (gated.Count == limit)
-                break;
-        }
-        return gated;
-    }
-
     /// <summary>
     /// Issue-318 D4: counts workflow runs that are currently in flight
     /// (<c>Running</c>) and bound to <paramref name="workerId"/>. Used by

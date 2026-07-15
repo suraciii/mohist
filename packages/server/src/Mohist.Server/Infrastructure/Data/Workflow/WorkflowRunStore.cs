@@ -15,12 +15,7 @@ public interface IWorkflowRunStore
 {
     Task SaveAsync(WorkflowRun run, CancellationToken ct = default);
     Task SaveAsync(WorkflowRun run, IReadOnlyList<WorkflowEvent> events, CancellationToken ct = default);
-    Task SaveInitialAsync(WorkflowRun run, IReadOnlyList<WorkflowEvent> events, WorkflowStartLineageGuard guard, CancellationToken ct = default) =>
-        SaveAsync(run, events, ct);
-    Task<WorkflowBoundLineage?> SynchronizeBoundStartAsync(string workflowRunId, string issueId, CancellationToken ct = default) =>
-        Task.FromResult<WorkflowBoundLineage?>(null);
     Task<WorkflowRun?> LoadAsync(string workflowRunId, CancellationToken ct = default);
-    Task SynchronizeEpicAffiliationAsync(string workflowRunId, string issueId, CancellationToken ct = default);
 }
 
 public class WorkflowRunStore : IWorkflowRunStore
@@ -52,19 +47,11 @@ public class WorkflowRunStore : IWorkflowRunStore
     }
 
     public async Task SaveAsync(WorkflowRun run, IReadOnlyList<WorkflowEvent> events, CancellationToken ct = default) =>
-        await SaveEventsAsync(run, events, guard: null, ct);
-
-    public async Task SaveInitialAsync(
-        WorkflowRun run,
-        IReadOnlyList<WorkflowEvent> events,
-        WorkflowStartLineageGuard guard,
-        CancellationToken ct = default) =>
-        await SaveEventsAsync(run, events, guard, ct);
+        await SaveEventsAsync(run, events, ct);
 
     private async Task SaveEventsAsync(
         WorkflowRun run,
         IReadOnlyList<WorkflowEvent> events,
-        WorkflowStartLineageGuard? guard,
         CancellationToken ct)
     {
         var source = WorkflowEventSource(run.Id);
@@ -73,8 +60,6 @@ public class WorkflowRunStore : IWorkflowRunStore
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
         try
         {
-            if (guard is not null)
-                await ValidateInitialLineageAsync(db, guard, ct);
             await StageRunAsync(db, run, ct);
             foreach (var evt in events)
             {
@@ -91,20 +76,6 @@ public class WorkflowRunStore : IWorkflowRunStore
         }
 
         PokeDispatcherBestEffort();
-    }
-
-    private static async Task ValidateInitialLineageAsync(
-        MohistDbContext db,
-        WorkflowStartLineageGuard guard,
-        CancellationToken ct)
-    {
-        var locked = await db.Issues
-            .Where(issue => issue.IssueId == guard.IssueId
-                && issue.LineageVersion == guard.IssueLineageVersion)
-            .ExecuteUpdateAsync(setters => setters
-                .SetProperty(issue => issue.LineageVersion, issue => issue.LineageVersion), ct);
-        if (locked != 1)
-            throw new WorkflowStartLineageChangedException(guard.IssueId);
     }
 
     private void PokeDispatcherBestEffort() =>
@@ -145,93 +116,6 @@ public class WorkflowRunStore : IWorkflowRunStore
         return run;
     }
 
-    public async Task SynchronizeEpicAffiliationAsync(string workflowRunId, string issueId, CancellationToken ct = default)
-    {
-        const int maxAttempts = 3;
-        for (var attempt = 1; ; attempt++)
-        {
-            await using var db = await _dbFactory.CreateDbContextAsync(ct);
-            var workflow = await db.WorkflowRuns.FindAsync([workflowRunId], ct);
-            if (workflow is null) return;
-            var issue = await db.Issues.FindAsync([issueId], ct)
-                ?? throw new InvalidOperationException($"Issue '{issueId}' was not found while synchronizing workflow lineage.");
-            var epicId = string.IsNullOrWhiteSpace(issue.EpicId) ? null : issue.EpicId;
-            if (string.Equals(workflow.EpicId, epicId, StringComparison.Ordinal))
-                return;
-            workflow.EpicId = epicId;
-            var entry = db.Entry(workflow);
-            entry.Property<long>("ETag").CurrentValue = entry.Property<long>("ETag").OriginalValue + 1;
-
-            try
-            {
-                await db.SaveChangesAsync(ct);
-                return;
-            }
-            catch (DbUpdateConcurrencyException) when (attempt < maxAttempts)
-            {
-                _log.LogDebug(
-                    "Workflow {WorkflowRunId} lineage synchronization conflicted on attempt {Attempt}; retrying",
-                    workflowRunId,
-                    attempt);
-            }
-            catch (DbUpdateConcurrencyException)
-            {
-                throw;
-            }
-        }
-    }
-
-    public async Task<WorkflowBoundLineage?> SynchronizeBoundStartAsync(
-        string workflowRunId,
-        string issueId,
-        CancellationToken ct = default)
-    {
-        const int maxAttempts = 3;
-        for (var attempt = 1; ; attempt++)
-        {
-            await using var db = await _dbFactory.CreateDbContextAsync(ct);
-            var workflow = await db.WorkflowRuns.FindAsync([workflowRunId], ct);
-            if (workflow is null) return null;
-            var issue = await db.Issues.FindAsync([issueId], ct);
-            if (issue is null || !string.Equals(issue.WorkflowRunId, workflowRunId, StringComparison.Ordinal))
-                return null;
-
-            var epicId = string.IsNullOrWhiteSpace(issue.EpicId) ? null : issue.EpicId;
-            if (string.Equals(workflow.EpicId, epicId, StringComparison.Ordinal))
-                return new WorkflowBoundLineage(epicId);
-
-            workflow.EpicId = epicId;
-            var entry = db.Entry(workflow);
-            entry.Property<long>("ETag").CurrentValue = entry.Property<long>("ETag").OriginalValue + 1;
-            try
-            {
-                await db.SaveChangesAsync(ct);
-                return new WorkflowBoundLineage(epicId);
-            }
-            catch (DbUpdateConcurrencyException) when (attempt < maxAttempts)
-            {
-                _log.LogDebug("Workflow {WorkflowRunId} bound-start synchronization conflicted on attempt {Attempt}; retrying", workflowRunId, attempt);
-            }
-        }
-    }
-
-    internal static async Task StageEpicAffiliationAsync(
-        MohistDbContext db,
-        string? workflowRunId,
-        string? epicId,
-        CancellationToken ct = default)
-    {
-        if (string.IsNullOrWhiteSpace(workflowRunId)) return;
-
-        var entity = await db.WorkflowRuns.FindAsync([workflowRunId], ct);
-        if (entity is not null)
-        {
-            entity.EpicId = string.IsNullOrWhiteSpace(epicId) ? null : epicId;
-            var entry = db.Entry(entity);
-            entry.Property<long>("ETag").CurrentValue = entry.Property<long>("ETag").OriginalValue + 1;
-        }
-    }
-
     private static async Task StageRunAsync(MohistDbContext db, WorkflowRun run, CancellationToken ct)
     {
         var entity = await db.WorkflowRuns.FindAsync([run.Id], ct);
@@ -249,7 +133,7 @@ public class WorkflowRunStore : IWorkflowRunStore
             return;
         }
 
-        WorkflowRunLineage.ApplyEpicAffiliation(run, entity.EpicId);
+        entity.EpicId = WorkflowRunLineage.EpicAffiliationOf(run);
         entity.State = JSON.Serialize(run);
         var entry = db.Entry(entity);
         entry.Property<long>("ETag").CurrentValue = entry.Property<long>("ETag").OriginalValue + 1;
@@ -279,7 +163,8 @@ public class WorkflowRunStore : IWorkflowRunStore
         var changed = root.TryGetProperty("claim", out _)
             || (root.TryGetProperty("assignment", out var assignment) && assignment.ValueKind == JsonValueKind.Object && assignment.TryGetProperty("runnerId", out _))
             || ContainsLegacyTaskRunnerId(root)
-            || legacyRecovery.Count > 0;
+            || legacyRecovery.Count > 0
+            || IsLegacyAwaitingBinding(root);
         if (!changed)
             return json;
 
@@ -393,6 +278,15 @@ public class WorkflowRunStore : IWorkflowRunStore
         writer.WriteStartObject();
         foreach (var property in root.EnumerateObject())
         {
+            if (string.Equals(property.Name, "dispatchActivated", StringComparison.Ordinal))
+                continue;
+
+            if (string.Equals(property.Name, "status", StringComparison.Ordinal)
+                && IsLegacyAwaitingBinding(root))
+            {
+                writer.WriteString("status", "awaitingBinding");
+                continue;
+            }
             if (string.Equals(property.Name, "claim", StringComparison.Ordinal))
             {
                 if (!root.TryGetProperty("assignment", out _))
@@ -697,8 +591,12 @@ public class WorkflowRunStore : IWorkflowRunStore
         return false;
     }
 
+    private static bool IsLegacyAwaitingBinding(JsonElement root) =>
+        root.TryGetProperty("status", out var status)
+        && string.Equals(status.GetString(), "created", StringComparison.OrdinalIgnoreCase)
+        && root.TryGetProperty("dispatchActivated", out var activated)
+        && activated.ValueKind == JsonValueKind.False;
+
     private static string WorkflowEventSource(string workflowRunId) =>
         $"/mohist/workflow-runs/{workflowRunId}";
 }
-
-public sealed record WorkflowBoundLineage(string? EpicId);

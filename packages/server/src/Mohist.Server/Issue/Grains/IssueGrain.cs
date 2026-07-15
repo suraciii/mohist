@@ -28,7 +28,6 @@ public class IssueGrain : Grain, IIssueGrain
     private Domain.Issue? _issue;
     private bool _issueReloadRequired;
     private readonly IIssueStore _issueStore;
-    private readonly IWorkflowRunStore _workflowRunStore;
     private readonly IssueWorkflowProfileRegistry _profiles;
     private readonly WorkflowQuerier _workflowQuerier;
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
@@ -44,7 +43,6 @@ public class IssueGrain : Grain, IIssueGrain
 
     public IssueGrain(
         IIssueStore issueStore,
-        IWorkflowRunStore workflowRunStore,
         IssueWorkflowProfileRegistry profiles,
         WorkflowQuerier workflowQuerier,
         IDbContextFactory<MohistDbContext> dbFactory,
@@ -59,7 +57,6 @@ public class IssueGrain : Grain, IIssueGrain
         ILogger<IssueGrain> log)
     {
         _issueStore = issueStore;
-        _workflowRunStore = workflowRunStore;
         _profiles = profiles;
         _workflowQuerier = workflowQuerier;
         _dbFactory = dbFactory;
@@ -116,7 +113,13 @@ public class IssueGrain : Grain, IIssueGrain
         if (changed)
             await SaveIssueAsync();
         if (!string.IsNullOrWhiteSpace(_issue.WorkflowRunId))
-            await _workflowRunStore.SynchronizeEpicAffiliationAsync(_issue.WorkflowRunId, _issue.Id);
+        {
+            var workflow = GrainFactory.GetGrain<IWorkflowGrain>(_issue.WorkflowRunId);
+            await workflow.ApplyIssueLineageAsync(new WorkflowIssueLineage(
+                _issue.Id,
+                _issue.EpicId,
+                _issue.LineageVersion));
+        }
     }
 
     public async Task<string?> ResolveRepositoryRefAsync(string projectId, string? repositoryRef)
@@ -175,6 +178,31 @@ public class IssueGrain : Grain, IIssueGrain
         string wrId,
         RepositoryInfo repo,
         IReadOnlySet<int>? undeliveredPrerequisites)
+    {
+        var input = await BuildWorkflowStartInputAsync(project, wrId, repo);
+
+        _issue!.Start(wrId, undeliveredPrerequisites);
+        await SaveIssueAsync();
+
+        try
+        {
+            await EnsureCommittedWorkflowBindingAsync(wrId, input);
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex,
+                "Issue {Key} committed workflow binding {WrId}; durable IssueWorkStarted handling will retry workflow creation",
+                GrainKey,
+                wrId);
+        }
+        _log.LogInformation("Issue {Key} started workflow {WrId}", GrainKey, wrId);
+        return wrId;
+    }
+
+    private async Task<WorkflowStartInput> BuildWorkflowStartInputAsync(
+        WorkflowProjectContext? project,
+        string wrId,
+        RepositoryInfo repo)
     {
         var issue = _issue!;
 
@@ -240,52 +268,53 @@ public class IssueGrain : Grain, IIssueGrain
         foreach (var (key, body) in mergedPrompts)
             await _issueProfileManager.SetPromptAsync(issue.Id, key, body);
 
-        var wfGrain = GrainFactory.GetGrain<IWorkflowGrain>(wrId);
-        for (var attempt = 0; ; attempt++)
+        return new WorkflowStartInput(
+            Metadata: new WorkflowRunMetadata(
+                Name: null,
+                CreatedAt: DateTimeOffset.UtcNow,
+                Annotations: BuildWorkflowAnnotations(issue, projectContext.Id)),
+            Workspace: workspace);
+    }
+
+    public async Task EnsureWorkflowBindingAsync(string workflowRunId)
+    {
+        EnsureIssue();
+        if (!string.Equals(_issue!.WorkflowRunId, workflowRunId, StringComparison.Ordinal)
+            || !_issue.WorkflowBindingPending)
         {
-            try
+            return;
+        }
+        await EnsureCommittedWorkflowBindingAsync(workflowRunId);
+    }
+
+    private async Task EnsureCommittedWorkflowBindingAsync(
+        string workflowRunId,
+        WorkflowStartInput? preparedInput = null)
+    {
+        var issue = _issue!;
+        if (!string.Equals(issue.WorkflowRunId, workflowRunId, StringComparison.Ordinal))
+            throw new InvalidOperationException(
+                $"Issue '{issue.Id}' is not bound to workflow '{workflowRunId}'.");
+
+        var workflow = GrainFactory.GetGrain<IWorkflowGrain>(workflowRunId);
+        if (await workflow.GetRunStatusAsync() is null)
+        {
+            var input = preparedInput;
+            if (input is null)
             {
-                await wfGrain.StartAsync(input:
-                    new WorkflowStartInput(
-                        Metadata: new WorkflowRunMetadata(
-                            Name: null,
-                            CreatedAt: DateTimeOffset.UtcNow,
-                            Annotations: BuildWorkflowAnnotations(issue, projectContext.Id)),
-                        Workspace: workspace,
-                        LineageGuard: new WorkflowStartLineageGuard(issue.Id, issue.LineageVersion)));
-                break;
+                var resolution = RequireResolvedRepository(await ResolveIssueRepositoryAtStartAsync(issue));
+                input = await BuildWorkflowStartInputAsync(null, workflowRunId, resolution.Repository!);
             }
-            catch (WorkflowStartLineageChangedException) when (attempt < 2)
-            {
-                issue = await _issueStore.LoadAsync(GrainKey)
-                    ?? throw new InvalidOperationException($"Issue '{GrainKey}' disappeared while starting workflow.");
-                _issue = issue;
-            }
+            await workflow.PrepareIssueStartAsync(input);
         }
 
-        _issue!.Start(wrId, undeliveredPrerequisites);
-        try
-        {
+        await workflow.ConfirmIssueBindingAsync(new WorkflowIssueBinding(
+            issue.Id,
+            issue.EpicId,
+            issue.LineageVersion));
+
+        if (issue.ConfirmWorkflowBinding(workflowRunId))
             await SaveIssueAsync();
-        }
-        catch
-        {
-            // The workflow run was already committed, but the issue state/event
-            // transaction rolled back. A retry would mint a new wrId and leave
-            // this run orphaned. Compensate by stopping the run so it does not
-            // linger as active work the issue no longer references.
-            try { await wfGrain.StopAsync("issue save failed; compensating orphaned workflow start"); }
-            catch (Exception compEx)
-            {
-                _log.LogWarning(compEx,
-                    "Issue {Key} compensating stop of orphaned workflow {WrId} failed", GrainKey, wrId);
-            }
-            throw;
-        }
-
-        await wfGrain.ActivateAsync();
-        _log.LogInformation("Issue {Key} started workflow {WrId}", GrainKey, wrId);
-        return wrId;
     }
 
     private async Task<string?> TryReuseActiveWorkflowAsync()
@@ -297,6 +326,24 @@ public class IssueGrain : Grain, IIssueGrain
         try
         {
             var workflow = GrainFactory.GetGrain<IWorkflowGrain>(workflowRunId);
+            if (!issue.WorkflowBindingPending)
+            {
+                if (await workflow.IsStoppedOrTerminalAsync())
+                {
+                    issue.ClearStoppedWorkflow(workflowRunId);
+                    await SaveIssueAsync();
+                    return null;
+                }
+
+                _log.LogInformation("Issue {IssueId} reusing workflow run {WorkflowRunId}", issue.Id, workflowRunId);
+                return workflowRunId;
+            }
+            if (await workflow.GetRunStatusAsync() is null)
+            {
+                await EnsureCommittedWorkflowBindingAsync(workflowRunId);
+                _log.LogInformation("Issue {IssueId} restored workflow run {WorkflowRunId}", issue.Id, workflowRunId);
+                return workflowRunId;
+            }
             if (await workflow.IsStoppedOrTerminalAsync())
             {
                 issue.ClearStoppedWorkflow(workflowRunId);
@@ -304,7 +351,10 @@ public class IssueGrain : Grain, IIssueGrain
                 return null;
             }
 
-            await workflow.ActivateAsync();
+            await workflow.ConfirmIssueBindingAsync(new WorkflowIssueBinding(
+                issue.Id,
+                issue.EpicId,
+                issue.LineageVersion));
             _log.LogInformation("Issue {IssueId} reusing workflow run {WorkflowRunId}", issue.Id, workflowRunId);
             return workflowRunId;
         }

@@ -1379,6 +1379,8 @@ public class EpicAutoDoneHandlerSpecs
                 : Task.FromResult("wr_test");
         }
 
+        public Task EnsureWorkflowBindingAsync(string workflowRunId) => throw new NotSupportedException();
+
         public Task CompleteWorkAsync(string workflowRunId) => throw new NotSupportedException();
         public Task CancelAsync() => throw new NotSupportedException();
         public Task UpdateAsync(string title, string? body) => throw new NotSupportedException();

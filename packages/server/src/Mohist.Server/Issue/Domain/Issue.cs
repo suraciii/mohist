@@ -14,6 +14,7 @@ public sealed partial class Issue
     private DateTime? _archivedAt;
     private DateTime? _completedAt;
     private string? _workflowRunId;
+    private bool _workflowBindingPending;
     private string? _epicId;
     private IssueStatus _status = IssueStatus.Backlog;
     private int[] _prerequisiteNumbers = [];
@@ -90,14 +91,16 @@ public sealed partial class Issue
         init => _workflowRunId = NormalizeOptional(value);
     }
 
+    public bool WorkflowBindingPending
+    {
+        get => _workflowBindingPending;
+        init => _workflowBindingPending = value;
+    }
+
     /// <summary>
-    /// Epic affiliation reference. A denormalized cache of the issue's
-    /// current epic membership — the Epic domain owns the
-    /// <c>EpicIssueRow</c> join table as source of truth and writes this
-    /// field at link/unlink time. <c>null</c> means "no epic affiliation".
-    /// The protocol requires <c>issue.*</c> events to stamp <c>epicid</c>
-    /// from this field at emit time without issuing a cross-aggregate
-    /// query.
+    /// Current Epic affiliation revision applied by this Issue aggregate.
+    /// <c>null</c> means no epic affiliation. Issue events stamp this local
+    /// snapshot without querying the Epic aggregate.
     /// </summary>
     public string? EpicId
     {

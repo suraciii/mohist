@@ -608,6 +608,8 @@ public class WorkflowRunControlApiSpecs
             ?? throw new InvalidOperationException($"Workflow run {wrId} not found in store");
         row.State = "{}";
         await db.SaveChangesAsync();
+
+        await _grains.GetGrain<IManagementGrain>(0).ForceActivationCollection(TimeSpan.Zero);
     }
 
     private async Task ForceFailedStatusAsync(string wrId)

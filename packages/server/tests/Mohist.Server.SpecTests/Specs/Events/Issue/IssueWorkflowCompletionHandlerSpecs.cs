@@ -8,6 +8,7 @@ using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Issue.Domain;
+using Mohist.Server.Issue.Domain.Events;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Services;
 using Mohist.Server.SpecTests.Support;
@@ -402,6 +403,38 @@ public class IssueWorkflowCompletionHandlerSpecs
         Assert.Equal(IssueStatus.Done, IssueStore.Deserialize(stored.State)!.Status);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task BindingHandler_RedrivesTheCommittedIssueBinding()
+    {
+        await using var database = CreateDatabase();
+        var grains = new RecordingIssueGrainFactory(database.Factory, new FakeTimeProvider(FixedNow));
+        var handler = new IssueWorkflowBindingHandler(grains);
+
+        await handler.HandleAsync(
+            BuildWorkStartedEvent("wr_binding", "issue_binding"),
+            CancellationToken.None);
+
+        Assert.Equal(new RecordedCall("issue_binding", "wr_binding"), Assert.Single(grains.BindingCalls));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task BindingHandler_MissingIssueIdentityFailsForDurableRetry()
+    {
+        await using var database = CreateDatabase();
+        var grains = new RecordingIssueGrainFactory(database.Factory, new FakeTimeProvider(FixedNow));
+        var handler = new IssueWorkflowBindingHandler(grains);
+        var evt = BuildWorkStartedEvent("wr_binding", issueId: null);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            handler.HandleAsync(evt, CancellationToken.None));
+
+        Assert.Empty(grains.BindingCalls);
+    }
+
     private static CloudEvent BuildCompletedEvent(string workflowRunId, string issueId) =>
         new(
             id: Guid.NewGuid().ToString(),
@@ -413,6 +446,20 @@ public class IssueWorkflowCompletionHandlerSpecs
             {
                 ["issueid"] = issueId,
             });
+
+    private static CloudEvent<IssueWorkStarted> BuildWorkStartedEvent(string workflowRunId, string? issueId) =>
+        new(
+            Guid.NewGuid().ToString(),
+            new Uri($"/mohist/issues/{issueId ?? "missing"}", UriKind.Relative),
+            EventCatalog.ReverseDns.IssueWorkStarted,
+            FixedNow,
+            new IssueWorkStarted(workflowRunId),
+            extensions: issueId is null
+                ? new Dictionary<string, string>(StringComparer.Ordinal)
+                : new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    [EventCatalog.Lineage.IssueId] = issueId,
+                });
 
     private static async Task SeedIssueAsync(
         TestDatabase database,
@@ -508,6 +555,7 @@ public class IssueWorkflowCompletionHandlerSpecs
         private readonly IDbContextFactory<MohistDbContext> _dbFactory;
         private readonly FakeTimeProvider _time;
         public List<RecordedCall> Calls { get; } = [];
+        public List<RecordedCall> BindingCalls { get; } = [];
 
         public RecordingIssueGrainFactory(IDbContextFactory<MohistDbContext> dbFactory, FakeTimeProvider time)
         {
@@ -520,7 +568,7 @@ public class IssueWorkflowCompletionHandlerSpecs
         public IIssueGrain GetIssueGrain(string grainKey)
         {
             var stateStore = IssueStore;
-            return new CompleteWorkRecordingGrain(grainKey, stateStore, _dbFactory, _time, Calls);
+            return new CompleteWorkRecordingGrain(grainKey, stateStore, _dbFactory, _time, Calls, BindingCalls);
         }
 
         public TGrainInterface GetGrain<TGrainInterface>(string primaryKey, string? grainClassNamePrefix = null)
@@ -577,19 +625,22 @@ public class IssueWorkflowCompletionHandlerSpecs
         private readonly IDbContextFactory<MohistDbContext> _dbFactory;
         private readonly FakeTimeProvider _time;
         private readonly List<RecordedCall> _calls;
+        private readonly List<RecordedCall> _bindingCalls;
 
         public CompleteWorkRecordingGrain(
             string key,
             IStateStore<DomainIssue> stateStore,
             IDbContextFactory<MohistDbContext> dbFactory,
             FakeTimeProvider time,
-            List<RecordedCall> calls)
+            List<RecordedCall> calls,
+            List<RecordedCall> bindingCalls)
         {
             _key = key;
             _stateStore = stateStore;
             _dbFactory = dbFactory;
             _time = time;
             _calls = calls;
+            _bindingCalls = bindingCalls;
         }
 
         public async Task CompleteWorkAsync(string workflowRunId)
@@ -626,6 +677,11 @@ public class IssueWorkflowCompletionHandlerSpecs
 
         public Task<string> CreateAsync(string projectId, int number, string title, string? body, IReadOnlyDictionary<string, string>? labels, string? priority, string? repositoryRef = null, string? issueId = null, string? risk = null, bool isDraft = false, string[]? attachmentIds = null, string? workflowProfileId = null, int[]? prerequisiteNumbers = null) => throw new NotSupportedException();
         public Task<string> StartWorkAsync(WorkflowProjectContext? project = null) => throw new NotSupportedException();
+        public Task EnsureWorkflowBindingAsync(string workflowRunId)
+        {
+            _bindingCalls.Add(new RecordedCall(_key, workflowRunId));
+            return Task.CompletedTask;
+        }
         public Task CancelAsync() => throw new NotSupportedException();
         public Task UpdateAsync(string title, string? body) => throw new NotSupportedException();
         public Task UpdateFullAsync(UpdateIssueData data) => throw new NotSupportedException();
@@ -694,6 +750,7 @@ public class IssueWorkflowCompletionHandlerSpecs
             throw new InvalidOperationException("simulated grain failure");
         public Task<string> CreateAsync(string projectId, int number, string title, string? body, IReadOnlyDictionary<string, string>? labels, string? priority, string? repositoryRef = null, string? issueId = null, string? risk = null, bool isDraft = false, string[]? attachmentIds = null, string? workflowProfileId = null, int[]? prerequisiteNumbers = null) => throw new NotSupportedException();
         public Task<string> StartWorkAsync(WorkflowProjectContext? project = null) => throw new NotSupportedException();
+        public Task EnsureWorkflowBindingAsync(string workflowRunId) => throw new NotSupportedException();
         public Task CancelAsync() => throw new NotSupportedException();
         public Task UpdateAsync(string title, string? body) => throw new NotSupportedException();
         public Task UpdateFullAsync(UpdateIssueData data) => throw new NotSupportedException();

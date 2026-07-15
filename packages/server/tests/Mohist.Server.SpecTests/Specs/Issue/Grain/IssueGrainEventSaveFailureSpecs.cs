@@ -7,7 +7,6 @@ using Mohist.Server.Infrastructure.Data;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Infrastructure.Data.Issue;
-using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Domain.Events;
@@ -173,7 +172,6 @@ public class IssueGrainEventSaveFailureSpecs
     {
         return new IssueGrain(
             stateStore,
-            services.GetRequiredService<IWorkflowRunStore>(),
             services.GetRequiredService<IssueWorkflowProfileRegistry>(),
             services.GetRequiredService<WorkflowQuerier>(),
             services.GetRequiredService<IDbContextFactory<MohistDbContext>>(),

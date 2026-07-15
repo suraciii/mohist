@@ -264,6 +264,58 @@ public class EpicEventPublishSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
+    public async Task CreateAsync_EventStoreFailure_DoesNotPersistEpic()
+    {
+        var (database, _) = CreateDatabaseWithRecordingEventStore();
+        var grain = CreateGrain(
+            database.Factory,
+            $"{ProjectId}:{EpicId}",
+            new ThrowingEventStore(),
+            new FakeTimeProvider());
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            grain.CreateAsync(ProjectId, "Uncommitted", null, "p1"));
+
+        await using var verify = database.CreateDbContext();
+        Assert.Empty(await verify.Epics.AsNoTracking().ToListAsync());
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Theory]
+    [InlineData("pause", "running")]
+    [InlineData("update", "idle")]
+    [InlineData("close", "idle")]
+    [InlineData("reopen", "done")]
+    public async Task Mutation_EventStoreFailure_DoesNotCommitEpicState(string operation, string initialStatus)
+    {
+        var (database, _) = CreateDatabaseWithRecordingEventStore();
+        await SeedEpicAsync(database, status: initialStatus);
+        var grain = CreateGrain(
+            database.Factory,
+            $"{ProjectId}:{EpicId}",
+            new ThrowingEventStore(),
+            new FakeTimeProvider());
+
+        Task mutation = operation switch
+        {
+            "pause" => (Task)grain.PauseAsync("blocked"),
+            "update" => grain.UpdateAsync("Changed", null, null),
+            "close" => grain.SetStatusAsync("closed"),
+            "reopen" => grain.ReopenAsync(),
+            _ => throw new InvalidOperationException(operation),
+        };
+        await Assert.ThrowsAsync<InvalidOperationException>(() => mutation);
+
+        await using var verify = database.CreateDbContext();
+        var row = await verify.Epics.AsNoTracking().SingleAsync(e => e.Id == EpicId);
+        Assert.Equal(initialStatus, row.Status);
+        Assert.Equal($"Epic {EpicId}", row.Title);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
     public async Task ExistingSingleIssueLinkUnlinkBehaviorAndDefaultListOrderingUnchanged()
     {
         // Regression check from T-001 acceptance: single link/unlink
