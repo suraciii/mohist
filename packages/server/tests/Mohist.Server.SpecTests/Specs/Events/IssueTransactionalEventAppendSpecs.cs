@@ -234,7 +234,7 @@ public class IssueTransactionalEventAppendSpecs : IAsyncLifetime
     }
 
     [Fact]
-    public async Task StageEpicAffiliation_LeavesConcurrentIssueChangesIntactAcrossLinkAndUnlink()
+    public async Task StageEpicAffiliation_RejectsStaleWritersAndReappliesFromCurrentIssueState()
     {
         var store = new IssueStore(_dbFactory, _eventStore, _grainFactory, NullLogger<IssueStore>.Instance);
         var issue = BuildIssue("issue_txn_atomic_affiliation", number: 18);
@@ -247,7 +247,9 @@ public class IssueTransactionalEventAppendSpecs : IAsyncLifetime
         afterLinkRead.Update("Changed after link snapshot read", null, null, null,
             new DateTime(2026, 7, 15, 0, 0, 0, DateTimeKind.Utc));
         await store.SaveAsync(afterLinkRead.Id, afterLinkRead);
-        await link.SaveChangesAsync();
+        await Assert.ThrowsAsync<DbUpdateConcurrencyException>(() => link.SaveChangesAsync());
+
+        await StageEpicAffiliationAsync(issue.Id, "epic_atomic");
 
         var linked = (await store.LoadAsync(issue.Id))!;
         Assert.Equal("Changed after link snapshot read", linked.Title);
@@ -261,7 +263,9 @@ public class IssueTransactionalEventAppendSpecs : IAsyncLifetime
         afterUnlinkRead.Update("Changed after unlink snapshot read", null, null, null,
             new DateTime(2026, 7, 15, 0, 1, 0, DateTimeKind.Utc));
         await store.SaveAsync(afterUnlinkRead.Id, afterUnlinkRead);
-        await unlink.SaveChangesAsync();
+        await Assert.ThrowsAsync<DbUpdateConcurrencyException>(() => unlink.SaveChangesAsync());
+
+        await StageEpicAffiliationAsync(issue.Id, null);
 
         var unlinked = (await store.LoadAsync(issue.Id))!;
         Assert.Equal("Changed after unlink snapshot read", unlinked.Title);

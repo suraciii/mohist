@@ -215,12 +215,14 @@ public class BackfillIssueEpicAffiliationMigrationSpecs
 
         await SeedWorkflowAsync(context, "wr_current_link", linked.IssueId, "epic_stale");
         await SeedWorkflowAsync(context, "wr_current_none", unlinked.IssueId, "epic_stale");
+        await SeedWorkflowAsync(context, "wr_unmatched_issue", "issue_missing", "epic_annotation");
 
         await migrator.MigrateAsync(AtomicSnapshotMigration);
         context.ChangeTracker.Clear();
 
         Assert.Equal("epic_current", (await context.WorkflowRuns.SingleAsync(row => row.WorkflowRunId == "wr_current_link")).EpicId);
         Assert.Null((await context.WorkflowRuns.SingleAsync(row => row.WorkflowRunId == "wr_current_none")).EpicId);
+        Assert.Equal("epic_annotation", (await context.WorkflowRuns.SingleAsync(row => row.WorkflowRunId == "wr_unmatched_issue")).EpicId);
     }
 
     private static Task SeedWorkflowAsync(MohistDbContext context, string workflowId, string issueId, string epicId)

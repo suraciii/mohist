@@ -194,9 +194,15 @@ public class EpicGrain : Grain, IEpicGrain
         }
     }
 
-    public async Task<IReadOnlyList<BatchMembershipOutcome>> LinkIssuesAsync(
+    public Task<IReadOnlyList<BatchMembershipOutcome>> LinkIssuesAsync(
         IReadOnlyList<BatchMembershipRequestItem> issues,
-        string projectId)
+        string projectId) =>
+        LinkIssuesAsync(issues, projectId, retryBudget: 3);
+
+    private async Task<IReadOnlyList<BatchMembershipOutcome>> LinkIssuesAsync(
+        IReadOnlyList<BatchMembershipRequestItem> issues,
+        string projectId,
+        int retryBudget)
     {
         if (issues.Count == 0)
             return Array.Empty<BatchMembershipOutcome>();
@@ -347,8 +353,9 @@ public class EpicGrain : Grain, IEpicGrain
             }
             catch (DbUpdateConcurrencyException)
             {
+                if (retryBudget == 0) throw;
                 var remaining = dedupByIssueId.Values.Skip(outcomes.Count).ToArray();
-                var retried = await LinkIssuesAsync(remaining, projectId);
+                var retried = await LinkIssuesAsync(remaining, projectId, retryBudget - 1);
                 outcomes.AddRange(retried);
                 if (hasLinkedAny)
                     await RecomputeProgressAsync();
@@ -465,9 +472,15 @@ public class EpicGrain : Grain, IEpicGrain
             StartFailureMode.PreserveRunning);
     }
 
-    public async Task<IReadOnlyList<BatchMembershipOutcome>> UnlinkIssuesAsync(
+    public Task<IReadOnlyList<BatchMembershipOutcome>> UnlinkIssuesAsync(
         IReadOnlyList<BatchMembershipRequestItem> issues,
-        string projectId)
+        string projectId) =>
+        UnlinkIssuesAsync(issues, projectId, retryBudget: 3);
+
+    private async Task<IReadOnlyList<BatchMembershipOutcome>> UnlinkIssuesAsync(
+        IReadOnlyList<BatchMembershipRequestItem> issues,
+        string projectId,
+        int retryBudget)
     {
         if (issues.Count == 0)
             return Array.Empty<BatchMembershipOutcome>();
@@ -529,8 +542,9 @@ public class EpicGrain : Grain, IEpicGrain
             }
             catch (DbUpdateConcurrencyException)
             {
+                if (retryBudget == 0) throw;
                 var remaining = dedupByIssueId.Values.Skip(outcomes.Count).ToArray();
-                var retried = await UnlinkIssuesAsync(remaining, projectId);
+                var retried = await UnlinkIssuesAsync(remaining, projectId, retryBudget - 1);
                 outcomes.AddRange(retried);
                 if (hasUnlinkedAny)
                     await RecomputeProgressAsync();

@@ -99,20 +99,24 @@ public class IssueGrain : Grain, IIssueGrain
     {
         RejectIfReloadRequired();
         if (_issue is null) return;
+        var changed = false;
         if (string.IsNullOrWhiteSpace(epicId))
         {
-            if (_issue.EpicId is null) return;
-            _issue.SetEpicId(null);
+            if (_issue.EpicId is not null)
+            {
+                _issue.SetEpicId(null);
+                changed = true;
+            }
         }
         else if (!string.Equals(_issue.EpicId, epicId, StringComparison.Ordinal))
         {
             _issue.SetEpicId(epicId);
+            changed = true;
         }
-        else
-        {
-            return;
-        }
-        await SaveIssueAsync();
+        if (changed)
+            await SaveIssueAsync();
+        if (!string.IsNullOrWhiteSpace(_issue.WorkflowRunId))
+            await _workflowRunStore.SynchronizeEpicAffiliationAsync(_issue.WorkflowRunId, _issue.Id);
     }
 
     public async Task<string?> ResolveRepositoryRefAsync(string projectId, string? repositoryRef)
@@ -265,7 +269,17 @@ public class IssueGrain : Grain, IIssueGrain
             throw;
         }
 
-        await _workflowRunStore.SynchronizeEpicAffiliationAsync(wrId, issue.Id);
+        try
+        {
+            await _workflowRunStore.SynchronizeEpicAffiliationAsync(wrId, issue.Id);
+        }
+        catch (DbUpdateConcurrencyException ex)
+        {
+            _log.LogWarning(ex,
+                "Issue {Key} started workflow {WrId} but lineage synchronization is deferred to membership recovery",
+                GrainKey,
+                wrId);
+        }
         _log.LogInformation("Issue {Key} started workflow {WrId}", GrainKey, wrId);
         return wrId;
     }

@@ -25,6 +25,13 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                 maxLength: 64,
                 nullable: true);
 
+            migrationBuilder.AddColumn<long>(
+                name: "LineageVersion",
+                table: "Issues",
+                type: "INTEGER",
+                nullable: false,
+                defaultValue: 1L);
+
             migrationBuilder.Sql(
                 """
                 UPDATE "Issues"
@@ -61,6 +68,10 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
             migrationBuilder.DropColumn(
                 name: "EpicId",
                 table: "WorkflowRuns");
+
+            migrationBuilder.DropColumn(
+                name: "LineageVersion",
+                table: "Issues");
         }
     }
 }

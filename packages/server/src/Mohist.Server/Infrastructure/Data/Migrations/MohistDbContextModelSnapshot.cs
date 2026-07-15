@@ -830,6 +830,12 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("TEXT");
 
+                    b.Property<long>("LineageVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(1L);
+
                     b.Property<bool?>("IsArchived")
                         .ValueGeneratedOnAddOrUpdate()
                         .HasColumnType("INTEGER")
@@ -881,7 +887,8 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.Property<string>("WorkflowRunId")
                         .ValueGeneratedOnAddOrUpdate()
                         .HasColumnType("TEXT")
-                        .HasComputedColumnSql("COALESCE(json_extract(State, '$.workflowRunId'), json_extract(State, '$.WorkflowRunId'))", true);
+                        .HasComputedColumnSql("COALESCE(json_extract(State, '$.workflowRunId'), json_extract(State, '$.WorkflowRunId'))", true)
+                        .IsConcurrencyToken();
 
                     b.HasKey("IssueId");
 

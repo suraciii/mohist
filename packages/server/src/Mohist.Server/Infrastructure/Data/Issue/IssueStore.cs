@@ -97,6 +97,7 @@ public class IssueStore : IIssueStore
         var row = await db.Issues.FindAsync(new object[] { issueId }, ct)
             ?? throw new InvalidOperationException($"Issue '{issueId}' was not found while staging epic affiliation.");
         row.EpicId = NormalizeEpicId(epicId);
+        row.LineageVersion++;
         return row.WorkflowRunId;
     }
 
@@ -111,6 +112,7 @@ public class IssueStore : IIssueStore
                 State = Serialize(state),
                 Risk = state.Risk,
                 EpicId = NormalizeEpicId(state.EpicId),
+                LineageVersion = 1,
             });
         }
         else
@@ -118,6 +120,7 @@ public class IssueStore : IIssueStore
             state.SetEpicId(row.EpicId);
             row.State = Serialize(state);
             row.Risk = state.Risk;
+            row.LineageVersion++;
         }
     }
 
