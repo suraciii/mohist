@@ -67,10 +67,23 @@ Mohist 字段。Action Input 不需要 `agent`、`kind` 或 `type`；使用哪�
 的 task 共享对话上下文；不同名称相互隔离。省略 `session` 时使用 Work ID，避免
 无意间把两个 task 放进同一段对话。
 
-同一个 AgentSession 可以在不同 task 中切换 OpenCode 模型或 `variant`，不会因此
-丢失上下文。Reset、工作目录变化，或未来改用另一种执行后端时，
-Mohist 会建立新的 Runtime Session，并把前后关系保存在同一个 AgentSession 的
-会话沿革中；不会偷偷把上下文搬到另一个后端。
+### 物理 Session 复用不变量
+
+同一 WorkflowRun 中，只要 task 指定同一个 `session` 名称，Mohist 就必须继续使用该
+AgentSession 当前绑定的同一个物理 OpenCode Session。task 变化、task 重试，以及
+`options.model` 或 `options.variant` 变化都不能替换这个物理 Session；模型选择只影响
+本次回合，并在原 Session 上生效。
+
+| 变化 | 物理 OpenCode Session |
+|---|---|
+| 后续 task 或重试继续使用同名 `session` | 保持不变 |
+| `options.model` 或 `options.variant` 变化 | 保持不变 |
+| Compact | 保持不变 |
+| Reset | 建立新的空 Session，并记录会话沿革 |
+| 工作目录或执行后端变化 | 建立新 Session，并记录会话沿革 |
+
+如果已绑定的物理 Session 无法继续，Mohist 必须明确失败并提示 Reset，不能静默建立
+新的物理 Session。不同 `session` 名称仍相互隔离，不能因为 prompt、模型或配置相同而合并。
 
 同一 AgentSession 同时只执行一个由 Workflow 发起的回合。不同 AgentSession 可以并行。
 用户在 Session 页面提交的 follow-up 是例外：当前回合仍在执行时，它会进入当前
