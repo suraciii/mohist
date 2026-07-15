@@ -31,6 +31,14 @@ export const SAMPLE_ISSUE = {
   workflowRunId: 'wr-1',
 }
 
+const SAMPLE_PROJECT = {
+  id: 'proj-1',
+  name: 'Test Project',
+  createdAt: FIXTURE_TIME,
+  updatedAt: FIXTURE_TIME,
+  repositories: [],
+}
+
 export const SAMPLE_WORKFLOW_RUN_SESSION = {
   id: 'session-1',
   workflowRunId: 'wr-1',
@@ -140,6 +148,8 @@ export function withFiles(files: DiffFile[]) {
 }
 
 export function useIssueChangedFilesPageFixture() {
+  const sessionResponseResolvers = new Set<() => void>()
+  let currentQueryClient: QueryClient | null = null
   const state = {
     issueData: SAMPLE_ISSUE as unknown,
     diffData: SAMPLE_DIFF_DATA as unknown,
@@ -147,46 +157,69 @@ export function useIssueChangedFilesPageFixture() {
     commitDiffData: {} as Record<string, unknown>,
     sessionsData: [SAMPLE_WORKFLOW_RUN_SESSION] as unknown[],
     fileContentHandler: vi.fn(),
+    issueRequestCount: 0,
+    diffRequestCount: 0,
+    commitsRequestCount: 0,
+    sessionsRequestCount: 0,
+    sessionsResponseCount: 0,
     blockIssue: false,
     issueError: false,
     blockDiff: false,
     diffError: false,
     blockCommits: false,
     commitsError: false,
+    blockSessions: false,
     commitDiffError: false,
     blockCommitDiff: false,
+    releaseSessionResponses: () => {
+      sessionResponseResolvers.forEach((resolve) => resolve())
+      sessionResponseResolvers.clear()
+    },
+    getSessionsQueryStatus: () => currentQueryClient
+      ?.getQueryState(['workflow-runs', 'wr-1', 'sessions'])
+      ?.status,
   }
   const queryClients = new Set<QueryClient>()
 
   function resetState() {
+    state.releaseSessionResponses()
     state.issueData = SAMPLE_ISSUE
     state.diffData = SAMPLE_DIFF_DATA
     state.commitsData = SAMPLE_COMMITS_DATA
     state.commitDiffData = {}
     state.sessionsData = [SAMPLE_WORKFLOW_RUN_SESSION]
     state.fileContentHandler.mockClear()
+    state.issueRequestCount = 0
+    state.diffRequestCount = 0
+    state.commitsRequestCount = 0
+    state.sessionsRequestCount = 0
+    state.sessionsResponseCount = 0
     state.blockIssue = false
     state.issueError = false
     state.blockDiff = false
     state.diffError = false
     state.blockCommits = false
     state.commitsError = false
+    state.blockSessions = false
     state.commitDiffError = false
     state.blockCommitDiff = false
   }
 
   useMswServer(
     http.get('*/api/projects/:projectId/issues/:issueNumber', () => {
+      state.issueRequestCount += 1
       if (state.blockIssue) return new Promise<never>(() => {})
       if (state.issueError) return HttpResponse.json({ success: false, error: 'failed' }, { status: 500 })
       return HttpResponse.json({ success: true, data: state.issueData })
     }),
     http.get('*/api/projects/:projectId/issues/:issueNumber/diff', () => {
+      state.diffRequestCount += 1
       if (state.blockDiff) return new Promise<never>(() => {})
       if (state.diffError) return HttpResponse.json({ success: false, error: 'failed' }, { status: 500 })
       return HttpResponse.json({ success: true, data: state.diffData })
     }),
     http.get('*/api/projects/:projectId/issues/:issueNumber/commits', () => {
+      state.commitsRequestCount += 1
       if (state.blockCommits) return new Promise<never>(() => {})
       if (state.commitsError) return HttpResponse.json({ success: false, error: 'failed' }, { status: 500 })
       return HttpResponse.json({ success: true, data: state.commitsData })
@@ -201,7 +234,12 @@ export function useIssueChangedFilesPageFixture() {
       state.fileContentHandler(Number(params.issueNumber), path)
       return HttpResponse.json({ success: true, data: { base: 'old line', head: 'new line' } })
     }),
-    http.get('*/api/workflow-runs/:workflowRunId/sessions', () => {
+    http.get('*/api/workflow-runs/:workflowRunId/sessions', async () => {
+      state.sessionsRequestCount += 1
+      if (state.blockSessions) {
+        await new Promise<void>((resolve) => sessionResponseResolvers.add(resolve))
+      }
+      state.sessionsResponseCount += 1
       return HttpResponse.json({ success: true, data: state.sessionsData })
     }),
   )
@@ -209,12 +247,16 @@ export function useIssueChangedFilesPageFixture() {
   function createQueryClient() {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     queryClients.add(queryClient)
+    currentQueryClient = queryClient
     return queryClient
   }
 
   function routes() {
     return (
       <Routes>
+        <Route path="/:projectName/issues/:number/files" element={<IssueChangedFilesPage />} />
+        <Route path="/:projectName/issues/:number/workflow/sessions/:sessionName" element={<div data-testid="session-page-stub">Session Page</div>} />
+        <Route path="/:projectName/issues/:number" element={<div>Issue Detail Page</div>} />
         <Route path="/issues/:number/files" element={<IssueChangedFilesPage />} />
         <Route path="/issues/:number/workflow/sessions/:sessionName" element={<div data-testid="session-page-stub">Session Page</div>} />
         <Route path="/issues/:number" element={<div>Issue Detail Page</div>} />
@@ -226,7 +268,7 @@ export function useIssueChangedFilesPageFixture() {
     const queryClient = createQueryClient()
     return (
       <QueryClientProvider client={queryClient}>
-        <ProjectProvider initialProjectId="proj-1">
+        <ProjectProvider initialProjectId="proj-1" initialProjects={[SAMPLE_PROJECT]}>
           <MemoryRouter initialEntries={[initialRoute]}>
             <LocationProbe />
             {routes()}
@@ -240,7 +282,7 @@ export function useIssueChangedFilesPageFixture() {
     const queryClient = createQueryClient()
     return (
       <QueryClientProvider client={queryClient}>
-        <ProjectProvider initialProjectId="proj-1">
+        <ProjectProvider initialProjectId="proj-1" initialProjects={[SAMPLE_PROJECT]}>
           <MemoryRouter initialEntries={[initialRoute]}>
             {routes()}
           </MemoryRouter>
@@ -264,6 +306,7 @@ export function useIssueChangedFilesPageFixture() {
     cleanup()
     queryClients.forEach((queryClient) => queryClient.clear())
     queryClients.clear()
+    currentQueryClient = null
     sessionStorage.clear()
   })
 

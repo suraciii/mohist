@@ -69,4 +69,3 @@
 | Fixture registers `/issues/:number/workflow/sessions/:sessionName` stub | `IssueChangedFilesPage.fixture.tsx:219` |
 | `npm run typecheck -w packages/web` passes | root command, see Verification |
 | `npm run test:run -w packages/web` passes; presence + absence scenarios | root command, see Verification |
-

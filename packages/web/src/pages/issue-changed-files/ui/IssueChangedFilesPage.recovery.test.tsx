@@ -21,6 +21,16 @@ describe('IssueChangedFilesPage', () => {
       expect(screen.getByTestId('issue-files-recovery-return')).toBeTruthy()
     })
 
+    it('renders the recovery surface with the mapped message and actions when commits are unavailable', async () => {
+      state.commitsData = { available: false, reason: 'runner_unavailable', message: 'runner not connected' }
+      renderPage()
+      await screen.findByTestId('issue-files-recovery-surface')
+      expect(screen.getByTestId('issue-files-recovery-message').textContent)
+        .toBe('The file changes could not be loaded. The runner may be disconnected.')
+      expect(screen.getByTestId('issue-files-recovery-retry')).toBeTruthy()
+      expect(screen.getByTestId('issue-files-recovery-return')).toBeTruthy()
+    })
+
     it('renders the recovery surface for workspace_removed', async () => {
       state.diffData = { available: false, reason: 'workspace_removed', message: '' }
       renderPage()
@@ -166,6 +176,11 @@ describe('IssueChangedFilesPage', () => {
         expect(screen.getByText('main')).toBeTruthy()
         expect(screen.getByText('mo/issue-123')).toBeTruthy()
       })
+      await waitFor(() => {
+        expect(state.issueRequestCount).toBe(2)
+        expect(state.diffRequestCount).toBe(2)
+        expect(state.commitsRequestCount).toBe(2)
+      })
     })
 
     it('keeps the recovery surface available with the same actions when the failure persists', async () => {
@@ -177,32 +192,37 @@ describe('IssueChangedFilesPage', () => {
       expect(screen.getByTestId('issue-files-recovery-return')).toBeTruthy()
       fireEvent.click(screen.getByTestId('issue-files-recovery-retry'))
       await waitFor(() => {
-        expect(screen.getByTestId('issue-files-recovery-surface')).toBe(surface)
+        expect(state.issueRequestCount).toBe(2)
+        expect(state.diffRequestCount).toBe(2)
+        expect(state.commitsRequestCount).toBe(2)
       })
+      expect(screen.getByTestId('issue-files-recovery-surface')).toBe(surface)
+      expect(screen.getByTestId('issue-files-recovery-retry')).toBeTruthy()
+      expect(screen.getByTestId('issue-files-recovery-return')).toBeTruthy()
     })
   })
 
   describe('return-to-issue action', () => {
-    it('navigates to /issues/<number> from a transport error', async () => {
+    it('navigates to the project-scoped issue route from a transport error', async () => {
       state.diffError = true
       state.diffData = undefined
       renderPage()
       await screen.findByTestId('issue-files-recovery-surface')
       fireEvent.click(screen.getByTestId('issue-files-recovery-return'))
-      expect(screen.getByTestId('current-path').textContent).toBe('/issues/123')
+      expect(screen.getByTestId('current-path').textContent).toBe('/Test%20Project/issues/123')
     })
 
-    it('navigates to /issues/<number> from server-reported unavailability', async () => {
+    it('navigates to the project-scoped issue route from server-reported unavailability', async () => {
       state.diffData = { available: false, reason: 'workspace_removed', message: '' }
       renderPage()
       await screen.findByTestId('issue-files-recovery-surface')
       fireEvent.click(screen.getByTestId('issue-files-recovery-return'))
-      expect(screen.getByTestId('current-path').textContent).toBe('/issues/123')
+      expect(screen.getByTestId('current-path').textContent).toBe('/Test%20Project/issues/123')
     })
   })
 
   describe('related-session link when a workflow-run session is known', () => {
-    it('renders the session link targeting /issues/<number>/workflow/sessions/<encodeURIComponent(sessionName)> when a session is resolved', async () => {
+    it('renders the session link targeting the project-scoped session route when a session is resolved', async () => {
       state.diffData = { available: false, reason: 'runner_unavailable', message: '' }
       renderPage()
       await screen.findByTestId('issue-files-recovery-surface')
@@ -213,7 +233,7 @@ describe('IssueChangedFilesPage', () => {
       fireEvent.click(sessionLink)
       await waitFor(() => {
         expect(screen.getByTestId('current-path').textContent)
-          .toBe('/issues/123/workflow/sessions/s-wr-1')
+          .toBe('/Test%20Project/issues/123/workflow/sessions/s-wr-1')
       })
       expect(screen.getByTestId('session-page-stub')).toBeTruthy()
     })
@@ -231,7 +251,7 @@ describe('IssueChangedFilesPage', () => {
       fireEvent.click(sessionLink)
       await waitFor(() => {
         expect(screen.getByTestId('current-path').textContent)
-          .toBe('/issues/123/workflow/sessions/session%20with%20spaces%20%26%20symbols%2Fabc')
+          .toBe('/Test%20Project/issues/123/workflow/sessions/session%20with%20spaces%20%26%20symbols%2Fabc')
       })
     })
 
@@ -240,6 +260,13 @@ describe('IssueChangedFilesPage', () => {
       state.issueData = undefined
       renderPage()
       await screen.findByTestId('issue-files-recovery-surface')
+      await waitFor(() => {
+        expect(state.issueRequestCount).toBe(1)
+        expect(state.diffRequestCount).toBe(1)
+        expect(state.commitsRequestCount).toBe(1)
+      })
+      expect(state.sessionsRequestCount).toBe(0)
+      expect(state.sessionsResponseCount).toBe(0)
       expect(screen.queryByTestId('issue-files-recovery-session')).toBeNull()
       expect(screen.getByTestId('issue-files-recovery-retry')).toBeTruthy()
       expect(screen.getByTestId('issue-files-recovery-return')).toBeTruthy()
@@ -248,8 +275,13 @@ describe('IssueChangedFilesPage', () => {
     it('omits the session link when no active/running/probing session is resolved', async () => {
       state.diffData = { available: false, reason: 'runner_unavailable', message: '' }
       state.sessionsData = []
+      state.blockSessions = true
       renderPage()
       await screen.findByTestId('issue-files-recovery-surface')
+      await waitFor(() => expect(state.sessionsRequestCount).toBe(1))
+      state.releaseSessionResponses()
+      await waitFor(() => expect(state.sessionsResponseCount).toBe(1))
+      await waitFor(() => expect(state.getSessionsQueryStatus()).toBe('success'))
       expect(screen.queryByTestId('issue-files-recovery-session')).toBeNull()
       expect(screen.getByTestId('issue-files-recovery-retry')).toBeTruthy()
       expect(screen.getByTestId('issue-files-recovery-return')).toBeTruthy()
@@ -261,8 +293,13 @@ describe('IssueChangedFilesPage', () => {
         ...(state.sessionsData[0] as Record<string, unknown>),
         status: 'completed',
       }]
+      state.blockSessions = true
       renderPage()
       await screen.findByTestId('issue-files-recovery-surface')
+      await waitFor(() => expect(state.sessionsRequestCount).toBe(1))
+      state.releaseSessionResponses()
+      await waitFor(() => expect(state.sessionsResponseCount).toBe(1))
+      await waitFor(() => expect(state.getSessionsQueryStatus()).toBe('success'))
       expect(screen.queryByTestId('issue-files-recovery-session')).toBeNull()
       expect(screen.getByTestId('issue-files-recovery-retry')).toBeTruthy()
       expect(screen.getByTestId('issue-files-recovery-return')).toBeTruthy()
