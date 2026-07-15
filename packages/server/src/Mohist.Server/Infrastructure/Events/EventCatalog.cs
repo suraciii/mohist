@@ -2,8 +2,12 @@ namespace Mohist.Server.Infrastructure.Events;
 
 /// <summary>
 /// Read-only inventory of every CloudEvents <c>type</c> value used in the system.
-/// This is a documentation / introspection surface, not a dispatch table — the bus
-/// dispatches on <see cref="CloudNative.CloudEvents.CloudEvent.Type"/> directly.
+/// This is the protocol registry: for every registered type, the catalog also
+/// declares the set of lineage attributes that type MUST always carry on its
+/// envelope (matching <c>design/event-protocol.md</c>). The bus dispatches on
+/// <see cref="CloudNative.CloudEvents.CloudEvent.Type"/> directly; this catalog
+/// is the single source of truth that producers stamp against and that the
+/// distributed conformance assertions call.
 /// </summary>
 public static class EventCatalog
 {
@@ -98,6 +102,126 @@ public static class EventCatalog
         ReverseDns.EpicReopened,
         ReverseDns.EpicStartAttemptFailed,
     };
+
+    // === Lineage attribute names ===
+    // Naming convention: short user-visible name is `issue`; internal ids carry
+    // the `id` suffix. The matrix below pins the protocol names — keep them in
+    // sync with `design/event-protocol.md`.
+    public static class Lineage
+    {
+        public const string ProjectId = "projectid";
+        public const string WorkflowRunId = "workflowrunid";
+        public const string IssueId = "issueid";
+        public const string Issue = "issue";
+        public const string EpicId = "epicid";
+        public const string Stage = "stage";
+        public const string AgentId = "agentid";
+        public const string SessionId = "sessionid";
+        public const string RunnerId = "runnerid";
+    }
+
+    private static readonly string[] WorkflowBase = [Lineage.ProjectId, Lineage.WorkflowRunId];
+    private static readonly string[] WorkflowStageBase = [Lineage.ProjectId, Lineage.WorkflowRunId, Lineage.Stage];
+
+    private static readonly Dictionary<string, IReadOnlyList<string>> LineageRequired = new(StringComparer.Ordinal)
+    {
+        // === workflow.run.* ===
+        [ReverseDns.WorkflowRunStarted] = WorkflowBase,
+        [ReverseDns.WorkflowRunResumed] = WorkflowBase,
+        [ReverseDns.WorkflowRunPaused] = WorkflowBase,
+        [ReverseDns.WorkflowRunStopped] = WorkflowBase,
+        [ReverseDns.WorkflowRunCompleted] = WorkflowBase,
+        [ReverseDns.WorkflowRunFailed] = WorkflowBase,
+        [ReverseDns.WorkflowRunRetrying] = WorkflowBase,
+        [ReverseDns.WorkflowRunRerunning] = WorkflowBase,
+
+        // === workflow.stage.* ===
+        [ReverseDns.StageStarted] = WorkflowStageBase,
+        [ReverseDns.StageCompleted] = WorkflowStageBase,
+        [ReverseDns.StageFailed] = WorkflowStageBase,
+        [ReverseDns.StageApprovalRequested] = WorkflowStageBase,
+        [ReverseDns.StageApprovalResolved] = WorkflowStageBase,
+
+        // === workflow.feedback.requested (structurally stage-bearing per D2) ===
+        [ReverseDns.FeedbackRequested] = WorkflowStageBase,
+
+        // === workflow.task.* ===
+        [ReverseDns.TaskStarted] = WorkflowStageBase,
+        [ReverseDns.TaskCompleted] = WorkflowStageBase,
+        [ReverseDns.TaskFailed] = WorkflowStageBase,
+
+        // === workflow.check.* ===
+        [ReverseDns.CheckStarted] = WorkflowStageBase,
+        [ReverseDns.CheckPassed] = WorkflowStageBase,
+        [ReverseDns.CheckFailed] = WorkflowStageBase,
+        [ReverseDns.CheckPending] = WorkflowStageBase,
+
+        // === workflow.* (artifact — workflow base, no stage per D2) ===
+        [ReverseDns.WorkflowArtifactRecorded] = WorkflowBase,
+
+        // === workflow.repair-scheduled (catalog-only, no producer today) ===
+        [ReverseDns.RepairScheduled] = WorkflowBase,
+
+        // === issue.* ===
+        [ReverseDns.IssueCompleted] = [Lineage.ProjectId, Lineage.IssueId, Lineage.Issue],
+        [ReverseDns.IssueCancelled] = [Lineage.ProjectId, Lineage.IssueId, Lineage.Issue],
+        [ReverseDns.IssueWorkStarted] = [Lineage.ProjectId, Lineage.IssueId, Lineage.Issue],
+        [ReverseDns.IssueCreated] = [Lineage.ProjectId, Lineage.IssueId, Lineage.Issue],
+        [ReverseDns.IssueLabelsChanged] = [Lineage.ProjectId, Lineage.IssueId, Lineage.Issue],
+        [ReverseDns.IssuePriorityChanged] = [Lineage.ProjectId, Lineage.IssueId, Lineage.Issue],
+        [ReverseDns.IssueDraftChanged] = [Lineage.ProjectId, Lineage.IssueId, Lineage.Issue],
+        [ReverseDns.IssuePrerequisiteAdded] = [Lineage.ProjectId, Lineage.IssueId, Lineage.Issue],
+        [ReverseDns.IssuePrerequisiteRemoved] = [Lineage.ProjectId, Lineage.IssueId, Lineage.Issue],
+        [ReverseDns.IssueWorkflowProfileChanged] = [Lineage.ProjectId, Lineage.IssueId, Lineage.Issue],
+        [ReverseDns.IssueArchived] = [Lineage.ProjectId, Lineage.IssueId, Lineage.Issue],
+        [ReverseDns.IssueUnarchived] = [Lineage.ProjectId, Lineage.IssueId, Lineage.Issue],
+        [ReverseDns.IssueReopened] = [Lineage.ProjectId, Lineage.IssueId, Lineage.Issue],
+
+        // === epic.* ===
+        [ReverseDns.EpicCreated] = [Lineage.ProjectId, Lineage.EpicId],
+        [ReverseDns.EpicUpdated] = [Lineage.ProjectId, Lineage.EpicId],
+        [ReverseDns.EpicPriorityChanged] = [Lineage.ProjectId, Lineage.EpicId],
+        [ReverseDns.EpicIssueLinked] = [Lineage.ProjectId, Lineage.EpicId],
+        [ReverseDns.EpicIssueUnlinked] = [Lineage.ProjectId, Lineage.EpicId],
+        [ReverseDns.EpicStatusChanged] = [Lineage.ProjectId, Lineage.EpicId],
+        [ReverseDns.EpicClosed] = [Lineage.ProjectId, Lineage.EpicId],
+        [ReverseDns.EpicReopened] = [Lineage.ProjectId, Lineage.EpicId],
+        [ReverseDns.EpicStartAttemptFailed] = [Lineage.ProjectId, Lineage.EpicId],
+
+        // === agent-session.* ===
+        [ReverseDns.AgentSessionRuntimeBound] = [Lineage.ProjectId, Lineage.SessionId],
+        [ReverseDns.AgentSessionUsageRecorded] = [Lineage.ProjectId, Lineage.SessionId],
+        [ReverseDns.AgentSessionModelChanged] = [Lineage.ProjectId, Lineage.SessionId],
+        [ReverseDns.AgentSessionContextCompacted] = [Lineage.ProjectId, Lineage.SessionId],
+        [ReverseDns.AgentSessionContextExhausted] = [Lineage.ProjectId, Lineage.SessionId],
+        [ReverseDns.AgentSessionContextHealthUpdated] = [Lineage.ProjectId, Lineage.SessionId],
+
+        // === runner.* (catalog-only: no producer today; projectid is conditional) ===
+        [ReverseDns.RunnerDisconnected] = [Lineage.RunnerId],
+
+        // === inbox-synthesized ===
+        [ReverseDns.InboxItemPersisted] = [Lineage.ProjectId, Lineage.IssueId, Lineage.Issue],
+    };
+
+    /// <summary>
+    /// The set of lineage attributes the given event <paramref name="type"/> MUST
+    /// carry on its envelope. Returns an empty list when <paramref name="type"/> is
+    /// not a protocol-tracked entry (e.g. transcript / legacy names that flow on a
+    /// dedicated channel). Conditional attributes (issueid/issue/epicid on
+    /// workflow.*, epicid on issue.*, agentid/issue/workflowrunid/stage on
+    /// agent-session.*, projectid on runner.*) are deliberately not modelled here:
+    /// those are validated by the producer-tasks' stamping scenarios, not by the
+    /// always-required matrix.
+    /// </summary>
+    public static IReadOnlyList<string> RequiredAttributes(string type) =>
+        LineageRequired.TryGetValue(type, out var required) ? required : [];
+
+    /// <summary>
+    /// Whether the given event <paramref name="type"/> is tracked by the protocol
+    /// registry (i.e. has a lineage declaration). Catalog-only types with no
+    /// producer today are still tracked so their required attributes are pinned.
+    /// </summary>
+    public static bool HasLineageDeclaration(string type) => LineageRequired.ContainsKey(type);
 
     /// <summary>
     /// Reverse-DNS type values for new emits. Producers should prefer these over

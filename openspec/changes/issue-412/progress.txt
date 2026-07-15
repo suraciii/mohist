@@ -1,0 +1,59 @@
+T-001 progress
+
+## Codebase Patterns
+
+- Tests collocated near code: UnitTests in `packages/server/tests/Mohist.Server.UnitTests/Events/`, namespace `Mohist.Server.UnitTests.Events`.
+- New `CloudEvent(...)` is built via named parameters; extensions are usually passed as a `Dictionary<string, string>(StringComparer.Ordinal)` (confirmed in spec tests, e.g. `IssueTransactionalEventAppendSpecs`). Use the same comparer convention when constructing envelopes for conformance assertions.
+- The existing `CloudEvent` type is `Mohist.Server.Infrastructure.Events.CloudEvent` (non-generic, takes `JsonElement?` data). Use it as-is; do NOT introduce a second envelope type.
+- `EventCatalog.All` is a flat `IReadOnlyList<string>` referenced from `tests/Mohist.Server.UnitTests/Sessions/AgentSessionEventSerializerTests.cs:20-26`, `tests/Mohist.Server.UnitTests/Workflow/Artifacts/WorkflowArtifactDomainTests.cs:44-48`, and `tests/Mohist.Server.SpecTests/Specs/Epic/Grain/EpicEventPublishSpecs.cs:344-362`. Keep it as a derived/introspection surface (any new `ReverseDns` constants must appear in `All` for those tests). The unit test `EventCatalog_IncludesTranscriptRuntimeEventTypes` asserts legacy transcript names are still in `All`.
+- `Directory.Build.props` sets `TreatWarningsAsErrors=true`; unused private fields/members must be either referenced or removed (the registry's `ReverseDns`, `Lineage`, `All`, `RequiredAttributes`, `HasLineageDeclaration` are all referenced by tests/external code).
+
+## T-001 decisions / layout (for downstream tasks)
+
+- `EventCatalog.cs` now exposes:
+  - `All` (unchanged): flat `IReadOnlyList<string>` of every registered type.
+  - `ReverseDns.*` (unchanged): typed constants for emits.
+  - `Lineage.*` (NEW): typed constants for the lineage attribute protocol names (`projectid`, `workflowrunid`, `issueid`, `issue`, `epicid`, `stage`, `agentid`, `sessionid`, `runnerid`). Prefer these over string literals when stamping.
+  - `RequiredAttributes(string type)` (NEW): the always-required matrix per type. Empty list when the type has no lineage declaration (transcript / legacy names).
+  - `HasLineageDeclaration(string type)` (NEW): whether the protocol tracks that type. Useful for skipping non-protocol events in conformance checks.
+- `EnvelopeConformance.cs` (NEW, sibling of `EventCatalog.cs` in `Infrastructure/Events/`):
+  - `Missing(envelope)` / `Missing(extensions, type)`: returns the list of required attributes that are absent.
+  - `AssertRequired(envelope)` / `AssertRequired(extensions, type)`: throws `EnvelopeConformanceException` listing the missing attributes when the envelope fails. Empty values count as missing (lineage is omitted, never empty).
+  - Unknown / out-of-protocol types are a no-op (empty required list).
+  - Exception type `EnvelopeConformanceException : Exception` exposes `EventType` and `MissingAttributes`.
+
+## Matrix (pinned here — producers stamp to match)
+
+| Family | Always-required lineage |
+|---|---|
+| `workflow.run.*` (8 types) | `{projectid, workflowrunid}` |
+| `workflow.stage.*` (5) + `workflow.feedback.requested` | `{projectid, workflowrunid, stage}` |
+| `workflow.task.*` (3) | `{projectid, workflowrunid, stage}` |
+| `workflow.check.*` (4, includes catalog-only `check.started`) | `{projectid, workflowrunid, stage}` |
+| `workflow.artifact.recorded` | `{projectid, workflowrunid}` (NOT stage-bearing per D2) |
+| `workflow.repair-scheduled` (catalog-only) | `{projectid, workflowrunid}` |
+| `issue.*` (13) | `{projectid, issueid, issue}` |
+| `epic.*` (9) | `{projectid, epicid}` |
+| `agent-session.*` (6) | `{projectid, sessionid}` |
+| `runner.disconnected` (catalog-only) | `{runnerid}` |
+| `com.mohist.inbox.item-persisted` | `{projectid, issueid, issue}` |
+
+Conditional/affiliation-dependent attributes that are NOT in the always-required matrix (validated by producer-tasks' stamping scenarios instead):
+- `workflow.*`: `issueid`, `issue`, `epicid` — present iff the run's metadata annotations / Issue.EpicId has it at emit time.
+- `issue.*`: `epicid` — present iff `Issue.EpicId` is non-null at emit time (D5 denormalization, written by T-004).
+- `agent-session.*`: `agentid` when the session originates from an agent; `issue`, `workflowrunid`, `stage` when it originates from a workflow/issue.
+- `runner.*`: `projectid` when present (no producer today).
+
+## Gotchas
+
+- T-002 etc. must stamp `stage` via STRUCTURAL inspection of the `WorkflowEvent` union variants (per D2), NOT by `type` prefix. The variants that carry a `Stage` member are: `Stage*`, `StageApproval*`, `FeedbackRequested`, `Task*`, `Check*`. `WorkflowArtifactRecorded` (workflow.artifact.recorded) has no `Stage` and must NOT get a stage stamp. `workflow.check.started` has no producer today (catalog-only).
+- The conformance `Missing` helper treats null AND empty-string values as missing. Do not stamp `""` for absent affiliation — omission IS the contract.
+- `ReverseDns.WorkflowRunStopped` and `WorkflowRunPaused` are declared in `All` and the matrix — make sure any consumer-driven type filter (`string.Equals(type, WorkflowRunCompleted)` etc.) is still correct after stamping changes.
+- `RunnerDisconnected` has only `runnerid` in the always-required set (no `projectid`). If a producer is added later, the matrix should be raised to include `projectid` whenever it is present.
+
+## Verification
+
+- Server build: `dotnet build packages/server/src/Mohist.Server/Mohist.Server.csproj -p:SkipWebBuild=true` is clean (0 warn, 0 err).
+- Unit tests: `dotnet test packages/server/tests/Mohist.Server.UnitTests/Mohist.Server.UnitTests.csproj` — all 1365 pass (incl. 22 new tests in `Events/EventCatalogTests.cs`).
+- ArchTests: all 22 pass.
+- Existing `EventCatalog.All` callers compile and remain unchanged.
