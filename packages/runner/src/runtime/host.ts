@@ -9,6 +9,7 @@ import { createDefaultRegistry } from "../actions/registry.js"
 import "../core/prompt-registry.js"
 import { WorkspaceManager } from "./workspace.js"
 import { WorkspaceRegistry } from "./workspace-registry.js"
+import { SessionCommandJournal } from "./session-command-journal.js"
 import { ConvergenceBackstop, ServerConnectionConvergenceAdapter } from "./cleanup-convergence.js"
 import { CleanupLoop, DefaultCleanupRunner } from "./cleanup-loop.js"
 import { WorkExecutor } from "./executor.js"
@@ -76,6 +77,7 @@ export class RunnerHost {
   private readonly signalR: RunnerSignalRClient
   private readonly workspace: WorkspaceManager
   private readonly workspaceRegistry: WorkspaceRegistry
+  private readonly sessionCommandJournal: SessionCommandJournal
   private readonly convergence: ConvergenceBackstop
   private readonly cleanupLoop: CleanupLoop
   private readonly cleanupConvergenceIntervalMs: number
@@ -121,6 +123,7 @@ export class RunnerHost {
     // verify registration hooks) and RunnerSignalRClient (for the
     // RemoveWorkspace entry-removal hook).
     this.workspaceRegistry = new WorkspaceRegistry(options.runnerRoot)
+    this.sessionCommandJournal = new SessionCommandJournal(options.runnerRoot)
     this.convergence = new ConvergenceBackstop(
       this.workspaceRegistry,
       new ServerConnectionConvergenceAdapter(this.connection),
@@ -141,6 +144,8 @@ export class RunnerHost {
         serverConnection: this.connection,
         followupTargetResolver: (target) => this.resolveFollowupTarget(target),
         sessionCommandHandler: (request) => this.handleSessionCommand(request),
+        sessionCommandJournal: this.sessionCommandJournal,
+        reconcileStartedSessionCommand: (request) => this.reconcileStartedSessionCommand(request),
         registry: this.workspaceRegistry,
       },
     )
@@ -152,6 +157,10 @@ export class RunnerHost {
       return { ok: false, error: "conflict" }
     }
     return { ok: false, error: "unavailable" }
+  }
+
+  private reconcileStartedSessionCommand(_request: SessionCommandRequest) {
+    return { state: "indeterminate" } as const
   }
 
   // Issue-129 T-004: branches on `target.kind` so the same resolver
@@ -186,6 +195,7 @@ export class RunnerHost {
       } catch (error) {
         console.error("failed to load workspace registry; starting empty:", error)
       }
+      await this.sessionCommandJournal.load()
       await this.connectRunner(signal)
       await this.initializeSharedConnection(signal)
       // Startup convergence: pick up any terminal events the runner

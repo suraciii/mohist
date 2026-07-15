@@ -1,4 +1,5 @@
 import type * as signalR from "@microsoft/signalr"
+import type { SessionCommandJournalStore } from "../runtime/session-command-journal.js"
 
 export type SessionCommand = "compact" | "reset"
 export type SessionCommandError = "conflict" | "missing" | "unavailable"
@@ -11,7 +12,7 @@ export interface SessionCommandRequest {
   workDir: string | null
   command: SessionCommand
   expectedRuntimeSessionId?: string | null
-  operationId?: string
+  operationId: string
 }
 
 export interface SessionCommandResult {
@@ -24,61 +25,76 @@ export type SessionCommandHandler = (
   request: SessionCommandRequest,
 ) => Promise<SessionCommandResult> | SessionCommandResult
 
+export type SessionCommandReconciliation =
+  | { state: "completed"; result: SessionCommandResult }
+  | { state: "not-started" }
+  | { state: "indeterminate" }
+
+export type SessionCommandReconciler = (
+  request: SessionCommandRequest,
+) => Promise<SessionCommandReconciliation> | SessionCommandReconciliation
+
 export interface SessionCommandHandlerDeps {
   handler?: SessionCommandHandler | null
-}
-
-const MAX_RETAINED_RESET_OPERATIONS = 256
-
-interface ResetOperation {
-  result: Promise<SessionCommandResult>
-  completed: boolean
+  journal?: SessionCommandJournalStore | null
+  reconcileStarted?: SessionCommandReconciler | null
 }
 
 export function registerSessionCommandHandler(
   conn: signalR.HubConnection,
   deps: SessionCommandHandlerDeps,
 ): void {
-  const resetOperations = new Map<string, ResetOperation>()
+  const inFlight = new Map<string, Promise<SessionCommandResult>>()
   conn.on("SessionCommand", async (request: SessionCommandRequest | null | undefined) => {
-    if (!isSessionCommandRequest(request) || !deps.handler) {
+    const handler = deps.handler
+    const journal = deps.journal
+    if (!isSessionCommandRequest(request) || !handler || !journal) {
       return { ok: false, error: "unavailable" } satisfies SessionCommandResult
     }
 
+    const key = JSON.stringify([request.sessionId, request.operationId])
+    const existing = inFlight.get(key)
+    if (existing) return await existing
+
+    const operation = handleCommand(request, handler, journal, deps.reconcileStarted)
+    inFlight.set(key, operation)
     try {
-      if (request.command !== "reset") return validateResult(request, await deps.handler(request))
-
-      const operationId = request.operationId!
-      const existing = resetOperations.get(operationId)
-      if (existing) return await existing.result
-
-      discardOldestCompletedResetOperation(resetOperations)
-      if (resetOperations.size >= MAX_RETAINED_RESET_OPERATIONS) {
-        return { ok: false, error: "unavailable" } satisfies SessionCommandResult
-      }
-
-      const operation: ResetOperation = {
-        result: Promise.resolve(deps.handler(request)).then((result) => validateResult(request, result)),
-        completed: false,
-      }
-      resetOperations.set(operationId, operation)
-      try {
-        return await operation.result
-      } finally {
-        operation.completed = true
-      }
+      return await operation
     } catch {
       return { ok: false, error: "unavailable" } satisfies SessionCommandResult
+    } finally {
+      inFlight.delete(key)
     }
   })
 }
 
-function discardOldestCompletedResetOperation(operations: Map<string, ResetOperation>): void {
-  for (const [operationId, operation] of operations) {
-    if (!operation.completed) continue
-    operations.delete(operationId)
-    return
+async function handleCommand(
+  request: SessionCommandRequest,
+  handler: SessionCommandHandler,
+  journal: SessionCommandJournalStore,
+  reconcileStarted?: SessionCommandReconciler | null,
+): Promise<SessionCommandResult> {
+  const existing = await journal.get(request.sessionId, request.operationId)
+  if (existing) {
+    if (!sameRequest(existing.request, request)) return unavailable()
+    if (existing.state === "completed") return existing.result!
+
+    const reconciled = reconcileStarted
+      ? await reconcileStarted(request)
+      : { state: "indeterminate" } as const
+    if (reconciled.state === "indeterminate") return unavailable()
+    if (reconciled.state === "completed") {
+      const result = validateResult(request, reconciled.result)
+      if (result.error === "unavailable") return result
+      await journal.complete(request, result)
+      return result
+    }
   }
+
+  await journal.start(request)
+  const result = validateResult(request, await handler(request))
+  if (result.error !== "unavailable") await journal.complete(request, result)
+  return result
 }
 
 function validateResult(request: SessionCommandRequest, result: SessionCommandResult): SessionCommandResult {
@@ -105,7 +121,8 @@ function isSessionCommandRequest(value: unknown): value is SessionCommandRequest
     && (typeof request.workDir === "string" || request.workDir === null)
     && (request.command === "compact" || request.command === "reset")
     && (request.expectedRuntimeSessionId === undefined || request.expectedRuntimeSessionId === null || typeof request.expectedRuntimeSessionId === "string")
-    && (request.operationId === undefined || typeof request.operationId === "string")
+    && typeof request.operationId === "string"
+    && request.operationId.length > 0
     && isValidCommandBinding(request)
 }
 
@@ -113,10 +130,25 @@ function isValidCommandBinding(request: Partial<SessionCommandRequest>): boolean
   if (request.command === "compact") {
     return request.runtimeSessionId !== null
       && request.expectedRuntimeSessionId == null
-      && (request.operationId === undefined || request.operationId.length > 0)
+      && (request.operationId?.length ?? 0) > 0
   }
 
   return typeof request.operationId === "string"
     && request.operationId.length > 0
     && request.expectedRuntimeSessionId === request.runtimeSessionId
+}
+
+function sameRequest(left: SessionCommandRequest, right: SessionCommandRequest): boolean {
+  return left.sessionId === right.sessionId
+    && left.runtime === right.runtime
+    && left.runtimeSessionId === right.runtimeSessionId
+    && left.runnerId === right.runnerId
+    && left.workDir === right.workDir
+    && left.command === right.command
+    && left.expectedRuntimeSessionId === right.expectedRuntimeSessionId
+    && left.operationId === right.operationId
+}
+
+function unavailable(): SessionCommandResult {
+  return { ok: false, error: "unavailable" }
 }

@@ -36,6 +36,7 @@ export interface SessionDataSourceResult {
   healthStatus: string | null
 
   hasRecoveryActions: boolean
+  recoveryAvailable?: boolean
   recoverySessionName: string | null
   recoverySessionId?: string | null
   runtimeSessionLineage: RuntimeSessionLineageEntry[] | null

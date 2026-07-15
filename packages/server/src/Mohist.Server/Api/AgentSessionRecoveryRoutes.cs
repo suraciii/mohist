@@ -78,11 +78,12 @@ public static class AgentSessionRecoveryRoutes
             var commandResult = await commands.DispatchAsync(request, ct);
             if (MapCommandResult(request, commandResult) is { } commandFailure)
             {
-                await grain.AbandonResetAsync(request.OperationId!);
+                if (IsDefinitiveNoEffect(commandResult))
+                    await grain.AbandonResetAsync(request.OperationId);
                 return commandFailure;
             }
 
-            var result = await grain.CompleteCompactAsync(new CompleteCompactAgentSessionCommand(request.OperationId!));
+            var result = await grain.CompleteCompactAsync(new CompleteCompactAgentSessionCommand(request.OperationId));
             return ApiResults.Ok(result);
         }
         catch (RuntimeSessionMissingException ex)
@@ -91,8 +92,6 @@ public static class AgentSessionRecoveryRoutes
         }
         catch (InvalidOperationException ex) when (ex.Message.Contains("currently active", StringComparison.OrdinalIgnoreCase))
         {
-            if (!string.IsNullOrWhiteSpace(request?.OperationId))
-                await grain.AbandonResetAsync(request.OperationId);
             return ApiResults.Conflict(ex.Message, "session_active", new { sessionId });
         }
         catch (RecoveryOperationInProgressException ex)
@@ -101,8 +100,6 @@ public static class AgentSessionRecoveryRoutes
         }
         catch
         {
-            if (!string.IsNullOrWhiteSpace(request?.OperationId))
-                await grain.AbandonResetAsync(request.OperationId);
             throw;
         }
     }
@@ -121,12 +118,13 @@ public static class AgentSessionRecoveryRoutes
             var commandResult = await commands.DispatchAsync(request, ct);
             if (MapCommandResult(request, commandResult) is { } commandFailure)
             {
-                await grain.AbandonResetAsync(request.OperationId!);
+                if (IsDefinitiveNoEffect(commandResult))
+                    await grain.AbandonResetAsync(request.OperationId);
                 return commandFailure;
             }
 
             var result = await grain.CompleteResetAsync(new CompleteResetAgentSessionCommand(
-                request.OperationId!,
+                request.OperationId,
                 commandResult.RuntimeSessionId!,
                 request.Runtime));
             return ApiResults.Ok(result);
@@ -137,8 +135,6 @@ public static class AgentSessionRecoveryRoutes
         }
         catch (StaleRuntimeSessionBindingException ex)
         {
-            if (!string.IsNullOrWhiteSpace(request?.OperationId))
-                await grain.AbandonResetAsync(request.OperationId);
             return ApiResults.Conflict(
                 ex.Message,
                 "stale_binding",
@@ -150,8 +146,6 @@ public static class AgentSessionRecoveryRoutes
         }
         catch (InvalidOperationException ex) when (ex.Message.Contains("currently active", StringComparison.OrdinalIgnoreCase))
         {
-            if (!string.IsNullOrWhiteSpace(request?.OperationId))
-                await grain.AbandonResetAsync(request.OperationId);
             return ApiResults.Conflict(ex.Message, "session_active", new { sessionId });
         }
         catch (RecoveryOperationInProgressException ex)
@@ -160,8 +154,6 @@ public static class AgentSessionRecoveryRoutes
         }
         catch
         {
-            if (!string.IsNullOrWhiteSpace(request?.OperationId))
-                await grain.AbandonResetAsync(request.OperationId);
             throw;
         }
     }
@@ -204,6 +196,11 @@ public static class AgentSessionRecoveryRoutes
             _ => InvalidRunnerResult(request.SessionId),
         };
     }
+
+    private static bool IsDefinitiveNoEffect(SessionCommandResult result) =>
+        !result.Ok
+        && result.RuntimeSessionId is null
+        && result.Error is SessionCommandError.Conflict or SessionCommandError.Missing;
 
     private static IResult RuntimeSessionMissingResult(RuntimeSessionMissingException ex) =>
         ApiResults.Conflict(

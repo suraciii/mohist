@@ -50,6 +50,7 @@ export interface SessionRecoveryActionsProps {
   sessionName: string
   genericSessionId?: string
   status: string | null | undefined
+  recoveryAvailable?: boolean
   onSuccess?: () => void
   className?: string
   compactLabel?: string
@@ -89,6 +90,7 @@ export function SessionRecoveryActions({
   sessionName,
   genericSessionId,
   status,
+  recoveryAvailable,
   onSuccess,
   className,
   compactLabel = 'Compact',
@@ -98,7 +100,7 @@ export function SessionRecoveryActions({
   genericClients = defaultGenericClients,
 }: SessionRecoveryActionsProps) {
   const { projectId } = useProject()
-  const active = isSessionActive(status)
+  const active = recoveryAvailable === undefined ? isSessionActive(status) : !recoveryAvailable
   const [resetDialogOpen, setResetDialogOpen] = useState(false)
   const [inlineError, setInlineError] = useState<string | null>(null)
 

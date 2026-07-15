@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Runner.Grains;
@@ -149,6 +150,155 @@ public class AgentSessionRecoveryApiSpecs
         using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         Assert.Equal("runner_invalid_response", doc.RootElement.GetProperty("code").GetString());
         Assert.Equal(currentSession.Id, (await _fixture.Grains.GetGrain<IAgentSessionGrain>(currentSession.Id).GetAsync())?.AgentSessionId);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Theory]
+    [InlineData("compact", false)]
+    [InlineData("compact", true)]
+    [InlineData("reset", false)]
+    [InlineData("reset", true)]
+    public async Task RecoveryEndpoint_AmbiguousRunnerResult_ReusesThePersistedOperation(string operation, bool malformed)
+    {
+        var (project, issue, _, currentSession) = await CreateAndStartSessionAsync(
+            $"{operation}-ambiguous-{malformed}",
+            sessionName: "build",
+            attachIdle: true);
+        var requests = new List<SessionCommandRequest>();
+        RunnerHub.SetInvocationResponseFactory("SessionCommand", arguments =>
+        {
+            var request = Assert.IsType<SessionCommandRequest>(Assert.Single(arguments));
+            requests.Add(request);
+            if (requests.Count == 1)
+            {
+                if (!malformed)
+                    return new SessionCommandResult(Ok: false, Error: SessionCommandError.Unavailable);
+                return request.Command == SessionCommandKind.Compact
+                    ? new SessionCommandResult(Ok: true, RuntimeSessionId: "unexpected")
+                    : new SessionCommandResult(Ok: true);
+            }
+
+            return request.Command == SessionCommandKind.Compact
+                ? new SessionCommandResult(Ok: true)
+                : new SessionCommandResult(Ok: true, RuntimeSessionId: $"{request.RuntimeSessionId}-replacement");
+        });
+
+        using var first = await _client.PostAsync(
+            $"/api/projects/{project.Id}/issues/{issue.Number}/sessions/build/{operation}",
+            content: null);
+        Assert.Equal(malformed ? HttpStatusCode.BadGateway : HttpStatusCode.ServiceUnavailable, first.StatusCode);
+
+        using var retry = await _client.PostAsync(
+            $"/api/projects/{project.Id}/issues/{issue.Number}/sessions/build/{operation}",
+            content: null);
+        Assert.Equal(HttpStatusCode.OK, retry.StatusCode);
+        Assert.Equal(2, requests.Count);
+        Assert.Equal(requests[0].OperationId, requests[1].OperationId);
+
+        var state = await _fixture.Grains.GetGrain<IAgentSessionGrain>(currentSession.Id).GetAsync();
+        Assert.Equal(operation == "compact" ? currentSession.Id : $"{currentSession.Id}-replacement", state?.AgentSessionId);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Theory]
+    [InlineData("compact")]
+    [InlineData("reset")]
+    public async Task RecoveryEndpoint_TimedOutRunnerResponse_RetriesThePersistedOperation(string operation)
+    {
+        var (project, issue, _, currentSession) = await CreateAndStartSessionAsync(
+            $"{operation}-timeout-retry",
+            sessionName: "build",
+            attachIdle: true);
+        var dispatched = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var delayedResult = new TaskCompletionSource<SessionCommandResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var requests = new List<SessionCommandRequest>();
+        RunnerHub.SetInvocationResponseFactory("SessionCommand", arguments =>
+        {
+            var request = Assert.IsType<SessionCommandRequest>(Assert.Single(arguments));
+            requests.Add(request);
+            if (requests.Count == 1)
+            {
+                dispatched.TrySetResult();
+                return delayedResult.Task;
+            }
+
+            return request.Command == SessionCommandKind.Compact
+                ? new SessionCommandResult(Ok: true)
+                : new SessionCommandResult(Ok: true, RuntimeSessionId: $"{request.RuntimeSessionId}-replacement");
+        });
+
+        var first = _client.PostAsync(
+            $"/api/projects/{project.Id}/issues/{issue.Number}/sessions/build/{operation}",
+            content: null);
+        await dispatched.Task;
+        _fixture.TimeProvider.Advance(TimeSpan.FromSeconds(15));
+
+        using var timedOut = await first;
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, timedOut.StatusCode);
+
+        using var retry = await _client.PostAsync(
+            $"/api/projects/{project.Id}/issues/{issue.Number}/sessions/build/{operation}",
+            content: null);
+        Assert.Equal(HttpStatusCode.OK, retry.StatusCode);
+        Assert.Equal(2, requests.Count);
+        Assert.Equal(requests[0].OperationId, requests[1].OperationId);
+
+        var state = await LoadSessionStateAsync(currentSession.Id);
+        Assert.Equal(operation == "compact" ? 1 : 2, state.Status.RuntimeSessionLineage?.Count);
+        Assert.Equal(operation == "compact" ? currentSession.Id : $"{currentSession.Id}-replacement", state.Status.AgentRuntimeSessionId);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Theory]
+    [InlineData("compact")]
+    [InlineData("reset")]
+    public async Task RecoveryEndpoint_CancelledRequest_RetriesThePersistedOperation(string operation)
+    {
+        var (project, issue, _, currentSession) = await CreateAndStartSessionAsync(
+            $"{operation}-cancel-retry",
+            sessionName: "build",
+            attachIdle: true);
+        var dispatched = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var delayedResult = new TaskCompletionSource<SessionCommandResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var requests = new List<SessionCommandRequest>();
+        RunnerHub.SetInvocationResponseFactory("SessionCommand", arguments =>
+        {
+            var request = Assert.IsType<SessionCommandRequest>(Assert.Single(arguments));
+            requests.Add(request);
+            if (requests.Count == 1)
+            {
+                dispatched.TrySetResult();
+                return delayedResult.Task;
+            }
+
+            return request.Command == SessionCommandKind.Compact
+                ? new SessionCommandResult(Ok: true)
+                : new SessionCommandResult(Ok: true, RuntimeSessionId: $"{request.RuntimeSessionId}-replacement");
+        });
+
+        using var cancellation = new CancellationTokenSource();
+        var first = _client.PostAsync(
+            $"/api/projects/{project.Id}/issues/{issue.Number}/sessions/build/{operation}",
+            content: null,
+            cancellation.Token);
+        await dispatched.Task;
+        cancellation.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => first);
+
+        using var retry = await _client.PostAsync(
+            $"/api/projects/{project.Id}/issues/{issue.Number}/sessions/build/{operation}",
+            content: null);
+        Assert.Equal(HttpStatusCode.OK, retry.StatusCode);
+        Assert.Equal(2, requests.Count);
+        Assert.Equal(requests[0].OperationId, requests[1].OperationId);
+
+        var state = await LoadSessionStateAsync(currentSession.Id);
+        Assert.Equal(operation == "compact" ? 1 : 2, state.Status.RuntimeSessionLineage?.Count);
+        Assert.Equal(operation == "compact" ? currentSession.Id : $"{currentSession.Id}-replacement", state.Status.AgentRuntimeSessionId);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -617,6 +767,17 @@ public class AgentSessionRecoveryApiSpecs
         var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
         await grain.DeactivateForTestAsync();
         _ = await grain.GetAsync();
+    }
+
+    private async Task<AgentSession> LoadSessionStateAsync(string sessionId)
+    {
+        await using var db = await _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>().CreateDbContextAsync();
+        var state = await db.AgentSessions.AsNoTracking()
+            .Where(row => row.Id == sessionId)
+            .Select(row => row.State)
+            .SingleAsync();
+        return JsonSerializer.Deserialize<AgentSession>(state, JSON.Options)
+            ?? throw new InvalidOperationException($"Session {sessionId} state could not be deserialized.");
     }
 
     private static async Task<string[]> AssertRecoveryResponseAsync(

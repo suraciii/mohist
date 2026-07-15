@@ -11,15 +11,18 @@ public sealed class RunnerSessionCommandDispatcher : ISessionCommandDispatcher
     private readonly IHubContext<RunnerHub> _hub;
     private readonly RunnerConnectionTracker _connections;
     private readonly ILogger<RunnerSessionCommandDispatcher> _log;
+    private readonly TimeProvider _timeProvider;
 
     public RunnerSessionCommandDispatcher(
         IHubContext<RunnerHub> hub,
         RunnerConnectionTracker connections,
-        ILogger<RunnerSessionCommandDispatcher> log)
+        ILogger<RunnerSessionCommandDispatcher> log,
+        TimeProvider timeProvider)
     {
         _hub = hub;
         _connections = connections;
         _log = log;
+        _timeProvider = timeProvider;
     }
 
     public async Task<SessionCommandResult> DispatchAsync(
@@ -30,15 +33,21 @@ public sealed class RunnerSessionCommandDispatcher : ISessionCommandDispatcher
         if (string.IsNullOrWhiteSpace(connectionId))
             return Unavailable();
 
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeout.CancelAfter(RequestTimeout);
-
         try
         {
-            return await _hub.Clients.Client(connectionId).InvokeAsync<SessionCommandResult?>(
+            using var timeoutCancellation = new CancellationTokenSource();
+            var timeout = Task.Delay(RequestTimeout, _timeProvider, timeoutCancellation.Token);
+            var invocation = _hub.Clients.Client(connectionId).InvokeAsync<SessionCommandResult?>(
                 HubMethod,
                 request,
-                timeout.Token) ?? Unavailable();
+                ct);
+            var response = invocation.WaitAsync(ct);
+
+            if (await Task.WhenAny(response, timeout) == timeout)
+                return Unavailable();
+
+            timeoutCancellation.Cancel();
+            return await response ?? Unavailable();
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {

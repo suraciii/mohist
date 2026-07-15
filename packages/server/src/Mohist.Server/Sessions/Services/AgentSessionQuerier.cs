@@ -523,7 +523,8 @@ public class AgentSessionQuerier : IScopedService
             summary.ToolErrorCount,
             BuildGenericSessionSummaryContextRefs(record),
             AgentSessionDtoMapper.ToUsageDto(usage),
-            AgentSessionDtoMapper.BuildLineageDto(session));
+            AgentSessionDtoMapper.BuildLineageDto(session),
+            AgentSessionJsonHelper.StatusName(session, Now()) != "active");
     }
 
     public async Task<AgentSessionTranscriptResponse?> GetGenericSessionTranscriptAsync(string projectId, string sessionId, CancellationToken ct = default)

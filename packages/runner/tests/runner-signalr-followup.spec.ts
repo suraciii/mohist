@@ -133,6 +133,12 @@ function emitFollowup(builder: CapturedBuilder, payload: ReceiveFollowupPayload 
   handler(payload)
 }
 
+async function invokeFollowup(builder: CapturedBuilder, payload: ReceiveFollowupPayload | null | undefined) {
+  const handler = builder.handlers.get("ReceiveFollowup")
+  if (!handler) throw new Error("ReceiveFollowup handler was not registered")
+  return await handler(payload)
+}
+
 async function flush() {
   await new Promise((resolve) => setImmediate(resolve))
 }
@@ -278,6 +284,15 @@ describe("RunnerSignalRClient ReceiveFollowup handler", () => {
 
     expect(prompt).not.toHaveBeenCalled()
     expect(runtimeEvents).not.toHaveBeenCalled()
+  })
+
+  it("Followup_ReturnsMissingWhenTheRuntimeSessionCannotBeResolved", async () => {
+    const resolver = vi.fn(() => null)
+    buildClient({ resolver })
+
+    await expect(invokeFollowup(lastBuilder(), {
+      workflowRunId: "wr-1", sessionName: "work-1", text: "resume",
+    })).resolves.toEqual({ accepted: false, error: "missing" })
   })
 
   it("Followup_DropsWhenResolverThrows", async () => {

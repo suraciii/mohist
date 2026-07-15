@@ -426,6 +426,52 @@ public class AgentJobGrainSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
+    public async Task DelayedGenericJobFailure_AfterReset_DoesNotCloseTheReplacementRuntime()
+    {
+        await ClearGlobalRunnerRegistryAsync();
+        var projectId = $"agent-job-reset-project-{Guid.NewGuid():N}";
+        var sessionId = $"agent-job-reset-session-{Guid.NewGuid():N}";
+        var session = Grains.GetGrain<IAgentSessionGrain>(sessionId);
+        await session.OpenAsync(new OpenAgentSessionCommand(
+            RunnerId: "runner-a",
+            AgentRuntime: "opencode",
+            WorkDir: "/tmp/agent-job-reset",
+            Metadata: new AgentSessionMetadata(
+                new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    [AgentSessionQueryMetadataKeys.ProjectId] = projectId,
+                    [AgentSessionQueryMetadataKeys.SourceKind] = "agent-launch",
+                    [GenericAgentSessionMetadata.AgentId] = "agent-test",
+                })));
+        await session.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand("runtime-a"));
+
+        var job = JobGrain($"agent-job-reset-{Guid.NewGuid():N}");
+        await job.SubmitAsync(new AgentJobInput("delayed failure", ProjectId: projectId, AgentSessionId: sessionId));
+        await job.AssignRunnerAsync("runner-a", "work-a");
+        Assert.True(await job.RecordRuntimeSessionBindingAsync("runner-a", "work-a", sessionId, "runtime-a"));
+        Assert.False(await job.RecordRuntimeSessionBindingAsync("runner-a", "work-a", sessionId, "runtime-b"));
+
+        _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(10));
+        await session.ResetAsync(new ResetAgentSessionCommand("runtime-a", "runtime-b"));
+
+        _fixture.TimeProvider.Advance(TimeSpan.FromSeconds(11));
+        await job.CheckTimeoutsAsync();
+        await session.FlushForTestAsync();
+
+        Assert.Equal("runtime-b", (await session.GetAsync())?.AgentSessionId);
+        await using var db = GrainTestConfig.CreateDbContext(_fixture.ConnectionString);
+        var turnIds = await db.AgentSessionTranscriptTurns
+            .Where(turn => turn.SessionId == sessionId)
+            .Select(turn => turn.Id)
+            .ToListAsync();
+        Assert.Empty(await db.AgentSessionTranscriptParts
+            .Where(part => turnIds.Contains(part.TurnId) && part.Type == TranscriptPartTypes.SessionClosed)
+            .ToListAsync());
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
+    [Fact]
     public async Task GetGrain_IAgentJobGrain_ResolvesActiveActivation()
     {
         var jobKey = $"agent-job-resolve-{Guid.NewGuid():N}";

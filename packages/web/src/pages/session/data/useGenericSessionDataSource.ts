@@ -198,6 +198,7 @@ export function useGenericSessionDataSource(
     contextUsagePercent: meta?.usage?.contextUsagePercent ?? null,
     healthStatus: meta?.usage?.healthStatus ?? null,
     hasRecoveryActions: !!summary,
+    recoveryAvailable: summary?.recoveryAvailable ?? false,
     recoverySessionName: null,
     recoverySessionId: sessionId || null,
     runtimeSessionLineage: runtimeLineage,

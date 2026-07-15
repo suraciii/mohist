@@ -138,6 +138,34 @@ public class GenericAgentSessionFollowupApiSpecs : IAsyncLifetime
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
+    public async Task GenericFollowupEndpoint_RunnerCannotResolveRestartedSession_ReturnsResetHint()
+    {
+        var (project, sessionId, _) = await CreateIdleGenericSessionAsync("gen-followup-restarted");
+        var tracker = _fixture.Services.GetRequiredService<RunnerConnectionTracker>();
+        var runnerHub = _fixture.Services.GetRequiredService<IHubContext<RunnerHub>>() as RecordingRunnerHubContext
+            ?? throw new InvalidOperationException("Recording runner hub context was not registered.");
+        runnerHub.Clear();
+        runnerHub.SetInvocationResponse("ReceiveFollowup", new RunnerFollowupDeliveryResult(false, "missing"));
+        tracker.Register(_runnerId, "conn-gen-followup-restarted");
+        try
+        {
+            using var response = await PostGenericFollowupAsync(project.Id, sessionId, new { text = "resume after restart" });
+
+            Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+            using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            Assert.Equal("runtime_session_missing", body.RootElement.GetProperty("code").GetString());
+            Assert.Equal(sessionId, body.RootElement.GetProperty("details").GetProperty("sessionId").GetString());
+            Assert.Equal("reset", body.RootElement.GetProperty("details").GetProperty("hint").GetString());
+        }
+        finally
+        {
+            tracker.Unregister(_runnerId);
+        }
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
     public async Task GenericRunnerRoutes_CrossProjectSession_ReturnNotFoundAndDoNotMutate()
     {
         var launched = await LaunchAndOpenGenericSessionAsync("gen-cross-project");

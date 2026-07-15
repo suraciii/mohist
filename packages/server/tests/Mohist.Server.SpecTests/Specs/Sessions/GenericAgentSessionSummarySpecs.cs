@@ -78,6 +78,7 @@ public class GenericAgentSessionSummarySpecs
         Assert.Equal(AgentId, result.AgentId);
         Assert.Equal(AgentName, result.AgentName);
         Assert.Equal("running", result.Status);
+        Assert.True(result.RecoveryAvailable);
         Assert.Equal(CreatedAt.ToString("o"), result.CreatedAt);
         Assert.NotNull(result.LastActivityAt);
         Assert.Equal("gpt-4o", result.ResolvedModel);
@@ -100,6 +101,22 @@ public class GenericAgentSessionSummarySpecs
         Assert.NotNull(result);
         Assert.Equal("rate_limited", result!.FailureCategory);
         Assert.Equal("failed", result.Status);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
+    public async Task Summary_ReportsRecoveryUnavailableForAnActiveTurn()
+    {
+        using var fixture = new FakeAgentSessionSummaryDbContextFactory();
+        await SeedGenericSessionAsync(fixture, SessionId, hasTranscript: false, active: true);
+        var querier = CreateQuerier(fixture);
+
+        var result = await querier.GetGenericSessionSummaryAsync(ProjectA, SessionId);
+
+        Assert.NotNull(result);
+        Assert.Equal("running", result!.Status);
+        Assert.False(result.RecoveryAvailable);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -229,7 +246,8 @@ public class GenericAgentSessionSummarySpecs
         string sessionId,
         bool hasTranscript,
         bool withContextRefs = false,
-        string? terminalStatus = null)
+        string? terminalStatus = null,
+        bool active = false)
     {
         await using var db = factory.CreateDbContext();
 
@@ -255,7 +273,12 @@ public class GenericAgentSessionSummarySpecs
             metadata = new { labels },
             runtime = new { runnerId = $"runner-{sessionId}", workDir = (string?)null },
             settings = new { model = "gpt-4o" },
-            status = new { createdAt = CreatedAt, lastDataAt = CreatedAt.AddMinutes(5) },
+            status = new
+            {
+                agentRuntimeSessionId = active ? "runtime-" + sessionId : null,
+                createdAt = CreatedAt,
+                lastDataAt = active ? TimeProvider.GetUtcNow().UtcDateTime : CreatedAt.AddMinutes(5),
+            },
         }, JSON.Options);
 
         var row = new AgentSessionRow

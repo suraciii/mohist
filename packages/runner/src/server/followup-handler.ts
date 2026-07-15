@@ -38,23 +38,27 @@ export interface FollowupHandlerDeps {
   followupTargetResolver?: FollowupTargetResolver | null
 }
 
+export interface FollowupDeliveryResult {
+  accepted: boolean
+  error?: "missing" | "unavailable"
+}
+
 export function registerFollowupHandler(
   conn: signalR.HubConnection,
   deps: FollowupHandlerDeps,
 ): void {
-  conn.on("ReceiveFollowup", (payload: ReceiveFollowupPayload | null | undefined) => {
-    void handleFollowup(payload, deps)
-  })
+  conn.on("ReceiveFollowup", async (payload: ReceiveFollowupPayload | null | undefined) =>
+    await handleFollowup(payload, deps))
 }
 
 async function handleFollowup(
   payload: ReceiveFollowupPayload | null | undefined,
   deps: FollowupHandlerDeps,
-): Promise<void> {
-  if (!payload || typeof payload.text !== "string" || payload.text.length === 0) return
+): Promise<FollowupDeliveryResult> {
+  if (!payload || typeof payload.text !== "string" || payload.text.length === 0) return unavailable()
   const serverConnection = deps.serverConnection ?? null
   const resolver = deps.followupTargetResolver ?? null
-  if (!resolver || !serverConnection) return
+  if (!resolver || !serverConnection) return unavailable()
 
   // Issue-129 T-004: branch on the discriminated `target.kind` so a
   // single handler can deliver followups to either a workflow-shaped
@@ -65,16 +69,16 @@ async function handleFollowup(
   // server builds (no `target` field) keep working against the
   // workflow followup route.
   const sessionTarget = resolveSessionTarget(payload)
-  if (!sessionTarget) return
+  if (!sessionTarget) return unavailable()
 
   let target: FollowupTarget | null
   try {
     target = resolver(sessionTarget)
   } catch (error) {
     console.error("followup target resolver threw:", error)
-    return
+    return unavailable()
   }
-  if (!target) return
+  if (!target) return { accepted: false, error: "missing" }
 
   if (sessionTarget.kind === "workflow") {
     void serverConnection.workflowAgentSessionRuntimeEvents(
@@ -133,12 +137,18 @@ async function handleFollowup(
     })
   }
 
-  void target.connection
-    .prompt({
+  try {
+    await target.connection.prompt({
       sessionId: target.sessionId,
       prompt: [{ type: "text", text: payload.text }],
     })
-    .catch((error) => {
-      console.error("followup connection.prompt rejected:", error instanceof Error ? error.message : String(error))
-    })
+  } catch (error) {
+    console.error("followup connection.prompt rejected:", error instanceof Error ? error.message : String(error))
+    return unavailable()
+  }
+  return { accepted: true }
+}
+
+function unavailable(): FollowupDeliveryResult {
+  return { accepted: false, error: "unavailable" }
 }

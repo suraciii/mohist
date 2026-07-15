@@ -146,6 +146,28 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             && string.Equals(State.WorkId, workId, StringComparison.Ordinal));
     }
 
+    public async Task<bool> RecordRuntimeSessionBindingAsync(
+        string runnerId,
+        string workId,
+        string sessionId,
+        string runtimeSessionId)
+    {
+        if (string.IsNullOrWhiteSpace(runtimeSessionId)
+            || !string.Equals(State.RunnerId, runnerId, StringComparison.Ordinal)
+            || !string.Equals(State.WorkId, workId, StringComparison.Ordinal)
+            || !string.Equals(State.Input?.AgentSessionId, sessionId, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        if (!string.IsNullOrWhiteSpace(State.RuntimeSessionId))
+            return string.Equals(State.RuntimeSessionId, runtimeSessionId, StringComparison.Ordinal);
+
+        State.RuntimeSessionId = runtimeSessionId;
+        await SaveAsync();
+        return true;
+    }
+
     public async Task<AgentJobReportResult> ReportResultAsync(string runnerId, string workId, WorkResult result)
     {
         if (IsTerminal)
@@ -628,6 +650,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         string? reason)
     {
         var sessionId = State.Input?.AgentSessionId;
+        var runtimeSessionId = State.RuntimeSessionId;
         if (string.IsNullOrWhiteSpace(sessionId))
             return;
 
@@ -643,17 +666,16 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
                 ["reason"] = reason,
                 ["recordedAt"] = _timeProvider.GetUtcNow().ToString("o"),
             });
-            var session = await grain.GetAsync();
             var close = new[] { new AgentSessionRuntimeEventInput("session.closed", payload) };
-            if (string.IsNullOrWhiteSpace(session?.AgentSessionId))
+            if (string.IsNullOrWhiteSpace(runtimeSessionId))
             {
+                if (State.RunnerId is not null)
+                    return;
                 await grain.AppendSystemEventsAsync(new AppendAgentSessionSystemEventsCommand(close));
+                return;
             }
-            else
-            {
-                await grain.AppendRuntimeEventsAsync(
-                    new AppendAgentSessionRuntimeEventsCommand(close, session.AgentSessionId));
-            }
+            await grain.AppendRuntimeEventsAsync(
+                new AppendAgentSessionRuntimeEventsCommand(close, runtimeSessionId));
         }
         catch (Exception ex)
         {

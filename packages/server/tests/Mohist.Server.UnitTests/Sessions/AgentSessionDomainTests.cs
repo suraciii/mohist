@@ -154,21 +154,18 @@ public class AgentSessionDomainTests
     }
 
     [Fact]
-    public void AttachPhysicalSession_DifferentPhysicalSession_RebindsRuntimeSession()
+    public void AttachPhysicalSession_DifferentPhysicalSession_RequiresReset()
     {
         var session = CreateSession();
         var firstBoundAt = new DateTime(2026, 6, 17, 1, 0, 0, DateTimeKind.Utc);
-        var reboundAt = firstBoundAt.AddMinutes(1);
         session.AttachPhysicalSession("runtime-session-1", "model-a", "/work", null, null, firstBoundAt);
 
-        var events = session.AttachPhysicalSession("runtime-session-2", "model-b", "/work", null, null, reboundAt);
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            session.AttachPhysicalSession("runtime-session-2", "model-b", "/work", null, null, firstBoundAt.AddMinutes(1)));
 
-        Assert.Equal("runtime-session-2", session.Status.AgentRuntimeSessionId);
-        Assert.Equal(reboundAt, session.Status.BoundAt);
-        Assert.Equal("model-b", session.Settings.Model);
-        Assert.Collection(events,
-            e => Assert.Equal("runtime-session-2", Assert.IsType<AgentSessionRuntimeBound>(e.Value).AgentRuntimeSessionId),
-            e => Assert.Equal("model-b", Assert.IsType<AgentSessionModelChanged>(e.Value).Model));
+        Assert.Contains("use Reset", exception.Message, StringComparison.Ordinal);
+        Assert.Equal("runtime-session-1", session.Status.AgentRuntimeSessionId);
+        Assert.Equal("model-a", session.Settings.Model);
     }
 
     [Fact]
@@ -360,26 +357,19 @@ public class AgentSessionDomainTests
     }
 
     [Fact]
-    public void AttachPhysicalSession_RebindToNewPhysicalSession_AppendsLineageAndCarriesPrevious()
+    public void AttachPhysicalSession_RebindToNewPhysicalSession_RequiresReset()
     {
         var session = CreateSession();
         var firstBoundAt = new DateTime(2026, 6, 21, 1, 0, 0, DateTimeKind.Utc);
-        var reboundAt = firstBoundAt.AddMinutes(2);
         session.AttachPhysicalSession("runtime-session-1", "model-a", "/work", null, null, firstBoundAt);
 
-        var events = session.AttachPhysicalSession("runtime-session-2", "model-b", "/work", null, null, reboundAt);
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            session.AttachPhysicalSession("runtime-session-2", "model-b", "/work", null, null, firstBoundAt.AddMinutes(2)));
 
         var lineage = session.Status.RuntimeSessionLineage!;
-        Assert.Equal(2, lineage.Count);
+        Assert.Single(lineage);
         Assert.Equal("runtime-session-1", lineage[0].AgentRuntimeSessionId);
-        Assert.Equal(firstBoundAt, lineage[0].BoundAt);
-        Assert.Equal("runtime-session-2", lineage[1].AgentRuntimeSessionId);
-        Assert.Equal(reboundAt, lineage[1].BoundAt);
-
-        var boundEvent = Assert.Single(events, e => e.Value is AgentSessionRuntimeBound);
-        var bound = Assert.IsType<AgentSessionRuntimeBound>(boundEvent.Value);
-        Assert.Equal("runtime-session-2", bound.AgentRuntimeSessionId);
-        Assert.Equal("runtime-session-1", bound.PreviousAgentRuntimeSessionId);
+        Assert.Contains("use Reset", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]

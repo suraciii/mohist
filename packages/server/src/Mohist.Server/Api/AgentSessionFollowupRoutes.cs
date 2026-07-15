@@ -108,20 +108,40 @@ public static class AgentSessionFollowupRoutes
                     "runner_offline",
                     new { runnerId = target.RunnerId });
 
-            await runnerHub.Clients.Client(connectionId).SendAsync(
-                "ReceiveFollowup",
-                new
-                {
-                    target = new
+            RunnerFollowupDeliveryResult? delivery;
+            try
+            {
+                delivery = await runnerHub.Clients.Client(connectionId).InvokeAsync<RunnerFollowupDeliveryResult?>(
+                    "ReceiveFollowup",
+                    new
                     {
-                        kind = "generic",
-                        projectId = project.Id,
-                        sessionId = target.SessionId,
+                        target = new
+                        {
+                            kind = "generic",
+                            projectId = project.Id,
+                            sessionId = target.SessionId,
+                        },
+                        text,
                     },
-                    text,
-                });
+                    ct);
+            }
+            catch
+            {
+                return ApiResults.Fail("Runner is unavailable", 503, "runner_unavailable", new { runnerId = target.RunnerId });
+            }
 
-            return ApiResults.Ok(new AgentSessionFollowupResult(target.SessionId));
+            if (delivery?.Accepted == true)
+                return ApiResults.Ok(new AgentSessionFollowupResult(target.SessionId));
+
+            if (string.Equals(delivery?.Error, "missing", StringComparison.Ordinal))
+            {
+                return ApiResults.Conflict(
+                    $"Runtime session missing for AgentSession {target.SessionId}. Reset the session to establish a new binding.",
+                    "runtime_session_missing",
+                    new { sessionId = target.SessionId, hint = "reset" });
+            }
+
+            return ApiResults.Fail("Runner is unavailable", 503, "runner_unavailable", new { runnerId = target.RunnerId });
         });
 
         return app;
@@ -137,3 +157,5 @@ public static class AgentSessionFollowupRoutes
 public sealed record GenericFollowupRequest(string? Text = null);
 
 public sealed record AgentSessionFollowupResult(string SessionId, string Status = "sent");
+
+public sealed record RunnerFollowupDeliveryResult(bool Accepted, string? Error = null);

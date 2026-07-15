@@ -1,28 +1,58 @@
 import { describe, expect, it, vi } from "vitest"
 import type * as signalR from "@microsoft/signalr"
+import type { SessionCommandJournalEntry, SessionCommandJournalStore } from "../src/runtime/session-command-journal.js"
 import {
   registerSessionCommandHandler,
   type SessionCommandError,
   type SessionCommandHandler,
+  type SessionCommandReconciler,
   type SessionCommandRequest,
   type SessionCommandResult,
 } from "../src/server/session-command-handler.js"
 
-function register(handler: SessionCommandHandler | null) {
+class MemoryJournal implements SessionCommandJournalStore {
+  private readonly entries = new Map<string, SessionCommandJournalEntry>()
+
+  async load(): Promise<void> {}
+
+  async get(sessionId: string, operationId: string): Promise<SessionCommandJournalEntry | null> {
+    return this.entries.get(`${sessionId}:${operationId}`) ?? null
+  }
+
+  async start(request: SessionCommandRequest): Promise<SessionCommandJournalEntry> {
+    const key = `${request.sessionId}:${request.operationId}`
+    const existing = this.entries.get(key)
+    if (existing) return existing
+    const entry: SessionCommandJournalEntry = { request: { ...request }, state: "started" }
+    this.entries.set(key, entry)
+    return entry
+  }
+
+  async complete(request: SessionCommandRequest, result: SessionCommandResult): Promise<void> {
+    const key = `${request.sessionId}:${request.operationId}`
+    this.entries.set(key, { request: { ...request }, state: "completed", result: { ...result } })
+  }
+}
+
+function register(
+  handler: SessionCommandHandler | null,
+  journal = new MemoryJournal(),
+  reconcileStarted?: SessionCommandReconciler,
+) {
   const handlers = new Map<string, (...args: unknown[]) => unknown>()
   const connection = {
     on: vi.fn((method: string, callback: (...args: unknown[]) => unknown) => {
       handlers.set(method, callback)
     }),
   } as unknown as signalR.HubConnection
-  registerSessionCommandHandler(connection, { handler })
+  registerSessionCommandHandler(connection, { handler, journal, reconcileStarted })
 
   const callback = handlers.get("SessionCommand")
   if (!callback) throw new Error("SessionCommand handler was not registered")
   return (request: SessionCommandRequest) => Promise.resolve(callback(request) as SessionCommandResult)
 }
 
-function request(command: "compact" | "reset"): SessionCommandRequest {
+function request(command: "compact" | "reset", operationId = `${command}-1`): SessionCommandRequest {
   return {
     sessionId: "session-1",
     runtime: "opencode",
@@ -30,113 +60,101 @@ function request(command: "compact" | "reset"): SessionCommandRequest {
     runnerId: "runner-1",
     workDir: "/work/project",
     command,
-    ...(command === "reset" ? { expectedRuntimeSessionId: "runtime-1", operationId: "reset-1" } : {}),
+    operationId,
+    ...(command === "reset" ? { expectedRuntimeSessionId: "runtime-1" } : {}),
   }
 }
 
 describe("SessionCommand contract", () => {
-  it("compact accepts the recovery reservation and returns no new runtime id", async () => {
+  it("compact accepts the durable reservation and returns no new runtime id", async () => {
     const fakeHandler = vi.fn(async (received: SessionCommandRequest): Promise<SessionCommandResult> => {
       expect(Object.keys(received).sort()).toEqual([
-        "command",
-        "operationId",
-        "runnerId",
-        "runtime",
-        "runtimeSessionId",
-        "sessionId",
-        "workDir",
+        "command", "operationId", "runnerId", "runtime", "runtimeSessionId", "sessionId", "workDir",
       ])
       return { ok: true }
     })
-    const invoke = register(fakeHandler)
-    const compact = { ...request("compact"), operationId: "compact-1" }
+    const compact = request("compact")
 
-    const result = await invoke(compact)
+    const result = await register(fakeHandler)(compact)
 
     expect(fakeHandler).toHaveBeenCalledWith(compact)
     expect(result).toEqual({ ok: true })
-    expect(result).not.toHaveProperty("runtimeSessionId")
   })
 
   it("reset returns the replacement runtime session id", async () => {
-    const fakeHandler = vi.fn(async (): Promise<SessionCommandResult> => ({
-      ok: true,
-      runtimeSessionId: "runtime-2",
-    }))
-    const invoke = register(fakeHandler)
-    const reset = request("reset")
+    const result = await register(async () => ({ ok: true, runtimeSessionId: "runtime-2" }))(request("reset"))
 
-    const result = await invoke(reset)
-
-    expect(fakeHandler).toHaveBeenCalledWith(reset)
     expect(result).toEqual({ ok: true, runtimeSessionId: "runtime-2" })
   })
 
-  it("deduplicates duplicate reset operation ids before invoking the runtime handler", async () => {
+  it.each(["compact", "reset"] as const)("deduplicates concurrent %s delivery", async (command) => {
     let release!: () => void
     const deferred = new Promise<void>((resolve) => { release = resolve })
     const fakeHandler = vi.fn(async (): Promise<SessionCommandResult> => {
       await deferred
-      return { ok: true, runtimeSessionId: "runtime-2" }
+      return command === "compact" ? { ok: true } : { ok: true, runtimeSessionId: "runtime-2" }
     })
     const invoke = register(fakeHandler)
+    const commandRequest = request(command)
 
-    const first = invoke(request("reset"))
-    const duplicate = invoke(request("reset"))
+    const first = invoke(commandRequest)
+    const duplicate = invoke(commandRequest)
     release()
 
-    await expect(Promise.all([first, duplicate])).resolves.toEqual([
-      { ok: true, runtimeSessionId: "runtime-2" },
-      { ok: true, runtimeSessionId: "runtime-2" },
-    ])
+    await expect(Promise.all([first, duplicate])).resolves.toEqual(command === "compact"
+      ? [{ ok: true }, { ok: true }]
+      : [{ ok: true, runtimeSessionId: "runtime-2" }, { ok: true, runtimeSessionId: "runtime-2" }])
     expect(fakeHandler).toHaveBeenCalledTimes(1)
+  })
+
+  it.each(["compact", "reset"] as const)("replays a completed %s after handler restart", async (command) => {
+    const journal = new MemoryJournal()
+    const commandRequest = request(command)
+    const firstHandler = vi.fn(async (): Promise<SessionCommandResult> => command === "compact"
+      ? { ok: true }
+      : { ok: true, runtimeSessionId: "runtime-2" })
+    await register(firstHandler, journal)(commandRequest)
+
+    const restartedHandler = vi.fn(async (): Promise<SessionCommandResult> => ({ ok: false, error: "unavailable" }))
+    const replay = await register(restartedHandler, journal)(commandRequest)
+
+    expect(replay).toEqual(command === "compact" ? { ok: true } : { ok: true, runtimeSessionId: "runtime-2" })
+    expect(restartedHandler).not.toHaveBeenCalled()
+  })
+
+  it("reconciles a started operation without blind execution", async () => {
+    const journal = new MemoryJournal()
+    const commandRequest = request("reset")
+    await journal.start(commandRequest)
+    const handler = vi.fn(async (): Promise<SessionCommandResult> => ({ ok: true, runtimeSessionId: "runtime-2" }))
+
+    const unavailable = await register(handler, journal)(commandRequest)
+    expect(unavailable).toEqual({ ok: false, error: "unavailable" })
+    expect(handler).not.toHaveBeenCalled()
+
+    const reconciled = await register(handler, journal, async () => ({
+      state: "completed",
+      result: { ok: true, runtimeSessionId: "runtime-2" },
+    }))(commandRequest)
+    expect(reconciled).toEqual({ ok: true, runtimeSessionId: "runtime-2" })
+    expect(handler).not.toHaveBeenCalled()
   })
 
   it("rejects a reset without the reserved expected binding", async () => {
     const fakeHandler = vi.fn(async (): Promise<SessionCommandResult> => ({ ok: true }))
-    const invoke = register(fakeHandler)
     const invalid = { ...request("reset"), expectedRuntimeSessionId: "runtime-stale" }
 
-    await expect(invoke(invalid)).resolves.toEqual({ ok: false, error: "unavailable" })
+    await expect(register(fakeHandler)(invalid)).resolves.toEqual({ ok: false, error: "unavailable" })
     expect(fakeHandler).not.toHaveBeenCalled()
   })
 
-  it("rejects a successful reset response without a replacement runtime session id", async () => {
-    const fakeHandler = vi.fn(async (): Promise<SessionCommandResult> => ({ ok: true }))
-    const invoke = register(fakeHandler)
+  it.each<SessionCommandError>(["conflict", "missing"])("persists the %s error vocabulary", async (error) => {
+    const invoke = register(async () => ({ ok: false, error }))
 
-    await expect(invoke(request("reset"))).resolves.toEqual({ ok: false, error: "unavailable" })
+    await expect(invoke(request("compact"))).resolves.toEqual({ ok: false, error })
   })
-
-  it("bounds retained completed reset operations", async () => {
-    const fakeHandler = vi.fn(async (received: SessionCommandRequest): Promise<SessionCommandResult> => ({
-      ok: true,
-      runtimeSessionId: `${received.operationId}-replacement`,
-    }))
-    const invoke = register(fakeHandler)
-
-    for (let index = 0; index <= 256; index += 1) {
-      await invoke({ ...request("reset"), operationId: `reset-${index}` })
-    }
-    await invoke({ ...request("reset"), operationId: "reset-256" })
-    await invoke({ ...request("reset"), operationId: "reset-0" })
-
-    expect(fakeHandler).toHaveBeenCalledTimes(258)
-  })
-
-  it.each<SessionCommandError>(["conflict", "missing"])(
-    "passes through the %s error vocabulary",
-    async (error) => {
-      const fakeHandler = vi.fn(async (): Promise<SessionCommandResult> => ({ ok: false, error }))
-      const invoke = register(fakeHandler)
-
-      await expect(invoke(request("compact"))).resolves.toEqual({ ok: false, error })
-    },
-  )
 
   it("reports unavailable when no runtime handler is installed", async () => {
-    const invoke = register(null)
-
-    await expect(invoke(request("compact"))).resolves.toEqual({ ok: false, error: "unavailable" })
+    await expect(register(null)(request("compact"))).resolves.toEqual({ ok: false, error: "unavailable" })
   })
 })

@@ -147,6 +147,7 @@ export function SessionDetailShell({
     contextUsagePercent,
     healthStatus,
     hasRecoveryActions,
+    recoveryAvailable,
     recoverySessionName,
     recoverySessionId,
     runtimeSessionLineage,
@@ -197,6 +198,7 @@ export function SessionDetailShell({
                 sessionName={recoverySessionName ?? ''}
                 genericSessionId={recoverySessionId ?? undefined}
                 status={meta?.status ?? null}
+                recoveryAvailable={recoveryAvailable}
                 onSuccess={handleRecoverySuccess}
                 bare
               />

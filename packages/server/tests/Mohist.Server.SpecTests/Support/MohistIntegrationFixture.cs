@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.SignalR;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Mohist.Server.Api;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -335,6 +336,8 @@ public sealed class RecordingRunnerHubContext : IHubContext<RunnerHub>
     {
         SentMessages.Clear();
         Invocations.Clear();
+        _invocationResponses.Clear();
+        _invocationResponseFactories.Clear();
     }
 
     /// <summary>
@@ -361,6 +364,11 @@ public sealed class RecordingRunnerHubContext : IHubContext<RunnerHub>
     {
         if (_invocationResponseFactories.TryGetValue(method, out var responseFactory))
             return responseFactory(arguments);
+        if (string.Equals(method, "ReceiveFollowup", StringComparison.Ordinal)
+            && !_invocationResponses.ContainsKey(method))
+        {
+            return new RunnerFollowupDeliveryResult(true);
+        }
         return _invocationResponses.TryGetValue(method, out var value) ? value : null;
     }
 
@@ -415,6 +423,7 @@ public sealed class RecordingRunnerHubContext : IHubContext<RunnerHub>
 
         public Task<T> InvokeCoreAsync<T>(string method, object?[] args, CancellationToken cancellationToken = default)
         {
+            _context.SentMessages.Add(new RecordedRunnerHubMessage(_connectionId, method, args));
             _context.Invocations.Add(new RecordedRunnerHubInvocation(_connectionId, method, args));
             var response = _context.ResolveInvocationResponse(method, args);
             if (response is Task<T> pending)

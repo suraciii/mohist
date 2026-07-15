@@ -39,6 +39,12 @@ public static partial class AgentSessionExtensions
             _ = processPid;
             var oldModel = session.Settings.Model;
             var existingAgentSessionId = session.Status.AgentRuntimeSessionId;
+            if (!string.IsNullOrWhiteSpace(existingAgentSessionId)
+                && !string.Equals(existingAgentSessionId, agentSessionId, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    $"AgentSession {session.Id} is already bound to runtime session {existingAgentSessionId}; use Reset to replace the binding.");
+            }
             var isNewRuntimeBinding = !string.Equals(existingAgentSessionId, agentSessionId, StringComparison.Ordinal);
 
             session.Runtime = session.Runtime with

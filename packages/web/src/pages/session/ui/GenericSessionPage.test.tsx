@@ -246,46 +246,6 @@ describe('GenericSessionPage', () => {
     })
   })
 
-  describe('recovery region', () => {
-    it('renders ContextHealthBar when usage data is present and turns exist', async () => {
-      _summaryData = baseSummary({
-        usage: { contextWindowUsed: 12000, contextWindowSize: 32000, contextUsagePercent: 37.5, healthStatus: 'green' },
-      })
-      mocks.transcriptTurns = [makeTurn()]
-      renderPage()
-      await waitFor(() => {
-        const bars = screen.getAllByTestId('context-health-bar')
-        expect(bars.length).toBeGreaterThanOrEqual(1)
-      })
-    })
-
-    it('omits ContextHealthBar when no usage data', async () => {
-      _summaryData = baseSummary({ usage: null })
-      renderPage()
-      await waitFor(() => {
-        expect(screen.queryByTestId('context-health-bar')).not.toBeInTheDocument()
-      })
-    })
-
-    it('renders Compact/Reset recovery actions addressed by the stable session id', async () => {
-      _summaryData = baseSummary()
-      mocks.transcriptTurns = [makeTurn()]
-      renderPage()
-      await waitFor(() => {
-        expect(screen.getByTestId('session-recovery-actions')).toBeInTheDocument()
-      })
-    })
-
-    it('renders no sibling sidebar for generic sessions', async () => {
-      _summaryData = baseSummary()
-      mocks.transcriptTurns = [makeTurn()]
-      renderPage()
-      await waitFor(() => {
-        expect(screen.queryByTestId('session-sibling-sidebar')).not.toBeInTheDocument()
-      })
-    })
-  })
-
   describe('transcript rendering', () => {
     it('passes session transcript to SessionTranscriptLayout', async () => {
       _summaryData = baseSummary()

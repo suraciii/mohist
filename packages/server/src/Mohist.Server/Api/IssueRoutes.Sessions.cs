@@ -134,23 +134,43 @@ public static partial class IssueRoutes
             // newer runner can route by target.kind. The runner resolver
             // prefers `target` when present and falls back to the
             // top-level workflow fields for backwards compatibility.
-            await runnerHub.Clients.Client(connectionId).SendAsync(
-                "ReceiveFollowup",
-                new
-                {
-                    workflowRunId = target.WorkflowRunId,
-                    sessionName = target.SessionName,
-                    target = new
+            RunnerFollowupDeliveryResult? delivery;
+            try
+            {
+                delivery = await runnerHub.Clients.Client(connectionId).InvokeAsync<RunnerFollowupDeliveryResult?>(
+                    "ReceiveFollowup",
+                    new
                     {
-                        kind = "workflow",
-                        projectId = project.Id,
                         workflowRunId = target.WorkflowRunId,
                         sessionName = target.SessionName,
+                        target = new
+                        {
+                            kind = "workflow",
+                            projectId = project.Id,
+                            workflowRunId = target.WorkflowRunId,
+                            sessionName = target.SessionName,
+                        },
+                        text,
                     },
-                    text,
-                });
+                    ctx.RequestAborted);
+            }
+            catch
+            {
+                return ApiResults.Fail("Runner is unavailable", 503, "runner_unavailable", new { runnerId = target.RunnerId });
+            }
 
-            return ApiResults.Ok(new AgentSessionFollowupResult(sessionId));
+            if (delivery?.Accepted == true)
+                return ApiResults.Ok(new AgentSessionFollowupResult(sessionId));
+
+            if (string.Equals(delivery?.Error, "missing", StringComparison.Ordinal))
+            {
+                return ApiResults.Conflict(
+                    $"Runtime session missing for AgentSession {sessionId}. Reset the session to establish a new binding.",
+                    "runtime_session_missing",
+                    new { sessionId, hint = "reset" });
+            }
+
+            return ApiResults.Fail("Runner is unavailable", 503, "runner_unavailable", new { runnerId = target.RunnerId });
         });
 
         group.MapPost("/{number:int}/sessions/{name}/cancel", async (

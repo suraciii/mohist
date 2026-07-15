@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Config;
+using Mohist.Server.Agent.Grains;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Runner.Services.SignalR;
 using Mohist.Server.Sessions.Domain;
@@ -375,9 +376,9 @@ public static class RunnerRoutes
         });
 
         group.MapPost("/agent-sessions/{projectId}/{sessionId}/attach", async (
-            string projectId, string sessionId,
+            string runnerId, string projectId, string sessionId,
             AgentSessionAttachRequest req, AgentSessionResolver sessions,
-            AgentSessionQuery sessionQuery,
+            AgentSessionQuery sessionQuery, IGrainFactory grains,
             CancellationToken ct) =>
         {
             var grain = sessions.GetGrain(sessionId);
@@ -390,6 +391,12 @@ public static class RunnerRoutes
             {
                 var session = await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand(
                     req.RuntimeSessionId, req.Model, req.WorkDir, req.ChangeDir, req.ProcessPid));
+                if (!string.IsNullOrWhiteSpace(req.AgentJobId)
+                    && !string.IsNullOrWhiteSpace(req.WorkId))
+                {
+                    await grains.GetGrain<IAgentJobGrain>(req.AgentJobId)
+                        .RecordRuntimeSessionBindingAsync(runnerId, req.WorkId, sessionId, req.RuntimeSessionId);
+                }
                 return Results.Ok(ToRunnerGenericAgentSession(session));
             }
             catch (InvalidOperationException ex)
@@ -626,7 +633,14 @@ public record RunnerGenericAgentSessionResponse(
     string? Model = null,
     string? ResolvedModel = null,
     string? Runtime = null);
-public record AgentSessionAttachRequest(string RuntimeSessionId, string? Model = null, string? WorkDir = null, string? ChangeDir = null, int? ProcessPid = null);
+public record AgentSessionAttachRequest(
+    string RuntimeSessionId,
+    string? Model = null,
+    string? WorkDir = null,
+    string? ChangeDir = null,
+    int? ProcessPid = null,
+    string? WorkId = null,
+    string? AgentJobId = null);
 public record AgentSessionRuntimeEventsRequest(string? WorkId, string? WorkType, string? Stage, IReadOnlyList<AgentSessionRuntimeEventRequest> RuntimeEvents, string? RuntimeSessionId = null);
 public record AgentSessionRuntimeEventRequest(string Type, System.Text.Json.JsonElement Payload);
 public record WorkDispatchResponse(

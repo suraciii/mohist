@@ -150,17 +150,35 @@ public sealed class AgentSessionRecoveryGrainSpecs : IClassFixture<AgentSessionG
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
-    public async Task Compact_ConcurrentPreparationRejectsTheSecondOperation()
+    public async Task Compact_ConcurrentPreparationReusesThePersistedOperation()
     {
         var (grain, sessionId) = await CreateAttachedSessionAsync("runtime-before-compact");
 
         var compact = await grain.PrepareSessionCommandAsync(SessionCommandKind.Compact);
-        var exception = await Assert.ThrowsAsync<RecoveryOperationInProgressException>(() =>
-            grain.PrepareSessionCommandAsync(SessionCommandKind.Compact));
+        var duplicate = await grain.PrepareSessionCommandAsync(SessionCommandKind.Compact);
 
-        Assert.Equal(sessionId, exception.SessionId);
-        Assert.Equal("compact", exception.Operation);
-        await grain.AbandonResetAsync(compact.OperationId!);
+        Assert.Equal(sessionId, compact.SessionId);
+        Assert.Equal(compact.OperationId, duplicate.OperationId);
+
+        await grain.CompleteCompactAsync(new CompleteCompactAgentSessionCommand(compact.OperationId, Summary: "summary"));
+        Assert.Equal(1, _fixture.StateStore.Events.Count(e => e.Value is AgentSessionContextCompacted));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
+    public async Task DelayedAttachAfterReset_CannotRestoreThePreviousRuntimeBinding()
+    {
+        var (grain, _) = await CreateAttachedSessionAsync("runtime-before-reset");
+        await grain.ResetAsync(new ResetAgentSessionCommand(
+            ExpectedRuntimeSessionId: "runtime-before-reset",
+            ReplacementRuntimeSessionId: "runtime-after-reset"));
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => grain.AttachPhysicalSessionAsync(
+            new AttachPhysicalSessionCommand("runtime-before-reset")));
+
+        Assert.Contains("use Reset", exception.Message, StringComparison.Ordinal);
+        Assert.Equal("runtime-after-reset", (await grain.GetAsync())?.AgentSessionId);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]

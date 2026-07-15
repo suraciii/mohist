@@ -521,7 +521,15 @@ export async function attachSessionToServer(context: ActionContext, runtimeSessi
   const target = sessionTargetFromContext(context)
   if (!target || !context.serverConnection) return
 
-  const body = { runtimeSessionId, workDir: context.workDir, processPid, model: agentConfig?.model ?? stringInput(context.with, "model"), ...(resolvedModel ? { resolvedModel } : {}) }
+  const body = {
+    runtimeSessionId,
+    workDir: context.workDir,
+    processPid,
+    model: agentConfig?.model ?? stringInput(context.with, "model"),
+    workId: context.workId,
+    agentJobId: context.ownerKind === "agent-job" ? context.agentJobId ?? null : null,
+    ...(resolvedModel ? { resolvedModel } : {}),
+  }
   if (target.kind === "workflow") {
     await context.serverConnection.attachWorkflowAgentSession(
       target.projectId,

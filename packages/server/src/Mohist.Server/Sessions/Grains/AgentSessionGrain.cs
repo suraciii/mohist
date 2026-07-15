@@ -210,8 +210,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
 
         if (session.Status.PendingReset is { } pending)
         {
-            if (command == SessionCommandKind.Reset
-                && string.Equals(pending.Command, CommandName(command), StringComparison.Ordinal))
+            if (string.Equals(pending.Command, CommandName(command), StringComparison.Ordinal))
             {
                 return BuildSessionCommandRequest(session, command, pending);
             }
@@ -309,7 +308,8 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             WorkDir: session.Runtime.WorkDir,
             Command: command,
             ExpectedRuntimeSessionId: command == SessionCommandKind.Reset ? reservation?.ExpectedRuntimeSessionId : null,
-            OperationId: reservation?.OperationId);
+            OperationId: reservation?.OperationId
+                ?? throw new InvalidOperationException("Session command requires a persisted operation id."));
 
     private static AgentSessionResetReservation RequireReservation(
         AgentSession session,

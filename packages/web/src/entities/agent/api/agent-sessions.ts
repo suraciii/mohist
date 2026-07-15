@@ -45,6 +45,7 @@ export interface GenericAgentSessionSummaryDto {
   contextRefs: AgentSessionListContextRefsDto | null
   usage: AgentSessionUsage
   runtimeSessionLineage: RuntimeSessionLineageEntry[] | null
+  recoveryAvailable: boolean
 }
 
 export interface AgentSessionLaunchResponse {

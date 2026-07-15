@@ -24,7 +24,7 @@ public sealed record SessionCommandRequest(
     [property: Id(4), JsonIgnore(Condition = JsonIgnoreCondition.Never)] string? WorkDir,
     [property: Id(5)] SessionCommandKind Command,
     [property: Id(6)] string? ExpectedRuntimeSessionId = null,
-    [property: Id(7)] string? OperationId = null);
+    [property: Id(7)] string OperationId = "");
 
 public sealed record SessionCommandResult(
     bool Ok,

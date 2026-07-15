@@ -256,7 +256,8 @@ public sealed record GenericAgentSessionSummaryDto(
     int? ToolErrorCount,
     [property: JsonPropertyName("contextRefs")] GenericAgentSessionSummaryContextRefsDto? ContextRefs,
     [property: JsonPropertyName("usage")] AgentUsageDto Usage,
-    [property: JsonPropertyName("runtimeSessionLineage")] IReadOnlyList<RuntimeSessionLineageEntryDto>? RuntimeSessionLineage);
+    [property: JsonPropertyName("runtimeSessionLineage")] IReadOnlyList<RuntimeSessionLineageEntryDto>? RuntimeSessionLineage,
+    [property: JsonPropertyName("recoveryAvailable")] bool RecoveryAvailable);
 
 /// <summary>
 /// Lightweight association entry returned by the issue/epic agent-session

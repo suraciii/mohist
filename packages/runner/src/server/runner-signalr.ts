@@ -26,6 +26,7 @@ import { registerWorkspaceRemovalHandler } from "./workspace-removal-handler.js"
 import { registerFollowupHandler } from "./followup-handler.js"
 import { registerCancelHandler } from "./cancel-handler.js"
 import { registerWorkflowRunStatusHandler } from "./workflow-run-status-handler.js"
+import type { SessionCommandJournalStore } from "../runtime/session-command-journal.js"
 import {
   registerSessionCommandHandler,
   type SessionCommand,
@@ -63,6 +64,8 @@ export interface RunnerSignalRClientOptions {
   serverConnection?: ServerConnection | null
   followupTargetResolver?: FollowupTargetResolver | null
   sessionCommandHandler?: SessionCommandHandler | null
+  sessionCommandJournal?: SessionCommandJournalStore | null
+  reconcileStartedSessionCommand?: import("./session-command-handler.js").SessionCommandReconciler | null
   registry?: WorkspaceRegistry | null
 }
 
@@ -75,6 +78,8 @@ export class RunnerSignalRClient {
   private readonly serverConnection: ServerConnection | null
   private readonly followupTargetResolver: FollowupTargetResolver | null
   private readonly sessionCommandHandler: SessionCommandHandler | null
+  private readonly sessionCommandJournal: SessionCommandJournalStore | null
+  private readonly reconcileStartedSessionCommand: import("./session-command-handler.js").SessionCommandReconciler | null
 
   constructor(
     serverUrl: string,
@@ -98,6 +103,8 @@ export class RunnerSignalRClient {
     this.serverConnection = options.serverConnection ?? null
     this.followupTargetResolver = options.followupTargetResolver ?? null
     this.sessionCommandHandler = options.sessionCommandHandler ?? null
+    this.sessionCommandJournal = options.sessionCommandJournal ?? null
+    this.reconcileStartedSessionCommand = options.reconcileStartedSessionCommand ?? null
 
     this.registerHandlers()
     this.registerLifecycleCallbacks()
@@ -150,6 +157,8 @@ export class RunnerSignalRClient {
 
     registerSessionCommandHandler(this.connection, {
       handler: this.sessionCommandHandler,
+      journal: this.sessionCommandJournal,
+      reconcileStarted: this.reconcileStartedSessionCommand,
     })
 
     registerWorkflowRunStatusHandler(this.connection, {
