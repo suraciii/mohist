@@ -74,4 +74,29 @@ describe("mohist/acp-agent resumed shared sessions", () => {
     expect(result.message ?? "").not.toContain("Session liveness probe timed out")
     expect(JSON.parse(result.output ?? "{}").text).toBe("")
   })
+
+  it("PersistedSessionWithDifferentModelAndVariant_ResumesSamePhysicalSession", async () => {
+    useAcpFakeTimers()
+    const shared = createSharedSessionFixture("thought-liveness", {
+      sessionRecord: { acpSessionId: "server-session-1", model: "kimi-for-coding/k2p6" },
+    })
+
+    const action = acpAgentAction(contextWithOverrides({
+      prompt: "continue with a different model",
+      session: "shared-session",
+      agent: { model: "openai/gpt-5.5", variant: "high" },
+      livenessQuietThresholdMs: 5_000,
+      probeTimeoutMs: 5_000,
+      timeout: 5_000,
+    }, undefined, shared.context()))
+    await shared.agent.waitForPrompt()
+    for (let index = 0; index < 5; index += 1) await vi.advanceTimersByTimeAsync(20)
+    const result = await action
+
+    expect(result.status).toBe("success")
+    expect(shared.agent.calls).toContainEqual(expect.objectContaining({ event: "resumeSession", sessionId: "server-session-1" }))
+    expect(shared.agent.calls.some((entry) => entry.event === "newSession")).toBe(false)
+    expect(shared.agent.calls).toContainEqual(expect.objectContaining({ event: "unstable_setSessionModel", sessionId: "server-session-1", modelId: "openai/gpt-5.5/high" }))
+    expect(shared.agent.calls).toContainEqual(expect.objectContaining({ event: "prompt", sessionId: "server-session-1" }))
+  })
 })

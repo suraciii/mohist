@@ -150,11 +150,9 @@ describe("mohist/acp-agent existing shared session reuse", () => {
     expect(shared.agent.calls.some((entry) => entry.event === "newSession")).toBe(false)
   })
 
-  it("ExistingSharedSessionWithDifferentRequestedModel_StartsNewSessionInsteadOfResumingOldModel", async () => {
+  it("ExistingSharedSessionWithDifferentRequestedModel_ReusesPhysicalSessionAndAppliesNewModel", async () => {
     useAcpFakeTimers()
     const shared = createSharedSessionFixture("thought-liveness", {
-      cachedModel: "kimi-for-coding/k2p6",
-      newSessionId: "replacement-session-1",
       sessionRecord: { acpSessionId: "shared-session-1", model: "kimi-for-coding/k2p6" },
     })
 
@@ -171,23 +169,19 @@ describe("mohist/acp-agent existing shared session reuse", () => {
 
     expect(result.status).toBe("success")
     expect(shared.agent.calls.some((entry) => entry.event === "resumeSession")).toBe(false)
-    expect(shared.agent.calls.some((entry) => entry.event === "newSession")).toBe(true)
-    expect(shared.serverConnection.calls).toContainEqual(expect.objectContaining({
-      event: "attachWorkflowAgentSession",
-      sessionName: "shared-session",
-      body: expect.objectContaining({ agentSessionId: "replacement-session-1", model: "openai/gpt-5.5" }),
-    }))
-    const setModelIndex = shared.agent.calls.findIndex((entry) => entry.event === "unstable_setSessionModel" && entry.sessionId === "replacement-session-1" && entry.modelId === "openai/gpt-5.5")
-    const promptIndex = shared.agent.calls.findIndex((entry) => entry.event === "prompt" && entry.sessionId === "replacement-session-1")
+    expect(shared.agent.calls.some((entry) => entry.event === "newSession")).toBe(false)
+    const attachCalls = shared.serverConnection.calls.filter((entry) => entry.event === "attachWorkflowAgentSession")
+    expect(attachCalls).not.toHaveLength(0)
+    expect(attachCalls.every((entry) => (entry.body as { agentSessionId?: string }).agentSessionId === "shared-session-1")).toBe(true)
+    const setModelIndex = shared.agent.calls.findIndex((entry) => entry.event === "unstable_setSessionModel" && entry.sessionId === "shared-session-1" && entry.modelId === "openai/gpt-5.5")
+    const promptIndex = shared.agent.calls.findIndex((entry) => entry.event === "prompt" && entry.sessionId === "shared-session-1")
     expect(setModelIndex).toBeGreaterThanOrEqual(0)
     expect(setModelIndex).toBeLessThan(promptIndex)
   })
 
-  it("ExistingSharedSessionSameModelDifferentVariant_StartsFreshSessionDeliversNewVariant", async () => {
+  it("ExistingSharedSessionSameModelDifferentVariant_ReusesPhysicalSessionAndDeliversNewVariant", async () => {
     useAcpFakeTimers()
     const shared = createSharedSessionFixture("thought-liveness", {
-      cachedModel: "anthropic/claude-sonnet-4-5/max",
-      newSessionId: "variant-flip-session-1",
       sessionRecord: { acpSessionId: "shared-session-1", model: "anthropic/claude-sonnet-4-5/max" },
     })
 
@@ -204,7 +198,7 @@ describe("mohist/acp-agent existing shared session reuse", () => {
 
     expect(result.status).toBe("success")
     expect(shared.agent.calls.some((entry) => entry.event === "resumeSession")).toBe(false)
-    expect(shared.agent.calls.some((entry) => entry.event === "newSession")).toBe(true)
-    expect(shared.agent.calls.some((entry) => entry.event === "unstable_setSessionModel" && entry.modelId === "anthropic/claude-sonnet-4-5/high")).toBe(true)
+    expect(shared.agent.calls.some((entry) => entry.event === "newSession")).toBe(false)
+    expect(shared.agent.calls.some((entry) => entry.event === "unstable_setSessionModel" && entry.sessionId === "shared-session-1" && entry.modelId === "anthropic/claude-sonnet-4-5/high")).toBe(true)
   })
 })

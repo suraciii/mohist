@@ -66,20 +66,6 @@ export function modelDiagnosticContext(context: ActionContext, requested: Reques
   }
 }
 
-export function requestedModelMatchesSession(requestedModel: string | undefined, sessionModel: string | null | undefined) {
-  const requested = requestedModel?.trim()
-  if (!requested) return true
-  return sessionModel?.trim() === requested
-}
-
-export function cachedModelAllowsReuse(requestedModel: string | undefined, cachedModel: string | null | undefined) {
-  const requested = requestedModel?.trim()
-  if (!requested) return true
-  const cached = cachedModel?.trim()
-  if (!cached) return true
-  return cached === requested
-}
-
 export function extractResolvedModelId(value: unknown): string | undefined {
   if (typeof value !== "object" || value === null) return undefined
   const models = (value as Record<string, unknown>).models

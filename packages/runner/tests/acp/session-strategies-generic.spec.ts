@@ -318,6 +318,25 @@ describe("runAcpAgentSession — generic session dispatch", () => {
     expect(fixture.agent.calls).toContainEqual({ event: "unstable_setSessionModel", sessionId: "acp-session-1", modelId: "openai/gpt-5.5" })
   })
 
+  it("GenericSessionWithDifferentModel_ResumesSamePhysicalSession", async () => {
+    const fixture = createGenericFixture()
+    fixture.serverConnection.nextGetGenericSession = {
+      acpSessionId: "persisted-acp-session",
+      workDir: "D:/work",
+      model: "kimi-for-coding/k2p6",
+    }
+
+    const result = await acpAgentAction(fixture.context({
+      with: { prompt: "continue with a different model", agent: { model: "openai/gpt-5.5" } } as never,
+    }))
+
+    expect(result.status).toBe("success")
+    expect(fixture.agent.calls).toContainEqual({ event: "resumeSession", sessionId: "persisted-acp-session" })
+    expect(fixture.agent.calls.some((entry) => entry.event === "newSession")).toBe(false)
+    expect(fixture.agent.calls).toContainEqual({ event: "unstable_setSessionModel", sessionId: "persisted-acp-session", modelId: "openai/gpt-5.5" })
+    expect(fixture.agent.calls).toContainEqual({ event: "prompt", sessionId: "persisted-acp-session" })
+  })
+
   it("WorkflowOwnerKind_StillUsesWorkflowConnectionMethods", async () => {
     const fixture = createGenericFixture()
     fixture.context({ ownerKind: "workflow", agentSessionId: undefined, workflowRunId: "wf-1", with: { session: "build", prompt: "do the work" } as never })
