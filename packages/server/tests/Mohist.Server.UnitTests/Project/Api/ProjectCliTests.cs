@@ -50,16 +50,26 @@ public class ProjectCliTests
               "data": { "id": "proj_new", "name": "alpha" }
             }
             """);
+        var workTreeRoot = Path.Combine(Path.GetTempPath(), $"alpha-{Guid.NewGuid():N}");
+        files.AddDirectory(workTreeRoot);
+        files.AddDirectory(Path.Combine(workTreeRoot, ".git"));
         var output = new StringWriter();
         var error = new StringWriter();
+        var responses = new Queue<(int, string, string)>([
+            (0, workTreeRoot + "\n", ""),
+            (0, "abc123\n", ""),
+            (0, "git@example.com:team/alpha.git\n", ""),
+            (0, "origin/main\n", ""),
+        ]);
+        var executor = new QueuedGitCommandExecutor(responses);
 
         var exitCode = await MohistCliCommands.RunAsync(
             new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
-            ["project", "create", "alpha"],
+            ["project", "create", "alpha", "--path", workTreeRoot],
             output,
             error,
             files,
-            new NoopCommandExecutor(),
+            executor,
             getUserHome: () => "/mohist-tests/user");
 
         Assert.Equal(0, exitCode);
@@ -68,9 +78,10 @@ public class ProjectCliTests
         Assert.Equal("/api/projects", request.RequestUri!.PathAndQuery);
         var body = http.RequestBodies.Single();
         Assert.Contains("\"name\": \"alpha\"", body);
+        Assert.Contains("\"repository\":", body);
+        Assert.Contains("\"gitUrl\": \"git@example.com:team/alpha.git\"", body);
         Assert.DoesNotContain("\"path\"", body);
         Assert.DoesNotContain("\"effectivePath\"", body);
-        Assert.DoesNotContain("\"baseBranch\"", body);
     }
 
     [Fact]
@@ -267,6 +278,23 @@ public class ProjectCliTests
     {
         public Task<(int ExitCode, string Stdout, string Stderr)> ExecuteAsync(string fileName, string[] args, string? workingDirectory = null, CancellationToken cancellationToken = default) =>
             Task.FromResult((0, "", ""));
+    }
+
+    private sealed class QueuedGitCommandExecutor : ICommandExecutor
+    {
+        private readonly Queue<(int ExitCode, string Stdout, string Stderr)> _responses;
+
+        public QueuedGitCommandExecutor(Queue<(int ExitCode, string Stdout, string Stderr)> responses)
+        {
+            _responses = responses;
+        }
+
+        public Task<(int ExitCode, string Stdout, string Stderr)> ExecuteAsync(string fileName, string[] args, string? workingDirectory = null, CancellationToken cancellationToken = default)
+        {
+            if (_responses.Count > 0)
+                return Task.FromResult(_responses.Dequeue());
+            return Task.FromResult((0, "", ""));
+        }
     }
 
     private sealed class RecordingHttpHandler : HttpMessageHandler

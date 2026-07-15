@@ -50,13 +50,40 @@ internal static class ProjectCommands
 
     private static Command BuildCreate(MohistCliApi api)
     {
-        var cmd = new Command("create", "Create a new project");
+        var cmd = new Command("create", "Create a new project from a local Git working tree");
         var nameArg = new Argument<string>("name") { Description = "Project name" };
+        var pathOpt = new Option<string>("--path") { Description = "Path to the local Git repository that becomes the project's default repository" };
         cmd.Arguments.Add(nameArg);
-        cmd.SetAction(ctx =>
+        cmd.Options.Add(pathOpt);
+        cmd.SetAction(async ctx =>
         {
             var name = ctx.GetValue(nameArg);
-            return api.PrintPostAsync("/api/projects", new { name });
+            var path = ctx.GetValue(pathOpt);
+
+            var bootstrap = await ProjectRepositoryBootstrap.TryResolveAsync(
+                path ?? string.Empty,
+                api.FileSystem,
+                api.CommandExecutor);
+
+            if (bootstrap is ProjectRepositoryBootstrap.Outcome.Failure failure)
+            {
+                api.Error.WriteLine(failure.Message);
+                return 1;
+            }
+
+            var resolved = ((ProjectRepositoryBootstrap.Outcome.Success)bootstrap).Result;
+            return await api.PrintPostAsync(
+                "/api/projects",
+                new
+                {
+                    name,
+                    repository = new
+                    {
+                        name = resolved.RepositoryName,
+                        gitUrl = resolved.GitUrl,
+                        baseBranch = resolved.BaseBranch,
+                    },
+                });
         });
         return cmd;
     }
