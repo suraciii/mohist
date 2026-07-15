@@ -57,3 +57,10 @@
 - `SessionRecovery` table output now reads the stable recovery result `id` and prints it as `session id`; the removed physical `agentSessionId` is no longer rendered or asserted by CLI specs.
 - Workflow and named-agent help describes Compact and Reset as in-place operations. CLI specs pin stable-session wording for both `session_active` and `runtime_session_missing` responses without id-rotation language.
 - Verification: pre-change focused CLI specs passed 94/94; post-change focused CLI specs passed 112/112; full CLI tests passed 883/883.
+
+## T-008
+
+- Workflow-scoped and canonical generic Follow-up return the same `{ sessionId, status }` shape and share join-active-turn / start-user-initiated-idle-turn wording. Specs pin that neither path creates a TaskRun or AgentJob.
+- Follow-up `session.input` events carry the physical binding as `runtimeSessionId` for both Workflow and generic targets; `acpSessionId` is absent.
+- Canonical Cancel accepts Workflow and Agent-launch sessions, interrupts only the current turn, and leaves the stable sessionId, source, runtime binding, transcript, and lineage unchanged. It remains outside the Compact/Reset idle boundary.
+- Verification: focused server Follow-up/Cancel specs passed 41/41; runner Follow-up specs passed 27/27 and Cancel specs passed 9/9; runner source and test typechecks passed; focused CLI session specs passed 98/98.
