@@ -150,31 +150,46 @@ describe("mohist/acp-agent existing shared session reuse", () => {
     expect(shared.agent.calls.some((entry) => entry.event === "newSession")).toBe(false)
   })
 
-  it("ExistingSharedSessionWithDifferentRequestedModel_ReusesPhysicalSessionAndAppliesNewModel", async () => {
+  it("SameNamedWorkflowSessionAcrossTasksAndModelChange_ReusesOnePhysicalSession", async () => {
     useAcpFakeTimers()
     const shared = createSharedSessionFixture("thought-liveness", {
       sessionRecord: { acpSessionId: "shared-session-1", model: "kimi-for-coding/k2p6" },
     })
 
-    const action = acpAgentAction(contextWithOverrides({
-      prompt: "switch shared session model",
+    const firstAction = acpAgentAction(contextWithOverrides({
+      prompt: "first task",
+      session: "shared-session",
+      agent: { model: "kimi-for-coding/k2p6" },
+      livenessQuietThresholdMs: 5_000,
+      probeTimeoutMs: 5_000,
+      timeout: 5_000,
+    }, undefined, { ...shared.context(), workId: "task-a" }))
+    await advanceThoughtLiveness(shared.agent)
+    const firstResult = await firstAction
+
+    const secondAction = acpAgentAction(contextWithOverrides({
+      prompt: "second task with another model",
       session: "shared-session",
       agent: { model: "openai/gpt-5.5" },
       livenessQuietThresholdMs: 5_000,
       probeTimeoutMs: 5_000,
       timeout: 5_000,
-    }, undefined, shared.context()))
+    }, undefined, { ...shared.context(), workId: "task-b" }))
     await advanceThoughtLiveness(shared.agent)
-    const result = await action
+    const secondResult = await secondAction
 
-    expect(result.status).toBe("success")
+    expect(firstResult.status).toBe("success")
+    expect(secondResult.status).toBe("success")
     expect(shared.agent.calls.some((entry) => entry.event === "resumeSession")).toBe(false)
     expect(shared.agent.calls.some((entry) => entry.event === "newSession")).toBe(false)
+    const prompts = shared.agent.calls.filter((entry) => entry.event === "prompt")
+    expect(prompts).toHaveLength(2)
+    expect(prompts.every((entry) => entry.sessionId === "shared-session-1")).toBe(true)
     const attachCalls = shared.serverConnection.calls.filter((entry) => entry.event === "attachWorkflowAgentSession")
     expect(attachCalls).not.toHaveLength(0)
     expect(attachCalls.every((entry) => (entry.body as { agentSessionId?: string }).agentSessionId === "shared-session-1")).toBe(true)
     const setModelIndex = shared.agent.calls.findIndex((entry) => entry.event === "unstable_setSessionModel" && entry.sessionId === "shared-session-1" && entry.modelId === "openai/gpt-5.5")
-    const promptIndex = shared.agent.calls.findIndex((entry) => entry.event === "prompt" && entry.sessionId === "shared-session-1")
+    const promptIndex = shared.agent.calls.findIndex((entry) => entry.event === "prompt" && entry.sessionId === "shared-session-1" && entry.text === "second task with another model")
     expect(setModelIndex).toBeGreaterThanOrEqual(0)
     expect(setModelIndex).toBeLessThan(promptIndex)
   })
