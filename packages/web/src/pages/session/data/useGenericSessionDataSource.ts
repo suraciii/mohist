@@ -111,7 +111,7 @@ export function useGenericSessionDataSource(
   } = useTranscript({
     issueNumber: 0,
     sessionId,
-    acpSessionId: sessionId,
+    runtimeSessionId: sessionId,
     initialTurns: initialTurns.length > 0 ? initialTurns : undefined,
     sessionQueryKeys: [metadataQueryKey, transcriptQueryKey],
     isRunning,
@@ -173,7 +173,7 @@ export function useGenericSessionDataSource(
     isError: summaryError,
     notFound: !sessionId || (!summary && !summaryLoading && !summaryError),
     sessionKey: sessionId,
-    acpSessionId: sessionId,
+    runtimeSessionId: sessionId,
     meta,
     transcriptResponse: transcriptResponse ?? null,
     initialTurns,

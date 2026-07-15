@@ -41,7 +41,7 @@ function fakeServerConnection(): ServerConnection & { calls: Array<{ method: str
     },
     async ensureWorkflowAgentSession(...args: unknown[]) {
       calls.push({ method: "ensureWorkflowAgentSession", args })
-      return { acpSessionId: "shared", workDir: "D:/work" }
+      return { runtimeSessionId: "shared", workDir: "D:/work" }
     },
     async getWorkflowAgentSession(...args: unknown[]) {
       calls.push({ method: "getWorkflowAgentSession", args })
@@ -49,7 +49,7 @@ function fakeServerConnection(): ServerConnection & { calls: Array<{ method: str
     },
     async openWorkflowAgentSession(...args: unknown[]) {
       calls.push({ method: "openWorkflowAgentSession", args })
-      return { acpSessionId: "shared", workDir: "D:/work" }
+      return { runtimeSessionId: "shared", workDir: "D:/work" }
     },
   } as unknown as ServerConnection & { calls: Array<{ method: string; args: unknown[] }> }
 }

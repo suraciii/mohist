@@ -96,7 +96,7 @@ function setupRunningIssueMocks() {
       id: 'session-1',
       sessionName: 'session-1',
       workflowRunId: 'wr-1',
-      acpSessionId: 'acp-1',
+      runtimeSessionId: 'acp-1',
       projectId: 'proj-1',
       issueNumber: 123,
       runnerId: 'runner-1',
@@ -162,7 +162,7 @@ function baseRunningMetadata(overrides: Partial<AgentSessionMetadata> = {}): Age
   return {
     id: 'agent-session-1',
     sessionName: 'session-1',
-    acpSessionId: 'acp-1',
+    runtimeSessionId: 'acp-1',
     title: 'Test session',
     status: 'active',
     statusKind: 'live',

@@ -29,7 +29,7 @@ import {
 interface UseSessionTranscriptOptions {
   issueNumber: number
   sessionId: string
-  acpSessionId: string
+  runtimeSessionId: string
   initialTurns?: SessionTurn[]
   sessionQueryKeys?: readonly (readonly unknown[])[]
   isRunning: boolean
@@ -52,7 +52,7 @@ export interface UseSessionTranscriptResult {
 export function useSessionTranscript({
   issueNumber,
   sessionId,
-  acpSessionId,
+  runtimeSessionId,
   initialTurns,
   sessionQueryKeys,
   isRunning,
@@ -86,7 +86,7 @@ export function useSessionTranscript({
 
   useEffect(() => {
     hasLiveTailRef.current = false
-  }, [issueId, sessionId, acpSessionId])
+  }, [issueId, sessionId, runtimeSessionId])
 
   const scrollToBottom = useCallback(() => {
     setIsNearBottom(true)
@@ -166,10 +166,10 @@ export function useSessionTranscript({
 
     mountedRef.current = true
     const unsubs: Array<() => void> = []
-    const isCurrentSessionEvent = (detail: { acpSessionId?: string | null; coderSessionId?: string | null; sessionId?: string | null }) => {
+    const isCurrentSessionEvent = (detail: { runtimeSessionId?: string | null; sessionId?: string | null }) => {
       if (!mountedRef.current) return false
-      if (acpSessionId && detail.acpSessionId === acpSessionId) return true
-      return detail.coderSessionId === sessionId || detail.sessionId === sessionId
+      if (runtimeSessionId && detail.runtimeSessionId === runtimeSessionId) return true
+      return detail.sessionId === sessionId
     }
     const handleToolDetail = (detail: AgentDetailEventMap['tool_call.started']) => {
       if (!isCurrentSessionEvent(detail)) return
@@ -437,7 +437,7 @@ export function useSessionTranscript({
     )
 
     const handleLegacyTerminalEvent = (
-      detail: { coderSessionId?: string | null; sessionId?: string | null; acpSessionId?: string | null; reason?: string | null },
+      detail: { sessionId?: string | null; runtimeSessionId?: string | null; reason?: string | null },
       status: 'completed' | 'failed' | 'cancelled',
     ) => {
       if (!isCurrentSessionEvent(detail)) return
@@ -560,7 +560,7 @@ export function useSessionTranscript({
       }
       for (const unsub of unsubs) unsub()
     }
-  }, [issueId, sessionId, acpSessionId, issueNumber, isRunning, queryClient, invalidateAndRefetch])
+  }, [issueId, sessionId, runtimeSessionId, issueNumber, isRunning, queryClient, invalidateAndRefetch])
 
   return {
     turns,

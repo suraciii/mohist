@@ -53,7 +53,7 @@ export async function acpAgentAction(context: ActionContext): Promise<ActionResu
     output: JSON.stringify({
       kind: "acp-agent",
       status: ok ? "success" : "failure",
-      acpSessionId: result.acpSessionId,
+      runtimeSessionId: result.acpSessionId,
       model: agentConfig?.model,
       text: result.text,
       error: result.error,

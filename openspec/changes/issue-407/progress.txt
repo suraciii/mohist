@@ -42,3 +42,11 @@
 - Handler `missing` and `conflict` results map to the existing runtime_session_missing Reset hint and shared session_active conflict. A runner without #409's runtime implementation returns unavailable rather than fabricating a compact or replacement session.
 - Contract coverage uses a fake runner handler to pin compact, reset, conflict, and missing request/result behavior. Active-session API specs also assert the runner is not invoked before the server idle boundary passes.
 - Verification: focused recovery specs passed 28/28; focused SessionCommand unit tests passed 5/5; runner source/test typechecks passed; full `npm test` passed (CLI 865, server unit 1356, architecture 22, server spec 2763, Web 4653, Runner 1019).
+
+## T-006
+
+- Session read models and runner lookup responses now expose the physical binding as `runtimeSessionId` plus `runtime`; lineage entries use the same pair. C# domain/state/event members remain `AgentRuntimeSessionId`, and no persisted shape was changed.
+- Web live-event models use stable `sessionId` for the logical AgentSession and `runtimeSessionId` for the physical runtime conversation. Transcript envelope normalization prefers canonical `runtimeSessionId` while still projecting the server's internal `agentSessionId` envelope member into that canonical field.
+- Runner server-response fields, follow-up events, runtime-event payload builders, liveness payloads, and action output use `runtimeSessionId`. `AcpSessionResult.acpSessionId` and ACP SDK-local variables remain internal adapter names and are not wire keys.
+- Project event activity projection no longer allow-lists `coderSessionId`. Negative API tests pin that the legacy field is filtered out.
+- Verification: focused server wire specs passed 73/73; runner source/test typechecks and Web typecheck passed; full `npm test` passed (CLI 865, server unit 1356, architecture 22, server spec 2763, Web 4654, Runner 1019). Wire-emission greps found no legacy keys outside explicit negative assertions and ACP-internal adapter names.

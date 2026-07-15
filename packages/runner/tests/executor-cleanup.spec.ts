@@ -544,7 +544,7 @@ describe("WorkExecutor clean worktree invariant", () => {
     // result blob), the dirty-worktree failure must merge that
     // output with the evidence rather than dropping it.
     markWorktreeDirty("src/preserved.ts")
-    const actionOutput = JSON.stringify({ kind: "acp-agent", acpSessionId: "sess-1", model: "openai/gpt-5" })
+    const actionOutput = JSON.stringify({ kind: "acp-agent", runtimeSessionId: "sess-1", model: "openai/gpt-5" })
     const executor = buildExecutor(makeRegistry(async () => ({ status: "success", output: actionOutput })))
 
     const result = await executor.execute(buildWork(), new AbortController().signal)
@@ -552,7 +552,7 @@ describe("WorkExecutor clean worktree invariant", () => {
     expect(result.status).toBe("failed")
     const evidence = JSON.parse(result.output ?? "{}")
     expect(evidence.kind).toBe("dirty-worktree")
-    expect(evidence.acpSessionId).toBe("sess-1")
+    expect(evidence.runtimeSessionId).toBe("sess-1")
     expect(evidence.model).toBe("openai/gpt-5")
     expect(evidence.unstaged).toEqual(["src/preserved.ts"])
   })

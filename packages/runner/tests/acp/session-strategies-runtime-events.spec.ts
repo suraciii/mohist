@@ -24,7 +24,7 @@ describe("mohist/acp-agent new and ephemeral sessions", () => {
     expect(resolvedModelEvent).toBeTruthy()
     expect(resolvedModelEvent?.resolvedModel).toBe("openai/gpt-4.1")
     expect(resolvedModelEvent?.source).toBe("newSession")
-    expect(resolvedModelEvent?.acpSessionId).toBe("fake-session-1")
+    expect(resolvedModelEvent?.runtimeSessionId).toBe("fake-session-1")
   })
 
   it("NewSessionLacksCurrentModelId_RunnerDoesNotEmitResolvedModelEvent", async () => {

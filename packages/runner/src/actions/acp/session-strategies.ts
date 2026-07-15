@@ -91,12 +91,12 @@ export async function runAcpWorkflowAgentSession(context: ActionContext, prompt:
       issueNumber: context.issueNumber,
     }, context.signal)
 
-    if (session.acpSessionId) {
+    if (session.runtimeSessionId) {
       const cached = manager.get(key)
-      if (cached?.sessionId === session.acpSessionId) {
+      if (cached?.sessionId === session.runtimeSessionId) {
         return runPromptOnExistingWorkflowAgentSession(context, prompt, cached)
       }
-      const result = await runResumedWorkflowAgentSession(context, prompt, session.acpSessionId, session.workDir ?? context.workDir)
+      const result = await runResumedWorkflowAgentSession(context, prompt, session.runtimeSessionId, session.workDir ?? context.workDir)
       if (result.success && result.acpSessionId) manager.set(key, { sessionId: result.acpSessionId, workDir: session.workDir ?? context.workDir })
       return result
     }
@@ -138,16 +138,16 @@ export async function runAcpGenericAgentSession(context: ActionContext, prompt: 
     title: context.title,
     issueNumber: context.issueNumber,
   }
-  const session = existing?.acpSessionId
+  const session = existing?.runtimeSessionId
     ? existing
     : await serverConnection.openAgentSession(projectId, sessionId, openBody, context.signal)
 
-  if (session.acpSessionId) {
+  if (session.runtimeSessionId) {
     const cached = manager.get(key)
-    if (cached?.sessionId === session.acpSessionId) {
+    if (cached?.sessionId === session.runtimeSessionId) {
       return runPromptOnExistingWorkflowAgentSession(context, prompt, cached)
     }
-    const result = await runResumedWorkflowAgentSession(context, prompt, session.acpSessionId, session.workDir ?? context.workDir)
+    const result = await runResumedWorkflowAgentSession(context, prompt, session.runtimeSessionId, session.workDir ?? context.workDir)
     if (result.success && result.acpSessionId) manager.set(key, { sessionId: result.acpSessionId, workDir: session.workDir ?? context.workDir })
     return result
   }

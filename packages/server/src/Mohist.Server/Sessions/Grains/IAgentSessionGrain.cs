@@ -87,7 +87,8 @@ public sealed record AgentSessionInfo(
     [property: Id(18)] long? ContextWindowSize,
     [property: Id(19)] string? FailureCategory,
     [property: Id(20)] int? ToolCallCount,
-    [property: Id(21)] int? ToolErrorCount);
+    [property: Id(21)] int? ToolErrorCount,
+    [property: Id(22)] string? Runtime);
 
 [GenerateSerializer]
 public sealed record AgentSessionRecoveryResult(

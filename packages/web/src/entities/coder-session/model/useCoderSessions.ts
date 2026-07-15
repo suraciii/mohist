@@ -83,15 +83,15 @@ export function useCoderSessions(
       onAgentEvent('coder_session_started', (detail) => {
         if (detail.issueId !== issueId || !mountedRef.current) return
         const newSession: CoderSessionSummary = {
-          id: detail.coderSessionId,
-          acpSessionId: detail.acpSessionId,
+          id: detail.sessionId,
+          runtimeSessionId: detail.runtimeSessionId,
           executionId: detail.executionId ?? null,
           taskDescription: detail.taskDescription ?? null,
           status: 'running',
           createdAt: new Date().toISOString(),
           completedAt: null,
           model: detail.model ?? null,
-          coderType: detail.coderType ?? null,
+          runtime: detail.runtime ?? null,
           stage: detail.stage ?? null,
           title: detail.title ?? null,
           lastDataAt: null,
@@ -109,7 +109,7 @@ export function useCoderSessions(
         if (detail.issueId !== issueId || !mountedRef.current) return
         setLiveSessions((prev) => {
           const next = prev.map((s) =>
-            s.id === detail.coderSessionId
+            s.id === detail.sessionId
               ? { ...s, status: detail.status, completedAt: new Date().toISOString() }
               : s,
           )
@@ -124,7 +124,7 @@ export function useCoderSessions(
       onAgentEvent('coder_session_status_changed', (detail) => {
         if (!mountedRef.current) return
         setLiveSessions((prev) => {
-          const idx = prev.findIndex((s) => s.id === detail.coderSessionId)
+          const idx = prev.findIndex((s) => s.id === detail.sessionId)
           if (idx === -1) return prev
           const existing = prev[idx]
           const updated: CoderSessionSummary = {
@@ -149,7 +149,7 @@ export function useCoderSessions(
       onAgentEvent('usage.updated', (detail) => {
         if (!mountedRef.current) return
         setLiveSessions((prev) => {
-          const idx = prev.findIndex((s) => s.id === detail.coderSessionId)
+          const idx = prev.findIndex((s) => s.id === detail.sessionId)
           if (idx === -1) return prev
           const existing = prev[idx]
           const updated: CoderSessionSummary = {

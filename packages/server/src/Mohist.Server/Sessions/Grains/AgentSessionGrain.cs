@@ -806,7 +806,8 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         usage.ContextWindowSize,
         eventSummary.FailureCategory,
         eventSummary.ToolCallCount,
-            eventSummary.ToolErrorCount);
+            eventSummary.ToolErrorCount,
+            s.Runtime.Runtime);
     }
 
     private async Task<AgentSessionTranscriptSummary> LoadEventSummaryAsync(string sessionId)

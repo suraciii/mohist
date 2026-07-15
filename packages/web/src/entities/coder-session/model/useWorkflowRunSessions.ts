@@ -63,7 +63,7 @@ export function useWorkflowRunSessions(
           ? {
               ...prev,
               sessions: prev.sessions.map((session) =>
-                session.id === detail.coderSessionId
+                session.id === detail.sessionId
                   ? { ...session, status: detail.status, completedAt: new Date().toISOString() }
                   : session,
               ),
@@ -76,11 +76,11 @@ export function useWorkflowRunSessions(
           ? {
               ...prev,
               sessions: prev.sessions.map((session) =>
-                session.id === detail.coderSessionId
+                session.id === detail.sessionId
                   ? {
                       ...session,
                       status: detail.status,
-                      acpSessionId: detail.acpSessionId ?? session.acpSessionId,
+                      runtimeSessionId: detail.runtimeSessionId ?? session.runtimeSessionId,
                       ...(detail.lastDataAt !== undefined && { lastDataAt: detail.lastDataAt }),
                       ...(detail.failureReason !== undefined && { failureReason: detail.failureReason }),
                     }
@@ -95,7 +95,7 @@ export function useWorkflowRunSessions(
           ? {
               ...prev,
               sessions: prev.sessions.map((session) =>
-                session.id === detail.coderSessionId || session.acpSessionId === detail.acpSessionId
+                session.id === detail.sessionId || session.runtimeSessionId === detail.runtimeSessionId
                   ? {
                       ...session,
                       usage: {
@@ -124,7 +124,7 @@ export function useWorkflowRunSessions(
           ? {
               ...prev,
               sessions: prev.sessions.map((session) =>
-                session.id === detail.coderSessionId || session.acpSessionId === detail.acpSessionId
+                session.id === detail.sessionId || session.runtimeSessionId === detail.runtimeSessionId
                   ? {
                       ...session,
                       usage: {

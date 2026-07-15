@@ -15,7 +15,7 @@ function Wrapper({
   const result = useSessionTranscript({
     issueNumber: 84,
     sessionId: 'session-84',
-    acpSessionId: 'acp-84',
+    runtimeSessionId: 'acp-84',
     initialTurns: events,
     isRunning,
   })
@@ -77,7 +77,7 @@ describe('useSessionTranscript', () => {
 
     act(() => {
       dispatchAgentEvent('message.delta', {
-        acpSessionId: 'acp-84',
+        runtimeSessionId: 'acp-84',
         text: ' live',
       })
     })
@@ -95,7 +95,7 @@ describe('useSessionTranscript', () => {
 
     act(() => {
       dispatchAgentEvent('message.delta', {
-        acpSessionId: 'acp-84',
+        runtimeSessionId: 'acp-84',
         text: ' live',
       })
     })

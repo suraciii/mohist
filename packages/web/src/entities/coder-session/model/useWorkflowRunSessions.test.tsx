@@ -22,7 +22,7 @@ function session(overrides: Partial<WorkflowRunSession>): WorkflowRunSession {
     id: overrides.id ?? 'session-id',
     workflowRunId: overrides.workflowRunId ?? 'wr-1',
     sessionName: overrides.sessionName ?? 'plan',
-    acpSessionId: overrides.acpSessionId ?? null,
+    runtimeSessionId: overrides.runtimeSessionId ?? null,
     projectId: overrides.projectId ?? 'project-1',
     issueNumber: overrides.issueNumber ?? 42,
     runnerId: overrides.runnerId ?? 'runner-1',
@@ -87,7 +87,7 @@ describe('useWorkflowRunSessions', () => {
 
   describe('event handlers', () => {
     it('usage.updated applies contextUsagePercent and healthStatus to matched session', async () => {
-      _sessionsData = [session({ id: 'sess-1', acpSessionId: 'acp-1', status: 'running' })]
+      _sessionsData = [session({ id: 'sess-1', runtimeSessionId: 'acp-1', status: 'running' })]
 
       const queryClient = createQueryClient()
       const wrapper = ({ children }: { children: ReactNode }) => (
@@ -105,8 +105,8 @@ describe('useWorkflowRunSessions', () => {
 
       act(() => {
         ;(dispatchAgentEvent as any)('usage.updated', {
-          coderSessionId: 'sess-1',
-          acpSessionId: 'acp-1',
+          sessionId: 'sess-1',
+          runtimeSessionId: 'acp-1',
           contextUsagePercent: 72,
           healthStatus: 'yellow',
         })
@@ -140,7 +140,7 @@ describe('useWorkflowRunSessions', () => {
 
       act(() => {
         ;(dispatchAgentEvent as any)('usage.updated', {
-          coderSessionId: 'sess-1',
+          sessionId: 'sess-1',
           contextUsagePercent: 72,
           healthStatus: 'yellow',
         })
@@ -154,7 +154,7 @@ describe('useWorkflowRunSessions', () => {
     })
 
     it('context_health_update updates matched session fields', async () => {
-      _sessionsData = [session({ id: 'sess-1', acpSessionId: 'acp-1', status: 'running' })]
+      _sessionsData = [session({ id: 'sess-1', runtimeSessionId: 'acp-1', status: 'running' })]
 
       const queryClient = createQueryClient()
       const wrapper = ({ children }: { children: ReactNode }) => (
@@ -172,8 +172,8 @@ describe('useWorkflowRunSessions', () => {
 
       act(() => {
         ;(dispatchAgentEvent as any)('context_health_update', {
-          coderSessionId: 'sess-1',
-          acpSessionId: 'acp-1',
+          sessionId: 'sess-1',
+          runtimeSessionId: 'acp-1',
           healthStatus: 'red',
           contextUsagePercent: 91,
           contextWindowUsed: 182000,
@@ -190,8 +190,8 @@ describe('useWorkflowRunSessions', () => {
       })
     })
 
-    it('context_health_update updates session matched by acpSessionId', async () => {
-      _sessionsData = [session({ id: 'sess-1', acpSessionId: 'acp-1', status: 'running' })]
+    it('context_health_update updates session matched by runtimeSessionId', async () => {
+      _sessionsData = [session({ id: 'sess-1', runtimeSessionId: 'acp-1', status: 'running' })]
 
       const queryClient = createQueryClient()
       const wrapper = ({ children }: { children: ReactNode }) => (
@@ -209,8 +209,8 @@ describe('useWorkflowRunSessions', () => {
 
       act(() => {
         ;(dispatchAgentEvent as any)('context_health_update', {
-          coderSessionId: undefined,
-          acpSessionId: 'acp-1',
+          sessionId: undefined,
+          runtimeSessionId: 'acp-1',
           healthStatus: 'yellow',
           contextUsagePercent: 65,
           contextWindowUsed: 130000,
@@ -228,7 +228,7 @@ describe('useWorkflowRunSessions', () => {
     it('context_health_update ignores sessions whose identifiers do not match', async () => {
       _sessionsData = [session({
         id: 'sess-1',
-        acpSessionId: 'acp-1',
+        runtimeSessionId: 'acp-1',
         usage: { healthStatus: 'green', contextUsagePercent: 30 },
         status: 'running',
       })]
@@ -249,8 +249,8 @@ describe('useWorkflowRunSessions', () => {
 
       act(() => {
         ;(dispatchAgentEvent as any)('context_health_update', {
-          coderSessionId: 'sess-unknown',
-          acpSessionId: 'acp-unknown',
+          sessionId: 'sess-unknown',
+          runtimeSessionId: 'acp-unknown',
           healthStatus: 'red',
           contextUsagePercent: 95,
           contextWindowUsed: 190000,

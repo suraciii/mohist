@@ -71,7 +71,7 @@ export function convertLegacyToAgentMetadata(detail: CoderSessionDetail): AgentS
   return {
     id: detail.id,
     sessionName: legacy.sessionId,
-    acpSessionId: detail.acpSessionId,
+    runtimeSessionId: detail.runtimeSessionId,
     status: legacy.status ?? detail.status,
     statusKind: legacy.statusKind,
     model: legacy.model ?? detail.model,

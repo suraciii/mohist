@@ -85,9 +85,9 @@ class TranscriptAxisFakeAgent {
   readonly calls: any[] = []
   private connection!: AgentSideConnection
   private readonly emitPlan: "full" = "full"
-  private readonly sessionRecord: { acpSessionId: string }
+  private readonly sessionRecord: { runtimeSessionId: string }
 
-  constructor(sessionRecord: { acpSessionId: string } = { acpSessionId: "acp-session-1" }) {
+  constructor(sessionRecord: { runtimeSessionId: string } = { runtimeSessionId: "acp-session-1" }) {
     this.sessionRecord = sessionRecord
   }
 
@@ -103,7 +103,7 @@ class TranscriptAxisFakeAgent {
       },
       async newSession() {
         self.calls.push({ event: "newSession" })
-        return { sessionId: self.sessionRecord.acpSessionId }
+        return { sessionId: self.sessionRecord.runtimeSessionId }
       },
       async resumeSession(params: { sessionId: string }) {
         self.calls.push({ event: "resumeSession", sessionId: params.sessionId })
@@ -140,8 +140,8 @@ class TranscriptAxisFakeAgent {
 
 class FakeServerConnectionForTranscriptAxis {
   readonly calls: Array<{ event: string; type?: string; payload?: unknown; body?: unknown; sessionId?: string }> = []
-  nextGetGenericSession: { acpSessionId?: string | null; workDir?: string; model?: string | null } | null = null
-  nextGenericSession: { acpSessionId: string; workDir: string; model?: string | null } = { acpSessionId: "acp-session-1", workDir: "D:/work" }
+  nextGetGenericSession: { runtimeSessionId?: string | null; workDir?: string; model?: string | null } | null = null
+  nextGenericSession: { runtimeSessionId: string; workDir: string; model?: string | null } = { runtimeSessionId: "acp-session-1", workDir: "D:/work" }
 
   async getAgentSession(_projectId: string, sessionId: string) {
     this.calls.push({ event: "getAgentSession", sessionId })
@@ -169,7 +169,7 @@ class FakeServerConnectionForTranscriptAxis {
 
   async openWorkflowAgentSession() {
     this.calls.push({ event: "openWorkflowAgentSession" })
-    return { acpSessionId: "wf-acp-1", workDir: "D:/work" }
+    return { runtimeSessionId: "wf-acp-1", workDir: "D:/work" }
   }
 
   async attachWorkflowAgentSession() {
@@ -181,7 +181,7 @@ class FakeServerConnectionForTranscriptAxis {
   }
 }
 
-function createTranscriptAxisFixture(opts: { nextGenericSession?: { acpSessionId: string; workDir: string; model?: string | null } } = {}) {
+function createTranscriptAxisFixture(opts: { nextGenericSession?: { runtimeSessionId: string; workDir: string; model?: string | null } } = {}) {
   const agent = new TranscriptAxisFakeAgent()
   const [clientStream, agentStream] = linkedStreams()
   const sessionUpdateHandlers = new Map<string, (notification: SessionNotification) => Promise<void>>()

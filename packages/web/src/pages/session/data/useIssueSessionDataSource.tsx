@@ -35,15 +35,15 @@ function buildSessionMetadata(
   meta: AgentSessionMetadata,
   lastEventAt: string | null,
   turnCount: number,
-  acpSessionId: string,
+  runtimeSessionId: string,
 ) {
   const isRunning = meta.status === 'active' || meta.status === 'running' || meta.status === 'probing'
   return {
     sessionId: meta.id,
     sessionName: meta.sessionName,
-    coderSessionId: meta.id,
     issueId: '',
-    acpSessionId: meta.acpSessionId ?? acpSessionId,
+    runtimeSessionId: meta.runtimeSessionId ?? runtimeSessionId,
+    runtime: meta.runtime ?? null,
     executionId: null,
     title: meta.title,
     status: meta.status,
@@ -213,17 +213,17 @@ export function useIssueSessionDataSource(
     const turnCount = transcriptResponse?.turns.length ?? 0
     return {
       id: metadata.id,
-      acpSessionId: metadata.acpSessionId,
+      runtimeSessionId: metadata.runtimeSessionId,
       executionId: null,
       taskDescription: metadata.title,
       status: metadata.status,
       createdAt: metadata.createdAt,
       completedAt: metadata.completedAt,
       model: metadata.model,
-      coderType: null,
+      runtime: metadata.runtime ?? null,
       stage: metadata.stage,
       title: metadata.title,
-      metadata: buildSessionMetadata(metadata, lastEventAt, turnCount, metadata.acpSessionId),
+      metadata: buildSessionMetadata(metadata, lastEventAt, turnCount, metadata.runtimeSessionId),
       turns: initialTurns,
       incomplete: false,
     }
@@ -232,7 +232,7 @@ export function useIssueSessionDataSource(
   const rawStatus = detail?.metadata?.status ?? detail?.status ?? session?.status
   const apiStatusKind = detail?.metadata?.statusKind
   const isRunning = (rawStatus === 'active' || rawStatus === 'running' || rawStatus === 'probing') && apiStatusKind !== 'completed' && apiStatusKind !== 'failed'
-  const acpSessionId = detail?.acpSessionId ?? session?.acpSessionId ?? ''
+  const runtimeSessionId = detail?.runtimeSessionId ?? session?.runtimeSessionId ?? ''
 
   const statusKind: StatusKind = detail
     ? (detail.metadata.statusKind ?? getSessionStatusKind(rawStatus, detail.metadata.lastActivityAt, isRunning, detail.metadata.completedAt ?? detail.completedAt))
@@ -250,7 +250,7 @@ export function useIssueSessionDataSource(
   } = useTranscript({
     issueNumber,
     sessionId: detail?.id ?? decodedSessionId ?? decodedSessionName ?? '',
-    acpSessionId,
+    runtimeSessionId,
     initialTurns: initialTurns.length > 0 ? initialTurns : undefined,
     sessionQueryKeys: [metadataQueryKey, transcriptQueryKey],
     isRunning,
@@ -265,7 +265,7 @@ export function useIssueSessionDataSource(
   const [searchParams] = useSearchParams()
   const fromActivity = searchParams.get('from') === 'activity'
   const runtimeLineage = metadata?.runtimeSessionLineage ?? null
-  const viewedRuntimeSessionId = searchParams.get('rt') ?? metadata?.acpSessionId ?? null
+  const viewedRuntimeSessionId = searchParams.get('rt') ?? metadata?.runtimeSessionId ?? null
 
   const buildLineageTargetPath = runtimeLineage && runtimeLineage.length >= 2
     ? (runtimeId: string) => {
@@ -311,7 +311,7 @@ export function useIssueSessionDataSource(
     isError: isDetailError,
     notFound: !lookupKey || isNaN(issueNumber) || issueNumber <= 0 || (!detail && !sessionsLoading && !metadataLoading && !isDetailError),
     sessionKey: lookupKey ?? '',
-    acpSessionId,
+    runtimeSessionId,
     meta: detail?.metadata ?? null,
     transcriptResponse: transcriptResponse ?? null,
     initialTurns,

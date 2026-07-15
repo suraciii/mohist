@@ -424,7 +424,8 @@ public static class RunnerRoutes
             session.Status,
             session.WorkDir,
             session.Model,
-            session.ResolvedModel);
+            session.ResolvedModel,
+            session.Runtime);
 
     private static async Task<bool> IsGenericAgentSessionInProjectAsync(
         AgentSessionQuery sessionQuery,
@@ -483,7 +484,8 @@ public static class RunnerRoutes
             session.Status,
             session.WorkDir,
             session.Model,
-            session.ResolvedModel);
+            session.ResolvedModel,
+            session.Runtime);
 
     private static string? NormalizeBuildGitHash(string? value)
     {
@@ -592,7 +594,7 @@ public record RunnerReportResponse(
     string? OwnerKind = null,
     string? OwnerId = null);
 public record RunnerAgentSessionKey(string ProjectId, string WorkflowRunId, string SessionName);
-public record RunnerAgentSessionResponse(RunnerAgentSessionKey Key, [property: JsonPropertyName("acpSessionId")] string? AgentSessionId, string Status, string? WorkDir = null, string? Model = null, string? ResolvedModel = null);
+public record RunnerAgentSessionResponse(RunnerAgentSessionKey Key, [property: JsonPropertyName("runtimeSessionId")] string? AgentSessionId, string Status, string? WorkDir = null, string? Model = null, string? ResolvedModel = null, string? Runtime = null);
 public record AgentSessionOpenRequest(string? WorkId = null, string? WorkType = null, string? Stage = null, string? Title = null, int? IssueNumber = null);
 /// <summary>
 /// Body for the runner's <c>POST /api/runner/{runnerId}/agent-sessions/{projectId}/{sessionId}/open</c>
@@ -615,11 +617,12 @@ public record GenericAgentSessionOpenRequest(
 /// addressed solely by sessionId.
 /// </summary>
 public record RunnerGenericAgentSessionResponse(
-    [property: JsonPropertyName("acpSessionId")] string? AgentSessionId,
+    [property: JsonPropertyName("runtimeSessionId")] string? AgentSessionId,
     string Status,
     string? WorkDir = null,
     string? Model = null,
-    string? ResolvedModel = null);
+    string? ResolvedModel = null,
+    string? Runtime = null);
 public record AgentSessionAttachRequest(string AgentSessionId, string? Model = null, string? WorkDir = null, string? ChangeDir = null, int? ProcessPid = null);
 public record AgentSessionRuntimeEventsRequest(string? WorkId, string? WorkType, string? Stage, IReadOnlyList<AgentSessionRuntimeEventRequest> RuntimeEvents);
 public record AgentSessionRuntimeEventRequest(string Type, System.Text.Json.JsonElement Payload);

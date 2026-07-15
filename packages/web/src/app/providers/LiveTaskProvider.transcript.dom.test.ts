@@ -49,10 +49,28 @@ describe('LiveTaskProvider transcript routing', () => {
     })
 
     expect(unwrapped?.detail).toMatchObject({
-      acpSessionId: 'acp-84',
-      coderSessionId: 'session-84',
+      runtimeSessionId: 'acp-84',
+      sessionId: 'session-84',
       text: 'thinking',
     })
+  })
+
+  it('prefers the canonical runtime session field when the envelope provides it', () => {
+    const unwrapped = __testing__.unwrapTranscriptEnvelope({
+      type: 'message.delta',
+      sessionId: 'session-84',
+      runtimeSessionId: 'runtime-84',
+      agentSessionId: 'internal-runtime-84',
+      payload: { text: 'working' },
+    })
+
+    expect(unwrapped?.detail).toMatchObject({
+      runtimeSessionId: 'runtime-84',
+      sessionId: 'session-84',
+      text: 'working',
+    })
+    expect(unwrapped?.detail).not.toHaveProperty('acpSessionId')
+    expect(unwrapped?.detail).not.toHaveProperty('coderSessionId')
   })
 })
 

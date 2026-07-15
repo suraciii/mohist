@@ -46,7 +46,7 @@ function providerDefaultModelWarningContext(context: Parameters<typeof acpAgentA
 describe("mohist/acp-agent resumed shared sessions", () => {
   it("ResumedSharedSessionStreamsThoughtChunks_ProbeWindowCrossed_DoesNotTimeoutOrAppendThoughtText", async () => {
     useAcpFakeTimers()
-    const shared = createSharedSessionFixture("thought-liveness", { sessionRecord: { acpSessionId: "server-session-1" } })
+    const shared = createSharedSessionFixture("thought-liveness", { sessionRecord: { runtimeSessionId: "server-session-1" } })
 
     const context = contextWithOverrides({
       prompt: "long resumed task",

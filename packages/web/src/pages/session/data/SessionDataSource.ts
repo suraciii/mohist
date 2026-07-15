@@ -13,7 +13,7 @@ export interface SessionDataSourceResult {
   notFound: boolean
 
   sessionKey: string
-  acpSessionId: string
+  runtimeSessionId: string
   meta: SessionMetadata | null
   transcriptResponse: AgentSessionTranscriptResponse | null
   initialTurns: SessionTurn[]

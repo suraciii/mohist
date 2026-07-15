@@ -24,12 +24,12 @@ function options() {
 
 describe("ServerConnection.getAgentSession (generic)", () => {
   it("GetAgentSession_HitsGenericSessionUrl", async () => {
-    fetchMock.mockResolvedValueOnce(mockResponse({ status: 200, body: JSON.stringify({ acpSessionId: "acp-1", workDir: "D:/work" }) }))
+    fetchMock.mockResolvedValueOnce(mockResponse({ status: 200, body: JSON.stringify({ runtimeSessionId: "acp-1", runtime: "opencode", workDir: "D:/work" }) }))
     const connection = new ServerConnection(options())
 
     const result = await connection.getAgentSession("project-1", "session-abc", new AbortController().signal)
 
-    expect(result).toEqual({ acpSessionId: "acp-1", workDir: "D:/work" })
+    expect(result).toEqual({ runtimeSessionId: "acp-1", runtime: "opencode", workDir: "D:/work" })
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
     expect(url).toMatch(/\/api\/runner\/runner-1\/agent-sessions\/project-1\/session-abc$/)
     expect(init.method).toBe("GET")
@@ -56,12 +56,12 @@ describe("ServerConnection.getAgentSession (generic)", () => {
 
 describe("ServerConnection.openAgentSession (generic)", () => {
   it("OpenAgentSession_PostsToGenericOpenUrl_AndReturnsSession", async () => {
-    fetchMock.mockResolvedValueOnce(mockResponse({ status: 200, body: JSON.stringify({ acpSessionId: "acp-new", workDir: "D:/work", model: "openai/gpt-4.1" }) }))
+    fetchMock.mockResolvedValueOnce(mockResponse({ status: 200, body: JSON.stringify({ runtimeSessionId: "acp-new", runtime: "opencode", workDir: "D:/work", model: "openai/gpt-4.1" }) }))
     const connection = new ServerConnection(options())
 
     const result = await connection.openAgentSession("project-1", "session-abc", { workId: "work-1", workType: "agent-job" }, new AbortController().signal)
 
-    expect(result).toEqual({ acpSessionId: "acp-new", workDir: "D:/work", model: "openai/gpt-4.1" })
+    expect(result).toEqual({ runtimeSessionId: "acp-new", runtime: "opencode", workDir: "D:/work", model: "openai/gpt-4.1" })
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
     expect(url).toMatch(/\/api\/runner\/runner-1\/agent-sessions\/project-1\/session-abc\/open$/)
     expect(init.method).toBe("POST")

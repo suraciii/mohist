@@ -142,17 +142,20 @@ public class WorkflowSessionSpecs
 
         Assert.Equal(workflowRunId, opened.Key.WorkflowRunId);
         Assert.Equal(workflowRunId, fetched.Key.WorkflowRunId);
-        Assert.Equal("acp-1", fetched.AcpSessionId);
+        Assert.Equal("acp-1", fetched.RuntimeSessionId);
+        Assert.Equal("opencode", fetched.Runtime);
         Assert.Equal("/workspace", fetched.WorkDir);
         Assert.Equal(sessionName, detail.Session.SessionName);
-        Assert.Equal("acp-1", detail.Session.AcpSessionId);
+        Assert.Equal("acp-1", detail.Session.RuntimeSessionId);
+        Assert.Equal("opencode", detail.Session.Runtime);
         Assert.Equal("completed", detail.Session.Status);
         Assert.Equal("plan", detail.Session.Stage);
         Assert.NotNull(detail.Session.CompletedAt);
         Assert.Equal("openai/gpt-4o", detail.Session.Model);
         var listed = Assert.Single(sessions);
         Assert.Equal(sessionName, listed.SessionName);
-        Assert.Equal("acp-1", listed.AcpSessionId);
+        Assert.Equal("acp-1", listed.RuntimeSessionId);
+        Assert.Equal("opencode", listed.Runtime);
         Assert.Equal("completed", listed.Status);
         Assert.Equal("plan", listed.Stage);
         Assert.NotNull(listed.CompletedAt);
@@ -331,9 +334,9 @@ public class WorkflowSessionSpecs
             .WithLabel(AgentSessionQueryMetadataKeys.Stage, stage)
             .WithAnnotation(AgentSessionQueryMetadataKeys.Title, title);
 
-    private sealed record RunnerAgentSessionDto(RunnerAgentSessionKeyDto Key, string? AcpSessionId, string Status, string? WorkDir, string? Model);
+    private sealed record RunnerAgentSessionDto(RunnerAgentSessionKeyDto Key, string? RuntimeSessionId, string Status, string? WorkDir, string? Model, string? Runtime);
     private sealed record RunnerAgentSessionKeyDto(string ProjectId, string WorkflowRunId, string SessionName);
-    private sealed record WorkflowSessionDto(string Id, string WorkflowRunId, string SessionName, string? AcpSessionId, string Status, string? Stage, string? Model, string? CompletedAt, string? FailureReason, int? ExitCode, WorkflowSessionUsageDto? Usage);
+    private sealed record WorkflowSessionDto(string Id, string WorkflowRunId, string SessionName, string? RuntimeSessionId, string? Runtime, string Status, string? Stage, string? Model, string? CompletedAt, string? FailureReason, int? ExitCode, WorkflowSessionUsageDto? Usage);
     private sealed record WorkflowSessionUsageDto(long? TotalTokens);
     private sealed record WorkflowSessionDetailDto(WorkflowSessionDto Session, IssueSessionTranscriptTestResponse Transcript);
     private sealed record SessionEventDto(long Sequence, string Type, string? WorkId);

@@ -14,7 +14,7 @@
 //     generic  → `agentSessionRuntimeEvents`
 //   - emits a `session.input` runtime event tagged with
 //     `kind: "followup" / role: "user" / source: "followup"` on the
-//     resolved `acpSessionId` — non-awaited, rejection logged but does
+//     resolved `runtimeSessionId` — non-awaited, rejection logged but does
 //     NOT block the prompt
 //   - issues `connection.prompt(...)` exactly once, fire-and-forget:
 //     `target.connection.prompt(...)` is awaited only by `.catch(...)`,
@@ -93,7 +93,7 @@ async function handleFollowup(
               text: payload.text,
               kind: "followup",
               sentAt: new Date().toISOString(),
-              acpSessionId: target.sessionId,
+              runtimeSessionId: target.sessionId,
               source: "followup",
             },
           },
@@ -119,7 +119,7 @@ async function handleFollowup(
               text: payload.text,
               kind: "followup",
               sentAt: new Date().toISOString(),
-              acpSessionId: target.sessionId,
+              runtimeSessionId: target.sessionId,
               source: "followup",
             },
           },

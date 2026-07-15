@@ -333,7 +333,7 @@ export function createSharedSessionFixture(
   scenario: "thought-liveness" | "probe-send-failed" | "resolved-model" | "compaction",
   options?: {
     newSessionId?: string
-    sessionRecord?: { acpSessionId: string; model?: string | null }
+    sessionRecord?: { runtimeSessionId: string; model?: string | null }
   },
 ) {
   const agent = new FakeSharedAcpAgent(scenario, { newSessionId: options?.newSessionId })
@@ -352,7 +352,7 @@ export function createSharedSessionFixture(
   const serverConnection = new FakeServerConnection()
   const acpSessionManager = new AcpSessionManager()
   acpSessionManager.set(acpSessionManager.workflowKey("workflow-1", "shared-session"), { sessionId: "shared-session-1", workDir: "D:/fake/work" })
-  serverConnection.nextEnsureWorkflowAgentSession = options?.sessionRecord ? { ...options.sessionRecord, workDir: "D:/fake/work" } : { acpSessionId: "shared-session-1", workDir: "D:/fake/work" }
+  serverConnection.nextEnsureWorkflowAgentSession = options?.sessionRecord ? { ...options.sessionRecord, workDir: "D:/fake/work" } : { runtimeSessionId: "shared-session-1", workDir: "D:/fake/work" }
   const connection = clientConnection
   if (scenario === "probe-send-failed") {
     const originalPrompt = clientConnection.prompt.bind(clientConnection)
@@ -391,7 +391,7 @@ export function createSharedSessionFixture(
 
 export class FakeServerConnection {
   readonly calls: Array<{ event: string; type?: string; payload?: unknown; body?: unknown; sessionName?: string }> = []
-  nextEnsureWorkflowAgentSession: { acpSessionId?: string; workDir?: string; model?: string | null } = { acpSessionId: "shared-session-1", workDir: "D:/fake/work" }
+  nextEnsureWorkflowAgentSession: { runtimeSessionId?: string; workDir?: string; model?: string | null } = { runtimeSessionId: "shared-session-1", workDir: "D:/fake/work" }
   private readonly livenessProbeStarted = deferred<void>()
 
   constructor(private readonly timeline?: Array<{ event: string }>) {}

@@ -138,7 +138,10 @@ public class AgentSessionSpecs
 
         Assert.Equal(currentSession.Id, root.GetProperty("id").GetString());
         Assert.Equal("plan", root.GetProperty("sessionName").GetString());
-        Assert.Equal(currentSession.Id, root.GetProperty("acpSessionId").GetString());
+        Assert.Equal(currentSession.Id, root.GetProperty("runtimeSessionId").GetString());
+        Assert.Equal("opencode", root.GetProperty("runtime").GetString());
+        Assert.False(root.TryGetProperty("acpSessionId", out _));
+        Assert.False(root.TryGetProperty("coderSessionId", out _));
         Assert.False(string.IsNullOrEmpty(root.GetProperty("status").GetString()));
         Assert.Equal(work.Stage, root.GetProperty("stage").GetString());
         Assert.Equal("Plan session", root.GetProperty("title").GetString());
@@ -224,6 +227,14 @@ public class AgentSessionSpecs
         Assert.Equal("active", summary.Status);
         Assert.NotNull(summary.LastDataAt);
         Assert.True(DateTime.Parse(summary.LastDataAt!) > beforeLastDataAt);
+
+        var raw = await _client.GetRawAsync($"/api/projects/{project.Id}/issues/{issue.Number}/coder-sessions");
+        using var document = JsonDocument.Parse(raw);
+        var wireSummary = Assert.Single(document.RootElement.GetProperty("data").EnumerateArray());
+        Assert.Equal(session.Id, wireSummary.GetProperty("runtimeSessionId").GetString());
+        Assert.Equal("opencode", wireSummary.GetProperty("runtime").GetString());
+        Assert.False(wireSummary.TryGetProperty("acpSessionId", out _));
+        Assert.False(wireSummary.TryGetProperty("coderSessionId", out _));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]

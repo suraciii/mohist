@@ -143,8 +143,11 @@ public class GenericAgentSessionFollowupApiSpecs : IAsyncLifetime
         using var existing = await _client.GetAsync($"/api/runner/{_runnerId}/agent-sessions/{project.Id}/{sessionId}");
         Assert.Equal(HttpStatusCode.OK, existing.StatusCode);
         var existingPayload = await existing.Content.ReadFromJsonAsync<JsonElement>();
-        if (existingPayload.TryGetProperty("acpSessionId", out var acpSessionId))
-            Assert.True(acpSessionId.ValueKind == JsonValueKind.Null || string.IsNullOrEmpty(acpSessionId.GetString()));
+        if (existingPayload.TryGetProperty("runtimeSessionId", out var runtimeSessionId))
+            Assert.True(runtimeSessionId.ValueKind == JsonValueKind.Null || string.IsNullOrEmpty(runtimeSessionId.GetString()));
+        Assert.Equal("opencode", existingPayload.GetProperty("runtime").GetString());
+        Assert.False(existingPayload.TryGetProperty("acpSessionId", out _));
+        Assert.False(existingPayload.TryGetProperty("coderSessionId", out _));
 
         await _fixture.Client.PostOkAsync(
             $"/api/runner/{_runnerId}/agent-sessions/{project.Id}/{sessionId}/open",

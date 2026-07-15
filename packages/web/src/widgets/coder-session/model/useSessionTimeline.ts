@@ -217,12 +217,12 @@ export function useSessionTimeline(issueNumber: number, session?: CoderSessionIt
     mountedRef.current = true
     const issueId = String(issueNumber)
     const unsubs: Array<() => void> = []
-    const isCurrentSessionEvent = (detail: { acpSessionId?: string | null; coderSessionId?: string | null; sessionId?: string | null }) => {
+    const isCurrentSessionEvent = (detail: { runtimeSessionId?: string | null; sessionId?: string | null }) => {
       if (!mountedRef.current) return false
       const s = sessionRef.current
       if (!s) return true
-      if (detail.acpSessionId === s.acpSessionId) return true
-      return detail.coderSessionId === s.id || detail.sessionId === s.id
+      if (detail.runtimeSessionId === s.runtimeSessionId) return true
+      return detail.sessionId === s.id
     }
 
     const makeEnv = (): SessionTimelineEnv => ({
@@ -254,9 +254,9 @@ export function useSessionTimeline(issueNumber: number, session?: CoderSessionIt
         if (detail.issueId !== issueId || !mountedRef.current) return
         const s = sessionRef.current
         if (s) {
-          if (detail.coderSessionId && detail.coderSessionId !== s.id) return
-          if (!detail.coderSessionId && detail.acpSessionId && detail.acpSessionId !== s.acpSessionId) return
-          if (!detail.coderSessionId && !detail.acpSessionId) return
+          if (detail.sessionId && detail.sessionId !== s.id) return
+          if (!detail.sessionId && detail.runtimeSessionId && detail.runtimeSessionId !== s.runtimeSessionId) return
+          if (!detail.sessionId && !detail.runtimeSessionId) return
         }
         dispatch(planRoundStartReducer, detail)
       }),
@@ -267,9 +267,9 @@ export function useSessionTimeline(issueNumber: number, session?: CoderSessionIt
         if (detail.issueId !== issueId || !mountedRef.current) return
         const s = sessionRef.current
         if (s) {
-          if (detail.coderSessionId && detail.coderSessionId !== s.id) return
-          if (!detail.coderSessionId && detail.acpSessionId && detail.acpSessionId !== s.acpSessionId) return
-          if (!detail.coderSessionId && !detail.acpSessionId) return
+          if (detail.sessionId && detail.sessionId !== s.id) return
+          if (!detail.sessionId && detail.runtimeSessionId && detail.runtimeSessionId !== s.runtimeSessionId) return
+          if (!detail.sessionId && !detail.runtimeSessionId) return
         }
         planBufferRef.current.push(detail)
         scheduleFlush()
@@ -318,11 +318,11 @@ export function useSessionTimeline(issueNumber: number, session?: CoderSessionIt
 
       if (detail.state === 'started') {
         const entry: ToolCallEntry = {
-          executionId: detail.coderSessionId ?? detail.acpSessionId ?? '',
+          executionId: detail.sessionId ?? detail.runtimeSessionId ?? '',
           toolName: detail.toolName,
           state: 'started',
           timestamp: Date.now(),
-          acpSessionId: detail.acpSessionId,
+          runtimeSessionId: detail.runtimeSessionId,
           toolCallId: detail.toolCallId,
           title: detail.title,
           rawInput: typeof detail.rawInput === 'string' ? detail.rawInput : JSON.stringify(detail.rawInput ?? ''),

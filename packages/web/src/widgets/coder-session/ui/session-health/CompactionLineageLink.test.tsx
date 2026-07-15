@@ -7,7 +7,7 @@ import type { RuntimeSessionLineageEntry } from '../../../../entities/coder-sess
 import type { CompactionLineageLinkProps } from './CompactionLineageLink'
 
 function makeEntry(id: string, boundAt: string): RuntimeSessionLineageEntry {
-  return { agentRuntimeSessionId: id, boundAt }
+  return { runtimeSessionId: id, boundAt }
 }
 
 const FIXED_PATH_BUILDER = (runtimeId: string) =>

@@ -146,7 +146,7 @@ function setupDefaultMocks() {
       id: 'session-1',
       sessionName: 'session-1',
       workflowRunId: 'wr-1',
-      acpSessionId: 'rt-latest',
+      runtimeSessionId: 'rt-latest',
       projectId: 'proj-1',
       issueNumber: 123,
       runnerId: 'runner-1',
@@ -182,7 +182,7 @@ function baseMetadata(overrides: Partial<AgentSessionMetadata> = {}): AgentSessi
   return {
     id: 'agent-session-1',
     sessionName: 'session-1',
-    acpSessionId: 'rt-latest',
+    runtimeSessionId: 'rt-latest',
     title: 'Test session',
     status: 'completed',
     statusKind: 'completed',
@@ -237,7 +237,7 @@ describe('SessionPage lineage link wiring', () => {
   it('renders no lineage link when the lineage is a single entry (no compaction relationship)', async () => {
     _metadataData = baseMetadata({
       runtimeSessionLineage: [
-        { agentRuntimeSessionId: 'rt-latest', boundAt: '2026-06-15T10:00:00.000Z' },
+        { runtimeSessionId: 'rt-latest', boundAt: '2026-06-15T10:00:00.000Z' },
       ],
     })
 
@@ -250,8 +250,8 @@ describe('SessionPage lineage link wiring', () => {
   it('renders a predecessor link inside the recovery region when the lineage has 2 entries (common case, page shows latest)', async () => {
     _metadataData = baseMetadata({
       runtimeSessionLineage: [
-        { agentRuntimeSessionId: 'rt-prev', boundAt: '2026-06-15T09:00:00.000Z' },
-        { agentRuntimeSessionId: 'rt-latest', boundAt: '2026-06-15T10:00:00.000Z' },
+        { runtimeSessionId: 'rt-prev', boundAt: '2026-06-15T09:00:00.000Z' },
+        { runtimeSessionId: 'rt-latest', boundAt: '2026-06-15T10:00:00.000Z' },
       ],
     })
 
@@ -268,7 +268,7 @@ describe('SessionPage lineage link wiring', () => {
   })
 
   it('uses the ?rt=<runtimeSessionId> anchor scheme within the existing session route', async () => {
-    _metadataData = baseMetadata({ runtimeSessionLineage: [{ agentRuntimeSessionId: 'rt-prev', boundAt: '2026-06-15T09:00:00.000Z' }, { agentRuntimeSessionId: 'rt-latest', boundAt: '2026-06-15T10:00:00.000Z' }] })
+    _metadataData = baseMetadata({ runtimeSessionLineage: [{ runtimeSessionId: 'rt-prev', boundAt: '2026-06-15T09:00:00.000Z' }, { runtimeSessionId: 'rt-latest', boundAt: '2026-06-15T10:00:00.000Z' }] })
 
     const { container } = await renderPage()
     const href = container.querySelector('[data-testid="compaction-lineage-link-predecessor"]')?.getAttribute('href') ?? ''
@@ -278,7 +278,7 @@ describe('SessionPage lineage link wiring', () => {
   })
 
   it('preserves the Activity return context on lineage links', async () => {
-    _metadataData = baseMetadata({ runtimeSessionLineage: [{ agentRuntimeSessionId: 'rt-prev', boundAt: '2026-06-15T09:00:00.000Z' }, { agentRuntimeSessionId: 'rt-latest', boundAt: '2026-06-15T10:00:00.000Z' }] })
+    _metadataData = baseMetadata({ runtimeSessionLineage: [{ runtimeSessionId: 'rt-prev', boundAt: '2026-06-15T09:00:00.000Z' }, { runtimeSessionId: 'rt-latest', boundAt: '2026-06-15T10:00:00.000Z' }] })
     const { container } = await renderPage({ initialEntry: '/issues/123/workflow/sessions/session-1?from=activity' })
     expect(container.querySelector('[data-testid="compaction-lineage-link-predecessor"]')).toHaveAttribute('href', expect.stringContaining('rt=rt-prev&from=activity'))
   })
@@ -286,9 +286,9 @@ describe('SessionPage lineage link wiring', () => {
   it('renders both predecessor and successor links when the user is viewing a non-latest runtime session (?rt= param)', async () => {
     _metadataData = baseMetadata({
       runtimeSessionLineage: [
-        { agentRuntimeSessionId: 'rt-1', boundAt: '2026-06-15T08:00:00.000Z' },
-        { agentRuntimeSessionId: 'rt-2', boundAt: '2026-06-15T09:00:00.000Z' },
-        { agentRuntimeSessionId: 'rt-latest', boundAt: '2026-06-15T10:00:00.000Z' },
+        { runtimeSessionId: 'rt-1', boundAt: '2026-06-15T08:00:00.000Z' },
+        { runtimeSessionId: 'rt-2', boundAt: '2026-06-15T09:00:00.000Z' },
+        { runtimeSessionId: 'rt-latest', boundAt: '2026-06-15T10:00:00.000Z' },
       ],
     })
 
@@ -310,8 +310,8 @@ describe('SessionPage lineage link wiring', () => {
   it('places the lineage link inside the sticky recovery region of the transcript scroll container', async () => {
     _metadataData = baseMetadata({
       runtimeSessionLineage: [
-        { agentRuntimeSessionId: 'rt-prev', boundAt: '2026-06-15T09:00:00.000Z' },
-        { agentRuntimeSessionId: 'rt-latest', boundAt: '2026-06-15T10:00:00.000Z' },
+        { runtimeSessionId: 'rt-prev', boundAt: '2026-06-15T09:00:00.000Z' },
+        { runtimeSessionId: 'rt-latest', boundAt: '2026-06-15T10:00:00.000Z' },
       ],
     })
 
@@ -332,8 +332,8 @@ describe('SessionPage lineage link wiring', () => {
   it('falls back to the latest runtime session when the URL ?rt= does not match any chain entry', async () => {
     _metadataData = baseMetadata({
       runtimeSessionLineage: [
-        { agentRuntimeSessionId: 'rt-prev', boundAt: '2026-06-15T09:00:00.000Z' },
-        { agentRuntimeSessionId: 'rt-latest', boundAt: '2026-06-15T10:00:00.000Z' },
+        { runtimeSessionId: 'rt-prev', boundAt: '2026-06-15T09:00:00.000Z' },
+        { runtimeSessionId: 'rt-latest', boundAt: '2026-06-15T10:00:00.000Z' },
       ],
     })
 

@@ -17,7 +17,7 @@ describe("mohist/acp-agent new and ephemeral sessions", () => {
     const result = await runWithProviderDefaultModelWarning(fixture.context({ prompt: "do the work" }))
 
     expect(result.status).toBe("success")
-    expect(JSON.parse(result.output ?? "{}").acpSessionId).toBe("fake-session-1")
+    expect(JSON.parse(result.output ?? "{}").runtimeSessionId).toBe("fake-session-1")
     expect(fixture.agent.calls.map((call) => call.event).filter((event) => ["initialize", "newSession", "prompt"].includes(event))).toEqual(["initialize", "newSession", "prompt"])
   })
 
