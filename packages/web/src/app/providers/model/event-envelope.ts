@@ -25,9 +25,13 @@ export function routeTranscriptEventName(name: string): string {
 /**
  * Wire shape from the SignalR bus. The server now sends the full CloudEvents
  * 1.0.2 envelope; the Web reads {@link payload} for the original event body
- * and {@link extensions} for routing metadata (projectid, workflowrunid,
- * issueno). Falls back to the legacy raw-payload shape (where the event
- * body sits in a top-level `payload` field) for any unmigrated producers.
+ * and {@link extensions} for routing metadata (projectid, issueid, issue,
+ * workflowrunid, epicid, stage, agentid, sessionid, runnerid — see
+ * `EventCatalog.Lineage` on the server). The user-visible issue number rides
+ * under the `issue` key (the unified protocol name; `issueno` is the legacy
+ * name retained only on pre-change historical rows). Falls back to the
+ * legacy raw-payload shape (where the event body sits in a top-level
+ * `payload` field) for any unmigrated producers.
  *
  * Note on field casing: the server-side `CloudEventEnvelope` record uses
  * PascalCase property names (SpecVersion, DataContentType, ...) when

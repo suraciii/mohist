@@ -158,10 +158,14 @@ public sealed class HermesIssueNotificationHandler : ICloudEventHandler
     private static ResolvedIdentity? ResolveFromIssueExtensions(CloudEvent evt)
     {
         var extensions = evt.Extensions;
-        if (!extensions.TryGetValue("projectid", out var projectId) || string.IsNullOrWhiteSpace(projectId)
-            || !extensions.TryGetValue("issueid", out var issueId) || string.IsNullOrWhiteSpace(issueId)
-            || !extensions.TryGetValue("issueno", out var issueNumberText) || string.IsNullOrWhiteSpace(issueNumberText)
-            || !int.TryParse(issueNumberText, out var issueNumber))
+        if (!extensions.TryGetValue(EventCatalog.Lineage.ProjectId, out var projectId) || string.IsNullOrWhiteSpace(projectId)
+            || !extensions.TryGetValue(EventCatalog.Lineage.IssueId, out var issueId) || string.IsNullOrWhiteSpace(issueId))
+        {
+            return null;
+        }
+
+        var issueNumberText = TryReadIssueNumberText(extensions);
+        if (issueNumberText is null || !int.TryParse(issueNumberText, out var issueNumber))
         {
             return null;
         }
@@ -174,6 +178,23 @@ public sealed class HermesIssueNotificationHandler : ICloudEventHandler
         };
 
         return new ResolvedIdentity(projectId, issueId, issueNumber, workflowRunId);
+    }
+
+    private static string? TryReadIssueNumberText(IReadOnlyDictionary<string, string> extensions)
+    {
+        if (extensions.TryGetValue(EventCatalog.Lineage.Issue, out var unifiedText)
+            && !string.IsNullOrWhiteSpace(unifiedText))
+        {
+            return unifiedText;
+        }
+
+        if (extensions.TryGetValue("issueno", out var legacyText)
+            && !string.IsNullOrWhiteSpace(legacyText))
+        {
+            return legacyText;
+        }
+
+        return null;
     }
 
     private async Task<DomainIssue?> ResolveIssueAsync(ResolvedIdentity resolved, IStateStore<DomainIssue> issueStore)

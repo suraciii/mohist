@@ -319,8 +319,11 @@ public sealed class EpicStartRetryHandler : ICloudEventHandler<Epic.Domain.Event
 /// wiring. <see cref="EpicAutoDoneHandler"/> (completed),
 /// <see cref="EpicCancelledHandler"/> (cancelled), and
 /// <see cref="EpicDraftChangedHandler"/> (undraft) funnel here so the
-/// CloudEvent <c>projectid</c>/<c>issueid</c> extension parsing, epic
-/// lookup, and grain dispatch stay in one place. When
+/// CloudEvent <c>projectid</c>/<c>issueid</c>/<c>issue</c> extension
+/// parsing, epic lookup, and grain dispatch stay in one place. The
+/// issue number is read from the unified <c>issue</c> key with a legacy
+/// <c>issueno</c> fallback for pre-change historical rows that were
+/// never backfilled (Non-Goal forbids rewriting history). When
 /// <paramref name="includePrerequisiteLookup"/> is set, also reverse-looks-up
 /// epics whose members depend on the event's issue as an external
 /// prerequisite — the owning-epic lookup misses those because the
@@ -375,16 +378,17 @@ internal sealed class EpicProgressRecomputeDispatcher
             return;
         }
 
+        var issueNumber = TryReadIssueNumber(extensions);
         var epicIds = new HashSet<string>(StringComparer.Ordinal);
 
         if (_epicQuerier is not null)
         {
             var direct = await _epicQuerier.GetEpicIdForIssueAsync(projectId, issueId).ConfigureAwait(false);
             if (direct is not null) epicIds.Add(direct);
-            if (includePrerequisiteLookup && int.TryParse(extensions.GetValueOrDefault("issueno"), out var issueNo))
+            if (includePrerequisiteLookup && issueNumber is int n)
             {
                 var dependent = await _epicQuerier
-                    .GetEpicIdsDependentOnPrerequisiteAsync(projectId, issueNo)
+                    .GetEpicIdsDependentOnPrerequisiteAsync(projectId, n)
                     .ConfigureAwait(false);
                 foreach (var id in dependent) epicIds.Add(id);
             }
@@ -395,10 +399,10 @@ internal sealed class EpicProgressRecomputeDispatcher
             var epicQuerier = scope.ServiceProvider.GetRequiredService<EpicQuerier>();
             var direct = await epicQuerier.GetEpicIdForIssueAsync(projectId, issueId).ConfigureAwait(false);
             if (direct is not null) epicIds.Add(direct);
-            if (includePrerequisiteLookup && int.TryParse(extensions.GetValueOrDefault("issueno"), out var issueNo))
+            if (includePrerequisiteLookup && issueNumber is int n)
             {
                 var dependent = await epicQuerier
-                    .GetEpicIdsDependentOnPrerequisiteAsync(projectId, issueNo)
+                    .GetEpicIdsDependentOnPrerequisiteAsync(projectId, n)
                     .ConfigureAwait(false);
                 foreach (var id in dependent) epicIds.Add(id);
             }
@@ -409,6 +413,29 @@ internal sealed class EpicProgressRecomputeDispatcher
             var grain = _grains.GetGrain<IEpicGrain>($"{projectId}:{epicId}");
             await grain.RecomputeProgressAsync().ConfigureAwait(false);
         }
+    }
+
+    internal static int? TryReadIssueNumber(IReadOnlyDictionary<string, string> extensions)
+    {
+        var text = TryReadIssueNumberText(extensions);
+        return int.TryParse(text, out var n) ? n : null;
+    }
+
+    private static string? TryReadIssueNumberText(IReadOnlyDictionary<string, string> extensions)
+    {
+        if (extensions.TryGetValue(EventCatalog.Lineage.Issue, out var unifiedText)
+            && !string.IsNullOrWhiteSpace(unifiedText))
+        {
+            return unifiedText;
+        }
+
+        if (extensions.TryGetValue("issueno", out var legacyText)
+            && !string.IsNullOrWhiteSpace(legacyText))
+        {
+            return legacyText;
+        }
+
+        return null;
     }
 }
 

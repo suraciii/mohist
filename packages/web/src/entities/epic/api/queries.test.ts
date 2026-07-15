@@ -236,7 +236,7 @@ describe('epicEventsQueryOptions', () => {
         time: '2026-06-30T12:00:00+00:00',
         dataContentType: 'application/json',
         data: { title: 'Auth epic', description: 'desc', priority: 'p2' },
-        extensions: { projectid: 'proj-1', epicid: 'epic-1', epicno: '1' },
+        extensions: { projectid: 'proj-1', epicid: 'epic-1' },
       },
     ]
     const captured: string[] = []

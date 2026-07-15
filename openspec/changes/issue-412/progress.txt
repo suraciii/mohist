@@ -286,3 +286,40 @@ T-006 progress
 - `Mohist.Cli.Tests`: 865 pass (unchanged).
 - Web + runner suites: unchanged.
 - Full `npm test` suite: all 10,717 tests pass across server (1399 unit + 22 arch + 2764 spec + 865 cli), web (4653), runner (1014).
+
+---
+T-007 progress
+
+## T-007 decisions / layout
+- `EpicProgressRecomputeDispatcher.DispatchAsync` (in `EpicAutoDoneHandler.cs:381`) lifts the issue-number lookup into a `TryReadIssueNumber(extensions)` helper that prefers `EventCatalog.Lineage.Issue` (`"issue"`) and falls back to the legacy `"issueno"` key. Both `_epicQuerier` (DI-injected) and `EpicQuerier from scope` branches now share a single helper, eliminating the duplicated `int.TryParse(extensions.GetValueOrDefault("issueno"), out var issueNo)` calls. The helper returns `int?` so a missing-or-empty value cleanly short-circuits the prerequisite reverse lookup (the direct-membership dispatch still proceeds).
+- `HermesIssueNotificationHandler.ResolveFromIssueExtensions` (in `Events/Subscriptions/HermesIssueNotificationHandler.cs:158`) now uses `EventCatalog.Lineage.ProjectId` / `EventCatalog.Lineage.IssueId` constants for the primary reads and a new `TryReadIssueNumberText` private helper for the issue-number lookup (same shape as the dispatcher's helper). The `projectid`/`issueid` reads were also updated from raw string literals to the typed `EventCatalog.Lineage.*` constants — same convention the T-006 helper introduced in `InboxProjectionHandler`.
+- `packages/web/src/app/providers/model/event-envelope.ts:25-37` doc comment now names the unified `issue` lineage key (and lists the full `EventCatalog.Lineage` set the server stamps) instead of the legacy `issueno`. Web fixtures (`packages/web/src/entities/epic/api/client.test.ts:148`, `.../queries.test.ts:239`, `.../EpicActivityTimelineSection.test.tsx:41`) drop the `"epicno"` field from envelope data; `packages/web/tests/browser/activity.spec.ts:29,46` fixture extensions use the unified `issue` key. The web never had producer-side stamping or read-side extension parsing for these keys, so no other code path needed updating.
+
+## Tests added
+- `EpicAutoDoneHandlerSpecs` (extended for T-007, 4 new tests):
+  - `HandleAsync_ExternalPrerequisiteCompletes_DispatchesToDependentEpic_ViaUnifiedIssueKey` — drives the new unified `issue` key through the prerequisite reverse lookup; pins the post-change path.
+  - `HandleAsync_ExternalPrerequisiteCompletes_DispatchesToDependentEpic_ViaLegacyIssuenoFallback` — drives the legacy `issueno` key through the same path; pins the history shim (Non-Goal forbids backfill).
+  - `HandleAsync_BothKeysPresent_DispatchesViaUnifiedIssueKey` — both keys stamped, `issue` wins; pins the precedence contract.
+  - `HandleAsync_NeitherIssueNorIssueno_SkipsPrerequisiteLookupAndStillDispatchesOwningEpic` — neither key present; the direct-membership dispatch still proceeds and the prerequisite lookup is skipped silently (the helper returns `null`).
+- `HermesIssueNotificationTests` (extended for T-007, 4 new tests in `tests/Mohist.Server.UnitTests/Notifications/`):
+  - `IssueEvent_UnifiedIssueKey_ResolvesIdentity` — drives a post-change row stamped with `EventCatalog.Lineage.*` constants; pins the post-change notification path.
+  - `IssueEvent_LegacyIssuenoFallback_ResolvesIdentity` — pre-change historical row stamped with the legacy key; pins the history shim.
+  - `IssueEvent_BothKeysPresent_PrefersUnifiedIssueKey` — unified key wins on conflict.
+  - `IssueEvent_NoIssueNumberKey_SkipsWithoutSending` — neither key present; no notification is dispatched.
+
+## Gotchas / hand-offs
+- The `EpicProgressRecomputeDispatcher.TryReadIssueNumber` helper is `internal static` so spec tests can drive it directly if a future task needs to pin its behavior in isolation. The InboxProjectionHandler and HermesIssueNotificationHandler helpers are `private static` because they live behind a CloudEvent boundary (the test path drives the handler, not the helper). Following the InboxProjectionHandler's example, a `BuildLegacyIssueEvent` + `BuildIssueEvent` pair in the test support module is the cleanest way to add a similar test for any future history-traversing handler that needs the dual-key contract.
+- The two existing `EpicAutoDoneHandlerSpecs` test fixtures `BuildCompletedEvent` / `BuildCancelledEvent` / `BuildEpicIssueLinkedEvent` etc. continue to stamp `issueno` / `epicno` on their input. They drive handlers that don't read those keys (the prerequisite reverse lookup reads `issue`/`issueno`; the EpicEventRecomputeDispatcher reads only `projectid`/`epicid`), so the noise is harmless and the T-007 dual-key helper makes the historical-row path the default behavior for those existing tests. No fixture churn needed.
+- The XML doc on `EpicProgressRecomputeDispatcher` now names the unified `issue` key alongside the `issueno` fallback — the comment is the single sentence future readers will use to understand the rename. The XML doc on `HermesIssueNotificationHandler` was not updated (the private helper name is self-documenting).
+- Web envelope reader's doc comment is now the single sentence that documents the lineage key set; if a future issue adds a new lineage key to `EventCatalog.Lineage`, the web doc should be re-checked — the comment is intentionally exhaustive rather than pointing to a server-side constant the web can't import.
+
+## Verification
+- Server build: clean (0 warn, 0 err) on `packages/server/src/Mohist.Server`.
+- `Mohist.Server.UnitTests`: 1403 pass (was 1399; +4 from new HermesIssueNotificationTests for the dual-key read).
+- `Mohist.Server.SpecTests`: 2768 pass (was 2764; +4 from new EpicAutoDoneHandlerSpecs for the unified key / legacy fallback / both-keys / no-number cases).
+- `Mohist.Server.ArchTests`: 22 pass (unchanged).
+- `Mohist.Cli.Tests`: 865 pass (unchanged).
+- Web typecheck (`npm run typecheck -w packages/web`): clean.
+- Web `npm run test:run`: 4653 pass (unchanged — the fixture updates are pure data shape, no behavior change).
+- Runner typecheck + tests: unchanged.
+- Full `npm test` suite: all 10,725 tests pass across server (1403 unit + 22 arch + 2768 spec + 865 cli), web (4653), runner (1014).

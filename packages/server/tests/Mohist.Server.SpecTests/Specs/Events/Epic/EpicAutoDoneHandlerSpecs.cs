@@ -816,6 +816,160 @@ public class EpicAutoDoneHandlerSpecs
         Assert.Equal("project_1:epic_1", call.GrainKey);
     }
 
+    // --- T-007: issueno -> issue rename; dual-key read for historical rows ---
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task HandleAsync_ExternalPrerequisiteCompletes_DispatchesToDependentEpic_ViaUnifiedIssueKey()
+    {
+        // Post-change row stamped with the unified `issue` key. The
+        // dispatcher's prerequisite reverse lookup must read `issue`
+        // and dispatch the dependent epic — no more primary read of
+        // `issueno`.
+        await using var database = CreateDatabase();
+        await SeedEpicAsync(database, status: "running");
+        await SeedIssueWithPrereqsAsync(database, projectId: "project_1", issueId: "issue_2", issueNumber: 2, prereqNumbers: [10]);
+        await SeedLinkAsync(database, epicId: "epic_1", issueId: "issue_2", issueNumber: 2);
+        await SeedIssueAsync(database, projectId: "project_1", issueId: "issue_10", issueNumber: 10, status: Mohist.Server.Issue.Domain.IssueStatus.Done);
+
+        var querier = new EpicQuerier(database.Factory, null!);
+        var grains = new TestEpicGrainFactory(database.Factory);
+        var handler = new EpicAutoDoneHandler(querier, grains, NullLogger<EpicAutoDoneHandler>.Instance);
+
+        var evt = new CloudEvent<IssueCompleted>(
+            id: Guid.NewGuid().ToString(),
+            source: new Uri("/mohist/issue/issue_10", UriKind.Relative),
+            type: EventCatalog.ReverseDns.IssueCompleted,
+            time: EventTime,
+            data: new IssueCompleted("wr_1"),
+            subject: "10",
+            extensions: new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [EventCatalog.Lineage.ProjectId] = "project_1",
+                [EventCatalog.Lineage.IssueId] = "issue_10",
+                [EventCatalog.Lineage.Issue] = "10",
+            });
+
+        await handler.HandleAsync(evt, CancellationToken.None);
+
+        var call = Assert.Single(grains.Calls);
+        Assert.Equal("project_1:epic_1", call.GrainKey);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task HandleAsync_ExternalPrerequisiteCompletes_DispatchesToDependentEpic_ViaLegacyIssuenoFallback()
+    {
+        // Pre-change historical row stamped with the legacy `issueno`
+        // key only. The Non-Goal forbids backfill, so the dual-key read
+        // must still resolve and dispatch the dependent epic.
+        await using var database = CreateDatabase();
+        await SeedEpicAsync(database, status: "running");
+        await SeedIssueWithPrereqsAsync(database, projectId: "project_1", issueId: "issue_2", issueNumber: 2, prereqNumbers: [10]);
+        await SeedLinkAsync(database, epicId: "epic_1", issueId: "issue_2", issueNumber: 2);
+        await SeedIssueAsync(database, projectId: "project_1", issueId: "issue_10", issueNumber: 10, status: Mohist.Server.Issue.Domain.IssueStatus.Done);
+
+        var querier = new EpicQuerier(database.Factory, null!);
+        var grains = new TestEpicGrainFactory(database.Factory);
+        var handler = new EpicAutoDoneHandler(querier, grains, NullLogger<EpicAutoDoneHandler>.Instance);
+
+        var evt = new CloudEvent<IssueCompleted>(
+            id: Guid.NewGuid().ToString(),
+            source: new Uri("/mohist/issue/issue_10", UriKind.Relative),
+            type: EventCatalog.ReverseDns.IssueCompleted,
+            time: EventTime,
+            data: new IssueCompleted("wr_1"),
+            subject: "10",
+            extensions: new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [EventCatalog.Lineage.ProjectId] = "project_1",
+                [EventCatalog.Lineage.IssueId] = "issue_10",
+                ["issueno"] = "10",
+            });
+
+        await handler.HandleAsync(evt, CancellationToken.None);
+
+        var call = Assert.Single(grains.Calls);
+        Assert.Equal("project_1:epic_1", call.GrainKey);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task HandleAsync_BothKeysPresent_DispatchesViaUnifiedIssueKey()
+    {
+        // When both keys are stamped, the unified `issue` value wins
+        // (matching the unified-key contract).
+        await using var database = CreateDatabase();
+        await SeedEpicAsync(database, status: "running");
+        await SeedIssueWithPrereqsAsync(database, projectId: "project_1", issueId: "issue_2", issueNumber: 2, prereqNumbers: [10]);
+        await SeedLinkAsync(database, epicId: "epic_1", issueId: "issue_2", issueNumber: 2);
+        await SeedIssueAsync(database, projectId: "project_1", issueId: "issue_10", issueNumber: 10, status: Mohist.Server.Issue.Domain.IssueStatus.Done);
+
+        var querier = new EpicQuerier(database.Factory, null!);
+        var grains = new TestEpicGrainFactory(database.Factory);
+        var handler = new EpicAutoDoneHandler(querier, grains, NullLogger<EpicAutoDoneHandler>.Instance);
+
+        var evt = new CloudEvent<IssueCompleted>(
+            id: Guid.NewGuid().ToString(),
+            source: new Uri("/mohist/issue/issue_10", UriKind.Relative),
+            type: EventCatalog.ReverseDns.IssueCompleted,
+            time: EventTime,
+            data: new IssueCompleted("wr_1"),
+            subject: "10",
+            extensions: new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [EventCatalog.Lineage.ProjectId] = "project_1",
+                [EventCatalog.Lineage.IssueId] = "issue_10",
+                [EventCatalog.Lineage.Issue] = "10",
+                ["issueno"] = "999",
+            });
+
+        await handler.HandleAsync(evt, CancellationToken.None);
+
+        // Unified key wins -> real prereq 10 -> dependent epic dispatched.
+        var call = Assert.Single(grains.Calls);
+        Assert.Equal("project_1:epic_1", call.GrainKey);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task HandleAsync_NeitherIssueNorIssueno_SkipsPrerequisiteLookupAndStillDispatchesOwningEpic()
+    {
+        // No issue number on the envelope: the owning-epic lookup still
+        // dispatches via the direct membership path; the prerequisite
+        // reverse lookup is simply skipped (its input is null).
+        await using var database = CreateDatabase();
+        await SeedEpicAsync(database, status: "running");
+        await SeedIssueAsync(database, projectId: "project_1", issueId: "issue_1", issueNumber: 1, status: Mohist.Server.Issue.Domain.IssueStatus.Done);
+        await SeedLinkAsync(database, epicId: "epic_1", issueId: "issue_1", issueNumber: 1);
+
+        var querier = new EpicQuerier(database.Factory, null!);
+        var grains = new TestEpicGrainFactory(database.Factory);
+        var handler = new EpicAutoDoneHandler(querier, grains, NullLogger<EpicAutoDoneHandler>.Instance);
+
+        var evt = new CloudEvent<IssueCompleted>(
+            id: Guid.NewGuid().ToString(),
+            source: new Uri("/mohist/issue/issue_1", UriKind.Relative),
+            type: EventCatalog.ReverseDns.IssueCompleted,
+            time: EventTime,
+            data: new IssueCompleted("wr_1"),
+            subject: "1",
+            extensions: new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [EventCatalog.Lineage.ProjectId] = "project_1",
+                [EventCatalog.Lineage.IssueId] = "issue_1",
+            });
+
+        await handler.HandleAsync(evt, CancellationToken.None);
+
+        var call = Assert.Single(grains.Calls);
+        Assert.Equal("project_1:epic_1", call.GrainKey);
+    }
+
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]

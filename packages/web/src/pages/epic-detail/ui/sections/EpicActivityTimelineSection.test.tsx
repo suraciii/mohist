@@ -38,7 +38,7 @@ function makeEvent(overrides: Partial<StoredCloudEventDto> & { type: string; dat
     time: overrides.time ?? '2026-06-30T12:00:00+00:00',
     dataContentType: overrides.dataContentType ?? 'application/json',
     data: overrides.data ?? {},
-    extensions: overrides.extensions ?? { projectid: 'proj-1', epicid: 'epic-1', epicno: '1' },
+    extensions: overrides.extensions ?? { projectid: 'proj-1', epicid: 'epic-1' },
   }
 }
 
