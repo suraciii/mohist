@@ -57,7 +57,7 @@ function makeCompactViewportSession(): WorkflowRunSession {
     id: `session-${sessionName}`,
     workflowRunId,
     sessionName,
-    acpSessionId: `acp-${sessionName}`,
+    runtimeSessionId: `acp-${sessionName}`,
     projectId: project.id,
     issueNumber,
     runnerId: 'runner-compact-viewport',
@@ -105,7 +105,7 @@ function makeCompactViewportMetadata(status = 'failed') {
   return {
     id: `session-${sessionName}`,
     sessionName,
-    acpSessionId: `acp-${sessionName}`,
+    runtimeSessionId: `acp-${sessionName}`,
     status,
     statusKind,
     model: 'minimax/MiniMax-M3',

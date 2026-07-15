@@ -78,7 +78,7 @@ describe("mohist/acp-agent resumed shared sessions", () => {
   it("PersistedSessionWithDifferentModelAndVariant_ResumesSamePhysicalSession", async () => {
     useAcpFakeTimers()
     const shared = createSharedSessionFixture("thought-liveness", {
-      sessionRecord: { acpSessionId: "server-session-1", model: "kimi-for-coding/k2p6" },
+      sessionRecord: { runtimeSessionId: "server-session-1", model: "kimi-for-coding/k2p6" },
     })
 
     const action = acpAgentAction(contextWithOverrides({

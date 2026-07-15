@@ -321,7 +321,7 @@ describe("runAcpAgentSession — generic session dispatch", () => {
   it("GenericSessionWithDifferentModel_ResumesSamePhysicalSession", async () => {
     const fixture = createGenericFixture()
     fixture.serverConnection.nextGetGenericSession = {
-      acpSessionId: "persisted-acp-session",
+      runtimeSessionId: "persisted-acp-session",
       workDir: "D:/work",
       model: "kimi-for-coding/k2p6",
     }
