@@ -1,0 +1,62 @@
+T-001 progress notes
+====================
+
+Implementation landed in commit 98643eb86 "T-001 enforce project repository invariants".
+
+What exists
+-----------
+- Domain policy: packages/server/src/Mohist.Server/Project/Domain/RepositoryPolicy.cs
+  - Validate(list): empty-list / duplicate-name (case-insensitive) / missing-or-multiple default / blank name or gitUrl or baseBranch
+  - Normalize(list): one existing default preserved; multiple defaults → first marked wins; no default → first declaration; blank baseBranch becomes "main"
+  - CreateInitial(name, gitUrl, baseBranch): IsDefault=true, blank baseBranch → "main"
+  - BuildAdd: rejects duplicate (case-insensitive) and blank fields; sets IsDefault based on explicit SetDefault or absence of a current default
+  - BuildUpdate: requires at least one of gitUrl/baseBranch; name immutable
+  - BuildSetDefault: returns Previous=Next when target is already sole default (idempotent no-op)
+  - BuildRemove: rejects default deletion with code "repository_default_deletion_conflict"
+- ProjectGrain (Domain/Grains/ProjectGrain.cs) routes Create/Add/Update/SetDefault/Remove through the policy before persisting.
+- ProjectInfo.DefaultRepository resolves via Repositories.FirstOrDefault(r => r.IsDefault); no silent list-order fallback.
+- ProjectRoutes enforces the API contract: repository is required on POST /api/projects; PATCH /repositories/{name} disallows mixing setDefault with metadata and rejects empty patch; DELETE returns 409 for default deletion; 404 for unknown repository with project id; 409 for duplicate name with stable error code "repository_name_conflict".
+
+Test coverage
+-------------
+- Unit: packages/server/tests/Mohist.Server.UnitTests/Project/Domain/RepositoryPolicyTests.cs (32 tests)
+  - Validate empty / missing default / multiple defaults / duplicate case-insensitive / blank gitUrl / clean single-default
+  - Normalize no-default / multi-default / single-default preserved / blank baseBranch → main / order & names preserved / empty list
+  - CreateInitial sets IsDefault
+  - BuildAdd new (first → default) / duplicate (case-insensitive) / no setDefault / with setDefault / blank gitUrl / blank name / null baseBranch → main
+  - BuildUpdate only gitUrl / only baseBranch / empty patch / unknown name / name immutable
+  - BuildSetDefault non-default → only default / on current default no-op / unknown name
+  - BuildRemove non-default ok / default rejected with conflict code / unknown name
+- Spec (grain): packages/server/tests/Mohist.Server.SpecTests/Specs/Project/Grain/ProjectGrainSpecs.cs (25 tests) covers grain-level create-with-default, add preserves/rebinds default, duplicate case-insensitive, blank gitUrl / blank name / blank baseBranch defaulting to main, set-default switch / idempotent / unknown, remove non-default / default conflict / unknown, update metadata, empty patch, default query without fallback.
+- Spec (API): packages/server/tests/Mohist.Server.SpecTests/Specs/Project/Api/ProjectApiSpecs.cs (16 tests) covers POST /api/projects without repository / with repository, list repos preserving default, duplicate-name conflict, blank gitUrl bad request + no mutation, PATCH metadata, PATCH empty bad request, PATCH unknown 404, PATCH setDefault switching default, PATCH setDefault idempotent, DELETE non-default success, DELETE default 409, GET project query model returning flagged default.
+
+Verification
+------------
+- dotnet test packages/server/tests/Mohist.Server.UnitTests --filter "FullyQualifiedName~RepositoryPolicyTests" → 32/32 passed
+- dotnet test packages/server/tests/Mohist.Server.SpecTests --filter "FullyQualifiedName~ProjectGrainSpecs" → 25/25 passed
+- dotnet test packages/server/tests/Mohist.Server.SpecTests --filter "FullyQualifiedName~ProjectApiSpecs" → 16/16 passed
+
+Acceptance check
+----------------
+- Default-invariant preservation: covered by AddRepository_PreservesDefaultWhenNotSetDefault (grain) + PostRepository_WithGitUrl_AddsSecondRepositoryPreservingDefault (api).
+- Case-insensitive duplicate rejection: AddRepository_DuplicateNameDifferentCase_Rejected + PostRepository_DuplicateNameDifferentCase_ReturnsConflict + BuildAdd_DuplicateCaseInsensitive_RejectedWithoutMutation.
+- Metadata-only update: UpdateRepository_ChangesGitUrlAndBaseBranch + PatchRepository_MetadataUpdate_PersistsNewGitUrlAndBaseBranch + BuildUpdate_NameIsImmutable_NextNameRemainsOriginal.
+- Idempotent default selection: SetDefaultRepository_OnCurrentDefault_IsIdempotent + PatchRepository_SetDefaultOnCurrentDefault_IsIdempotent + BuildSetDefault_OnCurrentDefault_IsNoOp.
+- Default-deletion conflict: RemoveRepository_Default_RejectedAsConflict + DeleteRepository_Default_ReturnsConflictAndDoesNotMutate + BuildRemove_DefaultRepository_RejectedAsConflict.
+- Repository-less creation rejected: PostProject_WithoutRepository_ReturnsBadRequest.
+- Query model returns flagged default (no fallback): DefaultRepository_ReturnsFlaggedRepositoryWithoutFallback + GetProject_QueryModel_ReturnsFlaggedDefaultRepository.
+- Actionable envelopes for validation/duplicate/conflict/not-found: covered by 4-way mix in ProjectApiSpecs.
+
+Codebase patterns
+-----------------
+- Pure domain policies live under Project/Domain/ and are exercised by unit tests without grains or web.
+- Grains orchestrate DB persistence + policy; never duplicate validation.
+- Route handlers map domain outcomes to ApiResults.{BadRequest,Conflict,NotFound,Ok} with stable error codes ("repository_name_required", "repository_name_conflict", "repository_default_deletion_conflict", "repository_patch_mixed_scope", "repository_update_empty").
+- ProjectInfo.DefaultRepository returns the flagged default rather than the first list entry; AddRepositoryAsync that adds to a project without any default promotes the new repo via BuildAdd's "anyCurrentDefault==false" branch.
+
+Gotchas
+-------
+- BuildAdd returns IsDefault=true when the project has no current default. ApplyAdd in ProjectGrain then clears existing entries' IsDefault to keep validation happy; with no existing entries the loop is a no-op, so this is safe.
+- UpdateRepositoryAsync treats a no-change metadata patch as Unchanged (returns _project without persisting) when BuildUpdate reports Changed=false. Empty patch (neither gitUrl nor baseBranch supplied) still raises ArgumentException via BuildUpdate before this short-circuit, so the route's "Provide gitUrl and/or baseBranch" 400 fires correctly.
+- SetDefaultRepositoryAsync on the current default short-circuits before mutating the list, so a redundant setDefault call doesn't even rewrite the persisted JSON.
+- BaseBranch normalization lives in TryNormalizeBaseBranch: null/empty/whitespace all collapse to "main" without error.
