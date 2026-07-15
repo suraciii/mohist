@@ -327,10 +327,9 @@ public class AgentSessionLifecycleDedupSpecs
     private async Task<CreatedSession> CreateSessionWithoutAttachAsync(string name)
     {
         var projectName = $"dedup-{name}-{Guid.NewGuid():N}";
-        var project = await _fixture.Client.PostDataAsync<ProjectDto>("/api/projects",
-            new { name = projectName });
+        var project = await _fixture.Client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", projectName);
         await _fixture.Client.PostOkAsync($"/api/projects/{project.Id}/repositories",
-            new { name = "main", gitUrl = "https://example.com/repo.git", baseBranch = "main", isDefault = true });
+            new { name = "main", gitUrl = "https://example.com/repo.git", baseBranch = "main", setDefault = true });
         var issue = await _fixture.Client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues",
             new { title = $"Dedup {name}", body = "track lifecycle emits", labels = new Dictionary<string, string>(StringComparer.Ordinal), priority = "p1", projectId = project.Id });
 

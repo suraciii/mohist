@@ -34,7 +34,7 @@ public class IssueWorkflowRepositoryResolutionSpecs
     {
         var projectId = $"proj_{Guid.NewGuid():N}";
         var projectGrain = _grains.GetGrain<IProjectGrain>(projectId);
-        await projectGrain.CreateAsync($"proj-{Guid.NewGuid():N}");
+        await projectGrain.CreateAsync($"proj-{Guid.NewGuid():N}", new Mohist.Server.Project.Domain.RepositoryInfo { Name = "placeholder", GitUrl = "git@example.com:placeholder.git", BaseBranch = "main", IsDefault = true });
         await projectGrain.AddRepositoryAsync(
             "secondary",
             "git@secondary.example:repo.git",
@@ -61,7 +61,7 @@ public class IssueWorkflowRepositoryResolutionSpecs
     {
         var projectId = $"proj_{Guid.NewGuid():N}";
         var projectGrain = _grains.GetGrain<IProjectGrain>(projectId);
-        await projectGrain.CreateAsync($"proj-{Guid.NewGuid():N}");
+        await projectGrain.CreateAsync($"proj-{Guid.NewGuid():N}", new Mohist.Server.Project.Domain.RepositoryInfo { Name = "placeholder", GitUrl = "git@example.com:placeholder.git", BaseBranch = "main", IsDefault = true });
         await projectGrain.AddRepositoryAsync(
             "secondary",
             "git@secondary.example:repo-old.git",
@@ -94,7 +94,7 @@ public class IssueWorkflowRepositoryResolutionSpecs
     {
         var projectId = $"proj_{Guid.NewGuid():N}";
         var projectGrain = _grains.GetGrain<IProjectGrain>(projectId);
-        await projectGrain.CreateAsync($"proj-{Guid.NewGuid():N}");
+        await projectGrain.CreateAsync($"proj-{Guid.NewGuid():N}", new Mohist.Server.Project.Domain.RepositoryInfo { Name = "placeholder", GitUrl = "git@example.com:placeholder.git", BaseBranch = "main", IsDefault = true });
         await projectGrain.AddRepositoryAsync(
             "secondary",
             "git@secondary.example:repo.git",
@@ -133,7 +133,7 @@ public class IssueWorkflowRepositoryResolutionSpecs
     {
         var projectId = $"proj_{Guid.NewGuid():N}";
         var projectGrain = _grains.GetGrain<IProjectGrain>(projectId);
-        await projectGrain.CreateAsync($"proj-{Guid.NewGuid():N}");
+        await projectGrain.CreateAsync($"proj-{Guid.NewGuid():N}", new Mohist.Server.Project.Domain.RepositoryInfo { Name = "placeholder", GitUrl = "git@example.com:placeholder.git", BaseBranch = "main", IsDefault = true });
         await projectGrain.AddRepositoryAsync("main", "git@main.example:repo.git", "main");
 
         var number = await _grains.GetGrain<IIssueCounterGrain>(projectId).NextAsync();

@@ -326,13 +326,13 @@ public class WorkflowArtifactUploadRouteSpecs
         var projectName = UniqueProjectName("art");
         var projectResponse = await _fixture.Client.PostAsJsonAsync(
             "/api/projects",
-            new { name = projectName });
+            new
+            {
+                name = projectName,
+                repository = new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main" },
+            });
         var projectJson = await projectResponse.Content.ReadFromJsonAsync<JsonElement>();
         var projectId = projectJson.GetProperty("data").GetProperty("id").GetString()!;
-
-        await _fixture.Client.PostAsJsonAsync(
-            $"/api/projects/{projectId}/repositories",
-            new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
 
         var issueResponse = await _fixture.Client.PostAsJsonAsync(
             $"/api/projects/{projectId}/issues",

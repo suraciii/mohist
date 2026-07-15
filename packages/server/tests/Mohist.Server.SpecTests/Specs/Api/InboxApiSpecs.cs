@@ -320,7 +320,7 @@ public class InboxApiSpecs
         var projectId = await CreateProjectAsync("inbox-spec");
         await _client.PostOkAsync(
             $"/api/projects/{projectId}/repositories",
-            new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
+            new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", setDefault = true });
         var issue = await _client.PostDataAsync<JsonElement>(
             $"/api/projects/{projectId}/issues",
             new

@@ -561,13 +561,13 @@ public class ProjectEventsApiSpecs
     private async Task<ProjectDto> CreateProjectAsync(string nameSuffix = "events")
     {
         var name = $"{nameSuffix}-{Guid.NewGuid():N}";
-        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name });
+        var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", name);
         await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new
         {
             name = "main",
             gitUrl = $"file://{Guid.NewGuid():N}",
             baseBranch = "main",
-            isDefault = true,
+            setDefault = true,
         });
         return project;
     }

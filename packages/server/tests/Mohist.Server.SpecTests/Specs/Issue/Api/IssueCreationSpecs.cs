@@ -37,7 +37,7 @@ public class IssueCreationSpecs
     {
         var id = $"proj_{Guid.NewGuid():N}";
         var projectGrain = _grains.GetGrain<IProjectGrain>(id);
-        var project = await projectGrain.CreateAsync($"proj-{Guid.NewGuid():N}");
+        var project = await projectGrain.CreateAsync($"proj-{Guid.NewGuid():N}", new Mohist.Server.Project.Domain.RepositoryInfo { Name = "placeholder", GitUrl = "git@example.com:placeholder.git", BaseBranch = "main", IsDefault = true });
         await projectGrain.AddRepositoryAsync("main", $"file://{Guid.NewGuid():N}", "main");
         return project;
     }

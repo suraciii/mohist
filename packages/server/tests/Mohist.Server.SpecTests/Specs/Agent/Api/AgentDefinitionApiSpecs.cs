@@ -252,7 +252,7 @@ public class AgentDefinitionApiSpecs
     }
 
     private async Task<ProjectDto> CreateProjectAsync(string prefix) =>
-        await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"{prefix}-{Guid.NewGuid():N}" });
+        await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", $"{prefix}-{Guid.NewGuid():N}");
 
     private static object NewAgent(string name) => new
     {

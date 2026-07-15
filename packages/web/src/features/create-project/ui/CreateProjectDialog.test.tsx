@@ -10,7 +10,7 @@ import { fireEvent, render, screen, waitFor, within } from '../../../../tests/te
 import { CreateProjectDialog } from '..'
 import { useProject, type ProjectCreator } from '../../../entities/project'
 
-const createRequests: { name: string }[] = []
+const createRequests: { name: string; repository: { name: string; gitUrl: string; baseBranch?: string } }[] = []
 
 const createProject: ProjectCreator = async (request) => {
   createRequests.push(request)
@@ -57,19 +57,49 @@ function openDialog() {
   return render(<HostDialog />)
 }
 
-describe('CreateProjectDialog (name-only)', () => {
-  it('submits only the project name and does not include path or effectivePath', async () => {
+function fillCreateProjectForm(
+  dialog: HTMLElement,
+  name: string,
+  repository = {
+    name: 'server',
+    gitUrl: 'https://github.com/example/server.git',
+    baseBranch: 'main',
+  },
+) {
+  fireEvent.change(within(dialog).getByTestId('create-project-name'), {
+    target: { value: name },
+  })
+  fireEvent.change(within(dialog).getByTestId('create-project-repository-name'), {
+    target: { value: repository.name },
+  })
+  fireEvent.change(within(dialog).getByTestId('create-project-repository-git-url'), {
+    target: { value: repository.gitUrl },
+  })
+  fireEvent.change(within(dialog).getByTestId('create-project-repository-base-branch'), {
+    target: { value: repository.baseBranch },
+  })
+}
+
+describe('CreateProjectDialog', () => {
+  it('submits the project name and a repository declaration', async () => {
     openDialog()
     const dialog = await screen.findByTestId('create-project-dialog')
     expect(dialog).toBeInTheDocument()
 
-    fireEvent.change(within(dialog).getByTestId('create-project-name'), {
-      target: { value: 'my-project' },
+    fillCreateProjectForm(dialog, 'my-project', {
+      name: 'server',
+      gitUrl: 'git@github.com:example/server.git',
+      baseBranch: 'trunk',
     })
     fireEvent.click(within(dialog).getByTestId('create-project-submit'))
 
     await waitFor(() => expect(createRequests).toHaveLength(1))
-    expect(createRequests[0]).toEqual({ name: 'my-project' })
+    expect(createRequests[0].name).toBe('my-project')
+    expect(createRequests[0].repository).toEqual({
+      name: 'server',
+      gitUrl: 'git@github.com:example/server.git',
+      baseBranch: 'trunk',
+    })
     const body = createRequests[0] as Record<string, unknown>
     expect(body).not.toHaveProperty('path')
     expect(body).not.toHaveProperty('effectivePath')
@@ -86,7 +116,7 @@ describe('CreateProjectDialog (name-only)', () => {
     expect(within(dialog).queryByTestId('create-project-path')).not.toBeInTheDocument()
   })
 
-  it('does not display "Path is required" when the name field is the only required input', async () => {
+  it('requires complete repository metadata without requiring a local path', async () => {
     openDialog()
     const dialog = await screen.findByTestId('create-project-dialog')
     const submit = within(dialog).getByTestId('create-project-submit') as HTMLButtonElement
@@ -94,11 +124,10 @@ describe('CreateProjectDialog (name-only)', () => {
     expect(within(dialog).queryByText(/path is required/i)).not.toBeInTheDocument()
   })
 
-  it('enables submit when a name is entered and no path is required', async () => {
+  it('enables submit when the project and required repository fields are entered', async () => {
     openDialog()
     const dialog = await screen.findByTestId('create-project-dialog')
-    const nameInput = within(dialog).getByTestId('create-project-name')
-    fireEvent.change(nameInput, { target: { value: 'only-name' } })
+    fillCreateProjectForm(dialog, 'project-with-repository')
 
     const submit = within(dialog).getByTestId('create-project-submit') as HTMLButtonElement
     expect(submit).not.toBeDisabled()
@@ -108,9 +137,7 @@ describe('CreateProjectDialog (name-only)', () => {
     openDialog()
     const dialog = await screen.findByTestId('create-project-dialog')
 
-    fireEvent.change(within(dialog).getByTestId('create-project-name'), {
-      target: { value: 'existing' },
-    })
+    fillCreateProjectForm(dialog, 'existing')
     fireEvent.click(within(dialog).getByTestId('create-project-submit'))
 
     await waitFor(() => {
@@ -128,9 +155,7 @@ describe('CreateProjectDialog (name-only)', () => {
 
     expect(screen.getByTestId('active-project-id').textContent).toBe('test-project')
 
-    fireEvent.change(within(dialog).getByTestId('create-project-name'), {
-      target: { value: 'switched-project' },
-    })
+    fillCreateProjectForm(dialog, 'switched-project')
     fireEvent.click(within(dialog).getByTestId('create-project-submit'))
 
     await waitFor(() => {
@@ -142,9 +167,7 @@ describe('CreateProjectDialog (name-only)', () => {
     openDialog()
     const dialog = await screen.findByTestId('create-project-dialog')
 
-    fireEvent.change(within(dialog).getByTestId('create-project-name'), {
-      target: { value: 'close-on-success' },
-    })
+    fillCreateProjectForm(dialog, 'close-on-success')
     fireEvent.click(within(dialog).getByTestId('create-project-submit'))
 
     await waitFor(() => {
@@ -156,12 +179,19 @@ describe('CreateProjectDialog (name-only)', () => {
     openDialog()
     const dialog = await screen.findByTestId('create-project-dialog')
 
-    fireEvent.change(within(dialog).getByTestId('create-project-name'), {
-      target: { value: '  trimmed-name  ' },
+    fillCreateProjectForm(dialog, '  trimmed-name  ', {
+      name: '  backend  ',
+      gitUrl: '  https://github.com/example/backend.git  ',
+      baseBranch: '  main  ',
     })
     fireEvent.click(within(dialog).getByTestId('create-project-submit'))
 
     await waitFor(() => expect(createRequests).toHaveLength(1))
-    expect(createRequests[0]).toEqual({ name: 'trimmed-name' })
+    expect(createRequests[0].name).toBe('trimmed-name')
+    expect(createRequests[0].repository).toEqual({
+      name: 'backend',
+      gitUrl: 'https://github.com/example/backend.git',
+      baseBranch: 'main',
+    })
   })
 })

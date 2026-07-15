@@ -181,16 +181,13 @@ public class EpicListQueryApiSpecs
 
     private async Task<ProjectDto> CreateProjectAsync()
     {
-        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new
-        {
-            name = $"epic-list-query-{Guid.NewGuid():N}",
-        });
+        var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", $"epic-list-query-{Guid.NewGuid():N}");
         await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new
         {
             name = "main",
             gitUrl = $"file://{Guid.NewGuid():N}",
             baseBranch = "main",
-            isDefault = true,
+            setDefault = true,
         });
         return project;
     }

@@ -283,17 +283,14 @@ public class AttachmentApiSpecs
 
     private async Task<string> CreateProjectAsync(string prefix)
     {
-        var response = await _fixture.Client.PostDataAsync<JsonElement>("/api/projects", new
-        {
-            name = $"{prefix}-{Guid.NewGuid():N}"[..Math.Min(prefix.Length + 1 + 32, 63)],
-        });
+        var response = await _fixture.Client.CreateProjectWithDefaultRepositoryAsync<JsonElement>("/api/projects", $"{prefix}-{Guid.NewGuid():N}");
         var projectId = response.GetProperty("id").GetString()!;
         await _fixture.Client.PostOkAsync($"/api/projects/{projectId}/repositories", new
         {
             name = "main",
             gitUrl = $"file://{Guid.NewGuid():N}",
             baseBranch = "main",
-            isDefault = true,
+            setDefault = true,
         });
         return projectId;
     }

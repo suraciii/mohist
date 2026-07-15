@@ -44,7 +44,7 @@ public class TaskLogRouteSpecs
                 name = "main",
                 gitUrl = $"file://{Guid.NewGuid():N}",
                 baseBranch = "main",
-                isDefault = true,
+                setDefault = true,
             });
     }
 

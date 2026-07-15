@@ -200,7 +200,13 @@ public class WorkflowRunDetailApiSpecs
         var id = $"proj_{Guid.NewGuid():N}";
         var name = $"wr-detail-{Guid.NewGuid():N}";
         var projectGrain = _grains.GetGrain<IProjectGrain>(id);
-        await projectGrain.CreateAsync(name);
+        await projectGrain.CreateAsync(name, new Mohist.Server.Project.Domain.RepositoryInfo
+        {
+            Name = "placeholder",
+            GitUrl = "git@example.com:placeholder.git",
+            BaseBranch = "main",
+            IsDefault = true,
+        });
         await projectGrain.AddRepositoryAsync("origin", "git@example.com:test.git", "main");
         return (id, name);
     }

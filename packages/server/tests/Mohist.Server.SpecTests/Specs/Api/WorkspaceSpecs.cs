@@ -334,7 +334,7 @@ public class WorkspaceSpecs
 
     private async Task<ProjectDto> CreateProjectWithRepositoryAsync(string baseBranch = "main")
     {
-        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"workspace-{Guid.NewGuid():N}" });
+        var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", $"workspace-{Guid.NewGuid():N}");
         await _client.PostDataAsync<RepositoryDto>($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = "git@example.com:repo.git", baseBranch });
         return project;
     }

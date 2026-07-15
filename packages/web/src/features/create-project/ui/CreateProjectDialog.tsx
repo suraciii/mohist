@@ -19,6 +19,9 @@ interface Props {
 
 export function CreateProjectDialog({ open, onClose, projectCreator }: Props) {
   const [name, setName] = useState('')
+  const [repositoryName, setRepositoryName] = useState('')
+  const [repositoryGitUrl, setRepositoryGitUrl] = useState('')
+  const [repositoryBaseBranch, setRepositoryBaseBranch] = useState('main')
   const { setProjectId } = useProject()
 
   const createProject = useCreateProject(projectCreator)
@@ -29,13 +32,23 @@ export function CreateProjectDialog({ open, onClose, projectCreator }: Props) {
 
   function resetAndClose() {
     setName('')
+    setRepositoryName('')
+    setRepositoryGitUrl('')
+    setRepositoryBaseBranch('main')
     createProject.reset()
     onClose()
   }
 
   async function handleCreate() {
     createProject.mutate(
-      { name: name.trim() },
+      {
+        name: name.trim(),
+        repository: {
+          name: repositoryName.trim(),
+          gitUrl: repositoryGitUrl.trim(),
+          baseBranch: repositoryBaseBranch.trim() || undefined,
+        },
+      },
       {
         onSuccess: (project) => {
           setProjectId(project.id)
@@ -62,6 +75,39 @@ export function CreateProjectDialog({ open, onClose, projectCreator }: Props) {
               placeholder="Project name"
               autoFocus
               data-testid="create-project-name"
+            />
+          </div>
+          <div>
+            <Label htmlFor="project-repository-name" className="text-xs">Repository name *</Label>
+            <Input
+              id="project-repository-name"
+              type="text"
+              value={repositoryName}
+              onChange={(e) => setRepositoryName(e.target.value)}
+              placeholder="server"
+              data-testid="create-project-repository-name"
+            />
+          </div>
+          <div>
+            <Label htmlFor="project-repository-git-url" className="text-xs">Git URL *</Label>
+            <Input
+              id="project-repository-git-url"
+              type="url"
+              value={repositoryGitUrl}
+              onChange={(e) => setRepositoryGitUrl(e.target.value)}
+              placeholder="https://github.com/your-org/server.git"
+              data-testid="create-project-repository-git-url"
+            />
+          </div>
+          <div>
+            <Label htmlFor="project-repository-base-branch" className="text-xs">Base branch</Label>
+            <Input
+              id="project-repository-base-branch"
+              type="text"
+              value={repositoryBaseBranch}
+              onChange={(e) => setRepositoryBaseBranch(e.target.value)}
+              placeholder="main"
+              data-testid="create-project-repository-base-branch"
             />
           </div>
 
@@ -94,6 +140,8 @@ export function CreateProjectDialog({ open, onClose, projectCreator }: Props) {
               onClick={handleCreate}
               disabled={
                 !name.trim() ||
+                !repositoryName.trim() ||
+                !repositoryGitUrl.trim() ||
                 createProject.isPending
               }
               data-testid="create-project-submit"

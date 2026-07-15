@@ -592,18 +592,13 @@ public class GenericAgentSessionFollowupApiSpecs : IAsyncLifetime
     {
         var projectName = $"gen-followup-{Guid.NewGuid():N}";
         if (projectName.Length > 63) projectName = projectName[..63];
-        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new
-        {
-            name = projectName,
-            path = "/mohist-tests/projects/generic-session-followup",
-            baseBranch = "main",
-        });
+        var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", projectName);
         await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new
         {
             name = "main",
             gitUrl = $"file://{Guid.NewGuid():N}",
             baseBranch = "main",
-            isDefault = true,
+            setDefault = true,
         });
         return new ProjectRef(project.Id, project.Path);
     }

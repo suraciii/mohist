@@ -24,18 +24,13 @@ public class PathContractRegressionSpecs
     public async Task LegacyWorktreeStatusRoute_ReturnsNotFound()
     {
         var name = $"legacy-status-{Guid.NewGuid():N}";
-        var project = await (await _client.PostAsJsonAsync("/api/projects", new { name }))
+        var project = await (await _client.PostAsJsonAsync("/api/projects", new
+        {
+            name,
+            repository = new { name = "primary", gitUrl = "git@example.com:primary.git", baseBranch = "main" },
+        }))
             .Content.ReadFromJsonAsync<JsonElement>();
         var projectId = project.GetProperty("data").GetProperty("id").GetString()!;
-        await _client.PostAsJsonAsync(
-            $"/api/projects/{projectId}/repositories",
-            new
-            {
-                name = "primary",
-                gitUrl = "git@example.com:primary.git",
-                baseBranch = "main",
-                isDefault = true,
-            });
         var issue = await (await _client.PostAsJsonAsync(
             $"/api/projects/{projectId}/issues",
             new { title = "Legacy status", projectId = projectId }))
@@ -73,7 +68,11 @@ public class PathContractRegressionSpecs
     public async Task ProjectsList_OmitsPathAndEffectivePath()
     {
         var name = $"contract-list-{Guid.NewGuid():N}";
-        var createResponse = await _client.PostAsJsonAsync("/api/projects", new { name });
+        var createResponse = await _client.PostAsJsonAsync("/api/projects", new
+        {
+            name,
+            repository = new { name = "test-repo", gitUrl = "git@example.com:test-repo.git", baseBranch = "main" },
+        });
         Assert.Equal(System.Net.HttpStatusCode.Created, createResponse.StatusCode);
 
         using var listResponse = await _client.GetAsync("/api/projects");
@@ -93,7 +92,11 @@ public class PathContractRegressionSpecs
     public async Task ProjectDetail_OmitsPathAndEffectivePath()
     {
         var name = $"contract-detail-{Guid.NewGuid():N}";
-        var createResponse = await _client.PostAsJsonAsync("/api/projects", new { name });
+        var createResponse = await _client.PostAsJsonAsync("/api/projects", new
+        {
+            name,
+            repository = new { name = "test-repo", gitUrl = "git@example.com:test-repo.git", baseBranch = "main" },
+        });
         var created = await createResponse.Content.ReadFromJsonAsync<JsonElement>();
         var projectId = created.GetProperty("data").GetProperty("id").GetString()!;
 
@@ -111,7 +114,11 @@ public class PathContractRegressionSpecs
     public async Task ProjectCreate_WithoutPath_ReturnsProjectWithoutLocalPathFields()
     {
         var name = $"contract-create-{Guid.NewGuid():N}";
-        using var response = await _client.PostAsJsonAsync("/api/projects", new { name });
+        using var response = await _client.PostAsJsonAsync("/api/projects", new
+        {
+            name,
+            repository = new { name = "test-repo", gitUrl = "git@example.com:test-repo.git", baseBranch = "main" },
+        });
 
         Assert.Equal(System.Net.HttpStatusCode.Created, response.StatusCode);
         var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement;
@@ -127,7 +134,11 @@ public class PathContractRegressionSpecs
     public async Task RepositoryAdd_WithoutGitUrl_Returns400AndDoesNotMutateState()
     {
         var name = $"contract-repoadd-{Guid.NewGuid():N}";
-        var project = await (await _client.PostAsJsonAsync("/api/projects", new { name }))
+        var project = await (await _client.PostAsJsonAsync("/api/projects", new
+        {
+            name,
+            repository = new { name = "test-repo", gitUrl = "git@example.com:test-repo.git", baseBranch = "main" },
+        }))
             .Content.ReadFromJsonAsync<JsonElement>();
         var projectId = project.GetProperty("data").GetProperty("id").GetString()!;
 
@@ -153,23 +164,13 @@ public class PathContractRegressionSpecs
     public async Task RepositoryAdd_WithGitUrl_ReturnsRepositoryWithoutLocalPathFields()
     {
         var name = $"contract-repogit-{Guid.NewGuid():N}";
-        var project = await (await _client.PostAsJsonAsync("/api/projects", new { name }))
+        var project = await (await _client.PostAsJsonAsync("/api/projects", new
+        {
+            name,
+            repository = new { name = "primary", gitUrl = "git@example.com:primary.git", baseBranch = "main" },
+        }))
             .Content.ReadFromJsonAsync<JsonElement>();
-        var projectId = project.GetProperty("data").GetProperty("id").GetString()!;
-
-        using var response = await _client.PostAsJsonAsync(
-            $"/api/projects/{projectId}/repositories",
-            new
-            {
-                name = "primary",
-                gitUrl = "git@example.com:primary.git",
-                baseBranch = "main",
-                isDefault = true,
-            });
-
-        Assert.Equal(System.Net.HttpStatusCode.Created, response.StatusCode);
-        var data = (await response.Content.ReadFromJsonAsync<JsonElement>())
-            .GetProperty("data");
+        var data = project.GetProperty("data");
 
         var firstRepo = data.GetProperty("repositories").EnumerateArray().First();
         AssertRepositoryHasNoLocalPathFields(firstRepo);
@@ -183,19 +184,13 @@ public class PathContractRegressionSpecs
     public async Task IssueStart_DispatchVariables_ContainGitUrlButNoLocalPathFields()
     {
         var name = $"contract-dispatch-{Guid.NewGuid():N}";
-        var project = await (await _client.PostAsJsonAsync("/api/projects", new { name }))
+        var project = await (await _client.PostAsJsonAsync("/api/projects", new
+        {
+            name,
+            repository = new { name = "primary", gitUrl = "git@example.com:dispatch.git", baseBranch = "main" },
+        }))
             .Content.ReadFromJsonAsync<JsonElement>();
         var projectId = project.GetProperty("data").GetProperty("id").GetString()!;
-
-        await _client.PostAsJsonAsync(
-            $"/api/projects/{projectId}/repositories",
-            new
-            {
-                name = "primary",
-                gitUrl = "git@example.com:dispatch.git",
-                baseBranch = "main",
-                isDefault = true,
-            });
 
         var issue = await (await _client.PostAsJsonAsync(
             $"/api/projects/{projectId}/issues",
@@ -264,18 +259,13 @@ public class PathContractRegressionSpecs
     public async Task WorkflowEffectiveVariableKeyPath_ReturnsValueOrJsonNull()
     {
         var name = $"keypath-{Guid.NewGuid():N}";
-        var project = await (await _client.PostAsJsonAsync("/api/projects", new { name }))
+        var project = await (await _client.PostAsJsonAsync("/api/projects", new
+        {
+            name,
+            repository = new { name = "primary", gitUrl = "git@example.com:keypath.git", baseBranch = "main" },
+        }))
             .Content.ReadFromJsonAsync<JsonElement>();
         var projectId = project.GetProperty("data").GetProperty("id").GetString()!;
-        await _client.PostAsJsonAsync(
-            $"/api/projects/{projectId}/repositories",
-            new
-            {
-                name = "primary",
-                gitUrl = "git@example.com:keypath.git",
-                baseBranch = "main",
-                isDefault = true,
-            });
         var issue = await (await _client.PostAsJsonAsync(
             $"/api/projects/{projectId}/issues",
             new { title = "Key path contract", projectId, isDraft = false }))

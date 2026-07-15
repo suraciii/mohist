@@ -270,7 +270,13 @@ public class OtelExecutionChainTracingSpecs : IClassFixture<MohistIntegrationFix
         // create issues against.
         var projectId = $"proj_{Guid.NewGuid():N}";
         var projectGrain = _fixture.Grains.GetGrain<Mohist.Server.Project.Grains.IProjectGrain>(projectId);
-        await projectGrain.CreateAsync($"proj-{Guid.NewGuid():N}");
+        await projectGrain.CreateAsync($"proj-{Guid.NewGuid():N}", new Mohist.Server.Project.Domain.RepositoryInfo
+        {
+            Name = "placeholder",
+            GitUrl = "git@example.com:placeholder.git",
+            BaseBranch = "main",
+            IsDefault = true,
+        });
         await projectGrain.AddRepositoryAsync("main", $"file://{Guid.NewGuid():N}", "main");
         return projectId;
     }

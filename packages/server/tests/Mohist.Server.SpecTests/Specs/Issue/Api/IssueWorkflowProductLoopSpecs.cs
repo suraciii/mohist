@@ -47,8 +47,8 @@ public class IssueWorkflowProductLoopSpecs : IAsyncLifetime
     public async Task IssueStart_RunnerCompletesWorkflow_IssueBecomesDone()
     {
         var projectName = $"project-{Guid.NewGuid():N}";
-        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = projectName });
-        await _client.PostOkAsync($"/api/projects/{ project.Id }/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
+        var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", projectName);
+        await _client.PostOkAsync($"/api/projects/{ project.Id }/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", setDefault = true });
         await UseNoArtifactTemplateAsync(project.Id);
 var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Ship product loop", body = "body", labels = new Dictionary<string, string>(StringComparer.Ordinal), priority = "p1", model = "openai/gpt-4o", projectId = project.Id, isDraft = false });
         _projectId = project.Id;
@@ -114,8 +114,8 @@ var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/i
     [Fact]
     public async Task IssueWorkflowVariablesPatch_AppliesToFutureDispatches()
     {
-        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"variables-{Guid.NewGuid():N}" });
-        await _client.PostOkAsync($"/api/projects/{ project.Id }/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
+        var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", $"variables-{Guid.NewGuid():N}");
+        await _client.PostOkAsync($"/api/projects/{ project.Id }/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", setDefault = true });
 var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Patch workflow variables", body = "body", labels = new Dictionary<string, string>(StringComparer.Ordinal), priority = "p1", model = "openai/gpt-4o", projectId = project.Id, isDraft = false });
         _projectId = project.Id;
         _issueNumber = issue.Number;
@@ -145,8 +145,8 @@ var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/i
     [Fact]
     public async Task IssueWorkflowVariablesPatch_ProjectsModelSettingsOnIssueDetail()
     {
-        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"issue-model-profile-{Guid.NewGuid():N}" });
-        await _client.PostOkAsync($"/api/projects/{ project.Id }/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
+        var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", $"issue-model-profile-{Guid.NewGuid():N}");
+        await _client.PostOkAsync($"/api/projects/{ project.Id }/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", setDefault = true });
 var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Configure issue model profile", body = "body", labels = new Dictionary<string, string>(StringComparer.Ordinal), priority = "p1", projectId = project.Id, isDraft = false });
         _projectId = project.Id;
         _issueNumber = issue.Number;
@@ -173,8 +173,8 @@ var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/i
     [Fact]
     public async Task ProjectVariablesPatch_AppliesToNextTaskDispatch()
     {
-        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"project-variables-{Guid.NewGuid():N}" });
-        await _client.PostOkAsync($"/api/projects/{ project.Id }/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
+        var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", $"project-variables-{Guid.NewGuid():N}");
+        await _client.PostOkAsync($"/api/projects/{ project.Id }/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", setDefault = true });
         await UseNoArtifactTemplateAsync(project.Id);
 var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Patch project variables", body = "body", labels = new Dictionary<string, string>(StringComparer.Ordinal), priority = "p1", projectId = project.Id, isDraft = false });
         _projectId = project.Id;
@@ -227,8 +227,8 @@ var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/i
         // the old design). After the issue is running, the project model is
         // changed. The next stage dispatch must use the NEW project model,
         // not the value that was live at issue creation.
-        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"project-live-propagate-{Guid.NewGuid():N}" });
-        await _client.PostOkAsync($"/api/projects/{ project.Id }/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
+        var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", $"project-live-propagate-{Guid.NewGuid():N}");
+        await _client.PostOkAsync($"/api/projects/{ project.Id }/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", setDefault = true });
         await UseNoArtifactTemplateAsync(project.Id);
 
         // Project is configured with model A BEFORE the issue is started.
@@ -279,8 +279,8 @@ var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/i
     [Fact]
     public async Task ProjectStageVariablesPatch_OverridesPersistedWorkflowStageAgent()
     {
-        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"project-stage-variables-{Guid.NewGuid():N}" });
-        await _client.PostOkAsync($"/api/projects/{ project.Id }/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
+        var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", $"project-stage-variables-{Guid.NewGuid():N}");
+        await _client.PostOkAsync($"/api/projects/{ project.Id }/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", setDefault = true });
         await UseNoArtifactTemplateAsync(project.Id);
 var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Patch project stage variables", body = "body", labels = new Dictionary<string, string>(StringComparer.Ordinal), priority = "p1", projectId = project.Id, isDraft = false });
         _projectId = project.Id;
@@ -328,8 +328,8 @@ var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/i
     public async Task IssueStart_GlobalRunnerAssignsProjectBacklogWork()
     {
         var projectName = $"global-runner-{Guid.NewGuid():N}";
-        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = projectName });
-        await _client.PostOkAsync($"/api/projects/{ project.Id }/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
+        var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", projectName);
+        await _client.PostOkAsync($"/api/projects/{ project.Id }/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", setDefault = true });
 var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Dispatch to global runner", body = "body", labels = new Dictionary<string, string>(StringComparer.Ordinal), priority = "p1", projectId = project.Id, isDraft = false });
         _projectId = project.Id;
         _issueNumber = issue.Number;
@@ -356,8 +356,8 @@ var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/i
     [Fact]
     public async Task IssueWorkflowYaml_ReturnsActiveWorkflowDefinition()
     {
-        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"yaml-{Guid.NewGuid():N}" });
-        await _client.PostOkAsync($"/api/projects/{ project.Id }/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
+        var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", $"yaml-{Guid.NewGuid():N}");
+        await _client.PostOkAsync($"/api/projects/{ project.Id }/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", setDefault = true });
 var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Show workflow yaml", body = "body", labels = new Dictionary<string, string>(StringComparer.Ordinal), priority = "p1", projectId = project.Id, isDraft = false });
         _projectId = project.Id;
         _issueNumber = issue.Number;

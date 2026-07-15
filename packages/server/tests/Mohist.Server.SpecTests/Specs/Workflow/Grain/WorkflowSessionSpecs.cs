@@ -34,7 +34,7 @@ public class WorkflowSessionSpecs
         var project = await _client.PostProjectWithRepositoryAsync<ProjectDto>(
             "/api/projects",
             new { name = $"all-disabled-start-{Guid.NewGuid():N}" },
-            new { name = "main", gitUrl = "https://example.com/repo.git", baseBranch = "main", isDefault = true });
+            new { name = "main", gitUrl = "https://example.com/repo.git", baseBranch = "main", setDefault = true });
         var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new
         {
             title = "Persisted issue in all-disabled project",
@@ -256,16 +256,13 @@ public class WorkflowSessionSpecs
     private async Task<(ProjectDto Project, IssueDto Issue, string WorkflowRunId)> CreateIssueWorkflowAsync(string title)
     {
         var projectName = $"wfs-{Guid.NewGuid():N}";
-        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new
-        {
-            name = projectName,
-        });
+        var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", projectName);
         await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new
         {
             name = "main",
             gitUrl = "https://example.com/repo.git",
             baseBranch = "main",
-            isDefault = true
+            setDefault = true
         });
         var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new
         {

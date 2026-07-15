@@ -420,7 +420,11 @@ public class AgentLauncherSpecs
     {
         var raw = $"{prefix}-{Guid.NewGuid():N}".ToLowerInvariant();
         var name = raw.Length > 63 ? raw[..63] : raw;
-        using var response = await _fixture.Client.PostAsJsonAsync("/api/projects", new { name });
+        using var response = await _fixture.Client.PostAsJsonAsync("/api/projects", new
+        {
+            name,
+            repository = new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main" },
+        });
         if (!response.IsSuccessStatusCode)
         {
             var body = await response.Content.ReadAsStringAsync();

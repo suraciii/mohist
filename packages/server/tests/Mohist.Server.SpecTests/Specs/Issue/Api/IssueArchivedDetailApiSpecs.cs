@@ -441,7 +441,13 @@ public class IssueArchivedDetailApiSpecs
         var id = $"proj_{Guid.NewGuid():N}";
         var name = $"mohist-local-{Guid.NewGuid():N}";
         var projectGrain = _grains.GetGrain<IProjectGrain>(id);
-        await projectGrain.CreateAsync(name);
+        await projectGrain.CreateAsync(name, new Mohist.Server.Project.Domain.RepositoryInfo
+        {
+            Name = "placeholder",
+            GitUrl = "git@example.com:placeholder.git",
+            BaseBranch = "main",
+            IsDefault = true,
+        });
         await projectGrain.AddRepositoryAsync("origin", "git@example.com:mohist-local.git", "main");
         return (id, name);
     }

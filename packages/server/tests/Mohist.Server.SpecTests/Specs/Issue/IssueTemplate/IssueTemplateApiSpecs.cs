@@ -28,7 +28,7 @@ public class IssueTemplateApiSpecs
     [Fact]
     public async Task List_IncludesBuiltinTemplates()
     {
-        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"it-list-{Guid.NewGuid():N}" });
+        var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", $"it-list-{Guid.NewGuid():N}");
 
         var list = await _client.GetDataAsync<List<JsonElement>>($"/api/issue-templates?projectId={project.Id}");
 
@@ -49,7 +49,7 @@ public class IssueTemplateApiSpecs
     [Fact]
     public async Task Get_Feature_ReturnsFullTemplateWithBody()
     {
-        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"it-get-{Guid.NewGuid():N}" });
+        var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", $"it-get-{Guid.NewGuid():N}");
 
         var response = await _client.GetAsync($"/api/issue-templates/feature?projectId={project.Id}");
         response.EnsureSuccessStatusCode();
@@ -78,7 +78,7 @@ public class IssueTemplateApiSpecs
     [Fact]
     public async Task Get_AliasMohistDefault_ReturnsFeature()
     {
-        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"it-alias-{Guid.NewGuid():N}" });
+        var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", $"it-alias-{Guid.NewGuid():N}");
 
         var responseCanonical = await _client.GetAsync($"/api/issue-templates/feature?projectId={project.Id}");
         responseCanonical.EnsureSuccessStatusCode();
@@ -96,7 +96,7 @@ public class IssueTemplateApiSpecs
     [Fact]
     public async Task Get_NonexistentTemplate_ReturnsNotFound()
     {
-        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"it-404-{Guid.NewGuid():N}" });
+        var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", $"it-404-{Guid.NewGuid():N}");
 
         using var response = await _client.GetAsync($"/api/issue-templates/nonexistent?projectId={project.Id}");
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
@@ -107,7 +107,7 @@ public class IssueTemplateApiSpecs
     [Fact]
     public async Task List_ExcludesBuiltinsWhenDisabled()
     {
-        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"it-disabled-{Guid.NewGuid():N}" });
+        var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", $"it-disabled-{Guid.NewGuid():N}");
 
         var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
         await using var db = await dbFactory.CreateDbContextAsync();
@@ -132,7 +132,7 @@ public class IssueTemplateApiSpecs
     [Fact]
     public async Task DisabledBuiltIn_CanBeShadowedByProjectCustomTemplate()
     {
-        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"it-shadow-{Guid.NewGuid():N}" });
+        var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", $"it-shadow-{Guid.NewGuid():N}");
 
         var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
         await using var db = await dbFactory.CreateDbContextAsync();
@@ -180,8 +180,8 @@ public class IssueTemplateApiSpecs
     [Fact]
     public async Task DisabledDefault_DoesNotAffectOtherProjects()
     {
-        var projectA = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"it-a-{Guid.NewGuid():N}" });
-        var projectB = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"it-b-{Guid.NewGuid():N}" });
+        var projectA = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", $"it-a-{Guid.NewGuid():N}");
+        var projectB = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", $"it-b-{Guid.NewGuid():N}");
 
         var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
         await using var db = await dbFactory.CreateDbContextAsync();

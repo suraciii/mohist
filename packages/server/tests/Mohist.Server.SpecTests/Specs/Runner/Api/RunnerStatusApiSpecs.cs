@@ -102,10 +102,7 @@ public class RunnerStatusApiSpecs
     [Fact]
     public async Task GetRunners_GlobalRunnerWithoutProjectId_IsReturned()
     {
-        var projectResponse = await _fixture.Client.PostAsJsonAsync("/api/projects", new { name = $"proj-{Guid.NewGuid():N}" });
-        var projectJson = await projectResponse.Content.ReadFromJsonAsync<global::System.Text.Json.JsonElement>();
-        var projectId = projectJson.GetProperty("data").GetProperty("id").GetString()!;
-        await _fixture.Client.PostAsJsonAsync($"/api/projects/{projectId}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
+        var projectId = await CreateProjectIdAsync($"proj-{Guid.NewGuid():N}");
 
         var runnerId = $"runner-global-scope-{Guid.NewGuid():N}";
         await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new
@@ -136,10 +133,7 @@ public class RunnerStatusApiSpecs
     [Fact]
     public async Task GetRunners_GlobalRunner_ReturnsRunner()
     {
-        var projectResponse = await _fixture.Client.PostAsJsonAsync("/api/projects", new { name = $"proj-{Guid.NewGuid():N}" });
-        var projectJson = await projectResponse.Content.ReadFromJsonAsync<global::System.Text.Json.JsonElement>();
-        var projectId = projectJson.GetProperty("data").GetProperty("id").GetString()!;
-        await _fixture.Client.PostAsJsonAsync($"/api/projects/{projectId}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
+        var projectId = await CreateProjectIdAsync($"proj-{Guid.NewGuid():N}");
 
         var runnerId = $"runner-api-{Guid.NewGuid():N}";
         await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new
@@ -175,10 +169,7 @@ public class RunnerStatusApiSpecs
     [Fact]
     public async Task GetRunners_RunnerRegisteringWithProjectId_IsReturnedAsGlobal()
     {
-        var projectResponse = await _fixture.Client.PostAsJsonAsync("/api/projects", new { name = $"proj-{Guid.NewGuid():N}" });
-        var projectJson = await projectResponse.Content.ReadFromJsonAsync<global::System.Text.Json.JsonElement>();
-        var projectId = projectJson.GetProperty("data").GetProperty("id").GetString()!;
-        await _fixture.Client.PostAsJsonAsync($"/api/projects/{projectId}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
+        var projectId = await CreateProjectIdAsync($"proj-{Guid.NewGuid():N}");
 
         var runnerId = $"runner-proj-{Guid.NewGuid():N}";
         await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new
@@ -215,10 +206,7 @@ public class RunnerStatusApiSpecs
     [Fact]
     public async Task GetRunners_NoRunnersForProject_ReturnsEmptyList()
     {
-        var projectResponse = await _fixture.Client.PostAsJsonAsync("/api/projects", new { name = $"proj-empty-{Guid.NewGuid():N}" });
-        var projectJson = await projectResponse.Content.ReadFromJsonAsync<global::System.Text.Json.JsonElement>();
-        var projectId = projectJson.GetProperty("data").GetProperty("id").GetString()!;
-        await _fixture.Client.PostAsJsonAsync($"/api/projects/{projectId}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
+        var projectId = await CreateProjectIdAsync($"proj-empty-{Guid.NewGuid():N}");
 
         var registry = _fixture.Grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
         var existingIds = await registry.ListRunnerIdsAsync();
@@ -248,10 +236,7 @@ public class RunnerStatusApiSpecs
     [Fact]
     public async Task GetRunners_BusyRunner_IncludesActiveWork()
     {
-        var projectResponse = await _fixture.Client.PostAsJsonAsync("/api/projects", new { name = $"proj-{Guid.NewGuid():N}" });
-        var projectJson = await projectResponse.Content.ReadFromJsonAsync<global::System.Text.Json.JsonElement>();
-        var projectId = projectJson.GetProperty("data").GetProperty("id").GetString()!;
-        await _fixture.Client.PostAsJsonAsync($"/api/projects/{projectId}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
+        var projectId = await CreateProjectIdAsync($"proj-{Guid.NewGuid():N}");
 
         var runnerId = $"runner-busy-{Guid.NewGuid():N}";
         await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new
@@ -292,10 +277,7 @@ public class RunnerStatusApiSpecs
     [Fact]
     public async Task GetRunners_DisconnectedBusyWorkspaceRunner_IsBusyAndStillShowsConnectionDiagnostic()
     {
-        var projectResponse = await _fixture.Client.PostAsJsonAsync("/api/projects", new { name = $"proj-{Guid.NewGuid():N}" });
-        var projectJson = await projectResponse.Content.ReadFromJsonAsync<global::System.Text.Json.JsonElement>();
-        var projectId = projectJson.GetProperty("data").GetProperty("id").GetString()!;
-        await _fixture.Client.PostAsJsonAsync($"/api/projects/{projectId}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
+        var projectId = await CreateProjectIdAsync($"proj-{Guid.NewGuid():N}");
 
         var runnerId = $"runner-disc-busy-api-{Guid.NewGuid():N}";
         await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new
@@ -337,10 +319,7 @@ public class RunnerStatusApiSpecs
     [Fact]
     public async Task GetRunners_RunnerFields_UseRunnerTerminology()
     {
-        var projectResponse = await _fixture.Client.PostAsJsonAsync("/api/projects", new { name = $"proj-{Guid.NewGuid():N}" });
-        var projectJson = await projectResponse.Content.ReadFromJsonAsync<global::System.Text.Json.JsonElement>();
-        var projectId = projectJson.GetProperty("data").GetProperty("id").GetString()!;
-        await _fixture.Client.PostAsJsonAsync($"/api/projects/{projectId}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
+        var projectId = await CreateProjectIdAsync($"proj-{Guid.NewGuid():N}");
 
         var runnerId = $"runner-terms-{Guid.NewGuid():N}";
         await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new
@@ -383,9 +362,7 @@ public class RunnerStatusApiSpecs
     [Fact]
     public async Task RegisterRunner_WithBuildGitHash_ExposesHashInStatus()
     {
-        var projectResponse = await _fixture.Client.PostAsJsonAsync("/api/projects", new { name = $"proj-{Guid.NewGuid():N}", path = "/tmp/project", baseBranch = "main" });
-        var projectJson = await projectResponse.Content.ReadFromJsonAsync<global::System.Text.Json.JsonElement>();
-        var projectId = projectJson.GetProperty("data").GetProperty("id").GetString()!;
+        var projectId = await CreateProjectIdAsync($"proj-{Guid.NewGuid():N}");
 
         var runnerId = $"runner-hash-{Guid.NewGuid():N}";
         var hash = "abcdef1234567890abcdef1234567890abcdef12";
@@ -421,10 +398,7 @@ public class RunnerStatusApiSpecs
     [Fact]
     public async Task GetRunners_BusyMultiSlotRunner_ListsEveryActiveWorkIndependently()
     {
-        var projectResponse = await _fixture.Client.PostAsJsonAsync("/api/projects", new { name = $"proj-{Guid.NewGuid():N}" });
-        var projectJson = await projectResponse.Content.ReadFromJsonAsync<global::System.Text.Json.JsonElement>();
-        var projectId = projectJson.GetProperty("data").GetProperty("id").GetString()!;
-        await _fixture.Client.PostAsJsonAsync($"/api/projects/{projectId}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
+        var projectId = await CreateProjectIdAsync($"proj-{Guid.NewGuid():N}");
 
         var runnerId = $"runner-multi-api-{Guid.NewGuid():N}";
         await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new
@@ -481,10 +455,7 @@ public class RunnerStatusApiSpecs
     [Fact]
     public async Task GetRunners_IdleRunner_HasEmptyActiveWorksArray()
     {
-        var projectResponse = await _fixture.Client.PostAsJsonAsync("/api/projects", new { name = $"proj-{Guid.NewGuid():N}" });
-        var projectJson = await projectResponse.Content.ReadFromJsonAsync<global::System.Text.Json.JsonElement>();
-        var projectId = projectJson.GetProperty("data").GetProperty("id").GetString()!;
-        await _fixture.Client.PostAsJsonAsync($"/api/projects/{projectId}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
+        var projectId = await CreateProjectIdAsync($"proj-{Guid.NewGuid():N}");
 
         var runnerId = $"runner-idle-api-{Guid.NewGuid():N}";
         await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new
@@ -520,10 +491,7 @@ public class RunnerStatusApiSpecs
     [Fact]
     public async Task GetRunner_BusyRunner_Returns200WithFullDetail()
     {
-        var projectResponse = await _fixture.Client.PostAsJsonAsync("/api/projects", new { name = $"proj-{Guid.NewGuid():N}" });
-        var projectJson = await projectResponse.Content.ReadFromJsonAsync<global::System.Text.Json.JsonElement>();
-        var projectId = projectJson.GetProperty("data").GetProperty("id").GetString()!;
-        await _fixture.Client.PostAsJsonAsync($"/api/projects/{projectId}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
+        var projectId = await CreateProjectIdAsync($"proj-{Guid.NewGuid():N}");
 
         var runnerId = $"runner-detail-{Guid.NewGuid():N}";
         var hash = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef";
@@ -582,10 +550,7 @@ public class RunnerStatusApiSpecs
     [Fact]
     public async Task GetRunner_IdleRunner_Returns200WithEmptyActiveWorks()
     {
-        var projectResponse = await _fixture.Client.PostAsJsonAsync("/api/projects", new { name = $"proj-{Guid.NewGuid():N}" });
-        var projectJson = await projectResponse.Content.ReadFromJsonAsync<global::System.Text.Json.JsonElement>();
-        var projectId = projectJson.GetProperty("data").GetProperty("id").GetString()!;
-        await _fixture.Client.PostAsJsonAsync($"/api/projects/{projectId}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
+        var projectId = await CreateProjectIdAsync($"proj-{Guid.NewGuid():N}");
 
         var runnerId = $"runner-idle-detail-{Guid.NewGuid():N}";
         await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new
@@ -622,10 +587,7 @@ public class RunnerStatusApiSpecs
     [Fact]
     public async Task GetRunner_UnknownRunner_Returns404WithRunnerNotFoundReason()
     {
-        var projectResponse = await _fixture.Client.PostAsJsonAsync("/api/projects", new { name = $"proj-{Guid.NewGuid():N}" });
-        var projectJson = await projectResponse.Content.ReadFromJsonAsync<global::System.Text.Json.JsonElement>();
-        var projectId = projectJson.GetProperty("data").GetProperty("id").GetString()!;
-        await _fixture.Client.PostAsJsonAsync($"/api/projects/{projectId}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
+        var projectId = await CreateProjectIdAsync($"proj-{Guid.NewGuid():N}");
 
         var unknownRunnerId = $"runner-unknown-{Guid.NewGuid():N}";
 
@@ -643,10 +605,7 @@ public class RunnerStatusApiSpecs
     [Fact]
     public async Task GetRunner_RunnerWithOtherProjectId_Returns200()
     {
-        var projectResponse = await _fixture.Client.PostAsJsonAsync("/api/projects", new { name = $"proj-{Guid.NewGuid():N}" });
-        var projectJson = await projectResponse.Content.ReadFromJsonAsync<global::System.Text.Json.JsonElement>();
-        var projectId = projectJson.GetProperty("data").GetProperty("id").GetString()!;
-        await _fixture.Client.PostAsJsonAsync($"/api/projects/{projectId}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
+        var projectId = await CreateProjectIdAsync($"proj-{Guid.NewGuid():N}");
 
         var runnerId = $"runner-foreign-{Guid.NewGuid():N}";
         await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new
@@ -677,10 +636,7 @@ public class RunnerStatusApiSpecs
     [Fact]
     public async Task GetRunner_IsReadOnly_NoDispatchHeartbeatOrUnregisterSideEffect()
     {
-        var projectResponse = await _fixture.Client.PostAsJsonAsync("/api/projects", new { name = $"proj-{Guid.NewGuid():N}" });
-        var projectJson = await projectResponse.Content.ReadFromJsonAsync<global::System.Text.Json.JsonElement>();
-        var projectId = projectJson.GetProperty("data").GetProperty("id").GetString()!;
-        await _fixture.Client.PostAsJsonAsync($"/api/projects/{projectId}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
+        var projectId = await CreateProjectIdAsync($"proj-{Guid.NewGuid():N}");
 
         var runnerId = $"runner-readonly-{Guid.NewGuid():N}";
         await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new
@@ -722,5 +678,15 @@ public class RunnerStatusApiSpecs
         {
             await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
         }
+    }
+
+    private async Task<string> CreateProjectIdAsync(string name)
+    {
+        var project = await _fixture.Client.CreateProjectWithDefaultRepositoryAsync<global::System.Text.Json.JsonElement>(
+            "/api/projects",
+            name,
+            gitUrl: $"file://{Guid.NewGuid():N}");
+        return project.GetProperty("id").GetString()
+            ?? throw new InvalidOperationException("Project response did not include an id");
     }
 }

@@ -1,5 +1,6 @@
 using System.Net.Http.Json;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 
 namespace Mohist.Server.SpecTests.Support;
 
@@ -23,6 +24,7 @@ public static class ApiTestClient
 
     public static async Task<T> PostDataAsync<T>(this HttpClient client, string path, object? body = null)
     {
+        body = CompleteProjectCreateRequest(path, body);
         using var response = body is null
             ? await client.PostAsync(path, null)
             : await client.PostAsJsonAsync(path, body, JsonOptions);
@@ -38,10 +40,7 @@ public static class ApiTestClient
     }
 
     /// <summary>
-    /// Creates a project and immediately attaches a single default repository.
-    /// Tests that need a project to be issue-startable use this helper instead
-    /// of POSTing a name-only project (which is the new contract) and then
-    /// issuing against an empty repository set.
+    /// Creates a project with its initial repository in one request.
     /// </summary>
     public static async Task<T> PostProjectWithRepositoryAsync<T>(
         this HttpClient client,
@@ -49,19 +48,43 @@ public static class ApiTestClient
         object projectBody,
         object repositoryBody)
     {
-        var project = await PostDataAsync<T>(client, projectPath, projectBody);
-        var idProperty = typeof(T).GetProperty("Id");
-        var projectId = idProperty?.GetValue(project) as string
-            ?? throw new InvalidOperationException("Project response must have an Id property");
-        await client.PostAsJsonAsync(
-            $"{projectPath}/{projectId}/repositories",
-            repositoryBody,
-            JsonOptions);
-        return project;
+        var request = JsonSerializer.SerializeToNode(projectBody, JsonOptions)?.AsObject()
+            ?? throw new InvalidOperationException("Project request must be a JSON object");
+        request["repository"] = JsonSerializer.SerializeToNode(repositoryBody, JsonOptions);
+        return await PostDataAsync<T>(client, projectPath, request);
+    }
+
+    /// <summary>
+    /// Issue-416 / T-001: POST a project with a placeholder default
+    /// repository in one request so tests do not need to construct the new
+    /// request contract inline. The repository declaration is a fixed
+    /// non-functional metadata — tests that exercise repository semantics
+    /// construct their own.
+    /// </summary>
+    public static async Task<T> CreateProjectWithDefaultRepositoryAsync<T>(
+        this HttpClient client,
+        string projectPath,
+        string projectName,
+        string? repoName = null,
+        string gitUrl = "git@example.com:test-repo.git",
+        string baseBranch = "main")
+    {
+        var body = new
+        {
+            name = projectName,
+            repository = new
+            {
+                name = repoName ?? "test-repo",
+                gitUrl,
+                baseBranch,
+            },
+        };
+        return await PostDataAsync<T>(client, projectPath, body);
     }
 
     public static async Task PostOkAsync(this HttpClient client, string path, object? body = null)
     {
+        body = CompleteProjectCreateRequest(path, body);
         using var response = body is null
             ? await client.PostAsync(path, null)
             : await client.PostAsJsonAsync(path, body, JsonOptions);
@@ -146,6 +169,28 @@ public static class ApiTestClient
             $"Response status code does not indicate success: {(int)response.StatusCode} ({response.ReasonPhrase}). Body: {body}",
             inner: null,
             response.StatusCode);
+    }
+
+    private static object? CompleteProjectCreateRequest(string path, object? body)
+    {
+        if (!string.Equals(path, "/api/projects", StringComparison.Ordinal) || body is null)
+            return body;
+
+        var request = JsonSerializer.SerializeToNode(body, JsonOptions)?.AsObject();
+        if (request is null || request.ContainsKey("repository"))
+            return body;
+
+        var name = request["name"]?.GetValue<string>();
+        if (string.IsNullOrWhiteSpace(name))
+            return body;
+
+        request["repository"] = new JsonObject
+        {
+            ["name"] = "test-repo",
+            ["gitUrl"] = "git@example.com:test-repo.git",
+            ["baseBranch"] = "main",
+        };
+        return request;
     }
 
     private sealed record ApiEnvelope<T>(bool Success, T? Data, string? Error = null, string? Code = null, object? Details = null);

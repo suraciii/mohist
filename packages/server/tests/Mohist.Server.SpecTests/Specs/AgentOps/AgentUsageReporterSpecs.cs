@@ -528,13 +528,13 @@ public class AgentUsageReporterSpecs
     private async Task<ProjectDto> CreateProjectAsync()
     {
         var name = $"cost-querier-{Guid.NewGuid():N}";
-        var project = await _fixture.Client.PostDataAsync<ProjectDto>("/api/projects", new { name });
+        var project = await _fixture.Client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", name);
         await _fixture.Client.PostOkAsync($"/api/projects/{project.Id}/repositories", new
         {
             name = "main",
             gitUrl = $"file://{Guid.NewGuid():N}",
             baseBranch = "main",
-            isDefault = true,
+            setDefault = true,
         });
         return project;
     }

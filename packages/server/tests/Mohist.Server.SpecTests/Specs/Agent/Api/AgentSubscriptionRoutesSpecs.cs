@@ -583,7 +583,7 @@ public class AgentSubscriptionRoutesSpecs
     }
 
     private async Task<ProjectDto> CreateProjectAsync(string prefix) =>
-        await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"{prefix}-{Guid.NewGuid():N}" });
+        await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", $"{prefix}-{Guid.NewGuid():N}");
 
     private async Task<AgentDto> CreateAgentAsync(string projectId, string name)
     {

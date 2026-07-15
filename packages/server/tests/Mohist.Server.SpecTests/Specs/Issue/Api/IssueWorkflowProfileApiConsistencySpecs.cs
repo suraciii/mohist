@@ -963,7 +963,7 @@ public class IssueWorkflowProfileApiConsistencySpecs : IAsyncLifetime
                 name = "main",
                 gitUrl = $"file://{Guid.NewGuid():N}",
                 baseBranch = "main",
-                isDefault = true,
+                setDefault = true,
             });
         return project;
     }
