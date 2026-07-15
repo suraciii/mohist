@@ -10,6 +10,8 @@ Every event family SHALL stamp its full business lineage into CloudEvents envelo
 - `runner.*` events SHALL carry `runnerid`; they SHALL carry `projectid` when present.
 - The inbox-synthesized event (`com.mohist.inbox.item-persisted`) SHALL lift `issue` and `issueid` already present in its hint payload onto extensions, alongside `projectid`.
 
+`projectid` is required producer identity for workflow and agent-session events. A producer without that identity SHALL reject the append rather than persist an envelope that violates the matrix. Other conditional affiliation attributes are omitted when absent.
+
 #### Scenario: Workflow run events carry run identity and issue lineage
 
 - **WHEN** a `workflow.run.*` event is produced for a run whose metadata annotations carry a project id, issue id, and issue number
@@ -58,7 +60,7 @@ When a lineage affiliation does not exist at emit time, the corresponding extens
 
 ### Requirement: Lineage is a production-time snapshot
 
-Lineage attributes SHALL record affiliation as it exists at the instant the event is produced. Later relationship changes (an issue moving to a different epic, a workflow run's issue annotation changing) SHALL NOT rewrite the attributes already stamped on historical events. No backfill of historical events SHALL occur.
+Lineage attributes SHALL record the affiliation revision already applied by the producing aggregate at the instant the event is produced. Cross-aggregate membership propagation is causal: an Epic change reaches Issue and WorkflowRun through durable reactions and does not atomically change their state. Later relationship changes (an issue moving to a different epic, a workflow run's issue annotation changing) SHALL NOT rewrite the attributes already stamped on historical events. No backfill of historical events SHALL occur.
 
 #### Scenario: Moving an issue to another epic does not change past events
 

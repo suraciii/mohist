@@ -49,6 +49,10 @@ describe("isTerminalWorkflowStatus", () => {
     expect(isTerminalWorkflowStatus("Created")).toBe(false)
   })
 
+  it("ReturnsFalseForAwaitingBinding", () => {
+    expect(isTerminalWorkflowStatus("AwaitingBinding")).toBe(false)
+  })
+
   it("ReturnsFalseForReady", () => {
     // New vocabulary value from the D1 state machine: assigned, waiting
     // for the bound runner to pick up work. Must be non-terminal — the

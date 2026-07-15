@@ -373,6 +373,73 @@ public class EpicBatchMembershipSpecs
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Theory]
+    [InlineData(1, true)]
+    [InlineData(2, true)]
+    [InlineData(3, false)]
+    [InlineData(4, false)]
+    public async Task LinkIssuesAsync_RetriesConcurrencyFailuresWithinThreeTotalAttempts(int conflicts, bool succeeds)
+    {
+        var database = CreateDatabase();
+        await SeedEpicAsync(database, status: EpicStatusName.Done);
+        await SeedIssueAsync(database, issueId: "issue_terminal", issueNumber: 1, status: IssueStatus.Done);
+        var interceptor = new FailConcurrencyAttemptsInterceptor(conflicts);
+        var grain = CreateGrain(database.CreateFactory(interceptor), $"{ProjectId}:epic_1");
+
+        if (succeeds)
+        {
+            var outcome = Assert.Single(await grain.LinkIssuesAsync(
+                [new BatchMembershipRequestItem("1", "issue_terminal", 1)], ProjectId));
+            Assert.Equal("linked", outcome.Status);
+        }
+        else
+        {
+            await Assert.ThrowsAsync<DbUpdateConcurrencyException>(() => grain.LinkIssuesAsync(
+                [new BatchMembershipRequestItem("1", "issue_terminal", 1)], ProjectId));
+        }
+
+        Assert.Equal(succeeds ? conflicts + 1 : 3, interceptor.SaveAttempts);
+        await using var verify = database.CreateDbContext();
+        Assert.Equal(succeeds, await verify.EpicIssues.AnyAsync(link =>
+            link.ProjectId == ProjectId && link.EpicId == "epic_1" && link.IssueId == "issue_terminal"));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Theory]
+    [InlineData(1, true)]
+    [InlineData(2, true)]
+    [InlineData(3, false)]
+    [InlineData(4, false)]
+    public async Task UnlinkIssuesAsync_RetriesConcurrencyFailuresWithinThreeTotalAttempts(int conflicts, bool succeeds)
+    {
+        var database = CreateDatabase();
+        await SeedEpicAsync(database, status: EpicStatusName.Done);
+        await SeedIssueAsync(database, issueId: "issue_terminal", issueNumber: 1, status: IssueStatus.Done);
+        await SeedLinkAsync(database, "issue_terminal", 1);
+        var interceptor = new FailConcurrencyAttemptsInterceptor(conflicts);
+        var grain = CreateGrain(database.CreateFactory(interceptor), $"{ProjectId}:epic_1");
+
+        if (succeeds)
+        {
+            var outcome = Assert.Single(await grain.UnlinkIssuesAsync(
+                [new BatchMembershipRequestItem("1", "issue_terminal", 1)], ProjectId));
+            Assert.Equal("unlinked", outcome.Status);
+        }
+        else
+        {
+            await Assert.ThrowsAsync<DbUpdateConcurrencyException>(() => grain.UnlinkIssuesAsync(
+                [new BatchMembershipRequestItem("1", "issue_terminal", 1)], ProjectId));
+        }
+
+        Assert.Equal(succeeds ? conflicts + 1 : 3, interceptor.SaveAttempts);
+        await using var verify = database.CreateDbContext();
+        Assert.Equal(!succeeds, await verify.EpicIssues.AnyAsync(link =>
+            link.ProjectId == ProjectId && link.EpicId == "epic_1" && link.IssueId == "issue_terminal"));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task LinkIssuesAsync_DoneEpic_BatchWithOpenIssue_WakesToRunning_Atomically()
     {
@@ -721,6 +788,19 @@ public class EpicBatchMembershipSpecs
         await db.SaveChangesAsync();
     }
 
+    private static async Task SeedLinkAsync(TestDatabase database, string issueId, int issueNumber)
+    {
+        await using var db = database.CreateDbContext();
+        db.EpicIssues.Add(new EpicIssueRow
+        {
+            ProjectId = ProjectId,
+            EpicId = "epic_1",
+            IssueId = issueId,
+            IssueNumber = issueNumber,
+        });
+        await db.SaveChangesAsync();
+    }
+
     private static TestDatabase CreateDatabase()
     {
         var connection = new SqliteConnection("Data Source=:memory:");
@@ -814,6 +894,24 @@ public class EpicBatchMembershipSpecs
             parameter.ParameterName = name;
             parameter.Value = value;
             command.Parameters.Add(parameter);
+        }
+    }
+
+    private sealed class FailConcurrencyAttemptsInterceptor(int failures) : SaveChangesInterceptor
+    {
+        private int _remaining = failures;
+
+        public int SaveAttempts { get; private set; }
+
+        public override ValueTask<InterceptionResult<int>> SavingChangesAsync(
+            DbContextEventData eventData,
+            InterceptionResult<int> result,
+            CancellationToken cancellationToken = default)
+        {
+            SaveAttempts++;
+            if (_remaining-- > 0)
+                throw new DbUpdateConcurrencyException("simulated batch membership conflict");
+            return ValueTask.FromResult(result);
         }
     }
 

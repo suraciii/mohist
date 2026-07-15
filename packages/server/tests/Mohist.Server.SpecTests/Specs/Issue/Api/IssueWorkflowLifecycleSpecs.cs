@@ -75,6 +75,49 @@ public class IssueWorkflowLifecycleSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
+    public async Task CancelAsync_WhenWorkflowBindingIsPending_RejectsWithoutStrandingTheRun()
+    {
+        var (_, _, _, issueId, workflowRunId) = await SeedIssueInProgressAsync();
+        await ResetBindingToPreparedAsync(issueId, workflowRunId);
+
+        var issue = _grains.GetGrain<IIssueGrain>(issueId);
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => issue.CancelAsync());
+
+        Assert.Contains("awaiting-binding", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.True((await LoadIssueBindingStateAsync(issueId)).Pending);
+        Assert.Equal(WorkflowRunStatus.AwaitingBinding, (await LoadWorkflowRunAsync(workflowRunId))!.Status);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task CancelAsync_AfterProtectedBindingCanBeStoppedCancelledReopenedAndRestarted()
+    {
+        var (projectId, _, issueNumber, issueId, originalWorkflowRunId) = await SeedIssueInProgressAsync();
+        await ResetBindingToPreparedAsync(issueId, originalWorkflowRunId);
+
+        var issue = _grains.GetGrain<IIssueGrain>(issueId);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => issue.CancelAsync());
+
+        await issue.EnsureWorkflowBindingAsync(originalWorkflowRunId);
+        await _grains.GetGrain<IWorkflowGrain>(originalWorkflowRunId).StopAsync("user-stopped");
+        await issue.CancelAsync();
+        await issue.ReopenAsync();
+
+        var replacementWorkflowRunId = await issue.StartWorkAsync();
+
+        Assert.NotEqual(originalWorkflowRunId, replacementWorkflowRunId);
+        var restarted = await GetIssueInfoAsync(projectId, issueNumber);
+        Assert.NotNull(restarted);
+        Assert.Equal("in_progress", restarted!.Status);
+        Assert.Equal(replacementWorkflowRunId, restarted.WorkflowRunId);
+        Assert.False((await LoadIssueBindingStateAsync(issueId)).Pending);
+        Assert.Equal(WorkflowRunStatus.Pending, (await LoadWorkflowRunAsync(replacementWorkflowRunId))!.Status);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
     public async Task CancelAsync_WhenWorkflowStopped_IssueTransitionsToCancelled()
     {
         var (projectId, _, issueNumber, issueId, wrId) = await SeedIssueInProgressAsync();

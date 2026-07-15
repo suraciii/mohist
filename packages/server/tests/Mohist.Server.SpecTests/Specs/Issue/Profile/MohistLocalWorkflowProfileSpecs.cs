@@ -105,6 +105,29 @@ public class MohistLocalWorkflowProfileSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
+    public void AwaitingBindingWorkflow_ProjectsStartingHealth()
+    {
+        var workflow = new WorkflowStatusView(
+            WorkflowRunId: "wr-binding",
+            Status: "awaiting-binding",
+            CurrentStage: null,
+            Stages: [],
+            PendingWork: null,
+            Failure: null,
+            AvailableActions: []);
+
+        var state = MohistDefaultWorkflowProjection.ProjectWorkflowState(
+            1,
+            "Binding issue",
+            IssueStatus.InProgress,
+            workflow);
+
+        Assert.Equal("starting", state.Health);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
     public void DefaultWorkflowDefinition_LoadsFromYaml()
     {
         var definition = MohistWorkflow.Definition;

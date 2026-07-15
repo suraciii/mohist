@@ -176,6 +176,20 @@ describe("ConvergenceBackstop", () => {
     expect(registry.get("wr-created")?.terminalAt).toBeNull()
   })
 
+  it("RunOnce_OnAwaitingBindingStatus_LeavesEntryActive", async () => {
+    const registry = await makeRegistry()
+    await registry.register({ issueId: "i1", issueNumber: 1, workflowRunId: "wr-awaiting-binding", workspacePath: join(root, "w1") })
+
+    const stub = new StubRunner([{ "wr-awaiting-binding": "AwaitingBinding" }])
+    const backstop = new ConvergenceBackstop(registry, stub)
+
+    const result = await backstop.runOnce(new AbortController().signal)
+
+    expect(result).toEqual({ queried: 1, transitioned: 0, dropped: 0 })
+    expect(registry.get("wr-awaiting-binding")?.phase).toBe("active")
+    expect(registry.get("wr-awaiting-binding")?.terminalAt).toBeNull()
+  })
+
   it("RunOnce_OnPendingStatus_LeavesEntryActive (D1 pending — waiting for claim)", async () => {
     const registry = await makeRegistry()
     await registry.register({ issueId: "i1", issueNumber: 1, workflowRunId: "wr-pending", workspacePath: join(root, "w1") })

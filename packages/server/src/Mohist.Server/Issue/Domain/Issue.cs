@@ -108,6 +108,11 @@ public sealed partial class Issue
         init => _epicId = NormalizeOptional(value);
     }
 
+    /// <summary>
+    /// Monotonic revision of the Issue's persisted producer snapshot. It
+    /// advances on every Issue save; WorkflowRun receives selected revisions
+    /// only to order applied Issue lineage updates.
+    /// </summary>
     [JsonIgnore]
     public long LineageVersion { get; private set; } = 1;
 

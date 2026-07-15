@@ -95,6 +95,7 @@ public static class MohistDefaultWorkflowProjection
         if (attention is not null) return "attention";
         return workflowStatus switch
         {
+            "awaiting-binding" => "starting",
             "running" when assignedBy is null => "queued",
             "paused" => "paused",
             "failed" => "blocked",

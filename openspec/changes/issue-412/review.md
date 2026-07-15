@@ -2,7 +2,7 @@
 
 ## Result: FAIL
 
-Reviewed the live issue, proposal, design, tasks, all candidate changes through `b1d39842a`, and adjacent membership, recovery, query, retry, and artifact paths. The latest candidate fixes the repeated stopped-run activation and adds happy-path terminal/reopen snapshot tests. It still commits active-membership changes before producer snapshots, so event-time lineage can be permanently stale; its bounded discovery can also permanently starve valid gated starts.
+Reviewed the live issue, proposal, design, tasks, all candidate changes through `fe33e8de6`, the new aggregate-coordination design, durable event handlers, and the affected server, runner, and web paths. The candidate correctly removes Epic transactions that write Issue/WorkflowRun state and makes the binding process recoverable. It nevertheless changes the issue's event-time affiliation contract to eventual propagation, and cancellation can strand an `AwaitingBinding` workflow permanently.
 
 ## Repaired Items
 
@@ -12,66 +12,83 @@ Reviewed the live issue, proposal, design, tasks, all candidate changes through 
 
 - [ID: item-1]
   Severity: blocking
-  Scope: terminal/reopen epic lineage transaction boundary
-  Evidence: Terminal paths save the changed epic status and removed active memberships before restaging Issue/Workflow snapshots (`EpicGrain.cs:714-724`, `:868-873`, `:983-987`); reopen likewise saves reclaimed active memberships before restaging (`EpicGrain.cs:770-774`). Each `SaveChangesAsync` commits its own transaction. Between those writes, an Issue or workflow append reads the prior scalar and persists a historical envelope with the wrong `epicid`; that event cannot be repaired later. If the restage write fails, the membership/status is already committed, the terminal command cannot be replayed from its new state, and the terminal event append has not yet occurred to drive recovery. The added tests assert only final scalar values after successful sequential writes (`EpicMembershipSpecs.cs:490-507`; `EpicReopenSpecs.cs:246-272`). [disallowed:atomic producer-snapshot data safety]
-  SuggestedAction: Use one explicit transaction for membership/status, resolver-visible snapshot restaging, and the corresponding durable epic events. Do not expose the new membership truth before its producer snapshots commit.
-  Verification: Barrier-test Issue and workflow appends between membership mutation and snapshot staging, and inject a snapshot-stage failure in done, closed, auto-done, and reopen paths. Assert no stale envelope can persist and each transition is retryable or rolls back entirely.
+  Scope: acceptance criterion for affiliation at event time
+  Evidence: The issue requires lineage to record the affiliation when an event occurs. The candidate explicitly replaces that with causal, eventually consistent producer snapshots (`design.md:46-55`; `specs/event-lineage-stamping/spec.md:68-80`). Epic membership commits first, then only best-effort/direct and durable handler commands update Issue and WorkflowRun (`EpicGrain.cs:152-168`; `EpicAutoDoneHandler.cs:517-583`). In the interval, `IssueStore` and `WorkflowRunStore` stamp their still-local prior `EpicId` (`IssueStore.cs:58-75`; `WorkflowRunStore.cs:52-71`). Thus an Issue/workflow event produced after a committed link, unlink, terminalization, or reopen can permanently carry the old or absent `epicid`, contrary to the current issue's stated event-time affiliation rule. [disallowed:product behavior and consistency contract]
+  SuggestedAction: Obtain explicit product acceptance for causal lineage semantics and update the live issue acceptance criteria, or provide a design that meets the current event-time criterion without violating aggregate boundaries.
+  Verification: Commit an Epic affiliation change, deliberately hold its Issue propagation, emit an Issue/workflow event, and assert the expected `epicid` under the accepted contract.
   Status: unresolved
 
 - [ID: item-2]
-  Severity: warning
-  Scope: bounded gated-start discovery
-  Evidence: `FindGatedStartsAsync` always reads only the first `limit * 4` IDs sorted lexically (`WorkflowRunQuerier.cs:94-129`). Corrupt, ungated, or structurally invalid `Created` rows in that fixed prefix are skipped, but the next poll begins from the same prefix. Sixteen skipped rows therefore permanently hide a valid gated start after them; it will never reach `DispatchService` activation (`DispatchService.cs:96-109`).
-  SuggestedAction: Use a durable/rotating scan cursor, or persist/query the dispatch gate so the database can select actual candidates without a fixed rejected prefix.
-  Verification: Seed more than sixteen corrupt or non-gated `Created` rows followed by a valid gated run, poll repeatedly, and assert the valid run is eventually recovered.
+  Severity: blocking
+  Scope: cancellation during durable workflow binding
+  Evidence: `CancelAsync` rejects created/pending/ready/running/paused/approval workflows but omits `awaiting-binding` (`IssueGrain.cs:430-451`). `Close` then clears `WorkflowBindingPending` (`Issue.Transitions.cs:233-243`). The durable `IssueWorkStarted` reaction subsequently exits without creating or confirming the pending binding (`IssueGrain.cs:279-288`), leaving the prepared run non-terminal. After reopening, `StartWorkAsync` treats that run as reusable because it is not terminal and the pending marker is false (`IssueGrain.cs:320-359`), so the issue remains backlog while work never starts.
+  SuggestedAction: Reject cancellation while binding is pending, or stop/resolve the prepared run before clearing the marker and make the subsequent reopen/start path create a fresh binding.
+  Verification: Interrupt binding after Issue commit, cancel, redeliver `IssueWorkStarted`, reopen, and start again. Assert no awaiting-binding orphan remains and the resulting Issue/workflow pair reaches `InProgress`/`Pending` exactly once.
   Status: unresolved
 
 - [ID: item-3]
-  Severity: test-gap
-  Scope: guarded-start and terminal lineage recovery protocols
-  Evidence: The new tests cover only final scalar snapshots for close/reopen. No test covers `FindGatedStartsAsync`, poll batch ordering, malformed-prefix starvation, bound-start concurrency retry, unbound compensation across restart, or fault/interleaving boundaries around the new two-phase terminal writes. The new paths therefore have no regression coverage for their failure semantics.
-  SuggestedAction: Add focused querier, dispatcher, grain, and integration specs for these durable boundaries and failure modes.
-  Verification: Assert bounded recovery progression, no pre-bind dispatch, correct post-link envelope lineage, and atomic terminal/reopen outcomes under injected save failures.
-  Status: open
+  Severity: warning
+  Scope: user-visible awaiting-binding status
+  Evidence: The new workflow state maps to `awaiting-binding` (`WorkflowStatusMapper.cs:10-16`), but the Issue projection falls through to `active` (`MohistDefaultWorkflowProjection.cs:90-102`) and the runtime decision surface renders that as `Workflow running` (`derive-runtime-decision.ts:124-136`; `runtime-presentations.ts:200-212`). `WorkflowRunStatusPill` renders `Starting`, but it is not used by the production issue workflow surface. Users are told work is executing while the run is deliberately non-assignable.
+  SuggestedAction: Add an explicit starting/binding runtime projection and render it in the Issue decision surface, with no execution-only actions.
+  Verification: Load an Issue whose workflow is `awaiting-binding` in the full detail view and assert a starting/waiting state rather than running/executing text.
+  Status: unresolved
 
 - [ID: item-4]
+  Severity: warning
+  Scope: specification and producer validation consistency
+  Evidence: The proposal and D6 say lineage is printed when present and absent labels are omitted (`proposal.md:7-13`; `design.md:60-61`), while workflow and session producers throw when `projectId` is absent (`WorkflowRunLineage.cs:55-88`; `AgentSessionLineage.cs:98-108`). The event-lineage spec treats conditional affiliations as omittable but does not state this mandatory-project rejection behavior. The documented contract and runtime behavior disagree.
+  SuggestedAction: State that `projectid` is mandatory and producer events without it are rejected, or relax the producers and catalog consistently.
+  Verification: Add producer specs for missing project annotations/labels that assert the selected contract.
+  Status: unresolved
+
+- [ID: item-5]
+  Severity: test-gap
+  Scope: durable Issue-to-Workflow binding and lineage propagation
+  Evidence: Binding integration specs directly invoke `EnsureWorkflowBindingAsync` (`IssueWorkflowLifecycleSpecs.cs:238-290`), while the subscription test only records a command invocation (`IssueWorkflowCompletionHandlerSpecs.cs:403-439`). There is no dispatcher-driven test for crashes between Issue prepare/confirm/marker-clear, cancellation while binding, or reopen after a failed binding. `ApplyIssueLineageAsync` has no duplicate, stale, or equal-revision conflict coverage despite implementing that protocol (`WorkflowGrain.cs:154-170`).
+  SuggestedAction: Add end-to-end dispatcher/redelivery specs for each binding boundary and revision ordering case.
+  Verification: Exercise duplicate, delayed, stale, and conflicting affiliation deliveries, asserting the workflow snapshot never regresses and the binding marker eventually converges.
+  Status: open
+
+- [ID: item-6]
+  Severity: test-gap
+  Scope: runner handling of `AwaitingBinding`
+  Evidence: The runner wire union includes `AwaitingBinding` (`workflow-terminal-status.ts:36-46`), but its terminal-status tests omit it (`workflow-terminal-status.spec.ts:14-89`), as do SignalR push and cleanup-convergence scenarios. The default currently treats unknown/nonterminal states conservatively, but the new server status has no explicit cross-plane regression coverage.
+  SuggestedAction: Add terminal-predicate, server-push, and cleanup convergence cases for `AwaitingBinding`.
+  Verification: Assert it preserves workspace ownership, never marks cleanup eligible, and transitions correctly after later `Pending`, `Stopped`, and `Completed` statuses.
+  Status: open
+
+- [ID: item-7]
   Severity: test-gap
   Scope: bounded batch affiliation persistence retries
-  Evidence: The candidate still lacks a spec that injects the changed `DbUpdateConcurrencyException` path for batch workflow snapshot persistence. Existing batch failure coverage uses generic active-membership failures, so it does not prove the three-total-attempt contract.
-  SuggestedAction: Add link and unlink specs for one through four workflow snapshot concurrency conflicts while preserving committed membership outcomes.
-  Verification: Assert success on every permitted retry and deterministic failure after the third total persistence attempt.
+  Evidence: The candidate still lacks a spec that injects the changed `DbUpdateConcurrencyException` path for batch membership persistence. Existing coverage uses generic active-membership failures, so it does not prove the three-total-attempt contract.
+  SuggestedAction: Add link and unlink specs for one through four concurrency failures while preserving committed membership outcomes.
+  Verification: Assert success through attempt three and deterministic failure on attempt four.
   Status: open
 
 ## Follow-up Items
 
-- [ID: item-5]
+- [ID: item-8]
   Severity: follow-up
-  Scope: recovery activation ownership
-  Evidence: `WorkflowGrain.OnActivateAsync` independently activates any `Created` gated run (`WorkflowGrain.cs:75-87`), so API/control reads can recover starts outside `DispatchService`'s four-per-poll budget and its redelivery-first ordering.
-  SuggestedAction: Decide whether recovery belongs exclusively to scheduled dispatch reconciliation; if so, make grain activation load-only and centralize recovery admission.
+  Scope: Issue lineage revision scope
+  Evidence: `IssueStore` increments `LineageVersion` for every Issue save (`IssueStore.cs:92-114`), but WorkflowRun receives it only on binding and affiliation propagation. The revision name suggests a lineage-only ordering contract while the implementation uses a broader aggregate revision.
+  SuggestedAction: Either rename/document it as the Issue state revision or isolate a lineage-specific revision to reduce protocol ambiguity.
   Status: follow-up
 
 ## Pre-existing or Out-of-scope Items
 
-- [ID: item-6]
+- [ID: item-9]
   Severity: warning
   Scope: rehomed retained links in epic progression
-  Evidence: Reopen deliberately retains a link that another active epic owns (`EpicReopenSpecs.cs:194-245`), but later `TryStartNextAsync` evaluates every retained `EpicIssues` row without filtering active ownership (`EpicGrain.cs:898-927`). Starting the reopened epic can therefore call `StartWorkAsync` for an issue owned by another epic. This predates the lineage snapshot change, but route lineage makes the ambiguity visible.
+  Evidence: Reopen retains a link that another active epic owns, while later progress selection evaluates retained membership without filtering active ownership. A restarted epic can attempt to start an Issue owned by another epic. This predates the lineage propagation redesign.
   SuggestedAction: Track a separate epic-progression change to restrict execution candidates to active ownership or reclassify retained historical links.
-  Status: pre-existing
-
-- [ID: item-7]
-  Severity: warning
-  Scope: `EpicGrain` post-commit event persistence
-  Evidence: Existing close, reopen, and auto-done paths save authoritative state before the exception-swallowing post-commit append (`EpicGrain.cs:718-724`, `:770-775`, `:870-874`, `:1194-1228`). A failure can leave a transition without its durable epic audit event. This candidate retains rather than introduces that behavior.
-  SuggestedAction: Track transactional event persistence for the remaining epic mutation paths separately.
   Status: pre-existing
 
 ## Verification
 
-- `npm test` passed: 865 CLI, 1,408 server unit, 2,790 server spec, 22 architecture, 4,653 web, and 1,014 runner tests.
+- `npm test` passed: 865 CLI, 1,411 server unit, 2,802 server spec, 22 architecture, 4,654 web, and 1,014 runner tests.
 - `npm run typecheck -w packages/web` passed.
-- `npm run test:run -w packages/web` passed: 333 files and 4,653 tests.
+- `npm run test:run -w packages/web` passed: 333 files and 4,654 tests.
 - `git diff --check master...HEAD` passed.
 
 <promise>FAIL</promise>

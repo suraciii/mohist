@@ -113,6 +113,10 @@ function determineSummary(input: RuntimeDecisionInput): RuntimeSummary {
     || input.hasActiveAgent === false
   const isBacklog = issue.status === 'backlog'
 
+  if (status === 'starting') {
+    return 'queued'
+  }
+
   if (waitReason && (hasExplicitQueueSignal || isBacklog)) {
     return 'queued'
   }

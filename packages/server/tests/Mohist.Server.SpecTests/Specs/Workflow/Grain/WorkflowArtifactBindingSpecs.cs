@@ -70,6 +70,29 @@ public class WorkflowArtifactBindingSpecs : WorkflowGrainSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
+    public async Task ApplyIssueLineageAsync_IgnoresStaleAndDuplicateRevisions_AndRejectsConflicts()
+    {
+        await StartWorkflowAsync(SingleStage(tasks: [new TaskDefinition("task-1", "Task 1", "spec/task")], checks: []));
+        var (work, _) = await PollWorkAnyAsync();
+        var workflow = Grains.GetGrain<IWorkflowGrain>(work.WorkflowRunId);
+        var issueId = TestIssueId(work.WorkflowRunId);
+
+        await workflow.ApplyIssueLineageAsync(new WorkflowIssueLineage(issueId, "epic_current", 2));
+        await workflow.ApplyIssueLineageAsync(new WorkflowIssueLineage(issueId, "epic_stale", 1));
+        await workflow.ApplyIssueLineageAsync(new WorkflowIssueLineage(issueId, "epic_current", 2));
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            workflow.ApplyIssueLineageAsync(new WorkflowIssueLineage(issueId, "epic_conflict", 2)));
+
+        await workflow.PauseAsync("lineage assertion");
+
+        var paused = Assert.Single((await EventStore.ListAsync(work.WorkflowRunId)), entry =>
+            entry.Envelope.Type == EventCatalog.ReverseDns.WorkflowRunPaused);
+        Assert.Equal("epic_current", paused.Envelope.Extensions[EventCatalog.Lineage.EpicId]);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
     public async Task CompletedTask_MissingDeclaredArtifact_CompletesWithBestEffort()
     {
         var definition = SingleStage(
