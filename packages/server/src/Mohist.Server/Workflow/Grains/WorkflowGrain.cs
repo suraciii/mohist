@@ -96,6 +96,7 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
 
     public async Task StartAsync(WorkflowStartInput? input = null)
     {
+        var isInitialStart = _run is null;
         if (_run is null)
         {
             var metadata = input?.Metadata ?? BuildRunMetadata(input);
@@ -110,7 +111,17 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
         var events = _run.Start(Now());
 
         _log.LogInformation("Workflow {Id} started, stage={Stage}", GrainKey, _run.CurrentStageId);
-        await CommitAsync(events);
+        try
+        {
+            await CommitAsync(events, lineageGuard: isInitialStart ? input?.LineageGuard : null);
+        }
+        catch (WorkflowStartLineageChangedException) when (isInitialStart)
+        {
+            _run = null;
+            _runDirty = false;
+            _runReloadRequired = false;
+            throw;
+        }
     }
 
     public async Task ResumeAsync()
@@ -448,13 +459,17 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
             throw new InvalidOperationException($"Workflow '{GrainKey}' must reload after a failed event-aware save");
     }
 
-    private async Task CommitAsync(IReadOnlyList<WorkflowEvent> events, string? reason = null, CancellationToken ct = default)
+    private async Task CommitAsync(
+        IReadOnlyList<WorkflowEvent> events,
+        string? reason = null,
+        CancellationToken ct = default,
+        WorkflowStartLineageGuard? lineageGuard = null)
     {
         if (_run is not null)
         {
             var resolved = await _stageInitializer.InitializeFreshStagesAsync(events);
             _runDirty = true;
-            await SaveRunAsync(resolved);
+            await SaveRunAsync(resolved, lineageGuard);
             events = resolved;
         }
 
@@ -540,14 +555,22 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
         }
     }
 
-    private async Task SaveRunAsync(IReadOnlyList<WorkflowEvent> events)
+    private async Task SaveRunAsync(IReadOnlyList<WorkflowEvent> events, WorkflowStartLineageGuard? lineageGuard = null)
     {
         if (_run is null) return;
 
         try
         {
-            await _runStore.SaveAsync(_run, events);
+            if (lineageGuard is null)
+                await _runStore.SaveAsync(_run, events);
+            else
+                await _runStore.SaveInitialAsync(_run, events, lineageGuard);
             _runDirty = false;
+        }
+        catch (WorkflowStartLineageChangedException)
+        {
+            _runDirty = false;
+            throw;
         }
         catch (DbUpdateConcurrencyException ex)
         {

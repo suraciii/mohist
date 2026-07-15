@@ -15,6 +15,8 @@ public interface IWorkflowRunStore
 {
     Task SaveAsync(WorkflowRun run, CancellationToken ct = default);
     Task SaveAsync(WorkflowRun run, IReadOnlyList<WorkflowEvent> events, CancellationToken ct = default);
+    Task SaveInitialAsync(WorkflowRun run, IReadOnlyList<WorkflowEvent> events, WorkflowStartLineageGuard guard, CancellationToken ct = default) =>
+        SaveAsync(run, events, ct);
     Task<WorkflowRun?> LoadAsync(string workflowRunId, CancellationToken ct = default);
     Task SynchronizeEpicAffiliationAsync(string workflowRunId, string issueId, CancellationToken ct = default);
 }
@@ -47,7 +49,21 @@ public class WorkflowRunStore : IWorkflowRunStore
         await db.SaveChangesAsync(ct);
     }
 
-    public async Task SaveAsync(WorkflowRun run, IReadOnlyList<WorkflowEvent> events, CancellationToken ct = default)
+    public async Task SaveAsync(WorkflowRun run, IReadOnlyList<WorkflowEvent> events, CancellationToken ct = default) =>
+        await SaveEventsAsync(run, events, guard: null, ct);
+
+    public async Task SaveInitialAsync(
+        WorkflowRun run,
+        IReadOnlyList<WorkflowEvent> events,
+        WorkflowStartLineageGuard guard,
+        CancellationToken ct = default) =>
+        await SaveEventsAsync(run, events, guard, ct);
+
+    private async Task SaveEventsAsync(
+        WorkflowRun run,
+        IReadOnlyList<WorkflowEvent> events,
+        WorkflowStartLineageGuard? guard,
+        CancellationToken ct)
     {
         var source = WorkflowEventSource(run.Id);
 
@@ -55,6 +71,8 @@ public class WorkflowRunStore : IWorkflowRunStore
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
         try
         {
+            if (guard is not null)
+                await ValidateInitialLineageAsync(db, guard, ct);
             await StageRunAsync(db, run, ct);
             foreach (var evt in events)
             {
@@ -71,6 +89,20 @@ public class WorkflowRunStore : IWorkflowRunStore
         }
 
         PokeDispatcherBestEffort();
+    }
+
+    private static async Task ValidateInitialLineageAsync(
+        MohistDbContext db,
+        WorkflowStartLineageGuard guard,
+        CancellationToken ct)
+    {
+        var locked = await db.Issues
+            .Where(issue => issue.IssueId == guard.IssueId
+                && issue.LineageVersion == guard.IssueLineageVersion)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(issue => issue.LineageVersion, issue => issue.LineageVersion), ct);
+        if (locked != 1)
+            throw new WorkflowStartLineageChangedException(guard.IssueId);
     }
 
     private void PokeDispatcherBestEffort() =>

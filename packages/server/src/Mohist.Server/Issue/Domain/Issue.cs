@@ -105,6 +105,16 @@ public sealed partial class Issue
         init => _epicId = NormalizeOptional(value);
     }
 
+    [JsonIgnore]
+    public long LineageVersion { get; private set; } = 1;
+
+    public void SetLineageVersion(long lineageVersion)
+    {
+        if (lineageVersion < 1)
+            throw new ArgumentOutOfRangeException(nameof(lineageVersion));
+        LineageVersion = lineageVersion;
+    }
+
     public IssueStatus Status
     {
         get => _status;

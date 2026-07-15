@@ -7,6 +7,7 @@ using Mohist.Server.Events.Grains;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Events;
+using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Workflow.Domain;
@@ -91,6 +92,49 @@ public class WorkflowRunStoreSpecs
         // carries its run id on extensions.
         Assert.True(envelope.Extensions.TryGetValue("workflowrunid", out var stampedRunId));
         Assert.Equal(WorkflowRunId, stampedRunId);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public async Task SaveInitialAsync_RejectsStaleIssueLineageThenStampsTheReloadedEpicSnapshot()
+    {
+        using var factory = new FakeWorkflowRunStoreDbContextFactory();
+        var eventStore = new EventStore(factory, NullLogger<EventStore>.Instance);
+        var store = new WorkflowRunStore(factory, eventStore, new NullDispatchGrainFactory(), NullLogger<WorkflowRunStore>.Instance);
+
+        await using (var seed = factory.CreateDbContext())
+        {
+            seed.Issues.Add(new IssueRow
+            {
+                IssueId = IssueId,
+                State = "{}",
+                LineageVersion = 1,
+            });
+            await seed.SaveChangesAsync();
+        }
+
+        var staleRun = CreateRun("wr_initial_stale", epicId: null);
+        var staleGuard = new WorkflowStartLineageGuard(IssueId, 1);
+
+        await using (var link = factory.CreateDbContext())
+        {
+            await IssueStore.StageEpicAffiliationAsync(link, IssueId, "epic_committed");
+            await link.SaveChangesAsync();
+        }
+
+        await Assert.ThrowsAsync<WorkflowStartLineageChangedException>(
+            () => store.SaveInitialAsync(staleRun, [new WorkflowRunStarted()], staleGuard));
+        Assert.Empty(await eventStore.ListAsync(staleRun.Id));
+
+        var reloadedRun = CreateRun("wr_initial_reloaded", epicId: "epic_committed");
+        await store.SaveInitialAsync(
+            reloadedRun,
+            [new WorkflowRunStarted()],
+            new WorkflowStartLineageGuard(IssueId, 2));
+
+        var started = Assert.Single(await eventStore.ListAsync(reloadedRun.Id));
+        Assert.Equal("epic_committed", started.Envelope.Extensions[EventCatalog.Lineage.EpicId]);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]
@@ -451,6 +495,25 @@ public class WorkflowRunStoreSpecs
                 task!.AsObject().Remove("recoveryRemaining");
         }
         return root.ToJsonString();
+    }
+
+    private static WorkflowRun CreateRun(string workflowRunId, string? epicId)
+    {
+        var annotations = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["projectId"] = ProjectId,
+            ["issueId"] = IssueId,
+            ["issueNumber"] = "1",
+        };
+        if (epicId is not null)
+            annotations["epicId"] = epicId;
+
+        return new WorkflowRun
+        {
+            Id = workflowRunId,
+            Metadata = new WorkflowRunMetadata(null, FixedTime, Annotations: annotations),
+            Stages = [],
+        };
     }
 
     /// <summary>

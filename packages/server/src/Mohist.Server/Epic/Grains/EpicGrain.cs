@@ -197,7 +197,7 @@ public class EpicGrain : Grain, IEpicGrain
     public Task<IReadOnlyList<BatchMembershipOutcome>> LinkIssuesAsync(
         IReadOnlyList<BatchMembershipRequestItem> issues,
         string projectId) =>
-        LinkIssuesAsync(issues, projectId, retryBudget: 3);
+        LinkIssuesAsync(issues, projectId, retryBudget: 2);
 
     private async Task<IReadOnlyList<BatchMembershipOutcome>> LinkIssuesAsync(
         IReadOnlyList<BatchMembershipRequestItem> issues,
@@ -475,7 +475,7 @@ public class EpicGrain : Grain, IEpicGrain
     public Task<IReadOnlyList<BatchMembershipOutcome>> UnlinkIssuesAsync(
         IReadOnlyList<BatchMembershipRequestItem> issues,
         string projectId) =>
-        UnlinkIssuesAsync(issues, projectId, retryBudget: 3);
+        UnlinkIssuesAsync(issues, projectId, retryBudget: 2);
 
     private async Task<IReadOnlyList<BatchMembershipOutcome>> UnlinkIssuesAsync(
         IReadOnlyList<BatchMembershipRequestItem> issues,

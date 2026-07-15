@@ -44,6 +44,7 @@ public class IssueStore : IIssueStore
         var row = await db.Issues.FindAsync(key);
         var issue = row is null ? null : Deserialize(row.State);
         issue?.SetEpicId(row!.EpicId);
+        issue?.SetLineageVersion(row!.LineageVersion);
         return issue;
     }
 
@@ -114,10 +115,12 @@ public class IssueStore : IIssueStore
                 EpicId = NormalizeEpicId(state.EpicId),
                 LineageVersion = 1,
             });
+            state.SetLineageVersion(1);
         }
         else
         {
             state.SetEpicId(row.EpicId);
+            state.SetLineageVersion(row.LineageVersion + 1);
             row.State = Serialize(state);
             row.Risk = state.Risk;
             row.LineageVersion++;

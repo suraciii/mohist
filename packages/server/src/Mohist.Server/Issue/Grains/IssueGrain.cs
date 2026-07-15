@@ -241,13 +241,27 @@ public class IssueGrain : Grain, IIssueGrain
             await _issueProfileManager.SetPromptAsync(issue.Id, key, body);
 
         var wfGrain = GrainFactory.GetGrain<IWorkflowGrain>(wrId);
-        await wfGrain.StartAsync(input:
-            new WorkflowStartInput(
-                Metadata: new WorkflowRunMetadata(
-                    Name: null,
-                    CreatedAt: DateTimeOffset.UtcNow,
-                    Annotations: BuildWorkflowAnnotations(issue, projectContext.Id)),
-                Workspace: workspace));
+        for (var attempt = 0; ; attempt++)
+        {
+            try
+            {
+                await wfGrain.StartAsync(input:
+                    new WorkflowStartInput(
+                        Metadata: new WorkflowRunMetadata(
+                            Name: null,
+                            CreatedAt: DateTimeOffset.UtcNow,
+                            Annotations: BuildWorkflowAnnotations(issue, projectContext.Id)),
+                        Workspace: workspace,
+                        LineageGuard: new WorkflowStartLineageGuard(issue.Id, issue.LineageVersion)));
+                break;
+            }
+            catch (WorkflowStartLineageChangedException) when (attempt < 2)
+            {
+                issue = await _issueStore.LoadAsync(GrainKey)
+                    ?? throw new InvalidOperationException($"Issue '{GrainKey}' disappeared while starting workflow.");
+                _issue = issue;
+            }
+        }
 
         _issue!.Start(wrId, undeliveredPrerequisites);
         try

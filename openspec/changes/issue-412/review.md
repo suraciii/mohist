@@ -2,20 +2,14 @@
 
 ## Result: PASS
 
-Reviewed the current issue #412 candidate. Affiliation snapshots are ordered by a persisted Issue lineage version, and workflow synchronization participates in that same optimistic concurrency boundary.
+The initial workflow event now has a versioned issue-lineage creation handoff. `IssueGrain` supplies the current lineage version with the run metadata; `WorkflowRunStore` conditionally locks that version in the same transaction that persists the first run event. If membership commits first, the stale create is rejected and the issue reloads before retrying. If creation commits first, the later link is ordered after the initial event. The workflow store continues to stamp only the metadata snapshot it owns.
 
-## Repaired Items
-
-- Every Issue state save, affiliation staging operation, and workflow synchronization advances `Issues.LineageVersion`; stale terminal-only membership writes now fail their concurrency predicate and reapply from current membership.
-- Affiliation recovery calls `IIssueGrain.SetEpicAffiliationAsync`, which now synchronizes an already-bound WorkflowRun and propagates exhausted contention for durable event redelivery.
-- Batch link and unlink preserve completed outcomes while retrying the uncommitted suffix with a bounded three-attempt budget.
-- The migration uses the associated Issue snapshot whenever it exists, including null, and falls back to workflow annotations only for unresolvable Issues.
-- `MohistDbContextModelSnapshot` now matches the Issue concurrency metadata.
+The batch membership public retry budget now permits exactly three total persistence attempts. The recovery path remains durable: a failed affiliation delivery stays pending for dispatcher redelivery rather than being acknowledged.
 
 ## Verification
 
-- Focused Issue storage, lineage, migration, batch, recovery, and workflow lifecycle specs passed: 63 tests.
-- `npm test` passed.
+- `dotnet test packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj --no-restore -p:SkipWebBuild=true --filter 'FullyQualifiedName~WorkflowRunStoreSpecs|FullyQualifiedName~EpicAffiliationLineageSpecs|FullyQualifiedName~EpicBatchMembershipSpecs|FullyQualifiedName~EpicRecoverySpecs|FullyQualifiedName~IssueTransactionalEventAppendSpecs'` passed: 46 tests.
+- `npm test` passed: 865 CLI, 1,408 server unit, 2,786 server spec, 22 architecture, 4,653 web, and 1,014 runner tests.
 - `git diff --check` passed.
 
 <promise>PASS</promise>
