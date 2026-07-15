@@ -202,19 +202,40 @@ describe('IssueChangedFilesPage', () => {
   })
 
   describe('related-session link when a workflow-run session is known', () => {
-    it('renders the session link when the issue has a resolved active workflow-run session', async () => {
+    it('renders the session link targeting /issues/<number>/workflow/sessions/<encodeURIComponent(sessionName)> when a session is resolved', async () => {
       state.diffData = { available: false, reason: 'runner_unavailable', message: '' }
       renderPage()
       await screen.findByTestId('issue-files-recovery-surface')
       const sessionLink = await screen.findByTestId('issue-files-recovery-session')
       expect(sessionLink).toBeTruthy()
+      expect(screen.getByTestId('issue-files-recovery-retry')).toBeTruthy()
+      expect(screen.getByTestId('issue-files-recovery-return')).toBeTruthy()
       fireEvent.click(sessionLink)
       await waitFor(() => {
-        expect(screen.getByTestId('session-page-stub')).toBeTruthy()
+        expect(screen.getByTestId('current-path').textContent)
+          .toBe('/issues/123/workflow/sessions/s-wr-1')
+      })
+      expect(screen.getByTestId('session-page-stub')).toBeTruthy()
+    })
+
+    it('encodes the session name in the link path (encodeURIComponent)', async () => {
+      state.diffData = { available: false, reason: 'runner_unavailable', message: '' }
+      state.sessionsData = [{
+        ...(state.sessionsData[0] as Record<string, unknown>),
+        status: 'running',
+        sessionName: 'session with spaces & symbols/abc',
+      }]
+      renderPage()
+      await screen.findByTestId('issue-files-recovery-surface')
+      const sessionLink = await screen.findByTestId('issue-files-recovery-session')
+      fireEvent.click(sessionLink)
+      await waitFor(() => {
+        expect(screen.getByTestId('current-path').textContent)
+          .toBe('/issues/123/workflow/sessions/session%20with%20spaces%20%26%20symbols%2Fabc')
       })
     })
 
-    it('omits the session link when there is no workflowRunId (issue query failed)', async () => {
+    it('does not enable the workflow-run sessions query when there is no workflowRunId', async () => {
       state.issueError = true
       state.issueData = undefined
       renderPage()
@@ -227,6 +248,19 @@ describe('IssueChangedFilesPage', () => {
     it('omits the session link when no active/running/probing session is resolved', async () => {
       state.diffData = { available: false, reason: 'runner_unavailable', message: '' }
       state.sessionsData = []
+      renderPage()
+      await screen.findByTestId('issue-files-recovery-surface')
+      expect(screen.queryByTestId('issue-files-recovery-session')).toBeNull()
+      expect(screen.getByTestId('issue-files-recovery-retry')).toBeTruthy()
+      expect(screen.getByTestId('issue-files-recovery-return')).toBeTruthy()
+    })
+
+    it('omits the session link when only completed/failed sessions are resolved', async () => {
+      state.diffData = { available: false, reason: 'runner_unavailable', message: '' }
+      state.sessionsData = [{
+        ...(state.sessionsData[0] as Record<string, unknown>),
+        status: 'completed',
+      }]
       renderPage()
       await screen.findByTestId('issue-files-recovery-surface')
       expect(screen.queryByTestId('issue-files-recovery-session')).toBeNull()

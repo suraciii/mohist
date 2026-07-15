@@ -34,3 +34,39 @@
 
 ### What T-002 will need to thread
 - `RecoverySurface` already accepts `sessionHref?: string`. T-002 only needs to (a) call `useWorkflowRunSessions` (already done in this task — wait, actually the call is in `IssueChangedFilesPage`, not in `RecoverySurface` — so the prop is already plumbed end-to-end; T-002 doesn't need to add it), (b) extend fixture state for session-link-absent scenarios (already done in this task — `state.sessionsData = []`), (c) add additional spec tests for presence/absence (already done in this task). Actually T-002 may end up being largely covered; T-002 should at least verify the session-link integration matches the spec scenarios line by line.
+
+## T-002: Add related-session link to the recovery surface
+
+### State at start
+- T-001 had already implemented the entire T-002 slice end-to-end: `useWorkflowRunSessions` is called in `IssueChangedFilesPage.tsx:780`, session selection (`active | running | probing` first match) is at `:781-785`, `sessionHref` is computed at `:786-788`, and `RecoverySurface` already renders the link via `sessionHref` prop at `:222-232`.
+- The fixture already had `state.sessionsData = [SAMPLE_WORKFLOW_RUN_SESSION]` (default) and the `*/api/workflow-runs/:workflowRunId/sessions` MSW handler at `:204-206`. The route stub `/issues/:number/workflow/sessions/:sessionName` was registered at `:219`.
+- The original three "related-session link" tests at `recovery.test.tsx:204-236` (presence + no `workflowRunId` + empty sessions) already passed.
+
+### T-002 changes
+- Strengthened the presence scenario: the test now asserts the route template (`/issues/123/workflow/sessions/s-wr-1`) via the `LocationProbe` instead of just the session-stub element, so a regression in the URL template would fail loudly.
+- Added a new test asserting `encodeURIComponent` handles spaces/`&`/`/` in `sessionName` (`/issues/123/workflow/sessions/session%20with%20spaces%20%26%20symbols%2Fabc`).
+- Renamed the "no workflowRunId" absence test to "does not enable the workflow-run sessions query when there is no workflowRunId" — the test setup (`state.issueError = true; state.issueData = undefined`) already exercises the `enabled: !!workflowRunId` gate since `data.issue` becomes `undefined`.
+- Added a "completed/failed sessions are filtered out" absence test to lock the `active|running|probing` selection rule, parallel to the existing "no sessions at all" absence test.
+
+### Gotchas observed
+- The fixture's `ProjectProvider` runs with `initialProjectId="proj-1"` only — `currentProject` is not populated, so `useProjectPath()` returns paths without the `/proj-1` prefix (consistent with the existing `return-to-issue` test at `recovery.test.tsx:192,200` which asserts just `/issues/123`). The new path assertions have to follow the same convention.
+- `IssueChangedFilesPage` calls `useWorkflowRunSessions(workflowRunId)` with `workflowRunId = data.issue?.workflowRunId ?? null`, exactly matching `IssueDetailPage.tsx:109-115`. The hook's own gate (`enabled: !!workflowRunId`) prevents the request from firing on a transport-error path, so no extra wiring needed at the call site.
+
+### Verification
+- `npm run typecheck -w packages/web` ✅
+- `npm run test:run -w packages/web` ✅ 4675 / 4675 (was 4673; +2 new T-002 tests)
+- `npm test` (root: server + runner) ✅
+- `IssueChangedFilesPage.recovery.test.tsx` ✅ 24 / 24 (added 2 on top of T-001's 22)
+- `IssueChangedFilesPage.*.test.tsx` (other 5 files) ✅ 54 / 54 (no regression)
+
+### Coverage map vs T-002 acceptance criteria
+| Criterion | Where it's enforced |
+| --- | --- |
+| Link href targets `/issues/<n>/workflow/sessions/<encodeURIComponent(name)>` | `recovery.test.tsx` `encodes the session name in the link path` + `renders the session link targeting …/workflow/sessions/s-wr-1` |
+| No link when no `workflowRunId`; Retry + return still present | `does not enable the workflow-run sessions query when there is no workflowRunId` |
+| No link when no active/running/probing session; Retry + return still present | `omits the session link when no active/running/probing session is resolved` + `omits the session link when only completed/failed sessions are resolved` |
+| Hook `enabled: !!workflowRunId` + `staleTime: 30 * 1000` | `entities/coder-session/model/useWorkflowRunSessions.ts:25-26` (unchanged reuse) |
+| Fixture registers `/issues/:number/workflow/sessions/:sessionName` stub | `IssueChangedFilesPage.fixture.tsx:219` |
+| `npm run typecheck -w packages/web` passes | root command, see Verification |
+| `npm run test:run -w packages/web` passes; presence + absence scenarios | root command, see Verification |
+
