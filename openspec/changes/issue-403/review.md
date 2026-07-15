@@ -1,27 +1,23 @@
 # Review Report
 
-## Result: FAIL
+## Result: PASS
 
-The post-repair candidate implements the unified Files/Diff recovery surface, product-language messages, retry, issue navigation, and project-scoped active-session navigation. It does not meet the issue acceptance criterion requiring a related-session action whenever a session is known: terminal sessions are deliberately excluded.
+The post-repair candidate satisfies all issue acceptance criteria. Both failed-load paths converge on one recovery surface, and terminal as well as live related sessions are reachable.
+
+## Acceptance Evidence
+
+- Context and product language: `IssueChangedFilesPage.tsx:154-212` maps every typed unavailability reason and renders the issue number, title, and health badge when the issue loaded. `IssueChangedFilesPage.recovery.test.tsx:34-104` verifies the reason messages, context, and initial-load gate.
+- Unified recovery: `IssueChangedFilesPage.tsx:799-823` gives query errors precedence and turns either diff or commits unavailability into the same `RecoverySurface`. The API union guarantees an unavailable response has a known reason (`entities/issue/model/git-changes.ts:36-40`).
+- Retry and issue navigation: `IssueChangedFilesPage.tsx:214-230` exposes both actions, with retry re-fetching issue, diff, and commits at `:816-820`. `IssueChangedFilesPage.recovery.test.tsx:145-221` verifies success, persistent failure, and both navigation paths.
+- Related session: `IssueChangedFilesPage.tsx:168-175` deterministically prefers live sessions but selects any known session; `:788-793` builds the encoded project-scoped route. `IssueChangedFilesPage.recovery-session.test.tsx:12-143` covers presence, absence, encoding, terminal sessions, and ordering.
 
 ## Repaired Items
 
-- [ID: item-1]
-  Severity: info
-  Scope: test organization
-  Evidence: `IssueChangedFilesPage.recovery.test.tsx` grew to 330 lines, exceeding the repository's 300-line test-file budget and causing `npm test` to fail in `check:test-boundaries`. Moved the five related-session scenarios to `IssueChangedFilesPage.recovery-session.test.tsx`; the files are now 245 and 94 lines respectively.
-  Verification: `npm run typecheck -w packages/web`; `npm run test:run -w packages/web -- IssueChangedFilesPage.recovery.test.tsx IssueChangedFilesPage.recovery-session.test.tsx` (25 passed); `npm test` (all server, CLI, Web, and Runner checks passed); `git diff --check`.
-  Status: resolved
+None.
 
 ## Blocking Items
 
-- [ID: item-2]
-  Severity: blocking
-  Scope: `packages/web/src/pages/issue-changed-files/ui/IssueChangedFilesPage.tsx:781`
-  Evidence: The page only selects sessions whose status is `active`, `running`, or `probing` (`:781-785`), so a known `completed`, `failed`, or `cancelled` workflow-run session produces no recovery action. Those are valid terminal session states (`packages/web/src/widgets/issue-workflow/model/useWorkflowSessionFiltering.ts:16-20`) and the session route has no live-status restriction (`packages/web/src/app/App.tsx:68`). The new test explicitly locks the exclusion in `IssueChangedFilesPage.recovery-session.test.tsx:77-90`. This violates issue acceptance criterion 5: when a related session is known, the user can open it. [disallowed: product behavior change]
-  SuggestedAction: Render a session action for a known terminal session as well, with an explicit deterministic selection rule when multiple sessions exist; retain preference for a live session if that is the intended UX. Update the terminal-session scenario to assert navigation to its session route.
-  Verification: Add completed, failed, and cancelled session fixtures to `IssueChangedFilesPage.recovery-session.test.tsx`, then verify each renders and navigates through `/issues/:number/workflow/sessions/:sessionName`.
-  Status: unresolved
+None.
 
 ## Follow-up Items
 
@@ -29,6 +25,26 @@ None.
 
 ## Pre-existing or Out-of-scope Items
 
-None.
+- [ID: item-1]
+  Severity: info
+  Scope: `openspec/changes/issue-403/design.md`, `tasks.json`, and `progress.txt`
+  Evidence: These planning artifacts still describe selecting only `active`, `running`, or `probing` sessions, while the final candidate correctly exposes terminal sessions too (`IssueChangedFilesPage.tsx:168-175`) to meet the issue's "when a related session is known" criterion. They are workflow context, not a product deliverable, so this does not affect the verdict.
+  SuggestedAction: Align the selection-rule wording before these artifacts are reused as implementation guidance.
+  Status: out-of-scope
 
-<promise>FAIL</promise>
+- [ID: item-2]
+  Severity: info
+  Scope: production build dependency output
+  Evidence: `npm run build -w packages/web` succeeds but Rollup reports two existing `@microsoft/signalr` misplaced `/*#__PURE__*/` annotation warnings. No candidate code triggers or changes them.
+  SuggestedAction: Address when upgrading or patching the SignalR dependency.
+  Status: pre-existing
+
+## Verification
+
+- `npm run typecheck -w packages/web` passed.
+- `npm run test:run -w packages/web -- IssueChangedFilesPage.recovery.test.tsx IssueChangedFilesPage.recovery-session.test.tsx` passed: 2 files, 29 tests.
+- `npm run test:ci -w packages/web` passed: FSD and test-boundary guards, 335 files, 4,680 tests.
+- `npm run build -w packages/web` passed.
+- `git diff --check master...HEAD` passed.
+
+<promise>PASS</promise>
