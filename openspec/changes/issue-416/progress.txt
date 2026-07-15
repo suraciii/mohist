@@ -116,3 +116,28 @@ Gotchas
 - The bootstrap pre-verifies `.git` on the canonicalized path before invoking any git command, so it returns an actionable error fast for non-work-tree directories without consuming git slots in the fake executor.
 - Origin/HEAD fallback treats a blank `origin/HEAD` reference (e.g. an unconfigured remote) as "fall back to checked-out branch"; it does not default to `main` like the optional `mo repo add --base-branch` argument does.
 - Description strings for `project create` were tuned to avoid containing the substring "repo" — the server-side `ProjectHelp_DoesNotListRepoSubcommand` spec asserts the absence of that literal, so wording like "local Git working tree" is safer than "local Git repository".
+
+T-004 progress notes
+====================
+
+Implementation
+--------------
+- `RepositoryCommands` now defaults repository command output to table and passes the repository table shape for every successful mutation.
+- `repo add` sends `setDefault`, normalizes omitted or blank `--base-branch` to `main`, and renders the updated Project's repository collection.
+- `repo update` exposes only `--git-url` and `--base-branch`; unsupported identity/default options are parser errors, and an empty metadata update fails locally before project resolution or HTTP dispatch.
+- `repo set-default` sends only `{ setDefault: true }`; idempotent server results render unchanged repository state.
+- `repo delete` renders the updated Project on success and preserves server conflict/not-found envelopes and non-zero exit codes.
+- The repository renderer accepts either a repository array or an updated Project object, displays name, Git URL, base branch, and explicit yes/no default status, and no longer displays legacy path/remote fields.
+
+Coverage and verification
+-------------------------
+- Baseline focused repository specs passed before refactoring: 32/32.
+- Updated `CliRepositoryCommandSpecs`: 41/41 passed, covering all five commands, both project scope flags and active scope, table/JSON output, default marking, `main` defaulting, atomic default selection payload, metadata-only update validation, unsupported update options, idempotent set-default output, successful/non-default delete, default-delete conflict, duplicate/not-found diagnostics, and updated-Project rendering.
+- Full CLI suite: 892/892 passed.
+- `dotnet build packages/cli/Mohist.Cli/Mohist.Cli.csproj --no-restore`: succeeded with 0 warnings and 0 errors.
+
+Codebase patterns
+-----------------
+- Repository mutation endpoints return Project-shaped data; keep extraction of `repositories` inside the renderer instead of duplicating it across command handlers.
+- Shared `Print*WithOutputAsync` helpers preserve successful JSON data and server errors; repository handlers only select the repository table shape.
+- Unsupported command options should be omitted from `System.CommandLine` definitions so parsing rejects them before actions and HTTP resolution run.
