@@ -63,6 +63,7 @@ public class AgentSessionStore : IAgentSessionStore
     {
         var source = AgentSessionEventPersistence.AgentSessionSource(state.Id);
         var subject = state.Id;
+        var extensions = AgentSessionLineage.BuildExtensions(state);
 
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
@@ -72,7 +73,7 @@ public class AgentSessionStore : IAgentSessionStore
             foreach (var evt in events)
             {
                 if (evt is null) continue;
-                var envelope = ToCloudEvent(evt, source, subject);
+                var envelope = ToCloudEvent(evt, source, subject, extensions);
                 await _eventStore.AppendAsync(db, envelope, ct);
             }
             await db.SaveChangesAsync(ct);
@@ -115,7 +116,7 @@ public class AgentSessionStore : IAgentSessionStore
         }
     }
 
-    private static CloudEvent ToCloudEvent(AgentSessionEvent evt, string source, string subject)
+    private static CloudEvent ToCloudEvent(AgentSessionEvent evt, string source, string subject, IReadOnlyDictionary<string, string> extensions)
     {
         var type = AgentSessionEventSerializer.BusType(evt);
         var data = AgentSessionEventSerializer.ToData(evt);
@@ -127,7 +128,7 @@ public class AgentSessionStore : IAgentSessionStore
             data: data,
             subject: subject,
             specVersion: SpecVersion,
-            extensions: null);
+            extensions: extensions);
     }
 }
 

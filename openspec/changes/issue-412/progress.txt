@@ -196,3 +196,56 @@ T-004 progress
 - `Mohist.Server.ArchTests`: 22 pass (unchanged).
 - `Mohist.Cli.Tests`: 865 pass (unchanged).
 - Full `npm test` suite: all 10,692 tests pass across server (1384 unit + 22 arch + 2754 spec + 865 cli), web (4653), runner (1014).
+
+---
+T-005 progress
+
+## T-005 decisions / layout
+- `AgentSessionLineage.BuildExtensions(session)` (new file at `packages/server/src/Mohist.Server/Infrastructure/Data/Sessions/AgentSessionLineage.cs`) is the pure helper that mirrors `WorkflowRunLineage` / `IssueLineage` / `EpicLineage`. It reads ONLY from the supplied `AgentSession.Metadata.Labels` — no DB context, no grain call, no cross-aggregate query (D6).
+- The helper's projection rules (D6):
+  - `projectid` is stamped from the `mohist.io/project-id` label when present; whitespace-only label is treated as absent.
+  - `sessionid` is always stamped (the session's own id; the producer's identity).
+  - When `source-kind = "workflow"` (workflow/issue-origin session): `issue` (from `mohist.io/issue-number`), `workflowrunid` (from `mohist.io/source-id`), and `stage` (from `mohist.io/stage`) are stamped when their labels are present.
+  - For all other source kinds (e.g. `agent-launch`): `agentid` is stamped from `mohist.io/agent-id` when present. The `agentid` and `issue`/`workflowrunid`/`stage` keys are mutually exclusive at the producer level — they describe different session origins.
+  - Absent labels are omitted, never an empty value.
+- `AgentSessionStore.SaveAsync` now computes the extensions dictionary once before the event loop (same shape as `IssueStore.SaveAsync`) and passes the read-only dictionary into `ToCloudEvent`. The previous `extensions: null` is gone.
+- `AgentSessionStore.ToCloudEvent` signature now takes an `IReadOnlyDictionary<string, string> extensions` parameter (was: nothing). The dictionary is the shared stamp; the CloudEvent extensions property is set to that dictionary.
+- `BuildSession` helper in the spec now takes an optional `AgentSessionMetadata` so each scenario can build its own labels. `BuildAgentLaunchLabels(projectId, agentId)` and `BuildWorkflowOriginLabels(projectId, workflowRunId, issueNumber, stage)` wrap `GenericAgentSessionMetadata.Metadata(...)` and `WorkflowAgentSessionMetadata.Metadata(...)` so the test scenarios use the exact same label-baking helpers the production paths use.
+
+## Tests added
+- `AgentSessionLineageTests` (new unit test, no silo — 15 tests, in `tests/Mohist.Server.UnitTests/Events/`):
+  - `BuildExtensions_AgentLaunchSession_StampsProjectSessionAndAgentId` — pins agent-launch path: `projectid`/`sessionid`/`agentid`.
+  - `BuildExtensions_AgentLaunchSession_OmitsWorkflowLineage` — agent-launch does NOT carry `issue`/`workflowrunid`/`stage` (the source-kind branch).
+  - `BuildExtensions_WorkflowOriginSession_StampsIssueWorkflowRunIdAndStage` — pins workflow path: `projectid`/`sessionid`/`issue`/`workflowrunid`/`stage`.
+  - `BuildExtensions_WorkflowOriginSession_OmitsAgentId` — workflow path does NOT carry `agentid` (mutual exclusion by source-kind).
+  - `BuildExtensions_WorkflowOriginSessionWithoutIssueNumber_OmitsIssueKey` — absent affiliation = no key (no empty value).
+  - `BuildExtensions_EmptyLabels_StampsOnlySessionId` — bare session with no labels: only `sessionid` is stamped; `projectid`/`agentid`/issue/workflowrunid/stage are absent.
+  - `BuildExtensions_AbsentProjectLabel_OmitsProjectId` — whitespace-only project-id label is treated as absent.
+  - `BuildExtensions_NoCrossAggregateLoad_TakesOnlySessionState` — pins the constructor arity (state only), defensive for any future refactor that adds a query.
+  - `BuildExtensions_AgentLaunchSession_SatisfiesEventCatalogForEveryAgentSessionType` — theory across all six agent-session.* types: `EnvelopeConformance.Missing(extensions, type)` is empty for each.
+  - `BuildExtensions_WorkflowSession_SatisfiesEventCatalogForAgentSessionType` — the throwing variant for a workflow-origin session against `AgentSessionRuntimeBound`.
+  - Plus the explicit `AssertRequired` on a workflow-origin session against `AgentSessionRuntimeBound`.
+- `AgentSessionTransactionalEventAppendSpecs` (extended for T-005 — 11 tests total, was 6):
+  - `SaveAsync_StampsSourceAndSubjectOnEveryLifecycleEnvelope` — the `projectid is NOT present` assertion was REMOVED. The OQ3 design note in the XML doc and inline comment was superseded.
+  - `SaveAsync_AgentLaunchSession_StampsProjectIdSessionIdAndAgentId` — drives the full save path with agent-launch labels and asserts the three keys on every envelope.
+  - `SaveAsync_WorkflowOriginSession_StampsIssueWorkflowRunIdAndStageFromLabels` — drives the full save path with workflow-origin labels and asserts the three additional keys; also asserts `agentid` is absent.
+  - `SaveAsync_WorkflowOriginSessionWithoutIssueNumber_OmitsIssueKey` — absent affiliation contract on the live path.
+  - `SaveAsync_SessionWithoutProjectIdLabel_OmitsProjectId` — defensive: a session with no project-id label does not stamp `projectid`; `sessionid` is still stamped from the session's own id.
+  - `SaveAsync_StampedEnvelopes_SatisfyEventCatalogRequiredAttributes` — drives both agent-launch and workflow-origin sessions through the production path and asserts every envelope passes `EnvelopeConformance.AssertRequired` (and `Missing` is empty).
+  - Class-level XML doc updated to reflect the new lineage contract (drops the OQ3 wording).
+
+## Gotchas / hand-offs
+- The label-key constants are stable across the codebase: `AgentSessionQueryMetadataKeys.ProjectId` (`mohist.io/project-id`), `AgentSessionQueryMetadataKeys.IssueNumber` (`mohist.io/issue-number`), `AgentSessionQueryMetadataKeys.WorkflowRunId` (`mohist.io/source-id`), `AgentSessionQueryMetadataKeys.Stage` (`mohist.io/stage`), `AgentSessionQueryMetadataKeys.SourceKind` (`mohist.io/source-kind`, with values `"agent-launch"` and `"workflow"`), and `GenericAgentSessionMetadata.AgentId` (`mohist.io/agent-id`). The `AgentSessionLineage` helper references them by constant — no string literals.
+- The `source-kind` label is the single discriminator between the two projection branches. A future source kind (e.g. a third-party integration) defaults to the non-workflow branch (stamp `agentid` when its `mohist.io/agent-id` label is present). That matches the matrix's "agentid when agent-origin" wording without an explicit enumeration of every future kind.
+- The `mohist.io/agent-launch/issue-number` label (the `GenericAgentSessionMetadata.IssueNumber` constant) is intentionally NOT read for stamping. The matrix is `issue` only when the session originates from a workflow/issue — generic agent-launch sessions do not contribute `issue`/`workflowrunid`/`stage` to the envelope, even if the user supplied an issue context reference at launch. The optional context refs stay in `Annotations` only (they do not create scope, mount, or supervisor lifecycle per the design of `GenericAgentSessionContext`).
+- The previous test's `Assert.False(entry.Envelope.Extensions.ContainsKey("projectid"))` was a contract assertion (the OQ3 design choice). T-005 supersedes it: projectid IS stamped when the label is present. The other assertions in that test (source / subject) are unchanged and re-verified.
+- `SaveAsync_StampedEnvelopes_SatisfyEventCatalogRequiredAttributes` is the only conformance spec test exercising the agent-session path; the unit test `BuildExtensions_AgentLaunchSession_SatisfiesEventCatalogForEveryAgentSessionType` covers the helper in isolation. The two together pin the matrix end to end.
+
+## Verification
+- Server build: clean (0 warn, 0 err) on `packages/server/src/Mohist.Server`.
+- `Mohist.Server.UnitTests`: 1399 pass (was 1384; +15 from new `AgentSessionLineageTests`).
+- `Mohist.Server.SpecTests`: 2759 pass (was 2754; +5 from new lineage + conformance scenarios in `AgentSessionTransactionalEventAppendSpecs`).
+- `Mohist.Server.ArchTests`: 22 pass (unchanged).
+- `Mohist.Cli.Tests`: 865 pass (unchanged).
+- Web + runner suites: unchanged.
+- Full `npm test` suite: all 10,712 tests pass across server (1399 unit + 22 arch + 2759 spec + 865 cli), web (4653), runner (1014).

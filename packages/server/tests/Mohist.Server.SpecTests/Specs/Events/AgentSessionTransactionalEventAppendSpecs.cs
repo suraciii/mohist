@@ -8,6 +8,7 @@ using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Sessions.Domain;
+using Mohist.Server.Sessions.Services;
 using Mohist.Server.SpecTests.Support;
 using Orleans;
 using Xunit;
@@ -24,8 +25,14 @@ namespace Mohist.Server.SpecTests.Specs.Events;
 /// on a fresh <c>DbContext</c>. Lifecycle events are stamped with
 /// <c>subject = session id</c> and the <c>/mohist/agent-session/{id}</c>
 /// source, and per design.md#OQ1 all six lifecycle types are persisted
-/// (no filtering); per design.md#OQ3 <c>projectid</c> is not stamped
-/// on agent-session events.
+/// (no filtering). Also covers issue-412 T-005 lineage stamping: every
+/// <c>agent-session.*</c> envelope carries <c>projectid</c> and
+/// <c>sessionid</c> from the session's own <c>Metadata.Labels</c>;
+/// agent-origin sessions additionally stamp <c>agentid</c>;
+/// workflow/issue-origin sessions stamp <c>issue</c>, <c>workflowrunid</c>,
+/// and <c>stage</c>; absent affiliations are omitted, never an empty
+/// value (D6); and every emitted envelope satisfies the catalog's
+/// declared required lineage attributes via the conformance helper.
 /// </summary>
 [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
 [Trait(Traits.Sut.Name, Traits.Sut.System)]
@@ -143,9 +150,147 @@ public class AgentSessionTransactionalEventAppendSpecs : IAsyncLifetime
         {
             Assert.Equal("/mohist/agent-session/agent_txn_identity", entry.Envelope.Source.ToString());
             Assert.Equal("agent_txn_identity", entry.Envelope.Subject);
-            // Per design.md#OQ3 the agent-session row does not stamp
-            // projectid (no consumer reads it from lifecycle events).
-            Assert.False(entry.Envelope.Extensions.ContainsKey("projectid"));
+        }
+    }
+
+    [Fact]
+    public async Task SaveAsync_AgentLaunchSession_StampsProjectIdSessionIdAndAgentId()
+    {
+        // T-005 / D6: an agent-launch session whose labels carry project
+        // id, agent id, and the agent source kind stamps projectid,
+        // sessionid, and agentid on every agent-session.* envelope. The
+        // stamp source is the session's own Metadata.Labels — no
+        // cross-aggregate query.
+        var store = new AgentSessionStore(_dbFactory, _eventStore, _grainFactory, NullLogger<AgentSessionStore>.Instance);
+        var session = BuildSession("agent_txn_agent_launch", BuildAgentLaunchLabels(
+            projectId: "proj_agent_launch",
+            agentId: "agent_lineage_1"));
+
+        await store.SaveAsync(session.Id, session, [
+            new AgentSessionRuntimeBound("acp-1", null),
+            new AgentSessionUsageRecorded(new AgentUsageSummary()),
+        ]);
+
+        var stored = await _eventStore.ListAgentSessionEventsAsync("agent_txn_agent_launch");
+        Assert.Equal(2, stored.Count);
+        foreach (var entry in stored)
+        {
+            Assert.Equal("proj_agent_launch", entry.Envelope.Extensions["projectid"]);
+            Assert.Equal("agent_txn_agent_launch", entry.Envelope.Extensions["sessionid"]);
+            Assert.Equal("agent_lineage_1", entry.Envelope.Extensions["agentid"]);
+        }
+    }
+
+    [Fact]
+    public async Task SaveAsync_WorkflowOriginSession_StampsIssueWorkflowRunIdAndStageFromLabels()
+    {
+        // T-005 / D6: a workflow-origin session whose labels carry the
+        // issue number, workflow run id, and stage name additionally
+        // stamps issue, workflowrunid, and stage — but never agentid,
+        // which is reserved for agent-launch sessions.
+        var store = new AgentSessionStore(_dbFactory, _eventStore, _grainFactory, NullLogger<AgentSessionStore>.Instance);
+        var session = BuildSession("agent_txn_workflow", BuildWorkflowOriginLabels(
+            projectId: "proj_workflow_origin",
+            workflowRunId: "wr_lineage_42",
+            issueNumber: 42,
+            stage: "build"));
+
+        await store.SaveAsync(session.Id, session, [
+            new AgentSessionRuntimeBound("acp-1", null),
+            new AgentSessionUsageRecorded(new AgentUsageSummary()),
+        ]);
+
+        var stored = await _eventStore.ListAgentSessionEventsAsync("agent_txn_workflow");
+        Assert.Equal(2, stored.Count);
+        foreach (var entry in stored)
+        {
+            Assert.Equal("proj_workflow_origin", entry.Envelope.Extensions["projectid"]);
+            Assert.Equal("agent_txn_workflow", entry.Envelope.Extensions["sessionid"]);
+            Assert.Equal("42", entry.Envelope.Extensions["issue"]);
+            Assert.Equal("wr_lineage_42", entry.Envelope.Extensions["workflowrunid"]);
+            Assert.Equal("build", entry.Envelope.Extensions["stage"]);
+            Assert.False(entry.Envelope.Extensions.ContainsKey("agentid"));
+        }
+    }
+
+    [Fact]
+    public async Task SaveAsync_WorkflowOriginSessionWithoutIssueNumber_OmitsIssueKey()
+    {
+        // T-005 / D6: absent affiliation is omitted, never an empty
+        // value. A workflow session whose labels lack the issue-number
+        // label does NOT stamp `issue` (the key is entirely absent).
+        var store = new AgentSessionStore(_dbFactory, _eventStore, _grainFactory, NullLogger<AgentSessionStore>.Instance);
+        var session = BuildSession("agent_txn_workflow_no_issue", BuildWorkflowOriginLabels(
+            projectId: "proj_workflow_no_issue",
+            workflowRunId: "wr_no_issue",
+            issueNumber: null,
+            stage: "build"));
+
+        await store.SaveAsync(session.Id, session, [new AgentSessionRuntimeBound("acp-1", null)]);
+
+        var stored = Assert.Single(await _eventStore.ListAgentSessionEventsAsync("agent_txn_workflow_no_issue"));
+        Assert.False(stored.Envelope.Extensions.ContainsKey("issue"));
+        Assert.Equal("wr_no_issue", stored.Envelope.Extensions["workflowrunid"]);
+        Assert.Equal("build", stored.Envelope.Extensions["stage"]);
+    }
+
+    [Fact]
+    public async Task SaveAsync_SessionWithoutProjectIdLabel_OmitsProjectId()
+    {
+        // T-005 / D6: a session whose Metadata.Labels is empty (or
+        // carries no project-id label) does NOT stamp projectid.
+        // sessionid is still stamped from the session's own id; absent
+        // affiliation is omitted, never an empty value.
+        var store = new AgentSessionStore(_dbFactory, _eventStore, _grainFactory, NullLogger<AgentSessionStore>.Instance);
+        var session = BuildSession("agent_txn_no_project");
+
+        await store.SaveAsync(session.Id, session, [new AgentSessionRuntimeBound("acp-1", null)]);
+
+        var stored = Assert.Single(await _eventStore.ListAgentSessionEventsAsync("agent_txn_no_project"));
+        Assert.False(stored.Envelope.Extensions.ContainsKey("projectid"));
+        Assert.False(stored.Envelope.Extensions.ContainsKey("agentid"));
+        Assert.Equal("agent_txn_no_project", stored.Envelope.Extensions["sessionid"]);
+    }
+
+    [Fact]
+    public async Task SaveAsync_StampedEnvelopes_SatisfyEventCatalogRequiredAttributes()
+    {
+        // T-005 / D8 conformance: every agent-session.* envelope
+        // produced through SaveAsync must satisfy the catalog's
+        // declared required lineage attributes (projectid, sessionid)
+        // for its type. Drives both an agent-launch and a workflow
+        // origin session through the production path.
+        var store = new AgentSessionStore(_dbFactory, _eventStore, _grainFactory, NullLogger<AgentSessionStore>.Instance);
+
+        var agentLaunch = BuildSession("agent_txn_conformance_agent", BuildAgentLaunchLabels(
+            projectId: "proj_conf_agent",
+            agentId: "agent_conf"));
+        await store.SaveAsync(agentLaunch.Id, agentLaunch, [
+            new AgentSessionRuntimeBound("acp-1", null),
+            new AgentSessionUsageRecorded(new AgentUsageSummary()),
+            new AgentSessionContextHealthUpdated("green", 40d, 400, 1000, DateTime.UtcNow),
+        ]);
+
+        var workflowOrigin = BuildSession("agent_txn_conformance_workflow", BuildWorkflowOriginLabels(
+            projectId: "proj_conf_workflow",
+            workflowRunId: "wr_conf",
+            issueNumber: 7,
+            stage: "review"));
+        await store.SaveAsync(workflowOrigin.Id, workflowOrigin, [
+            new AgentSessionRuntimeBound("acp-1", null),
+            new AgentSessionContextExhausted("context_exhaustion", 96d, 960, 1000, DateTime.UtcNow),
+        ]);
+
+        var agentEvents = await _eventStore.ListAgentSessionEventsAsync("agent_txn_conformance_agent");
+        var workflowEvents = await _eventStore.ListAgentSessionEventsAsync("agent_txn_conformance_workflow");
+        Assert.Equal(3, agentEvents.Count);
+        Assert.Equal(2, workflowEvents.Count);
+
+        foreach (var entry in agentEvents.Concat(workflowEvents))
+        {
+            EnvelopeConformance.AssertRequired(entry.Envelope);
+            var missing = EnvelopeConformance.Missing(entry.Envelope);
+            Assert.Empty(missing);
         }
     }
 
@@ -180,13 +325,14 @@ public class AgentSessionTransactionalEventAppendSpecs : IAsyncLifetime
         Assert.Empty(await _eventStore.ListAgentSessionEventsAsync("agent_txn_no_events_path"));
     }
 
-    private static AgentSession BuildSession(string id)
+    private static AgentSession BuildSession(string id, AgentSessionMetadata? metadata = null)
     {
         var session = new AgentSession
         {
             Id = id,
             Runtime = new AgentSessionRuntime("runner-1", null),
             Settings = new AgentSessionSettings("opencode"),
+            Metadata = metadata ?? new AgentSessionMetadata(),
         };
         session.Status = session.Status with
         {
@@ -195,6 +341,24 @@ public class AgentSessionTransactionalEventAppendSpecs : IAsyncLifetime
         };
         return session;
     }
+
+    private static AgentSessionMetadata BuildAgentLaunchLabels(string projectId, string agentId) =>
+        GenericAgentSessionMetadata.Metadata(new GenericAgentSessionContext(
+            ProjectId: projectId,
+            AgentId: agentId,
+            AgentName: $"{agentId}-name"));
+
+    private static AgentSessionMetadata BuildWorkflowOriginLabels(
+        string projectId,
+        string workflowRunId,
+        int? issueNumber,
+        string? stage) =>
+        WorkflowAgentSessionMetadata.Metadata(new WorkflowAgentSessionContext(
+            ProjectId: projectId,
+            WorkflowRunId: workflowRunId,
+            SessionName: "sess-name",
+            IssueNumber: issueNumber,
+            Stage: stage));
 
     private sealed class Factory : IDbContextFactory<MohistDbContext>
     {
