@@ -23,7 +23,9 @@
 
 > 日常工作：创建和推进 issue，把多个 issue 组织成 Epic，为生产线持续供料。
 
+- [仓库](repositories.md) —— Project 声明多个仓库作为执行资源，issue 按目标仓库分流
 - [Issue 管理](issues.md) —— 创建、启动、审批、恢复、关闭
+- [复合 Issue 与子 Issue](sub-issues.md) —— 一个 issue 追踪跨仓库需求，拆成子 issue 各自走 workflow
 - [用 Epic 规划](epics.md) —— 把零散 issue 组织成可自动推进的产品目标
 
 ## 板块 4：观察与操作

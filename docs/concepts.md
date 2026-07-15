@@ -8,20 +8,22 @@
 
 ## Project（项目）
 
-一个 Project 对应你手上的一个真实代码仓库。
+一个 Project 对应你手上的一个真实产品，是它的工作空间。
 
-- 每个 Project 关联一个 git 仓库（path + base branch）
-- Project 内的所有 issue 共享这个仓库
+- 每个 Project 声明一个或多个 git **仓库**作为执行资源（每个仓库有资源名 + base branch），其中一个是 default 仓库
+- Project 内的每个 issue 有一个**目标仓库**，不指定就落在 default 仓库
 - 同时只能有一个 active project（CLI 用 `mo project use` 切换）
 - 不同 Project 的数据完全隔离
 
 ```bash
-mo project create my-app --path /path/to/repo
+mo project create my-app --path /path/to/repo   # --path 的仓库注册为 default 仓库
 mo project use my-app
 mo project status   # 查看当前 project
 ```
 
 **多个 Project 的场景**：你有 side project A、side project B，分别建 Project，按需切换。
+
+**多个仓库的场景**：产品的 server 和 web 是两个代码库，同一个 Project 声明两个仓库，issue 按目标仓库分流。详见 [仓库](repositories.md)。
 
 ## Issue（工作单元）
 
@@ -30,8 +32,11 @@ mo project status   # 查看当前 project
 - 标题 + body（描述需求）
 - 优先级 p0（最高）~ p4（最低）
 - 标签（自由文本）
+- 目标仓库（这份工作在哪个代码库里执行，见 [仓库](repositories.md)）
 - 进入 workflow 后会有 stage、health、approvalState 等状态
 - 完成后留下一整套 OpenSpec 产物（proposal / design / specs / tasks / review）
+
+一份需求大到横跨多个仓库时，可以把一个 issue 拆成若干**子 issue**：父 issue 追踪整体，子 issue 各自走 workflow。详见 [复合 Issue 与子 Issue](sub-issues.md)。
 
 **Issue 的关键属性**：
 

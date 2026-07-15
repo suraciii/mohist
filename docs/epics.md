@@ -246,6 +246,15 @@ Epic 会**影响 linked issues 的推进**（决定何时自动启动下一个 i
 
 每个 linked issue 仍然走自己的 workflow（默认 `mohist/local`，或你 per-issue 指定）。Epic 决定的是"什么时候把下一个 issue 交给 workflow 去执行"，而不是"workflow 里有哪些步骤"。
 
+## 和子 issue 的关系
+
+Epic 与复合 issue（[复合 Issue 与子 Issue](sub-issues.md)）是两个正交的组织轴：Epic 组织**产品目标下的多个交付物**，复合 issue 是**一份工作的内部分工**。边界规则：
+
+- **子 issue 不能 link 到 Epic**，Epic 的自动推进永远不会触碰子 issue。
+- **父 issue 是普通的 Epic 成员**：轮到它时 Epic 启动它（父 issue 的启动即推进其子 issue），它 done 时计入 Epic 进度。Epic 不感知复合结构，本节不改变 Epic 的任何行为。
+
+**选择指引**：各部分是独立有价值的交付物 → Epic + 普通 issue；各部分只是同一份需求的分工（完成一半没有产品意义）→ 复合 issue。
+
 ## 当前限制
 
 Roadmap（已知不足）：

@@ -37,7 +37,7 @@
 
 ## 支撑主题
 
-- [issue-breakdown.md](issue-breakdown.md) — Issue 拆分 / sub-issue 方案（**WIP，暂不实现**）：与 Epic 重叠、#281 已列为 Non-Goal 的决策记录与开放问题。
+- [issue-breakdown.md](issue-breakdown.md) — 复合 Issue / 子 Issue 设计（**已定稿，待实装**）：父子模型、状态汇总、复合推进、与 Epic 的隔离约束；多仓库资源见 `docs/repositories.md`。
 - [epic-status-revival.md](epic-status-revival.md) — Epic `done` 自动唤醒与 `closed` 拒绝 link 的决策记录（issue-392）。
 - [issue-templates.md](issue-templates.md) — 三类 issue 模板（Feature / Bug / Refactor）的 body 结构与设计依据。
 - [mobile-pwa.md](mobile-pwa.md) — 移动端 PWA + 推送（**WIP，暂不实现**）：self-host 自治系统的移动端 promise，原 #106 关闭后的方案记录。
