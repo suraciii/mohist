@@ -28,6 +28,28 @@ export const SAMPLE_ISSUE = {
   createdAt: FIXTURE_TIME,
   updatedAt: FIXTURE_TIME,
   projectId: 'proj-1',
+  workflowRunId: 'wr-1',
+}
+
+export const SAMPLE_WORKFLOW_RUN_SESSION = {
+  id: 'session-1',
+  workflowRunId: 'wr-1',
+  sessionName: 's-wr-1',
+  acpSessionId: 'acp-1',
+  projectId: 'proj-1',
+  issueNumber: 123,
+  runnerId: 'runner-1',
+  status: 'active' as const,
+  stage: 'build',
+  model: 'minimax/MiniMax-M3',
+  workDir: null,
+  processPid: null,
+  createdAt: FIXTURE_TIME,
+  startedAt: FIXTURE_TIME,
+  completedAt: null,
+  lastDataAt: FIXTURE_TIME,
+  failureReason: null,
+  exitCode: null,
 }
 
 export const FOO_DIFF = `diff --git a/src/foo.ts b/src/foo.ts
@@ -123,6 +145,7 @@ export function useIssueChangedFilesPageFixture() {
     diffData: SAMPLE_DIFF_DATA as unknown,
     commitsData: SAMPLE_COMMITS_DATA as unknown,
     commitDiffData: {} as Record<string, unknown>,
+    sessionsData: [SAMPLE_WORKFLOW_RUN_SESSION] as unknown[],
     fileContentHandler: vi.fn(),
     blockIssue: false,
     issueError: false,
@@ -140,6 +163,7 @@ export function useIssueChangedFilesPageFixture() {
     state.diffData = SAMPLE_DIFF_DATA
     state.commitsData = SAMPLE_COMMITS_DATA
     state.commitDiffData = {}
+    state.sessionsData = [SAMPLE_WORKFLOW_RUN_SESSION]
     state.fileContentHandler.mockClear()
     state.blockIssue = false
     state.issueError = false
@@ -177,6 +201,9 @@ export function useIssueChangedFilesPageFixture() {
       state.fileContentHandler(Number(params.issueNumber), path)
       return HttpResponse.json({ success: true, data: { base: 'old line', head: 'new line' } })
     }),
+    http.get('*/api/workflow-runs/:workflowRunId/sessions', () => {
+      return HttpResponse.json({ success: true, data: state.sessionsData })
+    }),
   )
 
   function createQueryClient() {
@@ -189,6 +216,7 @@ export function useIssueChangedFilesPageFixture() {
     return (
       <Routes>
         <Route path="/issues/:number/files" element={<IssueChangedFilesPage />} />
+        <Route path="/issues/:number/workflow/sessions/:sessionName" element={<div data-testid="session-page-stub">Session Page</div>} />
         <Route path="/issues/:number" element={<div>Issue Detail Page</div>} />
       </Routes>
     )

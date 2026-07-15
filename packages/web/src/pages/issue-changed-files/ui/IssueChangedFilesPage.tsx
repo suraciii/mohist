@@ -1,9 +1,11 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { statusBadge, statusLabel, useIssue, useIssueDiff, useIssueCommits, useCommitDiff } from '../../../entities/issue'
+import type { ChangesUnavailableReason } from '../../../entities/issue'
+import { useWorkflowRunSessions } from '../../../entities/coder-session'
 import { ChangedFilesTree, DiffSearchPane, FullFilePane, RawPatchPane, SplitDiffPane, UnifiedDiffPane } from '../../../widgets/issue-changed-files'
 import { getFileBlockIdentity, parseDiff, parseDiffFiles, selectFirstReadableFile, type FileBlock } from '../../../shared/lib/diff-model'
-import type { IssueCommitsResponse, CommitEntry } from '../../../entities/issue'
+import type { IssueCommitsResponse, CommitEntry, IssueDiffResponse } from '../../../entities/issue'
 import { Button } from '@/shared/ui/components/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/ui/components/select'
 import { useProjectPath } from '../../../entities/project'
@@ -79,12 +81,10 @@ function BackToIssueButton({ issueNumber }: { issueNumber: number }) {
 function PageHeader({
   issue,
   diffData,
-  unavailableMessage,
   isBehind,
 }: {
   issue: NonNullable<ReturnType<typeof useIssue>['data']>
   diffData: NonNullable<ReturnType<typeof useIssueDiff>['data']> | undefined
-  unavailableMessage: string | null
   isBehind: boolean
 }) {
   return (
@@ -99,10 +99,10 @@ function PageHeader({
         </div>
         <h1 className="text-2xl font-bold text-gray-900">{issue.title}</h1>
       </div>
-      <DiffSummaryCard issue={issue} diffData={diffData} unavailableMessage={unavailableMessage} />
+      <DiffSummaryCard issue={issue} diffData={diffData} />
       {isBehind && diffData?.available && (
-        <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 mb-4">
-          <p className="text-sm text-blue-700">
+        <div className="rounded-lg border border-info-border bg-info-subtle p-4 mb-4">
+          <p className="text-sm text-info-foreground">
             This branch is {diffData.behind} commit{diffData.behind > 1 ? 's' : ''} behind {diffData.base}.
             Files changed shows only changes introduced by {diffData.head} from the merge base, matching GitHub PR behavior.
           </p>
@@ -115,19 +115,10 @@ function PageHeader({
 function DiffSummaryCard({
   issue,
   diffData,
-  unavailableMessage,
 }: {
   issue: NonNullable<ReturnType<typeof useIssue>['data']>
   diffData: NonNullable<ReturnType<typeof useIssueDiff>['data']> | undefined
-  unavailableMessage: string | null
 }) {
-  if (unavailableMessage) {
-    return (
-      <div className="rounded-lg border border-orange-200 bg-orange-50 p-6">
-        <p className="text-sm text-orange-700">{unavailableMessage}</p>
-      </div>
-    )
-  }
   if (!diffData?.available) return null
   return (
     <div className="rounded-lg border border-gray-200 bg-white p-4 mb-4">
@@ -160,20 +151,86 @@ function DiffSummaryCard({
   )
 }
 
-function ErrorState({ issueNumber, issueError, diffError }: { issueNumber: number; issueError: boolean; diffError: boolean }) {
+type RecoveryCause =
+  | { kind: 'transport' }
+  | { kind: 'unavailable'; reason: ChangesUnavailableReason }
+
+const RECOVERY_MESSAGE_MAP: Record<ChangesUnavailableReason, string> = {
+  runner_unavailable: 'The file changes could not be loaded. The runner may be disconnected.',
+  workspace_removed: 'The file changes could not be loaded. The workspace has been removed.',
+  branch_missing: 'The file changes could not be loaded. The branch could not be found.',
+  git_error: 'The file changes could not be loaded due to a git error.',
+  not_started: 'There are no changes yet.',
+}
+
+const TRANSPORT_MESSAGE = 'The file changes could not be loaded.'
+
+interface RecoverySurfaceProps {
+  issueNumber: number
+  issue: NonNullable<ReturnType<typeof useIssue>['data']> | undefined
+  cause: RecoveryCause
+  onRetry: () => void
+  sessionHref?: string
+}
+
+function RecoverySurface({ issueNumber, issue, cause, onRetry, sessionHref }: RecoverySurfaceProps) {
+  const message = cause.kind === 'transport'
+    ? TRANSPORT_MESSAGE
+    : RECOVERY_MESSAGE_MAP[cause.reason]
   const navigate = useNavigate()
   const toProjectPath = useProjectPath()
+  const returnToIssue = () => navigate(toProjectPath(`/issues/${issueNumber}`))
+
   return (
     <div className="flex-1 overflow-hidden flex flex-col">
       <div className="max-w-4xl mx-auto px-4 sm:px-6 py-4 w-full">
         <BackToIssueButton issueNumber={issueNumber} />
-        <div className="rounded-lg border border-red-200 bg-red-50 p-6">
-          <p className="text-sm text-red-700 mb-4">
-            {issueError ? 'Failed to load issue details.' : diffError ? 'Failed to load issue diff.' : 'Failed to load issue commits.'}
-          </p>
-          <Button variant="link" onClick={() => navigate(toProjectPath(`/issues/${issueNumber}`))} className="h-auto p-0 text-sm text-blue-600 hover:text-blue-700">
-            View issue detail
-          </Button>
+        <div className="rounded-lg border border-danger-border bg-danger-subtle p-6 space-y-4" data-testid="issue-files-recovery-surface">
+          <div className="flex items-center gap-2" data-testid="issue-files-recovery-context">
+            <span className="text-sm font-mono text-danger">#{issueNumber}</span>
+            {issue ? (
+              <>
+                <span
+                  className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${statusBadge(issue.health)}`}
+                  data-testid="issue-files-recovery-health"
+                >
+                  {statusLabel(issue.health)}
+                </span>
+                <span className="text-sm font-medium text-danger" data-testid="issue-files-recovery-title">{issue.title}</span>
+              </>
+            ) : null}
+          </div>
+          <p className="text-sm text-danger" data-testid="issue-files-recovery-message">{message}</p>
+          <div className="flex flex-wrap items-center gap-2" data-testid="issue-files-recovery-actions">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={onRetry}
+              data-testid="issue-files-recovery-retry"
+            >
+              Retry
+            </Button>
+            <Button
+              variant="link"
+              size="sm"
+              onClick={returnToIssue}
+              data-testid="issue-files-recovery-return"
+              className="h-auto p-0 text-sm text-danger"
+            >
+              Return to issue
+            </Button>
+            {sessionHref ? (
+              <Button
+                variant="link"
+                size="sm"
+                onClick={() => navigate(sessionHref)}
+                data-testid="issue-files-recovery-session"
+                className="h-auto p-0 text-sm text-danger"
+              >
+                Open related session
+              </Button>
+            ) : null}
+          </div>
         </div>
       </div>
     </div>
@@ -186,9 +243,9 @@ function InvalidIssueState() {
   return (
     <div className="flex-1 overflow-hidden flex flex-col">
       <div className="max-w-4xl mx-auto px-4 sm:px-6 py-4 w-full">
-        <div className="rounded-lg border border-red-200 bg-red-50 p-6">
-          <p className="text-sm text-red-700 mb-4">Invalid issue number</p>
-          <Button variant="link" onClick={() => navigate(toProjectPath())} className="h-auto p-0 text-sm text-blue-600 hover:text-blue-700">
+        <div className="rounded-lg border border-danger-border bg-danger-subtle p-6">
+          <p className="text-sm text-danger mb-4">Invalid issue number</p>
+          <Button variant="link" onClick={() => navigate(toProjectPath())} className="h-auto p-0 text-sm text-danger">
             Back to board
           </Button>
         </div>
@@ -317,11 +374,11 @@ function ReaderPane(props: ReaderPaneProps) {
   if (props.isCommitDiffLoading) return <CenteredReaderMessage>Loading commit diff...</CenteredReaderMessage>
   if (props.isCommitDiffError) {
     return (
-      <div className="flex flex-col items-center justify-center h-full text-gray-500 text-sm gap-3 px-4 text-center">
+      <div className="flex flex-col items-center justify-center h-full text-muted-foreground text-sm gap-3 px-4 text-center">
         <div>Failed to load commit diff.</div>
         <div className="flex items-center gap-2">
           <Button variant="outline" size="sm" onClick={props.onExitCommitMode}>Exit commit mode</Button>
-          <Button variant="link" onClick={() => navigate(toProjectPath(`/issues/${props.issueNumber}`))} className="h-auto p-0 text-sm text-blue-600 hover:text-blue-700">Back to issue</Button>
+          <Button variant="link" onClick={() => navigate(toProjectPath(`/issues/${props.issueNumber}`))} className="h-auto p-0 text-sm text-foreground">Back to issue</Button>
         </div>
       </div>
     )
@@ -589,33 +646,30 @@ function useChangedFilesData(issueNumber: number, commitMode: boolean, commitHas
     diffError: diffQuery.isError,
     isCommitDiffLoading: commitMode && !!commitHash && commitDiffQuery.isLoading,
     isCommitDiffError: commitMode && !!commitHash && commitDiffQuery.isError,
+    refetchIssue: issueQuery.refetch,
+    refetchDiff: diffQuery.refetch,
+    refetchCommits: commitsQuery.refetch,
   }
+}
+
+function getUnavailableReason(
+  diffData: IssueDiffResponse | undefined,
+  commitsData: IssueCommitsResponse | undefined,
+): ChangesUnavailableReason | null {
+  if (diffData?.available === false && diffData.reason) return diffData.reason
+  if (commitsData?.available === false && commitsData.reason) return commitsData.reason
+  return null
 }
 
 function getDiffAvailability(
   diffData: ReturnType<typeof useChangedFilesData>['diffData'],
   commitsData: ReturnType<typeof useChangedFilesData>['commitsData'],
 ) {
-  const workspaceRemoved = diffData?.reason === 'workspace_removed' || commitsData?.reason === 'workspace_removed'
-  const branchMissing = diffData?.reason === 'branch_missing' || commitsData?.reason === 'branch_missing'
-  const notStarted = diffData?.reason === 'not_started' || commitsData?.reason === 'not_started'
-  const runnerUnavailable = diffData?.reason === 'runner_unavailable' || commitsData?.reason === 'runner_unavailable'
-  const unavailableMessage = notStarted
-    ? 'No changes yet'
-    : runnerUnavailable
-      ? 'Changes unavailable — runner not connected'
-      : workspaceRemoved
-        ? 'Changes unavailable — workspace removed'
-        : branchMissing
-          ? 'Changes unavailable — branch missing'
-          : diffData?.available === false
-            ? diffData.message ?? 'Failed to load changes'
-            : null
-
+  const reason = getUnavailableReason(diffData, commitsData)
   return {
     diffAvailable: diffData?.available === true,
     isBehind: !!diffData && diffData.available && diffData.behind > 0,
-    unavailableMessage,
+    unavailableReason: reason,
   }
 }
 
@@ -647,7 +701,6 @@ function ChangedFilesContent({
   data,
   reader,
   commitState,
-  unavailableMessage,
   isBehind,
 }: {
   issueNumber: number
@@ -659,7 +712,6 @@ function ChangedFilesContent({
     exitCommitMode: () => void
     selectCommit: (commit: CommitEntry) => void
   }
-  unavailableMessage: string | null
   isBehind: boolean
 }) {
   const commits = (data.commitsData as IssueCommitsResponse | undefined)?.commits ?? []
@@ -674,7 +726,7 @@ function ChangedFilesContent({
 
   return (
     <div className="flex-1 overflow-hidden flex flex-col">
-      <PageHeader issue={data.issue!} diffData={data.diffData} unavailableMessage={unavailableMessage} isBehind={isBehind} />
+      <PageHeader issue={data.issue!} diffData={data.diffData} isBehind={isBehind} />
       {data.hasFileEntries ? (
         <ReaderWorkspace
           issueNumber={issueNumber}
@@ -722,13 +774,48 @@ export function IssueChangedFilesPage() {
   const reader = useChangedFilesReaderState({ issueNumber, parsedBlocks: data.parsedBlocks, commitMode })
   const commitActions = useCommitModeActions(reader, setCommitMode, setSelectedCommit)
   const commitState = { commitMode, selectedCommit, ...commitActions }
+  const toProjectPath = useProjectPath()
+
+  const workflowRunId = data.issue?.workflowRunId ?? null
+  const { sessions: workflowSessions } = useWorkflowRunSessions(workflowRunId)
+  const activeSession = workflowSessions.find((session) => (
+    session.status === 'active'
+    || session.status === 'running'
+    || session.status === 'probing'
+  ))
+  const sessionHref = activeSession
+    ? toProjectPath(`/issues/${issueNumber}/workflow/sessions/${encodeURIComponent(activeSession.sessionName)}`)
+    : undefined
 
   if (!issueNumber || isNaN(issueNumber) || issueNumber === 0) {
     return <InvalidIssueState />
   }
 
+  let recoveryCause: RecoveryCause | null = null
   if (data.hasQueryError) {
-    return <ErrorState issueNumber={issueNumber} issueError={data.issueError} diffError={data.diffError} />
+    recoveryCause = { kind: 'transport' }
+  } else if (
+    !data.isLoading
+    && data.diffData !== undefined
+    && availability.unavailableReason !== null
+  ) {
+    recoveryCause = { kind: 'unavailable', reason: availability.unavailableReason }
+  }
+
+  if (recoveryCause) {
+    return (
+      <RecoverySurface
+        issueNumber={issueNumber}
+        issue={data.issue}
+        cause={recoveryCause}
+        onRetry={() => {
+          void data.refetchIssue()
+          void data.refetchDiff()
+          void data.refetchCommits()
+        }}
+        sessionHref={sessionHref}
+      />
+    )
   }
 
   if (data.isLoading || !data.issue) {
@@ -741,9 +828,9 @@ export function IssueChangedFilesPage() {
 
   if (!availability.diffAvailable) return (
     <div className="flex-1 overflow-hidden flex flex-col">
-      <PageHeader issue={data.issue} diffData={data.diffData} unavailableMessage={availability.unavailableMessage} isBehind={availability.isBehind} />
+      <PageHeader issue={data.issue} diffData={data.diffData} isBehind={availability.isBehind} />
     </div>
   )
 
-  return <ChangedFilesContent issueNumber={issueNumber} data={data} reader={reader} commitState={commitState} unavailableMessage={availability.unavailableMessage} isBehind={availability.isBehind} />
+  return <ChangedFilesContent issueNumber={issueNumber} data={data} reader={reader} commitState={commitState} isBehind={availability.isBehind} />
 }

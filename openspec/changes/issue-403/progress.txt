@@ -1,0 +1,36 @@
+# issue-403 build progress
+
+## T-001: Converge Files/Diff failure paths onto a unified recoverable error surface
+
+### Codebase patterns observed
+- The `RecoverySurface` is page-local (Decision 1, Decision 6). It intentionally lives in `IssueChangedFilesPage.tsx`, not in `shared/ui` — no second consumer exists yet.
+- The `IssueDetailPage` precedent for session selection (`active | running | probing` first match) is the canonical selection rule. Mirrored verbatim.
+- Session route stub must be registered in the fixture (design Risk 5): the test harness uses `MemoryRouter`, so the recovery-surface session link would otherwise 404 if asserted.
+- The page already uses `statusBadge` / `statusLabel` from `entities/issue/lib/status-badge`; the recovery context header reuses them so the health badge stays consistent with the rest of the app.
+- The Activity page's per-source retry is *not* the right precedent here — design Decision 3 explicitly prefers a single Retry for the all-or-nothing evidence view.
+
+### Implementation notes
+- `useChangedFilesData` now returns `refetchIssue` / `refetchDiff` / `refetchCommits` (TanStack `refetch` already typed as `() => Promise<...>`).
+- New `getUnavailableReason` derives the `ChangesUnavailableReason` purely from `diffData`/`commitsData` reason fields; error booleans never enter the cause (per task notes).
+- `RecoveryCause = { kind: 'transport' } | { kind: 'unavailable'; reason: ChangesUnavailableReason }` — gated on `!isLoading && diffData present` per design Decision 2 so the surface does not flash during initial load.
+- `RECOVERY_MESSAGE_MAP` explicitly maps `git_error` (previously collapsed into a generic `diffData.message ?? 'Failed to load changes'` fallback). Self-review added a dedicated scenario for this reason.
+- `useWorkflowRunSessions(issue.workflowRunId)` is called the same way as `IssueDetailPage`; selection is `active | running | probing`. Link path is `toProjectPath(\`/issues/${number}/workflow/sessions/${encodeURIComponent(sessionName)}\`)` — same template as `IssueDetailPage:170-176`.
+- Token migration: red-50/200/700 → danger-subtle/border/foreground; orange-50/200 → warning-subtle/border/foreground (wait, the unavailable orange was a leftover that no longer exists because the new surface uses danger tokens for transport AND unavailable — both feed the same `RecoverySurface`, which uses danger tokens. The `warning-subtle` tokens are now unused for *this* page's error/unavailable surface, but the `Info` tokens were used for the isBehind card.)
+- `useProjectPath` is called twice in the page now: once via the `BackToIssueButton` inside `RecoverySurface`, once in the page to compute the `sessionHref`. Both are fine — `useProjectPath` is a `useCallback` over `currentProject?.name`, so the second call adds no extra cost.
+- The legacy `ErrorState` component and the unavailable branch of `DiffSummaryCard` were both removed. `useChangedFilesData` still returns `issueError` / `diffError` for any downstream consumer that wants them (none yet, but the hook contract is preserved).
+
+### Gotchas / regressions watched for
+- `state.diffData = { ...state.diffData, ... }` in the retry-success test was a TypeScript error because `state.diffData` is typed `unknown`. Replaced with a full object literal in the recovery test.
+- The fixture's `SAMPLE_ISSUE` had no `workflowRunId`, so the page would have `null` `workflowRunId` and never enable the sessions query. Added `workflowRunId: 'wr-1'` to the fixture sample plus an MSW handler at `*/api/workflow-runs/:workflowRunId/sessions` returning `SAMPLE_WORKFLOW_RUN_SESSION` (an active session). The session-link-absent test sets `state.sessionsData = []`.
+- The session route stub in the fixture (`/issues/:number/workflow/sessions/:sessionName`) must exist for the "Open related session" link to navigate without 404-ing in tests; otherwise the link assertion fails.
+- The recovery test was rewritten end-to-end (22 tests, up from 14). The dead-end navigation-only assertions ("clicking 'View issue detail' as the sole recovery") are gone; every failure path now asserts the surface + Retry + return.
+
+### Verification
+- `npm run typecheck -w packages/web` ✅
+- `npm run test:run -w packages/web` ✅ 4673 / 4673
+- `npm test` (root: server + runner) ✅
+- `IssueChangedFilesPage.recovery.test.tsx` ✅ 22 / 22 (rewritten)
+- `IssueChangedFilesPage.*.test.tsx` (other 5 files) ✅ 54 / 54 (no regression)
+
+### What T-002 will need to thread
+- `RecoverySurface` already accepts `sessionHref?: string`. T-002 only needs to (a) call `useWorkflowRunSessions` (already done in this task — wait, actually the call is in `IssueChangedFilesPage`, not in `RecoverySurface` — so the prop is already plumbed end-to-end; T-002 doesn't need to add it), (b) extend fixture state for session-link-absent scenarios (already done in this task — `state.sessionsData = []`), (c) add additional spec tests for presence/absence (already done in this task). Actually T-002 may end up being largely covered; T-002 should at least verify the session-link integration matches the spec scenarios line by line.
