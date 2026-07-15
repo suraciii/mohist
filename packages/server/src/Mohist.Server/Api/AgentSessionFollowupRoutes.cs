@@ -3,6 +3,8 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.SignalR;
 using Mohist.Server.Project.Services;
 using Mohist.Server.Runner.Services.SignalR;
+using Mohist.Server.Sessions.Domain;
+using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Sessions.Services;
 
 namespace Mohist.Server.Api;
@@ -62,6 +64,7 @@ public static class AgentSessionFollowupRoutes
             string sessionId,
             GenericFollowupRequest body,
             AgentSessionQuerier sessions,
+            IGrainFactory grains,
             IHubContext<RunnerHub> runnerHub,
             RunnerConnectionTracker connections,
             CancellationToken ct) =>
@@ -74,6 +77,18 @@ public static class AgentSessionFollowupRoutes
             var target = await sessions.ResolveGenericFollowupTargetAsync(project.Id, sessionId, ct);
             if (target is null)
                 return ApiResults.NotFound($"Agent session {sessionId} not found");
+
+            try
+            {
+                await grains.GetGrain<IAgentSessionGrain>(sessionId).EnsureRuntimeSessionPresentAsync();
+            }
+            catch (RuntimeSessionMissingException ex)
+            {
+                return ApiResults.Conflict(
+                    ex.Message,
+                    "runtime_session_missing",
+                    new { sessionId = ex.SessionId, hint = "reset" });
+            }
 
             if (!target.IsActive)
                 return ApiResults.Conflict("Session is no longer active", "session_inactive");

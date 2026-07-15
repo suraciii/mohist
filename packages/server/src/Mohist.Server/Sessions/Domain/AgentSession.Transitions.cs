@@ -52,12 +52,13 @@ public static partial class AgentSessionExtensions
                 BoundAt = isNewRuntimeBinding ? now : session.Status.BoundAt ?? now,
                 LastDataAt = now,
                 RuntimeSessionLineage = isNewRuntimeBinding
-                    ? AppendLineageEntry(session.Status.RuntimeSessionLineage, agentSessionId, now)
+                    ? AppendLineageEntry(session.Status.RuntimeSessionLineage, agentSessionId, now,
+                        runtime: session.Runtime.Runtime)
                     : session.Status.RuntimeSessionLineage
             };
             var events = new List<AgentSessionEvent>();
             if (isNewRuntimeBinding)
-                events.Add(new AgentSessionRuntimeBound(agentSessionId, existingAgentSessionId));
+                events.Add(new AgentSessionRuntimeBound(agentSessionId, existingAgentSessionId, session.Runtime.Runtime));
             if (!string.Equals(oldModel, session.Settings.Model, StringComparison.Ordinal))
                 events.Add(new AgentSessionModelChanged(session.Settings.Model));
             return events;
@@ -118,10 +119,16 @@ public static partial class AgentSessionExtensions
             string newAgentSessionId,
             long? contextWindowUsedAfter,
             long? contextWindowSizeAfter,
-            DateTime now)
+            DateTime now,
+            string? runtime = null)
         {
             var oldAgentSessionId = session.Status.AgentRuntimeSessionId;
-            var rebinds = !string.Equals(oldAgentSessionId, newAgentSessionId, StringComparison.Ordinal);
+            var oldRuntime = session.Runtime.Runtime;
+            var nextRuntime = NormalizeRuntime(runtime) ?? oldRuntime;
+            var rebinds = !string.Equals(oldAgentSessionId, newAgentSessionId, StringComparison.Ordinal)
+                || !string.Equals(oldRuntime, nextRuntime, StringComparison.Ordinal);
+            if (rebinds)
+                session.Runtime = session.Runtime with { Runtime = nextRuntime };
             session.Status = session.Status with
             {
                 AgentRuntimeSessionId = newAgentSessionId,
@@ -139,12 +146,14 @@ public static partial class AgentSessionExtensions
                 // still answers "who came before?".
                 RuntimeSessionLineage = rebinds
                     ? AppendLineageEntry(session.Status.RuntimeSessionLineage, newAgentSessionId, now,
-                        seedPrevious: oldAgentSessionId)
+                        seedPrevious: oldAgentSessionId,
+                        seedPreviousRuntime: oldAgentSessionId is null ? null : oldRuntime,
+                        runtime: nextRuntime)
                     : session.Status.RuntimeSessionLineage
             };
             var events = new List<AgentSessionEvent>();
             if (rebinds)
-                events.Add(new AgentSessionRuntimeBound(newAgentSessionId, oldAgentSessionId));
+                events.Add(new AgentSessionRuntimeBound(newAgentSessionId, oldAgentSessionId, session.Runtime.Runtime));
             return events;
         }
 
@@ -275,7 +284,9 @@ public static partial class AgentSessionExtensions
             IReadOnlyList<RuntimeSessionLineageEntry>? lineage,
             string newAgentSessionId,
             DateTime now,
-            string? seedPrevious = null)
+            string? seedPrevious = null,
+            string? seedPreviousRuntime = null,
+            string? runtime = null)
         {
             var entries = lineage is null
                 ? new List<RuntimeSessionLineageEntry>()
@@ -285,11 +296,27 @@ public static partial class AgentSessionExtensions
                 && !string.IsNullOrEmpty(seedPrevious)
                 && !string.Equals(seedPrevious, newAgentSessionId, StringComparison.Ordinal))
             {
-                entries.Add(new RuntimeSessionLineageEntry(seedPrevious, now));
+                entries.Add(new RuntimeSessionLineageEntry(seedPrevious, now, seedPreviousRuntime));
             }
 
-            entries.Add(new RuntimeSessionLineageEntry(newAgentSessionId, now));
+            entries.Add(new RuntimeSessionLineageEntry(newAgentSessionId, now, runtime));
             return entries;
+        }
+
+        private static string? NormalizeRuntime(string? runtime) =>
+            string.IsNullOrWhiteSpace(runtime) ? null : runtime.Trim();
+
+        public bool IsRuntimeSessionMissing(Func<string, bool> isRuntimeRegistered)
+        {
+            ArgumentNullException.ThrowIfNull(isRuntimeRegistered);
+            if (string.IsNullOrWhiteSpace(session.Status.AgentRuntimeSessionId))
+                return true;
+
+            var runtime = session.Runtime.Runtime;
+            if (string.IsNullOrWhiteSpace(runtime))
+                return true;
+
+            return !isRuntimeRegistered(runtime);
         }
 
         /// <summary>

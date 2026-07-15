@@ -10,6 +10,7 @@ public interface IAgentSessionGrain : IGrainWithStringKey
     Task<AgentSessionRecoveryResult> CompactAsync(CompactAgentSessionCommand command);
     Task<AgentSessionRecoveryResult> ResetAsync(ResetAgentSessionCommand command);
     Task<AgentSessionInfo?> GetAsync();
+    Task EnsureRuntimeSessionPresentAsync();
 
     /// <summary>
     /// Test-only hook: deactivates the grain so the next request

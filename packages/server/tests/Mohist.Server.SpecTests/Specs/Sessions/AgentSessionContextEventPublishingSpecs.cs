@@ -96,6 +96,8 @@ public class AgentSessionContextEventPublishingSpecs
         var sessionId = Guid.NewGuid().ToString("N");
         var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
         await grain.OpenAsync(new OpenAgentSessionCommand(_runnerId, "opencode", WorkDir: "/work"));
+        await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand("runtime-before-compact"));
+        _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(6));
 
         _fixture.RecordingTranscriptPublisher.Clear();
 
@@ -120,6 +122,8 @@ public class AgentSessionContextEventPublishingSpecs
         var sessionId = Guid.NewGuid().ToString("N");
         var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
         await grain.OpenAsync(new OpenAgentSessionCommand(_runnerId, "opencode", WorkDir: "/work"));
+        await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand("runtime-before-reset"));
+        _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(6));
 
         _fixture.RecordingTranscriptPublisher.Clear();
 

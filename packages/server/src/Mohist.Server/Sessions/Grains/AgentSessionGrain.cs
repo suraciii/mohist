@@ -12,6 +12,7 @@ namespace Mohist.Server.Sessions.Grains;
 public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
 {
     private static readonly TimeSpan PersistTimerDueTime = TimeSpan.FromMilliseconds(200);
+    private const string OpenCodeRuntime = "opencode";
 
     private readonly IAgentSessionStore _stateStore;
     private readonly IAgentSessionTranscriptStore _transcriptStore;
@@ -104,7 +105,8 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             command.RunnerId ?? string.Empty,
             command.WorkDir,
             command.Metadata,
-            Now());
+            Now(),
+            runtime: command.AgentRuntime);
         session.Settings = new AgentSessionSettings(command.Model);
         return session;
     }
@@ -114,7 +116,13 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         var session = await GetRequiredAsync();
 
         var now = Now();
-        var events = session.AttachPhysicalSession(command.AgentSessionId, command.Model, command.WorkDir, command.ChangeDir, command.ProcessPid, now);
+        var events = session.AttachPhysicalSession(
+            command.AgentSessionId,
+            command.Model,
+            command.WorkDir,
+            command.ChangeDir,
+            command.ProcessPid,
+            now);
         if (events.Count == 0)
         {
             await _stateStore.SaveAsync(SessionId, session);
@@ -129,6 +137,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
     public async Task<AgentSessionRecoveryResult> CompactAsync(CompactAgentSessionCommand command)
     {
         var session = await GetRequiredAsync();
+        EnsureRuntimeSessionPresent(session);
         EnsureSessionIdleForRecovery(session);
 
         var now = Now();
@@ -158,6 +167,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
     public async Task<AgentSessionRecoveryResult> ResetAsync(ResetAgentSessionCommand command)
     {
         var session = await GetRequiredAsync();
+        EnsureRuntimeSessionPresent(session);
         EnsureSessionIdleForRecovery(session);
 
         var now = Now();
@@ -179,6 +189,15 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
 
         return BuildRecoveryResult(session, usedBefore, size, "reset", wasCompacted: false);
     }
+
+    private static void EnsureRuntimeSessionPresent(AgentSession session)
+    {
+        if (!session.IsRuntimeSessionMissing(IsRuntimeRegistered)) return;
+        throw new RuntimeSessionMissingException(session.Id, session.Status.AgentRuntimeSessionId, session.Runtime.Runtime);
+    }
+
+    private static bool IsRuntimeRegistered(string runtime) =>
+        string.Equals(runtime, OpenCodeRuntime, StringComparison.OrdinalIgnoreCase);
 
     private void EnsureSessionIdleForRecovery(AgentSession session)
     {
@@ -690,6 +709,12 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         if (_sessionReloadRequired)
             throw new InvalidOperationException($"Agent session {SessionId} must reload after a failed event-aware save");
         return _session is null ? null : await ToInfoAsync(_session);
+    }
+
+    public async Task EnsureRuntimeSessionPresentAsync()
+    {
+        var session = await GetRequiredAsync();
+        EnsureRuntimeSessionPresent(session);
     }
 
     public Task DeactivateForTestAsync()

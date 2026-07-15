@@ -15,18 +15,22 @@ public sealed class AgentSession
         string runnerId,
         string? workDir,
         AgentSessionMetadata? metadata = null,
-        DateTime? now = null)
+        DateTime? now = null,
+        string? runtime = null)
     {
         var createdAt = now ?? DateTime.UtcNow;
         return new AgentSession
         {
             Id = id,
             Metadata = metadata ?? new AgentSessionMetadata(),
-            Runtime = new AgentSessionRuntime(runnerId, workDir),
+            Runtime = new AgentSessionRuntime(runnerId, workDir, NormalizeRuntime(runtime)),
             Settings = new AgentSessionSettings(),
             Status = AgentSessionStatusSnapshot.Created(createdAt)
         };
     }
+
+    private static string? NormalizeRuntime(string? runtime) =>
+        string.IsNullOrWhiteSpace(runtime) ? null : runtime.Trim();
 
     public void ValidateState()
     {
@@ -36,6 +40,34 @@ public sealed class AgentSession
             throw new InvalidOperationException("AgentSession state requires a Runtime.");
         if (Status.CreatedAt == default)
             throw new InvalidOperationException("AgentSession state requires CreatedAt to be set.");
+    }
+}
+
+[Serializable]
+[GenerateSerializer]
+public sealed class RuntimeSessionMissingException : InvalidOperationException
+{
+    public RuntimeSessionMissingException(string sessionId, string? runtimeSessionId, string? runtime)
+        : base(BuildMessage(sessionId, runtimeSessionId, runtime))
+    {
+        SessionId = sessionId;
+        RuntimeSessionId = runtimeSessionId;
+        Runtime = runtime;
+    }
+
+    [Id(0)]
+    public string SessionId { get; }
+    [Id(1)]
+    public string? RuntimeSessionId { get; }
+    [Id(2)]
+    public string? Runtime { get; }
+
+    private static string BuildMessage(string sessionId, string? runtimeSessionId, string? runtime)
+    {
+        var details = string.IsNullOrEmpty(runtimeSessionId)
+            ? "no runtime session is bound"
+            : $"runtime session {runtimeSessionId} uses unavailable runtime '{runtime ?? "unknown"}'";
+        return $"Runtime session missing for AgentSession {sessionId}: {details}. Reset the session to establish a new binding.";
     }
 }
 
@@ -79,7 +111,8 @@ public sealed record AgentSessionMetadata(
 
 public sealed record AgentSessionRuntime(
     string RunnerId,
-    string? WorkDir);
+    string? WorkDir,
+    string? Runtime = null);
 
 public sealed record AgentSessionSettings(string? Model = null);
 
@@ -95,11 +128,14 @@ public sealed record AgentSessionSettings(string? Model = null);
 /// holds all such entries — predecessor/successor are derived by
 /// position. Entries are append-only on rebind; the first entry
 /// records the original runtime session bound by AttachPhysicalSession.
+/// <see cref="Runtime"/> carries the execution-backend name that owned
+/// the binding and remains null on legacy entries.
 /// </summary>
 [GenerateSerializer]
 public sealed record RuntimeSessionLineageEntry(
     [property: Id(0)] string AgentRuntimeSessionId,
-    [property: Id(1)] DateTime BoundAt);
+    [property: Id(1)] DateTime BoundAt,
+    [property: Id(2)] string? Runtime = null);
 
 public sealed record AgentSessionStatusSnapshot(
     string? AgentRuntimeSessionId = null,

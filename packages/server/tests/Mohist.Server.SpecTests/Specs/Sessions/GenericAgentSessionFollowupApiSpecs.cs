@@ -230,18 +230,16 @@ public class GenericAgentSessionFollowupApiSpecs : IAsyncLifetime
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
-    public async Task GenericFollowupEndpoint_InactiveSessionBeforeRunnerOpens_ReturnsConflict()
+    public async Task GenericFollowupEndpoint_MissingBindingBeforeRunnerOpens_ReturnsRuntimeSessionMissing()
     {
-        // Mint the session but never call the runner's open endpoint: the
-        // session stays "inactive" (no LastDataAt yet), and the runner
-        // never bound itself via the open call.
         var (project, _, sessionId, _) = await LaunchGenericSessionAsync("gen-followup-inactive");
 
         using var response = await PostGenericFollowupAsync(project.Id, sessionId, new { text = "ping" });
 
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
         using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        Assert.Equal("session_inactive", doc.RootElement.GetProperty("code").GetString());
+        Assert.Equal("runtime_session_missing", doc.RootElement.GetProperty("code").GetString());
+        Assert.Equal(sessionId, doc.RootElement.GetProperty("details").GetProperty("sessionId").GetString());
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]

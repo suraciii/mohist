@@ -1,6 +1,6 @@
 using System.Net;
-using System.Net.Http.Json;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Infrastructure.Data.Db;
@@ -33,7 +33,7 @@ public class AgentSessionRecoveryApiSpecs
     [Fact]
     public async Task CompactEndpoint_InactiveSession_ReturnsUpdatedMetrics()
     {
-        var (project, issue, work, currentSession) = await CreateAndStartSessionAsync("compact-inactive", sessionName: "plan");
+        var (project, issue, work, currentSession) = await CreateAndStartSessionAsync("compact-inactive", sessionName: "plan", attachIdle: true);
 
         using var response = await _client.PostAsync($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/plan/compact", content: null);
 
@@ -79,7 +79,7 @@ public class AgentSessionRecoveryApiSpecs
     [Fact]
     public async Task ResetEndpoint_InactiveSession_ReturnsClearedMetrics()
     {
-        var (project, issue, _, currentSession) = await CreateAndStartSessionAsync("reset-inactive", sessionName: "build");
+        var (project, issue, _, currentSession) = await CreateAndStartSessionAsync("reset-inactive", sessionName: "build", attachIdle: true);
 
         using var response = await _client.PostAsync($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/build/reset", content: null);
 
@@ -130,7 +130,7 @@ public class AgentSessionRecoveryApiSpecs
     [Fact]
     public async Task CompactEndpoint_PersistsCompactionEventAndUpdatesCoderSessionRecord()
     {
-        var (project, issue, _, currentSession) = await CreateAndStartSessionAsync("compact-persist", sessionName: "plan");
+        var (project, issue, _, currentSession) = await CreateAndStartSessionAsync("compact-persist", sessionName: "plan", attachIdle: true);
 
         using var response = await _client.PostAsync($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/plan/compact", content: null);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -159,7 +159,7 @@ public class AgentSessionRecoveryApiSpecs
     [Fact]
     public async Task SessionMetadataEndpoint_AfterCompact_ExposesContextUsagePercent()
     {
-        var (project, issue, _, _) = await CreateAndStartSessionAsync("compact-dto", sessionName: "plan");
+        var (project, issue, _, _) = await CreateAndStartSessionAsync("compact-dto", sessionName: "plan", attachIdle: true);
 
         using var compactResponse = await _client.PostAsync($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/plan/compact", content: null);
         Assert.Equal(HttpStatusCode.OK, compactResponse.StatusCode);
@@ -175,7 +175,7 @@ public class AgentSessionRecoveryApiSpecs
     [Fact]
     public async Task CompactEndpoint_AfterClosedSession_EmitsContextExhaustionCategoryOnMetadata()
     {
-        var (project, issue, _, currentSession) = await CreateAndStartSessionAsync("compact-after-close", sessionName: "plan");
+        var (project, issue, _, currentSession) = await CreateAndStartSessionAsync("compact-after-close", sessionName: "plan", attachIdle: true);
 
         using var compactResponse = await _client.PostAsync($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/plan/compact", content: null);
         Assert.Equal(HttpStatusCode.OK, compactResponse.StatusCode);
@@ -192,16 +192,69 @@ public class AgentSessionRecoveryApiSpecs
     [Fact]
     public async Task AgentSessionGrain_Compact_RecoversAfterRuntimeEventsMakeSessionActive()
     {
-        var (project, issue, _, currentSession) = await CreateAndStartSessionAsync("compact-deactivate", sessionName: "plan");
+        var (project, issue, _, currentSession) = await CreateAndStartSessionAsync("compact-deactivate", sessionName: "plan", attachIdle: true);
 
         using var response = await _client.PostAsync($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/plan/compact", content: null);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Theory]
+    [InlineData("compact")]
+    [InlineData("reset")]
+    public async Task RecoveryEndpoint_LegacyBindingWithoutRuntime_ReturnsRuntimeSessionMissing(string operation)
+    {
+        var (project, issue, _, currentSession) = await CreateAndStartSessionAsync(
+            $"{operation}-legacy-missing",
+            sessionName: "plan",
+            attachIdle: true);
+        var transcriptPath = $"/api/projects/{project.Id}/issues/{issue.Number}/sessions/plan/transcript";
+        var transcriptBefore = await _client.GetStringAsync(transcriptPath);
+
+        await RemovePersistedRuntimeAsync(currentSession.Id);
+
+        using var response = await _client.PostAsync(
+            $"/api/projects/{project.Id}/issues/{issue.Number}/sessions/plan/{operation}",
+            content: null);
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal("runtime_session_missing", doc.RootElement.GetProperty("code").GetString());
+        var details = doc.RootElement.GetProperty("details");
+        Assert.Equal(currentSession.Id, details.GetProperty("sessionId").GetString());
+        Assert.Equal("reset", details.GetProperty("hint").GetString());
+        Assert.Contains(currentSession.Id, doc.RootElement.GetProperty("error").GetString(), StringComparison.Ordinal);
+        Assert.Contains("Reset", doc.RootElement.GetProperty("error").GetString(), StringComparison.Ordinal);
+
+        using var metadataResponse = await _client.GetAsync(
+            $"/api/projects/{project.Id}/issues/{issue.Number}/sessions/plan");
+        Assert.Equal(HttpStatusCode.OK, metadataResponse.StatusCode);
+        Assert.Equal(transcriptBefore, await _client.GetStringAsync(transcriptPath));
+    }
+
+    private async Task RemovePersistedRuntimeAsync(string sessionId)
+    {
+        await using var db = await _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>().CreateDbContextAsync();
+        var row = await db.AgentSessions.SingleAsync(r => r.Id == sessionId);
+        var state = JsonNode.Parse(row.State)?.AsObject()
+            ?? throw new InvalidOperationException($"Session {sessionId} state could not be parsed.");
+        var runtime = state["runtime"]?.AsObject()
+            ?? throw new InvalidOperationException($"Session {sessionId} state has no runtime binding.");
+        runtime.Remove("runtime");
+        row.State = state.ToJsonString();
+        await db.SaveChangesAsync();
+
+        var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
+        await grain.DeactivateForTestAsync();
+        _ = await grain.GetAsync();
+    }
+
     private async Task<(ProjectDto Project, IssueDto Issue, WorkDispatch Work, CreatedSession Session)> CreateAndStartSessionAsync(
         string name,
         string sessionName = "plan",
-        bool attachAndStart = false)
+        bool attachAndStart = false,
+        bool attachIdle = false)
     {
         var (project, issue) = await CreateProjectAndIssueAsync(name);
         var work = new WorkDispatch(
@@ -221,6 +274,11 @@ public class AgentSessionRecoveryApiSpecs
         if (attachAndStart)
         {
             await _client.PostOkAsync(RunnerAgentSessionAttachPath(currentSession), new { agentSessionId = currentSession.Id, workDir = $"/workspaces/{project.Id}", processPid = 1234 });
+        }
+        else if (attachIdle)
+        {
+            await _client.PostOkAsync(RunnerAgentSessionAttachPath(currentSession), new { agentSessionId = currentSession.Id, workDir = project.Path, processPid = 1234 });
+            _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(6));
         }
 
         return (project, issue, work, currentSession);

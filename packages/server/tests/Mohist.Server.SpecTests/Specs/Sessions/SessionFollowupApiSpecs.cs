@@ -120,15 +120,23 @@ public class SessionFollowupApiSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
-    public async Task FollowupEndpoint_InactiveSession_ReturnsConflict()
+    public async Task FollowupEndpoint_MissingRuntimeBinding_ReturnsRuntimeSessionMissing()
     {
-        var (project, issue, _, _) = await CreateAndStartSessionAsync("followup-inactive", sessionName: "plan");
+        var (project, issue, _, session) = await CreateAndStartSessionAsync("followup-missing-runtime", sessionName: "plan");
+        var runnerHub = _fixture.Services.GetRequiredService<IHubContext<RunnerHub>>() as RecordingRunnerHubContext
+            ?? throw new InvalidOperationException("Recording runner hub context was not registered.");
+        runnerHub.Clear();
 
         using var response = await PostFollowupAsync(project.Id, issue.Number, "plan", new { text = "ping" });
 
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
         using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        Assert.Equal("session_inactive", doc.RootElement.GetProperty("code").GetString());
+        Assert.Equal("runtime_session_missing", doc.RootElement.GetProperty("code").GetString());
+        Assert.Equal(session.Id, doc.RootElement.GetProperty("details").GetProperty("sessionId").GetString());
+        Assert.Equal("reset", doc.RootElement.GetProperty("details").GetProperty("hint").GetString());
+        Assert.Contains(session.Id, doc.RootElement.GetProperty("error").GetString(), StringComparison.Ordinal);
+        Assert.Contains("Reset", doc.RootElement.GetProperty("error").GetString(), StringComparison.Ordinal);
+        Assert.Empty(runnerHub.SentMessages);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]

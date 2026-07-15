@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.SignalR;
 using Mohist.Server.Project.Services;
 using Mohist.Server.Runner.Services.SignalR;
+using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Sessions.Services;
 
@@ -64,6 +65,13 @@ public static partial class IssueRoutes
                 var result = await grain.CompactAsync(new CompactAgentSessionCommand());
                 return ApiResults.Ok(result);
             }
+            catch (RuntimeSessionMissingException ex)
+            {
+                return ApiResults.Conflict(
+                    ex.Message,
+                    "runtime_session_missing",
+                    new { sessionId = ex.SessionId, hint = "reset" });
+            }
             catch (InvalidOperationException ex) when (ex.Message.Contains("currently active", StringComparison.OrdinalIgnoreCase))
             {
                 return ApiResults.Conflict("Cannot compact while session is active", "session_active", new { sessionId });
@@ -89,6 +97,13 @@ public static partial class IssueRoutes
                 var result = await grain.ResetAsync(new ResetAgentSessionCommand());
                 return ApiResults.Ok(result);
             }
+            catch (RuntimeSessionMissingException ex)
+            {
+                return ApiResults.Conflict(
+                    ex.Message,
+                    "runtime_session_missing",
+                    new { sessionId = ex.SessionId, hint = "reset" });
+            }
             catch (InvalidOperationException ex) when (ex.Message.Contains("currently active", StringComparison.OrdinalIgnoreCase))
             {
                 return ApiResults.Conflict("Cannot reset while session is active", "session_active", new { sessionId });
@@ -102,6 +117,7 @@ public static partial class IssueRoutes
             string name,
             FollowupRequest body,
             AgentSessionQuerier sessions,
+            IGrainFactory grains,
             IHubContext<RunnerHub> runnerHub,
             RunnerConnectionTracker connections) =>
         {
@@ -110,6 +126,22 @@ public static partial class IssueRoutes
                 return ApiResults.BadRequest("text is required", "followup_text_missing");
 
             var project = GetRequiredProject(ctx);
+            var sessionId = await sessions.ResolveIssueSessionIdAsync(project.Id, number, name, ctx.RequestAborted);
+            if (sessionId is null)
+                return ApiResults.NotFound($"Session {name} not found");
+
+            try
+            {
+                await grains.GetGrain<IAgentSessionGrain>(sessionId).EnsureRuntimeSessionPresentAsync();
+            }
+            catch (RuntimeSessionMissingException ex)
+            {
+                return ApiResults.Conflict(
+                    ex.Message,
+                    "runtime_session_missing",
+                    new { sessionId = ex.SessionId, hint = "reset" });
+            }
+
             var target = await sessions.ResolveFollowupTargetAsync(project.Id, number, name, ctx.RequestAborted);
             if (target is null)
                 return ApiResults.NotFound($"Session {name} not found");

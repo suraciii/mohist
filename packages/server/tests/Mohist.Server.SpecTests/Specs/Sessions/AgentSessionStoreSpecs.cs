@@ -44,6 +44,35 @@ public class AgentSessionStoreSpecs : IAsyncLifetime
     }
 
     [Fact]
+    public async Task SaveAndLoad_PreservesCurrentRuntimeBindingAndLineage()
+    {
+        var createdAt = new DateTime(2026, 7, 15, 0, 0, 0, DateTimeKind.Utc);
+        var session = AgentSession.Create(
+            $"session-{Guid.NewGuid():N}",
+            "runner-1",
+            "/work",
+            now: createdAt,
+            runtime: "opencode");
+        session.AttachPhysicalSession(
+            "runtime-session-1",
+            model: null,
+            workDir: "/work",
+            changeDir: null,
+            processPid: null,
+            now: createdAt.AddMinutes(1));
+
+        await _store.SaveAsync(session.Id, session);
+        var rehydrated = await _store.LoadAsync(session.Id);
+
+        Assert.NotNull(rehydrated);
+        Assert.Equal("opencode", rehydrated!.Runtime.Runtime);
+        Assert.Equal("runtime-session-1", rehydrated.Status.AgentRuntimeSessionId);
+        Assert.Equal("runner-1", rehydrated.Runtime.RunnerId);
+        Assert.Equal("/work", rehydrated.Runtime.WorkDir);
+        Assert.Equal("opencode", Assert.Single(rehydrated.Status.RuntimeSessionLineage!).Runtime);
+    }
+
+    [Fact]
     public async Task SavePartsAsync_RetrySameCorrelationKey_UpdatesExistingPart()
     {
         var sessionId = $"transcript-{Guid.NewGuid():N}";
