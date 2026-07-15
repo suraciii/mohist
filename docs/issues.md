@@ -31,7 +31,18 @@ mo issue create "Implement search" --workflow-profile mohist/local
 
 # 指定模型
 mo issue create "Complex refactor" --model claude-sonnet-4
+
+# 指定目标仓库（多仓库 project；不指定落 default 仓库）
+mo issue create "server: 加订阅 API" --repo server
+
+# 拆为某个 issue 的子 issue
+mo issue create "web: 订阅管理页" --parent 42 --repo web
 ```
+
+### 目标仓库与子 issue
+
+- 每个 issue 有一个**目标仓库**，workflow 全程（分支、diff、Integrate）都发生在那里；启动后不可更改。详见 [仓库](repositories.md)。
+- 一份需求横跨多个仓库时，拆成子 issue：父 issue 追踪整体，子 issue 各自走 workflow。详见 [复合 Issue 与子 Issue](sub-issues.md)。
 
 ### Issue body 怎么写
 
@@ -234,8 +245,8 @@ mo issue update 42 --label kind=bug --label area=web
 ## CLI 完整命令一览
 
 ```
-mo issue create <title> [options]
-mo issue list [options]
+mo issue create <title> [--repo <仓库>] [--parent <编号>] [options]
+mo issue list [--repo <仓库>] [--parent <编号>] [options]
 mo issue show <number>
 mo issue update <number> [options]
 mo issue start <number>
