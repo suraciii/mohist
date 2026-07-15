@@ -1,0 +1,53 @@
+{
+  "project": "mohist-local",
+  "description": "Replace the dead-end Files/Diff failure states with a single recoverable error surface that preserves issue context and offers retry, return-to-issue, and related-session-link actions. Web-only change.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Converge Files/Diff failure paths onto a unified recoverable error surface",
+      "spec": "specs/changed-files-recovery/spec.md#unified-recoverable-error-surface-for-both-failure-paths",
+      "description": "Restructure the IssueChangedFilesPage state machine to derive a single RecoveryCause (transport | unavailable) in precedence order, replacing the separate ErrorState and DiffSummaryCard unavailable banner with one page-local RecoverySurface component. The surface preserves issue context (number always; title + health badge when the issue loaded), explains the failure in product language via a ChangesUnavailableReason message map (including the currently-unhandled git_error), and offers Retry plus return-to-issue. Retry re-fetches issue+diff+commits together via refetch functions newly exposed from useChangedFilesData (the hook currently drops them). Migrate the legacy red-50/orange-50/blue-600 error classes to danger-subtle/warning-subtle tokens. Update the recovery spec tests and fixture to assert the new surface. This task delivers spec requirements: unified surface, issue context preserved, product-language explanation, retry, and return-to-issue.",
+      "acceptanceCriteria": [
+        "A transport/query error on any of useIssue/useIssueDiff/useIssueCommits (isError) renders the RecoverySurface, not the legacy bare red ErrorState card.",
+        "Each server-reported unavailability reason — runner_unavailable, workspace_removed, branch_missing, git_error, not_started — renders the same RecoverySurface with identical recovery actions; no bare orange availability banner remains.",
+        "RecoverySurface always shows the issue number (from the route param); the issue title and health badge render when the issue query succeeded, and are omitted honestly when it failed.",
+        "Each reason maps to its product-language sentence (e.g. runner_unavailable -> 'The file changes could not be loaded. The runner may be disconnected.'; git_error -> '...due to a git error.'; not_started -> 'There are no changes yet.'). Raw reason identifiers and HTTP status codes are never the primary guidance.",
+        "The unavailable branch is gated on !isLoading && diffData present, so RecoverySurface does not flash during initial load.",
+        "A single Retry action invokes refetchIssue + refetchDiff + refetchCommits; on success the evidence view renders; on persistent failure RecoverySurface re-renders with all actions still available.",
+        "A return-to-issue action navigates to /issues/<number> from every failure path.",
+        "Legacy red-50/red-200/red-700/orange-50/blue-600 classes on the error/unavailable surfaces are replaced with danger-subtle/danger-border/danger-foreground and warning-subtle/warning-border/warning-foreground tokens.",
+        "useChangedFilesData exposes refetchIssue/refetchDiff/refetchCommits and the resolved unavailability reason/message so the cause and text can be derived.",
+        "`npm run typecheck -w packages/web` passes.",
+        "`npm run test:run -w packages/web` passes; IssueChangedFilesPage.recovery.test.tsx is updated to assert the converged surface, Retry refetch, context preservation, and return-to-issue; the dead-end navigation-only assertions (e.g. clicking 'View issue detail' as the sole recovery) are replaced."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/web/src/pages/issue-changed-files/ui/IssueChangedFilesPage.tsx with the new RecoverySurface component, restructured precedence-ordered state machine, and useChangedFilesData exposing refetch + reason; updated IssueChangedFilesPage.fixture.tsx and IssueChangedFilesPage.recovery.test.tsx",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Follow design Decisions 1 (single RecoverySurface, page-local), 2 (precedence: invalid -> transport -> unavailable-gated-on-not-loading -> null), 3 (retry re-fetches all three sources, not per-source — the view is all-or-nothing unlike Activity), 5 (message map), 6 (compact context header, not full PageHeader). getDiffAvailability currently collapses git_error into a generic fallback; the message map must handle it explicitly. useChangedFilesData returns hasQueryError but no commitsError boolean today — reason is derived from diffData/commitsData reason fields, not from the error booleans."
+    },
+    {
+      "id": "T-002",
+      "title": "Add related-session link to the recovery surface",
+      "spec": "specs/changed-files-recovery/spec.md#related-session-link-when-a-session-is-known",
+      "description": "Add workflow-run session awareness to IssueChangedFilesPage by calling useWorkflowRunSessions(issue.workflowRunId) exactly as IssueDetailPage does, selecting the first session whose status is active/running/probing, and rendering a link on RecoverySurface to /issues/<number>/workflow/sessions/<encodeURIComponent(sessionName)> when one exists. The link is absent when there is no workflowRunId or no resolved session, while Retry and return-to-issue remain available. Register a session-route stub in the fixture harness and add spec tests for presence and absence. This delivers the net-new session-awareness requirement (the page currently has no session knowledge at all).",
+      "acceptanceCriteria": [
+        "When evidence cannot be loaded and the issue has a resolved session with status active/running/probing, RecoverySurface renders a link whose href targets /issues/<number>/workflow/sessions/<encodeURIComponent(sessionName)>.",
+        "When the issue has no workflowRunId (e.g. the issue query itself failed) or no resolved active/running/probing session, no session link renders, and Retry and return-to-issue are still present.",
+        "The useWorkflowRunSessions query is enabled only when workflowRunId is present, so it does not fire on an issue-load failure; it reuses the hook's existing staleTime: 30s.",
+        "The fixture harness registers a stub route for /issues/:number/workflow/sessions/:sessionName so the session link can be asserted.",
+        "`npm run typecheck -w packages/web` passes.",
+        "`npm run test:run -w packages/web` passes; spec tests assert both the session-link-present scenario (a known workflow-run session exists) and the session-link-absent scenario (no workflowRunId / no sessions), with Retry and return-to-issue available in both."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/web/src/pages/issue-changed-files/ui/IssueChangedFilesPage.tsx with useWorkflowRunSessions integration and the session link rendered inside RecoverySurface; IssueChangedFilesPage.fixture.tsx with the session-route stub; IssueChangedFilesPage.recovery.test.tsx extended with session-link presence/absence scenarios",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Reuse useWorkflowRunSessions from entities/coder-session (already used by IssueDetailPage). Session selection mirrors IssueDetailPage.tsx:109-115 (find first active|running|probing). Link path template mirrors IssueDetailPage.tsx:170-176 and the route registered at app/App.tsx:68. Thread session data into RecoverySurface via an optional sessionHref prop so T-001's component signature needs no rework."
+    }
+  ]
+}
