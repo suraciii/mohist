@@ -75,7 +75,7 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
         await ClearStoppedRunStaleApprovalGateAsync(ct);
 
         _cachedAssignedWorkerId = _run?.Assignment?.WorkerId;
-        if (_run?.DispatchActivated == false)
+        if (_run is { DispatchActivated: false, Status: WorkflowRunStatus.Created })
         {
             await ActivateAsync();
             if (_run.DispatchActivated == false && _run.StartedAt is not null)

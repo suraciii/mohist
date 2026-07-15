@@ -71,7 +71,6 @@ public sealed class DispatchService : IScopedService
             return new RunnerPollResponse([]);
 
         await _pollObserver.AfterRunnerInfoAsync(runnerId);
-        await ActivateBoundGatedStartsAsync(info.ProjectId, ct);
 
         var dispatches = new List<WorkDispatch>();
         var reportedWorkKeys = ReportedWorkKeys(req);
@@ -88,6 +87,7 @@ public sealed class DispatchService : IScopedService
         if (spare <= 0)
             return new RunnerPollResponse(dispatches);
 
+        await ActivateBoundGatedStartsAsync(info.ProjectId, ct);
         await AddAssignablePendingDispatchesAsync(runner, info.ProjectId, runnerId, workerId, spare, dispatches, ct);
 
         return new RunnerPollResponse(dispatches);

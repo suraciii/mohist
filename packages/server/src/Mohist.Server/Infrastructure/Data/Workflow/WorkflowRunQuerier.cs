@@ -91,7 +91,10 @@ public sealed class WorkflowRunQuerier
             .ToListAsync(ct);
     }
 
-    public async Task<IReadOnlyList<string>> FindGatedStartsAsync(string? projectId = null, CancellationToken ct = default)
+    public async Task<IReadOnlyList<string>> FindGatedStartsAsync(
+        string? projectId = null,
+        int limit = 4,
+        CancellationToken ct = default)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var query = db.WorkflowRuns.AsNoTracking()
@@ -101,7 +104,13 @@ public sealed class WorkflowRunQuerier
         if (!string.IsNullOrWhiteSpace(projectId))
             query = query.Where(row => row.MetadataProjectId == projectId);
 
-        var candidates = await query.OrderBy(row => row.WorkflowRunId).ToListAsync(ct);
+        if (limit <= 0)
+            return [];
+
+        var candidates = await query
+            .OrderBy(row => row.WorkflowRunId)
+            .Take(limit * 4)
+            .ToListAsync(ct);
         var gated = new List<string>();
         foreach (var candidate in candidates)
         {
@@ -113,6 +122,9 @@ public sealed class WorkflowRunQuerier
             catch (Exception)
             {
             }
+
+            if (gated.Count == limit)
+                break;
         }
         return gated;
     }

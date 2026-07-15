@@ -10,6 +10,7 @@ using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Epic;
 using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Infrastructure.Data.Issue;
+using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.SpecTests.Support;
@@ -248,6 +249,27 @@ public class EpicReopenSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
+    public async Task ReopenAsync_RestagesIssueAndWorkflowToItsReclaimedActiveMembership()
+    {
+        var database = CreateDatabase();
+        await SeedEpicAsync(database, epicId: "epic_reopened", status: "closed", number: 1);
+        await SeedEpicAsync(database, epicId: "epic_retained", status: "done", number: 2);
+        await SeedIssueAsync(database, issueId: "issue_1", issueNumber: 1, workflowRunId: "workflow_1", epicId: "epic_retained");
+        await SeedWorkflowAsync(database, "workflow_1", "epic_retained");
+        await SeedLinkAsync(database, "issue_1", 1, epicId: "epic_reopened");
+        await SeedLinkAsync(database, "issue_1", 1, epicId: "epic_retained");
+
+        var grain = CreateGrain(database.Factory, $"{ProjectId}:epic_reopened");
+        await grain.ReopenAsync();
+
+        await using var verify = database.CreateDbContext();
+        Assert.Equal("epic_reopened", (await verify.Issues.SingleAsync(row => row.IssueId == "issue_1")).EpicId);
+        Assert.Equal("epic_reopened", (await verify.WorkflowRuns.SingleAsync(row => row.WorkflowRunId == "workflow_1")).EpicId);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
     public async Task ReopenAsync_RecordsEpicReopenedAndEpicStatusChangedEvents()
     {
         var database = CreateDatabase();
@@ -344,7 +366,9 @@ public class EpicReopenSpecs
         TestDatabase database,
         string projectId = ProjectId,
         string issueId = "issue_1",
-        int issueNumber = 1)
+        int issueNumber = 1,
+        string? workflowRunId = null,
+        string? epicId = null)
     {
         var issue = new Mohist.Server.Issue.Domain.Issue
         {
@@ -355,6 +379,7 @@ public class EpicReopenSpecs
             Status = IssueStatus.Backlog,
             Priority = "p2",
             IsDraft = false,
+            WorkflowRunId = workflowRunId,
         };
         var json = IssueStore.Serialize(issue);
         await using var db = database.CreateDbContext();
@@ -364,6 +389,19 @@ public class EpicReopenSpecs
             ProjectId = projectId,
             Number = issueNumber,
             State = json,
+            EpicId = epicId,
+        });
+        await db.SaveChangesAsync();
+    }
+
+    private static async Task SeedWorkflowAsync(TestDatabase database, string workflowRunId, string? epicId)
+    {
+        await using var db = database.CreateDbContext();
+        db.WorkflowRuns.Add(new WorkflowRunRow
+        {
+            WorkflowRunId = workflowRunId,
+            State = "{}",
+            EpicId = epicId,
         });
         await db.SaveChangesAsync();
     }

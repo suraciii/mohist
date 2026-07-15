@@ -716,6 +716,11 @@ public class EpicGrain : Grain, IEpicGrain
             await ReleaseActiveMembershipsAsync(db, projectId, epicId);
         var pending = DrainPendingEvents(domain);
         await db.SaveChangesAsync();
+        if (row.Status is EpicStatusName.Done or EpicStatusName.Closed)
+        {
+            await RestageIssueLineageSnapshotsAsync(db, projectId, links.Select(link => link.IssueId));
+            await db.SaveChangesAsync();
+        }
         await PersistEpicEventsAsync(domain, pending, now);
         return ToDto(row);
     }
@@ -763,6 +768,8 @@ public class EpicGrain : Grain, IEpicGrain
         }
 
         var pending = DrainPendingEvents(domain);
+        await db.SaveChangesAsync();
+        await RestageIssueLineageSnapshotsAsync(db, projectId, links.Select(link => link.IssueId));
         await db.SaveChangesAsync();
         await PersistEpicEventsAsync(domain, pending, now);
         return ToDto(row);
@@ -860,6 +867,8 @@ public class EpicGrain : Grain, IEpicGrain
             MapToRow(domain, row, now);
             await ReleaseActiveMembershipsAsync(db, projectId, epicId);
             var pending = DrainPendingEvents(domain);
+            await db.SaveChangesAsync();
+            await RestageIssueLineageSnapshotsAsync(db, projectId, links.Select(link => link.IssueId));
             await db.SaveChangesAsync();
             await PersistEpicEventsAsync(domain, pending, now);
             return ToDto(row);
@@ -973,6 +982,8 @@ public class EpicGrain : Grain, IEpicGrain
         MapToRow(domain, row, now);
         await ReleaseActiveMembershipsAsync(db, projectId, epicId);
         var pending = DrainPendingEvents(domain);
+        await db.SaveChangesAsync();
+        await RestageIssueLineageSnapshotsAsync(db, projectId, links.Select(link => link.IssueId));
         await db.SaveChangesAsync();
         await PersistEpicEventsAsync(domain, pending, now);
         return ToDto(row);
@@ -1267,6 +1278,18 @@ public class EpicGrain : Grain, IEpicGrain
     {
         var workflowRunId = await IssueStore.StageEpicAffiliationAsync(db, issueId, epicId);
         await WorkflowRunStore.StageEpicAffiliationAsync(db, workflowRunId, epicId);
+    }
+
+    private static async Task RestageIssueLineageSnapshotsAsync(
+        MohistDbContext db,
+        string projectId,
+        IEnumerable<string> issueIds)
+    {
+        foreach (var issueId in issueIds.Distinct(StringComparer.Ordinal))
+        {
+            var epicId = await EpicIssueAffiliationResolver.ResolveAsync(db, projectId, issueId);
+            await StageIssueLineageSnapshotAsync(db, issueId, epicId);
+        }
     }
 
     /// <summary>
