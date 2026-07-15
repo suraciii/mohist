@@ -131,6 +131,136 @@ public class AgentSessionRecoveryApiSpecs
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Theory]
+    [InlineData("compact", true)]
+    [InlineData("reset", false)]
+    public async Task RecoveryEndpoints_BothSourcesShareCanonicalRouting(
+        string operation,
+        bool wasCompacted)
+    {
+        var (project, issue, _, workflowSession) = await CreateAndStartSessionAsync(
+            $"{operation}-source-parity",
+            sessionName: "plan",
+            attachIdle: true);
+        var agentSession = await CreateAgentLaunchSessionAsync(
+            project,
+            $"{operation}-source-parity",
+            attach: true,
+            idle: true);
+        Assert.Equal("inactive", agentSession.Status);
+
+        using var agentResponse = await _client.PostAsync(
+            $"/api/projects/{project.Id}/agent-sessions/{agentSession.Id}/{operation}",
+            content: null);
+        using var workflowResponse = await _client.PostAsync(
+            $"/api/projects/{project.Id}/issues/{issue.Number}/sessions/plan/{operation}",
+            content: null);
+
+        var workflowShape = await AssertRecoveryResponseAsync(
+            workflowResponse,
+            workflowSession.Id,
+            operation,
+            wasCompacted);
+        var agentShape = await AssertRecoveryResponseAsync(
+            agentResponse,
+            agentSession.Id,
+            operation,
+            wasCompacted);
+        Assert.Equal(workflowShape, agentShape);
+
+        _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(6));
+        using var canonicalWorkflowResponse = await _client.PostAsync(
+            $"/api/projects/{project.Id}/agent-sessions/{workflowSession.Id}/{operation}",
+            content: null);
+        var canonicalWorkflowShape = await AssertRecoveryResponseAsync(
+            canonicalWorkflowResponse,
+            workflowSession.Id,
+            operation,
+            wasCompacted);
+        Assert.Equal(workflowShape, canonicalWorkflowShape);
+
+        Assert.Equal(workflowSession.Id, (await _fixture.Grains
+            .GetGrain<IAgentSessionGrain>(workflowSession.Id)
+            .GetAsync())?.Id);
+        Assert.Equal(agentSession.Id, (await _fixture.Grains
+            .GetGrain<IAgentSessionGrain>(agentSession.Id)
+            .GetAsync())?.Id);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Theory]
+    [InlineData("compact")]
+    [InlineData("reset")]
+    public async Task CanonicalRecoveryEndpoint_ActiveAgentLaunchSession_ReturnsSharedConflict(string operation)
+    {
+        var (project, _) = await CreateProjectAndIssueAsync($"{operation}-agent-active");
+        var session = await CreateAgentLaunchSessionAsync(
+            project,
+            $"{operation}-agent-active",
+            attach: true,
+            idle: false);
+
+        using var response = await _client.PostAsync(
+            $"/api/projects/{project.Id}/agent-sessions/{session.Id}/{operation}",
+            content: null);
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal("session_active", doc.RootElement.GetProperty("code").GetString());
+        Assert.Equal(session.Id, doc.RootElement.GetProperty("details").GetProperty("sessionId").GetString());
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Theory]
+    [InlineData("compact")]
+    [InlineData("reset")]
+    public async Task CanonicalRecoveryEndpoint_MissingAgentLaunchBinding_ReturnsResetHint(string operation)
+    {
+        var (project, _) = await CreateProjectAndIssueAsync($"{operation}-agent-missing");
+        var session = await CreateAgentLaunchSessionAsync(
+            project,
+            $"{operation}-agent-missing",
+            attach: false,
+            idle: false);
+
+        using var response = await _client.PostAsync(
+            $"/api/projects/{project.Id}/agent-sessions/{session.Id}/{operation}",
+            content: null);
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal("runtime_session_missing", doc.RootElement.GetProperty("code").GetString());
+        var details = doc.RootElement.GetProperty("details");
+        Assert.Equal(session.Id, details.GetProperty("sessionId").GetString());
+        Assert.Equal("reset", details.GetProperty("hint").GetString());
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Theory]
+    [InlineData("compact")]
+    [InlineData("reset")]
+    public async Task CanonicalRecoveryEndpoint_CrossProjectSession_ReturnsNotFound(string operation)
+    {
+        var (sourceProject, _) = await CreateProjectAndIssueAsync($"{operation}-agent-project-a");
+        var session = await CreateAgentLaunchSessionAsync(
+            sourceProject,
+            $"{operation}-agent-project-a",
+            attach: true,
+            idle: true);
+        var (otherProject, _) = await CreateProjectAndIssueAsync($"{operation}-agent-project-b");
+
+        using var response = await _client.PostAsync(
+            $"/api/projects/{otherProject.Id}/agent-sessions/{session.Id}/{operation}",
+            content: null);
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task CompactEndpoint_PersistsCompactionEventAndUpdatesCoderSessionRecord()
     {
@@ -270,6 +400,63 @@ public class AgentSessionRecoveryApiSpecs
         var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
         await grain.DeactivateForTestAsync();
         _ = await grain.GetAsync();
+    }
+
+    private static async Task<string[]> AssertRecoveryResponseAsync(
+        HttpResponseMessage response,
+        string expectedSessionId,
+        string expectedOperation,
+        bool expectedWasCompacted)
+    {
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.True(
+            response.StatusCode == HttpStatusCode.OK,
+            $"Expected recovery success, got {(int)response.StatusCode}: {body}");
+        using var doc = JsonDocument.Parse(body);
+        var data = doc.RootElement.GetProperty("data");
+        Assert.Equal(expectedSessionId, data.GetProperty("id").GetString());
+        Assert.Equal(expectedOperation, data.GetProperty("operation").GetString());
+        Assert.Equal(expectedWasCompacted, data.GetProperty("wasCompacted").GetBoolean());
+        Assert.False(data.TryGetProperty("agentSessionId", out _));
+        return data.EnumerateObject()
+            .Select(property => property.Name)
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+    }
+
+    private async Task<AgentSessionInfo> CreateAgentLaunchSessionAsync(
+        ProjectDto project,
+        string name,
+        bool attach,
+        bool idle)
+    {
+        var sessionId = $"agent-recovery-{Guid.NewGuid():N}";
+        var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
+        await grain.OpenAsync(new OpenAgentSessionCommand(
+            RunnerId: _runnerId,
+            AgentRuntime: "opencode",
+            WorkDir: project.Path,
+            Model: null,
+            Metadata: GenericAgentSessionMetadata.Metadata(new GenericAgentSessionContext(
+                ProjectId: project.Id,
+                AgentId: $"agent-{Guid.NewGuid():N}",
+                AgentName: $"recovery-{name}"))));
+
+        if (attach)
+        {
+            await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand(
+                AgentSessionId: sessionId,
+                Model: null,
+                WorkDir: project.Path,
+                ChangeDir: null,
+                ProcessPid: 1234));
+        }
+
+        if (idle)
+            _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(6));
+
+        return await grain.GetAsync()
+            ?? throw new InvalidOperationException($"Agent session {sessionId} was not created.");
     }
 
     private async Task<(ProjectDto Project, IssueDto Issue, WorkDispatch Work, CreatedSession Session)> CreateAndStartSessionAsync(

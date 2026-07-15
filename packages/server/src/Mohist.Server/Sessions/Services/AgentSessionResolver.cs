@@ -20,6 +20,16 @@ public sealed class AgentSessionResolver : IScopedService
         return record?.Session.Id;
     }
 
+    public async Task<string?> ResolveCanonicalIdAsync(string projectId, string sessionId, CancellationToken ct = default)
+    {
+        var records = await _query.ListByIdsAsync([sessionId], ct);
+        var record = records.FirstOrDefault();
+        return record is not null
+            && string.Equals(record.Label(AgentSessionQueryMetadataKeys.ProjectId), projectId, StringComparison.Ordinal)
+            ? record.Session.Id
+            : null;
+    }
+
     public async Task<AgentSessionInfo?> GetByLabelsAsync(IReadOnlyDictionary<string, string> labels, CancellationToken ct = default)
     {
         var sessionId = await ResolveByLabelsAsync(labels, ct);

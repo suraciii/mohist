@@ -59,23 +59,7 @@ public static partial class IssueRoutes
             var sessionId = await sessions.ResolveIssueSessionIdAsync(project.Id, number, name, ct);
             if (sessionId is null) return ApiResults.NotFound($"Session {name} not found");
 
-            var grain = grains.GetGrain<IAgentSessionGrain>(sessionId);
-            try
-            {
-                var result = await grain.CompactAsync(new CompactAgentSessionCommand());
-                return ApiResults.Ok(result);
-            }
-            catch (RuntimeSessionMissingException ex)
-            {
-                return ApiResults.Conflict(
-                    ex.Message,
-                    "runtime_session_missing",
-                    new { sessionId = ex.SessionId, hint = "reset" });
-            }
-            catch (InvalidOperationException ex) when (ex.Message.Contains("currently active", StringComparison.OrdinalIgnoreCase))
-            {
-                return ApiResults.Conflict(ex.Message, "session_active", new { sessionId });
-            }
+            return await AgentSessionRecoveryRoutes.ExecuteCompactAsync(sessionId, grains);
         });
 
         group.MapPost("/{number:int}/sessions/{name}/reset", async (
@@ -91,40 +75,10 @@ public static partial class IssueRoutes
             var sessionId = await sessions.ResolveIssueSessionIdAsync(project.Id, number, name, ct);
             if (sessionId is null) return ApiResults.NotFound($"Session {name} not found");
 
-            var grain = grains.GetGrain<IAgentSessionGrain>(sessionId);
-            try
-            {
-                var current = await grain.GetAsync();
-                if (current is null) return ApiResults.NotFound($"Session {name} not found");
-
-                var expectedRuntimeSessionId = current.AgentSessionId;
-                var result = await grain.ResetAsync(new ResetAgentSessionCommand(
-                    ExpectedRuntimeSessionId: expectedRuntimeSessionId,
-                    ReplacementRuntimeSessionId: expectedRuntimeSessionId!));
-                return ApiResults.Ok(result);
-            }
-            catch (RuntimeSessionMissingException ex)
-            {
-                return ApiResults.Conflict(
-                    ex.Message,
-                    "runtime_session_missing",
-                    new { sessionId = ex.SessionId, hint = "reset" });
-            }
-            catch (StaleRuntimeSessionBindingException ex)
-            {
-                return ApiResults.Conflict(
-                    ex.Message,
-                    "stale_binding",
-                    new
-                    {
-                        sessionId = ex.SessionId,
-                        actualRuntimeSessionId = ex.ActualRuntimeSessionId,
-                    });
-            }
-            catch (InvalidOperationException ex) when (ex.Message.Contains("currently active", StringComparison.OrdinalIgnoreCase))
-            {
-                return ApiResults.Conflict(ex.Message, "session_active", new { sessionId });
-            }
+            return await AgentSessionRecoveryRoutes.ExecuteResetAsync(
+                sessionId,
+                grains,
+                $"Session {name} not found");
         });
 
         group.MapPost("/{number:int}/sessions/{name}/followup", async (

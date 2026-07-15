@@ -8,8 +8,8 @@ using Mohist.Server.Sessions.Services;
 namespace Mohist.Server.Api;
 
 /// <summary>
-/// Product cancel endpoint for a generic (non-workflow) AgentSession
-/// (issue-129 T-005 / design D6). The handler attempts to cancel the
+/// AgentSession cancel endpoint addressed by canonical stable session id.
+/// The handler attempts to cancel the
 /// running turn via a new server→runner <c>CancelAgentSession</c> SignalR
 /// invocation and returns the resulting session state honestly. The
 /// cancel is best-effort over ACP: when the underlying agent does not

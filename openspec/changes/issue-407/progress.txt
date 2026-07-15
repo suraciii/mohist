@@ -26,3 +26,11 @@
 - Workflow Reset reads the persisted current runtime binding through AgentSessionGrain.GetAsync. Until T-005 supplies the runner-created replacement, the route passes that same binding through ReplacementRuntimeSessionId, so the route neither mints nor rotates an id; T-005 must replace this pass-through with SessionCommandResult.RuntimeSessionId.
 - Workflow recovery API specs assert both responses keep the addressed stable Id and omit agentSessionId. BuildNewAgentSessionId and its route-side GUID generation are removed.
 - Verification: the pre-change and post-change focused recovery API/grain specs passed 19/19; full `npm test` passed (CLI 865, server unit 1351, architecture 22, server spec 2753, Web 4653, Runner 1014).
+
+## T-004
+
+- The canonical `/agent-sessions/{sessionId}/compact|reset` routes validate project ownership through AgentSessionResolver.ResolveCanonicalIdAsync and deliberately do not filter by source, so Workflow and Agent-launch records address the same AgentSession grain.
+- Workflow-scoped recovery aliases delegate to AgentSessionRecoveryRoutes.ExecuteCompactAsync/ExecuteResetAsync. Command construction, stable response shapes, and runtime-missing/active/stale conflict mapping now have one authority for both entry surfaces.
+- Reset retains T-003's current-binding pass-through until T-005 supplies SessionCommandResult.RuntimeSessionId. Followup and Cancel already preserve canonical AgentSession identity; the Workflow followup runner target remains source-shaped for transport compatibility and is outside recovery routing.
+- Recovery route specs create Agent-launch-labeled sessions with GenericAgentSessionMetadata directly. Using the product Agent launcher made idle recovery setup nondeterministic because its dispatched AgentJob continued recording activity; direct grain setup keeps the route spec isolated and fake-time deterministic.
+- Verification: pre-refactor workflow recovery specs passed 14/14; focused recovery API specs passed 22/22; full `npm test` passed (CLI 865, server unit 1351, architecture 22, server spec 2761, Web 4653, Runner 1014).

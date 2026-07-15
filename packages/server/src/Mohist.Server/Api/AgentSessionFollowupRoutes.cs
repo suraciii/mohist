@@ -10,14 +10,12 @@ using Mohist.Server.Sessions.Services;
 namespace Mohist.Server.Api;
 
 /// <summary>
-/// Generic (non-workflow) AgentSession followup endpoint for issue-129 T-004.
-/// Distinct from the issue-scoped
+/// Agent-launch followup endpoint addressed by canonical AgentSession id.
+/// The issue-scoped
 /// <c>POST /api/projects/{projectRef}/issues/{number}/sessions/{name}/followup</c>
-/// route (<see cref="IssueRoutes.MapIssueSessions"/>), which remains
-/// unchanged and reachable via the existing workflowRunId + sessionName axis.
-/// Generic sessions are reached by their minted <c>sessionId</c> alone
-/// (no workflowRunId lookup key); the launch endpoint stamps
-/// <c>source-kind = agent-launch</c> labels and the resolver in
+/// route (<see cref="IssueRoutes.MapIssueSessions"/>) is a Workflow lookup
+/// alias that resolves to the same canonical AgentSession grain before using
+/// its Workflow-shaped runner target. The resolver in
 /// <see cref="AgentSessionQuerier.ResolveGenericFollowupTargetAsync"/> reads
 /// the runner id from the session's Runtime state.
 /// </summary>
