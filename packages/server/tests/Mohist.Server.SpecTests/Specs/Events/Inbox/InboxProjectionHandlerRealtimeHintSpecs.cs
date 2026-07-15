@@ -18,7 +18,9 @@ namespace Mohist.Server.SpecTests.Specs.Events.Inbox;
 /// "Server emits a project-scoped realtime hint strictly after an inbox
 /// item is persisted": exactly one hint per non-duplicate insert, no
 /// hint on deduplicated inserts, no hint on insert failure, identity-only
-/// payload, projectid extension stamped, and publish failure propagation.
+/// payload, lineage extensions (projectid / issueid / issue) stamped,
+/// envelope satisfies <see cref="EventCatalog.RequiredAttributes"/> for
+/// <c>com.mohist.inbox.item-persisted</c>, and publish failure propagation.
 /// Shared DB / scope / event-builder helpers live in
 /// <see cref="InboxProjectionTestSupport"/>.
 /// </summary>
@@ -200,6 +202,108 @@ public class InboxProjectionHandlerRealtimeHintSpecs
         var hint = Assert.Single(publisher.Published);
         Assert.NotNull(hint.Extensions);
         Assert.Equal("proj_x", hint.Extensions!["projectid"]);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
+    [Fact]
+    public async Task Hint_CarriesIssueLineageFromDraft()
+    {
+        await using var database = InboxProjectionTestSupport.CreateDatabase();
+        await InboxProjectionTestSupport.SeedIssueAsync(database,
+            projectId: "proj_lineage",
+            issueId: "issue_lineage",
+            issueNumber: 42,
+            title: "Lineage");
+
+        var publisher = new CapturingEventPublisher();
+        var handler = InboxProjectionTestSupport.CreateHandler(database, publisher);
+        var evt = InboxProjectionTestSupport.BuildIssueEvent(
+            type: EventCatalog.ReverseDns.IssueWorkStarted,
+            projectId: "proj_lineage",
+            issueId: "issue_lineage",
+            issueNumber: 42,
+            eventId: "evt-lineage");
+
+        await handler.HandleAsync(evt, CancellationToken.None);
+
+        var hint = Assert.Single(publisher.Published);
+        Assert.NotNull(hint.Extensions);
+        // Lineage keys are lifted from the InboxItemDraft already held in
+        // scope — no extra lookup. Values must match the draft exactly.
+        Assert.Equal("proj_lineage", hint.Extensions![EventCatalog.Lineage.ProjectId]);
+        Assert.Equal("issue_lineage", hint.Extensions[EventCatalog.Lineage.IssueId]);
+        Assert.Equal("42", hint.Extensions[EventCatalog.Lineage.Issue]);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
+    [Fact]
+    public async Task Hint_SatisfiesEventCatalogRequiredAttributesForInboxItemPersisted()
+    {
+        await using var database = InboxProjectionTestSupport.CreateDatabase();
+        // Seed workflow-branch inputs first so the handler can resolve
+        // project / issue / number when it sees the workflow event.
+        await InboxProjectionTestSupport.SeedWorkflowRunAsync(database,
+            workflowRunId: "wf_conformance_failed",
+            projectId: "proj_conformance",
+            issueId: "issue_conformance_failed",
+            issueNumber: 1);
+        await InboxProjectionTestSupport.SeedWorkflowRunAsync(database,
+            workflowRunId: "wf_conformance_approval",
+            projectId: "proj_conformance",
+            issueId: "issue_conformance_approval",
+            issueNumber: 2);
+        // Seed the two issues the workflow runs reference.
+        await InboxProjectionTestSupport.SeedIssueAsync(database,
+            projectId: "proj_conformance",
+            issueId: "issue_conformance_failed",
+            issueNumber: 1,
+            title: "Failed");
+        await InboxProjectionTestSupport.SeedIssueAsync(database,
+            projectId: "proj_conformance",
+            issueId: "issue_conformance_approval",
+            issueNumber: 2,
+            title: "Approval");
+        // Seed two more issues for the issue-branch path.
+        await InboxProjectionTestSupport.SeedIssueAsync(database,
+            projectId: "proj_conformance",
+            issueId: "issue_conformance_started",
+            issueNumber: 3,
+            title: "Started");
+        await InboxProjectionTestSupport.SeedIssueAsync(database,
+            projectId: "proj_conformance",
+            issueId: "issue_conformance_completed",
+            issueNumber: 4,
+            title: "Completed");
+
+        var publisher = new CapturingEventPublisher();
+        var handler = InboxProjectionTestSupport.CreateHandler(database, publisher);
+        await handler.HandleAsync(InboxProjectionTestSupport.BuildWorkflowEvent(
+            EventCatalog.ReverseDns.WorkflowRunFailed, "wf_conformance_failed", "evt-cf-failed"), CancellationToken.None);
+        await handler.HandleAsync(InboxProjectionTestSupport.BuildWorkflowEvent(
+            EventCatalog.ReverseDns.StageApprovalRequested, "wf_conformance_approval", "evt-cf-approval"), CancellationToken.None);
+        await handler.HandleAsync(InboxProjectionTestSupport.BuildIssueEvent(
+            EventCatalog.ReverseDns.IssueWorkStarted, "proj_conformance", "issue_conformance_started", 3, "evt-cf-started"), CancellationToken.None);
+        await handler.HandleAsync(InboxProjectionTestSupport.BuildIssueEvent(
+            EventCatalog.ReverseDns.IssueCompleted, "proj_conformance", "issue_conformance_completed", 4, "evt-cf-completed"), CancellationToken.None);
+
+        var hintType = EventCatalog.ReverseDns.InboxItemPersisted;
+        Assert.True(EventCatalog.HasLineageDeclaration(hintType));
+        var required = EventCatalog.RequiredAttributes(hintType);
+        Assert.Equal(new[] { EventCatalog.Lineage.ProjectId, EventCatalog.Lineage.IssueId, EventCatalog.Lineage.Issue }, required);
+
+        Assert.Equal(4, publisher.Published.Count);
+        // Every emitted hint must satisfy the catalog's required-attribute
+        // declaration. AssertRequired throws if any required attribute is
+        // missing; Missing returns the empty list when conformance passes.
+        foreach (var hint in publisher.Published)
+        {
+            Assert.Equal(hintType, hint.Type);
+            var extensions = hint.Extensions ?? new Dictionary<string, string>();
+            Assert.Empty(EnvelopeConformance.Missing(extensions, hintType));
+            EnvelopeConformance.AssertRequired(extensions, hintType);
+        }
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]

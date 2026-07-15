@@ -50,10 +50,24 @@ internal static class InboxProjectionTestSupport
             type: type,
             time: TestTime.UtcNow,
             data: null,
-            extensions: new Dictionary<string, string>
+            extensions: new Dictionary<string, string>(StringComparer.Ordinal)
             {
-                ["projectid"] = projectId,
-                ["issueid"] = issueId,
+                [EventCatalog.Lineage.ProjectId] = projectId,
+                [EventCatalog.Lineage.IssueId] = issueId,
+                [EventCatalog.Lineage.Issue] = issueNumber.ToString(),
+            });
+
+    public static CloudEvent BuildLegacyIssueEvent(string type, string projectId, string issueId, int issueNumber, string eventId) =>
+        new(
+            id: eventId,
+            source: new Uri($"/mohist/issues/{issueId}", UriKind.Relative),
+            type: type,
+            time: DateTimeOffset.UtcNow,
+            data: null,
+            extensions: new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [EventCatalog.Lineage.ProjectId] = projectId,
+                [EventCatalog.Lineage.IssueId] = issueId,
                 ["issueno"] = issueNumber.ToString(),
             });
 

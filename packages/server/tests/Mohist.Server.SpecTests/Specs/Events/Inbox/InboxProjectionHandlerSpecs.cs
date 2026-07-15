@@ -463,6 +463,105 @@ public class InboxProjectionHandlerSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
+    public async Task IssueEvent_LegacyIssuenoKeyFallback_ResolvesIssueNumber()
+    {
+        await using var database = InboxProjectionTestSupport.CreateDatabase();
+        await InboxProjectionTestSupport.SeedIssueAsync(database,
+            projectId: "proj_a",
+            issueId: "issue_legacy",
+            issueNumber: 7,
+            title: "Legacy row");
+
+        var handler = InboxProjectionTestSupport.CreateHandler(database);
+        // Historical pre-change row: stamped with the legacy `issueno`
+        // key instead of the unified `issue` key. The Non-Goal forbids
+        // backfill, so the read path must still resolve the issue number.
+        var evt = InboxProjectionTestSupport.BuildLegacyIssueEvent(
+            type: EventCatalog.ReverseDns.IssueWorkStarted,
+            projectId: "proj_a",
+            issueId: "issue_legacy",
+            issueNumber: 7,
+            eventId: "evt-legacy-issueno");
+
+        await handler.HandleAsync(evt, CancellationToken.None);
+
+        var item = Assert.Single(await InboxProjectionTestSupport.GetInboxAsync(database, "proj_a"));
+        Assert.Equal("issue_legacy", item.IssueId);
+        Assert.Equal(7, item.IssueNumber);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
+    [Fact]
+    public async Task IssueEvent_NoIssueNumberKey_ReturnsNullWithoutThrowing()
+    {
+        await using var database = InboxProjectionTestSupport.CreateDatabase();
+        await InboxProjectionTestSupport.SeedIssueAsync(database,
+            projectId: "proj_a",
+            issueId: "issue_orphan",
+            issueNumber: 3,
+            title: "Orphan");
+
+        var handler = InboxProjectionTestSupport.CreateHandler(database);
+        // Neither `issue` nor `issueno` is present: identity cannot be
+        // resolved, the handler must skip silently.
+        var evt = new CloudEvent(
+            id: "evt-no-number",
+            source: new Uri("/mohist/issue/issue_orphan", UriKind.Relative),
+            type: EventCatalog.ReverseDns.IssueWorkStarted,
+            time: DateTimeOffset.UtcNow,
+            data: null,
+            extensions: new Dictionary<string, string>
+            {
+                ["projectid"] = "proj_a",
+                ["issueid"] = "issue_orphan",
+            });
+
+        await handler.HandleAsync(evt, CancellationToken.None);
+
+        Assert.Empty(await InboxProjectionTestSupport.GetInboxAsync(database, "proj_a"));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
+    [Fact]
+    public async Task IssueEvent_BothKeysPresent_PrefersUnifiedIssueKey()
+    {
+        await using var database = InboxProjectionTestSupport.CreateDatabase();
+        await InboxProjectionTestSupport.SeedIssueAsync(database,
+            projectId: "proj_a",
+            issueId: "issue_both",
+            issueNumber: 9,
+            title: "Both");
+
+        var handler = InboxProjectionTestSupport.CreateHandler(database);
+        // Both `issue` and the legacy `issueno` are stamped, but the
+        // latter disagrees with the loaded issue. The unified key wins
+        // and resolves correctly to issue_9.
+        var evt = new CloudEvent(
+            id: "evt-both",
+            source: new Uri("/mohist/issue/issue_both", UriKind.Relative),
+            type: EventCatalog.ReverseDns.IssueWorkStarted,
+            time: DateTimeOffset.UtcNow,
+            data: null,
+            extensions: new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["projectid"] = "proj_a",
+                ["issueid"] = "issue_both",
+                ["issue"] = "9",
+                ["issueno"] = "999",
+            });
+
+        await handler.HandleAsync(evt, CancellationToken.None);
+
+        var item = Assert.Single(await InboxProjectionTestSupport.GetInboxAsync(database, "proj_a"));
+        Assert.Equal("issue_both", item.IssueId);
+        Assert.Equal(9, item.IssueNumber);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
+    [Fact]
     public async Task WorkflowEvent_MissingAnnotationsOnRun_SkipsWithoutThrowing()
     {
         await using var database = InboxProjectionTestSupport.CreateDatabase();

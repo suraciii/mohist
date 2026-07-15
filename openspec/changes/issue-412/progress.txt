@@ -249,3 +249,40 @@ T-005 progress
 - `Mohist.Cli.Tests`: 865 pass (unchanged).
 - Web + runner suites: unchanged.
 - Full `npm test` suite: all 10,712 tests pass across server (1399 unit + 22 arch + 2759 spec + 865 cli), web (4653), runner (1014).
+
+---
+T-006 progress
+
+## T-006 decisions / layout
+- `InboxProjectionHandler.ProjectAsync` now stamps `eventcatalog.lineage.issueid` and `eventcatalog.lineage.issue` alongside `projectid` on the synthesized `com.mohist.inbox.item-persisted` envelope, lifted from `draft.issueid` and `draft.issuenumber` — the `inboxitempersistedhint` already in scope carries the same identity, so no extra lookup is issued. The dictionary is built with `stringcomparer.ordinal`, matching the convention in the spec tests.
+- `ResolveFromIssueExtensions` reads `projectid`/`issueid` via the `eventcatalog.lineage.*` constants, then routes the issue number through a new helper `tryreadissuenumber(extensions)` that prefers the unified `issue` key and falls back to the legacy `issueno` key when `issue` is absent. Whitespace-only values are treated as absent; `null`/missing on both keys returns `null` (the handler then skips silently — same shape as the previous missing-extension path).
+- The `issuenumber` fallback is the permanent history shim called out in the design (D3 / Risk: "Historical rows retain `issueno`/`epicno`; new readers key on `issue`"). The Non-Goal forbids backfill, so dual-key reads stay in the two handlers that read history.
+- `ResolveFromWorkflowRunAsync` was NOT touched — it reads from `WorkflowRunMetadata.Annotations` (the run's own state) using the legacy-cased annotation keys (`projectid`/`issueid`/`issuenumber`), which are the documented contract for that store. The annotations live on the run's own state, not on envelope extensions; renaming them is T-007's scope.
+- `InboxProjectionTestSupport.BuildIssueEvent` now stamps `issue` (not `issueno`), matching what `IssueStore` emits post-change. A new `BuildLegacyIssueEvent` helper stamps the legacy `issueno` shape so the fallback test can drive the historical-row path.
+- XML doc on the handler updated: identity-resolution section notes the unified `issue` key with the `issueno` fallback; realtime-hint section lists all three lineage keys.
+
+## Tests added
+- `InboxProjectionHandlerRealtimeHintSpecs` (extended for T-006):
+  - `Hint_CarriesIssueLineageFromDraft`: drives the full save path and asserts the synthesized envelope stamps `projectid`/`issueid`/`issue` lifted from the `inboxitemdraft` already in scope (no extra lookup). Values match the seeded issue identity exactly.
+  - `Hint_SatisfiesEventCatalogRequiredAttributesForInboxItemPersisted`: drives every kind the handler can emit (workflow failed, stage approval-requested, issue work-started, issue completed) and asserts every envelope passes `EnvelopeConformance.AssertRequired` and `Missing` is empty for `com.mohist.inbox.item-persisted`. Also pins the catalog declaration (`HasLineageDeclaration == true`, `RequiredAttributes == [projectid, issueid, issue]`).
+  - Class-level XML doc updated to reflect the new lineage contract.
+- `InboxProjectionHandlerSpecs` (extended):
+  - `IssueEvent_LegacyIssuenoKeyFallback_ResolvesIssueNumber`: a pre-change row stamped with `issueno` still resolves to the right issue (history shim).
+  - `IssueEvent_NoIssueNumberKey_ReturnsNullWithoutThrowing`: when neither `issue` nor `issueno` is present, the handler skips silently (matches the prior "missing extension" skip pattern).
+  - `IssueEvent_BothKeysPresent_PrefersUnifiedIssueKey`: when both keys are stamped, the unified `issue` wins — even if `issueno` disagrees, the loaded-issue sanity check pins the correct number.
+
+## Gotchas / hand-offs
+- `inboxitempersistedhint` carries `projectid`/`issueid`/`issuenumber`, but the synthesis stamps `issuenumber.toString()` into the `issue` extension key. The hint payload is unchanged — D7 keeps the identity-only payload contract.
+- The two existing `IssueEvent_Missing*Extension_SkipsWithoutThrowing` tests still pass without modification. The negative paths cover missing `projectid` and missing `issueid`; `issue`/`issueno` missing is now pinned by the new `IssueEvent_NoIssueNumberKey_ReturnsNullWithoutThrowing`.
+- `EnvelopeConformance.Missing` treats null AND empty-string values as missing — the synthesis dictionary uses `draft.ProjectId`/`draft.IssueId` (non-nullable strings from the loaded issue) and `draft.IssueNumber.ToString()` (never empty), so conformance passes by construction.
+- The class-level XML doc on `InboxProjectionHandler` no longer claims the issue path reads `issueno`; it now reads `issue` with an explicit `issueno` fallback paragraph. If a future task removes the fallback, the doc comment must also drop the fallback note.
+- `InboxProjectionHandlerSpecs.Hint_ProjectIdExtensionMatchesOwningProjectNotSourceRoute` still passes — it asserts only that `projectid` matches the owning project, which is still true alongside the new `issueid`/`issue` keys.
+
+## Verification
+- Server build: clean (0 warn, 0 err) on `packages/server/src/Mohist.Server`.
+- `Mohist.Server.SpecTests`: 2764 pass (was 2759; +5 from new T-006 tests).
+- `Mohist.Server.UnitTests`: 1399 pass (unchanged).
+- `Mohist.Server.ArchTests`: 22 pass (unchanged).
+- `Mohist.Cli.Tests`: 865 pass (unchanged).
+- Web + runner suites: unchanged.
+- Full `npm test` suite: all 10,717 tests pass across server (1399 unit + 22 arch + 2764 spec + 865 cli), web (4653), runner (1014).
