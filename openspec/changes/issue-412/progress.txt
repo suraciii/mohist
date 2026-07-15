@@ -146,3 +146,53 @@ T-003 progress
 - `Mohist.Server.UnitTests`: 1370 pass (was 1365; +5 from new `SetEpicId_*` and `State_RoundTripsEpicId` tests in `IssueDomainTests`).
 - `Mohist.Server.ArchTests`: 22 pass.
 - Full `npm test` suite: all 10,673 tests pass across server (1370 unit + 22 arch + 2749 spec + 865 cli), web (4653), runner (1014).
+
+---
+
+T-004 progress
+
+## Codebase Patterns (additions)
+- `EpicGrain` follows the same `Mohist.Server.Infrastructure.Data.<Domain>.<Domain>Lineage` placement as `WorkflowRunLineage` (Workflow/Domain) and `IssueLineage` (Issue/Domain). New lineage helpers MUST live in the data layer, take only the producing aggregate's state, and never invoke a grain or query a join table — otherwise they break the "no cross-aggregate query" invariant the conformance matrix enforces.
+- `IGrainFactory.GetGrain<IIssueGrain>(...)` follows the same `GrainKey.Issue(issueId)` pattern as `EpicCounter(projectId)` / `WorkflowBacklog(projectId)` (`Infrastructure/Orleans/GrainKey.cs`); the route key is the issue id (no project prefix). Use that constant rather than concatenating a project key.
+
+## T-004 decisions / layout
+- `EpicLineage.BuildExtensions(state)` (new file at `packages/server/src/Mohist.Server/Infrastructure/Data/Epic/EpicLineage.cs`) is the pure helper that mirrors `WorkflowRunLineage` / `IssueLineage`. It always returns exactly `{projectid, epicid}` (StringComparer.Ordinal); there is no `epicno` key because the matrix treats `epicid` as the single routing dimension and `epicno` is a non-routing read convenience.
+- `EpicGrain` has TWO `PersistEpicEventsAsync` overloads — a post-commit `AppendAsync(envelope)` (used by `CreateAsync`/`SetStatusAsync`/`UpdateAsync`/`ReopenAsync`/`PauseAsync`) and a transactional `AppendAsync(db, envelope)` (used by `StartAsync`/`ResumeAsync`/`LinkIssueAsync`/`UnlinkIssueAsync`/`TryAutoMarkDoneAsync`/`TryStartNextAsync` start-failure path). Both now read extensions from `EpicLineage.BuildExtensions(epic)` and so produce an identical unified set — no producer drift between the two overloads.
+- The stamp uses `EpicAggregate` (alias `Mohist.Server.Epic.Domain.Epic`) — the same instance the producer just stamped onto its pending events. No DB re-read; `BuildExtensions` is a pure function over the in-memory domain state.
+- Link entry points (`LinkIssueAsync`, `LinkIssuesAsync`) and unlink entry points (`UnlinkIssueAsync`, `UnlinkIssuesAsync`) call `PushEpicAffiliationAsync(issueId, epicId-or-null, "link"|"unlink")` immediately after the epic transaction commits. The helper is `try/catch` + log + swallow: synchronous push failure must NOT break the epic mutation (the durable `EpicIssueLinkedHandler` / `EpicIssueUnlinkedHandler` re-applies the same denormalization on every redelivery, so drift is bounded and self-healing).
+- `EpicIssueLinkedHandler` and `EpicIssueUnlinkedHandler` (in `Events/Subscriptions/EpicAutoDoneHandler.cs`) gain a new `EpicIssueAffiliationDispatcher.DispatchAsync(eventId, issueId, epicId, isLink, ct)` call. The dispatcher also wraps in `try/catch` + log: a synchronous failure here would otherwise dead-letter the durable handler and take the convergence path with it. The same `try/catch` mirror image lives in both the command path (`EpicGrain.PushEpicAffiliationAsync`) and the durable path (`EpicIssueAffiliationDispatcher`).
+- One-time backfill is a pure data migration `20260715000000_BackfillIssueEpicAffiliation` that writes `Issues.State.$.epicId` from `EpicActiveIssues` for every issue already linked to an active epic at cutover. It only writes rows where `epicId` is currently NULL and a row exists in `EpicActiveIssues`. Idempotent: re-running matches zero rows because the presence guard fails. `Down` is a no-op (additive projection, per the `BackfillIssueCompletedAt` precedent). The migration is pure data — no `BuildTargetModel` snapshot — because `Issue.EpicId` already rides the existing `State` JSON column (T-003 brought it in).
+- `EpicRecoveryFixture` (the only in-process silo test fixture) needed additional service registrations once the durable `EpicIssueLinkedHandler` started routing through `IIssueGrain.SetEpicAffiliationAsync` — it now calls `siloBuilder.Services.AddMohistConventionalServices()` plus the explicit `IConfiguration`/`IEnvironmentVariableProvider`/`IssueRepositoryResolver`/`IssueIdentityResolver`/`AttachmentService` `AddSingleton` lines that the conventional scan doesn't surface as `IScopedService`/`ISingletonService`. Without those, the InProcessTestCluster-backed `IssueGrain` fails to activate on `SetEpicAffiliationAsync` and the test's existing convergence expectations break.
+
+## Tests added
+- `EpicLineageTests` (new unit test, no silo):
+  - `BuildExtensions_StampsProjectIdAndEpicIdOnly`: pins the exact two keys + their values.
+  - `BuildExtensions_OmitsEpicNoKey`: legacy `epicno` is not present (the matrix decision).
+  - `BuildExtensions_OnlyStampsTwoKeysForEpic`: defensive count of 2 keys (catches accidental re-adds of `epicno` or future drift).
+  - `BuildExtensions_SatisfiesEventCatalogForEveryEpicType`: theory-driven across all nine registry entries — `EnvelopeConformance.Missing(extensions, type)` is empty for every `com.mohist.epic.*` type. Same conformance check the producer path calls, run from the pure helper.
+  - `BuildExtensions_AssertRequiredDoesNotThrow_ForAnEpicType`: the throwing variant for `EpicIssueLinked` — catches drift in CI rather than at the live call site.
+  - `BuildExtensions_StampsFromEpicStateWithoutAnyCrossAggregateLoad`: pins the constructor arity (state only) — a future refactor that adds a grain call or DB query would change this signature and surface here.
+- `EpicEventPublishSpecs` (extended):
+  - `CreateAsync_StampsProjectIdAndEpicIdOnly_NoEpicNo`: post-commit overload path — pins projectid + epicid and asserts exactly two keys, no epicno.
+  - `StartAsync_StampsProjectIdAndEpicIdOnly_NoEpicNo`: transactional overload path — same matrix; proves both overloads stamp identically.
+  - `LinkIssueAsync_LinkedEventStampsProjectIdAndEpicIdOnly_NoEpicNo`: live link path + records the `SetEpicAffiliationAsync(epicId)` push through a recording `IIssueGrain` stub.
+  - `UnlinkIssueAsync_UnlinkedEventStampsProjectIdAndEpicIdOnly_NoEpicNo_AndPushesNullAffiliation`: mirrors unlink with `null`.
+  - `LinkIssueAsync_PushFailure_IsSwallowedAndDoesNotBreakTheLink`: `ThrowingAffiliationGrainFactory` exercises the best-effort try/catch around the push — link row still commits and `EpicIssueLinked` event still fires.
+- One historical assertion updated: `CreateAsync_PersistsEpicCreatedEvent` flipped from asserting `epicno == "1"` to asserting `epicno` is absent — the matrix-level change.
+
+## Gotchas / hand-offs
+- The two `PersistEpicEventsAsync` overloads MUST share the same extensions dictionary shape. Going through the same `EpicLineage` helper is what enforces that — keep the helper as the single source of truth; do not reintroduce per-overload literal dictionaries.
+- `EpicGrain.PushEpicAffiliationAsync` and `EpicIssueAffiliationDispatcher.DispatchAsync` are mirror images in shape and behavior. Both wrap in `try/catch` + log + swallow. Any future change to one MUST mirror into the other (the new EpicEventPublishSpecs push-failure case locks the EpicGrain path; the durability contract comes from the dispatcher's matching contract).
+- `EpicRecoveryFixture` now registers the same conventional services as the production silo (specifically the `IIssueStore`/`IssueRepositoryResolver`/`IssueIdentityResolver` cluster the IssueGrain needs to activate). Without these, the durable handler's new IIssueGrain call dead-letters — confirmed by the `IssueLinkedEvent_DispatcherConvergesWhenInlineRecomputeWasSkipped` test reverting to red. The fixture-specific failure to remember: the disaptcher's `try/catch` swallows it back to a warning so the convergence test passes either way; the registrations are still required so the production-like path doesn't get exercised by a fake.
+- The backfill migration gates on `json_extract(State, '$.epicId') IS NULL` to be idempotent and preserve any live-written values (the live EpicGrain push is the only other writer). It only writes when an `EpicActiveIssues` row exists, mirroring the live write path (terminal-history rows leave the issue's `EpicId` cache clear). `Down` is intentionally a no-op — see `BackfillIssueCompletedAt.cs` for the precedent.
+- The `EpicIssueLinkedHandler` / `EpicIssueUnlinkedHandler` already had a `RecomputeProgressAsync()` dispatcher; T-004 does NOT replace that. The handler now does BOTH the affiliation push AND the recompute in sequence. They were both present in the design; T-004 only adds the first half. The order matters: affiliation push first (so the issue's later events stamp epicid), recompute second (so the epic's progress is updated). Swapping the two would still converge but would leave a small window where the issue's `EpicId` lag the join row.
+- `Mohist.Server.Infrastructure.Orleans.GrainKey.Issue(issueId)` is the canonical way to address `IIssueGrain`. Calling `_grains.GetGrain<IIssueGrain>(issueId)` (the literal-id form) also works because the grain uses `IGrainWithStringKey` and the key is the issue id, but the helper preserves the convention other EpicGrain callers use.
+- `EpicEventPublishSpecs` has TWO new grain fake classes (`RecordingIssueGrain` and `ThrowingIssueGrain`) alongside the existing `StubGrainFactory`/`StubEpicCounterGrain`. Both implement `IIssueGrain` and accept any `IGrainFactory` method. Keep the new fakes local to the test file — no shared fixture change needed.
+
+## Verification
+- Server build: clean (0 warn, 0 err) on `packages/server/src/Mohist.Server`.
+- `Mohist.Server.UnitTests`: 1384 pass (was 1370; +14 from new `EpicLineageTests` — 5 unique methods + 9-row theory).
+- `Mohist.Server.SpecTests`: 2754 pass (was 2749; +5 from the new EpicGrain stamp + push coverage in `EpicEventPublishSpecs`).
+- `Mohist.Server.ArchTests`: 22 pass (unchanged).
+- `Mohist.Cli.Tests`: 865 pass (unchanged).
+- Full `npm test` suite: all 10,692 tests pass across server (1384 unit + 22 arch + 2754 spec + 865 cli), web (4653), runner (1014).

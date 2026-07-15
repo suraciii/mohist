@@ -205,6 +205,7 @@ public sealed class EpicPrerequisiteRemovedHandler : ICloudEventHandler<IssuePre
 public sealed class EpicIssueLinkedHandler : ICloudEventHandler<Epic.Domain.Events.EpicIssueLinked>
 {
     private readonly EpicEventRecomputeDispatcher _dispatcher;
+    private readonly EpicIssueAffiliationDispatcher _affiliationDispatcher;
 
     [ActivatorUtilitiesConstructor]
     public EpicIssueLinkedHandler(
@@ -212,12 +213,16 @@ public sealed class EpicIssueLinkedHandler : ICloudEventHandler<Epic.Domain.Even
         ILogger<EpicIssueLinkedHandler> log)
     {
         _dispatcher = new EpicEventRecomputeDispatcher(grains, log);
+        _affiliationDispatcher = new EpicIssueAffiliationDispatcher(grains, log);
     }
 
     public bool Filter(CloudEvent<Epic.Domain.Events.EpicIssueLinked> evt) => true;
 
-    public Task HandleAsync(CloudEvent<Epic.Domain.Events.EpicIssueLinked> evt, CancellationToken ct) =>
-        _dispatcher.DispatchAsync(evt.Id, evt.Extensions, evtType: "issue-linked", ct);
+    public async Task HandleAsync(CloudEvent<Epic.Domain.Events.EpicIssueLinked> evt, CancellationToken ct)
+    {
+        await _affiliationDispatcher.DispatchAsync(evt.Id, evt.Data.IssueId, epicId: evt.Extensions.GetValueOrDefault("epicid"), isLink: true, ct).ConfigureAwait(false);
+        await _dispatcher.DispatchAsync(evt.Id, evt.Extensions, evtType: "issue-linked", ct).ConfigureAwait(false);
+    }
 }
 
 /// <summary>
@@ -230,6 +235,7 @@ public sealed class EpicIssueLinkedHandler : ICloudEventHandler<Epic.Domain.Even
 public sealed class EpicIssueUnlinkedHandler : ICloudEventHandler<Epic.Domain.Events.EpicIssueUnlinked>
 {
     private readonly EpicEventRecomputeDispatcher _dispatcher;
+    private readonly EpicIssueAffiliationDispatcher _affiliationDispatcher;
 
     [ActivatorUtilitiesConstructor]
     public EpicIssueUnlinkedHandler(
@@ -237,12 +243,16 @@ public sealed class EpicIssueUnlinkedHandler : ICloudEventHandler<Epic.Domain.Ev
         ILogger<EpicIssueUnlinkedHandler> log)
     {
         _dispatcher = new EpicEventRecomputeDispatcher(grains, log);
+        _affiliationDispatcher = new EpicIssueAffiliationDispatcher(grains, log);
     }
 
     public bool Filter(CloudEvent<Epic.Domain.Events.EpicIssueUnlinked> evt) => true;
 
-    public Task HandleAsync(CloudEvent<Epic.Domain.Events.EpicIssueUnlinked> evt, CancellationToken ct) =>
-        _dispatcher.DispatchAsync(evt.Id, evt.Extensions, evtType: "issue-unlinked", ct);
+    public async Task HandleAsync(CloudEvent<Epic.Domain.Events.EpicIssueUnlinked> evt, CancellationToken ct)
+    {
+        await _affiliationDispatcher.DispatchAsync(evt.Id, evt.Data.IssueId, epicId: null, isLink: false, ct).ConfigureAwait(false);
+        await _dispatcher.DispatchAsync(evt.Id, evt.Extensions, evtType: "issue-unlinked", ct).ConfigureAwait(false);
+    }
 }
 
 /// <summary>
@@ -443,5 +453,60 @@ internal sealed class EpicEventRecomputeDispatcher
 
         var grain = _grains.GetGrain<IEpicGrain>($"{projectId}:{epicId}");
         await grain.RecomputeProgressAsync().ConfigureAwait(false);
+    }
+}
+
+/// <summary>
+/// Dispatch logic for epic-link/unlink → IssueGrain affiliation write
+/// (D5 denormalization). The synchronous push inside <c>EpicGrain</c>
+/// link/unlink is best-effort; this durable path re-applies the same
+/// denormalization on every redelivery so drift between the join row
+/// (<c>EpicIssueRow</c>) and the issue's denormalized <c>EpicId</c> is
+/// bounded and self-healing.
+/// </summary>
+internal sealed class EpicIssueAffiliationDispatcher
+{
+    private readonly IGrainFactory _grains;
+    private readonly ILogger _log;
+
+    public EpicIssueAffiliationDispatcher(IGrainFactory grains, ILogger log)
+    {
+        _grains = grains;
+        _log = log;
+    }
+
+    public async Task DispatchAsync(
+        string eventId,
+        string issueId,
+        string? epicId,
+        bool isLink,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(issueId))
+        {
+            _log.LogDebug(
+                "{EvtType} event missing issue id in payload; skipping affiliation push (event {EventId})",
+                isLink ? "issue-linked" : "issue-unlinked", eventId);
+            return;
+        }
+        // Same best-effort posture as EpicGrain.PushEpicAffiliationAsync
+        // (D5): a synchronous failure here is logged but does not
+        // surface — the next redelivery re-applies. Without the
+        // try/catch, a failure in the durable handler would also fail
+        // its outer dispatch and let the dispatcher dead-letter the
+        // EpicIssueLinked/EpicIssueUnlinked event, taking the recompute
+        // convergence path with it.
+        try
+        {
+            var grain = _grains.GetGrain<Mohist.Server.Issue.Grains.IIssueGrain>(
+                Mohist.Server.Infrastructure.Orleans.GrainKey.Issue(issueId));
+            await grain.SetEpicAffiliationAsync(isLink ? epicId : null).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex,
+                "Durable affiliation push failed for issue {IssueId} (target epic {EpicId}); dispatcher will re-apply on redelivery (event {EventId})",
+                issueId, epicId ?? "<null>", eventId);
+        }
     }
 }

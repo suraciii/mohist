@@ -12,6 +12,7 @@ using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Issue.Domain;
+using Mohist.Server.Issue.Grains;
 using Mohist.Server.SpecTests.Support;
 using Xunit;
 
@@ -54,7 +55,7 @@ public class EpicEventPublishSpecs
         Assert.Equal("1", created.Envelope.Subject);
         Assert.Equal(ProjectId, created.Envelope.Extensions["projectid"]);
         Assert.Equal(dto.Id, created.Envelope.Extensions["epicid"]);
-        Assert.Equal("1", created.Envelope.Extensions["epicno"]);
+        Assert.False(created.Envelope.Extensions.ContainsKey("epicno"));
         Assert.Equal("Auth epic", created.Envelope.Data!.Value.GetProperty("title").GetString());
     }
 
@@ -365,6 +366,168 @@ public class EpicEventPublishSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
+    public async Task CreateAsync_StampsProjectIdAndEpicIdOnly_NoEpicNo()
+    {
+        // T-004 acceptance: post-commit PersistEpicEventsAsync stamps
+        // exactly {projectid, epicid}; the legacy epicno key (not a
+        // routing dimension per the matrix) is dropped from production
+        // envelopes. CreateAsync exercises the post-commit overload.
+        var fixedTime = new DateTimeOffset(2026, 6, 30, 12, 0, 0, TimeSpan.Zero);
+        var (database, eventStore) = CreateDatabaseWithRecordingEventStore();
+        var time = new FakeTimeProvider(fixedTime);
+        var grain = CreateGrain(database.Factory, $"{ProjectId}:{EpicId}", eventStore, time);
+
+        var dto = await grain.CreateAsync(ProjectId, "Auth epic", "description", "p1");
+
+        var created = Assert.Single(eventStore.Appended,
+            e => e.Envelope.Source.ToString() == $"/mohist/epics/{dto.Id}");
+        Assert.Equal(ProjectId, created.Envelope.Extensions["projectid"]);
+        Assert.Equal(dto.Id, created.Envelope.Extensions["epicid"]);
+        Assert.False(created.Envelope.Extensions.ContainsKey("epicno"));
+        Assert.Equal(2, created.Envelope.Extensions.Count);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task StartAsync_StampsProjectIdAndEpicIdOnly_NoEpicNo()
+    {
+        // T-004 acceptance: the transactional PersistEpicEventsAsync
+        // overload (used by StartAsync/ResumeAsync/LinkIssueAsync/etc.)
+        // stamps the identical unified set. Both overloads read from
+        // EpicLineage.BuildExtensions — they cannot drift.
+        var fixedTime = new DateTimeOffset(2026, 6, 30, 12, 0, 0, TimeSpan.Zero);
+        var (database, eventStore) = CreateDatabaseWithRecordingEventStore();
+        var time = new FakeTimeProvider(fixedTime);
+        await SeedEpicAsync(database);
+
+        var grain = CreateGrain(database.Factory, $"{ProjectId}:{EpicId}", eventStore, time);
+        await grain.StartAsync();
+
+        var statusChange = eventStore.Appended
+            .Single(e =>
+                e.Envelope.Source.ToString() == $"/mohist/epics/{EpicId}"
+                && e.Envelope.Type == EventCatalog.ReverseDns.EpicStatusChanged);
+        Assert.Equal(ProjectId, statusChange.Envelope.Extensions["projectid"]);
+        Assert.Equal(EpicId, statusChange.Envelope.Extensions["epicid"]);
+        Assert.False(statusChange.Envelope.Extensions.ContainsKey("epicno"));
+        Assert.Equal(2, statusChange.Envelope.Extensions.Count);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task LinkIssueAsync_LinkedEventStampsProjectIdAndEpicIdOnly_NoEpicNo()
+    {
+        var (database, eventStore) = CreateDatabaseWithRecordingEventStore();
+        var time = new FakeTimeProvider(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero));
+        await SeedEpicAsync(database);
+        await SeedIssueAsync(database);
+
+        // Recording grain factory: SetEpicAffiliationAsync can be
+        // asserted on without invoking the real IssueGrain (the affilia-
+        // tion push is best-effort, errors are logged, not raised).
+        var recordingGrains = new RecordingGrainFactory();
+
+        var grain = new EpicGrain(
+            database.Factory,
+            recordingGrains,
+            time,
+            eventStore,
+            NullLogger<EpicGrain>.Instance) { GrainKeyForTest = $"{ProjectId}:{EpicId}" };
+
+        await grain.LinkIssueAsync("issue_1", 1, ProjectId);
+
+        var linked = Assert.Single(eventStore.Appended,
+            e => e.Envelope.Source.ToString() == $"/mohist/epics/{EpicId}");
+        Assert.Equal(EventCatalog.ReverseDns.EpicIssueLinked, linked.Envelope.Type);
+        Assert.Equal(ProjectId, linked.Envelope.Extensions["projectid"]);
+        Assert.Equal(EpicId, linked.Envelope.Extensions["epicid"]);
+        Assert.False(linked.Envelope.Extensions.ContainsKey("epicno"));
+        Assert.Equal(2, linked.Envelope.Extensions.Count);
+
+        // T-004 (D5): the link push enqueued SetEpicAffiliationAsync(epicId).
+        var push = recordingGrains.AffiliationCalls.Single(c => c.IssueId == "issue_1");
+        Assert.Equal(EpicId, push.EpicId);
+        Assert.True(push.IsLink);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task UnlinkIssueAsync_UnlinkedEventStampsProjectIdAndEpicIdOnly_NoEpicNo_AndPushesNullAffiliation()
+    {
+        var (database, eventStore) = CreateDatabaseWithRecordingEventStore();
+        var time = new FakeTimeProvider(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero));
+        await SeedEpicAsync(database);
+        await SeedIssueAsync(database);
+        await SeedLinkAsync(database, "issue_1", 1);
+
+        var recordingGrains = new RecordingGrainFactory();
+        var grain = new EpicGrain(
+            database.Factory,
+            recordingGrains,
+            time,
+            eventStore,
+            NullLogger<EpicGrain>.Instance) { GrainKeyForTest = $"{ProjectId}:{EpicId}" };
+
+        await grain.UnlinkIssueAsync("issue_1", ProjectId);
+
+        var unlinked = eventStore.Appended
+            .Single(e =>
+                e.Envelope.Source.ToString() == $"/mohist/epics/{EpicId}"
+                && e.Envelope.Type == EventCatalog.ReverseDns.EpicIssueUnlinked);
+        Assert.Equal(ProjectId, unlinked.Envelope.Extensions["projectid"]);
+        Assert.Equal(EpicId, unlinked.Envelope.Extensions["epicid"]);
+        Assert.False(unlinked.Envelope.Extensions.ContainsKey("epicno"));
+        Assert.Equal(2, unlinked.Envelope.Extensions.Count);
+
+        // T-004 (D5): the unlink push enqueued SetEpicAffiliationAsync(null).
+        var push = recordingGrains.AffiliationCalls.Single(c => c.IssueId == "issue_1");
+        Assert.Null(push.EpicId);
+        Assert.False(push.IsLink);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task LinkIssueAsync_PushFailure_IsSwallowedAndDoesNotBreakTheLink()
+    {
+        // The synchronous push is best-effort: if the grain-to-grain
+        // call throws (e.g. transient silo failure), the durable
+        // EpicIssueLinkedHandler re-applies on redelivery (self-healing
+        // drift). The link itself MUST commit and emit its epic.issue-
+        // linked event, even when the push throws.
+        var (database, eventStore) = CreateDatabaseWithRecordingEventStore();
+        var time = new FakeTimeProvider(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero));
+        await SeedEpicAsync(database);
+        await SeedIssueAsync(database);
+
+        var throwingGrains = new ThrowingAffiliationGrainFactory();
+        var grain = new EpicGrain(
+            database.Factory,
+            throwingGrains,
+            time,
+            eventStore,
+            NullLogger<EpicGrain>.Instance) { GrainKeyForTest = $"{ProjectId}:{EpicId}" };
+
+        await grain.LinkIssueAsync("issue_1", 1, ProjectId);
+
+        var linked = Assert.Single(eventStore.Appended,
+            e => e.Envelope.Source.ToString() == $"/mohist/epics/{EpicId}");
+        Assert.Equal(EventCatalog.ReverseDns.EpicIssueLinked, linked.Envelope.Type);
+
+        // Join row is committed regardless of the failed push.
+        await using var verify = database.CreateDbContext();
+        var rows = await verify.EpicIssues.AsNoTracking()
+            .Where(l => l.ProjectId == ProjectId && l.EpicId == EpicId)
+            .ToListAsync();
+        Assert.Single(rows);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
     public async Task EventStore_PersistsEpicEventsViaDbRoundTrip()
     {
         // End-to-end: real EventStore writes through the migration
@@ -615,5 +778,148 @@ public Task<IReadOnlyList<StoredCloudEvent>> ListAgentSessionEventsAsync(string 
         public StubEpicCounterGrain(Func<int> next) => _next = next;
 
         public Task<int> NextAsync() => Task.FromResult(_next());
+    }
+
+    private sealed record AffiliationCall(string IssueId, string? EpicId, bool IsLink);
+
+    /// <summary>
+    /// Test double for <see cref="IGrainFactory"/> that records every
+    /// <c>IIssueGrain.SetEpicAffiliationAsync</c> invocation issued by
+    /// EpicGrain's link/unlink D5 push (T-004). Other grain lookups
+    /// throw — the link/unlink tests do not exercise them.
+    /// </summary>
+    private sealed class RecordingGrainFactory : IGrainFactory
+    {
+        public List<AffiliationCall> AffiliationCalls { get; } = [];
+
+        public IIssueGrain GetIssueGrain(string issueId) => new RecordingIssueGrain(this, issueId);
+
+        public TGrainInterface GetGrain<TGrainInterface>(string primaryKey, string? grainClassNamePrefix = null)
+            where TGrainInterface : IGrainWithStringKey
+        {
+            if (typeof(TGrainInterface) == typeof(IIssueGrain))
+                return (TGrainInterface)(object)GetIssueGrain(primaryKey);
+            throw new NotSupportedException(typeof(TGrainInterface).FullName);
+        }
+
+        public TGrainInterface GetGrain<TGrainInterface>(Guid primaryKey, string? grainClassNamePrefix = null) where TGrainInterface : IGrainWithGuidKey => throw new NotSupportedException();
+        public TGrainInterface GetGrain<TGrainInterface>(long primaryKey, string? grainClassNamePrefix = null) where TGrainInterface : IGrainWithIntegerKey => throw new NotSupportedException();
+        public TGrainInterface GetGrain<TGrainInterface>(Guid primaryKey, string keyExtension, string? grainClassNamePrefix = null) where TGrainInterface : IGrainWithGuidCompoundKey => throw new NotSupportedException();
+        public TGrainInterface GetGrain<TGrainInterface>(long primaryKey, string keyExtension, string? grainClassNamePrefix = null) where TGrainInterface : IGrainWithIntegerCompoundKey => throw new NotSupportedException();
+        public TGrainObserverInterface CreateObjectReference<TGrainObserverInterface>(IGrainObserver obj) where TGrainObserverInterface : IGrainObserver => throw new NotSupportedException();
+        public void DeleteObjectReference<TGrainObserverInterface>(IGrainObserver obj) where TGrainObserverInterface : IGrainObserver => throw new NotSupportedException();
+        public IGrain GetGrain(Type grainInterfaceType, string grainPrimaryKey)
+        {
+            if (grainInterfaceType == typeof(IIssueGrain))
+                return GetIssueGrain(grainPrimaryKey);
+            throw new NotSupportedException(grainInterfaceType.FullName);
+        }
+        public IGrain GetGrain(Type grainInterfaceType, Guid grainPrimaryKey) => throw new NotSupportedException();
+        public IGrain GetGrain(Type grainInterfaceType, long grainPrimaryKey) => throw new NotSupportedException();
+        public IGrain GetGrain(Type grainInterfaceType, Guid grainPrimaryKey, string keyExtension) => throw new NotSupportedException();
+        public IGrain GetGrain(Type grainInterfaceType, long grainPrimaryKey, string keyExtension) => throw new NotSupportedException();
+        public TGrainInterface GetGrain<TGrainInterface>(GrainId grainId) where TGrainInterface : IAddressable => throw new NotSupportedException();
+        public IAddressable GetGrain(GrainId grainId) => throw new NotSupportedException();
+        public IAddressable GetGrain(GrainId grainId, GrainInterfaceType interfaceType) => throw new NotSupportedException();
+        public IAddressable GetGrain(Type interfaceType, IdSpan grainKey, string? grainClassNamePrefix = null) => throw new NotSupportedException();
+        public IAddressable GetGrain(Type interfaceType, IdSpan grainKey) => throw new NotSupportedException();
+    }
+
+    private sealed class RecordingIssueGrain : IIssueGrain
+    {
+        private readonly RecordingGrainFactory _owner;
+        public RecordingIssueGrain(RecordingGrainFactory owner, string issueId)
+        {
+            _owner = owner;
+            IssueId = issueId;
+        }
+
+        public string IssueId { get; }
+
+        public Task<string> CreateAsync(string projectId, int number, string title, string? body, IReadOnlyDictionary<string, string>? labels, string? priority, string? repositoryRef = null, string? issueId = null, string? risk = null, bool isDraft = false, string[]? attachmentIds = null, string? workflowProfileId = null, int[]? prerequisiteNumbers = null) => throw new NotSupportedException();
+        public Task<string> StartWorkAsync(Mohist.Server.Issue.Grains.WorkflowProjectContext? project = null) => throw new NotSupportedException();
+        public Task CompleteWorkAsync(string workflowRunId) => throw new NotSupportedException();
+        public Task CancelAsync() => throw new NotSupportedException();
+        public Task UpdateAsync(string title, string? body) => throw new NotSupportedException();
+        public Task UpdateFullAsync(Mohist.Server.Issue.Grains.UpdateIssueData data) => throw new NotSupportedException();
+        public Task ArchiveAsync() => throw new NotSupportedException();
+        public Task UnarchiveAsync() => throw new NotSupportedException();
+        public Task ReopenAsync() => throw new NotSupportedException();
+        public Task<Mohist.Server.Issue.Grains.IssueWorkflowStatus?> GetWorkflowStatusAsync() => throw new NotSupportedException();
+        public Task<Mohist.Server.Issue.Grains.IssuePrerequisiteResult> AddPrerequisiteAsync(int prerequisiteNumber) => throw new NotSupportedException();
+        public Task RemovePrerequisiteAsync(int prerequisiteNumber) => throw new NotSupportedException();
+        public Task<Mohist.Server.Issue.Services.IssueStartReadiness> GetStartReadinessAsync() => throw new NotSupportedException();
+        public Task<Mohist.Server.Issue.Grains.IssueCommentResult> AddCommentAsync(string body, string[]? attachmentIds = null) => throw new NotSupportedException();
+        public Task DeactivateForTestAsync() => throw new NotSupportedException();
+        public Task SetEpicAffiliationAsync(string? epicId)
+        {
+            // The denormalization push records the call but does NOT
+            // persist any state — the test fixture does not back it
+            // with a real IssueStore. The goal is to assert the grain
+            // surfaced the right intent, not to roundtrip the issue.
+            _owner.AffiliationCalls.Add(new AffiliationCall(IssueId, epicId, IsLink: epicId is not null));
+            return Task.CompletedTask;
+        }
+    }
+
+    /// <summary>
+    /// Test double that throws when the EpicGrain D5 push routes to an
+    /// IssueGrain — used to pin the best-effort / self-healing contract
+    /// (T-004 acceptance: push failure must NOT break the link).
+    /// </summary>
+    private sealed class ThrowingAffiliationGrainFactory : IGrainFactory
+    {
+        public IIssueGrain GetIssueGrain(string issueId) => new ThrowingIssueGrain();
+
+        public TGrainInterface GetGrain<TGrainInterface>(string primaryKey, string? grainClassNamePrefix = null)
+            where TGrainInterface : IGrainWithStringKey
+        {
+            if (typeof(TGrainInterface) == typeof(IIssueGrain))
+                return (TGrainInterface)(object)GetIssueGrain(primaryKey);
+            throw new NotSupportedException(typeof(TGrainInterface).FullName);
+        }
+
+        public TGrainInterface GetGrain<TGrainInterface>(Guid primaryKey, string? grainClassNamePrefix = null) where TGrainInterface : IGrainWithGuidKey => throw new NotSupportedException();
+        public TGrainInterface GetGrain<TGrainInterface>(long primaryKey, string? grainClassNamePrefix = null) where TGrainInterface : IGrainWithIntegerKey => throw new NotSupportedException();
+        public TGrainInterface GetGrain<TGrainInterface>(Guid primaryKey, string keyExtension, string? grainClassNamePrefix = null) where TGrainInterface : IGrainWithGuidCompoundKey => throw new NotSupportedException();
+        public TGrainInterface GetGrain<TGrainInterface>(long primaryKey, string keyExtension, string? grainClassNamePrefix = null) where TGrainInterface : IGrainWithIntegerCompoundKey => throw new NotSupportedException();
+        public TGrainObserverInterface CreateObjectReference<TGrainObserverInterface>(IGrainObserver obj) where TGrainObserverInterface : IGrainObserver => throw new NotSupportedException();
+        public void DeleteObjectReference<TGrainObserverInterface>(IGrainObserver obj) where TGrainObserverInterface : IGrainObserver => throw new NotSupportedException();
+        public IGrain GetGrain(Type grainInterfaceType, string grainPrimaryKey)
+        {
+            if (grainInterfaceType == typeof(IIssueGrain))
+                return GetIssueGrain(grainPrimaryKey);
+            throw new NotSupportedException(grainInterfaceType.FullName);
+        }
+        public IGrain GetGrain(Type grainInterfaceType, Guid grainPrimaryKey) => throw new NotSupportedException();
+        public IGrain GetGrain(Type grainInterfaceType, long grainPrimaryKey) => throw new NotSupportedException();
+        public IGrain GetGrain(Type grainInterfaceType, Guid grainPrimaryKey, string keyExtension) => throw new NotSupportedException();
+        public IGrain GetGrain(Type grainInterfaceType, long grainPrimaryKey, string keyExtension) => throw new NotSupportedException();
+        public TGrainInterface GetGrain<TGrainInterface>(GrainId grainId) where TGrainInterface : IAddressable => throw new NotSupportedException();
+        public IAddressable GetGrain(GrainId grainId) => throw new NotSupportedException();
+        public IAddressable GetGrain(GrainId grainId, GrainInterfaceType interfaceType) => throw new NotSupportedException();
+        public IAddressable GetGrain(Type interfaceType, IdSpan grainKey, string? grainClassNamePrefix = null) => throw new NotSupportedException();
+        public IAddressable GetGrain(Type interfaceType, IdSpan grainKey) => throw new NotSupportedException();
+    }
+
+    private sealed class ThrowingIssueGrain : IIssueGrain
+    {
+        public Task<string> CreateAsync(string projectId, int number, string title, string? body, IReadOnlyDictionary<string, string>? labels, string? priority, string? repositoryRef = null, string? issueId = null, string? risk = null, bool isDraft = false, string[]? attachmentIds = null, string? workflowProfileId = null, int[]? prerequisiteNumbers = null) => throw new NotSupportedException();
+        public Task<string> StartWorkAsync(Mohist.Server.Issue.Grains.WorkflowProjectContext? project = null) => throw new NotSupportedException();
+        public Task CompleteWorkAsync(string workflowRunId) => throw new NotSupportedException();
+        public Task CancelAsync() => throw new NotSupportedException();
+        public Task UpdateAsync(string title, string? body) => throw new NotSupportedException();
+        public Task UpdateFullAsync(Mohist.Server.Issue.Grains.UpdateIssueData data) => throw new NotSupportedException();
+        public Task ArchiveAsync() => throw new NotSupportedException();
+        public Task UnarchiveAsync() => throw new NotSupportedException();
+        public Task ReopenAsync() => throw new NotSupportedException();
+        public Task<Mohist.Server.Issue.Grains.IssueWorkflowStatus?> GetWorkflowStatusAsync() => throw new NotSupportedException();
+        public Task<Mohist.Server.Issue.Grains.IssuePrerequisiteResult> AddPrerequisiteAsync(int prerequisiteNumber) => throw new NotSupportedException();
+        public Task RemovePrerequisiteAsync(int prerequisiteNumber) => throw new NotSupportedException();
+        public Task<Mohist.Server.Issue.Services.IssueStartReadiness> GetStartReadinessAsync() => throw new NotSupportedException();
+        public Task<Mohist.Server.Issue.Grains.IssueCommentResult> AddCommentAsync(string body, string[]? attachmentIds = null) => throw new NotSupportedException();
+        public Task DeactivateForTestAsync() => throw new NotSupportedException();
+        public Task SetEpicAffiliationAsync(string? epicId) =>
+            throw new InvalidOperationException("simulated silo failure on D5 push");
     }
 }

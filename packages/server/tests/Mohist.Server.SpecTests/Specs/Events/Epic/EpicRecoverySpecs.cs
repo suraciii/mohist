@@ -1,8 +1,10 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
+using EnvironmentAbstractions.TestHelpers;
 using Mohist.Server.Epic.Domain.Events;
 using Mohist.Server.Epic.Grains;
 using Mohist.Server.Events.Grains;
@@ -12,9 +14,12 @@ using Mohist.Server.Infrastructure.Data.Epic;
 using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Infrastructure.Events;
+using Mohist.Server.Infrastructure.Hosting;
+using Mohist.Server.Infrastructure.Workspace;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Services;
+using Mohist.Server.Issue.Services.Attachments;
 using Mohist.Server.SpecTests.Support;
 using Orleans;
 using Orleans.Hosting;
@@ -188,7 +193,7 @@ public class EpicRecoverySpecs
         public Task<IssueStartReadiness> GetStartReadinessAsync() => throw new NotSupportedException();
         public Task<IssueCommentResult> AddCommentAsync(string body, string[]? attachmentIds = null) => throw new NotSupportedException();
         public Task DeactivateForTestAsync() => throw new NotSupportedException();
-        public Task SetEpicAffiliationAsync(string? epicId) => throw new NotSupportedException();
+        public Task SetEpicAffiliationAsync(string? epicId) => Task.CompletedTask;
     }
 }
 
@@ -224,6 +229,22 @@ public sealed class EpicRecoveryFixture : IAsyncLifetime
             siloBuilder.Services.AddDbContextFactory<MohistDbContext>(options => options.UseSqlite(connectionString));
             siloBuilder.Services.AddSingleton<IEventStore, EventStore>();
             siloBuilder.Services.AddSingleton<IDeadLetterStore, DeadLetterStore>();
+            // Issue-412 T-004: the EpicIssueLinkedHandler/UnlinkedHandler
+            // now route a denormalization push through IIssueGrain
+            // (SetEpicAffiliationAsync) in addition to RecomputeProgress.
+            // The silo must therefore host IssueGrain's full DI graph —
+            // otherwise the push fails and the dispatcher's redelivery
+            // doubles up on work. Scan the production conventional
+            // services so IssueStore, IssueRepositoryResolver,
+            // IssueIdentityResolver, workflow profile managers, and the
+            // rest register themselves (AddScoped<IScopedService>+Scrutor
+            // mirror of MohistServiceRegistration.AddMohistConventionalServices).
+            siloBuilder.Services.AddMohistConventionalServices();
+            siloBuilder.Services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
+            siloBuilder.Services.AddSingleton<IEnvironmentVariableProvider, MockEnvironmentVariableProvider>();
+            siloBuilder.Services.AddSingleton<IssueRepositoryResolver>();
+            siloBuilder.Services.AddSingleton<IssueIdentityResolver>();
+            siloBuilder.Services.AddSingleton<AttachmentService>();
             siloBuilder.Services.AddCloudEventHandlers([
                 typeof(EpicIssueLinkedHandler),
                 typeof(EpicRunningStatusHandler),
