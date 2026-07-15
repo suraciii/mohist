@@ -121,6 +121,12 @@ SessionCommandResult   = { ok, runtimeSessionId?, error? }   // error ∈ {confl
 - For **Compact**, the result carries no new `runtimeSessionId` (binding unchanged); #409 wires `result.ok` to a successful `summarize`.
 - For **Reset**, the result carries the replacement `runtimeSessionId`; #409 wires it to `client.session.create()`.
 - A `missing` error maps to D5's `runtime_session_missing` response.
+- The Server persists one `operationId` before dispatch. An unavailable or otherwise ambiguous
+  dispatch result keeps that operation pending; a retry reuses it. A Runtime journal
+  deduplicates `(sessionId, operationId)` and persists completed results. A journal entry that
+  was only started is reconciled through a dedicated runtime seam after restart, never blindly
+  executed again. Definite `missing` and `conflict` replies clear the pending operation because
+  they prove no runtime effect occurred.
 
 The handler registration mirrors the existing `registerFollowupHandler` / `registerCancelHandler` pattern (free function, explicit deps). This issue lands the types, the server-side dispatch, and contract tests with a fake handler; #409 swaps the fake for the real SDK calls inside `OpenCodeRuntime`.
 
@@ -158,6 +164,10 @@ No behavioural change is needed beyond the wire rename; the design explicitly re
 - **[`runtime` absent on legacy rows]** -> Legacy lineage/binding rows have no `Runtime`. They degrade to hidden on the wire and surface as "runtime session missing" on the next command — exactly the spec's legacy behaviour. No backfill is performed (non-goal).
 - **[Wire rename is breaking across server/runner/web]** -> All three packages ship together from one repo; the rename lands atomically in the same change. No partial-upgrade window exists in the deployment model.
 - **[Expected-binding guard rejects legitimate retry after a concurrent Reset]** -> This is the intended behaviour: a retried Reset whose view is now stale must re-read the current binding. The conflict names the actual current binding so the caller can recover in one round-trip.
+- **[Recovery dispatch becomes ambiguous after a timeout]** -> The persisted operation id is the
+  retry token. The Server does not mint a new operation after an unavailable result, and the
+  runner journal either replays a completed result or asks the Runtime to reconcile the existing
+  operation. This avoids a second compaction or replacement session after retry.
 - **[Removing `BuildNewAgentSessionId` changes the grain command signature]** -> Existing spec tests (`AgentSessionGrainPersistenceSpecs`, `AgentSessionContextEventPublishingSpecs`) construct `CompactAgentSessionCommand`/`ResetAgentSessionCommand` with `NewAgentSessionId`; these are updated as part of the change. The `NewAgentSessionId` parameter becomes `ExpectedRuntimeSessionId` (Reset) / removed (Compact).
 - **[Web has ~100 `acpSessionId`/`coderSessionId` references]** -> The migration is mechanical but wide. Mitigated by the normalisation layer (`event-envelope.ts`) being the single read site for most consumers; tests are updated alongside.
 

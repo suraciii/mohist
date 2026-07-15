@@ -34,6 +34,7 @@ public class AgentSessionLifecycleDedupSpecs
             new { runtimeSessionId = session.Id, workDir = "/tmp", processPid = 4321 });
         await AppendEventsAsync(session, new
         {
+            runtimeSessionId = session.Id,
             runtimeEvents = new object[]
             {
                 new { type = "message.delta", payload = new { text = "after attach" } },
@@ -62,6 +63,7 @@ public class AgentSessionLifecycleDedupSpecs
             new { runtimeSessionId = session.Id, workDir = "/tmp", processPid = 4321 });
         await AppendEventsAsync(session, new
         {
+            runtimeSessionId = session.Id,
             runtimeEvents = new object[]
             {
                 new { type = "message.delta", payload = new { text = "first runtime row" } },
@@ -87,6 +89,7 @@ public class AgentSessionLifecycleDedupSpecs
 
         await AppendEventsAsync(session, new
         {
+            runtimeSessionId = session.Id,
             runtimeEvents = new object[]
             {
                 new { type = "message.delta", payload = new { text = "first" } },
@@ -96,6 +99,7 @@ public class AgentSessionLifecycleDedupSpecs
         });
         await AppendEventsAsync(session, new
         {
+            runtimeSessionId = session.Id,
             runtimeEvents = new object[]
             {
                 new { type = "message.delta", payload = new { text = "third" } },
@@ -103,6 +107,7 @@ public class AgentSessionLifecycleDedupSpecs
         });
         await AppendEventsAsync(session, new
         {
+            runtimeSessionId = session.Id,
             runtimeEvents = new object[]
             {
                 new { type = "message.delta", payload = new { text = "fourth" } },
@@ -128,6 +133,7 @@ public class AgentSessionLifecycleDedupSpecs
         await AppendTerminalAsync(session, status: "completed", exitCode: 0);
         await AppendEventsAsync(session, new
         {
+            runtimeSessionId = session.Id,
             runtimeEvents = new object[]
             {
                 new { type = "message.delta", payload = new { text = "after-terminal" } },
@@ -208,6 +214,7 @@ public class AgentSessionLifecycleDedupSpecs
 
         await AppendEventsAsync(session, new
         {
+            runtimeSessionId = session.Id,
             runtimeEvents = new object[]
             {
                 new { type = "message.delta", payload = new { text = "thinking" } },
@@ -251,6 +258,7 @@ public class AgentSessionLifecycleDedupSpecs
 
         await AppendEventsAsync(session, new
         {
+            runtimeSessionId = session.Id,
             runtimeEvents = new object[]
             {
                 new { type = "message.delta", payload = new { text = "hello" } },
@@ -295,6 +303,7 @@ public class AgentSessionLifecycleDedupSpecs
 
         await AppendEventsAsync(session, new
         {
+            runtimeSessionId = session.Id,
             runtimeEvents = new object[]
             {
                 new { type = "usage.updated", payload = new { inputTokens = 1 } },
@@ -361,6 +370,7 @@ public class AgentSessionLifecycleDedupSpecs
     private Task AppendTerminalAsync(CreatedSession session, string status, int exitCode, string? failureReason = null) =>
         AppendEventsAsync(session, new
         {
+            runtimeSessionId = session.Id,
             runtimeEvents = new[]
             {
                 failureReason is null
@@ -372,6 +382,7 @@ public class AgentSessionLifecycleDedupSpecs
     private Task AppendLivenessAsync(CreatedSession session, string status) =>
         AppendEventsAsync(session, new
         {
+            runtimeSessionId = session.Id,
             runtimeEvents = new[]
             {
                 new { type = "session.liveness", payload = new { status } }

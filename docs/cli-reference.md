@@ -411,7 +411,8 @@ mo update runner                    仅升级执行器
 - issue-407 已交付两种来源统一的 Compact / Reset 命令面。`compact` 原地压缩并保持
   当前 Runtime Session；`reset` 只在 Session 空闲且原绑定仍为当前绑定时建立没有旧上下文的
   Runtime Session。两者都保持并返回同一稳定 Session ID。当前 Runtime Session 不存在时，
-  命令会明确失败并提示 Reset。
+  命令会明确失败并提示 Reset。具体执行后端的压缩和新 Session 创建仍由 issue-409 落地；
+  在此之前 Compact 与 Reset 会报告执行后端不可用。
 - 其它命令面随各命令组改进 issue 进一步对齐到本文。
 
 ## 典型工作流脚本

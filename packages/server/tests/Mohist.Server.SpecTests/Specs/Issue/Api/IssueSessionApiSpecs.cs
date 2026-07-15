@@ -42,6 +42,7 @@ public class IssueSessionApiSpecs
 
         await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(currentSession), new
         {
+            runtimeSessionId = currentSession.Id,
             runtimeEvents = new object[]
             {
                 new { type = "session.input", payload = new { text = "Plan session", kind = "task" } },
@@ -162,6 +163,7 @@ public class IssueSessionApiSpecs
         // response must surface it.
         await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(currentSession), new
         {
+            runtimeSessionId = currentSession.Id,
             runtimeEvents = new object[]
             {
                 new
@@ -210,6 +212,7 @@ public class IssueSessionApiSpecs
 
         await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(currentSession), new
         {
+            runtimeSessionId = currentSession.Id,
             runtimeEvents = new object[]
             {
                 new { type = "session.input", payload = new { text = "do the thing", kind = "task" } },
@@ -229,6 +232,7 @@ public class IssueSessionApiSpecs
         });
         await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(currentSession), new
         {
+            runtimeSessionId = currentSession.Id,
             runtimeEvents = new object[]
             {
                 new { type = "message.delta", payload = new { text = "first" } },
@@ -249,6 +253,7 @@ public class IssueSessionApiSpecs
         });
         await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(currentSession), new
         {
+            runtimeSessionId = currentSession.Id,
             runtimeEvents = new object[]
             {
                 new { type = "session.closed", payload = new { status = "completed", exitCode = 0 } }
@@ -286,6 +291,7 @@ public class IssueSessionApiSpecs
         await _client.PostOkAsync(RunnerAgentSessionAttachPath(currentSession), new { runtimeSessionId = currentSession.Id, workDir = $"/workspaces/{project.Id}", processPid = 1234 });
         await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(currentSession), new
         {
+            runtimeSessionId = currentSession.Id,
             runtimeEvents = new object[]
             {
                 new { type = "session.input", payload = new { text = "do the thing", kind = "task" } },

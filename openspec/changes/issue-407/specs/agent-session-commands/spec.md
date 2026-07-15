@@ -94,6 +94,27 @@ Session commands SHALL be expressed in a Mohist-owned request/result shape that 
 - **THEN** both SHALL resolve through the same canonical AgentSession routing
 - **AND** SHALL observe the same product semantics and response shape
 
+### Requirement: Recovery commands preserve one operation across interrupted delivery
+
+Compact and Reset SHALL persist one recovery operation before dispatching to a Runtime.
+When delivery has an ambiguous outcome, including a timeout, transport loss, or an unavailable
+Runtime reply, a later attempt SHALL reuse that operation rather than create a second Runtime
+effect. A Runtime handler SHALL deduplicate repeated delivery of the same operation. It MAY
+reconcile a previously started operation after restart, but MUST NOT blindly execute it again.
+
+#### Scenario: Interrupted Compact resumes the persisted operation
+
+- **WHEN** Compact is reserved and the Server stops before the Runtime returns a result
+- **THEN** a later Compact request SHALL dispatch the same recovery operation
+- **AND** SHALL record at most one compaction fact and transcript record
+
+#### Scenario: Timed-out Reset does not create a second replacement
+
+- **WHEN** Reset delivery times out after the Runtime may have started creating a replacement
+- **THEN** a later Reset request SHALL reuse the same recovery operation
+- **AND** the Runtime SHALL return its known result or reconcile that operation
+- **AND** the AgentSession SHALL append at most one replacement lineage entry for that operation
+
 ### Requirement: A missing current Runtime Session fails explicitly with a Reset hint
 
 When the current Runtime Session does not exist (for example after an execution-backend replacement of a legacy binding), any session command that requires a live runtime session SHALL fail explicitly with an error that names the missing runtime session and prompts a Reset. The system SHALL NOT fabricate a synthetic continuous conversation to mask the missing backend.

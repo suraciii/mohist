@@ -340,6 +340,7 @@ public class AgentJobGrainSpecs
                 {
                     [AgentSessionQueryMetadataKeys.ProjectId] = projectId,
                     [AgentSessionQueryMetadataKeys.SourceKind] = "agent-launch",
+                    [GenericAgentSessionMetadata.AgentId] = "agent-test",
                 })));
 
         var jobKey = $"agent-job-bound-generic-{Guid.NewGuid():N}";
