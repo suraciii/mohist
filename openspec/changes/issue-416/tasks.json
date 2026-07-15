@@ -32,6 +32,8 @@
         "Projects with multiple defaults keep only the first marked default",
         "Declaration order, names, Git URLs, and base branches are preserved",
         "Unrecoverable data (empty list, missing fields, case conflicts) stops startup with actionable diagnostics and leaves rows unchanged",
+        "Existing issues without repository selection continue to start using the upgraded default repository's Git URL and base branch",
+        "In-flight workflows retain their repository metadata across the upgrade",
         "Project and Issue identities remain unchanged; no schema or Runner protocol change"
       ],
       "priority": 2,

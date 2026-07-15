@@ -33,6 +33,8 @@
 
 **Acceptance:**
 - Upgrade specs pass for single-repo default promotion, missing-default normalization, multiple-default normalization, metadata/order preservation, and unrecoverable-data rollback.
+- Existing issues without repository selection continue to start using the upgraded default repository's Git URL and base branch.
+- In-flight workflows retain their repository metadata across the upgrade.
 - No Project or Issue identity is changed; schema and `RepositoriesJson` shape remain the same.
 
 **Depends on:** T-001
