@@ -28,7 +28,10 @@ public sealed class WorkflowRunQuerier
         var row = await db.WorkflowRuns.AsNoTracking()
             .FirstOrDefaultAsync(x => x.WorkflowRunId == workflowRunId, ct);
         if (row is null) return null;
-        return JSON.Deserialize<WorkflowRun>(WorkflowRunStore.MigrateLegacyWorkflowRunJson(row.State));
+        var run = JSON.Deserialize<WorkflowRun>(WorkflowRunStore.MigrateLegacyWorkflowRunJson(row.State));
+        if (run is not null)
+            WorkflowRunLineage.ApplyEpicAffiliation(run, row.EpicId);
+        return run;
     }
 
     /// <summary>
@@ -86,6 +89,29 @@ public sealed class WorkflowRunQuerier
             .Take(limit)
             .Select(row => row.WorkflowRunId)
             .ToListAsync(ct);
+    }
+
+    public async Task<IReadOnlyList<string>> FindBoundGatedStartsAsync(string? projectId = null, int limit = 20, CancellationToken ct = default)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var query =
+            from workflow in db.WorkflowRuns.AsNoTracking()
+            join issue in db.Issues.AsNoTracking() on workflow.WorkflowRunId equals issue.WorkflowRunId
+            where workflow.Status == StatusString(WorkflowRunStatus.Created)
+            select new { workflow.WorkflowRunId, workflow.State, workflow.MetadataProjectId };
+
+        if (!string.IsNullOrWhiteSpace(projectId))
+            query = query.Where(row => row.MetadataProjectId == projectId);
+
+        var candidates = await query
+            .OrderBy(row => row.WorkflowRunId)
+            .Take(limit)
+            .ToListAsync(ct);
+
+        return candidates
+            .Where(row => JSON.Deserialize<WorkflowRun>(WorkflowRunStore.MigrateLegacyWorkflowRunJson(row.State))?.DispatchActivated == false)
+            .Select(row => row.WorkflowRunId)
+            .ToList();
     }
 
     /// <summary>

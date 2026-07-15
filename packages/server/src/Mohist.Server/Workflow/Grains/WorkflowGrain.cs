@@ -75,6 +75,8 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
         await ClearStoppedRunStaleApprovalGateAsync(ct);
 
         _cachedAssignedWorkerId = _run?.Assignment?.WorkerId;
+        if (_run?.DispatchActivated == false)
+            await ActivateAsync();
     }
 
     public override async Task OnDeactivateAsync(DeactivationReason reason, CancellationToken ct)
@@ -128,10 +130,17 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
     public async Task ActivateAsync()
     {
         EnsureRun();
-        var wasCreated = _run.Status == WorkflowRunStatus.Created;
-        _run.ActivateForDispatch(Now());
-        if (wasCreated)
-            await SaveRunAsync();
+        if (_run.DispatchActivated != false) return;
+        var issueId = GetIssueId();
+        if (string.IsNullOrWhiteSpace(issueId))
+            throw new InvalidOperationException($"Workflow '{GrainKey}' has a gated start without an issue id.");
+
+        var lineage = await _runStore.SynchronizeBoundStartAsync(GrainKey, issueId);
+        if (lineage is null) return;
+
+        WorkflowRunLineage.ApplyEpicAffiliation(_run, lineage.EpicId);
+        var events = _run.ActivateForDispatch(Now());
+        await CommitAsync(events);
     }
 
     public async Task ResumeAsync()
@@ -154,7 +163,7 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
     {
         EnsureRun();
 
-        if (_run.Status is not (WorkflowRunStatus.Pending or WorkflowRunStatus.Ready or WorkflowRunStatus.Running or WorkflowRunStatus.AwaitingApproval or WorkflowRunStatus.Paused))
+        if (_run.Status is not (WorkflowRunStatus.Created or WorkflowRunStatus.Pending or WorkflowRunStatus.Ready or WorkflowRunStatus.Running or WorkflowRunStatus.AwaitingApproval or WorkflowRunStatus.Paused))
             throw new InvalidOperationException($"Cannot stop workflow in {_run.Status} state");
 
         var stopEvents = _run.Stop();

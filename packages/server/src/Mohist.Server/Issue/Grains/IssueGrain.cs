@@ -283,7 +283,6 @@ public class IssueGrain : Grain, IIssueGrain
             throw;
         }
 
-        await _workflowRunStore.SynchronizeEpicAffiliationAsync(wrId, issue.Id);
         await wfGrain.ActivateAsync();
         _log.LogInformation("Issue {Key} started workflow {WrId}", GrainKey, wrId);
         return wrId;
@@ -305,7 +304,6 @@ public class IssueGrain : Grain, IIssueGrain
                 return null;
             }
 
-            await _workflowRunStore.SynchronizeEpicAffiliationAsync(workflowRunId, issue.Id);
             await workflow.ActivateAsync();
             _log.LogInformation("Issue {IssueId} reusing workflow run {WorkflowRunId}", issue.Id, workflowRunId);
             return workflowRunId;

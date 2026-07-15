@@ -17,6 +17,8 @@ public interface IWorkflowRunStore
     Task SaveAsync(WorkflowRun run, IReadOnlyList<WorkflowEvent> events, CancellationToken ct = default);
     Task SaveInitialAsync(WorkflowRun run, IReadOnlyList<WorkflowEvent> events, WorkflowStartLineageGuard guard, CancellationToken ct = default) =>
         SaveAsync(run, events, ct);
+    Task<WorkflowBoundLineage?> SynchronizeBoundStartAsync(string workflowRunId, string issueId, CancellationToken ct = default) =>
+        Task.FromResult<WorkflowBoundLineage?>(null);
     Task<WorkflowRun?> LoadAsync(string workflowRunId, CancellationToken ct = default);
     Task SynchronizeEpicAffiliationAsync(string workflowRunId, string issueId, CancellationToken ct = default);
 }
@@ -153,8 +155,10 @@ public class WorkflowRunStore : IWorkflowRunStore
             if (workflow is null) return;
             var issue = await db.Issues.FindAsync([issueId], ct)
                 ?? throw new InvalidOperationException($"Issue '{issueId}' was not found while synchronizing workflow lineage.");
-            issue.LineageVersion++;
-            workflow.EpicId = string.IsNullOrWhiteSpace(issue.EpicId) ? null : issue.EpicId;
+            var epicId = string.IsNullOrWhiteSpace(issue.EpicId) ? null : issue.EpicId;
+            if (string.Equals(workflow.EpicId, epicId, StringComparison.Ordinal))
+                return;
+            workflow.EpicId = epicId;
             var entry = db.Entry(workflow);
             entry.Property<long>("ETag").CurrentValue = entry.Property<long>("ETag").OriginalValue + 1;
 
@@ -175,6 +179,30 @@ public class WorkflowRunStore : IWorkflowRunStore
                 throw;
             }
         }
+    }
+
+    public async Task<WorkflowBoundLineage?> SynchronizeBoundStartAsync(
+        string workflowRunId,
+        string issueId,
+        CancellationToken ct = default)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var workflow = await db.WorkflowRuns.FindAsync([workflowRunId], ct);
+        if (workflow is null) return null;
+        var issue = await db.Issues.FindAsync([issueId], ct);
+        if (issue is null || !string.Equals(issue.WorkflowRunId, workflowRunId, StringComparison.Ordinal))
+            return null;
+
+        var epicId = string.IsNullOrWhiteSpace(issue.EpicId) ? null : issue.EpicId;
+        if (!string.Equals(workflow.EpicId, epicId, StringComparison.Ordinal))
+        {
+            workflow.EpicId = epicId;
+            var entry = db.Entry(workflow);
+            entry.Property<long>("ETag").CurrentValue = entry.Property<long>("ETag").OriginalValue + 1;
+            await db.SaveChangesAsync(ct);
+        }
+
+        return new WorkflowBoundLineage(epicId);
     }
 
     internal static async Task StageEpicAffiliationAsync(
@@ -662,3 +690,5 @@ public class WorkflowRunStore : IWorkflowRunStore
     private static string WorkflowEventSource(string workflowRunId) =>
         $"/mohist/workflow-runs/{workflowRunId}";
 }
+
+public sealed record WorkflowBoundLineage(string? EpicId);

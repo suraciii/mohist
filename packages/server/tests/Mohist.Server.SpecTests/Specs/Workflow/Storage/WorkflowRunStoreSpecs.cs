@@ -157,15 +157,11 @@ public class WorkflowRunStoreSpecs
         }
 
         var run = CreateRun("wr_prebind", epicId: null);
+        run.DispatchActivated = false;
         await store.SaveInitialAsync(run, [new WorkflowRunStarted()], new WorkflowStartLineageGuard(IssueId, 1));
 
         var querier = new WorkflowRunQuerier(factory);
         Assert.Empty(await querier.FindAssignableAsync(ProjectId));
-
-        run.ActivateForDispatch(FixedTime);
-        await store.SaveAsync(run);
-
-        Assert.Equal([run.Id], await querier.FindAssignableAsync(ProjectId));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]

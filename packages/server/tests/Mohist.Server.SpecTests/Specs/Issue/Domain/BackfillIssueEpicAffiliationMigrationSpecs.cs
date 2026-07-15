@@ -9,6 +9,7 @@ using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Epic;
 using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Infrastructure.Data.Issue;
+using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Issue.Domain.Events;
 using Mohist.Server.SpecTests.Support;
@@ -230,6 +231,10 @@ public class BackfillIssueEpicAffiliationMigrationSpecs
         Assert.Equal("epic_current", (await context.WorkflowRuns.SingleAsync(row => row.WorkflowRunId == "wr_current_link")).EpicId);
         Assert.Null((await context.WorkflowRuns.SingleAsync(row => row.WorkflowRunId == "wr_current_none")).EpicId);
         Assert.Equal("epic_annotation", (await context.WorkflowRuns.SingleAsync(row => row.WorkflowRunId == "wr_unmatched_issue")).EpicId);
+
+        var querier = new WorkflowRunQuerier(database.Factory);
+        Assert.Equal("epic_current", (await querier.LoadAsync("wr_current_link"))!.Metadata.Annotations!["epicId"]);
+        Assert.False((await querier.LoadAsync("wr_current_none"))!.Metadata.Annotations!.ContainsKey("epicId"));
     }
 
     private static Task SeedWorkflowAsync(MohistDbContext context, string workflowId, string issueId, string epicId)

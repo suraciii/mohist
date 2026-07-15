@@ -43,6 +43,7 @@ public sealed class WorkflowRun
     public required string Id { get; init; }
     public required WorkflowRunMetadata Metadata { get; set; }
     public WorkflowRunStatus Status { get; set; }
+    public bool? DispatchActivated { get; set; } = true;
     /// <summary>
     /// The active worker assignment for this run. At most one worker may own a
     /// run at a time; running tasks derive their worker id from this assignment

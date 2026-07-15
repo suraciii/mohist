@@ -87,6 +87,7 @@ public static partial class WorkflowRunExtensions
             if (current.Status == StageRunStatus.Pending)
                 current.Status = StageRunStatus.Running;
 
+            run.DispatchActivated = dispatchable;
             if (dispatchable)
                 SetStatusAndTrackReadySince(run, wasPaused
                     ? ActiveOrWaitingForDispatchStatus(run)
@@ -98,18 +99,14 @@ public static partial class WorkflowRunExtensions
                 : [new WorkflowRunStarted(), new StageStarted(current.Id)];
         }
 
-        public void ActivateForDispatch(DateTimeOffset now)
+        public IReadOnlyList<WorkflowEvent> ActivateForDispatch(DateTimeOffset now)
         {
-            if (run.Status == WorkflowRunStatus.Created)
-            {
-                SetStatusAndTrackReadySince(run, WorkflowRunStatus.Pending, now);
-                return;
-            }
+            if (run.DispatchActivated != false) return [];
+            if (run.Status != WorkflowRunStatus.Created)
+                throw new InvalidOperationException($"WorkflowRun is {run.Status}, activation requires Created");
 
-            if (run.Status is WorkflowRunStatus.Pending or WorkflowRunStatus.Ready or WorkflowRunStatus.Running)
-                return;
-
-            throw new InvalidOperationException($"WorkflowRun is {run.Status}, activation requires Created or an active status");
+            run.DispatchActivated = true;
+            return run.Advance(now);
         }
 
         public IReadOnlyList<WorkflowEvent> Pause()
