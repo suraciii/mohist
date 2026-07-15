@@ -1,6 +1,8 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using EnvironmentAbstractions.TestHelpers;
+using Mohist.Cli;
 using Mohist.Server.Project.Services;
 using Mohist.Server.SpecTests.Support;
 using Xunit;
@@ -44,6 +46,29 @@ public class ProjectApiSpecs
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         var json = await response.Content.ReadFromJsonAsync<JsonElement>();
         Assert.False(json.GetProperty("success").GetBoolean());
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
+    [Fact]
+    public async Task PostProject_WithInitialIsDefault_ReturnsBadRequestAndDoesNotCreateProject()
+    {
+        var name = $"initial-default-forbidden-{Guid.NewGuid():N}";
+        using var response = await _client.PostAsJsonAsync("/api/projects", new
+        {
+            name,
+            repository = new
+            {
+                name = "main",
+                gitUrl = "git@example.com:main.git",
+                baseBranch = "main",
+                isDefault = false,
+            },
+        });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var projects = await _client.GetDataAsync<List<ProjectInfo>>("/api/projects");
+        Assert.DoesNotContain(projects, project => project.Name == name);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -221,6 +246,21 @@ public class ProjectApiSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
+    public async Task PostRepository_WithIsDefault_ReturnsBadRequestAndDoesNotMutate()
+    {
+        var created = await CreateRepositoryUpdateProjectAsync();
+
+        using var response = await _client.PostAsJsonAsync(
+            $"/api/projects/{created.Id}/repositories",
+            new { name = "web", gitUrl = "git@example.com:web.git", isDefault = true });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        await AssertRepositoryUnchangedAsync(created.Id);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
+    [Fact]
     public async Task PatchRepository_MetadataUpdate_PersistsNewGitUrlAndBaseBranch()
     {
         var created = await _client.PostDataAsync<ProjectInfo>(
@@ -276,6 +316,44 @@ public class ProjectApiSpecs
         var repo = repos.Single();
         Assert.Equal("git@example.com:backend.git", repo.GitUrl);
         Assert.Equal("main", repo.BaseBranch);
+    }
+
+    public static TheoryData<object> ForbiddenRepositoryPatches => new()
+    {
+        { new { newName = "renamed", gitUrl = "git@example.com:renamed.git" } },
+        { new { isDefault = true, baseBranch = "release" } },
+        { new { setDefault = false, baseBranch = "release" } },
+    };
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
+    [Theory]
+    [MemberData(nameof(ForbiddenRepositoryPatches))]
+    public async Task PatchRepository_WithForbiddenControl_ReturnsBadRequestAndDoesNotMutate(object patch)
+    {
+        var created = await CreateRepositoryUpdateProjectAsync();
+
+        using var response = await _client.PatchAsJsonAsync(
+            $"/api/projects/{created.Id}/repositories/backend",
+            patch);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        await AssertRepositoryUnchangedAsync(created.Id);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
+    [Fact]
+    public async Task PatchRepository_WithBlankGitUrl_ReturnsBadRequestAndDoesNotMutate()
+    {
+        var created = await CreateRepositoryUpdateProjectAsync();
+
+        using var response = await _client.PatchAsJsonAsync(
+            $"/api/projects/{created.Id}/repositories/backend",
+            new { gitUrl = " ", baseBranch = "release" });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        await AssertRepositoryUnchangedAsync(created.Id);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -418,9 +496,44 @@ public class ProjectApiSpecs
         var json = await response.Content.ReadFromJsonAsync<JsonElement>();
         Assert.False(json.GetProperty("success").GetBoolean());
         Assert.Contains("default", json.GetProperty("error").GetString() ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("mo repo set-default", json.GetProperty("error").GetString() ?? string.Empty, StringComparison.Ordinal);
 
         var repos = await _client.GetDataAsync<List<RepositoryInfoDto>>($"/api/projects/{created.Id}/repositories");
         Assert.Single(repos);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
+    [Fact]
+    public async Task RepoDelete_DefaultThroughCli_SurfacesServerConflictHint()
+    {
+        var created = await _client.PostDataAsync<ProjectInfo>(
+            "/api/projects",
+            new
+            {
+                name = $"repo-delete-cli-{Guid.NewGuid():N}",
+                repository = new
+                {
+                    name = "server",
+                    gitUrl = "git@example.com:server.git",
+                    baseBranch = "main",
+                },
+            });
+        var output = new StringWriter();
+        var error = new StringWriter();
+        using var cliHttp = new HttpClient(new FixtureClientHandler(_client)) { BaseAddress = _client.BaseAddress };
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            cliHttp,
+            ["repo", "delete", "server", "--project-id", created.Id],
+            output,
+            error,
+            new FakeFileSystem(),
+            new NoopCommandExecutor());
+
+        Assert.NotEqual(0, exitCode);
+        Assert.Contains("mo repo set-default <other-name>", error.ToString(), StringComparison.Ordinal);
+        Assert.Single(await _client.GetDataAsync<List<RepositoryInfoDto>>($"/api/projects/{created.Id}/repositories"));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -448,6 +561,51 @@ public class ProjectApiSpecs
         Assert.NotNull(fetched.DefaultRepository);
         Assert.Equal("default-one", fetched.DefaultRepository!.Name);
         Assert.True(fetched.DefaultRepository.IsDefault);
+    }
+
+    private async Task<ProjectInfo> CreateRepositoryUpdateProjectAsync()
+    {
+        return await _client.PostDataAsync<ProjectInfo>(
+            "/api/projects",
+            new
+            {
+                name = $"repo-patch-{Guid.NewGuid():N}",
+                repository = new
+                {
+                    name = "backend",
+                    gitUrl = "git@example.com:backend.git",
+                    baseBranch = "main",
+                },
+            });
+    }
+
+    private async Task AssertRepositoryUnchangedAsync(string projectId)
+    {
+        var repository = Assert.Single(
+            await _client.GetDataAsync<List<RepositoryInfoDto>>($"/api/projects/{projectId}/repositories"));
+        Assert.Equal("backend", repository.Name);
+        Assert.Equal("git@example.com:backend.git", repository.GitUrl);
+        Assert.Equal("main", repository.BaseBranch);
+        Assert.True(repository.IsDefault);
+    }
+
+    private sealed class FixtureClientHandler(HttpClient client) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var forwarded = new HttpRequestMessage(request.Method, request.RequestUri!.PathAndQuery);
+            return client.SendAsync(forwarded, cancellationToken);
+        }
+    }
+
+    private sealed class NoopCommandExecutor : ICommandExecutor
+    {
+        public Task<(int ExitCode, string Stdout, string Stderr)> ExecuteAsync(
+            string fileName,
+            string[] args,
+            string? workingDirectory = null,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult((0, string.Empty, string.Empty));
     }
 
     private sealed record RepositoryInfoDto(string Name, string GitUrl, string BaseBranch, bool IsDefault);

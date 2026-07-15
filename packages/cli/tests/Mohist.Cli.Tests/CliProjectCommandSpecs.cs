@@ -50,6 +50,35 @@ public class CliProjectCommandSpecs
         Assert.False(body.AsObject().ContainsKey("workTreeRoot"));
         Assert.False(body.AsObject().ContainsKey("remote"));
         Assert.False(body.AsObject().ContainsKey("origin"));
+        executor.AssertExpectedCommandsExecuted();
+    }
+
+    [Fact]
+    public async Task ProjectCreate_WithNestedGitPath_PostsRepositoryNamedAfterResolvedRoot()
+    {
+        var nestedPath = Path.Combine(RepoRoot, "src");
+        var (handler, http, output, error, fileSystem, executor) = CliTestFactory.Create(
+            async (_, _) => RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new { id = "proj_123", name = "my-project" },
+            }, HttpStatusCode.Created),
+            activeProjectId: null);
+        fileSystem.CreateDirectory(RepoRoot);
+        SeedGitRepo(
+            fileSystem,
+            executor,
+            nestedPath,
+            resolvedWorkTreeRoot: RepoRoot,
+            createGitMarker: false);
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["project", "create", "my-project", "--path", nestedPath], output, error, fileSystem, executor);
+
+        Assert.Equal(0, exitCode);
+        var body = JsonNode.Parse(handler.Requests.Single().Body!)!;
+        Assert.Equal("product-a", body["repository"]!["name"]?.GetValue<string>());
+        executor.AssertExpectedCommandsExecuted();
     }
 
     [Fact]
@@ -80,6 +109,7 @@ public class CliProjectCommandSpecs
             activeProjectId: null);
 
         fileSystem.CreateDirectory(RepoRoot);
+        QueueGit(executor, RepoRoot, ["rev-parse", "--show-toplevel"], 128, "", "fatal: not a git repository");
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["project", "create", "my-project", "--path", RepoRoot], output, error, fileSystem, executor);
@@ -87,6 +117,7 @@ public class CliProjectCommandSpecs
         Assert.NotEqual(0, exitCode);
         Assert.Empty(handler.Requests);
         Assert.Contains(RepoRoot, error.ToString(), StringComparison.Ordinal);
+        executor.AssertExpectedCommandsExecuted();
     }
 
     [Fact]
@@ -104,6 +135,7 @@ public class CliProjectCommandSpecs
         Assert.NotEqual(0, exitCode);
         Assert.Empty(handler.Requests);
         Assert.Contains("origin", error.ToString(), StringComparison.OrdinalIgnoreCase);
+        executor.AssertExpectedCommandsExecuted();
     }
 
     [Fact]
@@ -122,6 +154,7 @@ public class CliProjectCommandSpecs
         Assert.Empty(handler.Requests);
         var stderr = error.ToString();
         Assert.Contains("branch", stderr, StringComparison.OrdinalIgnoreCase);
+        executor.AssertExpectedCommandsExecuted();
     }
 
     [Fact]
@@ -144,6 +177,7 @@ public class CliProjectCommandSpecs
         var request = handler.Requests.Single();
         var body = JsonNode.Parse(request.Body!)!;
         Assert.Equal("develop", body["repository"]!["baseBranch"]?.GetValue<string>());
+        executor.AssertExpectedCommandsExecuted();
     }
 
     [Fact]
@@ -180,36 +214,55 @@ public class CliProjectCommandSpecs
         bool includeOrigin = true,
         bool includeOriginHead = true,
         bool includeBranch = true,
-        string? branch = null)
+        string? branch = null,
+        string? resolvedWorkTreeRoot = null,
+        bool createGitMarker = true)
     {
+        var resolvedRoot = resolvedWorkTreeRoot ?? workTreeRoot;
         fileSystem.CreateDirectory(workTreeRoot);
-        var gitDir = Path.Combine(workTreeRoot, ".git");
-        fileSystem.CreateDirectory(gitDir);
+        if (createGitMarker)
+            fileSystem.CreateDirectory(Path.Combine(workTreeRoot, ".git"));
 
         executor.Invocations.Clear();
-        executor.QueueForFile("git", 0, workTreeRoot + "\n");
-        executor.QueueForFile("git", 0, "abc123\n");
+        QueueGit(executor, workTreeRoot, ["rev-parse", "--show-toplevel"], 0, resolvedRoot + "\n");
+        QueueGit(executor, resolvedRoot, ["rev-parse", "HEAD"], 0, "abc123\n");
         if (includeOrigin)
         {
-            executor.QueueForFile("git", 0, gitUrl + "\n");
+            QueueGit(executor, resolvedRoot, ["remote", "get-url", "origin"], 0, gitUrl + "\n");
         }
         else
         {
-            executor.QueueForFile("git", 128, "", "fatal: No such remote 'origin'\n");
+            QueueGit(executor, resolvedRoot, ["remote", "get-url", "origin"], 128, "", "fatal: No such remote 'origin'\n");
+            return;
         }
 
-        if (includeOriginHead && includeOrigin)
+        if (includeOriginHead)
         {
-            executor.QueueForFile("git", 0, $"origin/{baseBranch}\n");
+            QueueGit(executor, resolvedRoot, ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"], 0, $"origin/{baseBranch}\n");
+            return;
         }
 
+        QueueGit(executor, resolvedRoot, ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"], 1, "", "fatal: no origin/HEAD\n");
         if (includeBranch)
         {
-            executor.QueueForFile("git", 0, $"{(branch ?? baseBranch)}\n");
+            QueueGit(executor, resolvedRoot, ["symbolic-ref", "--short", "HEAD"], 0, $"{(branch ?? baseBranch)}\n");
         }
         else
         {
-            executor.QueueForFile("git", 1, "", "fatal: not a symbolic ref\n");
+            QueueGit(executor, resolvedRoot, ["symbolic-ref", "--short", "HEAD"], 1, "", "fatal: not a symbolic ref\n");
         }
+    }
+
+    private static void QueueGit(
+        FakeCommandExecutor executor,
+        string workingDirectory,
+        string[] gitArgs,
+        int exitCode,
+        string stdout = "",
+        string stderr = "")
+    {
+        var args = new List<string> { "-C", workingDirectory };
+        args.AddRange(gitArgs);
+        executor.QueueExpected("git", args.ToArray(), workingDirectory, exitCode, stdout, stderr);
     }
 }

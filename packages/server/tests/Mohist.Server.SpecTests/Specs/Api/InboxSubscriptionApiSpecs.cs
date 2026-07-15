@@ -216,9 +216,9 @@ public class InboxSubscriptionApiSpecs
 
     private async Task<string> CreateProjectAsync(string prefix)
     {
-        var project = await _client.PostDataAsync<JsonElement>(
+        var project = await _client.CreateProjectWithDefaultRepositoryAsync<JsonElement>(
             "/api/projects",
-            new { name = $"{prefix}-{Guid.NewGuid():N}" });
+            $"{prefix}-{Guid.NewGuid():N}");
         return project.GetProperty("id").GetString()!;
     }
 

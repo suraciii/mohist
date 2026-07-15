@@ -30,7 +30,9 @@ public class EnsureCliWrapperTests
     public async Task EnsureCliWrapper_NoExistingWrapper_CreatesWrapper()
     {
         var fs = new FakeFileSystem();
-        var ops = BuildOperations(out var output, out _, fs: fs, home: "/home/test");
+        var executor = new FakeCommandExecutor();
+        executor.QueueForFile("chmod", 0);
+        var ops = BuildOperations(out var output, out _, fs: fs, executor: executor, home: "/home/test");
         var wrapperPath = UpdateOperations.ResolveCliWrapperPath("/home/test");
 
         var exit = await ops.EnsureCliWrapperAsync("/managed/mo", "/home/test");
@@ -50,7 +52,9 @@ public class EnsureCliWrapperTests
         fs.CreateDirectory(wrapperDir);
         fs.AddFile(wrapperPath, "#!/bin/sh\nold-content\n");
 
-        var ops = BuildOperations(out _, out _, fs: fs, home: "/home/test");
+        var executor = new FakeCommandExecutor();
+        executor.QueueForFile("chmod", 0);
+        var ops = BuildOperations(out _, out _, fs: fs, executor: executor, home: "/home/test");
 
         var exit = await ops.EnsureCliWrapperAsync("/managed/mo", "/home/test");
 
@@ -91,7 +95,9 @@ public class EnsureCliWrapperTests
         var wrapperDir = Path.GetDirectoryName(wrapperPath)!;
         fs.CreateDirectory(wrapperDir);
 
-        var ops = BuildOperations(out _, out _, fs: fs, home: "/home/test");
+        var executor = new FakeCommandExecutor();
+        executor.QueueForFile("chmod", 0);
+        var ops = BuildOperations(out _, out _, fs: fs, executor: executor, home: "/home/test");
 
         var exit = await ops.EnsureCliWrapperAsync("/managed/mo", "/home/test");
 

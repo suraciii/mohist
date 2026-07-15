@@ -33,6 +33,9 @@ public static class ProjectRoutes
             if (req.Repository is null)
                 return ApiResults.BadRequest("repository is required", "repository_required");
 
+            if (req.Repository.IsDefault is not null)
+                return ApiResults.BadRequest("repository.isDefault is derived by the server", "repository_initial_default_forbidden");
+
             if (string.IsNullOrWhiteSpace(req.Repository.Name))
                 return ApiResults.BadRequest("repository.name is required", "repository_name_required");
 
@@ -112,6 +115,9 @@ public static class ProjectRoutes
 
         byRef.MapPost("/repositories", async (HttpContext context, AddRepositoryRequest req, IGrainFactory grains) =>
         {
+            if (req.IsDefault is not null)
+                return ApiResults.BadRequest("isDefault is derived by the server; use setDefault instead", "repository_default_forbidden");
+
             if (string.IsNullOrWhiteSpace(req.Name))
                 return ApiResults.BadRequest("name is required", "repository_name_required");
             if (string.IsNullOrWhiteSpace(req.GitUrl))
@@ -143,8 +149,20 @@ public static class ProjectRoutes
             var project = context.GetResolvedProject();
             var projectGrain = grains.GetGrain<IProjectGrain>(project.Id);
 
+            if (req.NewName is not null)
+                return ApiResults.BadRequest("Repository names are immutable", "repository_name_immutable");
+
+            if (req.IsDefault is not null)
+                return ApiResults.BadRequest("isDefault is derived by the server; use setDefault instead", "repository_default_forbidden");
+
+            if (req.SetDefault == false)
+                return ApiResults.BadRequest("setDefault must be true when supplied", "repository_default_selection_invalid");
+
+            if (req.GitUrl is not null && string.IsNullOrWhiteSpace(req.GitUrl))
+                return ApiResults.BadRequest("gitUrl must be a non-empty string", "repository_giturl_required");
+
             var setDefault = req.SetDefault == true;
-            var hasMetadataUpdate = !string.IsNullOrWhiteSpace(req.GitUrl) || req.BaseBranch is not null;
+            var hasMetadataUpdate = req.GitUrl is not null || req.BaseBranch is not null;
 
             if (setDefault && hasMetadataUpdate)
                 return ApiResults.BadRequest(
@@ -514,13 +532,24 @@ public sealed record ProjectPromptOverrideRequest(
 public sealed record PromptPreviewRequest(JsonElement? Variables);
 
 public record CreateProjectRequest(string Name, CreateProjectRepositoryRequest? Repository);
-public record CreateProjectRepositoryRequest(string? Name, string? GitUrl, string? BaseBranch);
+public record CreateProjectRepositoryRequest(
+    string? Name,
+    string? GitUrl,
+    string? BaseBranch,
+    JsonElement? IsDefault = null);
 public record UpdateProjectRequest();
-public record AddRepositoryRequest(string Name, string GitUrl, string? BaseBranch = null, bool? SetDefault = null);
+public record AddRepositoryRequest(
+    string Name,
+    string GitUrl,
+    string? BaseBranch = null,
+    bool? SetDefault = null,
+    JsonElement? IsDefault = null);
 public record UpdateRepositoryRequest(
     bool? SetDefault = null,
     string? GitUrl = null,
-    string? BaseBranch = null);
+    string? BaseBranch = null,
+    JsonElement? NewName = null,
+    JsonElement? IsDefault = null);
 public record CreateProjectTemplateRequest(string Yaml);
 public record UpdateProjectTemplateRequest(string Yaml);
 public record SetDefaultTemplateRequest(string TemplateId);

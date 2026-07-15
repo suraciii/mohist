@@ -221,17 +221,45 @@ public class IssueWorkflowRepositoryResolutionSpecs
         await issueGrain.CreateAsync(projectId, number, "In-flight issue", body: null, labels: null, priority: null, repositoryRef: null, issueId);
         var workflowRunId = await issueGrain.StartWorkAsync();
         using var variablesBeforeUpgrade = await LoadWorkflowVariablesAsync(workflowRunId);
+        var statusBeforeUpgrade = (await issueGrain.GetWorkflowStatusAsync())!;
 
+        await projectGrain.AsReference<IGrainManagementExtension>().DeactivateOnIdle();
         using (var scope = _services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+            var project = await db.Projects.SingleAsync(row => row.Id == projectId);
+            project.RepositoriesJson = JsonSerializer.Serialize(
+                new[]
+                {
+                    new Mohist.Server.Project.Domain.RepositoryInfo
+                    {
+                        Name = "server",
+                        GitUrl = "git@example.com:server.git",
+                        BaseBranch = "release",
+                        IsDefault = false,
+                    },
+                },
+                new JsonSerializerOptions(JsonSerializerDefaults.Web));
+            await db.SaveChangesAsync();
             await ProjectRepositoryDataUpgrader.UpgradeAsync(db);
+
+            db.ChangeTracker.Clear();
+            var upgradedProject = await db.Projects.SingleAsync(row => row.Id == projectId);
+            var repositories = JsonSerializer.Deserialize<List<Mohist.Server.Project.Domain.RepositoryInfo>>(
+                upgradedProject.RepositoriesJson,
+                new JsonSerializerOptions(JsonSerializerDefaults.Web))!;
+            var repository = Assert.Single(repositories);
+            Assert.True(repository.IsDefault);
         }
 
         using var variablesAfterUpgrade = await LoadWorkflowVariablesAsync(workflowRunId);
         Assert.Equal(
             variablesBeforeUpgrade.RootElement.GetProperty("repository").GetRawText(),
             variablesAfterUpgrade.RootElement.GetProperty("repository").GetRawText());
+        var statusAfterUpgrade = (await issueGrain.GetWorkflowStatusAsync())!;
+        Assert.Equal(statusBeforeUpgrade.Stage, statusAfterUpgrade.Stage);
+        Assert.Equal(statusBeforeUpgrade.RuntimeStatus, statusAfterUpgrade.RuntimeStatus);
+        Assert.Equal(statusBeforeUpgrade.WorkflowRunId, statusAfterUpgrade.WorkflowRunId);
         Assert.Equal(workflowRunId, await issueGrain.StartWorkAsync());
     }
 

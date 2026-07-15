@@ -381,12 +381,11 @@ public class WorkflowRerunFromStageApiSpecs
         var projectGrain = _grains.GetGrain<IProjectGrain>(id);
         await projectGrain.CreateAsync(name, new Mohist.Server.Project.Domain.RepositoryInfo
         {
-            Name = "placeholder",
-            GitUrl = "git@example.com:placeholder.git",
+            Name = "origin",
+            GitUrl = "git@example.com:test.git",
             BaseBranch = "main",
             IsDefault = true,
         });
-        await projectGrain.AddRepositoryAsync("origin", "git@example.com:test.git", "main");
         return (id, name);
     }
 

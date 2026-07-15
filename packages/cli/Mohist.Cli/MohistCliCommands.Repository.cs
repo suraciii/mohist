@@ -93,15 +93,17 @@ internal static class RepositoryCommands
             {
                 var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
                 if (resolveExit != 0) return resolveExit;
+                var payload = new Dictionary<string, object?>
+                {
+                    ["name"] = name,
+                    ["gitUrl"] = gitUrl,
+                    ["baseBranch"] = string.IsNullOrWhiteSpace(baseBranch) ? "main" : baseBranch,
+                };
+                if (setDefault)
+                    payload["setDefault"] = true;
                 return await api.PrintPostWithOutputAsync(
                     ProjectRepositoriesPath(resolvedProjectId),
-                    new
-                    {
-                        name,
-                        gitUrl,
-                        baseBranch = string.IsNullOrWhiteSpace(baseBranch) ? "main" : baseBranch,
-                        setDefault,
-                    },
+                    payload,
                     mode,
                     nameof(MohistCliApi.TableShape.RepoList));
             }

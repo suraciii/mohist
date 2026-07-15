@@ -47,17 +47,18 @@ public class ProjectRepositoryBootstrapTests
     }
 
     [Fact]
-    public async Task TryResolveAsync_DirectoryWithoutGitMarker_ReportsNotGitRepo()
+    public async Task TryResolveAsync_DirectoryOutsideGitWorkTree_ReportsNotGitRepo()
     {
         var fs = new FakeFileSystem();
         fs.CreateDirectory(WorkTreeRoot);
         var executor = new FakeCommandExecutor();
+        QueueGit(executor, WorkTreeRoot, ["rev-parse", "--show-toplevel"], 128, "", "fatal: not a git repository");
 
         var outcome = await ProjectRepositoryBootstrap.TryResolveAsync(WorkTreeRoot, fs, executor);
 
         var failure = Assert.IsType<ProjectRepositoryBootstrap.Outcome.Failure>(outcome);
         Assert.Contains("Git", failure.Message, StringComparison.OrdinalIgnoreCase);
-        Assert.Empty(executor.Invocations);
+        executor.AssertExpectedCommandsExecuted();
     }
 
     [Fact]
@@ -67,12 +68,13 @@ public class ProjectRepositoryBootstrapTests
         fs.CreateDirectory(WorkTreeRoot);
         fs.CreateDirectory(Path.Combine(WorkTreeRoot, ".git"));
         var executor = new FakeCommandExecutor();
-        executor.QueueForFile("git", 128, "", "fatal: not a git repository");
+        QueueGit(executor, WorkTreeRoot, ["rev-parse", "--show-toplevel"], 128, "", "fatal: not a git repository");
 
         var outcome = await ProjectRepositoryBootstrap.TryResolveAsync(WorkTreeRoot, fs, executor);
 
         var failure = Assert.IsType<ProjectRepositoryBootstrap.Outcome.Failure>(outcome);
         Assert.Contains("Git", failure.Message, StringComparison.OrdinalIgnoreCase);
+        executor.AssertExpectedCommandsExecuted();
     }
 
     [Fact]
@@ -82,13 +84,14 @@ public class ProjectRepositoryBootstrapTests
         fs.CreateDirectory(WorkTreeRoot);
         fs.CreateDirectory(Path.Combine(WorkTreeRoot, ".git"));
         var executor = new FakeCommandExecutor();
-        executor.QueueForFile("git", 0, WorkTreeRoot + "\n");
-        executor.QueueForFile("git", 128, "", "fatal: ambiguous argument 'HEAD'");
+        QueueGit(executor, WorkTreeRoot, ["rev-parse", "--show-toplevel"], 0, WorkTreeRoot + "\n");
+        QueueGit(executor, WorkTreeRoot, ["rev-parse", "HEAD"], 128, "", "fatal: ambiguous argument 'HEAD'");
 
         var outcome = await ProjectRepositoryBootstrap.TryResolveAsync(WorkTreeRoot, fs, executor);
 
         var failure = Assert.IsType<ProjectRepositoryBootstrap.Outcome.Failure>(outcome);
         Assert.Contains("HEAD", failure.Message, StringComparison.OrdinalIgnoreCase);
+        executor.AssertExpectedCommandsExecuted();
     }
 
     [Fact]
@@ -98,14 +101,15 @@ public class ProjectRepositoryBootstrapTests
         fs.CreateDirectory(WorkTreeRoot);
         fs.CreateDirectory(Path.Combine(WorkTreeRoot, ".git"));
         var executor = new FakeCommandExecutor();
-        executor.QueueForFile("git", 0, WorkTreeRoot + "\n");
-        executor.QueueForFile("git", 0, "abc123\n");
-        executor.QueueForFile("git", 128, "", "fatal: No such remote 'origin'");
+        QueueGit(executor, WorkTreeRoot, ["rev-parse", "--show-toplevel"], 0, WorkTreeRoot + "\n");
+        QueueGit(executor, WorkTreeRoot, ["rev-parse", "HEAD"], 0, "abc123\n");
+        QueueGit(executor, WorkTreeRoot, ["remote", "get-url", "origin"], 128, "", "fatal: No such remote 'origin'");
 
         var outcome = await ProjectRepositoryBootstrap.TryResolveAsync(WorkTreeRoot, fs, executor);
 
         var failure = Assert.IsType<ProjectRepositoryBootstrap.Outcome.Failure>(outcome);
         Assert.Contains("origin", failure.Message, StringComparison.OrdinalIgnoreCase);
+        executor.AssertExpectedCommandsExecuted();
     }
 
     [Fact]
@@ -115,14 +119,15 @@ public class ProjectRepositoryBootstrapTests
         fs.CreateDirectory(WorkTreeRoot);
         fs.CreateDirectory(Path.Combine(WorkTreeRoot, ".git"));
         var executor = new FakeCommandExecutor();
-        executor.QueueForFile("git", 0, WorkTreeRoot + "\n");
-        executor.QueueForFile("git", 0, "abc123\n");
-        executor.QueueForFile("git", 0, "   \n");
+        QueueGit(executor, WorkTreeRoot, ["rev-parse", "--show-toplevel"], 0, WorkTreeRoot + "\n");
+        QueueGit(executor, WorkTreeRoot, ["rev-parse", "HEAD"], 0, "abc123\n");
+        QueueGit(executor, WorkTreeRoot, ["remote", "get-url", "origin"], 0, "   \n");
 
         var outcome = await ProjectRepositoryBootstrap.TryResolveAsync(WorkTreeRoot, fs, executor);
 
         var failure = Assert.IsType<ProjectRepositoryBootstrap.Outcome.Failure>(outcome);
         Assert.Contains("origin", failure.Message, StringComparison.OrdinalIgnoreCase);
+        executor.AssertExpectedCommandsExecuted();
     }
 
     [Fact]
@@ -132,16 +137,17 @@ public class ProjectRepositoryBootstrapTests
         fs.CreateDirectory(WorkTreeRoot);
         fs.CreateDirectory(Path.Combine(WorkTreeRoot, ".git"));
         var executor = new FakeCommandExecutor();
-        executor.QueueForFile("git", 0, WorkTreeRoot + "\n");
-        executor.QueueForFile("git", 0, "abc123\n");
-        executor.QueueForFile("git", 0, "git@example.com:team/product-a.git\n");
-        executor.QueueForFile("git", 128, "", "fatal: no such ref");
-        executor.QueueForFile("git", 128, "", "fatal: not on a branch");
+        QueueGit(executor, WorkTreeRoot, ["rev-parse", "--show-toplevel"], 0, WorkTreeRoot + "\n");
+        QueueGit(executor, WorkTreeRoot, ["rev-parse", "HEAD"], 0, "abc123\n");
+        QueueGit(executor, WorkTreeRoot, ["remote", "get-url", "origin"], 0, "git@example.com:team/product-a.git\n");
+        QueueGit(executor, WorkTreeRoot, ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"], 128, "", "fatal: no such ref");
+        QueueGit(executor, WorkTreeRoot, ["symbolic-ref", "--short", "HEAD"], 128, "", "fatal: not on a branch");
 
         var outcome = await ProjectRepositoryBootstrap.TryResolveAsync(WorkTreeRoot, fs, executor);
 
         var failure = Assert.IsType<ProjectRepositoryBootstrap.Outcome.Failure>(outcome);
         Assert.Contains("branch", failure.Message, StringComparison.OrdinalIgnoreCase);
+        executor.AssertExpectedCommandsExecuted();
     }
 
     [Fact]
@@ -151,10 +157,10 @@ public class ProjectRepositoryBootstrapTests
         fs.CreateDirectory(WorkTreeRoot);
         fs.CreateDirectory(Path.Combine(WorkTreeRoot, ".git"));
         var executor = new FakeCommandExecutor();
-        executor.QueueForFile("git", 0, WorkTreeRoot + "\n");
-        executor.QueueForFile("git", 0, "abc123\n");
-        executor.QueueForFile("git", 0, "git@example.com:team/product-a.git\n");
-        executor.QueueForFile("git", 0, "origin/main\n");
+        QueueGit(executor, WorkTreeRoot, ["rev-parse", "--show-toplevel"], 0, WorkTreeRoot + "\n");
+        QueueGit(executor, WorkTreeRoot, ["rev-parse", "HEAD"], 0, "abc123\n");
+        QueueGit(executor, WorkTreeRoot, ["remote", "get-url", "origin"], 0, "git@example.com:team/product-a.git\n");
+        QueueGit(executor, WorkTreeRoot, ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"], 0, "origin/main\n");
 
         var outcome = await ProjectRepositoryBootstrap.TryResolveAsync(WorkTreeRoot, fs, executor);
 
@@ -163,6 +169,7 @@ public class ProjectRepositoryBootstrapTests
         Assert.Equal("product-a", success.Result.RepositoryName);
         Assert.Equal("git@example.com:team/product-a.git", success.Result.GitUrl);
         Assert.Equal(WorkTreeRoot, success.Result.WorkTreeRoot);
+        executor.AssertExpectedCommandsExecuted();
     }
 
     [Fact]
@@ -172,16 +179,17 @@ public class ProjectRepositoryBootstrapTests
         fs.CreateDirectory(WorkTreeRoot);
         fs.CreateDirectory(Path.Combine(WorkTreeRoot, ".git"));
         var executor = new FakeCommandExecutor();
-        executor.QueueForFile("git", 0, WorkTreeRoot + "\n");
-        executor.QueueForFile("git", 0, "abc123\n");
-        executor.QueueForFile("git", 0, "git@example.com:team/product-a.git\n");
-        executor.QueueForFile("git", 128, "", "fatal: no origin/HEAD");
-        executor.QueueForFile("git", 0, "develop\n");
+        QueueGit(executor, WorkTreeRoot, ["rev-parse", "--show-toplevel"], 0, WorkTreeRoot + "\n");
+        QueueGit(executor, WorkTreeRoot, ["rev-parse", "HEAD"], 0, "abc123\n");
+        QueueGit(executor, WorkTreeRoot, ["remote", "get-url", "origin"], 0, "git@example.com:team/product-a.git\n");
+        QueueGit(executor, WorkTreeRoot, ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"], 128, "", "fatal: no origin/HEAD");
+        QueueGit(executor, WorkTreeRoot, ["symbolic-ref", "--short", "HEAD"], 0, "develop\n");
 
         var outcome = await ProjectRepositoryBootstrap.TryResolveAsync(WorkTreeRoot, fs, executor);
 
         var success = Assert.IsType<ProjectRepositoryBootstrap.Outcome.Success>(outcome);
         Assert.Equal("develop", success.Result.BaseBranch);
+        executor.AssertExpectedCommandsExecuted();
     }
 
     [Fact]
@@ -191,16 +199,17 @@ public class ProjectRepositoryBootstrapTests
         fs.CreateDirectory(WorkTreeRoot);
         fs.CreateDirectory(Path.Combine(WorkTreeRoot, ".git"));
         var executor = new FakeCommandExecutor();
-        executor.QueueForFile("git", 0, WorkTreeRoot + "\n");
-        executor.QueueForFile("git", 0, "abc123\n");
-        executor.QueueForFile("git", 0, "git@example.com:team/product-a.git\n");
-        executor.QueueForFile("git", 0, "  \n");
-        executor.QueueForFile("git", 0, "release\n");
+        QueueGit(executor, WorkTreeRoot, ["rev-parse", "--show-toplevel"], 0, WorkTreeRoot + "\n");
+        QueueGit(executor, WorkTreeRoot, ["rev-parse", "HEAD"], 0, "abc123\n");
+        QueueGit(executor, WorkTreeRoot, ["remote", "get-url", "origin"], 0, "git@example.com:team/product-a.git\n");
+        QueueGit(executor, WorkTreeRoot, ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"], 0, "  \n");
+        QueueGit(executor, WorkTreeRoot, ["symbolic-ref", "--short", "HEAD"], 0, "release\n");
 
         var outcome = await ProjectRepositoryBootstrap.TryResolveAsync(WorkTreeRoot, fs, executor);
 
         var success = Assert.IsType<ProjectRepositoryBootstrap.Outcome.Success>(outcome);
         Assert.Equal("release", success.Result.BaseBranch);
+        executor.AssertExpectedCommandsExecuted();
     }
 
     [Fact]
@@ -210,10 +219,10 @@ public class ProjectRepositoryBootstrapTests
         fs.CreateDirectory(WorkTreeRoot);
         fs.CreateDirectory(Path.Combine(WorkTreeRoot, ".git"));
         var executor = new FakeCommandExecutor();
-        executor.QueueForFile("git", 0, WorkTreeRoot + "\n");
-        executor.QueueForFile("git", 0, "abc123\n");
-        executor.QueueForFile("git", 0, "git@example.com:team/product-a.git\n");
-        executor.QueueForFile("git", 0, "origin/main\n");
+        QueueGit(executor, WorkTreeRoot, ["rev-parse", "--show-toplevel"], 0, WorkTreeRoot + "\n");
+        QueueGit(executor, WorkTreeRoot, ["rev-parse", "HEAD"], 0, "abc123\n");
+        QueueGit(executor, WorkTreeRoot, ["remote", "get-url", "origin"], 0, "git@example.com:team/product-a.git\n");
+        QueueGit(executor, WorkTreeRoot, ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"], 0, "origin/main\n");
 
         var outcome = await ProjectRepositoryBootstrap.TryResolveAsync(WorkTreeRoot, fs, executor);
 
@@ -223,5 +232,40 @@ public class ProjectRepositoryBootstrapTests
         Assert.DoesNotContain("Path", fieldNames, StringComparison.Ordinal);
         Assert.DoesNotContain("Remote", fieldNames, StringComparison.Ordinal);
         Assert.DoesNotContain("Origin", fieldNames, StringComparison.Ordinal);
+        executor.AssertExpectedCommandsExecuted();
+    }
+
+    [Fact]
+    public async Task TryResolveAsync_NestedWorkTreeDirectory_UsesResolvedRoot()
+    {
+        var nestedPath = Path.Combine(WorkTreeRoot, "src");
+        var fs = new FakeFileSystem();
+        fs.CreateDirectory(WorkTreeRoot);
+        fs.CreateDirectory(nestedPath);
+        var executor = new FakeCommandExecutor();
+        QueueGit(executor, nestedPath, ["rev-parse", "--show-toplevel"], 0, WorkTreeRoot + "\n");
+        QueueGit(executor, WorkTreeRoot, ["rev-parse", "HEAD"], 0, "abc123\n");
+        QueueGit(executor, WorkTreeRoot, ["remote", "get-url", "origin"], 0, "git@example.com:team/product-a.git\n");
+        QueueGit(executor, WorkTreeRoot, ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"], 0, "origin/main\n");
+
+        var outcome = await ProjectRepositoryBootstrap.TryResolveAsync(nestedPath, fs, executor);
+
+        var success = Assert.IsType<ProjectRepositoryBootstrap.Outcome.Success>(outcome);
+        Assert.Equal(WorkTreeRoot, success.Result.WorkTreeRoot);
+        Assert.Equal("product-a", success.Result.RepositoryName);
+        executor.AssertExpectedCommandsExecuted();
+    }
+
+    private static void QueueGit(
+        FakeCommandExecutor executor,
+        string workingDirectory,
+        string[] gitArgs,
+        int exitCode,
+        string stdout = "",
+        string stderr = "")
+    {
+        var args = new List<string> { "-C", workingDirectory };
+        args.AddRange(gitArgs);
+        executor.QueueExpected("git", args.ToArray(), workingDirectory, exitCode, stdout, stderr);
     }
 }

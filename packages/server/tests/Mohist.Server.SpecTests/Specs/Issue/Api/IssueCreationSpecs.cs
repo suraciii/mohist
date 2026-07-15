@@ -37,8 +37,13 @@ public class IssueCreationSpecs
     {
         var id = $"proj_{Guid.NewGuid():N}";
         var projectGrain = _grains.GetGrain<IProjectGrain>(id);
-        var project = await projectGrain.CreateAsync($"proj-{Guid.NewGuid():N}", new Mohist.Server.Project.Domain.RepositoryInfo { Name = "placeholder", GitUrl = "git@example.com:placeholder.git", BaseBranch = "main", IsDefault = true });
-        await projectGrain.AddRepositoryAsync("main", $"file://{Guid.NewGuid():N}", "main");
+        var project = await projectGrain.CreateAsync($"proj-{Guid.NewGuid():N}", new Mohist.Server.Project.Domain.RepositoryInfo
+        {
+            Name = "main",
+            GitUrl = "git@example.com:main.git",
+            BaseBranch = "main",
+            IsDefault = true,
+        });
         return project;
     }
 
@@ -164,10 +169,14 @@ public class IssueCreationSpecs
         Assert.NotNull(work.Variables);
         Assert.Contains("My Project", work.Variables);
         Assert.Contains("repository", work.Variables);
-        Assert.Contains("main", work.Variables);
         Assert.Contains("workspace", work.Variables);
         Assert.DoesNotContain("project.path", work.Variables);
         Assert.DoesNotContain("project.baseBranch", work.Variables);
+        using var variables = JsonDocument.Parse(work.Variables);
+        var repository = variables.RootElement.GetProperty("repository");
+        Assert.Equal("main", repository.GetProperty("name").GetString());
+        Assert.Equal("git@example.com:main.git", repository.GetProperty("gitUrl").GetString());
+        Assert.Equal("main", repository.GetProperty("baseBranch").GetString());
 
         await runner.UnregisterAsync();
     }

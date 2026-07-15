@@ -1,6 +1,5 @@
 using System.Net.Http.Json;
 using System.Text.Json;
-using System.Text.Json.Nodes;
 
 namespace Mohist.Server.SpecTests.Support;
 
@@ -24,7 +23,6 @@ public static class ApiTestClient
 
     public static async Task<T> PostDataAsync<T>(this HttpClient client, string path, object? body = null)
     {
-        body = CompleteProjectCreateRequest(path, body);
         using var response = body is null
             ? await client.PostAsync(path, null)
             : await client.PostAsJsonAsync(path, body, JsonOptions);
@@ -84,7 +82,6 @@ public static class ApiTestClient
 
     public static async Task PostOkAsync(this HttpClient client, string path, object? body = null)
     {
-        body = CompleteProjectCreateRequest(path, body);
         using var response = body is null
             ? await client.PostAsync(path, null)
             : await client.PostAsJsonAsync(path, body, JsonOptions);
@@ -169,28 +166,6 @@ public static class ApiTestClient
             $"Response status code does not indicate success: {(int)response.StatusCode} ({response.ReasonPhrase}). Body: {body}",
             inner: null,
             response.StatusCode);
-    }
-
-    private static object? CompleteProjectCreateRequest(string path, object? body)
-    {
-        if (!string.Equals(path, "/api/projects", StringComparison.Ordinal) || body is null)
-            return body;
-
-        var request = JsonSerializer.SerializeToNode(body, JsonOptions)?.AsObject();
-        if (request is null || request.ContainsKey("repository"))
-            return body;
-
-        var name = request["name"]?.GetValue<string>();
-        if (string.IsNullOrWhiteSpace(name))
-            return body;
-
-        request["repository"] = new JsonObject
-        {
-            ["name"] = "test-repo",
-            ["gitUrl"] = "git@example.com:test-repo.git",
-            ["baseBranch"] = "main",
-        };
-        return request;
     }
 
     private sealed record ApiEnvelope<T>(bool Success, T? Data, string? Error = null, string? Code = null, object? Details = null);

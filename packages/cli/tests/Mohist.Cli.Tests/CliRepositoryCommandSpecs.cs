@@ -134,7 +134,7 @@ public class CliRepositoryCommandSpecs
         Assert.Equal(0, exitCode);
         var body = JsonNode.Parse(handler.Requests.Single().Body!)!;
         Assert.Equal("main", body["baseBranch"]?.GetValue<string>());
-        Assert.False(body["setDefault"]?.GetValue<bool>());
+        Assert.False(body.AsObject().ContainsKey("setDefault"));
     }
 
     [Fact]
@@ -305,7 +305,7 @@ public class CliRepositoryCommandSpecs
     {
         var (handler, http, output, error, fs, executor) = SetupEnv(_ =>
             RecordingHttpHandler.JsonError(
-                "Repository 'origin' is the default repository for Project 'proj_test'. Run 'mo repo set-default <other-name>' first.",
+                "Repository 'origin' is the default. Run 'mo repo set-default <other-name>' first.",
                 "repository_default_deletion_conflict",
                 HttpStatusCode.Conflict));
 
@@ -317,7 +317,6 @@ public class CliRepositoryCommandSpecs
         Assert.NotEqual(0, exitCode);
         Assert.Single(handler.Requests);
         Assert.Contains("origin", error.ToString(), StringComparison.Ordinal);
-        Assert.Contains("Project 'proj_test'", error.ToString(), StringComparison.Ordinal);
         Assert.Contains("mo repo set-default", error.ToString(), StringComparison.Ordinal);
     }
 

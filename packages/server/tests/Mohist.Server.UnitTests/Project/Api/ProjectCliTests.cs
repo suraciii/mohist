@@ -128,7 +128,7 @@ public class ProjectCliTests
     }
 
     [Fact]
-    public async Task RepositoryAdd_WithGitUrl_SendsGitUrlBaseBranchNameAndIsDefault()
+    public async Task RepositoryAdd_WithGitUrl_SendsGitUrlBaseBranchNameAndSetDefault()
     {
         var files = new FakeFileSystem();
         var statePath = Path.Combine(
@@ -170,7 +170,7 @@ public class ProjectCliTests
         Assert.Contains("\"name\": \"backend\"", body);
         Assert.Contains("\"gitUrl\": \"git@example.com:backend.git\"", body);
         Assert.Contains("\"baseBranch\": \"main\"", body);
-        Assert.Contains("\"isDefault\": true", body);
+        Assert.Contains("\"setDefault\": true", body);
         Assert.DoesNotContain("\"path\"", body);
         Assert.DoesNotContain("\"remote\"", body);
         Assert.DoesNotContain("\"resolvedPath\"", body);

@@ -33,10 +33,6 @@ internal static class ProjectRepositoryBootstrap
         if (!fileSystem.DirectoryExists(canonical))
             return new Outcome.Failure($"--path '{rawPath}' is not an existing directory.");
 
-        var gitDir = Path.Combine(canonical, ".git");
-        if (!fileSystem.DirectoryExists(gitDir) && !fileSystem.Exists(gitDir))
-            return new Outcome.Failure($"--path '{rawPath}' is not inside a Git working tree (no .git directory).");
-
         var workTreeRoot = await TryRunGitAsync(
             commandExecutor,
             canonical,

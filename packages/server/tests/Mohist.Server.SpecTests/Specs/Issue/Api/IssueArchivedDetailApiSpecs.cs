@@ -443,12 +443,11 @@ public class IssueArchivedDetailApiSpecs
         var projectGrain = _grains.GetGrain<IProjectGrain>(id);
         await projectGrain.CreateAsync(name, new Mohist.Server.Project.Domain.RepositoryInfo
         {
-            Name = "placeholder",
-            GitUrl = "git@example.com:placeholder.git",
+            Name = "origin",
+            GitUrl = "git@example.com:mohist-local.git",
             BaseBranch = "main",
             IsDefault = true,
         });
-        await projectGrain.AddRepositoryAsync("origin", "git@example.com:mohist-local.git", "main");
         return (id, name);
     }
 
