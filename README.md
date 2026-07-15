@@ -22,25 +22,13 @@ Draft → Plan → Build → Check → Integrate → Done
 
 ## 事件响应
 
-Mohist 的 workflow、issue、epic、runner 和 agent session 都会产生事件。Agent 事件订阅会让你配置 Agent 响应这些事件：代理审批、分析失败、汇总完成内容、生成后续 issue 或通知 owner。代理审批只是其中一个场景。
+Mohist 的 workflow、issue、epic、runner 和 agent session 都会产生事件。Agent 事件路由让你配置 Agent 响应这些事件：代理审批、分析失败、汇总完成内容、生成后续 issue 或通知 owner。代理审批只是其中一个场景。
 
 <!-- TODO: 补 Web UI 截图 -->
 
 ## 文档
 
-- [快速上手](docs/getting-started.md)
-- [核心概念](docs/concepts.md) —— Project / Issue / Workflow / Epic / Agent / Skill
-- [工作流详解](docs/the-workflow.md)
-- [Issue 管理](docs/issues.md)
-- [用 Epic 规划](docs/epics.md)
-- [Web UI 指南](docs/web-ui.md)
-- [CLI 参考](docs/cli-reference.md) —— `mo` 命令
-- [Workflow Profile](docs/workflow-profiles.md)
-- [Runner 指南](docs/runner.md)
-- [Skill 机制](docs/skills.md)
-- [Agent 事件订阅](docs/agent-subscriptions.md)
-- [故障恢复](docs/troubleshooting.md)
-- [Self-host 部署](docs/self-host.md)
+从 [快速上手](docs/getting-started.md) 开始；完整阅读路径见 [文档索引](docs/README.md)。架构与设计文档在 [`design/`](design/README.md)。
 
 ## 仓库结构
 
@@ -57,7 +45,7 @@ openspec/    工作流产出的变更产物
 
 ## 贡献
 
-见 [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md)。
+见 [`CONTRIBUTING.md`](CONTRIBUTING.md)。
 
 ## License
 

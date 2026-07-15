@@ -61,7 +61,7 @@ mo issue approve <number>   # 通过 plan，进入 Build
 mo issue reject <number>    # 打回，重新 plan
 ```
 
-Workflow 不关心审批者是 owner、Mohist Agent 还是脚本。人工处理时，重点看 proposal.md 和 tasks.json；这是发现方向错误成本最低的位置。
+审批者不限定是谁，见 [核心概念 · Approval](concepts.md#approval审批)。人工处理时，重点看 proposal.md 和 tasks.json；这是发现方向错误成本最低的位置。
 
 ## Build（实现）
 

@@ -10,9 +10,8 @@ ${{ path }}  →  resolved variable value
 non-template  →  kept as-is
 ```
 
-Expanded JSON objects deep-merge with resolved vars (vars win, task-level stays).
-A whole-value expression keeps the resolved JSON type, so
-`options: ${{ vars.agent }}` dispatches an object rather than a JSON string. The rendered
+Expansion semantics (deep-merge with resolved vars, whole-value expressions keeping the
+resolved JSON type) are specified with examples in [`profile.md`](profile.md). The rendered
 `with` payload is the action's only variable/configuration input; actions do not read the
 Workflow variable store again.
 
@@ -37,4 +36,4 @@ Available in `with` and `expect` expressions:
 
 Dispatch context is not profile variables. It exists only in the dispatch payload.
 
-Full dispatch/report flow: see `scheduling.md`.
+Full dispatch/report flow: see [`../runner.md`](../runner.md).

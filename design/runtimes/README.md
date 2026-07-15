@@ -1,8 +1,8 @@
 # Runtime 集成
 
 Runtime 集成把 Mohist 已经组装好的回合与 Session 请求适配到外部执行后端。它是
-Workflow Action adapter 与 AgentJob executor 共享的基础能力，本身不是 Workflow
-Action、Mohist Agent 或 bounded context。
+Workflow Action adapter 与 AgentJob executor 共享的基础能力；与 Agent / Session 的
+所有权边界与不变量见 [`../agent-execution.md`](../agent-execution.md)。
 
 本目录负责各 Runtime 特有的进程生命周期、SDK / protocol 映射、物理 Session 行为、
 事件、状态核对和兼容性决策。
@@ -14,8 +14,6 @@ Action、Mohist Agent 或 bounded context。
 
 相关边界：
 
-- [`../agent-execution.md`](../agent-execution.md) 定义 Action、AgentJob、AgentSession
-  与 Runtime Session 的关系。
 - [`../workflow/actions.md`](../workflow/actions.md) 定义通用 Workflow Action dispatch
   和输入输出契约。
 - [`../../docs/actions/`](../../docs/actions/README.md) 定义面向使用者的各 Action 产品契约。

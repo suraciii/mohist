@@ -109,4 +109,4 @@ Compact 或 Reset 也不会重新启动 Mohist Agent。具体执行方式由当�
 Mohist Agent 专项设计，本篇不定义它的输入、复用或等待语义。
 
 `mohist/opencode` 的具体配置见 [`mohist/opencode` Action](actions/opencode.md)。Mohist Agent
-事件响应见 [Agent 事件路由](agent-subscriptions.md)。
+事件响应见 [Agent 事件路由](event-routing.md)。

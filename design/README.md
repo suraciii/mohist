@@ -18,7 +18,7 @@
 ## Agent 与执行
 
 - [agent-execution.md](agent-execution.md) — Action、Inline Agent、Mohist Agent、AgentJob、AgentSession 与 Runtime Session 的分层和生命周期所有权。
-- [agent-subscriptions.md](agent-subscriptions.md) — Agent 事件路由（**WIP**）：项目级有序路由表，表达式匹配 + first-match/continue 触发 Agent，取代订阅优先级仲裁。
+- [event-routing.md](event-routing.md) — Agent 事件路由（**WIP**）：项目级有序路由表，表达式匹配 + first-match/continue 触发 Agent，取代订阅优先级仲裁。
 
 ## Runtime 集成
 
@@ -27,21 +27,22 @@
 ## Workflow 核心域
 
 - [workflow/actions.md](workflow/actions.md) — action input/output 接口、errorCode、失败恢复编排。
-- [workflow/builtin-workflows/](workflow/builtin-workflows/) — 内置 workflow；一个 workflow 一个文件。
-- [workflow/profile.md](workflow/profile.md) — profile = template + variables 的加载与合并。
+- [workflow/builtin-workflows.md](workflow/builtin-workflows.md) — 内置 workflow（local / github-pr）的设计要点；yaml 定义是真源。
+- [workflow/profile.md](workflow/profile.md) — profile = template + variables 的加载与合并；与 Issue 的依赖方向和归属。
 - [workflow/task-dispatch.md](workflow/task-dispatch.md) — Action Input 与 task-level `expect` 的独立模板展开和 dispatch 输入。
 - [workflow/recovery.md](workflow/recovery.md) — 失败恢复：recovery 声明、when 匹配、runner 构造恢复任务。
-- [workflow/scheduling.md](workflow/scheduling.md) — runner claim、pull、report、supervision。
 - [workflow/issue-coordination.md](workflow/issue-coordination.md) — Issue、WorkflowRun、Runner、Session 的跨聚合交互。
-- [workflow/boundaries/issue.md](workflow/boundaries/issue.md) — Workflow 与 Issue 的依赖方向和 profile 归属。
 
 ## 支撑主题
 
+- [hermes-webhook.md](hermes-webhook.md) — Hermes 通知网关：事件类型、payload、签名与投递可靠性。
 - [issue-breakdown.md](issue-breakdown.md) — 复合 Issue / 子 Issue 设计（**已定稿，待实装**）：父子模型、状态汇总、复合推进、与 Epic 的隔离约束；多仓库资源见 `docs/repositories.md`。
-- [epic-status-revival.md](epic-status-revival.md) — Epic `done` 自动唤醒与 `closed` 拒绝 link 的决策记录（issue-392）。
 - [issue-templates.md](issue-templates.md) — 三类 issue 模板（Feature / Bug / Refactor）的 body 结构与设计依据。
-- [mobile-pwa.md](mobile-pwa.md) — 移动端 PWA + 推送（**WIP，暂不实现**）：self-host 自治系统的移动端 promise，原 #106 关闭后的方案记录。
 - [prompt-management.md](prompt-management.md) — project-scoped prompt 库和 workflow 的关系。
-- [runner.md](runner.md) — Runner 聚合信息结构、poll presence 与进程监督契约。
+- [runner.md](runner.md) — Runner 与调度：聚合信息结构、poll presence、level-triggered 对账（claim / dispatch / supervision）。
 - [task-log.md](task-log.md) — task 执行日志的采集管道、上报通道与存储归属。
 - [web-ui.md](web-ui.md) — Web UI 设计边界。
+
+## 决策记录
+
+- [decisions/epic-status-revival.md](decisions/epic-status-revival.md) — Epic `done` 自动唤醒与 `closed` 拒绝 link（issue-392）。

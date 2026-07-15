@@ -57,188 +57,21 @@ stages:
 
 ## GitHub PR Profile
 
-`mohist/github-pr` 走 PR-first 形态：plan stage 最后一个 task 通过显式
-`mohist/create-github-pr` 打开或复用 draft PR，把 `prNumber`/`prUrl` 写入
-workflow runtime variables；check stage 在 `ai-review` 通过后用
-`mohist/push`（`forceWithLease: true`）把最新 commit 推到 PR head，
-再用 `mohist/mark-github-pr-ready` 把 PR 标记为 ready，最后用只读的
-`mohist/github-pr-status` check 确认 PR 状态并等待审批决策；integrate
-stage 依次执行 `archive-change` → `push` → `merge-pr`，
-用 `mohist/github-pr-status` 的 `expect: merged` check 验证 PR 已合入。
+`mohist/github-pr` 适合希望每个 issue 都以一个可审阅、可追溯的 GitHub PR 交付的团队。阶段骨架与 `mohist/local` 完全一致（Plan → Build → Check → Integrate，审批点同样在 Plan 和 Check 之后），区别只在交付方式：`mohist/local` 把工作分支直接合入 base branch，`mohist/github-pr` 全程通过一个 GitHub PR 走完。
 
-```yaml
-- stage: plan
-  tasks:
-    - id: proposal
-    - id: specs
-    - id: design
-    - id: tasks
-    - id: self-review
-      with:
-        session: plan
-        prompt: ${{ prompts.self-review }}
-        options: ${{ vars.agent }}
-      expect:
-        markers:
-          - path: ${{ openspecChangeDir }}/self-review.md
-            oneOf:
-              - <promise>PASS</promise>
-              - <promise>FAIL</promise>
-            failIf: <promise>FAIL</promise>
-      recovery:
-        budget: 2
-        handlers:
-          - when: promise=FAIL
-            tasks:
-              - id: recover:fix-plan-review
-                uses: mohist/opencode
-                with:
-                  session: plan
-                  prompt: ${{ prompts.fix-plan-review }}
-                  options: ${{ vars.agent }}
-            retrySelf: true
-    - id: open-draft-pr        # mohist/create-github-pr
-      with:
-        draft: true
-        titleFrom: issue.title
-        bodyFrom: issue.body
-      setVars:
-        github.pr.number: output.prNumber
-        github.pr.url: output.prUrl
-  checks:
-    - name: plan-artifacts     # mohist/openspec-artifacts
-      with:
-        changeDir: ${{ openspecChangeDir }}
+流程上的差别：
 
-- stage: check
-  tasks:
-    - id: ai-review
-      with:
-        session: check
-        prompt: ${{ prompts.review }}
-        options: ${{ vars.agent }}
-      expect:
-        markers:
-          - path: ${{ openspecChangeDir }}/review.md
-            oneOf:
-              - <promise>PASS</promise>
-              - <promise>FAIL</promise>
-            failIf: <promise>FAIL</promise>
-      recovery:
-        budget: 2
-        handlers:
-          - when: promise=FAIL
-            tasks:
-              - id: recover:fix-review-findings
-                uses: mohist/opencode
-                with:
-                  session: check
-                  prompt: ${{ prompts.auto-fix }}
-                  options: ${{ vars.agent }}
-            retrySelf: true
-    - id: push                 # mohist/push (forceWithLease: true)
-    - id: mark-pr-ready        # mohist/mark-github-pr-ready
-  checks:
-    - name: github-pr-status   # mohist/github-pr-status (read-only)
+- **Plan 通过自审后打开 draft PR。**PR 的标题和正文取自 issue 的标题和描述。从这一刻起，这个 issue 的所有后续改动都汇聚在同一个 PR 上，团队随时可以在 GitHub 上跟进。
+- **Check 阶段把 PR 变为 ready。**AI review 通过、最新改动推上 PR 之后，PR 从 draft 变为 ready for review，然后进入审批点等待决策。
+- **Integrate 阶段合并 PR。**等 PR 上的检查全部通过后 squash 合并，并确认 PR 确实已合入才算集成完成。
 
-- stage: integrate
-  tasks:
-    - id: archive-change
-    - id: push
-    - id: merge-pr            # mohist/merge-github-pr
-      with:
-        prNumber: ${{ vars.github.pr.number }}
-        method: squash
-      recovery:
-        budget: 2
-        handlers:
-          - when: errorCode=base-moved
-            tasks:
-              - id: recover:rebase        # mohist/rebase (conflictMode: task)
-                recovery:
-                  budget: 1
-                  handlers:
-                    - when: errorCode=conflict
-                      tasks:
-                        - id: recover:resolve-rebase-conflicts
-                          uses: mohist/opencode
-                          with:
-                            session: integrate
-                            prompt: ${{ prompts.resolve-rebase-conflicts }}
-                            options: ${{ vars.agent }}
-              - id: recover:push
-            retrySelf: true
+集成失败时的自动恢复：
 
-          - when: errorCode=pr-checks-failed
-            tasks:
-              - id: recover:fix-pr-checks   # mohist/opencode
-                uses: mohist/opencode
-                with:
-                  session: integrate
-                  prompt: ${{ prompts.fix-pr-checks }}
-                  options: ${{ vars.agent }}
-              - id: recover:push
-            retrySelf: true
-  checks:
-    - name: merge-verified    # mohist/github-pr-status with expect: merged
-```
+- base branch 在等待合并期间前进了 → 自动 rebase 到最新 base 后重试合并；出现冲突时由 Inline Agent 解决。
+- PR 上的检查失败 → Inline Agent 自动修复、更新 PR，再重试合并。
+- 自动恢复超出预算仍失败时，issue 停在失败状态；你可以在 Web UI 或 CLI 里查看失败原因，处理后重试。
 
-`self-review` 和 `ai-review` 都使用 `expect.markers` +
-`failIf: <promise>FAIL</promise>` 把
-marker 命中映射成 task 失败，并把命中的 promise 值作为 `output.promise`
-返回。`recovery.handlers` 可以直接匹配 `promise=FAIL`（参见
-[`design/workflow/actions.md`](../design/workflow/actions.md)）。失败会
-触发匹配 handler 声明的 recovery task，recovery 完成后用 `retrySelf: true`
-重新运行原失败 task。
-
-`open-draft-pr` 是 plan 的最后一个 task，它把稳定的 PR 身份写入 workflow
-runtime variables，后续 stage 不需要重复打开 PR：
-`vars.github.pr.number` 和 `vars.github.pr.url`。
-
-`mark-pr-ready` 只依赖 `vars.github.pr.number`，幂等：PR 已经 ready 时
-`gh pr ready` 不再调用、直接成功返回。它不更新 title/body、不推送代码。
-
-`push` 是显式同步 task，把本地线性 workflow branch 推到同名远程 branch；
-`forceWithLease: true` 用于 rebase 后允许 head history 重写。`push` 不
-声明业务 recovery —— 失败意味着权限/网络或远程 branch 被外部写入，应作为
-普通 task failure 暴露。
-
-`merge-pr` 等待 GitHub PR checks，通过后 `gh pr merge --squash`，并重新
-查询确认 `state=MERGED` 才视为集成完成。`merge-verified` check 通过
-`mohist/github-pr-status` 的 `expect: merged` 做只读确认。
-
-rebase 冲突只通过 task-level recovery 处理。冲突时返回
-`errorCode: conflict` 并保留 rebase 进行中；profile 的
-`recover:rebase` recovery（`errorCode=conflict` →
-`recover:resolve-rebase-conflicts`）由 Inline Agent 解决冲突、完成 rebase，然后
-workflow 继续走 `recover:push` 并 `retrySelf: true` 重新合并。
-
-PR title/body 不从 workflow metadata 读取。profile 通过
-`titleFrom: issue.title`、`bodyFrom: issue.body` 指示 `mohist/create-github-pr`
-在运行时执行 `mo issue show <number> --project-id <projectId> --output json`，
-再用返回的 issue title/body 创建或更新 PR。
-
-`mohist/github-pr` 使用四个 GitHub PR action：
-
-- `mohist/create-github-pr` 推送 workflow branch、创建或复用 draft PR，
-  返回 `output.prNumber` 和 `output.prUrl` 供 `setVars` 写入 workflow
-  runtime variables。
-- `mohist/mark-github-pr-ready` 只读 `vars.github.pr.number`，调用
-  `gh pr ready` 把 draft PR 标记为 ready；幂等。
-- `mohist/push` 推送本地 workflow branch 到远程 head；可选
-  `forceWithLease: true` 携带 `--force-with-lease`。
-- `mohist/merge-github-pr` 读取 `vars.github.pr.number`，在真正 merge 前
-  等待 GitHub PR checks，通过后 `gh pr merge --squash` 并确认
-  `state=MERGED`；recoverable failure 返回 action-owned
-  `errorCode: base-moved` 或 `errorCode: pr-checks-failed`，由 profile 的
-  `merge-pr.recovery` 显式处理。
-- `mohist/github-pr-status` 是只读 check：默认验证 PR 已 ready，
-  `expect: merged` 验证 PR 已合入。
-
-PR checks 属于 `mohist/merge-github-pr` 的内部前置条件，不是 stage-level
-check。`pr-checks-failed` 在 `merge-pr.recovery` 里显式声明
-（`recover:fix-pr-checks` → `recover:push` → `retrySelf: true`），失败后由
-Inline Agent 自动修并重新合并；不依赖 stage hook 或隐式边界动作。
+使用要求：Runner 所在机器需要安装 GitHub CLI 并已登录目标仓库。
 
 ## 关键字段
 
@@ -257,7 +90,7 @@ Inline Agent 自动修并重新合并；不依赖 stage hook 或隐式边界动�
 - Check: `true`（等待审批）
 - Integrate: `false`（自动合并）
 
-`requiresApproval` 的含义是阶段完成后需要审批。Workflow 只关心是否收到 approve / reject 决策，不关心审批者是 owner、脚本还是 Mohist Agent。
+`requiresApproval` 的含义是阶段完成后需要审批；审批者可以是谁、决策怎么给出，见 [核心概念的 Approval 节](concepts.md#approval审批)。
 
 ### tasks
 
@@ -393,5 +226,3 @@ Workflow 里的 `prompts.proposal` 等模板可以在 Settings → Templates 里
 ```bash
 mo issue show ${{ issue.number }} --project-id ${{ project.id }}
 ```
-
-完整变量列表看 [`design/workflow/profile.md`](../design/workflow/profile.md)。

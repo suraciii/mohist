@@ -1,223 +1,63 @@
-# Hermes Issue Notifications
+# Hermes 通知
 
-Mohist can push key issue-workflow moments to your chat (Telegram, WeChat, …) by
-handing them to [Hermes](https://github.com/) through an outbound webhook. Hermes
-owns the actual delivery to the chat platform; Mohist only renders the message
-body and posts it.
+Mohist 面向 self-host 的长跑场景：issue 启动后，生产线可能一跑几十分钟甚至几小时，你不会一直守在屏幕前。但生产线上有些时刻必须等你——到达审批点、执行失败、issue 完成。Hermes 通知把这些时刻推送到你的聊天工具（Telegram、微信等），在手机上就能看到，回一条命令就能让生产线继续。
 
-The split is deliberate: Mohist's server never spawns processes (it is the state
-and decision plane), so it talks to Hermes over HTTP — the same kind of outlet it
-already uses for the Web UI — and Hermes does the chat-side work.
+## 心智模型
 
-## When notifications fire
+- **Mohist 决定何时通知、说什么**：它盯着生产线，在关键时刻把消息写好。
+- **Hermes 负责送达**：消息交给通知伙伴 Hermes，由它推送到具体聊天平台。Mohist 不直接对接任何聊天平台。
+- 通知是**即时推送，不是持久记录**：错过的通知不会补发；要回看完整历史，Web 收件箱才是真源。
+- 通知**永不干扰生产线**：推送失败只会被记下后放弃，绝不阻塞或影响 issue 与 workflow 的执行。
 
-Four moments, three on by default:
+## 哪些时刻会通知
 
-| Moment | Trigger event | Default |
-|--------|---------------|---------|
-| Approval gate reached | `workflow.stage.approval-requested` | on |
-| Workflow failed | `workflow.run.failed` | on |
-| Issue completed | `issue.completed` | on |
-| Issue started | `issue.work-started` | **off** (noise for an issue you just opened) |
+四种时刻，三种默认开启：
 
-Each message carries: what happened, which issue (number + title), and a suggested
-next action that always includes the issue number (e.g. `approve 42`) so a chat
-reply can target the issue without conversation context. Failure notices do **not**
-include stack traces.
+| 时刻 | 默认 |
+|---|---|
+| 到达审批点，等你决策 | 开 |
+| 工作流失败，issue 阻塞 | 开 |
+| issue 完成 | 开 |
+| issue 开始工作 | **关**（多半是你刚亲手启动的，属于噪音） |
 
-## Mohist Configuration
+每条通知包含：发生了什么、哪个 issue（编号 + 标题）、建议的下一步动作。建议动作总是带着 issue 编号（例如 `approve 42`），在聊天里回话不需要任何上下文。失败通知只给简短原因，不含堆栈。
 
-Configure the outbound webhook in `~/.mohist/config.jsonc`:
+## 开启
 
-```jsonc
-{
-  "Mohist": {
-    "Notifications": {
-      "Hermes": {
-        "WebhookUrl": "http://127.0.0.1:8644/webhooks/mohist",
-        "Secret": "the-shared-secret",
-        "EnabledTypes": [
-          "approval_requested",
-          "workflow_failed",
-          "issue_completed"
-        ]
-      }
-    }
-  }
-}
+一条向导命令完成 Mohist 侧配置：
+
+```bash
+mo notification setup --platform telegram
 ```
 
-- `WebhookUrl` — Hermes webhook receiver URL. When missing/empty, Mohist sends nothing.
-- `Secret` — optional. When set, Mohist adds an `X-Hub-Signature-256: sha256=<hex-hmac>` header over the JSON body (the GitHub-style header Hermes validates). This must match the **subscription-level** secret on the Hermes side (see below).
-- `EnabledTypes` — which moments to send. Add `issue_started` if start pings are useful.
+向导会探测本机的 Hermes、生成一个共享密钥、写好 Mohist 的通知配置，并打印出需要在 Hermes 侧执行的订阅命令——照着跑一遍，链路就通了。完整选项见 `mo notification setup --help`。
 
-After changing this config, reload the managed server:
+微信没有默认的接收会话，需要显式指定会话 id（可用 `hermes send --list weixin` 查到）：
+
+```bash
+mo notification setup --platform weixin --deliver-chat-id "<你的微信会话 id>"
+```
+
+配置写好后重载服务端：
 
 ```bash
 mo update server
 ```
 
-> Note: the notification config is a nested section. `mo config get/set/list` only
-> covers flat keys today; edit `~/.mohist/config.jsonc` directly for this section.
-> (Tracked as a follow-up to unify the config surface.)
+最直接的端到端验证：驱动一个真实 issue 走到审批点或完成，看聊天工具里是否收到推送。
 
-You can also bootstrap a first config with the guided command:
+## 和故障恢复的衔接
 
-```bash
-mo notification setup --platform telegram
-# For a platform without a default home channel (e.g. weixin):
-mo notification setup --platform weixin --deliver-chat-id "<your-weixin-chat-id>"
-```
+失败通知的建议动作直接对应恢复命令：手机上看到「issue 42 失败」，回到任何一台终端（或让聊天里的 agent 代劳）执行 `mo issue retry 42` 即可原地重试。审批通知同理对应 `mo issue approve 42` / `mo issue reject 42`。恢复手段的完整地图见[故障恢复](troubleshooting.md)。
 
-It probes the Hermes webhook port, generates a shared secret, writes the Mohist
-section above, and prints the matching `hermes webhook subscribe` command to run
-(with the chat id folded in when supplied). See `mo notification setup --help` for flags.
+## 微信的推送窗口限制
 
-## Hermes Setup
+微信只允许机器人在你**最近主动发过消息之后的一段窗口内**（实践中约 48 小时）向你推送；窗口过期后推送会静默失败。这与价值最高的「issue 完成」通知天然冲突——它往往在你走开很久之后才触发。因此**推荐 Telegram 作为默认通知渠道**，微信当作你正在会话中时的辅助渠道。给机器人随便发一条消息（比如 `hi`），窗口就会重新打开，直到再次过期。
 
-These steps live on the Hermes side. They are Hermes' own commands; Mohist does
-not modify Hermes config.
+## 实装差距
 
-### 1. Enable the Hermes webhook platform
+- 按时刻开关通知（例如打开默认关闭的「issue 开始工作」）还没有命令面：`mo config get/set` 尚未覆盖通知配置，目前需重跑向导或手工编辑服务端配置，配置命令面的统一已列为后续事项。
 
-Add a top-level `platforms.webhook` block to `~/.hermes/config.yaml` (it must be
-top-level, not under `gateway.platforms`):
+---
 
-```yaml
-platforms:
-  webhook:
-    enabled: true
-    extra:
-      host: "127.0.0.1"   # Mohist is on the same host
-      port: 8644
-      secret: "<any-strong-random-string>"   # platform-level, see note below
-```
-
-Restart the gateway:
-
-```bash
-hermes gateway restart
-```
-
-Verify it is listening:
-
-```bash
-curl http://127.0.0.1:8644/health
-# {"status": "ok", "platform": "webhook"}
-```
-
-> **Two layers of secret — don't confuse them.** The `platforms.webhook.extra.secret`
-> above is platform-level. The subscription you create next gets its own
-> **subscription-level** secret (the `--secret` passed to `hermes webhook subscribe`).
-> Hermes validates incoming POSTs against the **subscription-level** secret. Mohist's
-> `Secret` (above) must match the subscription-level one, not the platform-level one.
-
-### 2. Create the Mohist subscription
-
-Use the **subscription-level** secret (the same value you put in Mohist's `Secret`).
-The `--prompt` template is kept minimal because Mohist already renders the message
-body — Hermes only passes it through:
-
-```bash
-hermes webhook subscribe mohist \
-  --deliver telegram \
-  --deliver-only \
-  --secret "<same-secret-as-Mohist>" \
-  --prompt '{body}'
-```
-
-- `--deliver-only` — skip the agent loop; deliver the rendered template verbatim. Zero LLM cost.
-- `--prompt '{body}'` — Hermes' template syntax is single-brace `{field}` placeholders
-  referencing the POST body's fields. Mohist renders the full message into `body`, so a
-  bare `{body}` is all you need. (Other available fields: `{issueNumber}`, `{issueTitle}`,
-  `{notificationType}`, `{stage}`, `{suggestedAction}`, … — but prefer `{body}` unless you
-  want a custom layout.)
-- `--deliver <platform>` — the chat platform to push to.
-
-### 3. Platforms that need a chat id
-
-Telegram has a default home channel, so `--deliver telegram` alone is enough. **WeChat
-(weixin) does not** — it needs an explicit chat id:
-
-```bash
-hermes webhook subscribe mohist \
-  --deliver weixin \
-  --deliver-chat-id "<your-weixin-chat-id>" \
-  --deliver-only \
-  --secret "<same-secret-as-Mohist>" \
-  --prompt '{body}'
-```
-
-Find your chat id with:
-
-```bash
-hermes send --list weixin
-```
-
-### 4. Verify
-
-Send a signed test POST that mimics Mohist's outbound payload:
-
-```bash
-curl -X POST http://127.0.0.1:8644/webhooks/mohist \
-  -H "Content-Type: application/json" \
-  -H "X-Hub-Signature-256: sha256=<hmac>" \
-  -d '{"body":"Mohist notification link verified.","issueNumber":0}'
-```
-
-A `{"status":"delivered"}` response means the full link works. (Computing the HMAC by
-hand is awkward; the easiest end-to-end check is to drive a real issue to an approval
-gate / completion and watch the chat.)
-
-## WeChat customer-service window (important limitation)
-
-WeChat (via iLink) only lets a bot push messages within a limited window after the user
-last messaged it (roughly 48h in practice). If you have not messaged the bot from WeChat
-for a while, outbound notifications silently fail with `ret=-2`, which Hermes reports as
-"rate limited" (misleading — it is a window expiry, not a rate limit).
-
-This conflicts with the highest-value notification — *issue completed* — which tends to
-fire long after the user walked away. **Prefer Telegram as the default notification
-channel.** Treat WeChat as a secondary channel that works while you are actively in the
-conversation.
-
-To revive a WeChat window: send the bot any message (e.g. `hi`) from WeChat, then
-notifications will deliver again until the window lapses.
-
-## Payload Shape
-
-Mohist posts JSON to `WebhookUrl` (camelCase, per CloudEvents/web convention):
-
-```json
-{
-  "notificationType": "approval_requested",
-  "eventType": "com.mohist.workflow.stage.approval-requested",
-  "sourceEventId": "evt_123",
-  "occurredAt": "2026-07-03T12:01:00+00:00",
-  "projectId": "proj_123",
-  "issueId": "issue_123",
-  "issueNumber": 42,
-  "issueTitle": "Add login rate limiting",
-  "workflowRunId": "wr_123",
-  "stage": "plan",
-  "failureReason": null,
-  "suggestedAction": "approve 42",
-  "body": "Issue #42 在 plan 阶段等待审批决策。下一步:approve 42"
-}
-```
-
-`body` is the pre-rendered message text (with per-kind wording, in Mohist's configured
-language). `failureReason` is set only for `workflow_failed`; it carries a short reason,
-never a stack trace. `suggestedAction` always carries the issue number.
-
-The `body` field is the one a default Hermes `{body}` template consumes; the other fields
-are available for custom templates or future channels.
-
-## Reliability
-
-Delivery is best-effort and matches the in-process event bus semantics: a webhook failure
-(non-200, connection refused, …) is logged and swallowed — it never blocks or retries, and
-it never affects issue / workflow execution. There is no outbox, retry queue, or DLQ.
-
-For a durable record of what happened, the Web Inbox remains the source of truth; this
-webhook is a transient push, not a persistent log.
+对应源码：`packages/server/src/Mohist.Server/Notifications/`；CLI `packages/cli/Mohist.Cli/MohistCliCommands.Notify.cs`。协议、配置键与 Hermes 侧接线细节见 [`design/hermes-webhook.md`](../design/hermes-webhook.md)。

@@ -4,81 +4,85 @@ status: converged
 
 # Event Bus
 
-## What it does
+## 做什么
 
-Domain events are already persisted (per-aggregate event tables). The system needs a notifier: deliver persisted events to subscribers at-least-once. No broker, no queue, no streaming SDK, no per-stream grain. Just a self-driving dispatcher.
+领域事件已经持久化（各聚合自带事件表）。系统需要的是一个通知器：把已持久化的事件以 at-least-once 语义投递给订阅者。不要 broker、不要队列、不要 streaming SDK、不要 per-stream grain，只要一个自驱动的分发器。
 
-## What goes in
+## 什么进总线
 
-| Aggregate | Events | In bus? |
+| 聚合 | 事件 | 进总线？ |
 |---|---|---|
-| WorkflowRun | state transitions, Completed, Failed | yes |
-| Issue | work-started, work-completed, closed | yes |
-| Runner | Disconnected (open) | yes |
-| Session | — | no |
+| WorkflowRun | 状态迁移、Completed、Failed | 是 |
+| Issue | work-started、work-completed、closed | 是 |
+| Runner | Disconnected（开放） | 是 |
+| Session | — | 否 |
 
-Session is a leaf trace domain. No domain reacts to it.
+Session 是叶子级追踪域，没有任何域对它作出反应。
 
-## Subscription contract
+## 订阅契约
 
-`ICloudEventHandler` + `[Subscription]` + DI. Stable mechanism, unchanged.
+`ICloudEventHandler` + `[Subscription]` + DI。机制稳定，不变。
 
-`[Subscription]` type syntax:
+订阅的匹配语言是 [`event-protocol.md`](event-protocol.md) 定义的 CEL 子集 matcher：一条布尔表达式匹配整个事件信封（`type`、`source` 与全部 context 扩展属性同权）。系统消费者（`[Subscription]` handler）与用户消费者（Agent 路由表）共用同一 matcher 语义，收敛随统一事件路由 epic 推进。
 
-| Pattern | Match |
+### 实装差距
+
+当前 `[Subscription]` 仍是对 type 的 glob 匹配，表达式 matcher 未实装：
+
+| 模式 | 匹配 |
 |---|---|
-| `com.mohist.workflow.run.completed` | exact |
-| `com.mohist.workflow.*` | prefix wildcard |
-| `*` | all |
-| `a\|b\|c` | any of |
-| `foo.*.bar` | forbidden |
+| `com.mohist.workflow.run.completed` | 精确 |
+| `com.mohist.workflow.*` | 前缀通配 |
+| `*` | 全部 |
+| `a\|b\|c` | 任一 |
+| `foo.*.bar` | 禁止 |
 
-## Persistence
+## 持久化
 
-Each event table gets one column: `DispatchedAt` (nullable). That is the only delivery marker.
+每张事件表加一列：`DispatchedAt`（可空）。这是唯一的投递标记。
 
-- `NULL` = undelivered.
-- `timestamp` = delivered.
-- No cursor table. No per-stream offset.
+- `NULL` = 未投递。
+- `timestamp` = 已投递。
+- 没有游标表，没有 per-stream offset。
 
-Events write in the same EF transaction as state save. Commit = persisted.
-`PublishAsync` writes a row. Never fires handlers. Notification is the dispatcher's job.
+事件与状态保存写在同一个 EF 事务里。提交即持久化。
+`PublishAsync` 只写一行，绝不触发 handler。通知是分发器的事。
 
-## Streams
+## Stream
 
-A stream = all rows in an event table with the same `Source`, ordered by per-source `Id`.
+一个 stream = 事件表中 `Source` 相同的所有行，按 per-source `Id` 排序。
 
-- Stream id = Source (e.g. `/mohist/workflow-runs/{runId}`).
-- Not event-sourced. State stored separately. Stream = notify + audit.
-- Cross-stream: event → command. `WorkflowRunCompleted` → `CompleteIssue`.
+- Stream id = Source（如 `/mohist/workflow-runs/{runId}`）。
+- 不是 event-sourced。状态另行存储。Stream = 通知 + 审计。
+- 跨 stream：事件 → 命令。`WorkflowRunCompleted` → `CompleteIssue`。
 
-## Dispatcher
+## 分发器
 
 ```
-Transaction ──write row──▶ commit        ← producers append only
+Transaction ──写入行──▶ commit           ← 生产者只追加
         │
-   Dispatcher (cluster singleton)
+   Dispatcher（集群单例）
    ┌──────────────────────────────┐
    │ Orleans reminder ~1s tick     │
-   │   query undispatched rows     │
-   │   per row: fanout to handlers │
-   │   Polly retry; dead → DLQ   │
+   │   查询未分发的行              │
+   │   逐行：fanout 到各 handler   │
+   │   Polly 重试；死信 → DLQ      │
    │   UPDATE DispatchedAt = now   │
    └──────────────────────────────┘
 ```
 
-- Producers append. Never wake the dispatcher.
-- Dispatcher = Orleans named grain + persistent reminder. Self-healing.
-- Single query per tick. Cost = undispatched row count, not stream count.
-- Per-stream FIFO: serial dispatch, ordered by (Source, Id).
-- Crash: row still NULL → redeliver. Handler must be idempotent on EventId.
-- Poison: DLQ + set DispatchedAt. Queryable, manually retryable.
+- 生产者只追加，绝不唤醒分发器。
+- 分发器 = Orleans named grain + 持久化 reminder，自愈。
+- 每个 tick 一次查询。成本 = 未分发行数，而非 stream 数。
+- Per-stream FIFO：串行分发，按 (Source, Id) 排序。
+- 崩溃：行仍为 NULL → 重投。handler 必须按 EventId 幂等。
+- 毒消息：进 DLQ 并置 DispatchedAt。可查询、可手动重试。
 
-Future: N dispatchers keyed by `hash(Source) % N`. Same source → same grain. Not yet.
+未来：N 个分发器按 `hash(Source) % N` 分片，同一 source → 同一 grain。暂不做。
 
-## Error ladder
+## 错误阶梯
 
-- Eliminate: event + state in same transaction.
-- Absorb: Polly exponential backoff.
-- Aggregate: dispatcher catches all. Handlers never swallow.
-- Surface: DLQ, queryable, retryable.
+- 消除：事件与状态同事务。
+- 吸收：Polly 指数退避。
+- 聚合：分发器兜底捕获，handler 绝不吞异常。
+- 暴露：DLQ，可查询、可重试。

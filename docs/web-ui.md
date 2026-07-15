@@ -42,14 +42,14 @@ Web UI 是日常使用 Mohist 的主要入口。访问 `http://localhost:3456`�
 
 ### 筛选和排序
 
-看板顶部 FilterBar：
+看板顶部筛选栏：
 
 - **Priority chips** — 点 P0/P1/P2/P3/P4 多选
-- **Labels** — Popover 选择
+- **Labels** — 弹出列表选择
 - **Search** — 按 title 搜索
 - **Sort** — Priority / Number / Updated
 
-筛选条件反映在 URL query string，可以分享链接。
+筛选条件包含在页面链接里，可以直接分享。
 
 ### Needs Attention 条
 
@@ -75,12 +75,12 @@ Web UI 是日常使用 Mohist 的主要入口。访问 `http://localhost:3456`�
 
 按从上到下：
 
-1. **WorkflowView** — 当前 workflow stage 的进度和子任务
-2. **IssueWorkflowProfileEditor** — 修改这个 issue 的 workflow profile
+1. **Workflow 进度视图** — 当前 workflow stage 的进度和子任务
+2. **Workflow Profile 编辑器** — 修改这个 issue 的 workflow profile
 3. **Diff 概览** — base/head 分支、ahead/behind、文件改动数
-4. **BranchBar** — 分支状态、rebase 可用性
+4. **分支状态栏** — 分支状态、rebase 可用性
 5. **Description** — issue body（markdown 渲染）
-6. **WorkflowYamlDialog** — 查看本次 run 的实际 yaml
+6. **Workflow 定义查看** — 查看本次 run 实际生效的 workflow 定义
 7. **Commits** — 本 issue 的 commit 列表
 8. **Comments** — 评论列表 + 新评论框
 
@@ -89,12 +89,12 @@ Web UI 是日常使用 Mohist 的主要入口。访问 `http://localhost:3456`�
 按从上到下：
 
 1. **Details** — Issue Stage / Workflow Stage / Project / Repository
-2. **LatestArtifactsPanel** — Plan/Check 阶段产物（点开看 proposal.md、review.md 等）
+2. **最新产物面板** — Plan/Check 阶段产物（点开看 proposal.md、review.md 等）
 3. **Base Drift Detected**（如有）— base branch 漂移信息
 4. **Workflow Blocked**（如有）— blocked 原因和推荐恢复操作
-5. **WorkflowConvergencePanel**（如有）— convergence 信息
+5. **收敛面板**（如有）— convergence 信息
 6. **Actions** — 主要操作区（Start / Approve / Retry / Stop / 等）
-7. **IssueModelSelector** — 切换 AI 模型（整体或 per-stage）
+7. **模型选择器** — 切换 AI 模型（整体或 per-stage）
 8. **Prerequisites**（如有）— 前置依赖列表 + Add Prerequisite 输入框
 
 ### 何时用什么按钮
@@ -137,46 +137,15 @@ URL: `/epics` 和 `/epics/<id>`
 
 ### 列表页
 
-列表先展示 `idle` / `running` Epic 的当前工作进度分组，再展示独立的生命周期分区：
-
-| 分组 | 含义 | 展示方式 |
-|---|---|---|
-| **Running** | `idle` / `running` Epic 中有 linked issue 正在 in-progress；这是工作进度分组，不等同于所有卡片都是 `running` 生命周期状态 | 有内容时展开 |
-| **Ready to start** | `idle` / `running` Epic 中有可推进的 next issue，等待启动 | 有内容时展开 |
-| **Waiting / Blocked** | `idle` / `running` Epic 中有 open linked issue，但当前没有 startable issue，详情由 nextIssueReason 解释 | 有内容时展开 |
-| **Idle / Empty** | `idle` / `running` Epic 中无 next issue、无 blocker、无 linked issues | 有内容时展开 |
-| **Paused** | 暂停推进（当前 in-progress issue 不中断） | 有 paused Epic 时显示 |
-| **Done** | 已完成 | 有 done Epic 时折叠显示 |
-| **Closed** | 已关闭 | 有 closed Epic 时折叠显示 |
-
-每张卡片显示编号、状态、优先级、进度条（X / Y completed）、以及当前活动或下一步信息。状态为 Paused 的卡片半透明。
-
-详情页入口：点卡片跳转到 `/epics/<id>`。
+所有 Epic 按当前工作情况分组：正在推进的、等待启动的、等待/受阻的、空闲的排在前面，Paused / Done / Closed 各自单独分区（Done / Closed 默认折叠）。每张卡片显示编号、状态、优先级、进度条（已完成 / 总数）、以及当前活动或下一步信息。点卡片进详情页。
 
 ### 详情页
 
-页面顶部按钮区提供以下生命周期操作，按当前状态显示：
+- 顶部按钮区按 Epic 当前状态提供生命周期操作（Start Epic / Pause / Resume / Mark Done / Close Epic）
+- 三个统计卡片：**进度**（已交付 / 总数，并提示是否已可标记完成）、**下一个 Issue**（下一个待推进 issue 和推进状态说明）、**当前活动**（正在进行的 linked issues，按 health 分组）
+- 下方为 Linked Issues 列表，支持添加/移除 issue、单个 issue 的 Start 按钮、以及依赖图视图（Graph tab）
 
-| 按钮 | 出现条件 | 操作 |
-|---|---|---|
-| **Start Epic** | Epic 为 idle 状态 | 开始自动推进 linked issues |
-| **Pause** | Epic 为 running 状态 | 暂停推进（当前 in-progress issue 不中断） |
-| **Resume** | Epic 为 paused 状态 | 恢复推进，重新评估 readiness |
-| **Mark Done** | `readyToMarkDone` 为 true（所有 linked issues 都已进入终态，没有 open linked issues） | 标记完成 |
-| **Close Epic** | 非 terminal 状态 | 关闭 Epic |
-
-操作按钮带 pending 状态反馈（Starting... / Pausing... / Resuming... / Marking... / Closing...）。
-
-### 详情页信息
-
-详情页展示三个统计卡片：
-- **Progress** — X / Y delivered + 进度条 + Ready to mark done 标记。delivered 只统计已完成交付的 issue；`readyToMarkDone` 依据是否仍有 open linked issues 判断。
-- **Next Issue** — 下一个待推进 issue + 推进状态说明
-- **Current Activity** — 当前活动的 linked issues（按 health 分组）
-
-下方为 Linked Issues 列表，支持添加/移除 issue、单个 issue 的 Start 按钮、以及依赖图视图（Graph tab）。
-
-详见 [用 Epic 规划](epics.md)（生命周期状态机）。
+各操作在什么状态下可用、状态之间怎样转换，见 [用 Epic 规划](epics.md)。
 
 ## Activity 页
 
