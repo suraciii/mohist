@@ -176,7 +176,7 @@ export function SessionDetailShell({
   const recoveryBarContent = hasRecoveryActions || lineageLink ? (
     <div className="flex flex-col gap-2">
       {hasRecoveryActions && (
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex flex-row flex-wrap gap-2 items-start justify-between md:flex-nowrap">
           <div className="flex-1 min-w-0">
             <ContextHealthBar
               contextWindowUsed={contextWindowUsed}
@@ -186,7 +186,7 @@ export function SessionDetailShell({
             />
           </div>
           {recoverySessionName && (
-            <div className="shrink-0">
+            <div className="contents md:block md:shrink-0">
               <SessionRecoveryActions
                 issueNumber={issueNumber}
                 sessionName={recoverySessionName}
@@ -356,7 +356,7 @@ export function SessionDetailShell({
         {errorsEvidence}
         <div
           ref={scrollContainerRef}
-          className="flex-1 overflow-y-auto min-w-0"
+          className="flex-1 overflow-y-auto min-w-0 min-h-[120px] md:min-h-0"
           data-testid="session-transcript-scroll-container"
         >
           <StickySessionTitle
@@ -368,7 +368,7 @@ export function SessionDetailShell({
             <div
               data-testid="session-recovery-bar"
               data-sticky="true"
-              className="sticky top-9 z-20 border-b border-border bg-background px-4 py-3"
+              className="sticky top-9 z-20 border-b border-border bg-background px-4 py-2 md:py-3"
             >
               {recoveryBarContent}
             </div>
@@ -560,7 +560,7 @@ function SessionHeader({
   return (
     <div
       data-testid="session-header"
-      className="border-b border-border bg-background px-4 py-3 shrink-0 min-w-0"
+      className="border-b border-border bg-background px-4 py-2 md:py-3 shrink-0 min-w-0"
     >
       <div className="flex flex-wrap items-center gap-2 text-sm mb-2 min-w-0">
         <Link
@@ -573,8 +573,8 @@ function SessionHeader({
         </Link>
         {issueTitle && (
           <>
-            <span className="text-muted-foreground/40 shrink-0">/</span>
-            <span className="text-muted-foreground truncate min-w-0">{issueTitle}</span>
+            <span className="hidden md:inline text-muted-foreground/40 shrink-0">/</span>
+            <span className="hidden md:inline text-muted-foreground truncate min-w-0">{issueTitle}</span>
           </>
         )}
         {workflowContextPath && workflowContextLabel && (
@@ -602,7 +602,7 @@ function SessionHeader({
           </h1>
         </div>
 
-        <div className="flex flex-col gap-2 text-xs text-muted-foreground sm:flex-row sm:items-center sm:gap-2 sm:ml-auto sm:shrink-0 sm:flex-wrap sm:justify-end">
+        <div className="flex flex-col gap-2 text-xs text-muted-foreground max-md:flex-row max-md:flex-wrap max-md:items-center sm:flex-row sm:items-center sm:gap-2 sm:ml-auto sm:shrink-0 sm:flex-wrap sm:justify-end">
           <StatusBadge kind={statusKind} failureReason={meta?.failureReason} />
           <span
             data-testid="session-stage-chip"
@@ -613,51 +613,51 @@ function SessionHeader({
           </span>
 
           {meta?.model && eventSummary?.resolvedModel && meta.model !== eventSummary.resolvedModel ? (
-            <span className="text-muted-foreground">
+            <span className="hidden md:inline text-muted-foreground">
               {meta.model} <span className="text-muted-foreground/40">→</span>{' '}
               <span className="text-info">{eventSummary.resolvedModel}</span>
             </span>
           ) : meta?.model ? (
-            <span>{meta.model}</span>
+            <span className="hidden md:inline">{meta.model}</span>
           ) : null}
 
-          <span className="text-muted-foreground/40">·</span>
-          <span>{turnCount} turn{turnCount !== 1 ? 's' : ''}</span>
+          <span className="hidden md:inline text-muted-foreground/40">·</span>
+          <span className="hidden md:inline">{turnCount} turn{turnCount !== 1 ? 's' : ''}</span>
 
           {meta?.lastActivityAt && (
             <>
-              <span className="text-muted-foreground/40">·</span>
-              <span title={`Last activity: ${meta.lastActivityAt}`}>
+              <span className="hidden md:inline text-muted-foreground/40">·</span>
+              <span className="hidden md:inline" title={`Last activity: ${meta.lastActivityAt}`}>
                 {formatRelativeTime(meta.lastActivityAt)}
               </span>
             </>
           )}
           {statusKind === 'probing' && meta?.probeSentAt && (
             <>
-              <span className="text-muted-foreground/40">·</span>
-              <span className="text-warning" title={`Probe sent: ${meta.probeSentAt}`}>
+              <span className="hidden md:inline text-muted-foreground/40">·</span>
+              <span className="hidden md:inline text-warning" title={`Probe sent: ${meta.probeSentAt}`}>
                 Checking since {formatRelativeTime(meta.probeSentAt)}
               </span>
             </>
           )}
           {fileSummary && (
             <>
-              <span className="text-muted-foreground/40">·</span>
-              <span>{fileSummary}</span>
+              <span className="hidden md:inline text-muted-foreground/40">·</span>
+              <span className="hidden md:inline">{fileSummary}</span>
             </>
           )}
           {isTerminal && (
             <>
-              <span className="text-muted-foreground/40">·</span>
-              <span className={statusKind === 'failed' ? 'text-danger' : ''}>
+              <span className="hidden md:inline text-muted-foreground/40">·</span>
+              <span className={`hidden md:inline ${statusKind === 'failed' ? 'text-danger' : ''}`}>
                 {formatDuration(duration)}
               </span>
             </>
           )}
           {meta?.sessionId && (
             <>
-              <span className="text-muted-foreground/40">·</span>
-              <span className="font-mono text-muted-foreground text-xs">{meta.sessionId.slice(0, 8)}</span>
+              <span className="hidden md:inline text-muted-foreground/40">·</span>
+              <span className="hidden md:inline font-mono text-muted-foreground text-xs">{meta.sessionId.slice(0, 8)}</span>
             </>
           )}
           {showCancelControl && (

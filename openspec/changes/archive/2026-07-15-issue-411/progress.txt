@@ -1,0 +1,79 @@
+Progress notes for issue #411 (compact-viewport CSS accommodations).
+
+## Codebase patterns
+
+- `SessionDetailShell` already uses Tailwind responsive classes heavily — the
+  `SessionHeader` already has `flex-col sm:flex-row sm:items-center sm:gap-3`
+  on the title cluster and `flex-col sm:flex-row sm:items-center sm:gap-2 ...`
+  on the metadata cluster. So the established pattern for "below sm changes
+  layout" lives in the existing code; we just add `md:` scopes for the new
+  compact-viewport concerns.
+- `tsconfig.json` `include`s `src` and `tests`, so browser tests in
+  `tests/browser/*.spec.ts` are linted by `tsc -b`. This means helpers that
+  take `page: Page` as a parameter must either use it or have the
+  `_page: Page` underscore prefix to satisfy `noUnusedParameters: true`.
+- `vitest.config.ts` excludes `tests/browser/**` from the default vitest
+  test run; browser tests only run via `npm run test:browser` (Playwright).
+  Verified by reading `vite.config.ts` `exclude:` and `projects[]`.
+- `useIssueSessionDataSource` always returns `cancel: null` after the
+  accept-evidence refactor in #402, so the SessionHeader's cancel button
+  is conditionally absent. Tests for cancel should mock the data source
+  via dependency injection rather than expect the cancel trigger to
+  always render.
+- The Datasource uses `SessionDataSource` types — `AgentSessionMetadata`
+  has no `sessionId` field; the `id` field becomes `sessionId` after
+  `buildSessionMetadata` runs in `useIssueSessionDataSource.tsx`.
+- Recovery actions and the recovery bar only render when
+  `recoverySessionName` is set; for the issue-bound route this is
+  always set when there is a session.
+
+## Gotchas
+
+- Mocking `Date.now()` for relative time: `formatRelativeTime` uses
+  `Date.now()` directly. To assert the "Xm ago" text appears, mock
+  `Date.now()` with `vi.spyOn(Date, 'now')`. Time comparison was
+  precise at minute granularity.
+- `shouldShowToken` in `SessionUsageSummary` only returns true when
+  `value > 0`. Tests that need to verify cached/thought token rendering
+  must set them to a positive number (not zero or null).
+- Transcript scroll container renders only when there are turns or the
+  session is running. Tests that need the followup composer must set
+  `status: 'active'` so `isRunning` is true.
+- `flex-row` in the recovery bar (D4) was previously
+  `flex-col sm:flex-row sm:items-start sm:justify-between`. After
+  removing the `sm:` prefix, the metadata cluster assertions in
+  `SessionPageHeader.spec.tsx` (which check the parent cluster
+  has `flex-col sm:flex-row`) still pass because the cluster
+  container is the title-row's metadata cluster, not the recovery
+  bar's inner row.
+- Re: the "30m ago" assertion failing — the metadata's
+  `lastActivityAt` is far in the past relative to current wall
+  clock, so `formatRelativeTime` returns `toLocaleDateString()`. The
+  test mocks `Date.now()` to a known moment (`2026-06-15T11:00:00Z`)
+  to drive relative-time formatting deterministically.
+- Sub-pixel rounding: the follow-up composer bottom and mobile nav
+  top are separated by 0px nominally, but bounding boxes can be off
+  by 1px due to fractional device pixel ratios in the headless
+  browser. The browser test uses `toBeLessThanOrEqual(nav.y + 1)`
+  to allow 1px tolerance without compromising the "not covered"
+  guarantee.
+
+## Implementation notes
+
+- D1 (SessionHeader metadata density) only adds `hidden md:inline`
+  to existing elements and their preceding separator dot. No
+  conditional rendering, no JS viewport hook. 7 nonessential
+  items gained the class plus 7 separator dots + 3 duration probes.
+- D2 (UsageSummary density) similarly keeps everything in the DOM.
+  `data-testid` anchors preserved. Tokens + Cost + Context remain
+  visible at all viewports.
+- D3 (transcript `min-h` floor) applies `min-h-[120px] md:min-h-0`
+  to the scroll container — preserves the desktop "fill available"
+  behavior while guaranteeing a 120px floor at compact viewports.
+- D4 (recovery bar) replaces `flex-col sm:flex-row sm:items-start
+  sm:justify-between` with `flex flex-row gap-2 items-start
+  justify-between`. The wrapper padding goes from `py-3` to
+  `py-2 md:py-3` (saves ~8px vertically below md).
+- All acceptance criteria for D1–D6 are covered by the new spec
+  test (`CoderSessionCompactViewport.spec.tsx`) and the new browser
+  test (`coder-session-compact-viewport.spec.ts`).

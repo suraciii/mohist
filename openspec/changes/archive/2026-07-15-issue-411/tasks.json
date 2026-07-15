@@ -1,0 +1,37 @@
+{
+  "project": "mohist-local",
+  "description": "Keep Coder Session transcript and session controls usable in compact mobile viewports by reducing summary density, adding a transcript height floor, and compacting the recovery bar below the md breakpoint.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Implement compact-viewport CSS accommodations with spec and browser tests for Coder Session",
+      "spec": "specs/coder-session-compact-viewport/spec.md#transcript-region-preserves-a-usable-reading-surface-at-compact-viewports",
+      "description": "Add pure CSS breakpoint accommodations to SessionDetailShell.tsx and SessionUsageSummary.tsx so the Coder Session page is usable at compact viewports. In SessionHeader (SessionDetailShell.tsx), hide nonessential metadata items (model, turn count, last-activity, probe-sent, changed-files, duration, session id) and their separator dots with `hidden md:inline`, keeping session name, status badge, stage chip, and cancel button visible. Add `min-h-[120px] md:min-h-0` to the transcript scroll container. Change the recovery bar inner layout to always `flex-row` and reduce wrapper padding to `py-2 md:py-3`. In SessionUsageSummary.tsx, hide secondary token breakdowns (input, output, cached, thought) with `hidden md:inline` and reduce padding to `py-1 md:py-2`. Add spec tests in packages/web/tests/CoderSessionCompactViewport.spec.tsx asserting the structural contract: nonessential metadata carries `hidden md:inline`, essential elements (name, status, stage) do not carry `hidden`, transcript has `min-h` with `md:min-h-0`, recovery bar uses `flex-row`, all existing data-testid anchors are preserved, and desktop layout classes remain unchanged. Add browser tests in packages/web/tests/browser/ that render the Coder Session page in a real Chromium layout engine at 375x667 and 320x568 viewports, verifying pixel-level behavior that jsdom cannot assert: transcript scroll container has non-zero visible height on initial load, Compact/Reset recovery controls are reachable and not covered by fixed mobile navigation, follow-up composer is not covered by mobile navigation, and fixed mobile navigation does not overlap the transcript content area.",
+      "acceptanceCriteria": [
+        "Nonessential SessionHeader metadata items (model, turn count, last-activity, probe-sent, changed-files, duration, session id) and their `·` separators carry `hidden md:inline` class in the rendered DOM",
+        "Session name (h1), StatusBadge, session-stage-chip, and cancel button do NOT carry `hidden` class - they remain visible at all viewports",
+        "Transcript scroll container (data-testid=session-transcript-scroll-container) className contains `min-h-[120px]` and `md:min-h-0`",
+        "Recovery bar inner content div uses `flex-row` (not `flex-col`) so ContextHealthBar and Compact/Reset buttons are always horizontal",
+        "Recovery bar wrapper (data-testid=session-recovery-bar) className contains `py-2` and `md:py-3`",
+        "SessionUsageSummary secondary token breakdowns (input, output, cached, thought) carry `hidden md:inline`; total tokens, context %, and cost remain visible",
+        "SessionUsageSummary container className contains `py-1` and `md:py-2`",
+        "All existing data-testid anchors preserved: session-header, session-transcript-scroll-container, session-sticky-title, session-recovery-bar, session-followup-composer, session-sibling-sidebar, session-recovery-compact, session-recovery-reset",
+        "Existing tests pass: npm run typecheck -w packages/web && npm run test:run -w packages/web (CoderSessionEvidence.spec.tsx, SessionPageHeader.spec.tsx, SessionPage.*.test.tsx, GenericSessionPage.test.tsx all green)",
+        "New spec test CoderSessionCompactViewport.spec.tsx passes and verifies the structural contract for compact-viewport classes and desktop-layout preservation",
+        "Browser test at 375x667 verifies transcript scroll container has visible height greater than 100px on initial load",
+        "Browser test at 320x568 verifies transcript scroll container has visible height greater than 0px (never collapses to zero)",
+        "Browser test verifies Compact/Reset recovery controls (data-testid=session-recovery-compact, session-recovery-reset) are within the viewport bounds and not covered by the fixed mobile bottom navigation at both 375x667 and 320x568",
+        "Browser test verifies follow-up composer (data-testid=session-followup-composer) is not covered by mobile navigation when a running session is viewed at compact viewports",
+        "Browser test verifies fixed mobile bottom navigation does not overlap the transcript scroll container's visible content area at both tested viewports",
+        "Browser tests pass via npm run test:browser and do not run in default npm test"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Modified packages/web/src/pages/session/ui/SessionDetailShell.tsx, packages/web/src/pages/session/ui/SessionUsageSummary.tsx, new packages/web/tests/CoderSessionCompactViewport.spec.tsx, and new packages/web/tests/browser/ test file(s) for CoderSession compact-viewport pixel verification",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "All accommodations are pure CSS breakpoint classes - no JS viewport hook (useIsMobile/useNarrowViewport) is introduced. D1-D3 use md: prefixed classes; D4 removes the sm: prefix from the recovery bar inner layout (making flex-row always apply) which only changes below-sm behavior since sm+ was already flex-row. Elements remain in the DOM (hidden via CSS), so existing getByText assertions in SessionPageHeader.spec.tsx remain green without modification. Per design D1-D6. Browser tests are a separate track per design/testing.md, running via npm run test:browser and not in default npm test."
+    }
+  ]
+}
