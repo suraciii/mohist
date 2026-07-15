@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect, useRef, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { statusBadge, statusLabel, useIssue, useIssueDiff, useIssueCommits, useCommitDiff } from '../../../entities/issue'
 import type { ChangesUnavailableReason } from '../../../entities/issue'
-import { useWorkflowRunSessions } from '../../../entities/coder-session'
+import { useWorkflowRunSessions, type WorkflowRunSession } from '../../../entities/coder-session'
 import { ChangedFilesTree, DiffSearchPane, FullFilePane, RawPatchPane, SplitDiffPane, UnifiedDiffPane } from '../../../widgets/issue-changed-files'
 import { getFileBlockIdentity, parseDiff, parseDiffFiles, selectFirstReadableFile, type FileBlock } from '../../../shared/lib/diff-model'
 import type { IssueCommitsResponse, CommitEntry, IssueDiffResponse } from '../../../entities/issue'
@@ -164,6 +164,15 @@ const RECOVERY_MESSAGE_MAP: Record<ChangesUnavailableReason, string> = {
 }
 
 const TRANSPORT_MESSAGE = 'The file changes could not be loaded.'
+
+function selectRelatedSession(sessions: WorkflowRunSession[]): WorkflowRunSession | undefined {
+  return [...sessions].sort((left, right) => {
+    const leftIsLive = left.status === 'active' || left.status === 'running' || left.status === 'probing'
+    const rightIsLive = right.status === 'active' || right.status === 'running' || right.status === 'probing'
+    if (leftIsLive !== rightIsLive) return leftIsLive ? -1 : 1
+    return left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id)
+  })[0]
+}
 
 interface RecoverySurfaceProps {
   issueNumber: number
@@ -778,13 +787,9 @@ export function IssueChangedFilesPage() {
 
   const workflowRunId = data.issue?.workflowRunId ?? null
   const { sessions: workflowSessions } = useWorkflowRunSessions(workflowRunId)
-  const activeSession = workflowSessions.find((session) => (
-    session.status === 'active'
-    || session.status === 'running'
-    || session.status === 'probing'
-  ))
-  const sessionHref = activeSession
-    ? toProjectPath(`/issues/${issueNumber}/workflow/sessions/${encodeURIComponent(activeSession.sessionName)}`)
+  const relatedSession = selectRelatedSession(workflowSessions)
+  const sessionHref = relatedSession
+    ? toProjectPath(`/issues/${issueNumber}/workflow/sessions/${encodeURIComponent(relatedSession.sessionName)}`)
     : undefined
 
   if (!issueNumber || isNaN(issueNumber) || issueNumber === 0) {
