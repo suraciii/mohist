@@ -1,5 +1,6 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Project;
@@ -121,6 +122,30 @@ public class ProjectRepositoryDataUpgraderSpecs
         Assert.Equal(invalidJson, (await LoadProjectAsync(db, "proj_broken")).RepositoriesJson);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
+    [Fact]
+    public async Task UpgradeAsync_WhenPersistenceFails_RollsBackEveryPreparedProject()
+    {
+        await using var connection = await OpenDatabaseAsync();
+        var firstJson = JSON.Serialize(new[] { Repository("server", "git@example.com:server.git", "main", false) });
+        var secondJson = JSON.Serialize(new[] { Repository("web", "git@example.com:web.git", "develop", false) });
+        await using (var seed = CreateContext(connection))
+        {
+            await SeedProjectJsonAsync(seed, "proj_first", "first", firstJson);
+            await SeedProjectJsonAsync(seed, "proj_second", "second", secondJson);
+        }
+
+        await using (var failing = CreateContext(connection, new ThrowOnSaveChangesInterceptor()))
+        {
+            await Assert.ThrowsAsync<InvalidOperationException>(() => ProjectRepositoryDataUpgrader.UpgradeAsync(failing));
+        }
+
+        await using var verify = CreateContext(connection);
+        Assert.Equal(firstJson, (await LoadProjectAsync(verify, "proj_first")).RepositoriesJson);
+        Assert.Equal(secondJson, (await LoadProjectAsync(verify, "proj_second")).RepositoriesJson);
+    }
+
     private static async Task<SqliteConnection> OpenDatabaseAsync()
     {
         var connection = new SqliteConnection("Data Source=:memory:");
@@ -129,10 +154,16 @@ public class ProjectRepositoryDataUpgraderSpecs
         return connection;
     }
 
-    private static MohistDbContext CreateContext(SqliteConnection connection) =>
-        new(new DbContextOptionsBuilder<MohistDbContext>()
-            .UseSqlite(connection)
-            .Options);
+    private static MohistDbContext CreateContext(
+        SqliteConnection connection,
+        params IInterceptor[] interceptors)
+    {
+        var options = new DbContextOptionsBuilder<MohistDbContext>()
+            .UseSqlite(connection);
+        if (interceptors.Length > 0)
+            options.AddInterceptors(interceptors);
+        return new MohistDbContext(options.Options);
+    }
 
     private static RepositoryInfo Repository(
         string name,
@@ -189,5 +220,14 @@ public class ProjectRepositoryDataUpgraderSpecs
             Assert.Equal(expected[index].BaseBranch, actual[index].BaseBranch);
             Assert.Equal(expected[index].IsDefault, actual[index].IsDefault);
         }
+    }
+
+    private sealed class ThrowOnSaveChangesInterceptor : SaveChangesInterceptor
+    {
+        public override ValueTask<InterceptionResult<int>> SavingChangesAsync(
+            DbContextEventData eventData,
+            InterceptionResult<int> result,
+            CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("Injected persistence failure");
     }
 }

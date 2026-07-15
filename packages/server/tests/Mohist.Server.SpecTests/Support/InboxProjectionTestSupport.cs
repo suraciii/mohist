@@ -128,7 +128,7 @@ internal static class InboxProjectionTestSupport
         {
             Id = projectId,
             Name = ProjectNameFromId(projectId),
-            RepositoriesJson = "[]",
+            RepositoriesJson = """[{"name":"test-repo","gitUrl":"git@example.com:test-repo.git","baseBranch":"main","isDefault":true}]""",
             CreatedAt = TestTime.UtcNow,
             UpdatedAt = TestTime.UtcNow,
         });

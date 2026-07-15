@@ -33,8 +33,11 @@ public static class ProjectRoutes
             if (req.Repository is null)
                 return ApiResults.BadRequest("repository is required", "repository_required");
 
-            if (req.Repository.IsDefault is not null)
+            if (IsSupplied(req.Repository.IsDefault))
                 return ApiResults.BadRequest("repository.isDefault is derived by the server", "repository_initial_default_forbidden");
+
+            if (IsSupplied(req.Repository.SetDefault))
+                return ApiResults.BadRequest("repository.setDefault is not accepted during project creation", "repository_initial_default_forbidden");
 
             if (string.IsNullOrWhiteSpace(req.Repository.Name))
                 return ApiResults.BadRequest("repository.name is required", "repository_name_required");
@@ -115,7 +118,7 @@ public static class ProjectRoutes
 
         byRef.MapPost("/repositories", async (HttpContext context, AddRepositoryRequest req, IGrainFactory grains) =>
         {
-            if (req.IsDefault is not null)
+            if (IsSupplied(req.IsDefault))
                 return ApiResults.BadRequest("isDefault is derived by the server; use setDefault instead", "repository_default_forbidden");
 
             if (string.IsNullOrWhiteSpace(req.Name))
@@ -149,10 +152,10 @@ public static class ProjectRoutes
             var project = context.GetResolvedProject();
             var projectGrain = grains.GetGrain<IProjectGrain>(project.Id);
 
-            if (req.NewName is not null)
+            if (IsSupplied(req.NewName))
                 return ApiResults.BadRequest("Repository names are immutable", "repository_name_immutable");
 
-            if (req.IsDefault is not null)
+            if (IsSupplied(req.IsDefault))
                 return ApiResults.BadRequest("isDefault is derived by the server; use setDefault instead", "repository_default_forbidden");
 
             if (req.SetDefault == false)
@@ -518,6 +521,9 @@ public static class ProjectRoutes
         message = exception.Message;
         return message.Contains("already exists", StringComparison.OrdinalIgnoreCase);
     }
+
+    private static bool IsSupplied(JsonElement value) =>
+        value.ValueKind != JsonValueKind.Undefined;
 }
 
 public sealed record PromptUpsertRequest(string? Body);
@@ -536,20 +542,21 @@ public record CreateProjectRepositoryRequest(
     string? Name,
     string? GitUrl,
     string? BaseBranch,
-    JsonElement? IsDefault = null);
+    JsonElement IsDefault = default,
+    JsonElement SetDefault = default);
 public record UpdateProjectRequest();
 public record AddRepositoryRequest(
     string Name,
     string GitUrl,
     string? BaseBranch = null,
     bool? SetDefault = null,
-    JsonElement? IsDefault = null);
+    JsonElement IsDefault = default);
 public record UpdateRepositoryRequest(
     bool? SetDefault = null,
     string? GitUrl = null,
     string? BaseBranch = null,
-    JsonElement? NewName = null,
-    JsonElement? IsDefault = null);
+    JsonElement NewName = default,
+    JsonElement IsDefault = default);
 public record CreateProjectTemplateRequest(string Yaml);
 public record UpdateProjectTemplateRequest(string Yaml);
 public record SetDefaultTemplateRequest(string TemplateId);

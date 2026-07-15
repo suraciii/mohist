@@ -203,22 +203,24 @@ public static class RepositoryPolicy
         if (repo is null)
             return new(default!, new[] { new ValidationError("name", $"Repository '{targetName}' not found.") });
 
-        var hasGitUrl = input.GitUrl is not null && !string.IsNullOrWhiteSpace(input.GitUrl);
+        var hasGitUrl = input.GitUrl is not null;
         var hasBaseBranch = input.BaseBranch is not null;
 
         if (!hasGitUrl && !hasBaseBranch)
             return new(default!, new[] { new ValidationError("update", "Provide gitUrl and/or baseBranch to update.") });
 
+        var gitUrl = repo.GitUrl;
+        if (hasGitUrl && !TryNormalize(input.GitUrl, out gitUrl))
+            return new(default!, new[] { new ValidationError("gitUrl", "gitUrl must be a non-empty string.") });
+
         var baseBranch = repo.BaseBranch;
         if (hasBaseBranch && !TryNormalizeBaseBranch(input.BaseBranch, out baseBranch))
             return new(default!, new[] { new ValidationError("baseBranch", "baseBranch must be a non-empty string.") });
 
-        var newGitUrl = hasGitUrl ? input.GitUrl!.Trim() : repo.GitUrl;
-
         return new(
             new TransitionUpdate(targetName, repo, repo with
             {
-                GitUrl = newGitUrl,
+                GitUrl = gitUrl,
                 BaseBranch = baseBranch,
             }),
             []);

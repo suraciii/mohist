@@ -42,7 +42,7 @@ internal static class ProjectRepositoryBootstrap
         if (workTreeRoot.ExitCode != 0)
             return new Outcome.Failure($"--path '{rawPath}' is not inside a Git working tree (rev-parse failed).");
 
-        var root = workTreeRoot.Stdout.Trim();
+        var root = TrimLineEnding(workTreeRoot.Stdout);
         if (string.IsNullOrWhiteSpace(root))
             return new Outcome.Failure($"--path '{rawPath}' is not inside a Git working tree (rev-parse returned no root).");
 
@@ -70,7 +70,7 @@ internal static class ProjectRepositoryBootstrap
         if (baseBranch is null)
             return new Outcome.Failure($"--path '{root}' has no resolvable base branch (no origin/HEAD and no checked-out branch).");
 
-        var repositoryName = Path.GetFileName(root.TrimEnd('/', '\\'));
+        var repositoryName = Path.GetFileName(root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
         if (string.IsNullOrWhiteSpace(repositoryName))
             return new Outcome.Failure($"--path '{root}' produced an empty repository resource name.");
 
@@ -127,7 +127,7 @@ internal static class ProjectRepositoryBootstrap
     {
         try
         {
-            canonical = Path.GetFullPath(rawPath).Replace('\\', '/');
+            canonical = Path.GetFullPath(rawPath);
             error = string.Empty;
             return true;
         }
@@ -138,6 +138,8 @@ internal static class ProjectRepositoryBootstrap
             return false;
         }
     }
+
+    private static string TrimLineEnding(string value) => value.TrimEnd('\r', '\n');
 
     private static async Task<(int ExitCode, string Stdout, string Stderr)> TryRunGitAsync(
         ICommandExecutor commandExecutor,

@@ -170,17 +170,13 @@ public class ProjectGrain : Grain, IProjectGrain
         if (validation.Count > 0)
             throw new ArgumentException(string.Join("; ", validation.Select(v => v.Message)));
 
-        _project.Repositories = next
-            .Select(r => new RepositoryInfo
-            {
-                Name = r.Name,
-                GitUrl = r.GitUrl,
-                BaseBranch = r.BaseBranch,
-                IsDefault = r.IsDefault,
-            })
-            .ToList();
-        _project.UpdatedAt = Now().UtcDateTime.ToString("o");
-        await PersistRepositoriesAsync();
+        var repositories = ToRepositoryInfos(next);
+        var updatedAt = Now();
+        if (!await PersistRepositoriesAsync(repositories, updatedAt))
+            return null;
+
+        _project.Repositories = repositories;
+        _project.UpdatedAt = updatedAt.UtcDateTime.ToString("o");
         return _project;
     }
 
@@ -216,17 +212,13 @@ public class ProjectGrain : Grain, IProjectGrain
         if (validation.Count > 0)
             throw new ArgumentException(string.Join("; ", validation.Select(v => v.Message)));
 
-        _project.Repositories = next
-            .Select(r => new RepositoryInfo
-            {
-                Name = r.Name,
-                GitUrl = r.GitUrl,
-                BaseBranch = r.BaseBranch,
-                IsDefault = r.IsDefault,
-            })
-            .ToList();
-        _project.UpdatedAt = Now().UtcDateTime.ToString("o");
-        await PersistRepositoriesAsync();
+        var repositories = ToRepositoryInfos(next);
+        var updatedAt = Now();
+        if (!await PersistRepositoriesAsync(repositories, updatedAt))
+            return null;
+
+        _project.Repositories = repositories;
+        _project.UpdatedAt = updatedAt.UtcDateTime.ToString("o");
         return _project;
     }
 
@@ -253,17 +245,13 @@ public class ProjectGrain : Grain, IProjectGrain
         if (validation.Count > 0)
             throw new ArgumentException(string.Join("; ", validation.Select(v => v.Message)));
 
-        _project.Repositories = next
-            .Select(r => new RepositoryInfo
-            {
-                Name = r.Name,
-                GitUrl = r.GitUrl,
-                BaseBranch = r.BaseBranch,
-                IsDefault = r.IsDefault,
-            })
-            .ToList();
-        _project.UpdatedAt = Now().UtcDateTime.ToString("o");
-        await PersistRepositoriesAsync();
+        var repositories = ToRepositoryInfos(next);
+        var updatedAt = Now();
+        if (!await PersistRepositoriesAsync(repositories, updatedAt))
+            return null;
+
+        _project.Repositories = repositories;
+        _project.UpdatedAt = updatedAt.UtcDateTime.ToString("o");
         return _project;
     }
 
@@ -300,29 +288,28 @@ public class ProjectGrain : Grain, IProjectGrain
         if (validation.Count > 0)
             throw new ArgumentException(string.Join("; ", validation.Select(v => v.Message)));
 
-        _project.Repositories = updated
-            .Select(r => new RepositoryInfo
-            {
-                Name = r.Name,
-                GitUrl = r.GitUrl,
-                BaseBranch = r.BaseBranch,
-                IsDefault = r.IsDefault,
-            })
-            .ToList();
-        _project.UpdatedAt = Now().UtcDateTime.ToString("o");
-        await PersistRepositoriesAsync();
+        var repositories = ToRepositoryInfos(updated);
+        var updatedAt = Now();
+        if (!await PersistRepositoriesAsync(repositories, updatedAt))
+            return null;
+
+        _project.Repositories = repositories;
+        _project.UpdatedAt = updatedAt.UtcDateTime.ToString("o");
         return _project;
     }
 
-    private async Task PersistRepositoriesAsync()
+    private async Task<bool> PersistRepositoriesAsync(
+        IReadOnlyList<RepositoryInfo> repositories,
+        DateTimeOffset updatedAt)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
         var entry = await db.Projects.FindAsync(GrainKey);
-        if (entry is null) return;
+        if (entry is null) return false;
 
-        entry.RepositoriesJson = JSON.Serialize(_project!.Repositories);
-        entry.UpdatedAt = Now();
+        entry.RepositoriesJson = JSON.Serialize(repositories);
+        entry.UpdatedAt = updatedAt;
         await db.SaveChangesAsync();
+        return true;
     }
 
     public Task<ProjectVariablesBag?> GetVariablesAsync()
@@ -424,6 +411,18 @@ public class ProjectGrain : Grain, IProjectGrain
                 r.GitUrl,
                 r.BaseBranch,
                 r.IsDefault))
+            .ToList();
+
+    private static List<RepositoryInfo> ToRepositoryInfos(
+        IEnumerable<RepositoryPolicy.NormalizedRepository> repositories) =>
+        repositories
+            .Select(repository => new RepositoryInfo
+            {
+                Name = repository.Name,
+                GitUrl = repository.GitUrl,
+                BaseBranch = repository.BaseBranch,
+                IsDefault = repository.IsDefault,
+            })
             .ToList();
 
     private static List<RepositoryPolicy.NormalizedRepository> ApplyAdd(

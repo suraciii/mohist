@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { useProject } from '../model/ProjectContext'
 import { createProject, deleteProject, getProjects, getRepositories, addRepository, removeRepository, setDefaultRepository } from './client'
+import type { AddRepositoryInput } from '../model/types'
 import { getProjectEvents, type ProjectEventDto, type ProjectEventTypeFilter } from './projectEvents'
 
 export type ProjectCreator = typeof createProject
@@ -24,7 +25,7 @@ export function useRepositories(projectId: string | undefined) {
 export function useAddRepository() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: ({ projectId, data }: { projectId: string; data: { name: string; gitUrl: string; baseBranch?: string; setDefault?: boolean } }) =>
+    mutationFn: ({ projectId, data }: { projectId: string; data: AddRepositoryInput }) =>
       addRepository(projectId, data),
     onSuccess: (_, { projectId }) => {
       queryClient.invalidateQueries({ queryKey: ['repositories', projectId] })

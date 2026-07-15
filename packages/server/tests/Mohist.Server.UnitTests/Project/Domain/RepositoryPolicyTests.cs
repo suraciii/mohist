@@ -310,6 +310,24 @@ public class RepositoryPolicyTests
     }
 
     [Fact]
+    public void BuildUpdate_BlankGitUrlWithBaseBranch_IsRejected()
+    {
+        var current = RepositoryPolicy.Normalize(
+            [new("server", "git@example.com:server.git", "main", true)]);
+
+        var build = RepositoryPolicy.BuildUpdate(
+            "server",
+            new RepositoryPolicy.TransitionInput(
+                Name: "server",
+                GitUrl: " ",
+                BaseBranch: "release"),
+            current);
+
+        Assert.False(build.IsSuccess);
+        Assert.Contains(build.Errors, error => error.Code == "gitUrl");
+    }
+
+    [Fact]
     public void BuildUpdate_EmptyPatch_RejectedWithUpdateError()
     {
         var current = RepositoryPolicy.Normalize(

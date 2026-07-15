@@ -1,8 +1,12 @@
+using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
+using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Project.Domain;
 using Mohist.Server.Project.Grains;
 using Mohist.Server.Project.Services;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.SpecTests.Specs.Workflow;
+using Orleans.Core.Internal;
 using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Project.Grain;
@@ -323,6 +327,95 @@ public class ProjectGrainSpecs : IClassFixture<WorkflowGrainFixture>
         Assert.NotNull(updated);
         var web = updated!.Repositories.Single(r => r.Name == "web");
         Assert.Equal("main", web.BaseBranch);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
+    [Fact]
+    public async Task AddRepository_WhenPersistenceFails_LeavesActivatedAndReactivatedProjectUnchanged()
+    {
+        var id = $"proj_{Guid.NewGuid():N}";
+        var grain = NewProjectGrain(id);
+        await grain.CreateAsync(
+            "persist-failure",
+            new RepositoryInfo
+            {
+                Name = "server",
+                GitUrl = "git@example.com:server.git",
+                BaseBranch = "main",
+                IsDefault = true,
+            });
+
+        var triggerName = $"fail_project_update_{Guid.NewGuid():N}";
+        await using var connection = new SqliteConnection(_fixture.ConnectionString);
+        await connection.OpenAsync();
+        await using var createTrigger = connection.CreateCommand();
+        createTrigger.CommandText = $"""
+            CREATE TRIGGER {triggerName}
+            BEFORE UPDATE ON Projects
+            WHEN NEW.Id = '{id}'
+            BEGIN
+                SELECT RAISE(ABORT, 'injected repository persistence failure');
+            END;
+            """;
+        await createTrigger.ExecuteNonQueryAsync();
+
+        try
+        {
+            await Assert.ThrowsAsync<DbUpdateException>(() =>
+                grain.AddRepositoryAsync("web", "git@example.com:web.git", "main"));
+
+            var active = await grain.GetAsync();
+            Assert.Single(active!.Repositories);
+            Assert.Equal("server", active.Repositories[0].Name);
+        }
+        finally
+        {
+            await using var dropTrigger = connection.CreateCommand();
+            dropTrigger.CommandText = $"DROP TRIGGER IF EXISTS {triggerName}";
+            await dropTrigger.ExecuteNonQueryAsync();
+        }
+
+        var retried = await grain.AddRepositoryAsync("web", "git@example.com:web.git", "main");
+        Assert.Equal(2, retried!.Repositories.Count);
+        await grain.AsReference<IGrainManagementExtension>().DeactivateOnIdle();
+        var reactivated = await NewProjectGrain(id).GetAsync();
+        Assert.Equal(2, reactivated!.Repositories.Count);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
+    [Fact]
+    public async Task AddRepository_WhenBackingRowIsMissing_LeavesActivatedProjectUnchanged()
+    {
+        var id = $"proj_{Guid.NewGuid():N}";
+        var grain = NewProjectGrain(id);
+        await grain.CreateAsync(
+            "persist-before-publish",
+            new RepositoryInfo
+            {
+                Name = "server",
+                GitUrl = "git@example.com:server.git",
+                BaseBranch = "main",
+                IsDefault = true,
+            });
+
+        await using (var connection = new SqliteConnection(_fixture.ConnectionString))
+        {
+            await connection.OpenAsync();
+            await using var db = new MohistDbContext(
+                new DbContextOptionsBuilder<MohistDbContext>().UseSqlite(connection).Options);
+            db.Projects.Remove(await db.Projects.SingleAsync(project => project.Id == id));
+            await db.SaveChangesAsync();
+        }
+
+        var result = await grain.AddRepositoryAsync("web", "git@example.com:web.git", "main");
+
+        Assert.Null(result);
+        var project = await grain.GetAsync();
+        var repository = Assert.Single(project!.Repositories);
+        Assert.Equal("server", repository.Name);
+        Assert.True(repository.IsDefault);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]

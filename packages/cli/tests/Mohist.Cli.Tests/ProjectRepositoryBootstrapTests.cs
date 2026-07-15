@@ -256,6 +256,26 @@ public class ProjectRepositoryBootstrapTests
         executor.AssertExpectedCommandsExecuted();
     }
 
+    [Fact]
+    public async Task TryResolveAsync_PosixBackslashInPath_PreservesDirectoryAndRepositoryName()
+    {
+        const string backslashRoot = "/work/product\\a";
+        var fs = new FakeFileSystem();
+        fs.CreateDirectory(backslashRoot);
+        var executor = new FakeCommandExecutor();
+        QueueGit(executor, backslashRoot, ["rev-parse", "--show-toplevel"], 0, backslashRoot + "\n");
+        QueueGit(executor, backslashRoot, ["rev-parse", "HEAD"], 0, "abc123\n");
+        QueueGit(executor, backslashRoot, ["remote", "get-url", "origin"], 0, "git@example.com:team/product-a.git\n");
+        QueueGit(executor, backslashRoot, ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"], 0, "origin/main\n");
+
+        var outcome = await ProjectRepositoryBootstrap.TryResolveAsync(backslashRoot, fs, executor);
+
+        var success = Assert.IsType<ProjectRepositoryBootstrap.Outcome.Success>(outcome);
+        Assert.Equal(backslashRoot, success.Result.WorkTreeRoot);
+        Assert.Equal("product\\a", success.Result.RepositoryName);
+        executor.AssertExpectedCommandsExecuted();
+    }
+
     private static void QueueGit(
         FakeCommandExecutor executor,
         string workingDirectory,

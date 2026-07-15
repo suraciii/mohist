@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Text;
 using System.Text.Json;
 using EnvironmentAbstractions.TestHelpers;
 using Mohist.Cli;
@@ -69,6 +70,19 @@ public class ProjectApiSpecs
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         var projects = await _client.GetDataAsync<List<ProjectInfo>>("/api/projects");
         Assert.DoesNotContain(projects, project => project.Name == name);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
+    [Theory]
+    [InlineData("""{"name":"null-initial-default","repository":{"name":"main","gitUrl":"git@example.com:main.git","isDefault":null}}""")]
+    [InlineData("""{"name":"set-initial-default","repository":{"name":"main","gitUrl":"git@example.com:main.git","setDefault":true}}""")]
+    public async Task PostProject_WithForbiddenInitialRepositoryControl_ReturnsBadRequest(string payload)
+    {
+        using var content = new StringContent(payload, Encoding.UTF8, "application/json");
+        using var response = await _client.PostAsync("/api/projects", content);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -181,6 +195,35 @@ public class ProjectApiSpecs
         var backend = repos.Single(r => r.GetProperty("name").GetString() == "backend");
         Assert.True(server.GetProperty("isDefault").GetBoolean());
         Assert.False(backend.GetProperty("isDefault").GetBoolean());
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
+    [Fact]
+    public async Task PostRepository_WithSetDefault_SwitchesDefaultAtomically()
+    {
+        var created = await _client.PostDataAsync<ProjectInfo>(
+            "/api/projects",
+            new
+            {
+                name = "repo-add-set-default",
+                repository = new
+                {
+                    name = "server",
+                    gitUrl = "git@example.com:server.git",
+                    baseBranch = "main",
+                },
+            });
+
+        using var response = await _client.PostAsJsonAsync(
+            $"/api/projects/{created.Id}/repositories",
+            new { name = "web", gitUrl = "git@example.com:web.git", baseBranch = "develop", setDefault = true });
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var json = await response.Content.ReadFromJsonAsync<JsonElement>();
+        var repositories = json.GetProperty("data").GetProperty("repositories").EnumerateArray().ToList();
+        Assert.False(repositories.Single(repository => repository.GetProperty("name").GetString() == "server").GetProperty("isDefault").GetBoolean());
+        Assert.True(repositories.Single(repository => repository.GetProperty("name").GetString() == "web").GetProperty("isDefault").GetBoolean());
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -351,6 +394,23 @@ public class ProjectApiSpecs
         using var response = await _client.PatchAsJsonAsync(
             $"/api/projects/{created.Id}/repositories/backend",
             new { gitUrl = " ", baseBranch = "release" });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        await AssertRepositoryUnchangedAsync(created.Id);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
+    [Theory]
+    [InlineData("""{"newName":null,"baseBranch":"release"}""")]
+    [InlineData("""{"isDefault":null,"baseBranch":"release"}""")]
+    public async Task PatchRepository_WithNullForbiddenControl_ReturnsBadRequestAndDoesNotMutate(string payload)
+    {
+        var created = await CreateRepositoryUpdateProjectAsync();
+        using var content = new StringContent(payload, Encoding.UTF8, "application/json");
+        using var response = await _client.PatchAsync(
+            $"/api/projects/{created.Id}/repositories/backend",
+            content);
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         await AssertRepositoryUnchangedAsync(created.Id);

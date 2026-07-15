@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { fireEvent, render, screen, waitFor, within } from '../../../../tests/test-utils'
 import { useMutation } from '@tanstack/react-query'
-import type { Project, Repository } from '../../../entities/project'
+import type { AddRepositoryInput, Project, Repository } from '../../../entities/project'
 import { RepositoriesSection, type RepositoriesSectionDataHook } from './RepositoriesSection'
 
 const addRepositoryRequests: { method: string; url: string; body: unknown }[] = []
@@ -37,7 +37,7 @@ const repositoriesDataHook: RepositoriesSectionDataHook = () => {
   const addRepo = useMutation({
     mutationFn: async ({ projectId, data }: {
       projectId: string
-      data: { name: string; gitUrl: string; baseBranch?: string; isDefault?: boolean }
+      data: AddRepositoryInput
     }) => {
       addRepositoryRequests.push({
         method: 'POST',

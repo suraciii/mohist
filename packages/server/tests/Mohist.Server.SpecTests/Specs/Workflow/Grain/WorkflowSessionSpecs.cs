@@ -34,7 +34,7 @@ public class WorkflowSessionSpecs
         var project = await _client.PostProjectWithRepositoryAsync<ProjectDto>(
             "/api/projects",
             new { name = $"all-disabled-start-{Guid.NewGuid():N}" },
-            new { name = "main", gitUrl = "https://example.com/repo.git", baseBranch = "main", setDefault = true });
+            new { name = "main", gitUrl = "https://example.com/repo.git", baseBranch = "main" });
         var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new
         {
             title = "Persisted issue in all-disabled project",
