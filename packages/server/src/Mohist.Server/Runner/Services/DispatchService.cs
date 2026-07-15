@@ -95,7 +95,7 @@ public sealed class DispatchService : IScopedService
 
     private async Task ActivateBoundGatedStartsAsync(string? projectId, CancellationToken ct)
     {
-        foreach (var workflowRunId in await _workflowRuns.FindBoundGatedStartsAsync(projectId, ct: ct))
+        foreach (var workflowRunId in await _workflowRuns.FindGatedStartsAsync(projectId, ct: ct))
         {
             try
             {

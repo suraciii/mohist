@@ -186,23 +186,33 @@ public class WorkflowRunStore : IWorkflowRunStore
         string issueId,
         CancellationToken ct = default)
     {
-        await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var workflow = await db.WorkflowRuns.FindAsync([workflowRunId], ct);
-        if (workflow is null) return null;
-        var issue = await db.Issues.FindAsync([issueId], ct);
-        if (issue is null || !string.Equals(issue.WorkflowRunId, workflowRunId, StringComparison.Ordinal))
-            return null;
-
-        var epicId = string.IsNullOrWhiteSpace(issue.EpicId) ? null : issue.EpicId;
-        if (!string.Equals(workflow.EpicId, epicId, StringComparison.Ordinal))
+        const int maxAttempts = 3;
+        for (var attempt = 1; ; attempt++)
         {
+            await using var db = await _dbFactory.CreateDbContextAsync(ct);
+            var workflow = await db.WorkflowRuns.FindAsync([workflowRunId], ct);
+            if (workflow is null) return null;
+            var issue = await db.Issues.FindAsync([issueId], ct);
+            if (issue is null || !string.Equals(issue.WorkflowRunId, workflowRunId, StringComparison.Ordinal))
+                return null;
+
+            var epicId = string.IsNullOrWhiteSpace(issue.EpicId) ? null : issue.EpicId;
+            if (string.Equals(workflow.EpicId, epicId, StringComparison.Ordinal))
+                return new WorkflowBoundLineage(epicId);
+
             workflow.EpicId = epicId;
             var entry = db.Entry(workflow);
             entry.Property<long>("ETag").CurrentValue = entry.Property<long>("ETag").OriginalValue + 1;
-            await db.SaveChangesAsync(ct);
+            try
+            {
+                await db.SaveChangesAsync(ct);
+                return new WorkflowBoundLineage(epicId);
+            }
+            catch (DbUpdateConcurrencyException) when (attempt < maxAttempts)
+            {
+                _log.LogDebug("Workflow {WorkflowRunId} bound-start synchronization conflicted on attempt {Attempt}; retrying", workflowRunId, attempt);
+            }
         }
-
-        return new WorkflowBoundLineage(epicId);
     }
 
     internal static async Task StageEpicAffiliationAsync(

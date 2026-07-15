@@ -91,27 +91,30 @@ public sealed class WorkflowRunQuerier
             .ToListAsync(ct);
     }
 
-    public async Task<IReadOnlyList<string>> FindBoundGatedStartsAsync(string? projectId = null, int limit = 20, CancellationToken ct = default)
+    public async Task<IReadOnlyList<string>> FindGatedStartsAsync(string? projectId = null, CancellationToken ct = default)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var query =
-            from workflow in db.WorkflowRuns.AsNoTracking()
-            join issue in db.Issues.AsNoTracking() on workflow.WorkflowRunId equals issue.WorkflowRunId
-            where workflow.Status == StatusString(WorkflowRunStatus.Created)
-            select new { workflow.WorkflowRunId, workflow.State, workflow.MetadataProjectId };
+        var query = db.WorkflowRuns.AsNoTracking()
+            .Where(workflow => workflow.Status == StatusString(WorkflowRunStatus.Created))
+            .Select(workflow => new { workflow.WorkflowRunId, workflow.State, workflow.MetadataProjectId });
 
         if (!string.IsNullOrWhiteSpace(projectId))
             query = query.Where(row => row.MetadataProjectId == projectId);
 
-        var candidates = await query
-            .OrderBy(row => row.WorkflowRunId)
-            .Take(limit)
-            .ToListAsync(ct);
-
-        return candidates
-            .Where(row => JSON.Deserialize<WorkflowRun>(WorkflowRunStore.MigrateLegacyWorkflowRunJson(row.State))?.DispatchActivated == false)
-            .Select(row => row.WorkflowRunId)
-            .ToList();
+        var candidates = await query.OrderBy(row => row.WorkflowRunId).ToListAsync(ct);
+        var gated = new List<string>();
+        foreach (var candidate in candidates)
+        {
+            try
+            {
+                if (JSON.Deserialize<WorkflowRun>(WorkflowRunStore.MigrateLegacyWorkflowRunJson(candidate.State))?.DispatchActivated == false)
+                    gated.Add(candidate.WorkflowRunId);
+            }
+            catch (Exception)
+            {
+            }
+        }
+        return gated;
     }
 
     /// <summary>

@@ -76,7 +76,11 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
 
         _cachedAssignedWorkerId = _run?.Assignment?.WorkerId;
         if (_run?.DispatchActivated == false)
+        {
             await ActivateAsync();
+            if (_run.DispatchActivated == false && _run.StartedAt is not null)
+                await StopAsync("unbound workflow-start recovery");
+        }
     }
 
     public override async Task OnDeactivateAsync(DeactivationReason reason, CancellationToken ct)
