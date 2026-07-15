@@ -8,6 +8,7 @@ using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.SpecTests.Support;
+using Mohist.Server.Workflow.Domain.Artifacts;
 using Mohist.Server.Workflow.Domain.Run;
 using Orleans;
 using Xunit;
@@ -16,12 +17,17 @@ namespace Mohist.Server.SpecTests.Specs.Events;
 
 /// <summary>
 /// Specs for the <c>transactional-event-append</c> requirement on the
-/// WorkflowRun producer. Covers issue-361 T-003 scenarios: state and
-/// event rows commit atomically; event-row write failures roll back the
-/// state transaction and are not swallowed; event rows survive a
-/// crash-after-commit and remain readable on a fresh <c>DbContext</c>;
-/// events for runs bound to an issue carry both <c>projectid</c> and
-/// <c>issueid</c> in <c>extensions</c> (D5 identity stamping).
+/// WorkflowRun producer. Covers issue-361 T-003 atomicity scenarios and
+/// issue-412 T-002 lineage scenarios: state and event rows commit
+/// atomically; event-row write failures roll back the state transaction
+/// and are not swallowed; event rows survive a crash-after-commit and
+/// remain readable on a fresh <c>DbContext</c>; events stamp
+/// <c>workflowrunid</c> always plus <c>projectid</c>/<c>issueid</c>/
+/// <c>issue</c> when the run's metadata annotations carry them; stage,
+/// task, check, and feedback-requested events additionally stamp
+/// <c>stage</c> from structural inspection of the union variant (D2);
+/// every emitted envelope satisfies the catalog's declared required
+/// lineage attributes via the conformance helper.
 /// </summary>
 [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
 [Trait(Traits.Sut.Name, Traits.Sut.System)]
@@ -134,13 +140,15 @@ public class TransactionalEventAppendSpecs : IAsyncLifetime
     }
 
     [Fact]
-    public async Task SaveAsync_RunBoundToIssue_StampsProjectIdAndIssueIdOnExtensions()
+    public async Task SaveAsync_RunBoundToIssue_StampsProjectIdIssueIdIssueAndWorkflowRunIdOnExtensions()
     {
         // Identity stamping at write time: the run's
-        // Annotations["projectId"] and Annotations["issueId"] flow onto
-        // every emitted WorkflowRun event's extensions. A consumer can
-        // read issueid directly from extensions without doing a reverse
-        // database lookup.
+        // Annotations["projectId"] / ["issueId"] / ["issueNumber"] flow onto
+        // every emitted WorkflowRun event's extensions, alongside the
+        // always-stamped workflowrunid (the run itself is the producer).
+        // A consumer can read issue lineage directly from extensions without
+        // doing a reverse database lookup, and Expression subscription can
+        // match on the unified `issue` key (D3 / T-002).
         var store = new WorkflowRunStore(_dbFactory, _eventStore, _grainFactory, NullLogger<WorkflowRunStore>.Instance);
         var run = BuildRun("wr_txn_identity", includeAnnotations: true);
 
@@ -157,16 +165,22 @@ public class TransactionalEventAppendSpecs : IAsyncLifetime
             Assert.Equal(ProjectId, stampedProjectId);
             Assert.True(entry.Envelope.Extensions.TryGetValue("issueid", out var stampedIssueId));
             Assert.Equal(IssueId, stampedIssueId);
+            Assert.True(entry.Envelope.Extensions.TryGetValue("issue", out var stampedIssue));
+            Assert.Equal("1", stampedIssue);
+            Assert.True(entry.Envelope.Extensions.TryGetValue("workflowrunid", out var stampedRunId));
+            Assert.Equal("wr_txn_identity", stampedRunId);
         }
     }
 
     [Fact]
-    public async Task SaveAsync_RunWithoutIssueAnnotation_DoesNotStampIssueIdExtension()
+    public async Task SaveAsync_RunWithoutIssueAnnotation_OmitsIssueAttributesButKeepsProjectIdAndWorkflowRunId()
     {
         // A WorkflowRun that is not bound to an issue (e.g. a workflow
         // started by an ad-hoc API call without an issue context) must
-        // NOT stamp a phantom issueid — the
-        // extension is conditional on the annotation being present.
+        // NOT stamp phantom issueid/issue keys — those extensions are
+        // conditional on the annotations being present. Project identity
+        // and the always-stamped workflowrunid remain on the envelope
+        // so routing on the run itself still works.
         var store = new WorkflowRunStore(_dbFactory, _eventStore, _grainFactory, NullLogger<WorkflowRunStore>.Instance);
         var run = new WorkflowRun
         {
@@ -186,7 +200,172 @@ public class TransactionalEventAppendSpecs : IAsyncLifetime
         var stored = Assert.Single(await _eventStore.ListAsync("wr_txn_unbound"));
         Assert.True(stored.Envelope.Extensions.TryGetValue("projectid", out var stampedProjectId));
         Assert.Equal(ProjectId, stampedProjectId);
+        Assert.True(stored.Envelope.Extensions.TryGetValue("workflowrunid", out var stampedRunId));
+        Assert.Equal("wr_txn_unbound", stampedRunId);
         Assert.False(stored.Envelope.Extensions.ContainsKey("issueid"));
+        Assert.False(stored.Envelope.Extensions.ContainsKey("issue"));
+    }
+
+    [Fact]
+    public async Task SaveAsync_StageTaskCheckAndFeedbackEvents_StampStageInAdditionToWorkflowLineage()
+    {
+        // D2: stage carriage is decided structurally by whether the
+        // unwrapped WorkflowEvent union variant exposes a Stage member,
+        // NOT by the bus-type prefix. Stages, stage approvals, feedback
+        // requested, tasks, and checks all carry the stage name onto
+        // the envelope, alongside the workflow.* lineage (workflowrunid
+        // + the conditionally-present projectid/issueid/issue).
+        var store = new WorkflowRunStore(_dbFactory, _eventStore, _grainFactory, NullLogger<WorkflowRunStore>.Instance);
+        var run = BuildRun("wr_txn_stage", includeAnnotations: true);
+
+        await store.SaveAsync(run, [
+            new StageStarted("build"),
+            new StageCompleted("build"),
+            new StageFailed("review", "boom"),
+            new StageApprovalRequested("merge"),
+            new StageApprovalResolved("merge", ApprovalResult.Approved),
+            new FeedbackRequested("code-review", "fb_1", null),
+            new TaskStarted("build", "task_a", "worker_a"),
+            new TaskCompleted("build", "task_a"),
+            new TaskFailed("build", "task_a", "boom"),
+            new CheckPassed("review", "lint", null),
+            new CheckFailed("review", "lint", "boom"),
+            new CheckPending("review", "lint", null),
+        ]);
+
+        var stored = await _eventStore.ListAsync("wr_txn_stage");
+        Assert.Equal(12, stored.Count);
+        foreach (var entry in stored)
+        {
+            Assert.True(entry.Envelope.Extensions.TryGetValue("workflowrunid", out _));
+            Assert.True(entry.Envelope.Extensions.TryGetValue("projectid", out _));
+            Assert.True(entry.Envelope.Extensions.TryGetValue("stage", out var stampedStage));
+            Assert.False(string.IsNullOrEmpty(stampedStage));
+        }
+
+        var byType = stored.ToDictionary(s => s.Envelope.Type);
+        Assert.Equal("build", byType["com.mohist.workflow.stage.started"].Envelope.Extensions["stage"]);
+        Assert.Equal("build", byType["com.mohist.workflow.stage.completed"].Envelope.Extensions["stage"]);
+        Assert.Equal("review", byType["com.mohist.workflow.stage.failed"].Envelope.Extensions["stage"]);
+        Assert.Equal("merge", byType["com.mohist.workflow.stage.approval-requested"].Envelope.Extensions["stage"]);
+        Assert.Equal("merge", byType["com.mohist.workflow.stage.approval-resolved"].Envelope.Extensions["stage"]);
+        Assert.Equal("code-review", byType["com.mohist.workflow.feedback.requested"].Envelope.Extensions["stage"]);
+        Assert.Equal("build", byType["com.mohist.workflow.task.started"].Envelope.Extensions["stage"]);
+        Assert.Equal("build", byType["com.mohist.workflow.task.completed"].Envelope.Extensions["stage"]);
+        Assert.Equal("build", byType["com.mohist.workflow.task.failed"].Envelope.Extensions["stage"]);
+        Assert.Equal("review", byType["com.mohist.workflow.check.passed"].Envelope.Extensions["stage"]);
+        Assert.Equal("review", byType["com.mohist.workflow.check.failed"].Envelope.Extensions["stage"]);
+        Assert.Equal("review", byType["com.mohist.workflow.check.pending"].Envelope.Extensions["stage"]);
+    }
+
+    [Fact]
+    public async Task SaveAsync_WorkflowArtifactRecordedEvent_DoesNotStampStage()
+    {
+        // D2: WorkflowArtifactRecorded carries no Stage member; even though
+        // its bus type is workflow.*, it MUST NOT receive a `stage` stamp.
+        // The base workflow.* lineage (projectid + workflowrunid) is kept.
+        var store = new WorkflowRunStore(_dbFactory, _eventStore, _grainFactory, NullLogger<WorkflowRunStore>.Instance);
+        var run = BuildRun("wr_txn_artifact", includeAnnotations: true);
+
+        await store.SaveAsync(run, [
+            new WorkflowArtifactRecorded("wr_txn_artifact", "task_a", "logs/build.log", DateTimeOffset.UtcNow),
+        ]);
+
+        var stored = Assert.Single(await _eventStore.ListAsync("wr_txn_artifact"));
+        Assert.Equal("com.mohist.workflow.artifact.recorded", stored.Envelope.Type);
+        Assert.True(stored.Envelope.Extensions.TryGetValue("projectid", out _));
+        Assert.True(stored.Envelope.Extensions.TryGetValue("workflowrunid", out _));
+        Assert.False(stored.Envelope.Extensions.ContainsKey("stage"));
+    }
+
+    [Fact]
+    public async Task SaveAsync_NoMetadataAnnotations_StampsOnlyWorkflowRunId()
+    {
+        // A run that has no metadata at all (defensive) still has a
+        // workflowrunid stamp because the run itself IS the producer,
+        // but conditional affiliations (projectid/issueid/issue/stage)
+        // are absent rather than empty strings.
+        var store = new WorkflowRunStore(_dbFactory, _eventStore, _grainFactory, NullLogger<WorkflowRunStore>.Instance);
+        var run = new WorkflowRun
+        {
+            Id = "wr_txn_no_meta",
+            Metadata = new WorkflowRunMetadata(
+                Name: null,
+                CreatedAt: DateTimeOffset.UtcNow),
+            Stages = [],
+        };
+
+        await store.SaveAsync(run, [new WorkflowRunCompleted()]);
+
+        var stored = Assert.Single(await _eventStore.ListAsync("wr_txn_no_meta"));
+        Assert.True(stored.Envelope.Extensions.TryGetValue("workflowrunid", out var stampedRunId));
+        Assert.Equal("wr_txn_no_meta", stampedRunId);
+        Assert.False(stored.Envelope.Extensions.ContainsKey("projectid"));
+        Assert.False(stored.Envelope.Extensions.ContainsKey("issueid"));
+        Assert.False(stored.Envelope.Extensions.ContainsKey("issue"));
+        Assert.False(stored.Envelope.Extensions.ContainsKey("stage"));
+    }
+
+    [Fact]
+    public async Task SaveAsync_StampedEnvelopes_SatisfyEventCatalogRequiredAttributes()
+    {
+        // Conformance check (D8): the producer must stamp every attribute
+        // the catalog says its type requires; absent affiliations stay
+        // absent. Drives every event family through the production path.
+        var store = new WorkflowRunStore(_dbFactory, _eventStore, _grainFactory, NullLogger<WorkflowRunStore>.Instance);
+        var run = BuildRun("wr_txn_conformance", includeAnnotations: true);
+
+        await store.SaveAsync(run, [
+            new WorkflowRunStarted(),
+            new StageStarted("build"),
+            new TaskStarted("build", "task_a", "worker_a"),
+            new CheckPassed("review", "lint", null),
+            new FeedbackRequested("code-review", "fb_1", null),
+            new WorkflowArtifactRecorded("wr_txn_conformance", "task_a", "logs.txt", DateTimeOffset.UtcNow),
+        ]);
+
+        var stored = await _eventStore.ListAsync("wr_txn_conformance");
+        Assert.Equal(6, stored.Count);
+        foreach (var entry in stored)
+        {
+            // Each envelope satisfies the always-required attributes for
+            // its type. EnvelopeConformance throws when an attribute is
+            // missing or empty.
+            EnvelopeConformance.AssertRequired(entry.Envelope);
+
+            // Empty values also count as missing — confirm via Missing().
+            var missing = EnvelopeConformance.Missing(entry.Envelope);
+            Assert.Empty(missing);
+        }
+    }
+
+    [Fact]
+    public void WorkflowRunLineage_StageOf_RecognisesAllStageBearingVariants()
+    {
+        // Structural inspection of the unwrapped union variant decides
+        // whether a `stage` stamp is set. Pin that the helper returns
+        // the stage for Stage*/StageApproval*/Feedback/Task*/Check* and
+        // null for the run-lifecycle variants and WorkflowArtifactRecorded.
+        Assert.Equal("build", WorkflowRunLineage.StageOf(new StageStarted("build")));
+        Assert.Equal("build", WorkflowRunLineage.StageOf(new StageCompleted("build")));
+        Assert.Equal("review", WorkflowRunLineage.StageOf(new StageFailed("review", "boom")));
+        Assert.Equal("merge", WorkflowRunLineage.StageOf(new StageApprovalRequested("merge")));
+        Assert.Equal("merge", WorkflowRunLineage.StageOf(new StageApprovalResolved("merge", ApprovalResult.Approved)));
+        Assert.Equal("code-review", WorkflowRunLineage.StageOf(new FeedbackRequested("code-review", "fb_1")));
+        Assert.Equal("build", WorkflowRunLineage.StageOf(new TaskStarted("build", "task_a", "worker_a")));
+        Assert.Equal("build", WorkflowRunLineage.StageOf(new TaskCompleted("build", "task_a")));
+        Assert.Equal("build", WorkflowRunLineage.StageOf(new TaskFailed("build", "task_a", "boom")));
+        Assert.Equal("review", WorkflowRunLineage.StageOf(new CheckPassed("review", "lint", null)));
+        Assert.Equal("review", WorkflowRunLineage.StageOf(new CheckFailed("review", "lint", "boom")));
+        Assert.Equal("review", WorkflowRunLineage.StageOf(new CheckPending("review", "lint", null)));
+
+        Assert.Null(WorkflowRunLineage.StageOf(new WorkflowRunStarted()));
+        Assert.Null(WorkflowRunLineage.StageOf(new WorkflowRunResumed()));
+        Assert.Null(WorkflowRunLineage.StageOf(new WorkflowRunPaused()));
+        Assert.Null(WorkflowRunLineage.StageOf(new WorkflowRunStopped()));
+        Assert.Null(WorkflowRunLineage.StageOf(new WorkflowRunCompleted()));
+        Assert.Null(WorkflowRunLineage.StageOf(new WorkflowRunFailed("boom")));
+        Assert.Null(WorkflowRunLineage.StageOf(new WorkflowArtifactRecorded("wr_1", "task_a", "logs.txt", DateTimeOffset.UtcNow)));
     }
 
     [Fact]

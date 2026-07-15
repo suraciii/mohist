@@ -49,9 +49,6 @@ public class WorkflowRunStore : IWorkflowRunStore
     public async Task SaveAsync(WorkflowRun run, IReadOnlyList<WorkflowEvent> events, CancellationToken ct = default)
     {
         var source = WorkflowEventSource(run.Id);
-        var annotations = run.Metadata?.Annotations;
-        var projectId = annotations?.GetValueOrDefault("projectId");
-        var issueId = annotations?.GetValueOrDefault("issueId");
 
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
@@ -61,7 +58,7 @@ public class WorkflowRunStore : IWorkflowRunStore
             foreach (var evt in events)
             {
                 if (evt is null) continue;
-                var envelope = ToCloudEvent(evt, source, projectId, issueId);
+                var envelope = ToCloudEvent(evt, source, run);
                 await _eventStore.AppendAsync(db, envelope, ct);
             }
             await db.SaveChangesAsync(ct);
@@ -78,19 +75,19 @@ public class WorkflowRunStore : IWorkflowRunStore
     private void PokeDispatcherBestEffort() =>
         EventDispatcherPoke.PokeAfterCommit(_grainFactory, _log, nameof(WorkflowRunStore));
 
-    private static CloudEvent ToCloudEvent(WorkflowEvent evt, string source, string? projectId, string? issueId)
+    /// <summary>
+    /// Build the CloudEvent envelope for a workflow domain event, stamping its
+    /// full business lineage onto <c>extensions</c> from the producing run's own
+    /// metadata annotations (no cross-aggregate query). <c>workflowrunid</c> is
+    /// stamped unconditionally because the run itself is the producer. <c>stage</c>
+    /// is stamped when the unwrapped <see cref="WorkflowEvent"/> variant exposes
+    /// a <c>Stage</c> member — see <c>WorkflowRunLineage.StageOf</c>.
+    /// </summary>
+    private static CloudEvent ToCloudEvent(WorkflowEvent evt, string source, WorkflowRun run)
     {
         var type = WorkflowEventSerializer.BusType(evt);
         var data = WorkflowEventSerializer.ToData(evt);
-        Dictionary<string, string>? extensions = null;
-        var hasProjectId = !string.IsNullOrWhiteSpace(projectId);
-        var hasIssueId = !string.IsNullOrWhiteSpace(issueId);
-        if (hasProjectId || hasIssueId)
-        {
-            extensions = new Dictionary<string, string>(StringComparer.Ordinal);
-            if (hasProjectId) extensions["projectid"] = projectId!;
-            if (hasIssueId) extensions["issueid"] = issueId!;
-        }
+        var extensions = WorkflowRunLineage.BuildExtensions(run, evt);
         return new CloudEvent(
             id: Guid.NewGuid().ToString(),
             source: new Uri(source, UriKind.Relative),

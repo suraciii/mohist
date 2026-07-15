@@ -85,6 +85,11 @@ public class WorkflowRunStoreSpecs
         Assert.Equal("com.mohist.workflow.run.failed", envelope.Type);
         Assert.True(envelope.Extensions.TryGetValue("projectid", out var projectId));
         Assert.Equal(ProjectId, projectId);
+        // workflowrunid is always stamped (D2/issue-412 T-002): the run
+        // itself is the producer, so every emitted workflow.* envelope
+        // carries its run id on extensions.
+        Assert.True(envelope.Extensions.TryGetValue("workflowrunid", out var stampedRunId));
+        Assert.Equal(WorkflowRunId, stampedRunId);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]
@@ -121,8 +126,49 @@ public class WorkflowRunStoreSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public async Task SaveAsync_WithoutProjectAnnotation_DoesNotStampProjectIdExtension()
+    public async Task SaveAsync_WithIssueAnnotation_StampsIssueNumberAsUnifiedIssueKey()
     {
+        // D3/T-002: the user-visible issue number is stamped under the
+        // protocol name `issue` (replacing the legacy `issueno`); this
+        // is the key subscription expressions will match on, so the
+        // producer side must drop any reference to the old name.
+        using var factory = new FakeWorkflowRunStoreDbContextFactory();
+        var eventStore = new EventStore(factory, NullLogger<EventStore>.Instance);
+        var store = new WorkflowRunStore(factory, eventStore, new NullDispatchGrainFactory(), NullLogger<WorkflowRunStore>.Instance);
+
+        var run = new WorkflowRun
+        {
+            Id = WorkflowRunId,
+            Metadata = new WorkflowRunMetadata(
+                Name: null,
+                CreatedAt: DateTimeOffset.UtcNow,
+                Annotations: new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["projectId"] = ProjectId,
+                    ["issueId"] = IssueId,
+                    ["issueNumber"] = "1",
+                }),
+            Stages = [],
+        };
+
+        await store.SaveAsync(run, [new WorkflowRunFailed("failed")]);
+
+        var stored = Assert.Single(await eventStore.ListAsync(WorkflowRunId));
+        Assert.True(stored.Envelope.Extensions.TryGetValue("issue", out var stampedIssue));
+        Assert.Equal("1", stampedIssue);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public async Task SaveAsync_WithoutProjectAnnotation_StampsWorkflowRunIdOnly()
+    {
+        // Absent affiliations are omitted, never empty (AC / T-002). A
+        // WorkflowRun that has no metadata at all still has a
+        // workflowrunid stamp because the run itself IS the producer
+        // — that's the only required attribute when nothing else is
+        // present. projectid/issueid/issue stay absent (no phantom
+        // empty values).
         using var factory = new FakeWorkflowRunStoreDbContextFactory();
         var eventStore = new EventStore(factory, NullLogger<EventStore>.Instance);
         var store = new WorkflowRunStore(factory, eventStore, new NullDispatchGrainFactory(), NullLogger<WorkflowRunStore>.Instance);
@@ -139,8 +185,12 @@ public class WorkflowRunStoreSpecs
         await store.SaveAsync(run, [new WorkflowRunFailed("failed")]);
 
         var stored = Assert.Single(await eventStore.ListAsync(WorkflowRunId));
+        Assert.True(stored.Envelope.Extensions.TryGetValue("workflowrunid", out var stampedRunId));
+        Assert.Equal(WorkflowRunId, stampedRunId);
         Assert.False(stored.Envelope.Extensions.ContainsKey("projectid"));
         Assert.False(stored.Envelope.Extensions.ContainsKey("issueid"));
+        Assert.False(stored.Envelope.Extensions.ContainsKey("issue"));
+        Assert.False(stored.Envelope.Extensions.ContainsKey("stage"));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]

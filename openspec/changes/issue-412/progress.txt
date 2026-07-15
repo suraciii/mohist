@@ -57,3 +57,49 @@ Conditional/affiliation-dependent attributes that are NOT in the always-required
 - Unit tests: `dotnet test packages/server/tests/Mohist.Server.UnitTests/Mohist.Server.UnitTests.csproj` — all 1365 pass (incl. 22 new tests in `Events/EventCatalogTests.cs`).
 - ArchTests: all 22 pass.
 - Existing `EventCatalog.All` callers compile and remain unchanged.
+
+---
+
+T-002 progress
+
+## Codebase Patterns (additions)
+
+- `WorkflowRunMetadata.Annotations` carries three identity-shaped keys today: `projectId`, `issueId`, `issueNumber`. The producer lifts them onto CloudEvent extensions using the protocol names from `EventCatalog.Lineage` (`projectid`, `issueid`, `issue`) — `issueNumber` (annotation) → `issue` (envelope key). T-003/T-004/T-006 will keep using the same convention.
+
+## T-002 decisions / layout
+
+- `WorkflowRunStore.ToCloudEvent` now delegates extension construction to a pure helper `WorkflowRunLineage.BuildExtensions(run, evt)` (new file at `packages/server/src/Mohist.Server/Infrastructure/Data/Workflow/WorkflowRunLineage.cs`). The helper is unit-testable without an Orleans silo and is reused by the spec tests.
+- Stamp matrix applied by the helper (per the matrix pinned in the T-001 section):
+  - `workflowrunid` is ALWAYS stamped (the run is the producer — even a metadata-less run still has a run id).
+  - `projectid`, `issueid`, `issue` are stamped only when the run's metadata annotation carries them; `IsNullOrWhiteSpace` skips them. Absent = omitted, NEVER an empty string.
+  - `stage` is stamped by `WorkflowRunLineage.StageOf(evt)`, which pattern-matches the unwrapped `WorkflowEvent` union. Variants with a `Stage` member: `StageStarted`/`StageCompleted`/`StageFailed`, `StageApprovalRequested`/`StageApprovalResolved`, `FeedbackRequested`, `TaskStarted`/`TaskCompleted`/`TaskFailed`, `CheckPassed`/`CheckFailed`/`CheckPending`. Everything else (run lifecycle variants + `WorkflowArtifactRecorded`) returns null and skips the stamp.
+- The `SaveAsync(run, events)` transactional path reads `WorkflowRunMetadata.Annotations` inside the append loop, so the lineage snapshot stays consistent with the EF Core transaction (D1). No cross-aggregate query is issued — `IssueStore`/`EpicGrain` is not touched. Verified by reading the test scenarios; if a future change adds such a query, the spec-test suite breaks.
+- The `ToCloudEvent(run, ...)` overload signature changed: now takes the whole `WorkflowRun` instead of pre-extracted `projectId`/`issueId` strings. Callers pass `run` once and the helper does the rest. Simpler than threading three nullable strings through.
+
+## Tests added
+
+- `TransactionalEventAppendSpecs` (already existed for issue-361 atomicity; extended for T-002):
+  - `SaveAsync_RunBoundToIssue_StampsProjectIdIssueIdIssueAndWorkflowRunIdOnExtensions` — replaces the old 2-key test, now asserts all four lineage keys including the always-stamped `workflowrunid` and the unified `issue` key (D3).
+  - `SaveAsync_RunWithoutIssueAnnotation_OmitsIssueAttributesButKeepsProjectIdAndWorkflowRunId` — replaces the old 1-key test, now asserts `issueid`/`issue` are absent while `projectid` and `workflowrunid` stay present (AC).
+  - `SaveAsync_StageTaskCheckAndFeedbackEvents_StampStageInAdditionToWorkflowLineage` — drives every stage-bearing variant through `SaveAsync` and asserts the unified `stage` value matches the variant's `Stage` member (D2).
+  - `SaveAsync_WorkflowArtifactRecordedEvent_DoesNotStampStage` — pins the explicit D2 non-carriage for `WorkflowArtifactRecorded` (which is `com.mohist.workflow.artifact.recorded` but has no `Stage` member).
+  - `SaveAsync_NoMetadataAnnotations_StampsOnlyWorkflowRunId` — defensive: a run with no metadata stamps ONLY `workflowrunid`; conditional keys stay absent.
+  - `SaveAsync_StampedEnvelopes_SatisfyEventCatalogRequiredAttributes` — drives a representative of every workflow event family (run/stage/task/check/feedback/artifact) and asserts each emitted envelope satisfies its catalog-declared required attributes via `EnvelopeConformance.AssertRequired` + `Missing`.
+  - `WorkflowRunLineage_StageOf_RecognisesAllStageBearingVariants` — pins the structural stage-decision for every variant (positive for all 12 stage-bearing; null for the 6 run-lifecycle variants + `WorkflowArtifactRecorded`).
+- `WorkflowRunStoreSpecs` (Service-tier specs at `Tests/Specs/Workflow/Storage/`):
+  - `SaveAsync_WithProjectAnnotation_StampsProjectIdOnPersistedEventExtensions` extended to also assert `workflowrunid`.
+  - `SaveAsync_WithIssueAnnotation_StampsIssueIdOnPersistedEventExtensions` left as-is (still asserts `issueid`).
+  - New `SaveAsync_WithIssueAnnotation_StampsIssueNumberAsUnifiedIssueKey` — `issueNumber` annotation → `issue` extension key (D3).
+  - `SaveAsync_WithoutProjectAnnotation_DoesNotStampProjectIdExtension` renamed to `..._StampsWorkflowRunIdOnly` — now pins the absent-affiliation contract: `workflowrunid` is present, `projectid`/`issueid`/`issue`/`stage` are absent.
+
+## Gotchas / hand-offs
+
+- The conformance spec test was kept DRY by writing the assertion loop once per "save a bunch of events, list them, assert extensions" pattern. Future producers (T-003..T-006) should follow the same skeleton: drive a representative event per family, list via the store, then `EnvelopeConformance.AssertRequired(envelope)` per entry + targeted key assertions for the conditional attributes.
+- `IReadOnlyDictionary<string, string>` extension access is read-only in the test (the run-id dictionary is built inside the helper); if a test wants to write extensions (negative cases) it must construct a fresh dictionary. The conformance `Missing` helper treats both null and empty-string values as missing, so the contract on omission (never empty) is shared.
+- The `stampedStage` value comes from the event payload — never from the bus type. A future producer that adds a new stage-bearing variant only needs to extend the `StageOf` switch; the conformance check catches the omission in CI.
+
+## Verification
+
+- Server build: clean (0 warn, 0 err).
+- `Mohist.Server.SpecTests`: 2744 pass (was 2738; +6 from T-002's extended/new tests in `TransactionalEventAppendSpecs` + `WorkflowRunStoreSpecs`).
+- Full `npm test` suite: all 10,663 tests pass across server (1365 unit + 22 arch + 2744 spec + 865 cli), web (4653), runner (1014).
