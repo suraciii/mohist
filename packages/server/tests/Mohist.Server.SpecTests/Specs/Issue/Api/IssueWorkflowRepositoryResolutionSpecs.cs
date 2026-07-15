@@ -1,5 +1,8 @@
 using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Data.Project;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Services;
 using Mohist.Server.Project.Grains;
@@ -7,6 +10,7 @@ using Mohist.Server.Project.Services;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.Workflow.Services;
+using Orleans.Core.Internal;
 using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Issue.Api;
@@ -149,6 +153,97 @@ public class IssueWorkflowRepositoryResolutionSpecs
         var info = await issueQuery.GetInfoAsync(projectId, number, await LoadProjectAsync(projectId));
         Assert.NotNull(info);
         Assert.Null(info!.WorkflowRunId);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task StartWorkAsync_ExistingIssueWithoutRepositorySelection_UsesUpgradedDefaultRepository()
+    {
+        var projectId = $"proj_{Guid.NewGuid():N}";
+        var projectGrain = _grains.GetGrain<IProjectGrain>(projectId);
+        await projectGrain.CreateAsync(
+            $"proj-{Guid.NewGuid():N}",
+            new Mohist.Server.Project.Domain.RepositoryInfo
+            {
+                Name = "server",
+                GitUrl = "git@example.com:server.git",
+                BaseBranch = "release",
+                IsDefault = true,
+            });
+        var number = await _grains.GetGrain<IIssueCounterGrain>(projectId).NextAsync();
+        var issueId = $"issue_{Guid.NewGuid():N}";
+        var issueGrain = _grains.GetGrain<IIssueGrain>(issueId);
+        await issueGrain.CreateAsync(projectId, number, "Existing issue", body: null, labels: null, priority: null, repositoryRef: null, issueId);
+        var issueBeforeUpgrade = await LoadIssueStateAsync(issueId);
+
+        await projectGrain.AsReference<IGrainManagementExtension>().DeactivateOnIdle();
+        using (var scope = _services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+            var project = await db.Projects.SingleAsync(row => row.Id == projectId);
+            project.RepositoriesJson = project.RepositoriesJson.Replace("\"isDefault\":true", "\"isDefault\":false", StringComparison.Ordinal);
+            await db.SaveChangesAsync();
+            await ProjectRepositoryDataUpgrader.UpgradeAsync(db);
+        }
+
+        var wrId = await issueGrain.StartWorkAsync();
+
+        using var variables = await LoadWorkflowVariablesAsync(wrId);
+        var repository = variables.RootElement.GetProperty("repository");
+        Assert.Equal("server", repository.GetProperty("name").GetString());
+        Assert.Equal("git@example.com:server.git", repository.GetProperty("gitUrl").GetString());
+        Assert.Equal("release", repository.GetProperty("baseBranch").GetString());
+        var issueAfterUpgrade = await LoadIssueStateAsync(issueId);
+        Assert.Equal(issueBeforeUpgrade.GetProperty("id").GetString(), issueAfterUpgrade.GetProperty("id").GetString());
+        Assert.Equal(issueBeforeUpgrade.GetProperty("projectId").GetString(), issueAfterUpgrade.GetProperty("projectId").GetString());
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task UpgradeAsync_InFlightWorkflowRetainsRepositoryVariables()
+    {
+        var projectId = $"proj_{Guid.NewGuid():N}";
+        var projectGrain = _grains.GetGrain<IProjectGrain>(projectId);
+        await projectGrain.CreateAsync(
+            $"proj-{Guid.NewGuid():N}",
+            new Mohist.Server.Project.Domain.RepositoryInfo
+            {
+                Name = "server",
+                GitUrl = "git@example.com:server.git",
+                BaseBranch = "release",
+                IsDefault = true,
+            });
+        var number = await _grains.GetGrain<IIssueCounterGrain>(projectId).NextAsync();
+        var issueId = $"issue_{Guid.NewGuid():N}";
+        var issueGrain = _grains.GetGrain<IIssueGrain>(issueId);
+        await issueGrain.CreateAsync(projectId, number, "In-flight issue", body: null, labels: null, priority: null, repositoryRef: null, issueId);
+        var workflowRunId = await issueGrain.StartWorkAsync();
+        using var variablesBeforeUpgrade = await LoadWorkflowVariablesAsync(workflowRunId);
+
+        using (var scope = _services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+            await ProjectRepositoryDataUpgrader.UpgradeAsync(db);
+        }
+
+        using var variablesAfterUpgrade = await LoadWorkflowVariablesAsync(workflowRunId);
+        Assert.Equal(
+            variablesBeforeUpgrade.RootElement.GetProperty("repository").GetRawText(),
+            variablesAfterUpgrade.RootElement.GetProperty("repository").GetRawText());
+        Assert.Equal(workflowRunId, await issueGrain.StartWorkAsync());
+    }
+
+    private async Task<JsonElement> LoadIssueStateAsync(string issueId)
+    {
+        using var scope = _services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var state = await db.Issues
+            .Where(issue => issue.IssueId == issueId)
+            .Select(issue => issue.State)
+            .SingleAsync();
+        return JsonDocument.Parse(state).RootElement.Clone();
     }
 
     private async Task<ProjectInfo> LoadProjectAsync(string projectId)

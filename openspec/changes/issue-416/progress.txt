@@ -60,3 +60,22 @@ Gotchas
 - UpdateRepositoryAsync treats a no-change metadata patch as Unchanged (returns _project without persisting) when BuildUpdate reports Changed=false. Empty patch (neither gitUrl nor baseBranch supplied) still raises ArgumentException via BuildUpdate before this short-circuit, so the route's "Provide gitUrl and/or baseBranch" 400 fires correctly.
 - SetDefaultRepositoryAsync on the current default short-circuits before mutating the list, so a redundant setDefault call doesn't even rewrite the persisted JSON.
 - BaseBranch normalization lives in TryNormalizeBaseBranch: null/empty/whitespace all collapse to "main" without error.
+
+T-002 progress notes
+====================
+
+Implementation
+--------------
+- DatabaseInitializer now owns the shared startup sequence: EF MigrateAsync followed by ProjectRepositoryDataUpgrader. Program's primary and OTLP fallback hosts both invoke it before StartAsync.
+- ProjectRepositoryDataUpgrader reads Projects in Id order, preflights every row, then writes all changed RepositoriesJson values in one transaction. Any diagnostic aborts before mutation.
+- Historical declarations are validated with RepositoryPolicy before Normalize, except missing/multiple-default errors are intentionally repairable. This prevents Normalize's live-input base-branch defaulting from fabricating metadata during upgrade.
+- Valid repository lists are compared structurally and left byte-for-byte untouched. Missing defaults select the first declaration; multiple defaults retain the first marked declaration. No Project timestamp or identity is changed.
+- Diagnostics include Project name/id and policy declaration details; malformed JSON, null declarations, empty lists, blank/null fields, and case-insensitive duplicate names are unrecoverable.
+
+Coverage and verification
+-------------------------
+- ProjectRepositoryDataUpgraderSpecs uses MigratedSqliteTemplate and covers single/missing/multiple/valid defaults, metadata/order/identity/timestamp preservation, idempotency, all unrecoverable inputs, and all-row rollback.
+- DatabaseInitializerRepositoryUpgradeSpecs verifies the Migrate-then-upgrade startup sequence.
+- IssueWorkflowRepositoryResolutionSpecs covers an existing issue with no repository selection starting from the upgraded default and an in-flight workflow retaining the same persisted repository variables/run id.
+- Focused server specs: 24/24 passed; RepositoryPolicy unit regression: 32/32 passed.
+- Full `npm test`: CLI 865, server unit 1375, arch 22, server specs 2774, web 4665, runner 1014 all passed.
