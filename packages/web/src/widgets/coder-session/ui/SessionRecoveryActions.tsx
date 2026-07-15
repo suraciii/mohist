@@ -214,7 +214,7 @@ export function SessionRecoveryActions({
           aria-live="polite"
           data-testid="session-recovery-error"
           data-tone="danger"
-          className="mt-2 rounded-md border border-danger-border bg-danger-subtle px-3 py-2 text-xs text-danger"
+          className="basis-full min-w-0 max-w-full w-full break-words mt-2 rounded-md border border-danger-border bg-danger-subtle px-3 py-2 text-xs text-danger"
         >
           {inlineError}
         </div>

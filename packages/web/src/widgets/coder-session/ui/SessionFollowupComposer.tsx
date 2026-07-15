@@ -105,7 +105,7 @@ export function SessionFollowupComposer({
       data-testid="session-followup-composer"
       onSubmit={handleSubmit}
       className={cn(
-        'shrink-0 border-t border-border bg-background px-4 py-3',
+        'shrink-0 border-t border-border bg-background px-4 py-2 md:py-3',
         className,
       )}
     >
@@ -119,7 +119,7 @@ export function SessionFollowupComposer({
           rows={2}
           disabled={isSending}
           aria-label="Followup message"
-          className="min-h-12 resize-none"
+          className="h-10 min-h-10 resize-none md:h-auto md:min-h-12"
         />
         <Button
           type="submit"

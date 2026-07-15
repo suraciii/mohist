@@ -31,25 +31,25 @@ export function SessionUsageSummary({ usage }: SessionUsageSummaryProps) {
       : null
 
   return (
-    <div className="border-b border-border bg-muted px-4 py-2" data-testid="session-usage-summary">
+    <div className="border-b border-border bg-muted px-4 py-1 md:py-2" data-testid="session-usage-summary">
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
         {/* Token detail */}
         <span className="text-muted-foreground font-medium" data-testid="usage-summary-tokens">
           Tokens:
           {usage.inputTokens != null && (
-            <span className="ml-1 text-foreground" data-testid="usage-summary-input">{formatCompact(usage.inputTokens)} in</span>
+            <span className="hidden md:inline ml-1 text-foreground" data-testid="usage-summary-input">{formatCompact(usage.inputTokens)} in</span>
           )}
           {usage.outputTokens != null && (
-            <span className="ml-1 text-foreground" data-testid="usage-summary-output">· {formatCompact(usage.outputTokens)} out</span>
+            <span className="hidden md:inline ml-1 text-foreground" data-testid="usage-summary-output">· {formatCompact(usage.outputTokens)} out</span>
           )}
           {usage.totalTokens != null && (
             <span className="ml-1 text-foreground font-semibold" data-testid="usage-summary-total">· {formatCompact(usage.totalTokens)} total</span>
           )}
           {shouldShowToken(usage.cachedReadTokens) && (
-            <span className="ml-1 text-muted-foreground" data-testid="usage-summary-cached">· {formatCompact(usage.cachedReadTokens)} cached</span>
+            <span className="hidden md:inline ml-1 text-muted-foreground" data-testid="usage-summary-cached">· {formatCompact(usage.cachedReadTokens)} cached</span>
           )}
           {shouldShowToken(usage.thoughtTokens) && (
-            <span className="ml-1 text-muted-foreground" data-testid="usage-summary-thought">· {formatCompact(usage.thoughtTokens)} thought</span>
+            <span className="hidden md:inline ml-1 text-muted-foreground" data-testid="usage-summary-thought">· {formatCompact(usage.thoughtTokens)} thought</span>
           )}
         </span>
 
