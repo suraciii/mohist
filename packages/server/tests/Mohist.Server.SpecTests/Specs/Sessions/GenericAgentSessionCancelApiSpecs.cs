@@ -190,7 +190,7 @@ public class GenericAgentSessionCancelApiSpecs : IAsyncLifetime
             new AgentSessionRuntimeEventInput(
                 Type: RuntimeEventTypes.SessionClosed,
                 PayloadJson: "{\"status\":\"completed\"}"),
-        }));
+        }, sessionId));
         await grain.FlushForTestAsync();
 
         runnerHub.Clear();
@@ -220,6 +220,7 @@ public class GenericAgentSessionCancelApiSpecs : IAsyncLifetime
     [InlineData("completed")]
     [InlineData("failed")]
     [InlineData("stopped")]
+    [InlineData("cancelled")]
     public async Task Cancel_AlreadyTerminalSession_MirrorsEachTerminalStateVerbatim(string terminalStatus)
     {
         var (project, _, sessionId, _) = await LaunchAndOpenGenericSessionAsync($"gen-cancel-terminal-{terminalStatus}");
@@ -230,7 +231,7 @@ public class GenericAgentSessionCancelApiSpecs : IAsyncLifetime
             new AgentSessionRuntimeEventInput(
                 Type: RuntimeEventTypes.SessionClosed,
                 PayloadJson: $"{{\"status\":\"{terminalStatus}\"}}"),
-        }));
+        }, sessionId));
         await grain.FlushForTestAsync();
 
         using var response = await PostGenericCancelAsync(project.Id, sessionId);
@@ -353,8 +354,10 @@ public class GenericAgentSessionCancelApiSpecs : IAsyncLifetime
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
-    [Fact]
-    public async Task ResolveGenericCancelTargetAsync_TerminalSession_ReturnsTerminalState()
+    [Theory]
+    [InlineData("failed")]
+    [InlineData("cancelled")]
+    public async Task ResolveGenericCancelTargetAsync_TerminalSession_ReturnsTerminalState(string terminalStatus)
     {
         var (project, _, sessionId, _) = await LaunchAndOpenGenericSessionAsync("gen-cancel-resolve-terminal");
 
@@ -363,8 +366,8 @@ public class GenericAgentSessionCancelApiSpecs : IAsyncLifetime
         {
             new AgentSessionRuntimeEventInput(
                 Type: RuntimeEventTypes.SessionClosed,
-                PayloadJson: "{\"status\":\"failed\"}"),
-        }));
+                PayloadJson: $"{{\"status\":\"{terminalStatus}\"}}"),
+        }, sessionId));
         await grain.FlushForTestAsync();
 
         await using var scope = _fixture.Services.CreateAsyncScope();
@@ -373,7 +376,7 @@ public class GenericAgentSessionCancelApiSpecs : IAsyncLifetime
         var target = await querier.ResolveGenericCancelTargetAsync(project.Id, sessionId);
 
         Assert.NotNull(target);
-        Assert.Equal("failed", target!.TerminalState);
+        Assert.Equal(terminalStatus, target!.TerminalState);
     }
 
     private Task<HttpResponseMessage> PostGenericCancelAsync(string projectId, string sessionId) =>
@@ -417,7 +420,7 @@ public class GenericAgentSessionCancelApiSpecs : IAsyncLifetime
             new AgentSessionRuntimeEventInput(
                 RuntimeEventTypes.MessageDelta,
                 "{\"text\":\"preserved assistant text\"}"),
-        }));
+        }, runtimeSessionId));
         await grain.FlushForTestAsync();
 
         return (project, sessionId);

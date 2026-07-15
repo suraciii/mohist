@@ -417,6 +417,8 @@ public sealed class RecordingRunnerHubContext : IHubContext<RunnerHub>
         {
             _context.Invocations.Add(new RecordedRunnerHubInvocation(_connectionId, method, args));
             var response = _context.ResolveInvocationResponse(method, args);
+            if (response is Task<T> pending)
+                return pending;
             if (response is T typed)
             {
                 return Task.FromResult(typed);

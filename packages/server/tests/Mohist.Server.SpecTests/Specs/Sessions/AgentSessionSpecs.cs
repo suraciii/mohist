@@ -46,6 +46,7 @@ public class AgentSessionSpecs
 
         await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(session), new
         {
+            runtimeSessionId = session.Id,
             runtimeEvents = new object[]
             {
                 new
@@ -79,6 +80,7 @@ public class AgentSessionSpecs
         await _client.PostOkAsync(RunnerAgentSessionAttachPath(currentSession), new { runtimeSessionId = currentSession.Id, workDir = $"/workspaces/{project.Id}", processPid = 1234 });
         await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(currentSession), new
         {
+            runtimeSessionId = currentSession.Id,
             runtimeEvents = new object[]
             {
                 new { type = "reasoning.delta", payload = new { content = new { text = "thinking" } } },
@@ -212,6 +214,7 @@ public class AgentSessionSpecs
         _fixture.TimeProvider.Advance(TimeSpan.FromSeconds(1));
         await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(session), new
         {
+            runtimeSessionId = session.Id,
             runtimeEvents = new object[]
             {
                 new { type = "message.delta", payload = new { text = "still working" } }
@@ -240,6 +243,20 @@ public class AgentSessionSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
+    public async Task CoderSessionSummary_UnboundSessionLeavesRuntimeSessionIdNull()
+    {
+        var (project, issue, _, _) = await CreateStartedAgentSessionAsync("unbound-summary", start: false, sessionName: "plan");
+
+        var raw = await _client.GetRawAsync($"/api/projects/{project.Id}/issues/{issue.Number}/coder-sessions");
+
+        using var document = JsonDocument.Parse(raw);
+        var summary = Assert.Single(document.RootElement.GetProperty("data").EnumerateArray());
+        Assert.False(summary.TryGetProperty("runtimeSessionId", out _));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
     public async Task IssueSessionEventsEndpoint_ReturnsTranscriptSegmentsInAscendingSequence()
     {
         var (project, issue, work, session) = await CreateStartedAgentSessionAsync("raw-events", sessionName: "plan");
@@ -251,6 +268,7 @@ public class AgentSessionSpecs
         await _client.PostOkAsync(RunnerAgentSessionAttachPath(currentSession), new { runtimeSessionId = currentSession.Id, workDir = $"/workspaces/{project.Id}", processPid = 1234 });
         await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(currentSession), new
         {
+            runtimeSessionId = currentSession.Id,
             runtimeEvents = new object[]
             {
                 new { type = "session.input", payload = new { text = "do the thing", kind = "task" } },
@@ -339,6 +357,7 @@ public class AgentSessionSpecs
 
         await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(session), new
         {
+            runtimeSessionId = session.Id,
             runtimeEvents = new[]
             {
                 new { type = "session.closed", payload = new { status = "completed", exitCode = 0 } }
@@ -372,7 +391,7 @@ public class AgentSessionSpecs
             .Cast<object>()
             .ToArray();
 
-        await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(session), new { runtimeEvents });
+        await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(session), new { runtimeSessionId = session.Id, runtimeEvents });
 
         var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
         await dbFactory.WaitForTranscriptPartsAsync(session.Id, 1, _fixture.Grains);
@@ -407,6 +426,7 @@ public class AgentSessionSpecs
 
         await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(session), new
         {
+            runtimeSessionId = session.Id,
             runtimeEvents = new object[]
             {
                 new { type = "session.input", payload = new { text = "plan the refactor", kind = "task" } },
@@ -419,6 +439,7 @@ public class AgentSessionSpecs
 
         await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(session), new
         {
+            runtimeSessionId = session.Id,
             runtimeEvents = new object[]
             {
                 new
@@ -492,6 +513,7 @@ public class AgentSessionSpecs
 
         await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(session), new
         {
+            runtimeSessionId = session.Id,
             runtimeEvents = new[]
             {
                 new { type = "usage.updated", payload = new { contextWindowUsed = 500, contextWindowSize = 1000 } }
@@ -516,6 +538,7 @@ public class AgentSessionSpecs
 
         await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(session), new
         {
+            runtimeSessionId = session.Id,
             runtimeEvents = new[]
             {
                 new { type = "session.closed", payload = new { status = "completed", exitCode = 0 } }
@@ -523,6 +546,7 @@ public class AgentSessionSpecs
         });
         await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(session), new
         {
+            runtimeSessionId = session.Id,
             runtimeEvents = new[]
             {
                 new { type = "session.liveness", payload = new { status = "probing", failureReason = "late" } }
@@ -530,6 +554,7 @@ public class AgentSessionSpecs
         });
         await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(session), new
         {
+            runtimeSessionId = session.Id,
             runtimeEvents = new[]
             {
                 new { type = "session.closed", payload = new { status = "failed", failureReason = "late-failure", exitCode = 1 } }
@@ -550,6 +575,7 @@ public class AgentSessionSpecs
 
         await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(session), new
         {
+            runtimeSessionId = session.Id,
             runtimeEvents = new[]
             {
                 new { type = "session.closed", payload = new { status = "failed", failureReason = "first attempt", exitCode = 1 } }
@@ -587,6 +613,7 @@ public class AgentSessionSpecs
 
         await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(session), new
         {
+            runtimeSessionId = session.Id,
             runtimeEvents = new object[]
             {
                 new { type = "session.closed", payload = new { status = "failed", failureReason = "Runner unregistered", exitCode = 1 } },
@@ -629,6 +656,7 @@ public class AgentSessionSpecs
             workId = work.WorkId,
             workType = work.WorkType,
             stage = work.Stage,
+            runtimeSessionId = session.Id,
             runtimeEvents = new[]
             {
                 new { type = "session.closed", payload = new { status = "completed", exitCode = 0 } }
@@ -655,6 +683,7 @@ public class AgentSessionSpecs
 
         await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(session), new
         {
+            runtimeSessionId = session.Id,
             runtimeEvents = new[]
             {
                 new
@@ -714,6 +743,7 @@ public class AgentSessionSpecs
 
         await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(session), new
         {
+            runtimeSessionId = session.Id,
             runtimeEvents = new object[]
             {
                 new
@@ -754,6 +784,7 @@ public class AgentSessionSpecs
 
         await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(session), new
         {
+            runtimeSessionId = session.Id,
             runtimeEvents = new[]
             {
                 new { type = "session.closed", payload = new { status = "completed", exitCode = 0 } }
@@ -762,6 +793,7 @@ public class AgentSessionSpecs
 
         await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(session), new
         {
+            runtimeSessionId = session.Id,
             runtimeEvents = new[]
             {
                 new
@@ -803,6 +835,7 @@ public class AgentSessionSpecs
 
         await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(session), new
         {
+            runtimeSessionId = session.Id,
             runtimeEvents = new[]
             {
                 new
@@ -830,6 +863,7 @@ public class AgentSessionSpecs
 
         await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(session), new
         {
+            runtimeSessionId = session.Id,
             runtimeEvents = new[]
             {
                 new
@@ -858,6 +892,7 @@ public class AgentSessionSpecs
 
         await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(session), new
         {
+            runtimeSessionId = session.Id,
             runtimeEvents = new[]
             {
                 new
@@ -902,6 +937,7 @@ public class AgentSessionSpecs
 
         await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(session), new
         {
+            runtimeSessionId = session.Id,
             runtimeEvents = new object[]
             {
                 new
@@ -1313,6 +1349,7 @@ var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/i
 
     private Task PostEventEntriesAsync(CreatedSession session, string text) => _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(session), new
     {
+        runtimeSessionId = session.Id,
         runtimeEvents = new[]
         {
             new { type = "message.delta", payload = new { text } }

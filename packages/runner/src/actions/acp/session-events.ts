@@ -72,7 +72,12 @@ export function sessionTargetFromContext(context: ActionContext): SessionTarget 
 const unresolvedAgentJobTargetWarned = new WeakSet<ActionContext>()
 const missingServerConnectionWarned = new WeakSet<ActionContext>()
 
-export async function emitSessionEvent(context: ActionContext, type: string, payload: JsonObject) {
+export async function emitSessionEvent(
+  context: ActionContext,
+  type: string,
+  payload: JsonObject,
+  runtimeSessionId: string | null = stringField(payload, "runtimeSessionId") ?? null,
+) {
   const target = sessionTargetFromContext(context)
   if (!target) {
     if (context.ownerKind === "agent-job" && !unresolvedAgentJobTargetWarned.has(context)) {
@@ -98,7 +103,9 @@ export async function emitSessionEvent(context: ActionContext, type: string, pay
     return
   }
 
-  const body = { workId: context.workId, workType: context.workType, stage: context.stage, runtimeEvents: [{ type, payload }] }
+  if (!runtimeSessionId) return
+
+  const body = { workId: context.workId, workType: context.workType, stage: context.stage, runtimeSessionId, runtimeEvents: [{ type, payload }] }
   if (target.kind === "workflow") {
     await context.serverConnection.workflowAgentSessionRuntimeEvents(
       target.projectId,
@@ -232,7 +239,7 @@ export async function emitLivenessStatusEvent(context: ActionContext, state: { l
   providerError?: unknown
   postProbeActivity?: boolean
 }) {
-  await emitSessionEvent(context, SESSION_LIVENESS_EVENT, buildLivenessEventPayload(context, state, status, extras))
+  await emitSessionEvent(context, SESSION_LIVENESS_EVENT, buildLivenessEventPayload(context, state, status, extras), extras?.runtimeSessionId ?? null)
 }
 
 export function buildPromptEvent(context: ActionContext, prompt: string, sessionId: string): JsonObject {
@@ -401,12 +408,12 @@ export function createObservabilityAwareEmitter(
   return async (type, update) => {
     const runtimeSessionId = getRuntimeSessionId()
     const normalized = normalizeSessionUpdate(update as unknown as JsonObject, runtimeSessionId, toolIds)
-    await emitSessionEvent(context, genericSessionEventType(type, normalized), normalized)
+    await emitSessionEvent(context, genericSessionEventType(type, normalized), normalized, runtimeSessionId)
 
     if (type === "config_option_update") {
       const resolvedModel = extractResolvedModelFromConfigUpdateLocal(update as unknown)
       if (resolvedModel) {
-        await emitSessionEvent(context, MODEL_RESOLVED_EVENT, buildResolvedModelEventPayload(context, runtimeSessionId, resolvedModel, "config_option_update"))
+        await emitSessionEvent(context, MODEL_RESOLVED_EVENT, buildResolvedModelEventPayload(context, runtimeSessionId, resolvedModel, "config_option_update"), runtimeSessionId)
       }
     }
 
@@ -423,9 +430,9 @@ export function createObservabilityAwareEmitter(
         compaction,
       })
       if (hasUsageUpdateContent(payload)) {
-        await emitSessionEvent(context, USAGE_UPDATED_EVENT, payload)
+        await emitSessionEvent(context, USAGE_UPDATED_EVENT, payload, runtimeSessionId)
         if (compaction) {
-          await emitSessionEvent(context, COMPACTION_EVENT, buildCompactionEventPayload(context, runtimeSessionId, compaction))
+          await emitSessionEvent(context, COMPACTION_EVENT, buildCompactionEventPayload(context, runtimeSessionId, compaction), runtimeSessionId)
         }
       }
     }

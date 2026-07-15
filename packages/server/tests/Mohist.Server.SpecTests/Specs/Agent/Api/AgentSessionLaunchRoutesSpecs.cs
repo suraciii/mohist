@@ -105,12 +105,13 @@ public class AgentSessionLaunchRoutesSpecs
             var sessionId = launchPayload.GetProperty("data").GetProperty("sessionId").GetString()!;
 
             var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
+            await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand("runtime-launch-read"));
             await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(new[]
             {
                 new AgentSessionRuntimeEventInput(
                     Type: RuntimeEventTypes.SessionInput,
                     PayloadJson: "{\"text\":\"open product transcript\",\"kind\":\"task\"}"),
-            }));
+            }, "runtime-launch-read"));
             await grain.FlushForTestAsync();
 
             using var metadata = await _fixture.Client.GetAsync(

@@ -104,3 +104,18 @@ export function postFollowup(
     },
   )
 }
+
+export interface SessionCancelResult {
+  state: string
+}
+
+export function cancelSession(
+  number: number,
+  name: string,
+  projectId?: string | null,
+): Promise<SessionCancelResult> {
+  return request<SessionCancelResult>(
+    projectApiPath(projectId, `/issues/${number}/sessions/${encodeURIComponent(name)}/cancel`),
+    { method: 'POST' },
+  )
+}

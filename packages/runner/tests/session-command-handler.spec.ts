@@ -35,10 +35,11 @@ function request(command: "compact" | "reset"): SessionCommandRequest {
 }
 
 describe("SessionCommand contract", () => {
-  it("compact is fulfilled from the Mohist request and returns no new runtime id", async () => {
+  it("compact accepts the recovery reservation and returns no new runtime id", async () => {
     const fakeHandler = vi.fn(async (received: SessionCommandRequest): Promise<SessionCommandResult> => {
       expect(Object.keys(received).sort()).toEqual([
         "command",
+        "operationId",
         "runnerId",
         "runtime",
         "runtimeSessionId",
@@ -48,7 +49,7 @@ describe("SessionCommand contract", () => {
       return { ok: true }
     })
     const invoke = register(fakeHandler)
-    const compact = request("compact")
+    const compact = { ...request("compact"), operationId: "compact-1" }
 
     const result = await invoke(compact)
 
@@ -61,7 +62,6 @@ describe("SessionCommand contract", () => {
     const fakeHandler = vi.fn(async (): Promise<SessionCommandResult> => ({
       ok: true,
       runtimeSessionId: "runtime-2",
-      runtime: "opencode",
     }))
     const invoke = register(fakeHandler)
     const reset = request("reset")
@@ -69,7 +69,7 @@ describe("SessionCommand contract", () => {
     const result = await invoke(reset)
 
     expect(fakeHandler).toHaveBeenCalledWith(reset)
-    expect(result).toEqual({ ok: true, runtimeSessionId: "runtime-2", runtime: "opencode" })
+    expect(result).toEqual({ ok: true, runtimeSessionId: "runtime-2" })
   })
 
   it("deduplicates duplicate reset operation ids before invoking the runtime handler", async () => {
@@ -77,7 +77,7 @@ describe("SessionCommand contract", () => {
     const deferred = new Promise<void>((resolve) => { release = resolve })
     const fakeHandler = vi.fn(async (): Promise<SessionCommandResult> => {
       await deferred
-      return { ok: true, runtimeSessionId: "runtime-2", runtime: "opencode" }
+      return { ok: true, runtimeSessionId: "runtime-2" }
     })
     const invoke = register(fakeHandler)
 
@@ -86,8 +86,8 @@ describe("SessionCommand contract", () => {
     release()
 
     await expect(Promise.all([first, duplicate])).resolves.toEqual([
-      { ok: true, runtimeSessionId: "runtime-2", runtime: "opencode" },
-      { ok: true, runtimeSessionId: "runtime-2", runtime: "opencode" },
+      { ok: true, runtimeSessionId: "runtime-2" },
+      { ok: true, runtimeSessionId: "runtime-2" },
     ])
     expect(fakeHandler).toHaveBeenCalledTimes(1)
   })
@@ -99,6 +99,29 @@ describe("SessionCommand contract", () => {
 
     await expect(invoke(invalid)).resolves.toEqual({ ok: false, error: "unavailable" })
     expect(fakeHandler).not.toHaveBeenCalled()
+  })
+
+  it("rejects a successful reset response without a replacement runtime session id", async () => {
+    const fakeHandler = vi.fn(async (): Promise<SessionCommandResult> => ({ ok: true }))
+    const invoke = register(fakeHandler)
+
+    await expect(invoke(request("reset"))).resolves.toEqual({ ok: false, error: "unavailable" })
+  })
+
+  it("bounds retained completed reset operations", async () => {
+    const fakeHandler = vi.fn(async (received: SessionCommandRequest): Promise<SessionCommandResult> => ({
+      ok: true,
+      runtimeSessionId: `${received.operationId}-replacement`,
+    }))
+    const invoke = register(fakeHandler)
+
+    for (let index = 0; index <= 256; index += 1) {
+      await invoke({ ...request("reset"), operationId: `reset-${index}` })
+    }
+    await invoke({ ...request("reset"), operationId: "reset-256" })
+    await invoke({ ...request("reset"), operationId: "reset-0" })
+
+    expect(fakeHandler).toHaveBeenCalledTimes(258)
   })
 
   it.each<SessionCommandError>(["conflict", "missing"])(

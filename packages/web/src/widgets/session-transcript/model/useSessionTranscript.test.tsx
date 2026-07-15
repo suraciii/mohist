@@ -89,6 +89,33 @@ describe('useSessionTranscript', () => {
     expect(screen.getByTestId('transcript').textContent).toBe('persisted live')
   })
 
+  it('ignores events from a replaced runtime even when they carry the same logical session id', () => {
+    renderSessionTranscript([persistedEvent('persisted')])
+
+    act(() => {
+      dispatchAgentEvent('message.delta', {
+        sessionId: 'session-84',
+        runtimeSessionId: 'acp-old',
+        text: ' stale',
+      })
+    })
+
+    expect(screen.getByTestId('transcript').textContent).toBe('persisted')
+  })
+
+  it('ignores runtime events that provide only the logical session id', () => {
+    renderSessionTranscript([persistedEvent('persisted')])
+
+    act(() => {
+      dispatchAgentEvent('message.delta', {
+        sessionId: 'session-84',
+        text: ' stale',
+      })
+    })
+
+    expect(screen.getByTestId('transcript').textContent).toBe('persisted')
+  })
+
   it('accepts persisted transcript once the session is no longer running', () => {
     const initial = [persistedEvent('persisted')]
     const { rerenderWith } = renderSessionTranscript(initial)

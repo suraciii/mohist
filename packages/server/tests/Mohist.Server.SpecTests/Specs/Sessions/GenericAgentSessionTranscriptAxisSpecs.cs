@@ -277,6 +277,7 @@ public class GenericAgentSessionTranscriptAxisSpecs : IAsyncLifetime
                 $"/api/runner/{_runnerId}/agent-sessions/{project.Id}/{sessionId}/runtime-events",
                 new
                 {
+                    runtimeSessionId = sessionId,
                     runtimeEvents = new object[]
                     {
                         new { type = "session.input", payload = new { text = "transcript-axis follow-up", kind = "task" } },
@@ -374,11 +375,14 @@ public class GenericAgentSessionTranscriptAxisSpecs : IAsyncLifetime
             Assert.Equal(HttpStatusCode.Created, launch.StatusCode);
             var launchPayload = await launch.Content.ReadFromJsonAsync<JsonElement>();
             var sessionId = launchPayload.GetProperty("data").GetProperty("sessionId").GetString()!;
+            var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
+            await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand(sessionId, WorkDir: $"/workspaces/{project.Id}"));
 
             await _fixture.Client.PostOkAsync(
                 $"/api/runner/{_runnerId}/agent-sessions/{project.Id}/{sessionId}/runtime-events",
                 new
                 {
+                    runtimeSessionId = sessionId,
                     runtimeEvents = new object[]
                     {
                         new { type = "session.input", payload = new { text = "session-id only", kind = "task" } },
@@ -452,6 +456,7 @@ public class GenericAgentSessionTranscriptAxisSpecs : IAsyncLifetime
                 workId = polledWork.WorkId,
                 workType = polledWork.WorkType,
                 stage = polledWork.Stage,
+                runtimeSessionId = sessionId,
                 runtimeEvents,
             });
         await ReportDispatchCompletedAsync(_runnerId, polledWork);

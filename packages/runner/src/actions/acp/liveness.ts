@@ -96,7 +96,7 @@ export async function monitorPrompt(context: ActionContext, connection: ClientSi
     if (!promptUsage || typeof promptUsage !== "object") return
     const payload = buildUsageUpdatePayload(context, sessionId, "prompt_response", promptUsage)
     if (!hasUsageUpdateContent(payload)) return
-    await emitSessionEvent(context, "usage.updated", payload)
+    await emitSessionEvent(context, "usage.updated", payload, sessionId)
   }
 
   try {

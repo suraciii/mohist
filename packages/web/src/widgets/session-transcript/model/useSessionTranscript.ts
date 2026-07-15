@@ -166,10 +166,9 @@ export function useSessionTranscript({
 
     mountedRef.current = true
     const unsubs: Array<() => void> = []
-    const isCurrentSessionEvent = (detail: { runtimeSessionId?: string | null; sessionId?: string | null }) => {
+    const isCurrentSessionEvent = (detail: { runtimeSessionId?: string | null }) => {
       if (!mountedRef.current) return false
-      if (runtimeSessionId && detail.runtimeSessionId === runtimeSessionId) return true
-      return detail.sessionId === sessionId
+      return detail.runtimeSessionId != null && detail.runtimeSessionId === runtimeSessionId
     }
     const handleToolDetail = (detail: AgentDetailEventMap['tool_call.started']) => {
       if (!isCurrentSessionEvent(detail)) return
@@ -433,57 +432,6 @@ export function useSessionTranscript({
         clearStreaming()
         invalidateAndRefetch()
         markNewContentRef.current()
-      }),
-    )
-
-    const handleLegacyTerminalEvent = (
-      detail: { sessionId?: string | null; runtimeSessionId?: string | null; reason?: string | null },
-      status: 'completed' | 'failed' | 'cancelled',
-    ) => {
-      if (!isCurrentSessionEvent(detail)) return
-
-      hasLiveTailRef.current = true
-      const now = new Date().toISOString()
-      setTurns((prev) => closeLatestTurn(prev, now))
-
-      if (status === 'failed' || status === 'cancelled') {
-        const errorPart = createErrorPart(
-          detail.reason ?? `Session ${status}`,
-          status === 'cancelled' ? 'cancelled' : 'failed',
-          now,
-        )
-        setTurns((prev) => {
-          const next = ensureLiveTurn(prev, now)
-          const lastTurn = next[next.length - 1]
-          next[next.length - 1] = {
-            ...lastTurn,
-            assistant: [...lastTurn.assistant, errorPart],
-          }
-          return next
-        })
-      }
-
-      setIsThinking(false)
-      clearStreaming()
-      invalidateAndRefetch()
-      markNewContentRef.current()
-    }
-
-    unsubs.push(
-      onAgentEvent('coder_session_completed', (detail) => {
-        handleLegacyTerminalEvent(detail, 'completed')
-      }),
-    )
-
-    unsubs.push(
-      onAgentEvent('coder_session_failed', (detail) => {
-        handleLegacyTerminalEvent(detail, 'failed')
-      }),
-    )
-
-    unsubs.push(
-      onAgentEvent('coder_session_cancelled', (detail) => {
-        handleLegacyTerminalEvent(detail, 'cancelled')
       }),
     )
 

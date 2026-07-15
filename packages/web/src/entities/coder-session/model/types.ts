@@ -88,7 +88,7 @@ export interface RuntimeSessionLineageEntry {
 export interface AgentSessionMetadata {
   id: string
   sessionName: string
-  runtimeSessionId: string
+  runtimeSessionId: string | null
   runtime?: string | null
   status: string
   statusKind?: SessionStatusKind
@@ -130,7 +130,7 @@ export interface FileChangeSummary {
 export interface CoderSessionSummary {
   id: string
   sessionName?: string | null
-  runtimeSessionId: string
+  runtimeSessionId: string | null
   executionId: string | null
   taskDescription: string | null
   status: string

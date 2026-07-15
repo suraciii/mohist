@@ -39,6 +39,7 @@ public class AgentSessionContextEventPublishingSpecs
         var sessionId = Guid.NewGuid().ToString("N");
         var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
         await grain.OpenAsync(OpenCommand());
+        await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand("runtime-context"));
 
         _fixture.RecordingTranscriptPublisher.Clear();
 
@@ -47,21 +48,21 @@ public class AgentSessionContextEventPublishingSpecs
             RuntimeEvents: new[]
             {
                 new AgentSessionRuntimeEventInput("usage.updated", """{"contextWindowUsed":300,"contextWindowSize":1000}"""),
-            }));
+            }, RuntimeSessionId: "runtime-context"));
 
         // Cross green→yellow (60% threshold) at 65%.
         await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
             RuntimeEvents: new[]
             {
                 new AgentSessionRuntimeEventInput("usage.updated", """{"contextWindowUsed":650,"contextWindowSize":1000}"""),
-            }));
+            }, RuntimeSessionId: "runtime-context"));
 
         // Cross yellow→red (80% threshold) at 85%.
         await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
             RuntimeEvents: new[]
             {
                 new AgentSessionRuntimeEventInput("usage.updated", """{"contextWindowUsed":850,"contextWindowSize":1000}"""),
-            }));
+            }, RuntimeSessionId: "runtime-context"));
 
         var healthEvents = _fixture.RecordingTranscriptPublisher.Published
             .Where(e => e.Type == "context_health_update")
@@ -145,20 +146,21 @@ public class AgentSessionContextEventPublishingSpecs
         var sessionId = Guid.NewGuid().ToString("N");
         var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
         await grain.OpenAsync(OpenCommand());
+        await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand("runtime-context"));
 
         // Bring usage to 96%.
         await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
             RuntimeEvents: new[]
             {
                 new AgentSessionRuntimeEventInput("usage.updated", """{"contextWindowUsed":960,"contextWindowSize":1000}"""),
-            }));
+            }, RuntimeSessionId: "runtime-context"));
 
         // Trigger the exhaustion classification.
         await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
             RuntimeEvents: new[]
             {
                 new AgentSessionRuntimeEventInput("session.closed", """{"status":"failed","exitCode":1}"""),
-            }));
+            }, RuntimeSessionId: "runtime-context"));
 
         // Force a flush so the post-state-save event rows are
         // committed before we read them.
@@ -181,13 +183,14 @@ public class AgentSessionContextEventPublishingSpecs
         var sessionId = Guid.NewGuid().ToString("N");
         var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
         await grain.OpenAsync(OpenCommand());
+        await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand("runtime-context"));
 
         // Bring usage to 50% (green) — first snapshot.
         await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
             RuntimeEvents: new[]
             {
                 new AgentSessionRuntimeEventInput("usage.updated", """{"contextWindowUsed":500,"contextWindowSize":1000}"""),
-            }));
+            }, RuntimeSessionId: "runtime-context"));
 
         await grain.FlushForTestAsync();
 

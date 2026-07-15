@@ -8,10 +8,12 @@ public interface IAgentSessionGrain : IGrainWithStringKey
     Task<AgentSessionInfo> OpenAsync(OpenAgentSessionCommand command);
     Task<AgentSessionInfo> AttachPhysicalSessionAsync(AttachPhysicalSessionCommand command);
     Task<IReadOnlyList<AgentSessionRuntimeEventInfo>> AppendRuntimeEventsAsync(AppendAgentSessionRuntimeEventsCommand command);
+    Task<IReadOnlyList<AgentSessionRuntimeEventInfo>> AppendSystemEventsAsync(AppendAgentSessionSystemEventsCommand command);
     Task<AgentSessionRecoveryResult> CompactAsync(CompactAgentSessionCommand command);
     Task<AgentSessionRecoveryResult> ResetAsync(ResetAgentSessionCommand command);
     Task<SessionCommandRequest> PrepareSessionCommandAsync(SessionCommandKind command);
     Task<SessionCommandRequest> BeginResetAsync();
+    Task<AgentSessionRecoveryResult> CompleteCompactAsync(CompleteCompactAgentSessionCommand command);
     Task<AgentSessionRecoveryResult> CompleteResetAsync(CompleteResetAgentSessionCommand command);
     Task AbandonResetAsync(string operationId);
     Task<AgentSessionInfo?> GetAsync();
@@ -50,6 +52,11 @@ public sealed record AttachPhysicalSessionCommand(
 
 [GenerateSerializer]
 public sealed record AppendAgentSessionRuntimeEventsCommand(
+    [property: Id(0)] IReadOnlyList<AgentSessionRuntimeEventInput> RuntimeEvents = null!,
+    [property: Id(1)] string RuntimeSessionId = "");
+
+[GenerateSerializer]
+public sealed record AppendAgentSessionSystemEventsCommand(
     [property: Id(0)] IReadOnlyList<AgentSessionRuntimeEventInput> RuntimeEvents = null!);
 
 [GenerateSerializer]
@@ -68,6 +75,12 @@ public sealed record CompleteResetAgentSessionCommand(
     [property: Id(0)] string OperationId,
     [property: Id(1)] string ReplacementRuntimeSessionId,
     [property: Id(2)] string ReplacementRuntime);
+
+[GenerateSerializer]
+public sealed record CompleteCompactAgentSessionCommand(
+    [property: Id(0)] string OperationId,
+    [property: Id(1)] string? Summary = null,
+    [property: Id(2)] int? MaxSummaryChars = null);
 
 [GenerateSerializer]
 public sealed record AgentSessionRuntimeEventInput(

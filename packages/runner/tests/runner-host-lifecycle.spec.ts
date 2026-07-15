@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { RunnerHost } from "../src/runtime/host.js"
 import type { SessionTarget } from "../src/runtime/acp-connection.js"
+import type { SessionCommandRequest } from "../src/server/session-command-handler.js"
 import { deferred } from "./support/deferred.js"
 
 const POLL_INTERVAL_MS = 10
@@ -50,6 +51,7 @@ const {
 
 let capturedOnReconnected: ((connectionId: string) => void) | null = null
 let capturedFollowupTargetResolver: ((target: SessionTarget) => { connection: unknown; sessionId: string; projectId: string } | null) | null = null
+let capturedSessionCommandHandler: ((request: SessionCommandRequest) => unknown) | null = null
 
 vi.mock("../src/server/connection.js", () => ({
   ServerConnection: class {
@@ -70,9 +72,10 @@ vi.mock("../src/server/runner-signalr.js", () => ({
     getConnectionId = getConnectionId
     probeLiveness = probeLiveness
     forceReconnect = forceReconnect
-    constructor(_serverUrl: string, _runnerId: string, _runnerRoot: string, _buildGitHash: string | null, options: { onReconnected?: (id: string) => void; followupTargetResolver?: typeof capturedFollowupTargetResolver } = {}) {
+    constructor(_serverUrl: string, _runnerId: string, _runnerRoot: string, _buildGitHash: string | null, options: { onReconnected?: (id: string) => void; followupTargetResolver?: typeof capturedFollowupTargetResolver; sessionCommandHandler?: typeof capturedSessionCommandHandler } = {}) {
       capturedOnReconnected = options.onReconnected ?? null
       capturedFollowupTargetResolver = options.followupTargetResolver ?? null
+      capturedSessionCommandHandler = options.sessionCommandHandler ?? null
     }
   },
 }))
@@ -105,6 +108,7 @@ beforeEach(() => {
   vi.useFakeTimers()
   capturedOnReconnected = null
   capturedFollowupTargetResolver = null
+  capturedSessionCommandHandler = null
   createSharedAcpConnection.mockResolvedValue({
     connection: { prompt: vi.fn(), cancel: vi.fn(), newSession: vi.fn(), resumeSession: vi.fn(), setSessionConfigOption: vi.fn(), closeSession: vi.fn() },
     processPid: 99999,
@@ -127,6 +131,26 @@ beforeEach(() => {
 })
 
 describe("RunnerHost", () => {
+  it.each(["OpenCode", "OPENCODE"])("recognizes %s as the configured runtime", (runtime) => {
+    new RunnerHost({
+      serverUrl: "http://localhost:3456",
+      runnerId: "runner-test",
+      runnerRoot: "/tmp/mohist-runner-test",
+      pollIntervalMs: POLL_INTERVAL_MS,
+      heartbeatIntervalMs: QUIET_INTERVAL_MS,
+      dispatchLivenessProbeIntervalMs: QUIET_INTERVAL_MS,
+    })
+
+    expect(capturedSessionCommandHandler?.({
+      sessionId: "session-1",
+      runtime,
+      runtimeSessionId: "runtime-1",
+      runnerId: "runner-test",
+      workDir: "/tmp/mohist-runner-test",
+      command: "compact",
+    })).toEqual({ ok: false, error: "unavailable" })
+  })
+
   it("RunnerRegistration_DoesNotReportWorkflowSlots", async () => {
     vi.clearAllMocks()
     const connected = deferred<void>()

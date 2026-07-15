@@ -143,7 +143,7 @@ describe('Live tool updates merge in place', () => {
 })
 
 describe('Terminal session events trigger refetch', () => {
-  it('coder_session_completed marks finalizing and triggers refetch', async () => {
+  it('session.closed marks finalizing and triggers refetch', async () => {
     const initialTurns = [makeTurn()]
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
 
@@ -162,12 +162,9 @@ describe('Terminal session events trigger refetch', () => {
     expect(result.current.isFinalizing).toBe(false)
 
     act(() => {
-      dispatchAgentEvent('coder_session_completed', {
-        issueId: '123',
-        projectId: 'project-1',
-        sessionId: 'session-123',
+      dispatchAgentEvent('session.closed', {
+        runtimeSessionId: 'acp-123',
         status: 'completed',
-        duration: 5000,
       })
     })
 
@@ -176,7 +173,7 @@ describe('Terminal session events trigger refetch', () => {
     })
   })
 
-  it('coder_session_failed marks finalizing and adds error part', async () => {
+  it('session.closed marks finalizing and adds an error part for failures', async () => {
     const initialTurns = [makeTurn()]
 
     const { result } = renderHookWithQueryClient(() => useSessionTranscript({
@@ -188,11 +185,10 @@ describe('Terminal session events trigger refetch', () => {
     }))
 
     act(() => {
-      dispatchAgentEvent('coder_session_failed', {
-        issueId: '123',
-        projectId: 'project-1',
-        sessionId: 'session-123',
-        reason: 'Out of memory',
+      dispatchAgentEvent('session.closed', {
+        runtimeSessionId: 'acp-123',
+        status: 'failed',
+        failureReason: 'Out of memory',
       })
     })
 
@@ -206,7 +202,7 @@ describe('Terminal session events trigger refetch', () => {
     })
   })
 
-  it('coder_session_cancelled marks finalizing and adds error part', async () => {
+  it('session.closed marks finalizing and adds an error part for cancellation', async () => {
     const initialTurns = [makeTurn()]
 
     const { result } = renderHookWithQueryClient(() => useSessionTranscript({
@@ -218,11 +214,10 @@ describe('Terminal session events trigger refetch', () => {
     }))
 
     act(() => {
-      dispatchAgentEvent('coder_session_cancelled', {
-        issueId: '123',
-        projectId: 'project-1',
-        sessionId: 'session-123',
-        reason: 'User cancelled',
+      dispatchAgentEvent('session.closed', {
+        runtimeSessionId: 'acp-123',
+        status: 'cancelled',
+        failureReason: 'User cancelled',
       })
     })
 

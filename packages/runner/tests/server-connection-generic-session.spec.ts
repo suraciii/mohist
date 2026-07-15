@@ -83,12 +83,12 @@ describe("ServerConnection.attachAgentSession (generic)", () => {
     fetchMock.mockResolvedValueOnce(mockResponse({ status: 200, body: "" }))
     const connection = new ServerConnection(options())
 
-    await connection.attachAgentSession("project-1", "session-abc", { agentSessionId: "acp-1", workDir: "D:/work" }, new AbortController().signal)
+    await connection.attachAgentSession("project-1", "session-abc", { runtimeSessionId: "acp-1", workDir: "D:/work" }, new AbortController().signal)
 
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
     expect(url).toMatch(/\/api\/runner\/runner-1\/agent-sessions\/project-1\/session-abc\/attach$/)
     expect(init.method).toBe("POST")
-    expect(JSON.parse(init.body as string)).toEqual({ agentSessionId: "acp-1", workDir: "D:/work" })
+    expect(JSON.parse(init.body as string)).toEqual({ runtimeSessionId: "acp-1", workDir: "D:/work" })
     expect(url).not.toMatch(/\/api\/runner\/runner-1\/sessions\/project-1\//)
   })
 })
@@ -98,13 +98,16 @@ describe("ServerConnection.agentSessionRuntimeEvents (generic)", () => {
     fetchMock.mockResolvedValueOnce(mockResponse({ status: 200, body: "" }))
     const connection = new ServerConnection(options())
 
-    await connection.agentSessionRuntimeEvents("project-1", "session-abc", { workId: "work-1", workType: "agent-job", stage: "agent", runtimeEvents: [{ type: "session.input", payload: { text: "hi" } }] }, new AbortController().signal)
+    await connection.agentSessionRuntimeEvents("project-1", "session-abc", { workId: "work-1", workType: "agent-job", stage: "agent", runtimeSessionId: "acp-1", runtimeEvents: [{ type: "session.input", payload: { text: "hi" } }] }, new AbortController().signal)
 
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
     expect(url).toMatch(/\/api\/runner\/runner-1\/agent-sessions\/project-1\/session-abc\/runtime-events$/)
     expect(init.method).toBe("POST")
     const body = JSON.parse(init.body as string)
-    expect(body.runtimeEvents).toEqual([{ type: "session.input", payload: { text: "hi" } }])
+    expect(body).toMatchObject({
+      runtimeSessionId: "acp-1",
+      runtimeEvents: [{ type: "session.input", payload: { text: "hi" } }],
+    })
     expect(url).not.toMatch(/\/api\/runner\/runner-1\/sessions\/project-1\//)
   })
 })

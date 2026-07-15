@@ -40,7 +40,7 @@ public sealed record AgentEventSummaryDto(
 public sealed record AgentSessionMetadataDto(
     string Id,
     string SessionName,
-    [property: JsonPropertyName("runtimeSessionId")] string AgentRuntimeSessionId,
+    [property: JsonPropertyName("runtimeSessionId")] string? AgentRuntimeSessionId,
     [property: JsonPropertyName("runtime")] string? AgentRuntime,
     [property: JsonPropertyName("status")] string Status,
     string? Model,
@@ -61,7 +61,7 @@ public sealed record AgentSessionMetadataDto(
 /// sessions compacted before T-001) so the field degrades to hidden.
 /// </summary>
 public sealed record RuntimeSessionLineageEntryDto(
-    [property: JsonPropertyName("runtimeSessionId")] string AgentRuntimeSessionId,
+    [property: JsonPropertyName("runtimeSessionId")] string? AgentRuntimeSessionId,
     [property: JsonPropertyName("runtime")] string? Runtime,
     [property: JsonPropertyName("boundAt")] string BoundAt);
 
@@ -126,7 +126,7 @@ public sealed class AgentSessionTranscriptToolDto
 public sealed record AgentSessionSummaryDto(
     string Id,
     string SessionName,
-    [property: JsonPropertyName("runtimeSessionId")] string AgentRuntimeSessionId,
+    [property: JsonPropertyName("runtimeSessionId")] string? AgentRuntimeSessionId,
     [property: JsonPropertyName("executionId")] string? WorkId,
     [property: JsonPropertyName("taskDescription")] string? TaskTitle,
     [property: JsonPropertyName("status")] string Status,

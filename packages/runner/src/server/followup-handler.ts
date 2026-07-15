@@ -85,6 +85,7 @@ async function handleFollowup(
         workId: null,
         workType: null,
         stage: null,
+        runtimeSessionId: target.sessionId,
         runtimeEvents: [
           {
             type: "session.input",
@@ -111,6 +112,7 @@ async function handleFollowup(
         workId: null,
         workType: null,
         stage: null,
+        runtimeSessionId: target.sessionId,
         runtimeEvents: [
           {
             type: "session.input",

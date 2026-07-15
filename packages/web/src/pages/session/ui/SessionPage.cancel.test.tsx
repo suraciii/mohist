@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, render, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import { ProjectProvider } from '../../../entities/project'
@@ -30,6 +30,7 @@ const mocks = {
     isStreaming: false,
   },
 }
+const cancelMutate = vi.fn()
 
 const sessionPageDependencies: SessionPageDependencies = {
   dataSource: {
@@ -47,6 +48,8 @@ const sessionPageDependencies: SessionPageDependencies = {
     }),
     getAgentSessionMetadata: async () => _metadataData as never,
     getAgentSessionTranscript: async () => _transcriptData as never,
+    useFollowupMutation: () => ({ mutate: vi.fn(), isPending: false }) as never,
+    useCancelSessionMutation: () => ({ mutate: cancelMutate, isPending: false }) as never,
   },
   shellComponents: {
     SessionTranscriptLayout: ({ turns }: { turns: any[] }) => (
@@ -193,11 +196,12 @@ function baseRunningMetadata(overrides: Partial<AgentSessionMetadata> = {}): Age
   }
 }
 
-describe('SessionPage cancel control absence', () => {
+describe('SessionPage workflow cancel control', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     setupRunningIssueMocks()
     _metadataData = baseRunningMetadata()
+    cancelMutate.mockClear()
   })
 
   afterEach(() => {
@@ -206,19 +210,32 @@ describe('SessionPage cancel control absence', () => {
     queryClients.length = 0
   })
 
-  it('renders no cancel trigger in the header even when the issue/workflow session is running', async () => {
+  it('renders a cancel trigger in the header when the issue/workflow session is running', async () => {
     const { container } = await renderIssueSessionPage()
 
-    expect(container.querySelector('[data-testid="session-cancel-trigger"]')).toBeNull()
+    expect(container.querySelector('[data-testid="session-cancel-trigger"]')).not.toBeNull()
     expect(container.querySelector('[data-testid="session-cancel-alert"]')).toBeNull()
   })
 
-  it('renders no cancel/stop control inside the followup composer', async () => {
+  it('confirms cancellation through the workflow session name', async () => {
     const { container } = await renderIssueSessionPage()
 
-    const composer = container.querySelector('[data-testid="session-followup-composer"]')
-    expect(composer).not.toBeNull()
-    expect(composer!.querySelector('[data-testid="session-cancel-trigger"]')).toBeNull()
-    expect(composer!.querySelector('[data-testid="session-cancel-alert"]')).toBeNull()
+    fireEvent.click(container.querySelector('[data-testid="session-cancel-trigger"]')!)
+    expect(document.querySelector('[data-testid="session-cancel-alert"]')).not.toBeNull()
+    fireEvent.click(document.querySelector('[data-testid="session-cancel-alert-confirm"]')!)
+
+    expect(cancelMutate).toHaveBeenCalledWith(
+      { issueNumber: 123, sessionName: 'session-1' },
+      expect.objectContaining({ onSettled: expect.any(Function) }),
+    )
+  })
+
+  it('hides cancellation when the workflow session has no physical runtime binding', async () => {
+    _metadataData = baseRunningMetadata({ runtimeSessionId: null })
+    _coderSessionsData = _coderSessionsData.map((session) => ({ ...(session as object), runtimeSessionId: null }))
+
+    const { container } = await renderIssueSessionPage()
+
+    expect(container.querySelector('[data-testid="session-cancel-trigger"]')).toBeNull()
   })
 })

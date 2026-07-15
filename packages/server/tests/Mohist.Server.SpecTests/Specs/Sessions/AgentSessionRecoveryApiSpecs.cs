@@ -38,8 +38,7 @@ public class AgentSessionRecoveryApiSpecs
                 SessionCommandKind.Compact => new SessionCommandResult(Ok: true),
                 SessionCommandKind.Reset => new SessionCommandResult(
                     Ok: true,
-                    RuntimeSessionId: $"{request.RuntimeSessionId ?? "new"}-replacement",
-                    Runtime: request.Runtime),
+                    RuntimeSessionId: $"{request.RuntimeSessionId ?? "new"}-replacement"),
                 _ => new SessionCommandResult(Ok: false, Error: SessionCommandError.Unavailable),
             };
         });
@@ -134,6 +133,110 @@ public class AgentSessionRecoveryApiSpecs
 
         var persisted = await _fixture.Grains.GetGrain<IAgentSessionGrain>(currentSession.Id).GetAsync();
         Assert.Equal($"{currentSession.Id}-replacement", persisted?.AgentSessionId);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
+    public async Task ResetEndpoint_MissingReplacementRuntimeSessionId_ReturnsInvalidRunnerResponseWithoutRebinding()
+    {
+        var (project, issue, _, currentSession) = await CreateAndStartSessionAsync("reset-invalid-result", sessionName: "build", attachIdle: true);
+        RunnerHub.SetInvocationResponse("SessionCommand", new SessionCommandResult(Ok: true));
+
+        using var response = await _client.PostAsync($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/build/reset", content: null);
+
+        Assert.Equal(HttpStatusCode.BadGateway, response.StatusCode);
+        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal("runner_invalid_response", doc.RootElement.GetProperty("code").GetString());
+        Assert.Equal(currentSession.Id, (await _fixture.Grains.GetGrain<IAgentSessionGrain>(currentSession.Id).GetAsync())?.AgentSessionId);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
+    public async Task RuntimeEventsEndpoint_IgnoresOldPhysicalBindingAfterReset()
+    {
+        var (project, issue, _, currentSession) = await CreateAndStartSessionAsync("stale-runtime-events", sessionName: "build", attachIdle: true);
+        using var reset = await _client.PostAsync($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/build/reset", content: null);
+        Assert.Equal(HttpStatusCode.OK, reset.StatusCode);
+        var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(currentSession.Id);
+        var afterReset = await grain.GetAsync();
+        Assert.NotNull(afterReset);
+        Assert.NotEqual(currentSession.Id, afterReset!.AgentSessionId);
+
+        _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(1));
+        using var staleEvent = await _client.PostAsJsonAsync(RunnerAgentSessionRuntimeEventsPath(currentSession), new
+        {
+            runtimeSessionId = currentSession.Id,
+            runtimeEvents = new[] { new { type = "session.closed", payload = new { status = "completed" } } },
+        });
+
+        Assert.Equal(HttpStatusCode.OK, staleEvent.StatusCode);
+        var afterStaleEvent = await grain.GetAsync();
+        Assert.Equal(afterReset.AgentSessionId, afterStaleEvent?.AgentSessionId);
+        Assert.Equal(afterReset.Status, afterStaleEvent?.Status);
+        Assert.Equal(afterReset.LastDataAt, afterStaleEvent?.LastDataAt);
+
+        await grain.FlushForTestAsync();
+        await using var db = await _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>().CreateDbContextAsync();
+        var closedParts = await db.AgentSessionTranscriptParts.AsNoTracking()
+            .Join(
+                db.AgentSessionTranscriptTurns.AsNoTracking().Where(turn => turn.SessionId == currentSession.Id),
+                part => part.TurnId,
+                turn => turn.Id,
+                (part, _) => part)
+            .Where(part => part.Type == "session.closed")
+            .ToListAsync();
+        Assert.Empty(closedParts);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
+    public async Task CompactEndpoint_WhileResetDispatchIsInFlight_ReturnsRecoveryInProgressWithoutMutation()
+    {
+        var (project, issue, _, currentSession) = await CreateAndStartSessionAsync(
+            "recovery-overlap",
+            sessionName: "build",
+            attachIdle: true);
+        var resetStarted = new TaskCompletionSource<SessionCommandRequest>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var completeReset = new TaskCompletionSource<SessionCommandResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+        RunnerHub.SetInvocationResponseFactory("SessionCommand", arguments =>
+        {
+            var request = Assert.IsType<SessionCommandRequest>(Assert.Single(arguments));
+            if (request.Command != SessionCommandKind.Reset)
+                return new SessionCommandResult(Ok: false, Error: SessionCommandError.Unavailable);
+
+            resetStarted.TrySetResult(request);
+            return completeReset.Task;
+        });
+
+        var resetTask = _client.PostAsync(
+            $"/api/projects/{project.Id}/issues/{issue.Number}/sessions/build/reset",
+            content: null);
+        var resetRequest = await resetStarted.Task;
+
+        using var compact = await _client.PostAsync(
+            $"/api/projects/{project.Id}/issues/{issue.Number}/sessions/build/compact",
+            content: null);
+
+        Assert.Equal(HttpStatusCode.Conflict, compact.StatusCode);
+        using var compactBody = JsonDocument.Parse(await compact.Content.ReadAsStringAsync());
+        Assert.Equal("recovery_in_progress", compactBody.RootElement.GetProperty("code").GetString());
+        Assert.Equal(currentSession.Id, compactBody.RootElement.GetProperty("details").GetProperty("sessionId").GetString());
+        Assert.Equal("reset", compactBody.RootElement.GetProperty("details").GetProperty("operation").GetString());
+        Assert.Equal(currentSession.Id, (await _fixture.Grains.GetGrain<IAgentSessionGrain>(currentSession.Id).GetAsync())?.AgentSessionId);
+        Assert.Single(RunnerHub.Invocations);
+
+        completeReset.SetResult(new SessionCommandResult(
+            Ok: true,
+            RuntimeSessionId: $"{resetRequest.RuntimeSessionId}-replacement"));
+        using var reset = await resetTask;
+
+        Assert.Equal(HttpStatusCode.OK, reset.StatusCode);
+        Assert.Equal($"{currentSession.Id}-replacement", (await _fixture.Grains
+            .GetGrain<IAgentSessionGrain>(currentSession.Id)
+            .GetAsync())?.AgentSessionId);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]

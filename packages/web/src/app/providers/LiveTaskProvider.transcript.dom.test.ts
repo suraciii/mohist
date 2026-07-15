@@ -23,6 +23,7 @@ describe('LiveTaskProvider transcript routing', () => {
     const envelope = {
       type: 'message.delta',
       sessionId: 'session-1',
+      agentSessionId: 'runtime-1',
       sequence: 12,
       createdAt: '2026-06-12T00:00:00.000Z',
       payload: { text: 'persisted segment' },
@@ -37,7 +38,18 @@ describe('LiveTaskProvider transcript routing', () => {
       text: 'persisted segment',
       payload: { text: 'persisted segment' },
       sequence: 12,
+      runtimeSessionId: 'runtime-1',
     })
+  })
+
+  it('does not substitute a logical session id for a missing runtime binding', () => {
+    const unwrapped = __testing__.unwrapTranscriptEnvelope({
+      type: 'message.delta',
+      sessionId: 'session-1',
+      payload: { text: 'persisted segment' },
+    })
+
+    expect(unwrapped?.detail).not.toHaveProperty('runtimeSessionId')
   })
 
   it('normalizes server transcript metadata into session-scoped detail fields', () => {

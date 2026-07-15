@@ -320,11 +320,13 @@ public static class RunnerRoutes
         {
             var sessionId = await sessions.ResolveByLabelsAsync(WorkflowAgentSessionMetadata.LookupLabels(projectId, workflowRunId, sessionName), ct);
             if (sessionId is null) return ApiResults.NotFound($"Session {sessionName} not found");
+            if (string.IsNullOrWhiteSpace(req.RuntimeSessionId))
+                return ApiResults.BadRequest("runtimeSessionId is required", "runtime_session_id_required");
 
             var runtimeEvents = req.RuntimeEvents.Select(e => new AgentSessionRuntimeEventInput(
                 e.Type,
                 e.Payload.ValueKind == System.Text.Json.JsonValueKind.Undefined ? "{}" : e.Payload.GetRawText())).ToArray();
-            return Results.Ok(await sessions.GetGrain(sessionId).AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(runtimeEvents)));
+            return Results.Ok(await sessions.GetGrain(sessionId).AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(runtimeEvents, req.RuntimeSessionId)));
         });
 
         // Generic (non-workflow) AgentSession routes — used by the runner
@@ -357,7 +359,6 @@ public static class RunnerRoutes
             if (existing is null) return ApiResults.NotFound($"Agent session {sessionId} not found");
             if (!await IsGenericAgentSessionInProjectAsync(sessionQuery, projectId, sessionId, ct))
                 return ApiResults.NotFound($"Agent session {sessionId} not found");
-
             // The session was minted up front by the launch endpoint
             // (T-003) carrying source-kind=agent-launch + agent id/name
             // labels. The runner's open call only contributes annotations
@@ -408,11 +409,13 @@ public static class RunnerRoutes
             if (existing is null) return ApiResults.NotFound($"Agent session {sessionId} not found");
             if (!await IsGenericAgentSessionInProjectAsync(sessionQuery, projectId, sessionId, ct))
                 return ApiResults.NotFound($"Agent session {sessionId} not found");
+            if (string.IsNullOrWhiteSpace(req.RuntimeSessionId))
+                return ApiResults.BadRequest("runtimeSessionId is required", "runtime_session_id_required");
 
             var runtimeEvents = req.RuntimeEvents.Select(e => new AgentSessionRuntimeEventInput(
                 e.Type,
                 e.Payload.ValueKind == System.Text.Json.JsonValueKind.Undefined ? "{}" : e.Payload.GetRawText())).ToArray();
-            return Results.Ok(await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(runtimeEvents)));
+            return Results.Ok(await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(runtimeEvents, req.RuntimeSessionId)));
         });
 
         return app;
@@ -624,7 +627,7 @@ public record RunnerGenericAgentSessionResponse(
     string? ResolvedModel = null,
     string? Runtime = null);
 public record AgentSessionAttachRequest(string RuntimeSessionId, string? Model = null, string? WorkDir = null, string? ChangeDir = null, int? ProcessPid = null);
-public record AgentSessionRuntimeEventsRequest(string? WorkId, string? WorkType, string? Stage, IReadOnlyList<AgentSessionRuntimeEventRequest> RuntimeEvents);
+public record AgentSessionRuntimeEventsRequest(string? WorkId, string? WorkType, string? Stage, IReadOnlyList<AgentSessionRuntimeEventRequest> RuntimeEvents, string? RuntimeSessionId = null);
 public record AgentSessionRuntimeEventRequest(string Type, System.Text.Json.JsonElement Payload);
 public record WorkDispatchResponse(
     string WorkflowRunId,

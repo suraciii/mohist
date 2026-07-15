@@ -29,8 +29,7 @@ public sealed record SessionCommandRequest(
 public sealed record SessionCommandResult(
     bool Ok,
     string? RuntimeSessionId = null,
-    SessionCommandError? Error = null,
-    string? Runtime = null);
+    SessionCommandError? Error = null);
 
 public interface ISessionCommandDispatcher
 {

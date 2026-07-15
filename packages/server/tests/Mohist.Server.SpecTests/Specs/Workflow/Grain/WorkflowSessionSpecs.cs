@@ -1,4 +1,5 @@
 using System.Net.Http.Json;
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Infrastructure.Data.Db;
@@ -115,6 +116,7 @@ public class WorkflowSessionSpecs
 
         await PostRawAsync<SessionEventDto[]>(RunnerAgentSessionRuntimeEventsPath("runner-1", projectId, workflowRunId, sessionName), new
         {
+            runtimeSessionId = "acp-1",
             workId = "proposal",
             workType = "task",
             stage = "plan",
@@ -127,6 +129,7 @@ public class WorkflowSessionSpecs
         });
         await PostRawAsync<SessionEventDto[]>(RunnerAgentSessionRuntimeEventsPath("runner-1", projectId, workflowRunId, sessionName), new
         {
+            runtimeSessionId = "acp-1",
             runtimeEvents = new object[]
             {
                 new { type = "session.closed", payload = new { status = "completed", exitCode = 0 } }
@@ -171,6 +174,22 @@ public class WorkflowSessionSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
+    public async Task GivenWorkflowSessionWithoutPhysicalBinding_WhenListed_ThenRuntimeSessionIdIsOmitted()
+    {
+        var (project, _, sessionName, workflowRunId) = await CreateIssueWorkflowSessionAsync("workflow-unbound-runtime");
+
+        using var response = await _client.GetAsync($"/api/workflow-runs/{workflowRunId}/sessions");
+        response.EnsureSuccessStatusCode();
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var listed = Assert.Single(document.RootElement.GetProperty("data").EnumerateArray());
+
+        Assert.Equal(sessionName, listed.GetProperty("sessionName").GetString());
+        Assert.False(listed.TryGetProperty("runtimeSessionId", out _));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
     public async Task GivenMohistPromptAndTerminalFailure_WhenIssueWorkflowSessionEventsAreQueried_ThenRawEventsReturnInSequence()
     {
         const string promptBody =
@@ -189,6 +208,7 @@ public class WorkflowSessionSpecs
         });
         await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(_runnerId, project.Id, workflowRunId, sessionName), new
         {
+            runtimeSessionId = sessionId,
             runtimeEvents = new object[]
             {
                 new

@@ -267,7 +267,7 @@ export function createSharedPromptRunner(options: {
     const beforeText = options.getAgentText()
     const beforeActivity = options.getActivityCount()
     const beforeWorkActivity = options.getWorkActivityCount()
-    await emitSessionEvent(options.context, "session.input", buildPromptEvent(options.context, prompt, options.sessionId))
+    await emitSessionEvent(options.context, "session.input", buildPromptEvent(options.context, prompt, options.sessionId), options.sessionId)
     const promptResult = await monitorPrompt(options.context, options.connection, options.sessionId, prompt, {
       timeoutMs: options.timeoutMs,
       livenessQuietThresholdMs: options.livenessQuietThresholdMs,

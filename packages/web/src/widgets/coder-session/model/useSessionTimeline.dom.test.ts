@@ -461,6 +461,45 @@ describe('useSessionTimeline event-wiring integration', () => {
     expect(hook.result.current.rounds).toHaveLength(0)
   })
 
+  it('plan_round_start drops an old runtime event for the current logical session', () => {
+    const hook = renderTimelineHook()
+
+    act(() => {
+      dispatchAgentEvent('plan_round_start', {
+        issueId: '123',
+        projectId: 'proj-1',
+        roundType: 'proposal',
+        roundLabel: 'Stale runtime',
+        roundIndex: 0,
+        sessionId: 'coder-1',
+        runtimeSessionId: 'acp-old',
+      })
+    })
+
+    expect(hook.result.current.rounds).toHaveLength(0)
+  })
+
+  it('drops runtime events that only identify the current logical session', () => {
+    const hook = renderTimelineHook()
+
+    act(() => {
+      dispatchAgentEvent('plan_round_start', {
+        issueId: '123',
+        projectId: 'proj-1',
+        roundType: 'proposal',
+        roundLabel: 'Proposal',
+        roundIndex: 0,
+        sessionId: 'coder-1',
+      })
+      dispatchAgentEvent('message.delta', {
+        sessionId: 'coder-1',
+        text: ' stale',
+      })
+    })
+
+    expect(hook.result.current.rounds[0].agentText).toBe('')
+  })
+
   it('plan_round_complete stamps verdict and extends with auto-fix / re-self-review on FAIL', () => {
     const hook = renderTimelineHook()
 
@@ -969,6 +1008,7 @@ describe('useSessionTimeline event-wiring integration', () => {
         sessionUpdate: 'message.delta',
         data: { text: 'hello ' },
         sessionId: 'coder-1',
+        runtimeSessionId: 'acp-1',
       })
       dispatchAgentEvent('plan_session_update', {
         issueId: '123',
@@ -978,6 +1018,7 @@ describe('useSessionTimeline event-wiring integration', () => {
         sessionUpdate: 'message.delta',
         data: { text: 'world' },
         sessionId: 'coder-1',
+        runtimeSessionId: 'acp-1',
       })
     })
 
@@ -1020,6 +1061,7 @@ describe('useSessionTimeline event-wiring integration', () => {
         sessionUpdate: 'message.delta',
         data: { text: 'first ' },
         sessionId: 'coder-1',
+        runtimeSessionId: 'acp-1',
       })
     })
 
@@ -1045,6 +1087,7 @@ describe('useSessionTimeline event-wiring integration', () => {
         sessionUpdate: 'message.delta',
         data: { text: 'second' },
         sessionId: 'coder-1',
+        runtimeSessionId: 'acp-1',
       })
     })
 

@@ -105,6 +105,23 @@ public sealed class StaleRuntimeSessionBindingException : InvalidOperationExcept
         $"'{actualRuntimeSessionId ?? "none"}'.";
 }
 
+[Serializable]
+[GenerateSerializer]
+public sealed class RecoveryOperationInProgressException : InvalidOperationException
+{
+    public RecoveryOperationInProgressException(string sessionId, string operation)
+        : base($"AgentSession {sessionId} already has a {operation} recovery operation in progress.")
+    {
+        SessionId = sessionId;
+        Operation = operation;
+    }
+
+    [Id(0)]
+    public string SessionId { get; }
+    [Id(1)]
+    public string Operation { get; }
+}
+
 [GenerateSerializer]
 public sealed record AgentSessionMetadata(
     [property: Id(0)] IReadOnlyDictionary<string, string>? Labels = null,
@@ -150,7 +167,7 @@ public sealed record AgentSessionMetadata(
         var kind = Label(SourceKindKey);
         if (kind is null)
         {
-            if (allowLegacySource && !HasSourceLabel()) return;
+            if (allowLegacySource) return;
             throw new InvalidOperationException("AgentSession source requires exactly one known source kind.");
         }
 
@@ -182,9 +199,6 @@ public sealed record AgentSessionMetadata(
 
     private static bool IsSourceLabel(string key) =>
         key is ProjectIdKey or SourceKindKey or WorkflowRunIdKey or SessionNameKey or AgentIdKey;
-
-    private bool HasSourceLabel() =>
-        Labels?.Keys.Any(IsSourceLabel) == true;
 
     private static IReadOnlyDictionary<string, string> With(IReadOnlyDictionary<string, string>? source, string key, string value)
     {
@@ -265,4 +279,5 @@ public sealed record AgentSessionResetReservation(
     string OperationId,
     string? ExpectedRuntimeSessionId,
     string Runtime,
-    DateTime StartedAt);
+    DateTime StartedAt,
+    string Command = "reset");

@@ -119,7 +119,7 @@ describe('useWorkflowRunSessions', () => {
       })
     })
 
-    it('usage.updated does not trigger a refetch', async () => {
+    it('ignores runtime events without a physical binding', async () => {
       _sessionsData = [session({ id: 'sess-1', status: 'running' })]
 
       const queryClient = createQueryClient()
@@ -147,10 +147,87 @@ describe('useWorkflowRunSessions', () => {
       })
 
       await waitFor(() => {
-        expect(result.current.sessions[0].usage?.contextUsagePercent).toBe(72)
+        expect(result.current.sessions[0].usage?.contextUsagePercent).toBeUndefined()
       })
 
       expect(workflowRunSessionsFetcher.mock.calls.length).toBe(fetchCountBefore)
+    })
+
+    it('updates terminal status from a current runtime session event', async () => {
+      _sessionsData = [session({ id: 'sess-1', runtimeSessionId: 'acp-1', status: 'running' })]
+
+      const queryClient = createQueryClient()
+      const wrapper = ({ children }: { children: ReactNode }) => (
+        <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+      )
+      const { result } = renderHook(
+        () => useWorkflowRunSessions('wr-1', workflowRunSessionsFetcher),
+        { wrapper },
+      )
+
+      await waitFor(() => expect(result.current.sessions).toHaveLength(1))
+      act(() => {
+        dispatchAgentEvent('session.closed', {
+          runtimeSessionId: 'acp-1',
+          status: 'completed',
+        })
+      })
+
+      expect(result.current.sessions[0].status).toBe('completed')
+    })
+
+    it('ignores a stale terminal event for the current logical session', async () => {
+      _sessionsData = [session({
+        id: 'sess-1',
+        runtimeSessionId: 'acp-current',
+        status: 'running',
+      })]
+      const queryClient = createQueryClient()
+      const wrapper = ({ children }: { children: ReactNode }) => (
+        <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+      )
+      const { result } = renderHook(
+        () => useWorkflowRunSessions('wr-1', workflowRunSessionsFetcher),
+        { wrapper },
+      )
+
+      await waitFor(() => expect(result.current.sessions).toHaveLength(1))
+      act(() => {
+        dispatchAgentEvent('session.closed', {
+          runtimeSessionId: 'acp-old',
+          status: 'completed',
+        })
+      })
+
+      expect(result.current.sessions[0].status).toBe('running')
+    })
+
+    it('ignores a stale physical runtime event for the current logical session', async () => {
+      _sessionsData = [session({
+        id: 'sess-1',
+        runtimeSessionId: 'acp-current',
+        status: 'running',
+        usage: { contextUsagePercent: 30 },
+      })]
+      const queryClient = createQueryClient()
+      const wrapper = ({ children }: { children: ReactNode }) => (
+        <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+      )
+      const { result } = renderHook(
+        () => useWorkflowRunSessions('wr-1', workflowRunSessionsFetcher),
+        { wrapper },
+      )
+
+      await waitFor(() => expect(result.current.sessions.length).toBe(1))
+      act(() => {
+        ;(dispatchAgentEvent as any)('usage.updated', {
+          sessionId: 'sess-1',
+          runtimeSessionId: 'acp-old',
+          contextUsagePercent: 99,
+        })
+      })
+
+      expect(result.current.sessions[0].usage?.contextUsagePercent).toBe(30)
     })
 
     it('context_health_update updates matched session fields', async () => {

@@ -74,6 +74,16 @@ public class AgentSessionDomainTests
     }
 
     [Fact]
+    public void LegacyMetadata_WithOnlyProjectLabel_RemainsReadable()
+    {
+        var metadata = new AgentSessionMetadata()
+            .WithLabel("mohist.io/project-id", "project-1");
+
+        metadata.ValidateSource(allowLegacySource: true);
+        Assert.Throws<InvalidOperationException>(() => metadata.ValidateSource());
+    }
+
+    [Fact]
     public void StateJson_UsesMetadataRuntimeSettingsAndStatusSections()
     {
         var session = CreateSession();

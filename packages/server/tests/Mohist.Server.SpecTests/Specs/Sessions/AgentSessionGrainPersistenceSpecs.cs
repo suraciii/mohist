@@ -20,26 +20,18 @@ public abstract class AgentSessionGrainPersistenceSpecsBase : IClassFixture<Agen
 
     protected IAgentSessionGrain NewGrain() => Fixture.Grains.GetGrain<IAgentSessionGrain>($"agent-session-spec-{Guid.NewGuid():N}");
 
+    protected async Task<IAgentSessionGrain> OpenBoundGrainAsync(string runtime = "test")
+    {
+        var grain = NewGrain();
+        await grain.OpenAsync(Open(runtime));
+        await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand("runtime-1"));
+        return grain;
+    }
+
     protected OpenAgentSessionCommand Open(string runtime = "test") => new(
         "runner-1",
         runtime,
         Metadata: WorkflowAgentSessionMetadata.Metadata(new WorkflowAgentSessionContext("project-1", "workflow-1", "build")));
-
-    protected Task WaitUntilAsync(
-        IAgentSessionGrain grain,
-        Func<bool> condition,
-        string description,
-        int timeoutMs = 5000)
-        => TestWait.ForAsync(
-            condition,
-            TimeSpan.FromMilliseconds(timeoutMs),
-            TimeSpan.FromMilliseconds(25),
-            description,
-            async () =>
-            {
-                Fixture.TimeProvider.Advance(TimeSpan.FromMilliseconds(250));
-                await grain.GetAsync();
-            });
 }
 
 [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
@@ -49,24 +41,20 @@ public class AgentSessionGrainPersistSuccessSpecs : AgentSessionGrainPersistence
     public AgentSessionGrainPersistSuccessSpecs(AgentSessionGrainFixture fixture) : base(fixture) { }
 
     [Fact]
-    public async Task PersistCallback_Success_SavesStateAndTranscriptAndDisposesTimer()
+    public async Task FlushForTestAsync_SavesBoundRuntimeEventsAndTranscript()
     {
-        var grain = NewGrain();
-        await grain.OpenAsync(Open());
+        var grain = await OpenBoundGrainAsync();
 
         await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
             new List<AgentSessionRuntimeEventInput>
             {
                 new AgentSessionRuntimeEventInput("session.input", "{\"text\":\"hello\",\"kind\":\"task\"}"),
                 new AgentSessionRuntimeEventInput("message.delta", "{\"text\":\"world\"}")
-            }));
+            }, "runtime-1"));
 
-        await WaitUntilAsync(
-            grain,
-            () => Fixture.StateStore.SaveCount >= 2 && Fixture.TranscriptStore.Flushes.Count >= 1,
-            "initial agent session persistence");
+        await grain.FlushForTestAsync();
 
-        Assert.Equal(2, Fixture.StateStore.SaveCount);
+        Assert.Equal(3, Fixture.StateStore.SaveCount);
         Assert.Single(Fixture.TranscriptStore.Flushes);
         Assert.Single(Fixture.TranscriptStore.Flushes[0].Parts);
         Assert.DoesNotContain(Fixture.Logger.Entries, e => e.Level == LogLevel.Error);
@@ -75,14 +63,11 @@ public class AgentSessionGrainPersistSuccessSpecs : AgentSessionGrainPersistence
             new List<AgentSessionRuntimeEventInput>
             {
                 new AgentSessionRuntimeEventInput("message.delta", "{\"text\":\" again\"}")
-            }));
+            }, "runtime-1"));
 
-        await WaitUntilAsync(
-            grain,
-            () => Fixture.StateStore.SaveCount >= 3 && Fixture.TranscriptStore.Flushes.Count >= 2,
-            "subsequent agent session persistence");
+        await grain.FlushForTestAsync();
 
-        Assert.Equal(3, Fixture.StateStore.SaveCount);
+        Assert.Equal(4, Fixture.StateStore.SaveCount);
         Assert.Equal(2, Fixture.TranscriptStore.Flushes.Count);
         Assert.Single(Fixture.TranscriptStore.Flushes[1].Parts);
         Assert.Contains(Fixture.TranscriptStore.Flushes[1].Parts, p => p.TextDelta == " again");
@@ -106,15 +91,14 @@ public class AgentSessionGrainPersistStateFailureSpecs : AgentSessionGrainPersis
         // storage. (The "same activation rejects further work" guarantee is
         // covered by IssueGrainEventSaveFailureSpecs, which constructs the
         // grain directly so DeactivateOnIdle does not reload it.)
-        var grain = NewGrain();
-        await grain.OpenAsync(Open());
+        var grain = await OpenBoundGrainAsync();
 
         await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
             new List<AgentSessionRuntimeEventInput>
             {
                 new AgentSessionRuntimeEventInput("session.input", "{\"text\":\"hello\",\"kind\":\"task\"}"),
                 new AgentSessionRuntimeEventInput("message.delta", "{\"text\":\"world\"}")
-            }));
+            }, "runtime-1"));
 
         Fixture.StateStore.NextException = new InvalidOperationException("state store down");
 
@@ -123,7 +107,7 @@ public class AgentSessionGrainPersistStateFailureSpecs : AgentSessionGrainPersis
         // The faulted save did not increment the count (ThrowIfPending fires
         // before SaveCount++), and the dirty state was not salvaged by the
         // failing flush.
-        Assert.Equal(1, Fixture.StateStore.SaveCount);
+        Assert.Equal(2, Fixture.StateStore.SaveCount);
         Assert.Empty(Fixture.TranscriptStore.Flushes);
 
         var stateError = Assert.Single(Fixture.Logger.Entries, e => e.Level == LogLevel.Error);
@@ -145,8 +129,7 @@ public class AgentSessionGrainPersistTranscriptFailureSpecs : AgentSessionGrainP
         // save failure happens AFTER the state/event transaction commits, so
         // the next flush must retry only the transcript and never re-save
         // state (which would re-append already-committed lifecycle events).
-        var grain = NewGrain();
-        await grain.OpenAsync(Open());
+        var grain = await OpenBoundGrainAsync();
 
         Fixture.TranscriptStore.NextException = new InvalidOperationException("transcript store down");
 
@@ -155,18 +138,18 @@ public class AgentSessionGrainPersistTranscriptFailureSpecs : AgentSessionGrainP
             {
                 new AgentSessionRuntimeEventInput("session.input", "{\"text\":\"hello\",\"kind\":\"task\"}"),
                 new AgentSessionRuntimeEventInput("message.delta", "{\"text\":\"world\"}")
-            }));
+            }, "runtime-1"));
 
         await grain.FlushForTestAsync();
 
         // State/event committed on the first flush; no second state save.
-        Assert.Equal(2, Fixture.StateStore.SaveCount);
+        Assert.Equal(3, Fixture.StateStore.SaveCount);
         Assert.Empty(Fixture.TranscriptStore.Flushes);
 
         await grain.FlushForTestAsync();
 
         // SaveCount must stay at 2: the retry is transcript-only.
-        Assert.Equal(2, Fixture.StateStore.SaveCount);
+        Assert.Equal(3, Fixture.StateStore.SaveCount);
         var transcriptError = Assert.Single(Fixture.Logger.Entries, e => e.Level == LogLevel.Error);
         Assert.Contains("failed to save transcript", transcriptError.Message);
         Assert.Contains("1", transcriptError.Message);
@@ -230,19 +213,18 @@ public class AgentSessionGrainDeactivationSpecs : AgentSessionGrainPersistenceSp
     [Fact]
     public async Task Deactivation_FlushesPendingStateAndTranscript()
     {
-        var grain = NewGrain();
-        await grain.OpenAsync(Open());
+        var grain = await OpenBoundGrainAsync();
 
         await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
             new List<AgentSessionRuntimeEventInput>
             {
                 new AgentSessionRuntimeEventInput("session.input", "{\"text\":\"hello\",\"kind\":\"task\"}"),
                 new AgentSessionRuntimeEventInput("message.delta", "{\"text\":\"world\"}")
-            }));
+            }, "runtime-1"));
 
         await DeactivateAsync(grain);
 
-        Assert.Equal(2, Fixture.StateStore.SaveCount);
+        Assert.Equal(3, Fixture.StateStore.SaveCount);
         Assert.Single(Fixture.TranscriptStore.Flushes);
         Assert.Single(Fixture.TranscriptStore.Flushes[0].Parts);
         Assert.DoesNotContain(Fixture.Logger.Entries, e => e.Level == LogLevel.Error);
@@ -264,8 +246,7 @@ public class AgentSessionGrainDeactivationSpecs : AgentSessionGrainPersistenceSp
     [Fact]
     public async Task Deactivation_TranscriptSaveFailure_LogsError()
     {
-        var grain = NewGrain();
-        await grain.OpenAsync(Open());
+        var grain = await OpenBoundGrainAsync();
 
         Fixture.TranscriptStore.NextException = new InvalidOperationException("transcript store down");
 
@@ -274,7 +255,7 @@ public class AgentSessionGrainDeactivationSpecs : AgentSessionGrainPersistenceSp
             {
                 new AgentSessionRuntimeEventInput("session.input", "{\"text\":\"hello\",\"kind\":\"task\"}"),
                 new AgentSessionRuntimeEventInput("message.delta", "{\"text\":\"world\"}")
-            }));
+            }, "runtime-1"));
 
         await DeactivateAsync(grain);
 

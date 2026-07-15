@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
-import { TEST_PROJECT, baseRender, screen, waitFor } from './test-utils'
+import { act, TEST_PROJECT, baseRender, fireEvent, screen, waitFor } from './test-utils'
 import { SessionPage, type SessionPageDependencies } from '../src/pages/session/ui/SessionPage'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ProjectProvider } from '../src/entities/project/model/ProjectContext'
@@ -20,6 +20,7 @@ let sessionsData: unknown[] = []
 let sessionsLoading = false
 let metadata: AgentSessionMetadata | null = null
 let transcript: AgentSessionTranscriptResponse = { turns: [], partCount: 0, lastActivityAt: null }
+const followupMutate = vi.fn()
 
 const sessionPageDependencies: SessionPageDependencies = {
   dataSource: {
@@ -45,6 +46,8 @@ const sessionPageDependencies: SessionPageDependencies = {
     }),
     getAgentSessionMetadata: async () => metadata as never,
     getAgentSessionTranscript: async () => transcript,
+    useFollowupMutation: () => ({ mutate: followupMutate, isPending: false }) as never,
+    useCancelSessionMutation: () => ({ mutate: vi.fn(), isPending: false }) as never,
   },
 }
 
@@ -56,6 +59,7 @@ beforeEach(() => {
   sessionsLoading = false
   metadata = null
   transcript = { turns: [], partCount: 0, lastActivityAt: null }
+  followupMutate.mockClear()
   setScopedValue(Element.prototype, 'scrollTo', vi.fn())
 })
 
@@ -178,6 +182,27 @@ describe('SessionPage followup composer integration', () => {
     expect(screen.getByTestId('session-followup-input')).toBeInTheDocument()
     expect(screen.getByTestId('session-followup-send')).toBeInTheDocument()
     expect(screen.queryByTestId('session-followup-composer')).not.toHaveAttribute('data-disabled', 'true')
+  })
+
+  it('submits workflow follow-ups through the canonical session name', async () => {
+    sessionsData = makeSessionsForLookup()
+    metadata = makeMetadata({ status: 'active', statusKind: 'live', completedAt: null })
+
+    renderWithQueryClient(<SessionPage dependencies={sessionPageDependencies} />)
+
+    await waitFor(() => expect(screen.getByTestId('session-followup-input')).toBeInTheDocument())
+    await act(async () => {
+      fireEvent.change(screen.getByTestId('session-followup-input'), { target: { value: 'Continue with tests' } })
+    })
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('session-followup-send'))
+    })
+
+    expect(followupMutate).toHaveBeenCalledWith({
+      issueNumber: ISSUE,
+      sessionName: SESSION,
+      text: 'Continue with tests',
+    })
   })
 
   it('hides the composer input when the session is completed', async () => {

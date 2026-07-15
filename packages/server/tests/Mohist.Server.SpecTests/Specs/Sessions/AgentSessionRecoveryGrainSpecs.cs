@@ -1,5 +1,6 @@
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
+using Mohist.Server.Sessions.Services;
 using Mohist.Server.SpecTests.Support;
 using Xunit;
 
@@ -127,6 +128,39 @@ public sealed class AgentSessionRecoveryGrainSpecs : IClassFixture<AgentSessionG
         await Assert.ThrowsAsync<StaleRuntimeSessionBindingException>(() => grain.CompleteResetAsync(
             new CompleteResetAgentSessionCommand(first.OperationId!, "unused-replacement", "opencode")));
         Assert.Equal("runtime-after-reset", (await grain.GetAsync())?.AgentSessionId);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
+    public async Task CompactAndReset_CompetingReservationsRejectTheSecondOperation()
+    {
+        var (grain, sessionId) = await CreateAttachedSessionAsync("runtime-before-recovery");
+
+        var compact = await grain.PrepareSessionCommandAsync(SessionCommandKind.Compact);
+        var exception = await Assert.ThrowsAsync<RecoveryOperationInProgressException>(() => grain.BeginResetAsync());
+
+        Assert.Equal(sessionId, exception.SessionId);
+        Assert.Equal("compact", exception.Operation);
+        await grain.AbandonResetAsync(compact.OperationId!);
+        var reset = await grain.BeginResetAsync();
+        Assert.Equal("runtime-before-recovery", reset.ExpectedRuntimeSessionId);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
+    public async Task Compact_ConcurrentPreparationRejectsTheSecondOperation()
+    {
+        var (grain, sessionId) = await CreateAttachedSessionAsync("runtime-before-compact");
+
+        var compact = await grain.PrepareSessionCommandAsync(SessionCommandKind.Compact);
+        var exception = await Assert.ThrowsAsync<RecoveryOperationInProgressException>(() =>
+            grain.PrepareSessionCommandAsync(SessionCommandKind.Compact));
+
+        Assert.Equal(sessionId, exception.SessionId);
+        Assert.Equal("compact", exception.Operation);
+        await grain.AbandonResetAsync(compact.OperationId!);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]

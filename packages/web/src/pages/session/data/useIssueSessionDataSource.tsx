@@ -3,7 +3,7 @@ import { useParams, useSearchParams, Link } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { ChevronLeftIcon, ChevronRightIcon } from 'lucide-react'
 import { useIssue } from '../../../entities/issue'
-import { useCoderSessions, getAgentSessionMetadata, getAgentSessionTranscript } from '../../../entities/coder-session'
+import { useCancelSessionMutation, useCoderSessions, getAgentSessionMetadata, getAgentSessionTranscript, useFollowupMutation } from '../../../entities/coder-session'
 import type { AgentSessionMetadata, AgentSessionTranscriptResponse, CoderSessionDetail, SessionTurn, WorkflowRunSession } from '../../../entities/coder-session'
 import { useProject, useProjectPath } from '../../../entities/project'
 import { useSiblingSessions } from '../../../widgets/issue-workflow'
@@ -19,6 +19,8 @@ export interface IssueSessionDataSourceDependencies {
   useSiblingSessions?: typeof useSiblingSessions
   getAgentSessionMetadata?: typeof getAgentSessionMetadata
   getAgentSessionTranscript?: typeof getAgentSessionTranscript
+  useFollowupMutation?: typeof useFollowupMutation
+  useCancelSessionMutation?: typeof useCancelSessionMutation
 }
 
 const defaultDependencies: Required<IssueSessionDataSourceDependencies> = {
@@ -29,6 +31,8 @@ const defaultDependencies: Required<IssueSessionDataSourceDependencies> = {
   useSiblingSessions,
   getAgentSessionMetadata,
   getAgentSessionTranscript,
+  useFollowupMutation,
+  useCancelSessionMutation,
 }
 
 function buildSessionMetadata(
@@ -121,6 +125,8 @@ export function useIssueSessionDataSource(
     useSiblingSessions: useSiblingSessionsHook,
     getAgentSessionMetadata: fetchAgentSessionMetadata,
     getAgentSessionTranscript: fetchAgentSessionTranscript,
+    useFollowupMutation: useFollowup,
+    useCancelSessionMutation: useCancel,
   } = { ...defaultDependencies, ...dependencies }
   const { number: numberStr, sessionId, sessionName } = useParams<{ number: string; sessionId?: string; sessionName?: string }>()
   const { projectId } = useProject()
@@ -213,7 +219,7 @@ export function useIssueSessionDataSource(
     const turnCount = transcriptResponse?.turns.length ?? 0
     return {
       id: metadata.id,
-      runtimeSessionId: metadata.runtimeSessionId,
+      runtimeSessionId: metadata.runtimeSessionId ?? session?.runtimeSessionId ?? '',
       executionId: null,
       taskDescription: metadata.title,
       status: metadata.status,
@@ -223,11 +229,11 @@ export function useIssueSessionDataSource(
       runtime: metadata.runtime ?? null,
       stage: metadata.stage,
       title: metadata.title,
-      metadata: buildSessionMetadata(metadata, lastEventAt, turnCount, metadata.runtimeSessionId),
+      metadata: buildSessionMetadata(metadata, lastEventAt, turnCount, metadata.runtimeSessionId ?? session?.runtimeSessionId ?? ''),
       turns: initialTurns,
       incomplete: false,
     }
-  }, [metadata, transcriptResponse, initialTurns, lastEventAt])
+  }, [metadata, transcriptResponse, initialTurns, lastEventAt, session?.runtimeSessionId])
 
   const rawStatus = detail?.metadata?.status ?? detail?.status ?? session?.status
   const apiStatusKind = detail?.metadata?.statusKind
@@ -261,6 +267,25 @@ export function useIssueSessionDataSource(
   const displayTurns = useMemo(() => turns.map((turn) => projectTranscriptTurn(turn)), [turns, projectTranscriptTurn])
 
   const recoverySessionName = detail?.metadata?.sessionName ?? session?.sessionName ?? session?.executionId ?? lookupKey ?? ''
+  const followup = useFollowup()
+  const cancelMutation = useCancel()
+  const isTerminal = rawStatus === 'completed' || rawStatus === 'failed' || rawStatus === 'cancelled' || rawStatus === 'stopped'
+  const canFollowup = !isTerminal && !!runtimeSessionId && !!recoverySessionName
+  const sendFollowup = useCallback((text: string) => {
+    followup.mutate({ issueNumber, sessionName: recoverySessionName, text })
+  }, [followup, issueNumber, recoverySessionName])
+  const cancelSession = useCallback((options?: { onSettled?: () => void }) => {
+    cancelMutation.mutate(
+      { issueNumber, sessionName: recoverySessionName },
+      { onSettled: options?.onSettled },
+    )
+  }, [cancelMutation, issueNumber, recoverySessionName])
+  const cancel = useMemo(
+    () => isRunning && runtimeSessionId && recoverySessionName
+      ? { mutate: cancelSession, isPending: cancelMutation.isPending }
+      : null,
+    [cancelMutation.isPending, cancelSession, isRunning, recoverySessionName, runtimeSessionId],
+  )
 
   const [searchParams] = useSearchParams()
   const fromActivity = searchParams.get('from') === 'activity'
@@ -317,10 +342,10 @@ export function useIssueSessionDataSource(
     initialTurns,
     statusKind: displayStatusKind,
     isRunning,
-    canFollowup: false,
-    followupIsPending: false,
-    sendFollowup: () => {},
-    cancel: null,
+    canFollowup,
+    followupIsPending: followup.isPending,
+    sendFollowup,
+    cancel,
     contextWindowUsed: detail?.metadata?.usage?.contextWindowUsed ?? null,
     contextWindowSize: detail?.metadata?.usage?.contextWindowSize ?? null,
     contextUsagePercent: detail?.metadata?.usage?.contextUsagePercent ?? null,

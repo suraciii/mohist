@@ -147,7 +147,7 @@ export class RunnerHost {
   }
 
   private handleSessionCommand(request: SessionCommandRequest): SessionCommandResult {
-    if (request.runtime !== "opencode") return { ok: false, error: "missing" }
+    if (request.runtime.toLowerCase() !== "opencode") return { ok: false, error: "missing" }
     if (request.command === "reset" && request.expectedRuntimeSessionId !== request.runtimeSessionId) {
       return { ok: false, error: "conflict" }
     }

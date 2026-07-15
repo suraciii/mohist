@@ -142,6 +142,7 @@ describe('LiveTaskProvider transcript routing', () => {
     const transcript = unwrapTranscriptEnvelope({
       Type: 'tool_call.started',
       SessionId: 'session-1',
+      AgentSessionId: 'runtime-1',
       Sequence: 12,
       CreatedAt: '2026-06-11T00:00:00.0000000Z',
       WorkId: 'work-1',
@@ -163,7 +164,7 @@ describe('LiveTaskProvider transcript routing', () => {
         toolName: 'Read',
         state: 'started',
         status: 'started',
-        runtimeSessionId: 'session-1',
+        runtimeSessionId: 'runtime-1',
         sessionId: 'session-1',
         payload: { toolCallId: 'tool-1', toolName: 'Read', status: 'started' },
       },

@@ -131,6 +131,16 @@ export function useGenericSessionDataSource(
   // without an issue binding).
   const [searchParams] = useSearchParams()
   const fromActivity = searchParams.get('from') === 'activity'
+  const runtimeLineage = summary?.runtimeSessionLineage ?? null
+  const viewedRuntimeSessionId = searchParams.get('rt') ?? summary?.runtimeSessionId ?? null
+  const buildLineageTargetPath = runtimeLineage && runtimeLineage.length >= 2
+    ? (runtimeId: string) => {
+        const base = toProjectPath(`/agent-sessions/${encodeURIComponent(sessionId)}`)
+        const params = new URLSearchParams({ rt: runtimeId })
+        if (fromActivity) params.set('from', 'activity')
+        return `${base}?${params}`
+      }
+    : null
   const hasIssueContextRef = summary?.contextRefs?.issueNumber != null
   const backPath = fromActivity
     ? toProjectPath('/activity')
@@ -190,9 +200,9 @@ export function useGenericSessionDataSource(
     hasRecoveryActions: !!summary,
     recoverySessionName: null,
     recoverySessionId: sessionId || null,
-    runtimeSessionLineage: summary?.runtimeSessionLineage ?? null,
-    viewedRuntimeSessionId: summary?.runtimeSessionId ?? null,
-    buildLineageTargetPath: null,
+    runtimeSessionLineage: runtimeLineage,
+    viewedRuntimeSessionId,
+    buildLineageTargetPath,
     metadataQueryKey,
     transcriptQueryKey,
     handleRecoverySuccess,

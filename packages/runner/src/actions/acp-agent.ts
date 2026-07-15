@@ -45,7 +45,7 @@ export async function acpAgentAction(context: ActionContext): Promise<ActionResu
     ? `failIf marker matched: ${failIfMatch.marker}`
     : result.error ?? verification.message
   if (context.ownerKind !== "agent-job" || !context.agentSessionId || !ok) {
-    await emitSessionEvent(context, "session.closed", { status: ok ? "completed" : "failed", failureReason, failureCategory, exitCode: result.exitCode ?? (ok ? 0 : 1) })
+    await emitSessionEvent(context, "session.closed", { status: ok ? "completed" : "failed", failureReason, failureCategory, exitCode: result.exitCode ?? (ok ? 0 : 1) }, result.acpSessionId ?? null)
   }
   return {
     status: ok ? "success" : "failure",

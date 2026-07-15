@@ -643,9 +643,17 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
                 ["reason"] = reason,
                 ["recordedAt"] = _timeProvider.GetUtcNow().ToString("o"),
             });
-            await grain.AppendRuntimeEventsAsync(
-                new AppendAgentSessionRuntimeEventsCommand(
-                    new[] { new AgentSessionRuntimeEventInput("session.closed", payload) }));
+            var session = await grain.GetAsync();
+            var close = new[] { new AgentSessionRuntimeEventInput("session.closed", payload) };
+            if (string.IsNullOrWhiteSpace(session?.AgentSessionId))
+            {
+                await grain.AppendSystemEventsAsync(new AppendAgentSessionSystemEventsCommand(close));
+            }
+            else
+            {
+                await grain.AppendRuntimeEventsAsync(
+                    new AppendAgentSessionRuntimeEventsCommand(close, session.AgentSessionId));
+            }
         }
         catch (Exception ex)
         {

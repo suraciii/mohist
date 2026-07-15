@@ -11,6 +11,13 @@ interface LiveSessionState {
   sessions: WorkflowRunSession[]
 }
 
+function matchesCurrentBinding(
+  session: WorkflowRunSession,
+  event: { runtimeSessionId?: string | null },
+) {
+  return event.runtimeSessionId != null && event.runtimeSessionId === session.runtimeSessionId
+}
+
 export type WorkflowRunSessionsFetcher = typeof getWorkflowRunSessions
 
 export function useWorkflowRunSessions(
@@ -57,13 +64,13 @@ export function useWorkflowRunSessions(
         if (detailWorkflowRunId && detailWorkflowRunId !== workflowRunId) return
         invalidate()
       }),
-      onAgentEvent('coder_session_completed', (detail) => {
+      onAgentEvent('session.closed', (detail) => {
         if (!mountedRef.current) return
         setLiveState((prev) => prev.workflowRunId === workflowRunId
           ? {
               ...prev,
               sessions: prev.sessions.map((session) =>
-                session.id === detail.sessionId
+                matchesCurrentBinding(session, detail)
                   ? { ...session, status: detail.status, completedAt: new Date().toISOString() }
                   : session,
               ),
@@ -76,7 +83,7 @@ export function useWorkflowRunSessions(
           ? {
               ...prev,
               sessions: prev.sessions.map((session) =>
-                session.id === detail.sessionId
+                matchesCurrentBinding(session, detail)
                   ? {
                       ...session,
                       status: detail.status,
@@ -95,7 +102,7 @@ export function useWorkflowRunSessions(
           ? {
               ...prev,
               sessions: prev.sessions.map((session) =>
-                session.id === detail.sessionId || session.runtimeSessionId === detail.runtimeSessionId
+                matchesCurrentBinding(session, detail)
                   ? {
                       ...session,
                       usage: {
@@ -124,7 +131,7 @@ export function useWorkflowRunSessions(
           ? {
               ...prev,
               sessions: prev.sessions.map((session) =>
-                session.id === detail.sessionId || session.runtimeSessionId === detail.runtimeSessionId
+                matchesCurrentBinding(session, detail)
                   ? {
                       ...session,
                       usage: {

@@ -61,7 +61,9 @@ const genericSessionPageDependencies: GenericSessionPageDependencies = {
       <div data-testid="session-followup-composer" data-disabled={disabled ? 'true' : 'false'} />
     ),
     ContextHealthBar: () => <div data-testid="context-health-bar" />,
-    CompactionLineageLink: () => <div data-testid="compaction-lineage-link" />,
+    CompactionLineageLink: ({ runtimeSessionLineage, buildTargetPath }: { runtimeSessionLineage?: Array<{ runtimeSessionId: string }> | null; buildTargetPath: (runtimeId: string) => string }) => (
+      <a data-testid="compaction-lineage-link" href={buildTargetPath(runtimeSessionLineage![0].runtimeSessionId)} />
+    ),
   },
 }
 
@@ -101,7 +103,7 @@ function makeTurn(overrides: Record<string, any> = {}) {
   }
 }
 
-async function renderPage() {
+async function renderPage(initialEntry = '/agent-sessions/sess-abc') {
   const queryClient = createQueryClient()
   const result = render(
     <QueryClientProvider client={queryClient}>
@@ -112,7 +114,7 @@ async function renderPage() {
         updatedAt: '2026-01-01T00:00:00Z',
         repositories: [],
       }]}>
-        <MemoryRouter initialEntries={['/agent-sessions/sess-abc']}>
+        <MemoryRouter initialEntries={[initialEntry]}>
           <Routes>
             <Route path="/agent-sessions/:sessionId" element={<GenericSessionPage dependencies={genericSessionPageDependencies} />} />
           </Routes>
@@ -291,6 +293,25 @@ describe('GenericSessionPage', () => {
       renderPage()
       await waitFor(() => {
         expect(screen.getByTestId('session-transcript-scroll-container')).toBeInTheDocument()
+      })
+    })
+  })
+
+  describe('runtime lineage', () => {
+    it('links generic predecessor bindings back to the same stable session route', async () => {
+      _summaryData = baseSummary({
+        runtimeSessionLineage: [
+          { runtimeSessionId: 'rt-old', runtime: 'opencode', boundAt: '2026-06-15T10:00:00.000Z' },
+          { runtimeSessionId: 'rt-abc', runtime: 'opencode', boundAt: '2026-06-15T10:10:00.000Z' },
+        ],
+      })
+      renderPage('/agent-sessions/sess-abc?from=activity')
+
+      await waitFor(() => {
+        expect(screen.getByTestId('compaction-lineage-link')).toHaveAttribute(
+          'href',
+          '/Test/agent-sessions/sess-abc?rt=rt-old&from=activity',
+        )
       })
     })
   })

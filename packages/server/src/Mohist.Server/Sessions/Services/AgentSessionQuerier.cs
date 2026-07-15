@@ -439,7 +439,8 @@ public class AgentSessionQuerier : IScopedService
         if (string.IsNullOrWhiteSpace(status)) return null;
         if (string.Equals(status, "completed", StringComparison.OrdinalIgnoreCase)
             || string.Equals(status, "failed", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(status, "stopped", StringComparison.OrdinalIgnoreCase))
+            || string.Equals(status, "stopped", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(status, "cancelled", StringComparison.OrdinalIgnoreCase))
         {
             return status.ToLowerInvariant();
         }
@@ -570,7 +571,7 @@ public class AgentSessionQuerier : IScopedService
         return new AgentSessionMetadataDto(
             domainSession.Id,
             session.Label(AgentSessionQueryMetadataKeys.SessionName) ?? fallbackSessionName,
-            domainSession.Status.AgentRuntimeSessionId ?? domainSession.Id,
+            domainSession.Status.AgentRuntimeSessionId,
             domainSession.Runtime.Runtime,
             AgentSessionJsonHelper.StatusName(domainSession, Now()),
             domainSession.Settings.Model,
@@ -663,7 +664,7 @@ public class AgentSessionQuerier : IScopedService
         return new AgentSessionSummaryDto(
             s.Id,
             record.Label(AgentSessionQueryMetadataKeys.SessionName) ?? string.Empty,
-            s.Status.AgentRuntimeSessionId ?? s.Id,
+            s.Status.AgentRuntimeSessionId,
             record.Label(AgentSessionQueryMetadataKeys.WorkId),
             s.Metadata.Annotation(AgentSessionQueryMetadataKeys.Title),
             AgentSessionJsonHelper.StatusName(s, Now()), s.Status.CreatedAt.ToString("o"), null,

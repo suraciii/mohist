@@ -206,11 +206,11 @@ describe('useSessionTranscript live parity and convergence', () => {
     })
   })
 
-  it('marks live transcript finalizing after completion live event until refetch', async () => {
+  it('marks live transcript finalizing after a bound completion event until refetch', async () => {
     const { result } = renderLiveTranscript()
     expect(result.current.isFinalizing).toBe(false)
     act(() => {
-      dispatchAgentEvent('coder_session_completed', { issueId: '123', projectId: 'project-1', sessionId: 'session-123', status: 'completed', duration: 1000 })
+      dispatchAgentEvent('session.closed', { runtimeSessionId: 'acp-123', status: 'completed' })
     })
     await waitFor(() => expect(result.current.isFinalizing).toBe(true))
   })
@@ -415,7 +415,7 @@ describe('useSessionTranscript live parity and convergence', () => {
   it('appends recovery/terminal errors as dedicated parts', async () => {
     const { result } = renderLiveTranscript()
     act(() => {
-      dispatchAgentEvent('coder_session_failed', { issueId: '123', projectId: 'project-1', sessionId: 'session-123', reason: 'Out of memory' })
+      dispatchAgentEvent('session.closed', { runtimeSessionId: 'acp-123', status: 'failed', failureReason: 'Out of memory' })
     })
     await waitFor(() => {
       const errorParts = result.current.turns.at(-1)?.assistant.filter((part): part is ErrorPart => part.type === 'error' && part.kind === 'failed')

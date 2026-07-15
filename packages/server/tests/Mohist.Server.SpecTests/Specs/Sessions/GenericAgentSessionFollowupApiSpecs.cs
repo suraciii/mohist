@@ -308,7 +308,7 @@ public class GenericAgentSessionFollowupApiSpecs : IAsyncLifetime
             new AgentSessionRuntimeEventInput(
                 Type: RuntimeEventTypes.SessionClosed,
                 PayloadJson: "{\"status\":\"completed\"}"),
-        }));
+        }, sessionId));
         await grain.FlushForTestAsync();
 
         using var response = await PostGenericFollowupAsync(project.Id, sessionId, new { text = "ping" });
@@ -334,7 +334,7 @@ public class GenericAgentSessionFollowupApiSpecs : IAsyncLifetime
             new AgentSessionRuntimeEventInput(
                 Type: RuntimeEventTypes.SessionLiveness,
                 PayloadJson: "{}"),
-        }));
+        }, sessionId));
         await grain.FlushForTestAsync();
 
         var tracker = _fixture.Services.GetRequiredService<RunnerConnectionTracker>();
@@ -354,7 +354,7 @@ public class GenericAgentSessionFollowupApiSpecs : IAsyncLifetime
             new AgentSessionRuntimeEventInput(
                 Type: RuntimeEventTypes.SessionClosed,
                 PayloadJson: "{\"status\":\"completed\"}"),
-        }));
+        }, sessionId));
         await grain.FlushForTestAsync();
 
         using var terminalResponse = await PostGenericFollowupAsync(project.Id, sessionId, new { text = "after close" });
@@ -374,7 +374,7 @@ public class GenericAgentSessionFollowupApiSpecs : IAsyncLifetime
             new AgentSessionRuntimeEventInput(
                 Type: RuntimeEventTypes.SessionLiveness,
                 PayloadJson: "{}"),
-        }));
+        }, sessionId));
 
         // The runner opened the session, so it's marked active, but
         // there's no SignalR connection tracked for this runner id.
@@ -413,7 +413,7 @@ public class GenericAgentSessionFollowupApiSpecs : IAsyncLifetime
             new AgentSessionRuntimeEventInput(
                 Type: RuntimeEventTypes.SessionLiveness,
                 PayloadJson: "{}"),
-        }));
+        }, sessionId));
 
         await using var scope = _fixture.Services.CreateAsyncScope();
         var querier = scope.ServiceProvider.GetRequiredService<AgentSessionQuerier>();
