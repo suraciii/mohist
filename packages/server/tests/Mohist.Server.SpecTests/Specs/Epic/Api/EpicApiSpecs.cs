@@ -1,4 +1,5 @@
 using Mohist.Server.Epic.Grains;
+using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Services.WorkflowProfiles;
 using Mohist.Server.SpecTests.Support;
@@ -25,7 +26,7 @@ public class EpicApiSpecs
 
     private async Task StartEpicAsync(string projectId, EpicDto epic)
     {
-        var grain = _grains.GetGrain<IEpicGrain>($"{projectId}:{epic.Id}");
+        var grain = _grains.GetGrain<IEpicGrain>(GrainKey.Epic(new EpicKey(projectId, epic.Number!.Value)));
         await grain.StartAsync();
     }
 
@@ -41,7 +42,7 @@ public class EpicApiSpecs
 
     private async Task CompleteIssueAsync(string projectId, IssueDto issueInfo)
     {
-        var grain = _grains.GetGrain<IIssueGrain>(issueInfo.Id);
+        var grain = _grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(projectId, issueInfo.Number)));
         var wrId = await grain.StartWorkAsync(new WorkflowProjectContext(projectId, "Epic API Test", RepositoryBaseBranch: "main"));
         await grain.CompleteWorkAsync(wrId);
     }
