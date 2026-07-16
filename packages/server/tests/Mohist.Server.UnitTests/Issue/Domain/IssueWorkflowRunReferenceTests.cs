@@ -18,7 +18,7 @@ public class IssueWorkflowRunReferenceTests
     public void WorkflowBindingPending_TracksTheDurableBindingProcess()
     {
         var issue = Mohist.Server.Issue.Domain.Issue.Create(
-            "issue_1", "project-1", 1, "Binding", isDraft: false);
+            "project-1", 1, "Binding", isDraft: false);
 
         issue.StartWorkflow("wr_1");
 
@@ -38,7 +38,7 @@ public class IssueWorkflowRunReferenceTests
     public void Archive_PreservesWorkflowRunReference_AndSetsArchivedAt()
     {
         var issue = Mohist.Server.Issue.Domain.Issue.Create(
-            "issue_1", "project-1", 1, "Done feature", isDraft: false);
+            "project-1", 1, "Done feature", isDraft: false);
         issue.StartWorkflow("wr_1");
         issue.Complete("wr_1");
         Assert.Equal(Mohist.Server.Issue.Domain.IssueStatus.Done, issue.Status);
@@ -58,7 +58,7 @@ public class IssueWorkflowRunReferenceTests
     public void Close_PreservesWorkflowRunReference_AndMarksCancelled()
     {
         var issue = Mohist.Server.Issue.Domain.Issue.Create(
-            "issue_1", "project-1", 1, "Cancelable", isDraft: false);
+            "project-1", 1, "Cancelable", isDraft: false);
         issue.StartWorkflow("wr_1");
         Assert.Equal(Mohist.Server.Issue.Domain.IssueStatus.InProgress, issue.Status);
 
@@ -73,7 +73,7 @@ public class IssueWorkflowRunReferenceTests
     public void Unarchive_ClearsOnlyArchivedAt_DoesNotAlterWorkflowRunReference()
     {
         var issue = Mohist.Server.Issue.Domain.Issue.Create(
-            "issue_1", "project-1", 1, "Archivable", isDraft: false);
+            "project-1", 1, "Archivable", isDraft: false);
         issue.StartWorkflow("wr_1");
         issue.Complete("wr_1");
         issue.Archive(new DateTime(2026, 6, 25, 11, 0, 0, DateTimeKind.Utc));
@@ -91,7 +91,7 @@ public class IssueWorkflowRunReferenceTests
     public void Unarchive_OnAlreadyUnarchivedIssue_TouchesUpdatedAt_AndLeavesReference()
     {
         var issue = Mohist.Server.Issue.Domain.Issue.Create(
-            "issue_1", "project-1", 1, "Not archived", isDraft: false);
+            "project-1", 1, "Not archived", isDraft: false);
         issue.StartWorkflow("wr_1");
         var before = issue.UpdatedAt;
 
@@ -107,7 +107,7 @@ public class IssueWorkflowRunReferenceTests
     public void State_RoundTripsArchivedDoneIssue_PreservingReference()
     {
         var issue = Mohist.Server.Issue.Domain.Issue.Create(
-            "issue_1", "project-1", 1, "Round trip", isDraft: false);
+            "project-1", 1, "Round trip", isDraft: false);
         issue.StartWorkflow("wr_1");
         issue.Complete("wr_1");
         issue.Archive(new DateTime(2026, 6, 25, 9, 30, 0, DateTimeKind.Utc));
@@ -130,7 +130,7 @@ public class IssueWorkflowRunReferenceTests
     public void State_RoundTripsCancelledIssue_PreservingReference()
     {
         var issue = Mohist.Server.Issue.Domain.Issue.Create(
-            "issue_1", "project-1", 1, "Round trip cancel", isDraft: false);
+            "project-1", 1, "Round trip cancel", isDraft: false);
         issue.StartWorkflow("wr_1");
         issue.Close("test");
 
@@ -160,7 +160,7 @@ public class IssueWorkflowRunReferenceTests
     public void ClearStoppedWorkflow_OnlyResetsReferenceWhenIdMatches_AndLeavesArchiveAlone()
     {
         var issue = Mohist.Server.Issue.Domain.Issue.Create(
-            "issue_1", "project-1", 1, "Cleared", isDraft: false);
+            "project-1", 1, "Cleared", isDraft: false);
         issue.StartWorkflow("wr_1");
         issue.Complete("wr_1");
         issue.Archive(new DateTime(2026, 6, 25, 8, 0, 0, DateTimeKind.Utc));
