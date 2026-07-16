@@ -403,7 +403,7 @@ public class RunnerStatusProjectionSpecs : WorkflowGrainSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
-    public async Task GetRuntimeStateAsync_BusyRunnerWithoutIssue_ExposesNullIssue()
+    public async Task GetRuntimeStateAsync_BusyRunner_ProjectsWorkflowIssue()
     {
         var runnerId = $"runner-no-issue-{Guid.NewGuid():N}";
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
@@ -414,7 +414,8 @@ public class RunnerStatusProjectionSpecs : WorkflowGrainSpecs
 
         var runtime = await runner.GetRuntimeStateAsync();
         var active = Assert.Single(runtime.ActiveWorks);
-        Assert.Null(active.Issue);
+        Assert.NotNull(active.Issue);
+        Assert.Equal(1, active.Issue!.IssueNumber);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
@@ -499,7 +500,8 @@ public class RunnerStatusProjectionSpecs : WorkflowGrainSpecs
             Assert.Equal("task", work.WorkType);
             Assert.False(string.IsNullOrWhiteSpace(work.Stage));
             Assert.False(string.IsNullOrWhiteSpace(work.Title));
-            Assert.Null(work.Issue);
+            Assert.NotNull(work.Issue);
+            Assert.Equal(1, work.Issue!.IssueNumber);
         });
     }
 

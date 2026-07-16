@@ -34,12 +34,7 @@ public class DropEpicMembershipTablesMigrationSpecs
                 Priority = "p2",
                 EpicNumber = 7,
             };
-            seed.Issues.Add(new IssueRow
-            {
-                State = IssueStore.Serialize(issue),
-                EpicNumber = 7,
-            });
-            await seed.SaveChangesAsync();
+            await InsertLegacyIssueAsync(seed, IssueStore.Serialize(issue), 7);
             Assert.True(await TableExistsAsync(seed, "EpicIssues"));
             Assert.True(await TableExistsAsync(seed, "EpicActiveIssues"));
 
@@ -68,6 +63,30 @@ public class DropEpicMembershipTablesMigrationSpecs
         parameter.Value = tableName;
         command.Parameters.Add(parameter);
         return Convert.ToInt32(await command.ExecuteScalarAsync()) == 1;
+    }
+
+    private static async Task InsertLegacyIssueAsync(MohistDbContext context, string state, int epicNumber)
+    {
+        var connection = context.Database.GetDbConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "INSERT INTO \"Issues\" (\"IssueId\", \"State\", \"EpicNumber\") VALUES ($issueId, $state, $epicNumber)";
+
+        var issueIdParameter = command.CreateParameter();
+        issueIdParameter.ParameterName = "$issueId";
+        issueIdParameter.Value = "issue_42";
+        command.Parameters.Add(issueIdParameter);
+
+        var stateParameter = command.CreateParameter();
+        stateParameter.ParameterName = "$state";
+        stateParameter.Value = state;
+        command.Parameters.Add(stateParameter);
+
+        var epicParameter = command.CreateParameter();
+        epicParameter.ParameterName = "$epicNumber";
+        epicParameter.Value = epicNumber;
+        command.Parameters.Add(epicParameter);
+
+        await command.ExecuteNonQueryAsync();
     }
 
     private static TestDatabase CreateDatabase(string targetMigration)
