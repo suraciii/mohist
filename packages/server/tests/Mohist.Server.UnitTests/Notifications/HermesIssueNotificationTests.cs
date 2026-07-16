@@ -9,6 +9,7 @@ using Mohist.Server.Events.Subscriptions;
 using Mohist.Server.Infrastructure.Data;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Events;
+using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Inbox;
 using Mohist.Server.Issue.Domain.Events;
 using Mohist.Server.Notifications;
@@ -320,7 +321,6 @@ public sealed class HermesIssueNotificationTests
             "evt_1",
             new DateTimeOffset(2026, 7, 3, 12, 0, 0, TimeSpan.Zero),
             "proj_1",
-            "issue_1",
             42,
             "Title",
             "run_1",
@@ -361,9 +361,8 @@ public sealed class HermesIssueNotificationTests
         options ??= new HermesNotificationOptions { WebhookUrl = "https://hermes.local/webhooks/mohist" };
         var issues = new FakeIssueStore();
         var workflowRuns = new FakeWorkflowRunStore();
-        issues.Items["issue_1"] = new DomainIssue
+        issues.Items[GrainKey.Issue(new IssueKey("proj_1", 42))] = new DomainIssue
         {
-            Id = "issue_1",
             ProjectId = "proj_1",
             Number = 42,
             Title = "Add Hermes outbound notifications",
@@ -377,7 +376,6 @@ public sealed class HermesIssueNotificationTests
                 Annotations: new Dictionary<string, string>(StringComparer.Ordinal)
                 {
                     ["projectId"] = "proj_1",
-                    ["issueId"] = "issue_1",
                     ["issueNumber"] = "42",
                 }),
             Status = WorkflowRunStatus.Running,
@@ -412,56 +410,52 @@ public sealed class HermesIssueNotificationTests
     private static CloudEvent IssueEvent<T>(string type, T data) where T : class =>
         new(
             id: "evt_" + type.Replace(".", "_", StringComparison.Ordinal),
-            source: new Uri("/mohist/issues/issue_1", UriKind.Relative),
+            source: new Uri("/mohist/projects/proj_1/issues/42", UriKind.Relative),
             type: type,
             time: new DateTimeOffset(2026, 7, 3, 12, 1, 0, TimeSpan.Zero),
             data: JsonSerializer.SerializeToElement(data, CloudEvent.JsonOptions),
             extensions: new Dictionary<string, string>(StringComparer.Ordinal)
             {
                 ["projectid"] = "proj_1",
-                ["issueid"] = "issue_1",
-                ["issueno"] = "42",
+                [EventCatalog.Lineage.Issue] = "42",
             });
 
     private static CloudEvent IssueEventUnified<T>(string type, T data) where T : class =>
         new(
             id: "evt_unified_" + type.Replace(".", "_", StringComparison.Ordinal),
-            source: new Uri("/mohist/issues/issue_1", UriKind.Relative),
+            source: new Uri("/mohist/projects/proj_1/issues/42", UriKind.Relative),
             type: type,
             time: new DateTimeOffset(2026, 7, 3, 12, 1, 0, TimeSpan.Zero),
             data: JsonSerializer.SerializeToElement(data, CloudEvent.JsonOptions),
             extensions: new Dictionary<string, string>(StringComparer.Ordinal)
             {
                 [EventCatalog.Lineage.ProjectId] = "proj_1",
-                [EventCatalog.Lineage.IssueId] = "issue_1",
                 [EventCatalog.Lineage.Issue] = "42",
             });
 
     private static CloudEvent IssueEventLegacy<T>(string type, T data) where T : class =>
         new(
             id: "evt_legacy_" + type.Replace(".", "_", StringComparison.Ordinal),
-            source: new Uri("/mohist/issues/issue_1", UriKind.Relative),
+            source: new Uri("/mohist/projects/proj_1/issues/42", UriKind.Relative),
             type: type,
             time: new DateTimeOffset(2026, 7, 3, 12, 1, 0, TimeSpan.Zero),
             data: JsonSerializer.SerializeToElement(data, CloudEvent.JsonOptions),
             extensions: new Dictionary<string, string>(StringComparer.Ordinal)
             {
                 [EventCatalog.Lineage.ProjectId] = "proj_1",
-                [EventCatalog.Lineage.IssueId] = "issue_1",
                 ["issueno"] = "42",
             });
 
     private static CloudEvent IssueEventBothKeys<T>(string type, T data) where T : class =>
         new(
             id: "evt_both_" + type.Replace(".", "_", StringComparison.Ordinal),
-            source: new Uri("/mohist/issues/issue_1", UriKind.Relative),
+            source: new Uri("/mohist/projects/proj_1/issues/42", UriKind.Relative),
             type: type,
             time: new DateTimeOffset(2026, 7, 3, 12, 1, 0, TimeSpan.Zero),
             data: JsonSerializer.SerializeToElement(data, CloudEvent.JsonOptions),
             extensions: new Dictionary<string, string>(StringComparer.Ordinal)
             {
                 [EventCatalog.Lineage.ProjectId] = "proj_1",
-                [EventCatalog.Lineage.IssueId] = "issue_1",
                 [EventCatalog.Lineage.Issue] = "42",
                 ["issueno"] = "999",
             });
@@ -469,14 +463,13 @@ public sealed class HermesIssueNotificationTests
     private static CloudEvent IssueEventNoIssueNumber<T>(string type, T data) where T : class =>
         new(
             id: "evt_nonum_" + type.Replace(".", "_", StringComparison.Ordinal),
-            source: new Uri("/mohist/issues/issue_1", UriKind.Relative),
+            source: new Uri("/mohist/projects/proj_1/issues/42", UriKind.Relative),
             type: type,
             time: new DateTimeOffset(2026, 7, 3, 12, 1, 0, TimeSpan.Zero),
             data: JsonSerializer.SerializeToElement(data, CloudEvent.JsonOptions),
             extensions: new Dictionary<string, string>(StringComparer.Ordinal)
             {
                 [EventCatalog.Lineage.ProjectId] = "proj_1",
-                [EventCatalog.Lineage.IssueId] = "issue_1",
             });
 
     private static HermesIssueNotificationPayload SamplePayload() =>
@@ -486,7 +479,6 @@ public sealed class HermesIssueNotificationTests
             "evt_1",
             new DateTimeOffset(2026, 7, 3, 12, 0, 0, TimeSpan.Zero),
             "proj_1",
-            "issue_1",
             42,
             "Title",
             "run_1",
