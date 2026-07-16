@@ -26,7 +26,6 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
     private bool _runReloadRequired;
     private readonly IWorkflowRunStore _runStore;
     private readonly WorkflowProfileManager _profileManager;
-    private readonly WorkflowSessionHealthService _sessionHealth;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<WorkflowGrain> _log;
     private readonly WorkflowReadModel _readModel;
@@ -39,13 +38,11 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
     public WorkflowGrain(
         IWorkflowRunStore runStore,
         WorkflowProfileManager profileManager,
-        WorkflowSessionHealthService sessionHealth,
         TimeProvider timeProvider,
         ILogger<WorkflowGrain> log)
     {
         _runStore = runStore;
         _profileManager = profileManager;
-        _sessionHealth = sessionHealth;
         _timeProvider = timeProvider;
         _log = log;
         _readModel = new WorkflowReadModel(this);
@@ -58,7 +55,6 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
     string IWorkflowGrainContext.GrainKey => GrainKey;
     WorkflowProfileManager IWorkflowGrainContext.ProfileManager => _profileManager;
     IGrainFactory IWorkflowGrainContext.Grains => GrainFactory;
-    WorkflowSessionHealthService IWorkflowGrainContext.SessionHealthGate => _sessionHealth;
     ILogger IWorkflowGrainContext.Log => _log;
     DateTimeOffset IWorkflowGrainContext.Now() => Now();
     void IWorkflowGrainContext.CacheAssignedWorkerId(string? workerId) => _cachedAssignedWorkerId = workerId;
@@ -175,26 +171,6 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
     public async Task RetryAsync()
     {
         EnsureRun();
-        var failure = _run.Failure;
-        var stageId = _run.CurrentStageId;
-        var failedTaskId = failure?.TaskId
-            ?? (stageId is not null
-                ? _run.Stages.FirstOrDefault(s => s.Id == stageId)?.Tasks.LastOrDefault(t => t.Status == TaskRunStatus.Failed)?.Id
-                : null);
-
-        await _sessionHealth.CheckAndEnforceAsync(
-            failedTaskId, stageId, GrainKey, _run,
-            events => CommitAsync(events), "retry", default);
-
-        var contextExhaustionRecovered = failure?.Reason == FailureReason.ContextExhaustion
-            && _run.ClearContextExhaustionFailure();
-        if (contextExhaustionRecovered)
-        {
-            _log.LogInformation(
-                "Workflow {Id} retry: session context recovered; demoting ContextExhaustion failure to TaskFailed (task={TaskId}, stage={Stage})",
-                GrainKey, failedTaskId ?? "(none)", stageId ?? "(none)");
-        }
-
         var retriedStageId = _run.CurrentStageId;
         await ReleaseCurrentStageLocksAsync("retried");
         var events = _run.Retry(Now());

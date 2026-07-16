@@ -54,24 +54,8 @@ public static partial class WorkflowRoutes
         {
             if (await ResolveWorkflowRunControlAsync(workflowRunId, reader, WorkflowControlAction.RetryOrRerun) is { } failure)
                 return failure;
-            try
-            {
-                await grains.GetGrain<IWorkflowGrain>(workflowRunId).RetryAsync();
-                return ApiResults.Ok();
-            }
-            catch (WorkflowSessionContextExhaustedException ex)
-            {
-                return ApiResults.Conflict(
-                    ex.Message,
-                    "session_context_exhausted",
-                    new
-                    {
-                        contextUsagePercent = ex.ContextUsagePercent,
-                        stage = ex.Stage,
-                        taskId = ex.TaskId,
-                        recoveryActions = WorkflowSessionHealthGate.RecoveryActions,
-                    });
-            }
+            await grains.GetGrain<IWorkflowGrain>(workflowRunId).RetryAsync();
+            return ApiResults.Ok();
         });
 
         app.MapPost("/api/workflow-runs/{workflowRunId}/rerun", async (

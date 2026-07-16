@@ -27,7 +27,7 @@ namespace Mohist.Server.SpecTests.Specs.Workflow.Api;
 ///   <item><description><see cref="WorkflowControlAction.ActiveOnly"/> admission: approve / reject / resume / pause / stop reject non-active runs with a 409 and leave state untouched.</description></item>
 ///   <item><description><see cref="WorkflowControlAction.RetryOrRerun"/> admission: retry / rerun / rerun-from-stage additionally admit failed runs.</description></item>
 ///   <item><description>Cross-path parity: the new run-scoped endpoints and the legacy issue-scoped endpoints (<c>/api/projects/{projectRef}/issues/{number}/{verb}</c>) reason over the same <see cref="WorkflowControlGuard"/> predicate and admit / reject the same runs.</description></item>
-///   <item><description>Structured error-code mapping: <c>unknown_stage</c>, <c>stage_not_reached</c>, <c>active_work_in_range</c>, <c>session_context_exhausted</c>.</description></item>
+///   <item><description>Structured error-code mapping: <c>unknown_stage</c>, <c>stage_not_reached</c>, <c>active_work_in_range</c>.</description></item>
 /// </list>
 /// </summary>
 [Collection("IntegrationWorkflow")]

@@ -102,14 +102,9 @@ internal sealed class WorkflowWorkLifecycle
     public async Task<string?> MarkTaskRunningAsync(
         WorkflowRun run,
         string logicalTaskId,
-        string workerId,
-        Func<IReadOnlyList<WorkflowEvent>, Task> commitAsync)
+        string workerId)
     {
         var current = run.CurrentStage();
-        await _owner.SessionHealthGate.CheckAndEnforceAsync(
-            logicalTaskId, current.Id, _owner.GrainKey, run,
-            commitAsync, "dispatch", default);
-
         var currentTask = current.Tasks.FirstOrDefault(t => t.Id == logicalTaskId);
         if (currentTask?.Status == TaskRunStatus.Running)
         {
@@ -191,7 +186,7 @@ internal sealed class WorkflowWorkLifecycle
             }
             if (task.Status != TaskRunStatus.Pending) return null;
 
-            var claimedWorkId = await MarkTaskRunningAsync(run, task.Id, workerId, commitAsync);
+            var claimedWorkId = await MarkTaskRunningAsync(run, task.Id, workerId);
             return claimedWorkId;
         }
 
