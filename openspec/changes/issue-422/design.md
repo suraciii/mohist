@@ -37,21 +37,21 @@ Stakeholders are workflow maintainers, runner maintainers, and operators who use
 - Move recovery matching or budget decrementing into the server workflow engine.
 - Change approval, rerun, or rerun-from-stage semantics.
 - Change workflow YAML, public HTTP APIs, CLI commands, Web UI, or action contracts.
-- Backfill or rewrite historical task attempts produced before this change.
 
 ## Decisions
 
 ### Decision 1: Model remaining allowance as task-attempt state
 
-Keep `RecoveryDefinition` and `TaskDefinition.Recovery` unchanged. Add `RecoveryRemaining` to `TaskRun` as execution state beside status, output, worker, and timestamps. A task without recovery has remaining 0. A fresh recovery-enabled attempt starts at `Recovery.Budget`; an automatic continuation receives an explicit decremented value. Task creation enforces `0 <= RecoveryRemaining <= Recovery.Budget`.
+Keep `RecoveryDefinition` and `TaskDefinition.Recovery` unchanged. Add nullable `RecoveryRemaining` to `TaskRun` as execution state beside status, output, worker, and timestamps. Its in-memory and wire states are intentional: explicit `null` means a fresh recovery-enabled attempt whose effective allowance must be initialized by the runner; a number means an execution-authored continuation allowance; an absent JSON property is reserved for pre-change persisted state or a malformed wire contract. Numeric state is bounded to `0 <= RecoveryRemaining <= Recovery.Budget`.
 
-Use a small internal task-attempt creation input containing a `TaskDefinition` plus optional `RecoveryRemaining`. Omitted remaining means "fresh attempt" and is initialized from the definition; an explicit value means "continuation of the current automatic round." This keeps execution state out of `TaskDefinition` while allowing runtime insertion to preserve it.
+Use a small internal task-attempt creation input with distinct fresh and continuation forms. Fresh construction takes only a `TaskDefinition` and stores explicit `null`; continuation construction takes a `TaskDefinition` plus an explicit numeric `RecoveryRemaining`. The persisted `TaskRun` property and runner poll DTO must serialize explicit nulls even though the shared JSON options normally omit null values, so the execution boundary can distinguish fresh from absent. This keeps execution state out of `TaskDefinition`, leaves initial materialization with the runner, and prevents a dropped pass-through value from silently opening a new round.
 
 Alternatives considered:
 
 - Continue decrementing `recovery.budget`. Rejected because it is the root cause and makes declaration data depend on execution history.
 - Add `remaining` inside the `recovery` object. Rejected because it preserves the same configuration/state coupling under a different property name.
 - Infer remaining allowance from task attempt numbers. Rejected because attempt numbers span manual rounds and do not indicate whether an attempt consumed recovery.
+- Initialize a numeric allowance in the control plane. Rejected because the issue assigns recovery-state interpretation to the execution side; the control plane only marks a fresh attempt and passes state through.
 
 ### Decision 2: Centralize definition projection and fresh-attempt construction
 
@@ -59,8 +59,8 @@ Add one `TaskRun` definition projection that returns exactly the definition-owne
 
 All fresh construction paths use the same factory:
 
-- Stage initialization and ordinary runtime task addition initialize remaining from the declaration.
-- Handler tasks returned without an explicit remaining value start their own recovery round from their own declaration.
+- Stage initialization, ordinary runtime task addition, and manual retry create fresh state with explicit `null`; they do not interpret the declaration budget.
+- Runner-produced handler tasks with their own recovery declaration carry an explicit full allowance for that declaration; non-recovery handler tasks carry no recovery state.
 - Manual `RetryFailedTask` projects the failed task back to definition data and invokes the fresh factory, so the preceding round's remaining value cannot enter the new attempt; the failed attempt and earlier history remain unchanged.
 - Runner-generated self-retries use the continuation form and supply the decremented remaining value.
 
@@ -82,7 +82,7 @@ Extend only task-bearing internal shapes, appending new Orleans field ids and re
 | Runner execution | `WorkDispatchResponse`, `RenderedWorkItem`, and `AddTaskInput` |
 | Runner-to-server follow-ups | `RuntimeTaskInput.RecoveryRemaining` inside each `addTasks` entry |
 
-`WorkflowWorkLifecycle`, `WorkflowItemTranslator`, the poll DTO mapper, and the runner connection mapper only pass the value through. `ActionContext` does not gain the field: actions do not interpret recovery budget, and `tryRecovery` already operates on `RenderedWorkItem` after action execution.
+`WorkflowWorkLifecycle`, `WorkflowItemTranslator`, the poll DTO mapper, and the runner connection mapper only pass the value through. `TaskRun.RecoveryRemaining` and `WorkDispatchResponse.RecoveryRemaining` are configured to emit explicit nulls; the TypeScript mapper preserves the distinction between `null` and `undefined`. The runner report path validates that every `addTasks` entry with a recovery declaration has an explicit numeric remaining value; a missing or null value is rejected rather than treated as fresh. Server-originated fresh task creation uses the separate fresh factory and therefore reaches the runner as explicit null without passing through the report path. `ActionContext` does not gain the field: actions do not interpret recovery budget, and `tryRecovery` already operates on `RenderedWorkItem` after action execution.
 
 The remaining value belongs on each follow-up task rather than on `WorkResult`, because one result can contain multiple handler tasks plus a self-retry and each task can begin or continue a different recovery round.
 
@@ -97,13 +97,17 @@ Replace `decrementRecoveryBudget` with remaining-state handling in `tryRecovery`
 
 ```text
 recovery = read immutable work.recovery
-remaining = bounded work.recoveryRemaining
+state = read work.recoveryRemaining with presence awareness
+if state is absent:
+    return ordinary normalized result
+remaining = recovery.budget when state is null, otherwise clamp(state, 0, recovery.budget)
 handler = first matching recovery handler
 
 if no handler or remaining == 0:
     return ordinary normalized result
 
-followUps = handler.tasks
+followUps = handler.tasks mapped so every recovery-enabled task carries:
+  recoveryRemaining = its own recovery.budget
 if handler.retrySelf:
     append self-retry with:
       recovery = unchanged work.recovery
@@ -112,7 +116,7 @@ if handler.retrySelf:
 return completed + followUps
 ```
 
-The server initializes fresh state and persists values, but it never decrements allowance or interprets handler matching. No-match results do not consume allowance. A matching completed result still schedules recovery. Handler tasks remain in declaration order and the self-retry remains last.
+Only the runner interprets the fresh null marker, materializes the declared budget for evaluation, and authors numeric state on every recovery-enabled follow-up. Every server and transport layer preserves explicit null or numeric state exactly. The runner bounds malformed numeric input to the declaration (negative becomes zero; above-budget becomes the declared budget) and treats an absent property as ineligible rather than resetting it. No-match results do not consume allowance. A matching completed result still schedules recovery. Handler tasks remain in declaration order; a handler task with its own recovery starts with an explicit numeric full allowance, `retrySelf: true` appends the decremented self-retry last, and `retrySelf: false` appends none.
 
 Alternatives considered:
 
@@ -123,21 +127,24 @@ Alternatives considered:
 
 `WorkflowRunStore` already serializes the complete `WorkflowRun` into the `WorkflowRuns.State` JSON column, so `TaskRun.RecoveryRemaining` is additive state within that JSON document. No EF migration or new table is required. The immutable `Recovery` object remains the source for any task history or projection that carries recovery configuration; `RecoveryRemaining` is not added to public task status, timeline, CLI, or Web DTOs.
 
+Normalize pre-change task state in the raw JSON migration step before ordinary deserialization. Presence of the `recoveryRemaining` property is the format discriminator: missing means legacy, while explicit null and explicit numbers are new-format state and are never normalized again. For each legacy `DefinitionId` group, compare recovery declarations structurally while ignoring only `budget`; normalize only when handlers, predicates, tasks, and `retrySelf` values match. Use the earliest matching attempt's recovery declaration as canonical, copy each legacy attempt's currently stored `recovery.budget` into its new numeric `RecoveryRemaining`, and replace only that attempt's recovery declaration with the canonical one. Reject an ambiguous reused-id group with an actionable load error rather than rewriting it. This conversion is idempotent and does not change attempt identity, status, output, ordering, or other history. A failed legacy attempt with encoded budget 0 therefore retains remaining 0 but regains the original declaration, allowing manual retry to create explicit fresh null and the runner to restore the full budget.
+
 Workflow events currently carry task identity and outcome rather than recovery configuration, so no event schema changes are needed. Any representation that does carry recovery must map the unchanged `TaskRun.Recovery`, never synthesize it from remaining state.
 
 The implementation must update `design/workflow/recovery.md`, which currently documents decrementing `recovery.budget`, to describe the separate state and remove the stale example that emits a reduced recovery declaration.
 
 Alternatives considered:
 
+- Leave pre-change recovery chains unchanged and require operators to rerun the stage. Rejected because the reported defect exists on an already-persisted exhausted chain and the manual-retry requirement is unconditional.
 - Add remaining allowance to public task status or timeline DTOs. Rejected because operators act on task failure and retry, not on the internal counter, and the specification requires immutable declarations rather than a new UI surface.
 - Emit a workflow event for each budget decrement. Rejected because the generated task attempt already persists the state and appears in workflow history; a second event stream would duplicate the same fact.
 
 ### Decision 6: Verify behavior at the owning boundaries
 
-- Runner specs cover unchanged recovery configuration, `recoveryRemaining` decrement, zero allowance, no-match preservation, first-handler selection, and follow-up ordering.
-- Server domain tests cover fresh versus continuation task construction and prove the definition projection excludes execution state.
+- Runner specs cover unchanged recovery configuration, explicit-null initialization, absent-state fail-closed behavior, `recoveryRemaining` decrement, zero allowance, no-match preservation, first-handler selection, nested recovery-enabled handler initialization, both `retrySelf` branches, malformed clamps, and follow-up ordering.
+- Server domain tests cover fresh-null versus numeric-continuation task construction, explicit-null serialization, reject missing/null runner continuation state, and prove the definition projection excludes execution state.
 - Workflow grain specs cover runner follow-up insertion preserving remaining state, exhaustion followed by manual retry restoring the full budget, and previous attempts remaining unchanged.
-- Translator/API contract tests cover the field in poll dispatch and report `addTasks`; persistence tests cover workflow JSON round-trip.
+- Translator/API contract tests cover explicit null versus numeric values in poll dispatch and numeric state in report `addTasks`; raw-JSON persistence tests cover format presence detection, idempotence, preservation of explicit null/zero, normalization of a pre-change 2 -> 1 -> 0 recovery chain, rejection of structurally ambiguous reused ids, and manual retry of an exhausted legacy attempt.
 
 All tests use existing fakes and deterministic inputs. No real runner, network, database service, or wall-clock timing is introduced.
 
@@ -148,20 +155,20 @@ Alternatives considered:
 
 ## Risks / Trade-offs
 
-- `[A pass-through layer drops recoveryRemaining]` -> Add focused contract assertions at WorkItem, WorkDispatch, HTTP DTO, runner mapping, report translation, and TaskRun insertion boundaries, plus the grain-level exhaustion/retry scenario.
+- `[A pass-through layer drops recoveryRemaining]` -> Require explicit state on every runner-produced recovery-enabled follow-up, fail closed when it is missing, and add focused contract assertions at WorkItem, WorkDispatch, HTTP DTO, runner mapping, report translation, and TaskRun insertion boundaries.
 - `[Server and runner versions are mixed during rollout]` -> Deploy them as one coordinated change with workflow dispatch quiesced; the old runner mutates configuration and the new runner expects separate state, so mixed execution is unsupported.
 - `[Malformed remaining state exceeds the declaration or becomes negative]` -> Validate task-attempt creation and bound the value at runner evaluation; invalid state must never increase a round beyond the declared budget.
 - `[Rollback occurs after new-format self-retries are persisted]` -> Drain workflow work and rerun affected stages after rollback; the old runner ignores separate remaining state and must not continue a new-format recovery chain.
-- `[Historical attempts retain decremented recovery declarations]` -> Do not rewrite history in this actively developed system. Drain in-flight recovery work before deployment and rerun any pre-change affected stage so new attempts use the new invariant.
+- `[Legacy normalization chooses the wrong declaration for reused definition ids]` -> Normalize only when all non-budget recovery structure matches, reject ambiguous groups, and cover profile and runtime-added recovery tasks with persisted legacy fixtures.
 
 ## Migration Plan
 
-1. Add the server domain state, centralized task-attempt construction, internal contract fields, and server tests.
+1. Add the server domain state, distinct fresh/continuation task-attempt construction, legacy normalization, internal contract fields, and server tests.
 2. Update runner types, connection mapping, recovery evaluation, and runner tests in the same change.
 3. Align `design/workflow/recovery.md` and run `npm run build`, `npm test`, `npm run typecheck -w packages/runner`, and `npm test -w packages/runner`.
 4. Before deployment, stop or drain workflow dispatch so no recovery task crosses versions; deploy server and runner together, then resume dispatch.
 
-No database schema or data migration runs. Pre-change in-flight or failed recovery chains are not backfilled; rerun the affected stage after deployment before relying on the new manual-retry behavior.
+No database schema migration runs. Existing workflow JSON is normalized by presence-aware raw JSON migration on load; the next aggregate save persists canonical recovery declarations and explicit remaining values. New-format explicit null and zero survive repeated loads unchanged. Verify deployment against a persisted pre-change exhausted chain before resuming general dispatch.
 
 Rollback requires draining dispatch, rolling back server and runner together, and rerunning any stage that persisted a new-format automatic self-retry. The additive JSON field needs no database rollback.
 
