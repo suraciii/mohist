@@ -6,6 +6,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Workflow;
+using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Services;
 using Mohist.Server.Project.Grains;
@@ -59,7 +60,7 @@ public class IssueArchivedDetailApiSpecs
     public async Task GetIssue_ForArchivedDoneIssue_ReturnsPreservedWorkflowRunId_AndArchivedAt()
     {
         var (projectId, issueNumber, _, wrId) = await SeedDoneIssueWithWorkflowRunAsync();
-        var issue = _grains.GetGrain<IIssueGrain>(await ResolveIssueIdAsync(projectId, issueNumber));
+        var issue = _grains.GetGrain<IIssueGrain>(IssueGrainKey(projectId, issueNumber));
         await issue.ArchiveAsync();
 
         var detail = await _client.GetDataAsync<IssueDetailWireDto>(
@@ -90,7 +91,7 @@ public class IssueArchivedDetailApiSpecs
     public async Task GetIssue_ForArchivedDoneIssue_JsonWireShape_KeepsReferenceAndArchivedAt()
     {
         var (projectId, issueNumber, _, wrId) = await SeedDoneIssueWithWorkflowRunAsync();
-        var issue = _grains.GetGrain<IIssueGrain>(await ResolveIssueIdAsync(projectId, issueNumber));
+        var issue = _grains.GetGrain<IIssueGrain>(IssueGrainKey(projectId, issueNumber));
         await issue.ArchiveAsync();
 
         var raw = await _client.GetRawAsync($"/api/projects/{projectId}/issues/{issueNumber}");
@@ -149,7 +150,7 @@ public class IssueArchivedDetailApiSpecs
 
         // Archive only the first issue.
         var archivedIssueGrain = _grains.GetGrain<IIssueGrain>(
-            await ResolveIssueIdAsync(archivedSeed.projectId, archivedSeed.issueNumber));
+            IssueGrainKey(archivedSeed.projectId, archivedSeed.issueNumber));
         await archivedIssueGrain.ArchiveAsync();
 
         var archivedDetail = await _client.GetDataAsync<IssueDetailWireDto>(
@@ -183,7 +184,7 @@ public class IssueArchivedDetailApiSpecs
         var (projectId, issueNumber, _, wrId) = await SeedDoneIssueWithWorkflowRunAsync();
         await SeedArtifactAsync(wrId, "openspec/changes/issue-1/proposal.md", "proposal body");
 
-        var grain = _grains.GetGrain<IIssueGrain>(await ResolveIssueIdAsync(projectId, issueNumber));
+        var grain = _grains.GetGrain<IIssueGrain>(IssueGrainKey(projectId, issueNumber));
         await grain.ArchiveAsync();
 
         var raw = await _client.GetRawAsync(
@@ -207,7 +208,7 @@ public class IssueArchivedDetailApiSpecs
         // workflow-run events. Archive must not collapse the timeline.
         var (projectId, issueNumber, _, wrId) = await SeedDoneIssueWithWorkflowRunAsync();
 
-        var grain = _grains.GetGrain<IIssueGrain>(await ResolveIssueIdAsync(projectId, issueNumber));
+        var grain = _grains.GetGrain<IIssueGrain>(IssueGrainKey(projectId, issueNumber));
         await grain.ArchiveAsync();
 
         var raw = await _client.GetRawAsync(
@@ -247,7 +248,7 @@ public class IssueArchivedDetailApiSpecs
         var (projectId, issueNumber, _, wrId) = await SeedDoneIssueWithWorkflowRunAsync();
         await MarkWorkflowRunCompletedAsync(wrId);
 
-        var grain = _grains.GetGrain<IIssueGrain>(await ResolveIssueIdAsync(projectId, issueNumber));
+        var grain = _grains.GetGrain<IIssueGrain>(IssueGrainKey(projectId, issueNumber));
         await grain.ArchiveAsync();
 
         var status = await _client.GetDataAsync<WorkflowStatusEnvelopeDto>(
@@ -271,7 +272,7 @@ public class IssueArchivedDetailApiSpecs
         var (projectId, issueNumber, _, wrId) = await SeedDoneIssueWithWorkflowRunAsync();
         await MarkWorkflowRunCompletedAsync(wrId);
 
-        var grain = _grains.GetGrain<IIssueGrain>(await ResolveIssueIdAsync(projectId, issueNumber));
+        var grain = _grains.GetGrain<IIssueGrain>(IssueGrainKey(projectId, issueNumber));
         await grain.ArchiveAsync();
 
         var raw = await _client.GetRawAsync($"/api/projects/{projectId}/issues/{issueNumber}");
@@ -313,7 +314,7 @@ public class IssueArchivedDetailApiSpecs
         var (projectId, issueNumber, _, wrId) = await SeedDoneIssueWithWorkflowRunAsync();
         await MarkWorkflowRunCompletedAsync(wrId);
 
-        var grain = _grains.GetGrain<IIssueGrain>(await ResolveIssueIdAsync(projectId, issueNumber));
+        var grain = _grains.GetGrain<IIssueGrain>(IssueGrainKey(projectId, issueNumber));
         await grain.ArchiveAsync();
 
         using var response = action switch
@@ -367,7 +368,7 @@ public class IssueArchivedDetailApiSpecs
         // issue that has a preserved reference.
         var (projectId, issueNumber, _, _) = await SeedDoneIssueWithWorkflowRunAsync();
 
-        var grain = _grains.GetGrain<IIssueGrain>(await ResolveIssueIdAsync(projectId, issueNumber));
+        var grain = _grains.GetGrain<IIssueGrain>(IssueGrainKey(projectId, issueNumber));
         await grain.ArchiveAsync();
 
         var raw = await _client.GetRawAsync($"/api/projects/{projectId}/issues/{issueNumber}");
@@ -392,7 +393,7 @@ public class IssueArchivedDetailApiSpecs
             await SeedDoneIssueWithWorkflowRunAsync();
 
         var archivedGrain = _grains.GetGrain<IIssueGrain>(
-            await ResolveIssueIdAsync(projectIdArchived, issueNumberArchived));
+            IssueGrainKey(projectIdArchived, issueNumberArchived));
         await archivedGrain.ArchiveAsync();
 
         var archivedRaw = await _client.GetRawAsync(
@@ -454,20 +455,14 @@ public class IssueArchivedDetailApiSpecs
     private async Task<(string issueId, int number)> CreateIssueInBacklogAsync(string projectId)
     {
         var number = await _grains.GetGrain<IIssueCounterGrain>(projectId).NextAsync();
-        var issueId = $"issue_{Guid.NewGuid():N}";
+        var issueId = IssueGrainKey(projectId, number);
         var grain = _grains.GetGrain<IIssueGrain>(issueId);
-        await grain.CreateAsync(projectId, number, "Archived detail API", null, null, null, null, issueId, isDraft: false);
+        await grain.CreateAsync(projectId, number, "Archived detail API", null, null, null, null, isDraft: false);
         return (issueId, number);
     }
 
-    private async Task<string> ResolveIssueIdAsync(string projectId, int number)
-    {
-        using var scope = _services.CreateScope();
-        var identities = scope.ServiceProvider.GetRequiredService<IssueIdentityResolver>();
-        var id = await identities.GetIdAsync(projectId, number);
-        Assert.NotNull(id);
-        return id!;
-    }
+    private static string IssueGrainKey(string projectId, int number) =>
+        GrainKey.Issue(new IssueKey(projectId, number));
 
     private async Task MarkWorkflowRunCompletedAsync(string workflowRunId)
     {
