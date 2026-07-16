@@ -10,7 +10,7 @@ Matching is independent of task success/failure. A successful task whose output 
 
 - Workflow engine: generic. Only knows stage/task/check/completed/failed. Never knows "recovery."
 - Recovery is a task top-level property: `recovery.budget` + `recovery.handlers`. Engine passes through.
-- Recovery config is immutable end-to-end. Consumption is separate per-attempt state (`recoveryRemaining`), never a mutated config copy.
+- Recovery config is immutable end-to-end. Remaining budget is separate per-attempt state (`recoveryRemaining`), never a mutated config copy.
 - Matching in runner executor: `when` expression matches any field in action output. Action knows nothing about recovery.
 - Recovery tasks are real workflow tasks: visible in graph/timeline/status.
 - Recovery = completed: current task produced recovery tasks as follow-up work.
@@ -36,13 +36,13 @@ Matching is independent of task success/failure. A successful task whose output 
         retrySelf: true
 ```
 
-- `budget`: max automatic recoveries in one consecutive cycle. Default 0. Never mutated.
+- `budget`: max consecutive automatic recoveries. Default 0. Never mutated.
 - `handlers`: ordered, first-match.
 - `when`: `field=value` match on any action output field.
 - `tasks`: user-defined recovery tasks.
 - `retrySelf`: runner constructs self-retry task carrying `recovery` unchanged plus `recoveryRemaining = remaining - 1`, appends to tasks.
 
-## 预算与剩余额度
+## 剩余预算（recoveryRemaining）
 
 `recovery` 配置从 YAML 到 runner 全程只读。「本轮还剩几次」是执行状态，放在配置之外的独立字段 `recoveryRemaining` 里随任务流转：
 
