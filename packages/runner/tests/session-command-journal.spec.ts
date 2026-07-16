@@ -1,9 +1,10 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import type * as signalR from "@microsoft/signalr"
 import { SessionCommandJournal } from "../src/runtime/session-command-journal.js"
-import type { SessionCommandRequest } from "../src/server/session-command-handler.js"
+import { registerSessionCommandHandler, type SessionCommandRequest } from "../src/server/session-command-handler.js"
 
 let root: string
 
@@ -54,5 +55,35 @@ describe("SessionCommandJournal", () => {
     await journal.load()
 
     await expect(journal.get("session-1", "compact-1")).rejects.toThrow("unavailable")
+  })
+
+  it.each([
+    { version: 1, operations: [] },
+    { version: 1, operations: { "session-1": [] } },
+  ])("fails closed for parseable invalid state without invoking the runtime", async (file) => {
+    const filePath = join(root, ".mohist", "runner-state", "session-commands.json")
+    await import("node:fs/promises").then(async ({ mkdir }) => await mkdir(join(root, ".mohist", "runner-state"), { recursive: true }))
+    await writeFile(filePath, JSON.stringify(file))
+    const journal = new SessionCommandJournal(root)
+    await journal.load()
+
+    const callbacks = new Map<string, (request: SessionCommandRequest) => Promise<unknown>>()
+    const connection = {
+      on: vi.fn((method: string, callback: (request: SessionCommandRequest) => Promise<unknown>) => {
+        callbacks.set(method, callback)
+      }),
+    } as unknown as signalR.HubConnection
+    const handler = vi.fn(async () => ({ ok: true, runtimeSessionId: "runtime-2" }))
+    registerSessionCommandHandler(connection, { handler, journal })
+
+    const result = await callbacks.get("SessionCommand")!({
+      ...request(),
+      command: "reset",
+      operationId: "reset-1",
+      expectedRuntimeSessionId: "runtime-1",
+    })
+
+    expect(result).toEqual({ ok: false, error: "unavailable" })
+    expect(handler).not.toHaveBeenCalled()
   })
 })

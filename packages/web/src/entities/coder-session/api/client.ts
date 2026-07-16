@@ -21,9 +21,17 @@ export function getAgentSessionMetadata(number: number, name: string, projectId?
   )
 }
 
-export function getAgentSessionTranscript(number: number, name: string, projectId?: string | null) {
+export function getAgentSessionTranscript(
+  number: number,
+  name: string,
+  projectId?: string | null,
+  runtimeSessionId?: string | null,
+) {
+  const search = runtimeSessionId
+    ? `?${new URLSearchParams({ runtimeSessionId }).toString()}`
+    : ''
   return request<AgentSessionTranscriptResponse>(
-    projectApiPath(projectId, `/issues/${number}/sessions/${encodeURIComponent(name)}/transcript`),
+    projectApiPath(projectId, `/issues/${number}/sessions/${encodeURIComponent(name)}/transcript${search}`),
   )
 }
 

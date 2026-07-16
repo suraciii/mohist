@@ -8,7 +8,7 @@ import type { AgentSessionMetadata, AgentSessionTranscriptResponse, CoderSession
 import { useProject, useProjectPath } from '../../../entities/project'
 import { useSiblingSessions } from '../../../widgets/issue-workflow'
 import { useSessionTranscript, projectTurn } from '../../../widgets/session-transcript'
-import type { SessionDataSourceResult, StatusKind } from './SessionDataSource'
+import type { SessionCancelOptions, SessionDataSourceResult, StatusKind } from './SessionDataSource'
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
 
 export interface IssueSessionDataSourceDependencies {
@@ -132,6 +132,7 @@ export function useIssueSessionDataSource(
   const { projectId } = useProject()
   const toProjectPath = useProjectPath()
   const queryClient = useQueryClient()
+  const [searchParams] = useSearchParams()
   const issueNumber = Number(numberStr)
   const decodedSessionId = sessionId ? decodeURIComponent(sessionId) : undefined
   const decodedSessionName = sessionName ? decodeURIComponent(sessionName) : undefined
@@ -176,15 +177,18 @@ export function useIssueSessionDataSource(
     [issueNumber, projectId, lookupKey],
   )
   const transcriptQueryKey = useMemo(
-    () => ['issues', issueNumber, projectId, 'agent-session-transcript', lookupKey] as const,
-    [issueNumber, projectId, lookupKey],
+    () => ['issues', issueNumber, projectId, 'agent-session-transcript', lookupKey, searchParams.get('rt') ?? null] as const,
+    [issueNumber, projectId, lookupKey, searchParams],
   )
 
   const handleRecoverySuccess = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: metadataQueryKey })
     queryClient.invalidateQueries({ queryKey: transcriptQueryKey })
-    queryClient.invalidateQueries({ queryKey: ['issues', issueNumber, 'coder-sessions'] })
-  }, [queryClient, metadataQueryKey, transcriptQueryKey, issueNumber])
+    queryClient.invalidateQueries({ queryKey: ['issues', issueNumber, projectId, 'coder-sessions'] })
+    if (issue?.workflowRunId) {
+      queryClient.invalidateQueries({ queryKey: ['workflow-runs', issue.workflowRunId, 'sessions'] })
+    }
+  }, [queryClient, metadataQueryKey, transcriptQueryKey, issueNumber, projectId, issue?.workflowRunId])
 
   const {
     data: metadata,
@@ -203,7 +207,7 @@ export function useIssueSessionDataSource(
     queryKey: transcriptQueryKey,
     queryFn: async () => {
       if (!lookupKey) return null
-      return fetchAgentSessionTranscript(issueNumber, lookupKey, projectId)
+      return fetchAgentSessionTranscript(issueNumber, lookupKey, projectId, searchParams.get('rt'))
     },
     enabled: hasRoute && !!metadata,
   })
@@ -256,7 +260,7 @@ export function useIssueSessionDataSource(
   } = useTranscript({
     issueNumber,
     sessionId: detail?.id ?? decodedSessionId ?? decodedSessionName ?? '',
-    runtimeSessionId,
+    runtimeSessionId: searchParams.get('rt') ?? runtimeSessionId,
     initialTurns: initialTurns.length > 0 ? initialTurns : undefined,
     sessionQueryKeys: [metadataQueryKey, transcriptQueryKey],
     isRunning,
@@ -271,13 +275,13 @@ export function useIssueSessionDataSource(
   const cancelMutation = useCancel()
   const isTerminal = rawStatus === 'completed' || rawStatus === 'failed' || rawStatus === 'cancelled' || rawStatus === 'stopped'
   const canFollowup = !isTerminal && !!runtimeSessionId && !!recoverySessionName
-  const sendFollowup = useCallback((text: string) => {
-    followup.mutate({ issueNumber, sessionName: recoverySessionName, text })
+  const sendFollowup = useCallback(async (text: string) => {
+    await followup.mutateAsync({ issueNumber, sessionName: recoverySessionName, text })
   }, [followup, issueNumber, recoverySessionName])
-  const cancelSession = useCallback((options?: { onSettled?: () => void }) => {
+  const cancelSession = useCallback((options?: SessionCancelOptions) => {
     cancelMutation.mutate(
       { issueNumber, sessionName: recoverySessionName },
-      { onSettled: options?.onSettled },
+      { onSuccess: options?.onSuccess, onSettled: options?.onSettled },
     )
   }, [cancelMutation, issueNumber, recoverySessionName])
   const cancel = useMemo(
@@ -287,7 +291,6 @@ export function useIssueSessionDataSource(
     [cancelMutation.isPending, cancelSession, isRunning, recoverySessionName, runtimeSessionId],
   )
 
-  const [searchParams] = useSearchParams()
   const fromActivity = searchParams.get('from') === 'activity'
   const runtimeLineage = metadata?.runtimeSessionLineage ?? null
   const viewedRuntimeSessionId = searchParams.get('rt') ?? metadata?.runtimeSessionId ?? null

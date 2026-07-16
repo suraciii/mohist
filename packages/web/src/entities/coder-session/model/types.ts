@@ -289,6 +289,7 @@ export interface SessionTurn {
     text: string
     kind: PromptKind
     sentAt: string
+    runtimeSessionId?: string | null
     summary?: PromptSummary
   }
   assistant: SessionPart[]

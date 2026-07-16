@@ -49,6 +49,10 @@ export class SessionCommandJournal implements SessionCommandJournalStore {
         return
       }
       for (const [sessionId, entries] of Object.entries(file.operations)) {
+        if (!isRecord(entries)) {
+          this.unavailable = true
+          return
+        }
         const operations = new Map<string, SessionCommandJournalEntry>()
         for (const [operationId, entry] of Object.entries(entries)) {
           if (!isEntry(entry)
@@ -136,16 +140,18 @@ export class SessionCommandJournal implements SessionCommandJournalStore {
 function parseJournal(raw: string): SessionCommandJournalFile | null {
   try {
     const value = JSON.parse(raw) as Partial<SessionCommandJournalFile> | null
-    return value
-      && typeof value === "object"
+    return isRecord(value)
       && value.version === 1
-      && value.operations
-      && typeof value.operations === "object"
+      && isRecord(value.operations)
       ? value as SessionCommandJournalFile
       : null
   } catch {
     return null
   }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
 }
 
 function isEntry(value: unknown): value is SessionCommandJournalEntry {

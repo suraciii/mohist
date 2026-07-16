@@ -9,6 +9,7 @@ import type { AgentSessionMetadata } from '../../../entities/coder-session'
 let _issueData: unknown = null
 let _coderSessionsData: unknown[] = []
 let _metadataData: unknown = null
+let _requestedTranscriptRuntime: string | null = null
 let _transcriptData: { turns: unknown[]; partCount: number; lastActivityAt: string } = {
   turns: [
     { id: 'turn-1', index: 0, kind: 'prompt', role: 'user', content: { text: 'Build it' }, parts: [] },
@@ -46,7 +47,10 @@ const sessionPageDependencies: SessionPageDependencies = {
       hasNext: false,
     }),
     getAgentSessionMetadata: async () => _metadataData as never,
-    getAgentSessionTranscript: async () => _transcriptData as never,
+    getAgentSessionTranscript: async (_number, _name, _projectId, runtimeSessionId) => {
+      _requestedTranscriptRuntime = runtimeSessionId ?? null
+      return _transcriptData as never
+    },
   },
   shellComponents: {
     SessionTranscriptLayout: ({ turns }: { turns: any[] }) => (
@@ -217,6 +221,7 @@ describe('SessionPage lineage link wiring', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     setupDefaultMocks()
+    _requestedTranscriptRuntime = null
   })
 
   afterEach(() => {
@@ -305,6 +310,7 @@ describe('SessionPage lineage link wiring', () => {
 
     const successor = container.querySelector('[data-testid="compaction-lineage-link-successor"]')
     expect(successor).toHaveAttribute('data-target-runtime-session-id', 'rt-latest')
+    expect(_requestedTranscriptRuntime).toBe('rt-2')
   })
 
   it('places the lineage link inside the sticky recovery region of the transcript scroll container', async () => {

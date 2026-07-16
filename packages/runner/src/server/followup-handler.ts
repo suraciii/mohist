@@ -138,12 +138,14 @@ async function handleFollowup(
   }
 
   try {
-    await target.connection.prompt({
+    void target.connection.prompt({
       sessionId: target.sessionId,
       prompt: [{ type: "text", text: payload.text }],
+    }).catch((error) => {
+      console.error("followup connection.prompt rejected:", error instanceof Error ? error.message : String(error))
     })
   } catch (error) {
-    console.error("followup connection.prompt rejected:", error instanceof Error ? error.message : String(error))
+    console.error("followup connection.prompt threw:", error instanceof Error ? error.message : String(error))
     return unavailable()
   }
   return { accepted: true }

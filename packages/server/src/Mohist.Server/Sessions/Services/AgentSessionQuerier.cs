@@ -52,7 +52,7 @@ public class AgentSessionQuerier : IScopedService
         if (session is null) return null;
 
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var transcript = await LoadTranscriptAsync(db, session.Session.Id, ct);
+        var transcript = await LoadTranscriptAsync(db, session.Session.Id, null, ct);
         return new WorkflowSessionDetailDto(ToWorkflowDto(session, TerminalFact.FromTranscript(transcript)), SessionTranscriptBuilder.Build(transcript));
     }
 
@@ -456,13 +456,18 @@ public class AgentSessionQuerier : IScopedService
         return await BuildSessionMetadataDtoAsync(db, session, sessionName, ct);
     }
 
-    public async Task<AgentSessionTranscriptResponse?> GetSessionTranscriptAsync(string projectId, int issueNumber, string sessionName, CancellationToken ct = default)
+    public async Task<AgentSessionTranscriptResponse?> GetSessionTranscriptAsync(
+        string projectId,
+        int issueNumber,
+        string sessionName,
+        string? runtimeSessionId = null,
+        CancellationToken ct = default)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var session = await FindCurrentSessionAsync(db, projectId, issueNumber, sessionName, ct);
         if (session is null) return null;
 
-        var transcript = await LoadTranscriptAsync(db, session.Session.Id, ct);
+        var transcript = await LoadTranscriptAsync(db, session.Session.Id, runtimeSessionId, ct);
         return SessionTranscriptBuilder.Build(transcript);
     }
 
@@ -527,13 +532,17 @@ public class AgentSessionQuerier : IScopedService
             AgentSessionJsonHelper.StatusName(session, Now()) != "active");
     }
 
-    public async Task<AgentSessionTranscriptResponse?> GetGenericSessionTranscriptAsync(string projectId, string sessionId, CancellationToken ct = default)
+    public async Task<AgentSessionTranscriptResponse?> GetGenericSessionTranscriptAsync(
+        string projectId,
+        string sessionId,
+        string? runtimeSessionId = null,
+        CancellationToken ct = default)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var session = await FindGenericSessionAsync(projectId, sessionId, ct);
         if (session is null) return null;
 
-        var transcript = await LoadTranscriptAsync(db, session.Session.Id, ct);
+        var transcript = await LoadTranscriptAsync(db, session.Session.Id, runtimeSessionId, ct);
         return SessionTranscriptBuilder.Build(transcript);
     }
 
@@ -677,14 +686,22 @@ public class AgentSessionQuerier : IScopedService
 
     private DateTime Now() => _timeProvider.GetUtcNow().UtcDateTime;
 
-    private static async Task<AgentSessionTranscriptData> LoadTranscriptAsync(MohistDbContext db, string sessionId, CancellationToken ct)
+    private static async Task<AgentSessionTranscriptData> LoadTranscriptAsync(
+        MohistDbContext db,
+        string sessionId,
+        string? runtimeSessionId,
+        CancellationToken ct)
     {
         var loaded = await TranscriptPartLoader.LoadAsync(db, new[] { sessionId }, ct: ct);
         var turns = loaded.Turns
+            .Where(turn => string.IsNullOrWhiteSpace(runtimeSessionId)
+                || string.Equals(turn.RuntimeSessionId, runtimeSessionId, StringComparison.Ordinal))
             .OrderBy(e => e.Sequence)
             .ThenBy(e => e.Id)
             .ToList();
+        var turnIds = turns.Select(turn => turn.Id).ToHashSet();
         var parts = loaded.Parts
+            .Where(part => turnIds.Contains(part.TurnId))
             .OrderBy(e => e.Sequence)
             .ThenBy(e => e.Id)
             .ToList();

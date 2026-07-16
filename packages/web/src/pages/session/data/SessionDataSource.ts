@@ -4,6 +4,7 @@ import type { DisplayTurn } from '../../../widgets/session-transcript'
 export type StatusKind = SessionStatusKind
 
 export interface SessionCancelOptions {
+  onSuccess?: (result: { state: string }) => void
   onSettled?: () => void
 }
 
@@ -23,7 +24,7 @@ export interface SessionDataSourceResult {
   canFollowup?: boolean
 
   followupIsPending: boolean
-  sendFollowup: (text: string) => void
+  sendFollowup: (text: string) => Promise<void>
 
   cancel: {
     mutate: (options?: SessionCancelOptions) => void

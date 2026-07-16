@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import { ProjectProvider } from '../../../entities/project'
@@ -48,7 +48,7 @@ const sessionPageDependencies: SessionPageDependencies = {
     }),
     getAgentSessionMetadata: async () => _metadataData as never,
     getAgentSessionTranscript: async () => _transcriptData as never,
-    useFollowupMutation: () => ({ mutate: vi.fn(), isPending: false }) as never,
+    useFollowupMutation: () => ({ mutateAsync: vi.fn(async () => ({ status: 'sent' })), isPending: false }) as never,
     useCancelSessionMutation: () => ({ mutate: cancelMutate, isPending: false }) as never,
   },
   shellComponents: {
@@ -226,8 +226,16 @@ describe('SessionPage workflow cancel control', () => {
 
     expect(cancelMutate).toHaveBeenCalledWith(
       { issueNumber: 123, sessionName: 'session-1' },
-      expect.objectContaining({ onSettled: expect.any(Function) }),
+      expect.objectContaining({ onSuccess: expect.any(Function) }),
     )
+
+    await act(async () => {
+      const options = cancelMutate.mock.calls[0]?.[1] as { onSuccess: (result: { state: string }) => void }
+      options.onSuccess({ state: 'not-cancellable' })
+    })
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="session-cancel-result"]')).toHaveTextContent('not-cancellable')
+    })
   })
 
   it('hides cancellation when the workflow session has no physical runtime binding', async () => {

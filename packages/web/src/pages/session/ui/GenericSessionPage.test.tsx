@@ -15,6 +15,7 @@ let _summaryError = false
 let _transcriptData: unknown = null
 const _followupHandler = vi.fn()
 const _cancelHandler = vi.fn()
+const _useGenericSessionTranscript = vi.fn(() => ({ data: _transcriptData }) as never)
 
 let _blockCancel = false
 let _cancelResolve: (() => void) | null = null
@@ -26,7 +27,7 @@ const genericSessionPageDependencies: GenericSessionPageDependencies = {
       isLoading: _summaryLoading,
       isError: _summaryError,
     }) as never,
-    useGenericSessionTranscript: () => ({ data: _transcriptData }) as never,
+    useGenericSessionTranscript: _useGenericSessionTranscript,
     useGenericFollowup: () => useMutation({
       mutationFn: async ({ text }: { sessionId: string; text: string }) => {
         _followupHandler({ text })
@@ -134,6 +135,7 @@ describe('GenericSessionPage', () => {
     mocks.transcriptTurns = []
     _followupHandler.mockClear()
     _cancelHandler.mockClear()
+    _useGenericSessionTranscript.mockClear()
     _blockCancel = false
     _cancelResolve = null
   })
@@ -272,6 +274,20 @@ describe('GenericSessionPage', () => {
           'href',
           '/Test/agent-sessions/sess-abc?rt=rt-old&from=activity',
         )
+      })
+    })
+
+    it('requests the selected runtime transcript for a history link', async () => {
+      _summaryData = baseSummary({
+        runtimeSessionLineage: [
+          { runtimeSessionId: 'rt-old', runtime: 'opencode', boundAt: '2026-06-15T10:00:00.000Z' },
+          { runtimeSessionId: 'rt-abc', runtime: 'opencode', boundAt: '2026-06-15T10:10:00.000Z' },
+        ],
+      })
+      renderPage('/agent-sessions/sess-abc?rt=rt-old')
+
+      await waitFor(() => {
+        expect(_useGenericSessionTranscript).toHaveBeenCalledWith('sess-abc', 'rt-old')
       })
     })
   })

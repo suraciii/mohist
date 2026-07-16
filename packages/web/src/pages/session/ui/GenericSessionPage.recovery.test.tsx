@@ -48,7 +48,7 @@ function makeSummary(recoveryAvailable: boolean, usage: unknown = null) {
 
 function renderPage() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  return render(
+  return { client, ...render(
     <QueryClientProvider client={client}>
       <ProjectProvider initialProjectId="proj-1" initialProjects={[{
         id: 'proj-1', name: 'Test', createdAt: '2026-01-01T00:00:00Z',
@@ -59,7 +59,7 @@ function renderPage() {
         </MemoryRouter>
       </ProjectProvider>
     </QueryClientProvider>,
-  )
+  ) }
 }
 
 describe('GenericSessionPage recovery', () => {
@@ -82,11 +82,13 @@ describe('GenericSessionPage recovery', () => {
 
   it('allows Compact and Reset when the server reports an idle generic session', async () => {
     summary = makeSummary(true)
-    renderPage()
+    const { client } = renderPage()
+    const invalidate = vi.spyOn(client, 'invalidateQueries')
 
     await waitFor(() => expect(screen.getByTestId('session-recovery-compact')).not.toBeDisabled())
     fireEvent.click(screen.getByTestId('session-recovery-compact'))
     await waitFor(() => expect(compact).toHaveBeenCalledWith('sess-abc', 'proj-1'))
+    await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: ['agent-sessions'] }))
 
     fireEvent.click(screen.getByTestId('session-recovery-reset'))
     fireEvent.click(screen.getByTestId('session-recovery-reset-confirm'))

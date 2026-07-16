@@ -292,6 +292,53 @@ public class GenericAgentSessionCancelApiSpecs : IAsyncLifetime
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
+    public async Task Cancel_UnopenedAgentLaunchSession_ReturnsNotCancellableWithoutRequiringRuntimeBinding()
+    {
+        var project = await CreateProjectAsync("gen-cancel-unopened");
+        var sessionId = $"cancel-unopened-{Guid.NewGuid():N}";
+        await _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId).OpenAsync(new OpenAgentSessionCommand(
+            RunnerId: string.Empty,
+            AgentRuntime: "opencode",
+            WorkDir: $"/workspaces/{project.Id}",
+            Metadata: GenericAgentSessionMetadata.Metadata(new GenericAgentSessionContext(
+                project.Id,
+                "cancel-unopened-agent",
+                "cancel-unopened-agent"))));
+
+        using var response = await PostGenericCancelAsync(project.Id, sessionId);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal("not-cancellable", doc.RootElement.GetProperty("data").GetProperty("state").GetString());
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
+    public async Task Cancel_BoundSessionWithMissingRuntime_ReturnsResetHint()
+    {
+        var (project, sessionId) = await CreateCanonicalSessionForCancelAsync("agent-launch", runtime: "acp");
+        var tracker = _fixture.Services.GetRequiredService<RunnerConnectionTracker>();
+        tracker.Register(_runnerId, "conn-gen-cancel-missing-runtime");
+        try
+        {
+            using var response = await PostGenericCancelAsync(project.Id, sessionId);
+
+            Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+            using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            Assert.Equal("runtime_session_missing", doc.RootElement.GetProperty("code").GetString());
+            Assert.Equal(sessionId, doc.RootElement.GetProperty("details").GetProperty("sessionId").GetString());
+            Assert.Equal("reset", doc.RootElement.GetProperty("details").GetProperty("hint").GetString());
+        }
+        finally
+        {
+            tracker.Unregister(_runnerId);
+        }
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
     public async Task Cancel_RunnerRepliesWithTerminalState_MirrorsThatTerminalState()
     {
         // The runner is allowed to return a terminal-state name in its
@@ -382,7 +429,7 @@ public class GenericAgentSessionCancelApiSpecs : IAsyncLifetime
     private Task<HttpResponseMessage> PostGenericCancelAsync(string projectId, string sessionId) =>
         _client.PostAsync($"/api/projects/{projectId}/agent-sessions/{sessionId}/cancel", content: null);
 
-    private async Task<(ProjectRef Project, string SessionId)> CreateCanonicalSessionForCancelAsync(string sourceKind)
+    private async Task<(ProjectRef Project, string SessionId)> CreateCanonicalSessionForCancelAsync(string sourceKind, string runtime = "opencode")
     {
         var project = await CreateProjectAsync($"preserves-{sourceKind}");
         await _fixture.Grains.GetGrain<IRunnerGrain>(_runnerId)
@@ -406,7 +453,7 @@ public class GenericAgentSessionCancelApiSpecs : IAsyncLifetime
         var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
         await grain.OpenAsync(new OpenAgentSessionCommand(
             RunnerId: _runnerId,
-            AgentRuntime: "opencode",
+            AgentRuntime: runtime,
             WorkDir: $"/workspaces/{project.Id}",
             Metadata: metadata));
         await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand(

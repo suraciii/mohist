@@ -69,6 +69,7 @@ public class AgentSessionLaunchRoutesSpecs
             Assert.NotNull(record);
             Assert.Equal(sessionId, record!.Session.Id);
             Assert.Equal(agent.Id, record.Session.Metadata.Label(GenericAgentSessionMetadata.AgentId));
+
             Assert.Equal("reviewer", record.Session.Metadata.Label(GenericAgentSessionMetadata.AgentName));
             Assert.Equal(projectId, record.Session.Metadata.Label(AgentSessionQueryMetadataKeys.ProjectId));
 
@@ -511,6 +512,12 @@ public class AgentSessionLaunchRoutesSpecs
             Assert.NotNull(record);
             Assert.Equal(sessionId, record!.Session.Id);
             Assert.Equal(agent.Id, record.Session.Metadata.Label(GenericAgentSessionMetadata.AgentId));
+
+            var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
+            await dbFactory.WaitForTranscriptPartsAsync(sessionId, 1, _fixture.Grains);
+            var closePayload = Assert.Single(await LoadSessionClosedPayloadsAsync(dbFactory, sessionId));
+            Assert.Equal("failed", closePayload.GetProperty("status").GetString());
+            Assert.Contains(AgentJobFailureReasons.ReportTimeout, closePayload.GetProperty("failureReason").GetString(), StringComparison.Ordinal);
         }
         finally
         {

@@ -164,7 +164,7 @@ describe("RunnerSignalRClient ReceiveFollowup handler", () => {
     })
   })
 
-  it("Followup_ReturnsImmediatelyWithoutAwaitingPromptResolution", async () => {
+  it("Followup_AcknowledgesWorkflowDeliveryBeforePromptResolution", async () => {
     let resolvePrompt!: (value: unknown) => void
     const prompt = vi.fn(() => new Promise((resolve) => { resolvePrompt = resolve }))
     const connection: MockConnection = { prompt }
@@ -175,9 +175,9 @@ describe("RunnerSignalRClient ReceiveFollowup handler", () => {
     buildClient({ resolver, serverConnection })
     const builder = lastBuilder()
 
-    emitFollowup(builder, { workflowRunId: "wr-1", sessionName: "work-1", text: "ship it" })
-    await flush()
+    const delivery = invokeFollowup(builder, { workflowRunId: "wr-1", sessionName: "work-1", text: "ship it" })
     expect(prompt).toHaveBeenCalledTimes(1)
+    await expect(delivery).resolves.toEqual({ accepted: true })
     resolvePrompt(undefined)
     await flush()
   })
@@ -454,6 +454,26 @@ describe("RunnerSignalRClient routes follow-ups to generic sessions", () => {
     })
     expect(workflowRuntimeEvents).not.toHaveBeenCalled()
     expect(agentSessionRuntimeEvents).toHaveBeenCalledTimes(1)
+  })
+
+  it("GenericFollowup_AcknowledgesDeliveryBeforePromptResolution", async () => {
+    let resolvePrompt!: (value: unknown) => void
+    const prompt = vi.fn(() => new Promise((resolve) => { resolvePrompt = resolve }))
+    const connection: MockConnection = { prompt }
+    const resolver = vi.fn(() => ({ connection: connection as never, sessionId: "runtime-1", projectId: "proj-1" }))
+    const serverConnection: MockServerConnection = {
+      workflowAgentSessionRuntimeEvents: vi.fn(async () => undefined),
+      agentSessionRuntimeEvents: vi.fn(async () => undefined),
+    }
+
+    buildClient({ resolver, serverConnection })
+
+    const delivery = invokeFollowup(lastBuilder(), genericPayload("continue"))
+
+    await expect(delivery).resolves.toEqual({ accepted: true })
+    expect(prompt).toHaveBeenCalledTimes(1)
+    resolvePrompt(undefined)
+    await flush()
   })
 
   it("GenericFollowup_EmitsSessionInputViaAgentSessionRuntimeEventsEndpoint", async () => {

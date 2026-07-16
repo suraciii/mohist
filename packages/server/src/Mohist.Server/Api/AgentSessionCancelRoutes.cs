@@ -73,6 +73,13 @@ public static class AgentSessionCancelRoutes
         if (!string.IsNullOrEmpty(target.TerminalState))
             return ApiResults.Ok(new { state = target.TerminalState });
 
+        if (string.IsNullOrWhiteSpace(target.RunnerId))
+            return ApiResults.Ok(new { state = "not-cancellable" });
+
+        var connectionId = connections.GetConnectionId(target.RunnerId);
+        if (string.IsNullOrWhiteSpace(connectionId))
+            return ApiResults.Ok(new { state = "not-cancellable" });
+
         try
         {
             await grains.GetGrain<IAgentSessionGrain>(target.SessionId).EnsureRuntimeSessionPresentAsync();
@@ -84,13 +91,6 @@ public static class AgentSessionCancelRoutes
                 "runtime_session_missing",
                 new { sessionId = ex.SessionId, hint = "reset" });
         }
-
-        if (string.IsNullOrWhiteSpace(target.RunnerId))
-            return ApiResults.Ok(new { state = "not-cancellable" });
-
-        var connectionId = connections.GetConnectionId(target.RunnerId);
-        if (string.IsNullOrWhiteSpace(connectionId))
-            return ApiResults.Ok(new { state = "not-cancellable" });
 
         object wireTarget = string.Equals(target.SourceKind, "workflow", StringComparison.Ordinal)
             ? new

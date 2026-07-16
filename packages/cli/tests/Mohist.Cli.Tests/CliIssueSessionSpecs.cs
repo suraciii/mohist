@@ -18,7 +18,7 @@ public class CliIssueSessionSpecs
     }
 
     [Fact]
-    public async Task SessionHelp_ListsFiveSubcommandsAndDocumentsNameSource()
+    public async Task SessionHelp_ListsSixSubcommandsAndDocumentsNameSource()
     {
         var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
             throw new InvalidOperationException("API must not be called for help"));
@@ -33,6 +33,7 @@ public class CliIssueSessionSpecs
         Assert.Contains("compact", stdout, StringComparison.Ordinal);
         Assert.Contains("reset", stdout, StringComparison.Ordinal);
         Assert.Contains("followup", stdout, StringComparison.Ordinal);
+        Assert.Contains("cancel", stdout, StringComparison.Ordinal);
         Assert.Contains("mo issue sessions", stdout, StringComparison.Ordinal);
         Assert.Empty(handler.Requests);
     }
@@ -54,6 +55,27 @@ public class CliIssueSessionSpecs
         Assert.DoesNotContain("new session id", stdout, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("rotat", stdout, StringComparison.OrdinalIgnoreCase);
         Assert.Empty(handler.Requests);
+    }
+
+    [Fact]
+    public async Task SessionCancel_PostsToWorkflowSessionEndpointAndPrintsReturnedState()
+    {
+        var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new { state = "not-cancellable" },
+            })));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["issue", "session", "cancel", "42", "plan"], output, error, fileSystem, executor);
+
+        Assert.Equal(0, exitCode);
+        var request = handler.Requests.Single();
+        Assert.Equal(HttpMethod.Post, request.Method);
+        Assert.Equal($"/api/projects/{ActiveProjectId}/issues/42/sessions/plan/cancel", request.RequestUri?.PathAndQuery);
+        Assert.Contains("not-cancellable", output.ToString(), StringComparison.Ordinal);
+        Assert.Empty(error.ToString());
     }
 
     [Fact]

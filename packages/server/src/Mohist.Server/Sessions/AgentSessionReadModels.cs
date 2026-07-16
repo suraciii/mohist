@@ -92,6 +92,7 @@ public sealed class AgentSessionTranscriptUserDto
     public string Text { get; init; } = string.Empty;
     public string Kind { get; init; } = "task";
     public string SentAt { get; init; } = string.Empty;
+    public string? RuntimeSessionId { get; init; }
 }
 
 public sealed class AgentSessionTranscriptPartDto

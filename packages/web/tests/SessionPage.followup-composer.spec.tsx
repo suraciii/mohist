@@ -20,7 +20,7 @@ let sessionsData: unknown[] = []
 let sessionsLoading = false
 let metadata: AgentSessionMetadata | null = null
 let transcript: AgentSessionTranscriptResponse = { turns: [], partCount: 0, lastActivityAt: null }
-const followupMutate = vi.fn()
+const followupMutateAsync = vi.fn(async () => ({ status: 'sent' }))
 
 const sessionPageDependencies: SessionPageDependencies = {
   dataSource: {
@@ -46,7 +46,7 @@ const sessionPageDependencies: SessionPageDependencies = {
     }),
     getAgentSessionMetadata: async () => metadata as never,
     getAgentSessionTranscript: async () => transcript,
-    useFollowupMutation: () => ({ mutate: followupMutate, isPending: false }) as never,
+    useFollowupMutation: () => ({ mutateAsync: followupMutateAsync, isPending: false }) as never,
     useCancelSessionMutation: () => ({ mutate: vi.fn(), isPending: false }) as never,
   },
 }
@@ -59,7 +59,7 @@ beforeEach(() => {
   sessionsLoading = false
   metadata = null
   transcript = { turns: [], partCount: 0, lastActivityAt: null }
-  followupMutate.mockClear()
+  followupMutateAsync.mockClear()
   setScopedValue(Element.prototype, 'scrollTo', vi.fn())
 })
 
@@ -198,10 +198,12 @@ describe('SessionPage followup composer integration', () => {
       fireEvent.click(screen.getByTestId('session-followup-send'))
     })
 
-    expect(followupMutate).toHaveBeenCalledWith({
-      issueNumber: ISSUE,
-      sessionName: SESSION,
-      text: 'Continue with tests',
+    await waitFor(() => {
+      expect(followupMutateAsync).toHaveBeenCalledWith({
+        issueNumber: ISSUE,
+        sessionName: SESSION,
+        text: 'Continue with tests',
+      })
     })
   })
 

@@ -62,11 +62,13 @@ export function useGenericSessionDataSource(
   const toProjectPath = useProjectPath()
   const queryClient = useQueryClient()
   const sessionId = rawSessionId ? decodeURIComponent(rawSessionId) : ''
+  const [searchParams] = useSearchParams()
+  const requestedRuntimeSessionId = searchParams.get('rt')
 
   useDocumentTitle(`Session — Mohist`)
 
   const { data: summary, isLoading: summaryLoading, isError: summaryError } = useSummary(sessionId)
-  const { data: transcriptResponse } = useTranscriptResponse(sessionId)
+  const { data: transcriptResponse } = useTranscriptResponse(sessionId, requestedRuntimeSessionId)
   const genericFollowup = useFollowup()
   const cancelGeneric = useCancel()
 
@@ -92,13 +94,14 @@ export function useGenericSessionDataSource(
     [projectId, sessionId],
   )
   const transcriptQueryKey = useMemo(
-    () => ['agent-session', projectId, sessionId, 'transcript'] as const,
-    [projectId, sessionId],
+    () => ['agent-session', projectId, sessionId, 'transcript', requestedRuntimeSessionId] as const,
+    [projectId, sessionId, requestedRuntimeSessionId],
   )
 
   const handleRecoverySuccess = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: metadataQueryKey })
     queryClient.invalidateQueries({ queryKey: transcriptQueryKey })
+    queryClient.invalidateQueries({ queryKey: ['agent-sessions'] })
   }, [queryClient, metadataQueryKey, transcriptQueryKey])
 
   const {
@@ -113,7 +116,7 @@ export function useGenericSessionDataSource(
   } = useTranscript({
     issueNumber: 0,
     sessionId,
-    runtimeSessionId: summary?.runtimeSessionId ?? '',
+    runtimeSessionId: requestedRuntimeSessionId ?? summary?.runtimeSessionId ?? '',
     initialTurns: initialTurns.length > 0 ? initialTurns : undefined,
     sessionQueryKeys: [metadataQueryKey, transcriptQueryKey],
     isRunning,
@@ -129,10 +132,9 @@ export function useGenericSessionDataSource(
   // carries an issue context ref, link to that issue; otherwise link to the
   // agent profile (and never fabricate issue/workflow links for sessions
   // without an issue binding).
-  const [searchParams] = useSearchParams()
   const fromActivity = searchParams.get('from') === 'activity'
   const runtimeLineage = summary?.runtimeSessionLineage ?? null
-  const viewedRuntimeSessionId = searchParams.get('rt') ?? summary?.runtimeSessionId ?? null
+  const viewedRuntimeSessionId = requestedRuntimeSessionId ?? summary?.runtimeSessionId ?? null
   const buildLineageTargetPath = runtimeLineage && runtimeLineage.length >= 2
     ? (runtimeId: string) => {
         const base = toProjectPath(`/agent-sessions/${encodeURIComponent(sessionId)}`)
@@ -162,14 +164,17 @@ export function useGenericSessionDataSource(
     : undefined
   const workflowContextLabel = workflowContextPath ? 'Workflow context' : undefined
 
-  const sendFollowup = useCallback((text: string) => {
-    genericFollowup.mutate({ sessionId, text })
+  const sendFollowup = useCallback(async (text: string) => {
+    await genericFollowup.mutateAsync({ sessionId, text })
   }, [genericFollowup, sessionId])
 
   const cancelSession = useCallback((options?: SessionCancelOptions) => {
     cancelGeneric.mutate(
       { sessionId, agentRef: summary?.agentId },
-      { onSettled: options?.onSettled },
+      {
+        onSuccess: (result) => options?.onSuccess?.({ state: result.state ?? 'not-cancellable' }),
+        onSettled: options?.onSettled,
+      },
     )
   }, [cancelGeneric, sessionId, summary?.agentId])
 
@@ -183,7 +188,7 @@ export function useGenericSessionDataSource(
     isError: summaryError,
     notFound: !sessionId || (!summary && !summaryLoading && !summaryError),
     sessionKey: sessionId,
-    runtimeSessionId: sessionId,
+    runtimeSessionId: viewedRuntimeSessionId ?? sessionId,
     meta,
     transcriptResponse: transcriptResponse ?? null,
     initialTurns,

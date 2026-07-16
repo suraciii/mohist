@@ -33,6 +33,7 @@ internal sealed class TranscriptAccumulator
 
     private string? _promptText;
     private string? _promptKind;
+    private string? _runtimeSessionId;
     private DateTime? _inputCreatedAt;
 
     public bool HasPending => _pending is not null || _accumulatedParts.Count > 0 || _promptText is not null;
@@ -91,6 +92,7 @@ internal sealed class TranscriptAccumulator
         _accumulatedParts.Clear();
         _promptText = null;
         _promptKind = null;
+        _runtimeSessionId = null;
         _inputCreatedAt = null;
     }
 
@@ -163,6 +165,7 @@ internal sealed class TranscriptAccumulator
         _promptKind = AgentSessionJsonHelper.GetStringProp(payload, "kind")
             ?? AgentSessionJsonHelper.GetStringProp(payload, "source")
             ?? "task";
+        _runtimeSessionId = row.AgentSessionId;
         _inputCreatedAt = row.CreatedAt;
     }
 
@@ -196,7 +199,8 @@ internal sealed class TranscriptAccumulator
             promptText,
             AgentSessionJsonHelper.NormalizePromptKind(promptKind),
             _inputCreatedAt ?? session.Status.CreatedAt,
-            now);
+            now,
+            RuntimeSessionId: _runtimeSessionId);
     }
 
     private static string? ToTextPartType(string eventType) => eventType switch

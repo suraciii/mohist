@@ -56,18 +56,18 @@ describe('getGenericSessionSummary (client fn)', () => {
 })
 
 describe('getGenericSessionTranscript (client fn)', () => {
-  it('builds the correct URL for a session transcript', async () => {
+  it('builds the correct URL for a selected runtime transcript', async () => {
     const urls: string[] = []
     server.use(
       http.get('*/api/projects/:projectId/agent-sessions/:sessionId/transcript', ({ request }) => {
-        urls.push(new URL(request.url).pathname)
+        urls.push(new URL(request.url).pathname + new URL(request.url).search)
         return HttpResponse.json({ success: true, data: { turns: [], partCount: 0 } })
       }),
     )
 
-    await getGenericSessionTranscript('proj-1', 'sess-abc')
+    await getGenericSessionTranscript('proj-1', 'sess-abc', 'runtime-old')
 
-    expect(urls).toEqual(['/api/projects/proj-1/agent-sessions/sess-abc/transcript'])
+    expect(urls).toEqual(['/api/projects/proj-1/agent-sessions/sess-abc/transcript?runtimeSessionId=runtime-old'])
   })
 })
 
@@ -182,12 +182,13 @@ describe('genericSessionSummaryQueryOptions', () => {
 
 /* ── genericSessionTranscriptQueryOptions ──────────────── */
 describe('genericSessionTranscriptQueryOptions', () => {
-  it('uses query key ["agent-session", projectId, sessionId, "transcript"]', () => {
-    expect(genericSessionTranscriptQueryOptions('proj-1', 'sess-abc').queryKey).toEqual([
+  it('includes the selected runtime in the transcript query key', () => {
+    expect(genericSessionTranscriptQueryOptions('proj-1', 'sess-abc', 'runtime-old').queryKey).toEqual([
       'agent-session',
       'proj-1',
       'sess-abc',
       'transcript',
+      'runtime-old',
     ])
   })
 

@@ -19,7 +19,8 @@ public sealed record AgentSessionTranscriptTurnUpsert(
     string PromptText,
     string PromptKind,
     DateTime StartedAt,
-    DateTime UpdatedAt);
+    DateTime UpdatedAt,
+    string? RuntimeSessionId = null);
 
 public sealed record AgentSessionTranscriptPartDelta(
     string Type,
@@ -62,6 +63,7 @@ public sealed class AgentSessionTranscriptStore : IAgentSessionTranscriptStore
                 turn = new AgentSessionTranscriptTurnRow
                 {
                     SessionId = transcript.Turn.SessionId,
+                    RuntimeSessionId = transcript.Turn.RuntimeSessionId,
                     Sequence = sequence,
                     PromptText = transcript.Turn.PromptText,
                     PromptKind = transcript.Turn.PromptKind,
@@ -75,6 +77,8 @@ public sealed class AgentSessionTranscriptStore : IAgentSessionTranscriptStore
             {
                 if (!string.IsNullOrWhiteSpace(transcript.Turn.PromptText))
                     turn.PromptText = transcript.Turn.PromptText;
+                if (!string.IsNullOrWhiteSpace(transcript.Turn.RuntimeSessionId))
+                    turn.RuntimeSessionId = transcript.Turn.RuntimeSessionId;
                 turn.PromptKind = transcript.Turn.PromptKind;
                 turn.UpdatedAt = transcript.Turn.UpdatedAt;
             }

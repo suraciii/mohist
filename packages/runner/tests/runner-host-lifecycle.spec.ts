@@ -148,6 +148,7 @@ describe("RunnerHost", () => {
       runnerId: "runner-test",
       workDir: "/tmp/mohist-runner-test",
       command: "compact",
+      operationId: "operation-1",
     })).toEqual({ ok: false, error: "unavailable" })
   })
 

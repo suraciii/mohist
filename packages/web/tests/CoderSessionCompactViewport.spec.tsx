@@ -154,7 +154,7 @@ function makeCancelableSessionData(): SessionDataSourceResult {
     statusKind: 'live',
     isRunning: true,
     followupIsPending: false,
-    sendFollowup: () => {},
+    sendFollowup: async () => {},
     cancel: { mutate: () => {}, isPending: false },
     contextWindowUsed: null,
     contextWindowSize: null,

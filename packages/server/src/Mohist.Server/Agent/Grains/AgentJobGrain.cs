@@ -669,9 +669,9 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             var close = new[] { new AgentSessionRuntimeEventInput("session.closed", payload) };
             if (string.IsNullOrWhiteSpace(runtimeSessionId))
             {
-                if (State.RunnerId is not null)
-                    return;
-                await grain.AppendSystemEventsAsync(new AppendAgentSessionSystemEventsCommand(close));
+                var session = await grain.GetAsync();
+                if (string.IsNullOrWhiteSpace(session?.AgentSessionId))
+                    await grain.AppendSystemEventsAsync(new AppendAgentSessionSystemEventsCommand(close));
                 return;
             }
             await grain.AppendRuntimeEventsAsync(

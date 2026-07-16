@@ -233,11 +233,12 @@ mo issue events <编号> [--limit <n>]
 mo issue diff <编号>
 mo issue commits <编号>
 mo issue sessions <编号>
-mo issue session get <编号> <名称>
+mo issue session show <编号> <名称>
 mo issue session transcript <编号> <名称>
 mo issue session compact <编号> <名称>
 mo issue session reset <编号> <名称>
 mo issue session followup <编号> <名称> [--text <文本>|--text-file <路径>]
+mo issue session cancel <编号> <名称>
 ```
 
 `compact` 使用当前执行后端的原生压缩并保持底层 Session 身份；`reset` 建立

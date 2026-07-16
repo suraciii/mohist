@@ -444,6 +444,7 @@ public class AgentJobGrainSpecs
                     [GenericAgentSessionMetadata.AgentId] = "agent-test",
                 })));
         await session.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand("runtime-a"));
+        _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(10));
 
         var job = JobGrain($"agent-job-reset-{Guid.NewGuid():N}");
         await job.SubmitAsync(new AgentJobInput("delayed failure", ProjectId: projectId, AgentSessionId: sessionId));
@@ -451,7 +452,6 @@ public class AgentJobGrainSpecs
         Assert.True(await job.RecordRuntimeSessionBindingAsync("runner-a", "work-a", sessionId, "runtime-a"));
         Assert.False(await job.RecordRuntimeSessionBindingAsync("runner-a", "work-a", sessionId, "runtime-b"));
 
-        _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(10));
         await session.ResetAsync(new ResetAgentSessionCommand("runtime-a", "runtime-b"));
 
         _fixture.TimeProvider.Advance(TimeSpan.FromSeconds(11));

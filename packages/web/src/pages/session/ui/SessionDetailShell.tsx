@@ -546,6 +546,7 @@ function SessionHeader({
 }) {
   const isTerminal = statusKind === 'completed' || statusKind === 'failed'
   const [cancelDialogOpen, setCancelDialogOpen] = useState(false)
+  const [cancelState, setCancelState] = useState<string | null>(null)
   const showCancelControl = cancel != null && isRunning
   const createdAt = meta?.createdAt ?? new Date().toISOString()
   const completedAt = meta?.completedAt ?? null
@@ -698,10 +699,20 @@ function SessionHeader({
           tone="destructive"
           loading={cancel.isPending}
           onConfirm={() => {
-            cancel.mutate({ onSettled: () => setCancelDialogOpen(false) })
+            cancel.mutate({
+              onSuccess: (result) => {
+                setCancelState(result.state)
+                setCancelDialogOpen(false)
+              },
+            })
           }}
           data-testid="session-cancel-alert"
         />
+      )}
+      {cancelState && (
+        <div className="px-4 pt-2 text-xs text-muted-foreground" role="status" data-testid="session-cancel-result">
+          Cancellation result: {cancelState}
+        </div>
       )}
 
     </div>
