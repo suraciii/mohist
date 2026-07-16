@@ -2,6 +2,7 @@ using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Sessions.Services;
 using Mohist.Server.SpecTests.Support;
+using Orleans.Core.Internal;
 using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Sessions;
@@ -162,6 +163,25 @@ public sealed class AgentSessionRecoveryGrainSpecs : IClassFixture<AgentSessionG
 
         await grain.CompleteCompactAsync(new CompleteCompactAgentSessionCommand(compact.OperationId, Summary: "summary"));
         Assert.Equal(1, _fixture.StateStore.Events.Count(e => e.Value is AgentSessionContextCompacted));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
+    public async Task Compact_ReservationSurvivesReactivationAndCompletesOnlyOnce()
+    {
+        var (grain, sessionId) = await CreateAttachedSessionAsync("runtime-before-compact");
+        var reserved = await grain.PrepareSessionCommandAsync(SessionCommandKind.Compact);
+
+        var management = grain.AsReference<IGrainManagementExtension>();
+        await management.DeactivateOnIdle();
+
+        var reactivated = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
+        var retry = await reactivated.PrepareSessionCommandAsync(SessionCommandKind.Compact);
+        Assert.Equal(reserved.OperationId, retry.OperationId);
+
+        await reactivated.CompleteCompactAsync(new CompleteCompactAgentSessionCommand(retry.OperationId, Summary: "summary"));
+        Assert.Single(_fixture.StateStore.Events, e => e.Value is AgentSessionContextCompacted);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
