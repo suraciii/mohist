@@ -278,7 +278,89 @@ public class InboxProjectionHandlerRealtimeHintSpecs
             Assert.False(string.IsNullOrWhiteSpace(projectId));
             Assert.True(extensions.TryGetValue(EventCatalog.Lineage.Issue, out var issue));
             Assert.False(string.IsNullOrWhiteSpace(issue));
+            ProducerConformance.Assert(
+                EventProducerFamily.InboxItemPersisted,
+                extensions,
+                new(ProjectId: projectId, Issue: issue));
         }
+    }
+
+    [Fact]
+    public async Task Hint_InheritsCanonicalOptionalLineageFromSourceEnvelope()
+    {
+        await using var database = InboxProjectionTestSupport.CreateDatabase();
+        await InboxProjectionTestSupport.SeedWorkflowRunAsync(database,
+            workflowRunId: "wf_inherited_lineage",
+            projectId: "proj_inherited",
+            issueNumber: 42);
+        await InboxProjectionTestSupport.SeedIssueAsync(database,
+            projectId: "proj_inherited",
+            issueNumber: 42,
+            title: "Inherited lineage");
+
+        var publisher = new CapturingEventPublisher();
+        var handler = InboxProjectionTestSupport.CreateHandler(database, publisher);
+        var sourceExtensions = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            [EventCatalog.Lineage.ProjectId] = "proj_inherited",
+            [EventCatalog.Lineage.Issue] = "42",
+            [EventCatalog.Lineage.Epic] = "7",
+            [EventCatalog.Lineage.WorkflowRunId] = "wf_inherited_lineage",
+            [EventCatalog.Lineage.Stage] = "review",
+        };
+
+        await handler.HandleAsync(InboxProjectionTestSupport.BuildWorkflowEvent(
+            EventCatalog.ReverseDns.StageApprovalRequested,
+            "wf_inherited_lineage",
+            "evt-inherited-lineage",
+            sourceExtensions), CancellationToken.None);
+
+        var hint = Assert.Single(publisher.Published);
+        var extensions = Assert.IsAssignableFrom<IReadOnlyDictionary<string, string>>(hint.Extensions);
+        ProducerConformance.Assert(
+            EventProducerFamily.InboxItemPersisted,
+            extensions,
+            new(
+                ProjectId: "proj_inherited",
+                Issue: "42",
+                Epic: "7",
+                WorkflowRunId: "wf_inherited_lineage",
+                Stage: "review"));
+    }
+
+    [Fact]
+    public async Task Hint_OmitsEmptyInheritedLineage()
+    {
+        await using var database = InboxProjectionTestSupport.CreateDatabase();
+        await InboxProjectionTestSupport.SeedWorkflowRunAsync(database,
+            workflowRunId: "wf_empty_inherited",
+            projectId: "proj_empty_inherited",
+            issueNumber: 42);
+        await InboxProjectionTestSupport.SeedIssueAsync(database,
+            projectId: "proj_empty_inherited",
+            issueNumber: 42,
+            title: "Empty inherited lineage");
+
+        var publisher = new CapturingEventPublisher();
+        var handler = InboxProjectionTestSupport.CreateHandler(database, publisher);
+        var sourceExtensions = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            [EventCatalog.Lineage.Epic] = " ",
+            [EventCatalog.Lineage.WorkflowRunId] = "",
+            [EventCatalog.Lineage.Stage] = "\t",
+        };
+
+        await handler.HandleAsync(InboxProjectionTestSupport.BuildWorkflowEvent(
+            EventCatalog.ReverseDns.WorkflowRunFailed,
+            "wf_empty_inherited",
+            "evt-empty-inherited",
+            sourceExtensions), CancellationToken.None);
+
+        var hint = Assert.Single(publisher.Published);
+        var extensions = Assert.IsAssignableFrom<IReadOnlyDictionary<string, string>>(hint.Extensions);
+        Assert.False(extensions.ContainsKey(EventCatalog.Lineage.Epic));
+        Assert.False(extensions.ContainsKey(EventCatalog.Lineage.WorkflowRunId));
+        Assert.False(extensions.ContainsKey(EventCatalog.Lineage.Stage));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]

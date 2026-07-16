@@ -31,8 +31,8 @@ namespace Mohist.Server.SpecTests.Specs.Events;
 /// agent-origin sessions additionally stamp <c>agentid</c>;
 /// workflow/issue-origin sessions stamp <c>issue</c>, <c>workflowrunid</c>,
 /// and <c>stage</c>; absent affiliations are omitted, never an empty
-/// value (D6); and every emitted envelope satisfies the catalog's
-/// declared required lineage attributes via the conformance helper.
+/// value (D6); and every emitted envelope satisfies the AgentSession
+/// producer-family rule.
 /// </summary>
 [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
 [Trait(Traits.Sut.Name, Traits.Sut.System)]
@@ -151,6 +151,10 @@ public class AgentSessionTransactionalEventAppendSpecs : IAsyncLifetime
         {
             Assert.Equal("/mohist/agent-session/agent_txn_identity", entry.Envelope.Source.ToString());
             Assert.Equal("agent_txn_identity", entry.Envelope.Subject);
+            ProducerConformance.Assert(
+                EventProducerFamily.AgentSession,
+                entry.Envelope.Extensions,
+                new(ProjectId: "proj_default_session", SessionId: "agent_txn_identity"));
         }
     }
 
@@ -179,6 +183,10 @@ public class AgentSessionTransactionalEventAppendSpecs : IAsyncLifetime
             Assert.Equal("proj_agent_launch", entry.Envelope.Extensions["projectid"]);
             Assert.Equal("agent_txn_agent_launch", entry.Envelope.Extensions["sessionid"]);
             Assert.Equal("agent_lineage_1", entry.Envelope.Extensions["agentid"]);
+            ProducerConformance.Assert(
+                EventProducerFamily.AgentSession,
+                entry.Envelope.Extensions,
+                new(ProjectId: "proj_agent_launch", SessionId: "agent_txn_agent_launch", AgentId: "agent_lineage_1"));
         }
     }
 
@@ -228,7 +236,45 @@ public class AgentSessionTransactionalEventAppendSpecs : IAsyncLifetime
             Assert.Equal("wr_lineage_42", entry.Envelope.Extensions["workflowrunid"]);
             Assert.Equal("build", entry.Envelope.Extensions["stage"]);
             Assert.False(entry.Envelope.Extensions.ContainsKey("agentid"));
+            ProducerConformance.Assert(
+                EventProducerFamily.AgentSession,
+                entry.Envelope.Extensions,
+                new(
+                    ProjectId: "proj_workflow_origin",
+                    Issue: "42",
+                    WorkflowRunId: "wr_lineage_42",
+                    SessionId: "agent_txn_workflow",
+                    Stage: "build",
+                    WorkflowOrigin: true));
         }
+    }
+
+    [Fact]
+    public async Task SaveAsync_WorkflowOriginSession_StampsEpicFromLocalMetadata()
+    {
+        var store = new AgentSessionStore(_dbFactory, _eventStore, _grainFactory, NullLogger<AgentSessionStore>.Instance);
+        var session = BuildSession("agent_txn_workflow_epic", BuildWorkflowOriginLabels(
+            projectId: "proj_workflow_origin",
+            workflowRunId: "wr_lineage_42",
+            issueNumber: 42,
+            epicNumber: 7,
+            stage: "build"));
+
+        await store.SaveAsync(session.Id, session, [new AgentSessionRuntimeBound("acp-1", null)]);
+
+        var stored = Assert.Single(await _eventStore.ListAgentSessionEventsAsync(session.Id));
+        Assert.Equal("7", stored.Envelope.Extensions[EventCatalog.Lineage.Epic]);
+        ProducerConformance.Assert(
+            EventProducerFamily.AgentSession,
+            stored.Envelope.Extensions,
+            new(
+                ProjectId: "proj_workflow_origin",
+                Issue: "42",
+                Epic: "7",
+                WorkflowRunId: "wr_lineage_42",
+                SessionId: session.Id,
+                Stage: "build",
+                WorkflowOrigin: true));
     }
 
     [Fact]
@@ -250,6 +296,15 @@ public class AgentSessionTransactionalEventAppendSpecs : IAsyncLifetime
         Assert.False(stored.Envelope.Extensions.ContainsKey("issue"));
         Assert.Equal("wr_no_issue", stored.Envelope.Extensions["workflowrunid"]);
         Assert.Equal("build", stored.Envelope.Extensions["stage"]);
+        ProducerConformance.Assert(
+            EventProducerFamily.AgentSession,
+            stored.Envelope.Extensions,
+            new(
+                ProjectId: "proj_workflow_no_issue",
+                WorkflowRunId: "wr_no_issue",
+                SessionId: "agent_txn_workflow_no_issue",
+                Stage: "build",
+                WorkflowOrigin: true));
     }
 
     [Fact]
@@ -382,12 +437,14 @@ public class AgentSessionTransactionalEventAppendSpecs : IAsyncLifetime
         string projectId,
         string workflowRunId,
         int? issueNumber,
-        string? stage) =>
+        string? stage,
+        int? epicNumber = null) =>
         WorkflowAgentSessionMetadata.Metadata(new WorkflowAgentSessionContext(
             ProjectId: projectId,
             WorkflowRunId: workflowRunId,
             SessionName: "sess-name",
             IssueNumber: issueNumber,
+            EpicNumber: epicNumber,
             Stage: stage));
 
     private sealed class Factory : IDbContextFactory<MohistDbContext>

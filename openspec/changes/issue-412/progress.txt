@@ -502,3 +502,37 @@ ArchTests pass (**27**), and the server build has zero errors. A full SpecTests 
 - Server UnitTests: **1454 passed**; Server SpecTests: **2743 passed**; Server ArchTests: **27 passed**; CLI: **911 passed**.
 - Web typecheck and suite: **4678 passed**; Runner typecheck and suite: **1028 passed**.
 - Full `npm test` passed, including FSD and test-boundary checks.
+
+## T-007 implementation follow-up
+
+- The current `EventCatalog` is type-only: no required-lineage matrix, conformance registry, or
+  catalog-only bypass remains. Added `EventProducerFamily`, `ProducerLineageContext`, and
+  `ProducerConformance` in `Infrastructure/Events/ProducerConformance.cs`. The guard enforces
+  family-required canonical keys, exact local optional context, structural Workflow stage
+  presence/absence as supplied by the producer shape, empty-value omission, and rejection of
+  `issueid`/`epicid`/`issueno`/`epicno`.
+- Workflow, Issue, and AgentSession transactional append specs now drive every serializable event
+  variant through the real store path and run the producer-family guard on the persisted envelope.
+  Epic lifecycle and start-failure specs do the same for Epic append paths. Runner remains a
+  reserved catalog type with no producer, so it has guard coverage but no fake producer path.
+- Workflow-origin AgentSession metadata now accepts and stores an optional canonical
+  `mohist.io/epic-number` label. `AgentSessionLineage` projects it to `epic`; direct agent-launch
+  issue/epic context remains metadata-only and is intentionally not promoted to workflow lineage.
+  Runner workflow-session open accepts the optional EpicNumber and passes it into that metadata.
+- Inbox synthesis now uses `InboxLineage.BuildExtensions`: `projectid`/`issue` come from the
+  committed draft, while `epic`/`workflowrunid`/`stage` are copied only when present and non-empty
+  on the source envelope. It never queries another aggregate for inherited lineage.
+- `WorkflowRunLineage.CarriesStage` exposes the structural stage decision separately from
+  `StageOf`, allowing append specs to verify all stage-bearing variants and the artifact/run
+  variants that must omit stage.
+
+### T-007 verification
+
+- Pre-edit focused suites: **102 UnitTests** and **46 SpecTests** passed.
+- Focused post-edit producer/conformance suites: **27 UnitTests** and **55 SpecTests** passed.
+- Server build: clean with zero warnings/errors.
+- Full `npm test` rerun: CLI **911**, Server Unit **1465**, Server Arch **27**, Server Spec **2750**,
+  Web **4678**, Runner **1028**; all passed. The first full run had the known transient
+  `IssueRebaseApi_QueuesWorkflowTask` conflict; the isolated retry and complete rerun passed.
+- Final post-verification normalization of optional workflow Issue/Epic numbers (non-positive
+  values omitted) passed the server build and **17** focused WorkflowSession/AgentSession specs.

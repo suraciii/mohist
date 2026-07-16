@@ -28,6 +28,10 @@ public class EpicEventLineageSpecs
                 entry.Envelope.Source.ToString() == $"/mohist/projects/{ProjectId}/epics/{dto.Number}");
             Assert.Equal(ProjectId, created.Envelope.Extensions[EventCatalog.Lineage.ProjectId]);
             Assert.Equal(dto.Number.ToString(), created.Envelope.Extensions[EventCatalog.Lineage.Epic]);
+            ProducerConformance.Assert(
+                EventProducerFamily.Epic,
+                created.Envelope.Extensions,
+                new(ProjectId: ProjectId, Epic: dto.Number.ToString()));
         }
     }
 
@@ -63,6 +67,47 @@ public class EpicEventLineageSpecs
                 entry.Envelope.Type == EventCatalog.ReverseDns.EpicStatusChanged);
             Assert.Equal(ProjectId, statusChanged.Envelope.Extensions[EventCatalog.Lineage.ProjectId]);
             Assert.Equal(EpicNumber.ToString(), statusChanged.Envelope.Extensions[EventCatalog.Lineage.Epic]);
+            ProducerConformance.Assert(
+                EventProducerFamily.Epic,
+                statusChanged.Envelope.Extensions,
+                new(ProjectId: ProjectId, Epic: EpicNumber.ToString()));
+        }
+    }
+
+    [Fact]
+    public async Task LifecycleCommands_StampEveryNormalEpicEventVariantThroughAppendPath()
+    {
+        var (database, eventStore) = CreateDatabaseWithRecordingEventStore();
+        await using (database)
+        {
+            var grain = CreateGrain(database.Factory, $"{ProjectId}:{EpicNumber}", eventStore, new FakeTimeProvider(FixedTime));
+
+            await grain.CreateAsync(ProjectId, EpicNumber, "Auth epic", "description", "p1");
+            await grain.UpdateAsync("Updated epic", null, "p2");
+            await grain.StartAsync();
+            await grain.PauseAsync("hold");
+
+            await SeedEpicAsync(database, epicNumber: 2, status: "running");
+            var terminalGrain = CreateGrain(database.Factory, $"{ProjectId}:2", eventStore, new FakeTimeProvider(FixedTime));
+            await terminalGrain.SetStatusAsync("closed");
+            await terminalGrain.ReopenAsync();
+
+            Assert.Contains(eventStore.Appended, entry => entry.Envelope.Type == EventCatalog.ReverseDns.EpicPriorityChanged);
+            Assert.Contains(eventStore.Appended, entry => entry.Envelope.Type == EventCatalog.ReverseDns.EpicUpdated);
+            Assert.Contains(eventStore.Appended, entry => entry.Envelope.Type == EventCatalog.ReverseDns.EpicStatusChanged);
+            Assert.Contains(eventStore.Appended, entry => entry.Envelope.Type == EventCatalog.ReverseDns.EpicClosed);
+            Assert.Contains(eventStore.Appended, entry => entry.Envelope.Type == EventCatalog.ReverseDns.EpicReopened);
+
+            foreach (var entry in eventStore.Appended)
+            {
+                var epicNumber = entry.Envelope.Source.ToString().EndsWith("/2", StringComparison.Ordinal)
+                    ? "2"
+                    : "1";
+                ProducerConformance.Assert(
+                    EventProducerFamily.Epic,
+                    entry.Envelope.Extensions,
+                    new(ProjectId: ProjectId, Epic: epicNumber));
+            }
         }
     }
 

@@ -122,6 +122,42 @@ public class IssueTransactionalEventAppendSpecs : IAsyncLifetime
     }
 
     [Fact]
+    public async Task SaveAsync_AllIssueEventVariants_SatisfyIssueProducerFamily()
+    {
+        var store = CreateStore(_eventStore);
+        var issue = BuildIssue(8, epicNumber: 7);
+        IssueEvent[] events =
+        [
+            new IssueCreated("Created", "p2", new Dictionary<string, string>(), null, null),
+            new IssueLabelsChanged(new Dictionary<string, string>(), new Dictionary<string, string>()),
+            new IssuePriorityChanged("p2", "p1"),
+            new IssueDraftChanged(false, true),
+            new IssuePrerequisiteAdded(9),
+            new IssuePrerequisiteRemoved(9),
+            new IssueWorkflowProfileChanged(null),
+            new IssueEpicChanged(6, 7),
+            new IssueWorkStarted("workflow_8"),
+            new IssueCompleted("workflow_8"),
+            new IssueCancelled(null),
+            new IssueArchived(),
+            new IssueUnarchived(),
+            new IssueReopened(),
+        ];
+
+        await store.SaveAsync(Key(8), issue, events);
+
+        var stored = await _eventStore.ListIssueEventsAsync(ProjectId, 8);
+        Assert.Equal(events.Length, stored.Count);
+        for (var i = 0; i < events.Length; i++)
+        {
+            ProducerConformance.Assert(
+                EventProducerFamily.Issue,
+                stored[i].Envelope.Extensions,
+                new(ProjectId: ProjectId, Issue: "8", Epic: "7"));
+        }
+    }
+
+    [Fact]
     public async Task SaveAsync_AffiliationChangePersistsIssueStateAndOwnEventTogether()
     {
         var store = CreateStore(_eventStore);
@@ -152,6 +188,21 @@ public class IssueTransactionalEventAppendSpecs : IAsyncLifetime
         Assert.Equal(ProjectId, extensions[EventCatalog.Lineage.ProjectId]);
         Assert.Equal("5", extensions[EventCatalog.Lineage.Issue]);
         Assert.False(extensions.ContainsKey(EventCatalog.Lineage.Epic));
+    }
+
+    [Fact]
+    public async Task SaveAsync_UnaffiliatedIssue_SatisfiesIssueProducerFamilyWithoutEpic()
+    {
+        var store = CreateStore(_eventStore);
+        var issue = BuildIssue(9);
+
+        await store.SaveAsync(Key(9), issue, [new IssueArchived()]);
+
+        var stored = Assert.Single(await _eventStore.ListIssueEventsAsync(ProjectId, 9));
+        ProducerConformance.Assert(
+            EventProducerFamily.Issue,
+            stored.Envelope.Extensions,
+            new(ProjectId: ProjectId, Issue: "9"));
     }
 
     [Fact]

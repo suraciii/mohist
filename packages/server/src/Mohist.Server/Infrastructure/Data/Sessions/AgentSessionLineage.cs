@@ -54,6 +54,10 @@ public static class AgentSessionLineage
             {
                 extensions[EventCatalog.Lineage.Issue] = issueNumber;
             }
+            if (TryGetNonEmpty(labels!, AgentSessionQueryMetadataKeys.EpicNumber, out var epicNumber))
+            {
+                extensions[EventCatalog.Lineage.Epic] = epicNumber;
+            }
             if (TryGetNonEmpty(labels!, AgentSessionQueryMetadataKeys.WorkflowRunId, out var workflowRunId))
             {
                 extensions[EventCatalog.Lineage.WorkflowRunId] = workflowRunId;

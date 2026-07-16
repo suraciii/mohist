@@ -24,6 +24,7 @@ public class AgentSessionLineageTests
     private const string WorkflowRunId = "wr_lineage_1";
     private const string Stage = "build";
     private const int IssueNumber = 42;
+    private const int EpicNumber = 7;
     private static readonly DateTime FixedTime = new(2026, 7, 15, 0, 0, 0, DateTimeKind.Utc);
 
     [Fact]
@@ -84,6 +85,16 @@ public class AgentSessionLineageTests
         var extensions = AgentSessionLineage.BuildExtensions(session);
 
         Assert.False(extensions.ContainsKey("agentid"));
+    }
+
+    [Fact]
+    public void BuildExtensions_WorkflowOriginSession_StampsEpicWhenLabeled()
+    {
+        var session = BuildWorkflowOriginSession(epicNumber: EpicNumber);
+
+        var extensions = AgentSessionLineage.BuildExtensions(session);
+
+        Assert.Equal(EpicNumber.ToString(), extensions[EventCatalog.Lineage.Epic]);
     }
 
     [Fact]
@@ -209,13 +220,14 @@ public class AgentSessionLineageTests
         return session;
     }
 
-    private static AgentSession BuildWorkflowOriginSession(bool includeIssueNumber = true)
+    private static AgentSession BuildWorkflowOriginSession(bool includeIssueNumber = true, int? epicNumber = null)
     {
         var labels = new WorkflowAgentSessionContext(
             ProjectId: ProjectId,
             WorkflowRunId: WorkflowRunId,
             SessionName: "sess-name",
             IssueNumber: includeIssueNumber ? IssueNumber : null,
+            EpicNumber: epicNumber,
             Stage: Stage);
         var session = new AgentSession
         {

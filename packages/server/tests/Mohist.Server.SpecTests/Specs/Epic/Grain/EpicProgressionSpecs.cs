@@ -345,8 +345,12 @@ public class EpicProgressionSpecs
         var resumed = await grain.ResumeAsync();
 
         Assert.Equal("running", resumed.Status);
-        Assert.Contains(eventStore.Appended,
+        var failure = Assert.Single(eventStore.Appended,
             evt => evt.Envelope.Type == EventCatalog.ReverseDns.EpicStartAttemptFailed);
+        ProducerConformance.Assert(
+            EventProducerFamily.Epic,
+            failure.Envelope.Extensions,
+            new(ProjectId: "project_1", Epic: "1"));
         await using var verify = database.CreateDbContext();
         var stored = await verify.Epics.AsNoTracking().SingleAsync();
         Assert.Equal("running", stored.Status);

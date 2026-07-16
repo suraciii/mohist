@@ -485,7 +485,8 @@ public static class RunnerRoutes
             req.WorkId,
             req.WorkType,
             req.Stage,
-            req.Title);
+            req.Title,
+            EpicNumber: req.EpicNumber is > 0 ? req.EpicNumber : null);
 
     private static RunnerAgentSessionResponse ToRunnerAgentSession(string projectId, string workflowRunId, string sessionName, AgentSessionInfo session) =>
         new(
@@ -611,7 +612,8 @@ public record AgentSessionOpenRequest(
     string? Stage = null,
     string? Title = null,
     int? IssueNumber = null,
-    string? WorkDir = null);
+    string? WorkDir = null,
+    int? EpicNumber = null);
 /// <summary>
 /// Body for the runner's <c>POST /api/runner/{runnerId}/agent-sessions/{projectId}/{sessionId}/open</c>
 /// call. Generic (non-workflow) AgentSessions are identified by

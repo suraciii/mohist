@@ -147,4 +147,21 @@ public static class WorkflowRunLineage
             _ => null,
         };
     }
+
+    public static bool CarriesStage(WorkflowEvent evt) => WorkflowEventSerializer.Unwrap(evt) switch
+    {
+        StageStarted or
+        StageCompleted or
+        StageFailed or
+        StageApprovalRequested or
+        StageApprovalResolved or
+        FeedbackRequested or
+        TaskStarted or
+        TaskCompleted or
+        TaskFailed or
+        CheckPassed or
+        CheckFailed or
+        CheckPending => true,
+        _ => false,
+    };
 }

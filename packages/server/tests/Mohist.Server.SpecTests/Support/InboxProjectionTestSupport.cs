@@ -58,13 +58,18 @@ internal static class InboxProjectionTestSupport
                 [EventCatalog.Lineage.Issue] = issueNumber.ToString(),
             });
 
-    public static CloudEvent BuildWorkflowEvent(string type, string workflowRunId, string eventId) =>
+    public static CloudEvent BuildWorkflowEvent(
+        string type,
+        string workflowRunId,
+        string eventId,
+        IReadOnlyDictionary<string, string>? extensions = null) =>
         new(
             id: eventId,
             source: new Uri($"/mohist/workflow-runs/{workflowRunId}", UriKind.Relative),
             type: type,
             time: TestTime.UtcNow,
-            data: null);
+            data: null,
+            extensions: extensions);
 
     public static async Task<List<InboxItemView>> GetInboxAsync(TestDatabase database, string projectId)
     {

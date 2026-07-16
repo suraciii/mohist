@@ -27,8 +27,7 @@ namespace Mohist.Server.SpecTests.Specs.Events;
 /// run's metadata annotations carry them; stage,
 /// task, check, and feedback-requested events additionally stamp
 /// <c>stage</c> from structural inspection of the union variant (D2);
-/// every emitted envelope satisfies the catalog's declared required
-/// lineage attributes via the conformance helper.
+/// every emitted envelope satisfies the WorkflowRun producer-family rule.
 /// </summary>
 [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
 [Trait(Traits.Sut.Name, Traits.Sut.System)]
@@ -193,16 +192,25 @@ public class TransactionalEventAppendSpecs : IAsyncLifetime
         var store = new WorkflowRunStore(_dbFactory, _eventStore, _grainFactory, NullLogger<WorkflowRunStore>.Instance);
         var run = BuildRun("wr_txn_epic", includeAnnotations: true, epicNumber: 1);
 
-        await store.SaveAsync(run, [
+        WorkflowEvent[] events = [
             new WorkflowRunStarted(),
             new StageStarted("build"),
             new TaskStarted("build", "task_1", "worker_1"),
             new CheckPassed("build", "lint", null),
-        ]);
+        ];
+        await store.SaveAsync(run, events);
 
         var stored = await _eventStore.ListAsync("wr_txn_epic");
         Assert.Equal(4, stored.Count);
-        Assert.All(stored, entry => Assert.Equal("1", entry.Envelope.Extensions["epic"]));
+        for (var i = 0; i < events.Length; i++)
+        {
+            var entry = stored[i];
+            Assert.Equal("1", entry.Envelope.Extensions["epic"]);
+            ProducerConformance.Assert(
+                EventProducerFamily.WorkflowRun,
+                entry.Envelope.Extensions,
+                WorkflowContext(run, events[i]));
+        }
     }
 
     [Fact]
@@ -236,7 +244,11 @@ public class TransactionalEventAppendSpecs : IAsyncLifetime
         Assert.True(stored.Envelope.Extensions.TryGetValue("workflowrunid", out var stampedRunId));
         Assert.Equal("wr_txn_unbound", stampedRunId);
         Assert.False(stored.Envelope.Extensions.ContainsKey("issue"));
-        Assert.False(stored.Envelope.Extensions.ContainsKey("issue"));
+        Assert.False(stored.Envelope.Extensions.ContainsKey("epic"));
+        ProducerConformance.Assert(
+            EventProducerFamily.WorkflowRun,
+            stored.Envelope.Extensions,
+            new(ProjectId: ProjectId, WorkflowRunId: "wr_txn_unbound"));
     }
 
     [Fact]
@@ -251,7 +263,7 @@ public class TransactionalEventAppendSpecs : IAsyncLifetime
         var store = new WorkflowRunStore(_dbFactory, _eventStore, _grainFactory, NullLogger<WorkflowRunStore>.Instance);
         var run = BuildRun("wr_txn_stage", includeAnnotations: true);
 
-        await store.SaveAsync(run, [
+        WorkflowEvent[] events = [
             new StageStarted("build"),
             new StageCompleted("build"),
             new StageFailed("review", "boom"),
@@ -264,16 +276,22 @@ public class TransactionalEventAppendSpecs : IAsyncLifetime
             new CheckPassed("review", "lint", null),
             new CheckFailed("review", "lint", "boom"),
             new CheckPending("review", "lint", null),
-        ]);
+        ];
+        await store.SaveAsync(run, events);
 
         var stored = await _eventStore.ListAsync("wr_txn_stage");
         Assert.Equal(12, stored.Count);
-        foreach (var entry in stored)
+        for (var i = 0; i < events.Length; i++)
         {
+            var entry = stored[i];
             Assert.True(entry.Envelope.Extensions.TryGetValue("workflowrunid", out _));
             Assert.True(entry.Envelope.Extensions.TryGetValue("projectid", out _));
             Assert.True(entry.Envelope.Extensions.TryGetValue("stage", out var stampedStage));
             Assert.False(string.IsNullOrEmpty(stampedStage));
+            ProducerConformance.Assert(
+                EventProducerFamily.WorkflowRun,
+                entry.Envelope.Extensions,
+                WorkflowContext(run, events[i]));
         }
 
         var byType = stored.ToDictionary(s => s.Envelope.Type);
@@ -309,6 +327,10 @@ public class TransactionalEventAppendSpecs : IAsyncLifetime
         Assert.True(stored.Envelope.Extensions.TryGetValue("projectid", out _));
         Assert.True(stored.Envelope.Extensions.TryGetValue("workflowrunid", out _));
         Assert.False(stored.Envelope.Extensions.ContainsKey("stage"));
+        ProducerConformance.Assert(
+            EventProducerFamily.WorkflowRun,
+            stored.Envelope.Extensions,
+            WorkflowContext(run, new WorkflowArtifactRecorded("wr_txn_artifact", "task_a", "logs/build.log", FixedTime)));
     }
 
     [Fact]
@@ -341,21 +363,68 @@ public class TransactionalEventAppendSpecs : IAsyncLifetime
         var store = new WorkflowRunStore(_dbFactory, _eventStore, _grainFactory, NullLogger<WorkflowRunStore>.Instance);
         var run = BuildRun("wr_txn_conformance", includeAnnotations: true);
 
-        await store.SaveAsync(run, [
+        WorkflowEvent[] events = [
             new WorkflowRunStarted(),
             new StageStarted("build"),
             new TaskStarted("build", "task_a", "worker_a"),
             new CheckPassed("review", "lint", null),
             new FeedbackRequested("code-review", "fb_1", null),
             new WorkflowArtifactRecorded("wr_txn_conformance", "task_a", "logs.txt", FixedTime),
-        ]);
+        ];
+        await store.SaveAsync(run, events);
 
         var stored = await _eventStore.ListAsync("wr_txn_conformance");
         Assert.Equal(6, stored.Count);
-        foreach (var entry in stored)
+        for (var i = 0; i < events.Length; i++)
         {
+            var entry = stored[i];
             Assert.Equal("wr_txn_conformance", entry.Envelope.Extensions[EventCatalog.Lineage.WorkflowRunId]);
             Assert.Equal("proj_txn", entry.Envelope.Extensions[EventCatalog.Lineage.ProjectId]);
+            ProducerConformance.Assert(
+                EventProducerFamily.WorkflowRun,
+                entry.Envelope.Extensions,
+                WorkflowContext(run, events[i]));
+        }
+    }
+
+    [Fact]
+    public async Task SaveAsync_AllWorkflowEventVariants_SatisfyWorkflowProducerFamily()
+    {
+        var store = new WorkflowRunStore(_dbFactory, _eventStore, _grainFactory, NullLogger<WorkflowRunStore>.Instance);
+        var run = BuildRun("wr_txn_all_variants", includeAnnotations: true, epicNumber: 7);
+        WorkflowEvent[] events =
+        [
+            new WorkflowRunStarted(),
+            new WorkflowRunResumed(),
+            new WorkflowRunPaused(),
+            new WorkflowRunStopped(),
+            new WorkflowRunCompleted(),
+            new WorkflowRunFailed("failed"),
+            new StageStarted("build"),
+            new StageCompleted("build"),
+            new StageFailed("build", "failed"),
+            new StageApprovalRequested("review"),
+            new StageApprovalResolved("review", ApprovalResult.Approved),
+            new FeedbackRequested("review", "feedback_1"),
+            new TaskStarted("build", "task_1", "worker_1"),
+            new TaskCompleted("build", "task_1"),
+            new TaskFailed("build", "task_1", "failed"),
+            new CheckPassed("build", "lint", null),
+            new CheckFailed("build", "lint", "failed"),
+            new CheckPending("build", "lint", null),
+            new WorkflowArtifactRecorded("wr_txn_all_variants", "task_1", "artifact.txt", FixedTime),
+        ];
+
+        await store.SaveAsync(run, events);
+
+        var stored = await _eventStore.ListAsync(run.Id);
+        Assert.Equal(events.Length, stored.Count);
+        for (var i = 0; i < events.Length; i++)
+        {
+            ProducerConformance.Assert(
+                EventProducerFamily.WorkflowRun,
+                stored[i].Envelope.Extensions,
+                WorkflowContext(run, events[i]));
         }
     }
 
@@ -366,6 +435,7 @@ public class TransactionalEventAppendSpecs : IAsyncLifetime
         // whether a `stage` stamp is set. Pin that the helper returns
         // the stage for Stage*/StageApproval*/Feedback/Task*/Check* and
         // null for the run-lifecycle variants and WorkflowArtifactRecorded.
+        Assert.True(WorkflowRunLineage.CarriesStage(new StageStarted("build")));
         Assert.Equal("build", WorkflowRunLineage.StageOf(new StageStarted("build")));
         Assert.Equal("build", WorkflowRunLineage.StageOf(new StageCompleted("build")));
         Assert.Equal("review", WorkflowRunLineage.StageOf(new StageFailed("review", "boom")));
@@ -426,6 +496,18 @@ public class TransactionalEventAppendSpecs : IAsyncLifetime
                 Annotations: annotations),
             Stages = [],
         };
+    }
+
+    private static ProducerLineageContext WorkflowContext(WorkflowRun run, WorkflowEvent evt)
+    {
+        var annotations = run.Metadata.Annotations;
+        return new ProducerLineageContext(
+            ProjectId: annotations?.GetValueOrDefault("projectId"),
+            Issue: annotations?.GetValueOrDefault("issueNumber"),
+            Epic: annotations?.GetValueOrDefault("epicNumber"),
+            WorkflowRunId: run.Id,
+            Stage: WorkflowRunLineage.StageOf(evt),
+            StageRequired: WorkflowRunLineage.CarriesStage(evt));
     }
 
     private sealed class Factory : IDbContextFactory<MohistDbContext>

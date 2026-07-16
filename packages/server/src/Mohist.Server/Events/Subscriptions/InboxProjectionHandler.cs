@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Mohist.Server.Infrastructure.Data;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Data.Inbox;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Orleans;
@@ -155,11 +156,7 @@ public sealed class InboxProjectionHandler : ICloudEventHandler
             Kind: kind,
             IssueNumber: draft.IssueNumber);
 
-        var extensions = new Dictionary<string, string>(StringComparer.Ordinal)
-        {
-            [EventCatalog.Lineage.ProjectId] = draft.ProjectId,
-            [EventCatalog.Lineage.Issue] = draft.IssueNumber.ToString(),
-        };
+        var extensions = InboxLineage.BuildExtensions(draft, evt.Extensions);
 
         var envelope = new CloudEvent(
             id: Guid.NewGuid().ToString(),
