@@ -20,6 +20,9 @@ Autonomous work pipeline. Advance, schedule, dispatch, approve, repair, resume. 
 | Skill·Explore | refine vague needs into bounded issues | — |
 
 Epic is Issue granularity (organizing facet), not a separate subdomain.
+Issue 与 Epic 是同一限界上下文中的两个聚合。Issue 持有自己的当前 `EpicNumber?`；Epic
+持有目标与推进策略，但不持有第二份权威成员集合。Epic 的成员、进度和候选 Issue 是
+对 Issue 当前状态的查询结果。
 Sub-issue/parent is also Issue-internal organization (work decomposition axis, orthogonal to Epic's goal/feeding axis); Workflow never sees it. See [`issue-breakdown.md`](issue-breakdown.md).
 Prompt belongs to Project Space (only configurable layer). Builtin .prompt is loader fallback.
 
@@ -65,8 +68,18 @@ and AgentJob dispatch contracts.
 
 ## Dependency invariants
 
-- Workflow depends on zero business contexts. This is not style — it enables autonomy.
-- Issue → Workflow only. Workflow never knows "issue."
+- 同一限界上下文允许聚合相互依赖；聚合边界限制事务，不禁止协作。Issue 与 Epic 可以
+  相互发送命令，但任一命令只提交接收方聚合，且同步调用过程中不回调形成环。
+- Issue 是当前 Epic 归属的唯一写入权威。Epic 不保存可被独立修改的 membership；它
+  通过查询 Issue 状态选择候选，并让 Issue 在自己的事务中接受或拒绝推进命令。
+- 不引入通用 `OwnerRef`、controller aggregate 或关系聚合。`EpicNumber?` 已完整表达
+  Issue 所需的单一可选归属，泛化只会隐藏业务语言和写入权威。
+- Workflow 代码依赖零个业务上下文。这不是风格要求，而是为了保持自治；它不引用 Issue
+  聚合、repository 或领域类型。
+- Issue → Workflow 是静态依赖方向。Issue 向 WorkflowRun 提供只含
+  `ProjectId`、`IssueNumber`、`EpicNumber?` 的运行上下文；这些标量是 Published
+  Language 中的关联信息，不让 Workflow 获得 Issue 行为依赖。Workflow 的结果事件由
+  Issue 侧 handler 消费。
 - Agent/Session ownership invariants (work owner is TaskRun xor AgentJob, session origin,
   Inline Agent identity, shared runtime not coupling Workflow to Agent) are listed once in
   [`agent-execution.md`](agent-execution.md).

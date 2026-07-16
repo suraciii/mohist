@@ -45,4 +45,5 @@
 
 ## 决策记录
 
+- [decisions/issue-owns-epic-membership.md](decisions/issue-owns-epic-membership.md) — Issue 持有当前 Epic 归属；Project-scoped number 身份与跨聚合恢复流程（issue-412）。
 - [decisions/epic-status-revival.md](decisions/epic-status-revival.md) — Epic `done` 自动唤醒与 `closed` 拒绝 link（issue-392）。

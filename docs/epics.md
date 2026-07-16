@@ -42,6 +42,9 @@ Epics 页（顶部导航）→ **New Epic**。
 | 优先级 | p0–p4 |
 | 状态 | idle / running / paused / done / closed（由生命周期管理） |
 
+Epic 和 Issue 都用 Project 内的编号作为永久身份。命令、页面和事件使用同一个编号，
+不再要求用户在编号之外理解另一套 id。
+
 **好的 epic 描述示例**：
 
 ```markdown
@@ -69,17 +72,22 @@ Epics 页（顶部导航）→ **New Epic**。
 ### CLI（推荐）
 
 ```bash
-mo epic link <epic-id-or-number> <issue-id-or-number>
-mo epic unlink <epic-id-or-number> <issue-id-or-number>
+mo epic link <epic-number> <issue-number>
+mo epic unlink <epic-number> <issue-number>
 ```
 
-两者都接受 id 或 number。
+关联会把 Issue 的当前 Epic 改为指定 Epic；若它原本属于另一个 Epic，则直接完成迁移。
+取消关联只在 Issue 当前属于指定 Epic 时生效。重复执行同一操作是安全的。
 
 ### Web UI
 
 issue 详情页 → **Edit** → 选 Epic；或在 Epic 详情页的 Linked Issues 列表里添加 / 移除。
 
-一个 issue 只能属于一个 epic（primary epic），重复关联会被拒绝。
+一个 Issue 同一时刻最多属于一个 Epic。这个归属是 Issue 自身的一部分；Epic 展示的成员、
+进度和下一个待推进 Issue 都由各 Issue 的当前归属汇总得出。
+
+`closed` Epic 拒绝新关联，必须先 Reopen。向 `done` Epic 关联 open Issue 时，Epic 会
+恢复为 `running`；关联终态 Issue 不会唤醒 Epic。
 
 ## 查看 Epic
 
@@ -94,8 +102,8 @@ issue 详情页 → **Edit** → 选 Epic；或在 Epic 详情页的 Linked Issu
 # 列出所有 epic
 mo epic list --project <project>
 
-# 显示详情（用 epic id 或 number）
-mo epic show <epic-id-or-number> --project <project>
+# 显示详情（使用 Project 内的 Epic 编号）
+mo epic show <epic-number> --project <project>
 ```
 
 详情（Web UI 详情页或 `mo epic show`）会展示 Epic 的进度：已交付了几个 issue、总共几个、几个被 blocked、几个正在进行；下一个待推进的 issue 是哪一个、当前为什么没有推进；以及是否已经满足标记完成的条件。
@@ -109,31 +117,31 @@ Epic 有五个生命周期状态，由用户操作和自动推进共同驱动。
 | `idle` | 已创建，但未开始自动推进 | 创建后默认 |
 | `running` | 正在自动推进 linked issues | 从 `idle` 执行 Start |
 | `paused` | 暂停自动推进，当前 in-progress issue 不中断 | 从 `running` 执行 Pause |
-| `done` | 完成（没有 open linked issues） | 在非 `paused`、非 terminal 状态下执行 Mark Done，且所有 linked issues 都已进入终态；或系统重新计算进度时发现符合条件的非 `paused`、非 terminal Epic 已没有 open linked issues，自动转入 `done` |
-| `closed` | 关闭（不再继续） | 任意状态（非 terminal）执行 Close |
+| `done` | 当前已完成（没有 open linked issues） | 在非 `paused`、非 `closed` 状态下执行 Mark Done，且所有 linked issues 都已进入终态；或系统重新计算进度时发现符合条件的非 `paused`、非 `closed` Epic 已没有 open linked issues，自动转入 `done` |
+| `closed` | 关闭（不再继续） | 从 `idle`、`running` 或 `paused` 执行 Close |
 
 - **新建 Epic 默认为 `idle`**，不会自动开始推进。必须显式 Start 才会进入 `running`。
-- **`done` 和 `closed` 是终态**，进入后不能再切换为其他状态。
+- **`done` 和 `closed` 是完成状态**，只有 Reopen 能显式恢复为 `idle`；此外，`done` 在关联新的 open Issue 后会自动恢复为 `running`。`closed` 不接受新关联。
 
 ### Start / Pause / Resume
 
 | 操作 | CLI | Web UI | 语义 |
 |---|---|---|---|
-| Start | `mo epic start <id>` | **Start Epic** | 将 idle → running，并尝试推进第一个 startable linked issue |
-| Pause | `mo epic pause <id>` | **Pause** | 将 running → paused，停止未来推进，不中断当前 in-progress issue |
-| Resume | `mo epic resume <id>` | **Resume** | 将 paused → running，重新评估 readiness 并推进 |
+| Start | `mo epic start <number>` | **Start Epic** | 将 idle → running，并尝试推进第一个 startable linked issue |
+| Pause | `mo epic pause <number>` | **Pause** | 将 running → paused，停止未来推进，不中断当前 in-progress issue |
+| Resume | `mo epic resume <number>` | **Resume** | 将 paused → running，重新评估 readiness 并推进 |
 
 **重复执行是安全的**：对已处在目标状态的 Epic 重复执行对应操作不报错、无副作用（例如对已是 `running` 的 epic 执行 Start）；在其他不匹配的状态下执行会被拒绝并提示当前状态。
 
 ```bash
 # Start（idle → running，同时尝试启动第一个 linked issue）
-mo epic start my-epic-id
+mo epic start 12
 
 # Pause（running → paused，不中断当前 issue）
-mo epic pause my-epic-id
+mo epic pause 12
 
 # Resume（paused → running，重新开始推进）
-mo epic resume my-epic-id
+mo epic resume 12
 ```
 
 ### 自动推进与 running-but-idle
@@ -156,26 +164,30 @@ mo epic resume my-epic-id
 ### Mark done / Close
 
 ```bash
-# Mark done（前置条件：非 paused/terminal，且没有 open linked issues）
-mo epic done <epic-id-or-number>
+# Mark done（前置条件：非 paused/closed，且没有 open linked issues）
+mo epic done <epic-number>
 
 # Close（关闭，不再继续）
-mo epic close <epic-id-or-number>
+mo epic close <epic-number>
+
+# Reopen（done / closed → idle）
+mo epic reopen <epic-number>
 ```
 
-Web UI 上对应 Epic 详情页的 **Mark Done** / **Close Epic** 按钮。
+Web UI 上对应 Epic 详情页的 **Mark Done** / **Close Epic** / **Reopen** 按钮。
 
-除了手动 Mark Done，系统在重新计算 linked issues 终态后，也会把符合条件的非 `paused`、非 terminal Epic 自动转为 `done`。这表示你观察到的完成结果，不是一个需要额外触发的用户操作。
+除了手动 Mark Done，系统在重新计算 linked issues 终态后，也会把符合条件的非 `paused`、非 `closed` Epic 自动转为 `done`。这表示你观察到的完成结果，不是一个需要额外触发的用户操作。
 
 ## 推荐工作流
 
 1. **想法出现时**：先建 Epic，描述里写 Goal/Background/Non-goals（粗略即可）。新建的 Epic 默认 `idle`。
 2. **细化时**：在 Epic 下逐步创建 / link issue（每个 issue 一个清晰可交付的功能点）。
-3. **开始执行时**：`mo epic start <id>` 将 Epic 切换到 `running`。Epic 会自动推进第一个 startable linked issue。
-4. **推进中**：当一个 linked issue 到达终态，`running` 的 Epic 自动推进到下一个 startable issue。你可以用 `mo epic show <id>` 查看下一个待推进的 issue 和推进状态。
-5. **需暂停时**：`mo epic pause <id>` 暂停推进，当前 issue 不受影响。
-6. **恢复时**：`mo epic resume <id>` 恢复推进，Epic 重新评估并推进下一个 issue。
-7. **完成时**：没有 open linked issues 时 `mo epic done <id>`。进度里的已交付数只统计已 delivered 的 issue；cancelled issue 是终态，会满足完成条件，但不计入已交付。
+3. **开始执行时**：`mo epic start <number>` 将 Epic 切换到 `running`。Epic 会自动推进第一个 startable linked issue。
+4. **推进中**：当一个 linked issue 到达终态，`running` 的 Epic 自动推进到下一个 startable issue。你可以用 `mo epic show <number>` 查看下一个待推进的 issue 和推进状态。
+5. **需暂停时**：`mo epic pause <number>` 暂停推进，当前 issue 不受影响。
+6. **恢复时**：`mo epic resume <number>` 恢复推进，Epic 重新评估并推进下一个 issue。
+7. **完成时**：没有 open linked issues 时 `mo epic done <number>`。进度里的已交付数只统计已 delivered 的 issue；cancelled issue 是终态，会满足完成条件，但不计入已交付。
+8. **重新规划时**：`mo epic reopen <number>` 把 `done` 或 `closed` Epic 恢复为 `idle`；之后再调整关联并 Start。
 
 ## 和 workflow 的关系
 
@@ -191,6 +203,11 @@ Epic 与复合 issue（[复合 Issue 与子 Issue](sub-issues.md)）是两个正
 - **父 issue 是普通的 Epic 成员**：轮到它时 Epic 启动它（父 issue 的启动即推进其子 issue），它 done 时计入 Epic 进度。Epic 不感知复合结构，本节不改变 Epic 的任何行为。
 
 **选择指引**：各部分是独立有价值的交付物 → Epic + 普通 issue；各部分只是同一份需求的分工（完成一半没有产品意义）→ 复合 issue。
+
+## 实装差距
+
+当前版本的部分 Epic 命令仍接受内部 id，CLI 尚未提供 Reopen，并且关联关系尚未完全
+收敛为 Issue 的单一归属。目标模型由 issue #412 推进；正文描述的是完成后的产品行为。
 
 ## 当前限制
 

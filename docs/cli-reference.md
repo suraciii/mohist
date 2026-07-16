@@ -227,18 +227,20 @@ Issue 的工作流快捷方式（approve/retry/rerun/...）是对应 `mo workflo
 ```
 mo epic create <title> [options]
 mo epic list
-mo epic get <epic-id-or-number>
-mo epic update <epic-id-or-number> [options]
-mo epic link <epic> <issue>
-mo epic unlink <epic> <issue>
-mo epic start <epic-id-or-number>            开始自动推进
-mo epic pause <epic-id-or-number>            暂停自动推进
-mo epic resume <epic-id-or-number>
-mo epic done <epic-id-or-number>             标记里程碑完成
-mo epic close <epic-id-or-number>            放弃里程碑
+mo epic get <epic-number>
+mo epic update <epic-number> [options]
+mo epic link <epic-number> <issue-number>
+mo epic unlink <epic-number> <issue-number>
+mo epic start <epic-number>                  开始自动推进
+mo epic pause <epic-number>                  暂停自动推进
+mo epic resume <epic-number>
+mo epic done <epic-number>                   标记里程碑完成
+mo epic close <epic-number>                  放弃里程碑
+mo epic reopen <epic-number>                 将完成或关闭的 Epic 恢复为 idle
 ```
 
 epic 无 delete——里程碑用 done（完成）或 close（放弃）收尾，不删除。
+Epic 和 Issue 的编号都只在所属 Project 内唯一；命令在 `--project` 指定的 Project 中解析编号。
 
 ## Mohist Agent（Named Agent）
 

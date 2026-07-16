@@ -25,7 +25,9 @@ WorkflowGrain commits → server persists/publishes → SignalR → Web UI refre
 
 ## Routes
 
-UI uses friendly paths (`/projects/{pid}/issues/{num}`). API boundary resolves display numbers to ids. Internal calls use `issueId` / `workflowRunId`.
+UI 与 API 都使用领域身份路径：`/projects/{projectId}/issues/{issueNumber}` 和
+`/projects/{projectId}/epics/{epicNumber}`。Issue / Epic number 不再解析成另一套内部 id；
+WorkflowRun 继续使用 `workflowRunId`。
 
 ## Rules
 

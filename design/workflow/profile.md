@@ -23,8 +23,9 @@ WorkflowGrain -> IWorkflowProfileProvider（port，只使用 Workflow 类型）
 
 ## 与 Issue 的依赖方向
 
-`Issue → Workflow` 单向。Workflow 不认识 issue，只操作抽象的 run、
-`WorkflowDefinition` 与 variables。
+`Issue → Workflow` 是静态依赖方向。Workflow 不引用 Issue 聚合或领域行为，只操作抽象的
+run、`WorkflowDefinition` 与 variables；WorkflowRun 为关联和事件 stamping 保存的
+`ProjectId`、`IssueNumber`、`EpicNumber?` 属于 Published Language 运行上下文。
 
 | 概念 | 归属 |
 |---|---|
@@ -42,7 +43,7 @@ WorkflowGrain -> IWorkflowProfileProvider（port，只使用 Workflow 类型）
 
 ```text
 project_workflow_profile    ProjectId, DefaultTemplateId, Variables
-issue_workflow_profile      IssueId, SourceTemplateId, Template, Variables
+issue_workflow_profile      ProjectId + IssueNumber, SourceTemplateId, Template, Variables
 workflow_run_profile        WorkflowRunId, Variables
 ```
 
