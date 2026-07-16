@@ -176,7 +176,7 @@ public class WorkflowRunStore : IWorkflowRunStore
 
     private static Dictionary<(int StageIndex, int TaskIndex), LegacyRecoveryNormalization> BuildLegacyRecoveryPlan(JsonElement root)
     {
-        var groups = new Dictionary<string, List<LegacyRecoveryTask>>(StringComparer.Ordinal);
+        var groups = new Dictionary<(int StageIndex, string DefinitionId), List<LegacyRecoveryTask>>();
         if (!TryGetProperty(root, "stages", out var stages) || stages.ValueKind != JsonValueKind.Array)
             return [];
 
@@ -210,10 +210,11 @@ public class WorkflowRunStore : IWorkflowRunStore
                         taskIndex,
                         ReadAttempt(task),
                         recovery);
-                    if (!groups.TryGetValue(entry.DefinitionId, out var group))
+                    var key = (entry.StageIndex, entry.DefinitionId);
+                    if (!groups.TryGetValue(key, out var group))
                     {
                         group = [];
-                        groups.Add(entry.DefinitionId, group);
+                        groups.Add(key, group);
                     }
                     group.Add(entry);
                 }
@@ -232,7 +233,7 @@ public class WorkflowRunStore : IWorkflowRunStore
             if (group.Value.Any(t => t.Recovery is null))
             {
                 throw new InvalidOperationException(
-                    $"Cannot normalize legacy recovery state for definition id '{group.Key}': some attempts have no recovery declaration");
+                    $"Cannot normalize legacy recovery state for definition id '{group.Key.DefinitionId}' in stage index {group.Key.StageIndex}: some attempts have no recovery declaration");
             }
 
             var canonical = group.Value
@@ -244,7 +245,7 @@ public class WorkflowRunStore : IWorkflowRunStore
             if (group.Value.Any(t => !RecoveryDeclarationsMatch(canonical.Recovery!.Value, t.Recovery!.Value)))
             {
                 throw new InvalidOperationException(
-                    $"Cannot normalize legacy recovery state for definition id '{group.Key}': recovery handlers or task declarations differ");
+                    $"Cannot normalize legacy recovery state for definition id '{group.Key.DefinitionId}' in stage index {group.Key.StageIndex}: recovery handlers or task declarations differ");
             }
 
             var declaredBudget = Math.Max(0, ReadRecoveryBudget(canonical.Recovery!.Value));
@@ -430,18 +431,29 @@ public class WorkflowRunStore : IWorkflowRunStore
         writer.WriteEndObject();
     }
 
-    private static bool RecoveryDeclarationsMatch(JsonElement left, JsonElement right) =>
-        JsonValuesEqual(left, right, ignoreBudget: true);
+    private enum JsonComparisonContext
+    {
+        Ordinary,
+        RecoveryDeclaration,
+        RecoveryHandlers,
+        RecoveryHandler,
+        TaskDefinitions,
+        TaskDefinition,
+    }
 
-    private static bool JsonValuesEqual(JsonElement left, JsonElement right, bool ignoreBudget)
+    private static bool RecoveryDeclarationsMatch(JsonElement left, JsonElement right) =>
+        JsonValuesEqual(left, right, JsonComparisonContext.RecoveryDeclaration);
+
+    private static bool JsonValuesEqual(JsonElement left, JsonElement right, JsonComparisonContext context)
     {
         if (left.ValueKind != right.ValueKind)
             return false;
 
         return left.ValueKind switch
         {
-            JsonValueKind.Object => ObjectsEqual(left, right, ignoreBudget),
-            JsonValueKind.Array => left.EnumerateArray().Zip(right.EnumerateArray()).All(pair => JsonValuesEqual(pair.First, pair.Second, false))
+            JsonValueKind.Object => ObjectsEqual(left, right, context),
+            JsonValueKind.Array => left.EnumerateArray().Zip(right.EnumerateArray()).All(pair =>
+                    JsonValuesEqual(pair.First, pair.Second, ArrayElementContext(context)))
                 && left.GetArrayLength() == right.GetArrayLength(),
             JsonValueKind.String => left.GetString() == right.GetString(),
             JsonValueKind.Number => left.TryGetDecimal(out var leftNumber)
@@ -454,13 +466,15 @@ public class WorkflowRunStore : IWorkflowRunStore
         };
     }
 
-    private static bool ObjectsEqual(JsonElement left, JsonElement right, bool ignoreBudget)
+    private static bool ObjectsEqual(JsonElement left, JsonElement right, JsonComparisonContext context)
     {
         var leftProperties = left.EnumerateObject()
-            .Where(p => !ignoreBudget || !string.Equals(p.Name, "budget", StringComparison.OrdinalIgnoreCase))
+            .Where(p => context != JsonComparisonContext.RecoveryDeclaration
+                || !string.Equals(p.Name, "budget", StringComparison.OrdinalIgnoreCase))
             .ToDictionary(p => p.Name, p => p.Value, StringComparer.Ordinal);
         var rightProperties = right.EnumerateObject()
-            .Where(p => !ignoreBudget || !string.Equals(p.Name, "budget", StringComparison.OrdinalIgnoreCase))
+            .Where(p => context != JsonComparisonContext.RecoveryDeclaration
+                || !string.Equals(p.Name, "budget", StringComparison.OrdinalIgnoreCase))
             .ToDictionary(p => p.Name, p => p.Value, StringComparer.Ordinal);
         if (leftProperties.Count != rightProperties.Count)
             return false;
@@ -468,12 +482,33 @@ public class WorkflowRunStore : IWorkflowRunStore
         foreach (var property in leftProperties)
         {
             if (!rightProperties.TryGetValue(property.Key, out var rightValue)
-                || !JsonValuesEqual(property.Value, rightValue,
-                    string.Equals(property.Key, "recovery", StringComparison.OrdinalIgnoreCase)))
+                || !JsonValuesEqual(property.Value, rightValue, PropertyContext(context, property.Key)))
                 return false;
         }
 
         return true;
+    }
+
+    private static JsonComparisonContext ArrayElementContext(JsonComparisonContext context) => context switch
+    {
+        JsonComparisonContext.RecoveryHandlers => JsonComparisonContext.RecoveryHandler,
+        JsonComparisonContext.TaskDefinitions => JsonComparisonContext.TaskDefinition,
+        _ => JsonComparisonContext.Ordinary,
+    };
+
+    private static JsonComparisonContext PropertyContext(JsonComparisonContext context, string propertyName)
+    {
+        if (context == JsonComparisonContext.RecoveryDeclaration
+            && string.Equals(propertyName, "handlers", StringComparison.OrdinalIgnoreCase))
+            return JsonComparisonContext.RecoveryHandlers;
+        if (context == JsonComparisonContext.RecoveryHandler
+            && string.Equals(propertyName, "tasks", StringComparison.OrdinalIgnoreCase))
+            return JsonComparisonContext.TaskDefinitions;
+        if (context == JsonComparisonContext.TaskDefinition
+            && string.Equals(propertyName, "recovery", StringComparison.OrdinalIgnoreCase))
+            return JsonComparisonContext.RecoveryDeclaration;
+
+        return JsonComparisonContext.Ordinary;
     }
 
     private static int ReadAttempt(JsonElement task) =>

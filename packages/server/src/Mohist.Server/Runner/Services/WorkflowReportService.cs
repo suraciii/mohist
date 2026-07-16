@@ -44,6 +44,9 @@ public sealed class WorkflowReportService : IScopedService
         if (activeWork is null)
             return (ReportAck.Stale.ToString().ToLowerInvariant(), null);
 
+        if (activeWork.IsTask)
+            RuntimeTaskFollowUps.Project(result.AddTasks);
+
         var report = await _translator.TranslateResultAsync(activeWork.Item, result, workflowRunId, run);
         ReportAck ack = report switch
         {

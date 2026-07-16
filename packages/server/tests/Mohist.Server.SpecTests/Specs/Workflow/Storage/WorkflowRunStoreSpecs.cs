@@ -225,6 +225,51 @@ public class WorkflowRunStoreSpecs
         Assert.Equal(JsonValueKind.Null, recoveryRemaining.ValueKind);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public async Task LoadAsync_LegacySameDefinitionAcrossStages_PreservesIndependentRecoveryRounds()
+    {
+        using var factory = new FakeWorkflowRunStoreDbContextFactory();
+        var eventStore = new EventStore(factory, NullLogger<EventStore>.Instance);
+        var store = new WorkflowRunStore(factory, eventStore, new NullDispatchGrainFactory(), NullLogger<WorkflowRunStore>.Instance);
+        var run = CreateLegacySameDefinitionAcrossStagesRun();
+
+        await using (var db = factory.CreateDbContext())
+        {
+            db.WorkflowRuns.Add(new WorkflowRunRow
+            {
+                WorkflowRunId = run.Id,
+                State = ToLegacyRecoveryState(run),
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var loaded = await store.LoadAsync(run.Id);
+        Assert.NotNull(loaded);
+        var firstStageTask = Assert.Single(loaded!.Stages.Single(stage => stage.Id == "plan").Tasks);
+        var failedStage = loaded.Stages.Single(stage => stage.Id == "check");
+        var failedTask = Assert.Single(failedStage.Tasks);
+        Assert.Equal(2, firstStageTask.Recovery!.Budget);
+        Assert.Equal(2, firstStageTask.RecoveryRemaining);
+        Assert.Equal(5, failedTask.Recovery!.Budget);
+        Assert.Equal(5, failedTask.RecoveryRemaining);
+
+        loaded.Retry(DateTimeOffset.UnixEpoch);
+        await store.SaveAsync(loaded);
+
+        var reloaded = await store.LoadAsync(run.Id);
+        Assert.NotNull(reloaded);
+        var retriedStage = reloaded!.Stages.Single(stage => stage.Id == "check");
+        var freshRetry = Assert.Single(retriedStage.Tasks, task => task.Id == "review.2");
+        Assert.Equal(5, freshRetry.Recovery!.Budget);
+        Assert.Null(freshRetry.RecoveryRemaining);
+
+        var dispatch = Assert.IsType<WorkflowTaskWork>(reloaded.NextWork());
+        Assert.Equal(5, dispatch.Recovery!.Budget);
+        Assert.Null(dispatch.RecoveryRemaining);
+    }
+
     private static WorkflowRun CreateLegacyExhaustedRecoveryRun()
     {
         var failedTask = LegacyAttempt(3, 0, TaskRunStatus.Failed);
@@ -258,6 +303,44 @@ public class WorkflowRunStoreSpecs
         };
     }
 
+    private static WorkflowRun CreateLegacySameDefinitionAcrossStagesRun()
+    {
+        var failedTask = LegacyAttempt(1, 5, TaskRunStatus.Failed);
+        var failure = new FailureDetails(FailureReason.TaskFailed, "check", failedTask.Id, Message: "recovery exhausted");
+        return new WorkflowRun
+        {
+            Id = "wr_legacy_stage_scoped_recovery",
+            Metadata = new WorkflowRunMetadata(null, DateTimeOffset.UnixEpoch),
+            Status = WorkflowRunStatus.Failed,
+            CurrentStageId = "check",
+            Failure = failure,
+            Stages =
+            [
+                new StageRun
+                {
+                    Id = "plan",
+                    Attempt = 1,
+                    RequiresApproval = false,
+                    Initialized = true,
+                    Status = StageRunStatus.Completed,
+                    Tasks = [LegacyAttempt(1, 2, TaskRunStatus.Completed)],
+                    Checks = [],
+                },
+                new StageRun
+                {
+                    Id = "check",
+                    Attempt = 1,
+                    RequiresApproval = false,
+                    Initialized = true,
+                    Status = StageRunStatus.Failed,
+                    Failure = failure,
+                    Tasks = [failedTask],
+                    Checks = [],
+                },
+            ],
+        };
+    }
+
     private static TaskRun LegacyAttempt(int attempt, int budget, TaskRunStatus status) => new()
     {
         Id = $"review.{attempt}",
@@ -274,9 +357,11 @@ public class WorkflowRunStoreSpecs
     private static string ToLegacyRecoveryState(WorkflowRun run)
     {
         var root = JsonNode.Parse(JSON.Serialize(run))!.AsObject();
-        var tasks = root["stages"]!.AsArray()[0]!["tasks"]!.AsArray();
-        foreach (var task in tasks)
-            task!.AsObject().Remove("recoveryRemaining");
+        foreach (var stage in root["stages"]!.AsArray())
+        {
+            foreach (var task in stage!["tasks"]!.AsArray())
+                task!.AsObject().Remove("recoveryRemaining");
+        }
         return root.ToJsonString();
     }
 

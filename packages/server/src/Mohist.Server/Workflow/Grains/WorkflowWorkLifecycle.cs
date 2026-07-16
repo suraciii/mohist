@@ -1,8 +1,6 @@
 using System.Text.Json;
 using Mohist.Server.Workflow.Domain.Artifacts;
-using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Domain.Run;
-using Mohist.Server.Workflow.Services;
 
 namespace Mohist.Server.Workflow.Grains;
 
@@ -27,25 +25,8 @@ internal sealed class WorkflowWorkLifecycle
         var currentTask = currentStage?.Tasks.FirstOrDefault(t => t.Id == taskRunId);
         var events = new List<WorkflowEvent>();
 
-        var taskAttempts = report.Status == TaskReportStatus.Succeeded && report.AddTasks is { Count: > 0 } addTasks
-            ? addTasks.Select(t =>
-            {
-                var with = WorkflowDispatchHelpers.ParseWith(t.With);
-                var definition = new TaskDefinition(t.Id, t.Title, t.Uses, with, t.Artifacts, t.SetVars, t.Recovery);
-                if (t.Recovery is not null)
-                {
-                    if (t.RecoveryRemaining is null)
-                        throw new InvalidOperationException(
-                            $"Recovery follow-up task '{t.Id}' must carry an explicit numeric recoveryRemaining");
-                    TaskRun.ValidateContinuation(definition, t.RecoveryRemaining.Value);
-                    return (Definition: definition, RecoveryRemaining: t.RecoveryRemaining);
-                }
-
-                if (t.RecoveryRemaining is not null)
-                    throw new InvalidOperationException(
-                        $"Task follow-up '{t.Id}' carries recoveryRemaining without a recovery declaration");
-                return (Definition: definition, RecoveryRemaining: (int?)null);
-            }).ToList()
+        var taskAttempts = report.Status == TaskReportStatus.Succeeded
+            ? RuntimeTaskFollowUps.Project(report.AddTasks)
             : [];
 
         if (report.Artifacts is { Count: > 0 })

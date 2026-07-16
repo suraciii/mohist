@@ -190,6 +190,20 @@ public sealed class WorkflowRecoveryRoundTests
     }
 
     [Fact]
+    public void LegacyRecoveryDeclarationsDifferingInWithRecoveryBudgetAreRejected()
+    {
+        const string json = """
+            {"stages":[{"tasks":[
+              {"definitionId":"review","attempt":1,"recovery":{"budget":2,"handlers":[{"when":"error=one","tasks":[{"id":"fix","title":"Fix","with":{"recovery":{"budget":2}}}],"retrySelf":true}]}},
+              {"definitionId":"review","attempt":2,"recovery":{"budget":1,"handlers":[{"when":"error=one","tasks":[{"id":"fix","title":"Fix","with":{"recovery":{"budget":1}}}],"retrySelf":true}]}}
+            ]}]}
+            """;
+
+        Assert.Throws<InvalidOperationException>(() =>
+            WorkflowRunStore.MigrateLegacyWorkflowRunJson(json));
+    }
+
+    [Fact]
     public void AmbiguousLegacyRecoveryDeclarationsAreRejected()
     {
         const string json = """

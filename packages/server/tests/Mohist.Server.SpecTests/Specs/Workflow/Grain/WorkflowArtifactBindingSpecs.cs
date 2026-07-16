@@ -106,6 +106,64 @@ public class WorkflowArtifactBindingSpecs : WorkflowGrainSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
+    public async Task InvalidRecoveryFollowUp_LeavesUploadPendingUntilCorrectedReport()
+    {
+        var recovery = new RecoveryDefinition(
+            2,
+            [new RecoveryHandlerDefinition("promise=FAIL", [], RetrySelf: true)]);
+        var definition = SingleStage(
+            tasks:
+            [
+                new TaskDefinition(
+                    "task-1",
+                    "Task 1",
+                    "spec/task",
+                    Artifacts: new TaskArtifactCapture([new TaskArtifactDeclaration("review.md")]),
+                    Recovery: recovery)
+            ],
+            checks: []);
+        await StartWorkflowAsync(definition);
+
+        var (work, runnerId) = await PollWorkAnyAsync();
+        var uploadId = await SeedPendingUploadAsync(work.WorkflowRunId, work.WorkId, "task-1.1", "review.md");
+
+        await Assert.ThrowsAnyAsync<Exception>(() => ReportAsync(runnerId, work.WorkId, new WorkResult(
+            "completed",
+            Output: "{}",
+            ArtifactUploadIds: [uploadId],
+            AddTasks: [new RuntimeTaskInput("task-1", "Task 1", "spec/task", Recovery: recovery)])));
+
+        await using (var db = CreateDb())
+        {
+            Assert.Empty(await db.WorkflowArtifacts.Where(a => a.WorkflowRunId == work.WorkflowRunId).ToListAsync());
+            Assert.Single(await db.WorkflowArtifactPendingUploads
+                .Where(p => p.WorkflowRunId == work.WorkflowRunId && p.UploadId == uploadId)
+                .ToListAsync());
+        }
+
+        await ReportAsync(runnerId, work.WorkId, new WorkResult(
+            "completed",
+            Output: "{}",
+            ArtifactUploadIds: [uploadId],
+            AddTasks: [new RuntimeTaskInput(
+                "task-1",
+                "Task 1",
+                "spec/task",
+                Recovery: recovery,
+                RecoveryRemaining: 1)]));
+
+        await using var correctedDb = CreateDb();
+        Assert.Single(await correctedDb.WorkflowArtifacts
+            .Where(a => a.WorkflowRunId == work.WorkflowRunId)
+            .ToListAsync());
+        Assert.Empty(await correctedDb.WorkflowArtifactPendingUploads
+            .Where(p => p.WorkflowRunId == work.WorkflowRunId && p.UploadId == uploadId)
+            .ToListAsync());
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
     public async Task FailedTask_WithDiagnosticUploads_BindsArtifacts()
     {
         var definition = SingleStage(
