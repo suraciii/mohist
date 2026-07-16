@@ -16,12 +16,9 @@ public sealed record EpicDto(
     [property: Id(8)] string? PauseReason = null);
 
 /// <summary>
-/// Resolved issue identifier passed from the HTTP layer to the grain's
-/// batch link/unlink entry points. The HTTP route resolves each
-/// identifier (number or internal id) to its issue via
-/// <c>IssueQuerier.ListAsync(all: true)</c>; the grain receives the
-/// resolved pair so duplicate-identifier de-dup is deterministic and
-/// the cross-aggregate invariant operates on the canonical internal id.
+/// Resolved issue number passed from the HTTP layer to the grain's batch
+/// link/unlink entry points. The grain receives the number with its wire
+/// identifier so duplicate requests are deterministic.
 /// </summary>
 [GenerateSerializer]
 public sealed record BatchMembershipRequestItem(
@@ -114,7 +111,7 @@ public sealed record EpicDetailDto(
 /// Per-issue result emitted by <c>IEpicGrain.LinkIssuesAsync</c> /
 /// <c>UnlinkIssuesAsync</c>. The HTTP layer wraps the list in
 /// <c>{ results: [...] }</c>. The <see cref="Status"/> discriminator is
-/// machine-friendly; <see cref="OwningEpicId"/> / <see cref="OwningEpicTitle"/>
+/// machine-friendly; <see cref="OwningEpicNumber"/> / <see cref="OwningEpicTitle"/>
 /// are populated only for <c>conflict</c> outcomes.
 /// </summary>
 [GenerateSerializer]
