@@ -39,7 +39,7 @@ namespace Mohist.Server.Events.Subscriptions;
 /// <list type="bullet">
 ///   <item>Workflow events → <see cref="IWorkflowRunStore.LoadAsync"/> reads
 ///         <see cref="WorkflowRunMetadata.Annotations"/> for
-///         <c>projectId</c>/<c>issueId</c>/<c>issueNumber</c> — the same
+///         <c>projectId</c>/<c>issueNumber</c> — the same
 ///         source <c>WorkflowGrain.GetProjectId</c> uses.</item>
 ///   <item>Issue events → extensions identify the candidate issue; the
 ///         loaded issue is the source of truth for project and number.
@@ -61,7 +61,7 @@ namespace Mohist.Server.Events.Subscriptions;
 /// <b>Realtime hint</b>. The inbox projection and its
 /// <c>com.mohist.inbox.item-persisted</c> CloudEvent carrying an
 /// <see cref="InboxItemPersistedHint"/> identity payload and an
-/// <c>extensions["projectid"]</c>/<c>["issueid"]</c>/<c>["issue"]</c>
+/// <c>extensions["projectid"]</c>/<c>["issue"]</c>
 /// stamp lifted from the <see cref="InboxItemDraft"/> already held in
 /// scope (no additional lookup) so the dispatcher can route it
 /// project-scoped commit in one transaction. A failed event append rolls the

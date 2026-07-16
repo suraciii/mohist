@@ -31,11 +31,9 @@ public class InboxProjectionHandlerSpecs
         await InboxProjectionTestSupport.SeedWorkflowRunAsync(database,
             workflowRunId: "wf_1",
             projectId: "proj_a",
-            issueId: "issue_1",
             issueNumber: 42);
         await InboxProjectionTestSupport.SeedIssueAsync(database,
             projectId: "proj_a",
-            issueId: "issue_1",
             issueNumber: 42,
             title: "Issue 42");
 
@@ -52,7 +50,6 @@ public class InboxProjectionHandlerSpecs
         Assert.Equal("/mohist/workflow-runs/wf_1", item.SourceEventSource);
         Assert.Equal("evt-failed", item.SourceEventId);
         Assert.Equal("proj_a", item.ProjectId);
-        Assert.Equal("issue_1", item.IssueId);
         Assert.Equal(42, item.IssueNumber);
         Assert.Equal("Issue 42", item.IssueTitle);
     }
@@ -66,11 +63,9 @@ public class InboxProjectionHandlerSpecs
         await InboxProjectionTestSupport.SeedWorkflowRunAsync(database,
             workflowRunId: "wf_2",
             projectId: "proj_a",
-            issueId: "issue_42",
             issueNumber: 42);
         await InboxProjectionTestSupport.SeedIssueAsync(database,
             projectId: "proj_a",
-            issueId: "issue_42",
             issueNumber: 42,
             title: "Approve me");
 
@@ -97,7 +92,6 @@ public class InboxProjectionHandlerSpecs
         await using var database = InboxProjectionTestSupport.CreateDatabase();
         await InboxProjectionTestSupport.SeedIssueAsync(database,
             projectId: "proj_a",
-            issueId: "issue_1",
             issueNumber: 7,
             title: "Started");
 
@@ -105,7 +99,6 @@ public class InboxProjectionHandlerSpecs
         var evt = InboxProjectionTestSupport.BuildIssueEvent(
             type: EventCatalog.ReverseDns.IssueWorkStarted,
             projectId: "proj_a",
-            issueId: "issue_1",
             issueNumber: 7,
             eventId: "evt-started");
 
@@ -113,7 +106,7 @@ public class InboxProjectionHandlerSpecs
 
         var item = Assert.Single(await InboxProjectionTestSupport.GetInboxAsync(database, "proj_a"));
         Assert.Equal(NotificationKinds.IssueStarted, item.NotificationKind);
-        Assert.Equal("/mohist/issues/issue_1", item.SourceEventSource);
+        Assert.Equal("/mohist/projects/proj_a/issues/7", item.SourceEventSource);
         Assert.Equal("evt-started", item.SourceEventId);
         Assert.Equal(7, item.IssueNumber);
         Assert.Equal("Started", item.IssueTitle);
@@ -127,7 +120,6 @@ public class InboxProjectionHandlerSpecs
         await using var database = InboxProjectionTestSupport.CreateDatabase();
         await InboxProjectionTestSupport.SeedIssueAsync(database,
             projectId: "proj_a",
-            issueId: "issue_1",
             issueNumber: 9,
             title: "Done");
 
@@ -135,7 +127,6 @@ public class InboxProjectionHandlerSpecs
         var evt = InboxProjectionTestSupport.BuildIssueEvent(
             type: EventCatalog.ReverseDns.IssueCompleted,
             projectId: "proj_a",
-            issueId: "issue_1",
             issueNumber: 9,
             eventId: "evt-completed");
 
@@ -156,7 +147,6 @@ public class InboxProjectionHandlerSpecs
         await using var database = InboxProjectionTestSupport.CreateDatabase();
         await InboxProjectionTestSupport.SeedIssueAsync(database,
             projectId: "proj_a",
-            issueId: "issue_1",
             issueNumber: 1,
             title: "Issue 1");
 
@@ -164,7 +154,6 @@ public class InboxProjectionHandlerSpecs
         var evt = InboxProjectionTestSupport.BuildIssueEvent(
             type: EventCatalog.ReverseDns.IssueWorkStarted,
             projectId: "proj_a",
-            issueId: "issue_1",
             issueNumber: 1,
             eventId: "evt-replay");
 
@@ -186,11 +175,9 @@ public class InboxProjectionHandlerSpecs
         await InboxProjectionTestSupport.SeedWorkflowRunAsync(database,
             workflowRunId: "wf_replay",
             projectId: "proj_a",
-            issueId: "issue_1",
             issueNumber: 1);
         await InboxProjectionTestSupport.SeedIssueAsync(database,
             projectId: "proj_a",
-            issueId: "issue_1",
             issueNumber: 1,
             title: "Issue 1");
 
@@ -216,7 +203,6 @@ public class InboxProjectionHandlerSpecs
         await using var database = InboxProjectionTestSupport.CreateDatabase();
         await InboxProjectionTestSupport.SeedIssueAsync(database,
             projectId: "proj_a",
-            issueId: "issue_1",
             issueNumber: 1,
             title: "Issue 1");
 
@@ -226,7 +212,6 @@ public class InboxProjectionHandlerSpecs
         var run = InboxProjectionTestSupport.BuildWorkflowRun(
             workflowRunId: "wf_store_replay",
             projectId: "proj_a",
-            issueId: "issue_1",
             issueNumber: 1);
 
         await runStore.SaveAsync(run, [new WorkflowRunFailed("failed")]);
@@ -248,11 +233,9 @@ public class InboxProjectionHandlerSpecs
         await InboxProjectionTestSupport.SeedWorkflowRunAsync(database,
             workflowRunId: "wf_iso",
             projectId: "proj_a",
-            issueId: "issue_1",
             issueNumber: 1);
         await InboxProjectionTestSupport.SeedIssueAsync(database,
             projectId: "proj_a",
-            issueId: "issue_1",
             issueNumber: 1,
             title: "Issue 1");
 
@@ -279,7 +262,6 @@ public class InboxProjectionHandlerSpecs
         await using var database = InboxProjectionTestSupport.CreateDatabase();
         await InboxProjectionTestSupport.SeedIssueAsync(database,
             projectId: "proj_a",
-            issueId: "issue_1",
             issueNumber: 1,
             title: "A1");
 
@@ -287,7 +269,6 @@ public class InboxProjectionHandlerSpecs
         var evt = InboxProjectionTestSupport.BuildIssueEvent(
             type: EventCatalog.ReverseDns.IssueCompleted,
             projectId: "proj_a",
-            issueId: "issue_1",
             issueNumber: 1,
             eventId: "evt-iso");
 
@@ -308,7 +289,6 @@ public class InboxProjectionHandlerSpecs
         await using var database = InboxProjectionTestSupport.CreateDatabase();
         await InboxProjectionTestSupport.SeedIssueAsync(database,
             projectId: "proj_a",
-            issueId: "issue_1",
             issueNumber: 1,
             title: "A1");
 
@@ -316,7 +296,6 @@ public class InboxProjectionHandlerSpecs
         var evt = InboxProjectionTestSupport.BuildIssueEvent(
             type: EventCatalog.ReverseDns.IssueCompleted,
             projectId: "proj_b",
-            issueId: "issue_1",
             issueNumber: 1,
             eventId: "evt-mismatch-project");
 
@@ -334,7 +313,6 @@ public class InboxProjectionHandlerSpecs
         await using var database = InboxProjectionTestSupport.CreateDatabase();
         await InboxProjectionTestSupport.SeedIssueAsync(database,
             projectId: "proj_a",
-            issueId: "issue_1",
             issueNumber: 1,
             title: "A1");
 
@@ -342,7 +320,6 @@ public class InboxProjectionHandlerSpecs
         var evt = InboxProjectionTestSupport.BuildIssueEvent(
             type: EventCatalog.ReverseDns.IssueWorkStarted,
             projectId: "proj_a",
-            issueId: "issue_1",
             issueNumber: 2,
             eventId: "evt-mismatch-number");
 
@@ -360,11 +337,9 @@ public class InboxProjectionHandlerSpecs
         await InboxProjectionTestSupport.SeedWorkflowRunAsync(database,
             workflowRunId: "wf_bad_ann",
             projectId: "proj_b",
-            issueId: "issue_1",
             issueNumber: 1);
         await InboxProjectionTestSupport.SeedIssueAsync(database,
             projectId: "proj_a",
-            issueId: "issue_1",
             issueNumber: 1,
             title: "A1");
 
@@ -389,11 +364,9 @@ public class InboxProjectionHandlerSpecs
         await InboxProjectionTestSupport.SeedWorkflowRunAsync(database,
             workflowRunId: "wf_bad_num",
             projectId: "proj_a",
-            issueId: "issue_1",
             issueNumber: 2);
         await InboxProjectionTestSupport.SeedIssueAsync(database,
             projectId: "proj_a",
-            issueId: "issue_1",
             issueNumber: 1,
             title: "A1");
 
@@ -418,14 +391,13 @@ public class InboxProjectionHandlerSpecs
         var handler = InboxProjectionTestSupport.CreateHandler(database);
         var evt = new CloudEvent(
             id: "evt-no-ext",
-            source: new Uri("/mohist/issue/issue_x", UriKind.Relative),
+            source: new Uri("/mohist/projects/proj_a/issues/1", UriKind.Relative),
             type: EventCatalog.ReverseDns.IssueWorkStarted,
             time: TestTime.UtcNow,
             data: null,
             extensions: new Dictionary<string, string>
             {
-                ["issueid"] = "issue_x",
-                ["issueno"] = "1",
+                [EventCatalog.Lineage.Issue] = "1",
             });
 
         await handler.HandleAsync(evt, CancellationToken.None);
@@ -437,21 +409,20 @@ public class InboxProjectionHandlerSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
-    public async Task IssueEvent_MissingIssueIdExtension_SkipsWithoutThrowing()
+    public async Task IssueEvent_MissingIssueNumberExtension_SkipsWithoutThrowing()
     {
         await using var database = InboxProjectionTestSupport.CreateDatabase();
 
         var handler = InboxProjectionTestSupport.CreateHandler(database);
         var evt = new CloudEvent(
             id: "evt-no-issue",
-            source: new Uri("/mohist/issue/issue_x", UriKind.Relative),
+            source: new Uri("/mohist/projects/proj_a/issues/1", UriKind.Relative),
             type: EventCatalog.ReverseDns.IssueCompleted,
             time: TestTime.UtcNow,
             data: null,
             extensions: new Dictionary<string, string>
             {
-                ["projectid"] = "proj_a",
-                ["issueno"] = "1",
+                [EventCatalog.Lineage.ProjectId] = "proj_a",
             });
 
         await handler.HandleAsync(evt, CancellationToken.None);
@@ -468,7 +439,6 @@ public class InboxProjectionHandlerSpecs
         await using var database = InboxProjectionTestSupport.CreateDatabase();
         await InboxProjectionTestSupport.SeedIssueAsync(database,
             projectId: "proj_a",
-            issueId: "issue_legacy",
             issueNumber: 7,
             title: "Legacy row");
 
@@ -479,14 +449,12 @@ public class InboxProjectionHandlerSpecs
         var evt = InboxProjectionTestSupport.BuildLegacyIssueEvent(
             type: EventCatalog.ReverseDns.IssueWorkStarted,
             projectId: "proj_a",
-            issueId: "issue_legacy",
             issueNumber: 7,
             eventId: "evt-legacy-issueno");
 
         await handler.HandleAsync(evt, CancellationToken.None);
 
         var item = Assert.Single(await InboxProjectionTestSupport.GetInboxAsync(database, "proj_a"));
-        Assert.Equal("issue_legacy", item.IssueId);
         Assert.Equal(7, item.IssueNumber);
     }
 
@@ -498,7 +466,6 @@ public class InboxProjectionHandlerSpecs
         await using var database = InboxProjectionTestSupport.CreateDatabase();
         await InboxProjectionTestSupport.SeedIssueAsync(database,
             projectId: "proj_a",
-            issueId: "issue_orphan",
             issueNumber: 3,
             title: "Orphan");
 
@@ -507,14 +474,13 @@ public class InboxProjectionHandlerSpecs
         // resolved, the handler must skip silently.
         var evt = new CloudEvent(
             id: "evt-no-number",
-            source: new Uri("/mohist/issue/issue_orphan", UriKind.Relative),
+            source: new Uri("/mohist/projects/proj_a/issues/3", UriKind.Relative),
             type: EventCatalog.ReverseDns.IssueWorkStarted,
             time: InboxProjectionTestSupport.FixedEventTime,
             data: null,
             extensions: new Dictionary<string, string>
             {
-                ["projectid"] = "proj_a",
-                ["issueid"] = "issue_orphan",
+                [EventCatalog.Lineage.ProjectId] = "proj_a",
             });
 
         await handler.HandleAsync(evt, CancellationToken.None);
@@ -530,32 +496,29 @@ public class InboxProjectionHandlerSpecs
         await using var database = InboxProjectionTestSupport.CreateDatabase();
         await InboxProjectionTestSupport.SeedIssueAsync(database,
             projectId: "proj_a",
-            issueId: "issue_both",
             issueNumber: 9,
             title: "Both");
 
         var handler = InboxProjectionTestSupport.CreateHandler(database);
         // Both `issue` and the legacy `issueno` are stamped, but the
         // latter disagrees with the loaded issue. The unified key wins
-        // and resolves correctly to issue_9.
+        // and resolves correctly to issue #9.
         var evt = new CloudEvent(
             id: "evt-both",
-            source: new Uri("/mohist/issue/issue_both", UriKind.Relative),
+            source: new Uri("/mohist/projects/proj_a/issues/9", UriKind.Relative),
             type: EventCatalog.ReverseDns.IssueWorkStarted,
             time: InboxProjectionTestSupport.FixedEventTime,
             data: null,
             extensions: new Dictionary<string, string>(StringComparer.Ordinal)
             {
-                ["projectid"] = "proj_a",
-                ["issueid"] = "issue_both",
-                ["issue"] = "9",
+                [EventCatalog.Lineage.ProjectId] = "proj_a",
+                [EventCatalog.Lineage.Issue] = "9",
                 ["issueno"] = "999",
             });
 
         await handler.HandleAsync(evt, CancellationToken.None);
 
         var item = Assert.Single(await InboxProjectionTestSupport.GetInboxAsync(database, "proj_a"));
-        Assert.Equal("issue_both", item.IssueId);
         Assert.Equal(9, item.IssueNumber);
     }
 
@@ -565,11 +528,10 @@ public class InboxProjectionHandlerSpecs
     public async Task WorkflowEvent_MissingAnnotationsOnRun_SkipsWithoutThrowing()
     {
         await using var database = InboxProjectionTestSupport.CreateDatabase();
-        // Workflow run exists but has no projectId/issueId annotations.
+        // Workflow run exists but has no projectId/issueNumber annotations.
         await InboxProjectionTestSupport.SeedWorkflowRunAsync(database,
             workflowRunId: "wf_no_ann",
             projectId: null,
-            issueId: null,
             issueNumber: null);
 
         var handler = InboxProjectionTestSupport.CreateHandler(database);
@@ -627,7 +589,7 @@ public class InboxProjectionHandlerSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
-    public async Task IssueEvent_UnknownIssueIdForTitle_SkipsWithoutThrowing()
+    public async Task IssueEvent_UnknownIssueNumberForTitle_SkipsWithoutThrowing()
     {
         await using var database = InboxProjectionTestSupport.CreateDatabase();
 
@@ -635,7 +597,6 @@ public class InboxProjectionHandlerSpecs
         var evt = InboxProjectionTestSupport.BuildIssueEvent(
             type: EventCatalog.ReverseDns.IssueCompleted,
             projectId: "proj_a",
-            issueId: "issue_missing",
             issueNumber: 7,
             eventId: "evt-missing-issue");
 
@@ -653,11 +614,9 @@ public class InboxProjectionHandlerSpecs
         await InboxProjectionTestSupport.SeedWorkflowRunAsync(database,
             workflowRunId: "wf_title",
             projectId: "proj_a",
-            issueId: "issue_1",
             issueNumber: 1);
         await InboxProjectionTestSupport.SeedIssueAsync(database,
             projectId: "proj_a",
-            issueId: "issue_1",
             issueNumber: 1,
             title: "Snapshot me");
 
@@ -673,7 +632,7 @@ public class InboxProjectionHandlerSpecs
         // is durable and the projection does not re-read on every query.
         await using (var db = database.CreateDbContext())
         {
-            var row = await db.Issues.FirstAsync(r => r.IssueId == "issue_1");
+            var row = await db.Issues.FirstAsync(r => r.ProjectId == "proj_a" && r.Number == 1);
             // The Issue.Title is init-only — patch the JSON state directly
             // to simulate a later title edit. The InboxItem row holds the
             // snapshot from projection time.
@@ -691,8 +650,8 @@ public class InboxProjectionHandlerSpecs
     public async Task Filter_AcceptsAllFourTypes()
     {
         var handler = InboxProjectionTestSupport.CreateHandler(InboxProjectionTestSupport.CreateDatabase());
-        Assert.True(handler.Filter(InboxProjectionTestSupport.BuildIssueEvent(EventCatalog.ReverseDns.IssueWorkStarted, "p", "i", 1, "e1")));
-        Assert.True(handler.Filter(InboxProjectionTestSupport.BuildIssueEvent(EventCatalog.ReverseDns.IssueCompleted, "p", "i", 1, "e2")));
+        Assert.True(handler.Filter(InboxProjectionTestSupport.BuildIssueEvent(EventCatalog.ReverseDns.IssueWorkStarted, "p", 1, "e1")));
+        Assert.True(handler.Filter(InboxProjectionTestSupport.BuildIssueEvent(EventCatalog.ReverseDns.IssueCompleted, "p", 1, "e2")));
         Assert.True(handler.Filter(InboxProjectionTestSupport.BuildWorkflowEvent(EventCatalog.ReverseDns.WorkflowRunFailed, "w", "e3")));
         Assert.True(handler.Filter(InboxProjectionTestSupport.BuildWorkflowEvent(EventCatalog.ReverseDns.StageApprovalRequested, "w", "e4")));
     }
@@ -705,7 +664,7 @@ public class InboxProjectionHandlerSpecs
         var handler = InboxProjectionTestSupport.CreateHandler(InboxProjectionTestSupport.CreateDatabase());
         Assert.False(handler.Filter(new CloudEvent(
             id: "e",
-            source: new Uri("/mohist/issue/issue_1", UriKind.Relative),
+            source: new Uri("/mohist/projects/proj_a/issues/1", UriKind.Relative),
             type: EventCatalog.ReverseDns.IssueCancelled,
             time: TestTime.UtcNow,
             data: null)));
@@ -739,24 +698,21 @@ public class InboxProjectionHandlerSpecs
         await InboxProjectionTestSupport.SeedWorkflowRunAsync(database,
             workflowRunId: "wf_1",
             projectId: "proj_a",
-            issueId: "issue_1",
             issueNumber: 1);
         await InboxProjectionTestSupport.SeedWorkflowRunAsync(database,
             workflowRunId: "wf_2",
             projectId: "proj_a",
-            issueId: "issue_1",
             issueNumber: 1);
         await InboxProjectionTestSupport.SeedIssueAsync(database,
             projectId: "proj_a",
-            issueId: "issue_1",
             issueNumber: 1,
             title: "Issue 1");
 
         var handler = InboxProjectionTestSupport.CreateHandler(database);
         await handler.HandleAsync(InboxProjectionTestSupport.BuildWorkflowEvent(EventCatalog.ReverseDns.WorkflowRunFailed, "wf_1", "evt-failed"), CancellationToken.None);
         await handler.HandleAsync(InboxProjectionTestSupport.BuildWorkflowEvent(EventCatalog.ReverseDns.StageApprovalRequested, "wf_2", "evt-approval"), CancellationToken.None);
-        await handler.HandleAsync(InboxProjectionTestSupport.BuildIssueEvent(EventCatalog.ReverseDns.IssueWorkStarted, "proj_a", "issue_1", 1, "evt-started"), CancellationToken.None);
-        await handler.HandleAsync(InboxProjectionTestSupport.BuildIssueEvent(EventCatalog.ReverseDns.IssueCompleted, "proj_a", "issue_1", 1, "evt-completed"), CancellationToken.None);
+        await handler.HandleAsync(InboxProjectionTestSupport.BuildIssueEvent(EventCatalog.ReverseDns.IssueWorkStarted, "proj_a", 1, "evt-started"), CancellationToken.None);
+        await handler.HandleAsync(InboxProjectionTestSupport.BuildIssueEvent(EventCatalog.ReverseDns.IssueCompleted, "proj_a", 1, "evt-completed"), CancellationToken.None);
 
         var items = await InboxProjectionTestSupport.GetInboxAsync(database, "proj_a");
         Assert.Equal(4, items.Count);
@@ -778,7 +734,6 @@ public class InboxProjectionHandlerSpecs
         await using var database = InboxProjectionTestSupport.CreateDatabase();
         await InboxProjectionTestSupport.SeedIssueAsync(database,
             projectId: "proj_a",
-            issueId: "issue_1",
             issueNumber: 1,
             title: "Enabled test");
         await InboxProjectionTestSupport.SeedSubscriptionAsync(database, "proj_a",
@@ -788,7 +743,6 @@ public class InboxProjectionHandlerSpecs
         var evt = InboxProjectionTestSupport.BuildIssueEvent(
             type: EventCatalog.ReverseDns.IssueCompleted,
             projectId: "proj_a",
-            issueId: "issue_1",
             issueNumber: 1,
             eventId: "evt-enabled");
 
@@ -806,7 +760,6 @@ public class InboxProjectionHandlerSpecs
         await using var database = InboxProjectionTestSupport.CreateDatabase();
         await InboxProjectionTestSupport.SeedIssueAsync(database,
             projectId: "proj_a",
-            issueId: "issue_1",
             issueNumber: 1,
             title: "Disabled test");
         await InboxProjectionTestSupport.SeedSubscriptionAsync(database, "proj_a",
@@ -823,7 +776,6 @@ public class InboxProjectionHandlerSpecs
         await InboxProjectionTestSupport.SeedWorkflowRunAsync(database,
             workflowRunId: "wf_disabled",
             projectId: "proj_a",
-            issueId: "issue_1",
             issueNumber: 1);
 
         await handler.HandleAsync(evt, CancellationToken.None);
@@ -839,7 +791,6 @@ public class InboxProjectionHandlerSpecs
         await using var database = InboxProjectionTestSupport.CreateDatabase();
         await InboxProjectionTestSupport.SeedIssueAsync(database,
             projectId: "proj_a",
-            issueId: "issue_1",
             issueNumber: 1,
             title: "Multi disabled");
         await InboxProjectionTestSupport.SeedSubscriptionAsync(database, "proj_a",
@@ -850,14 +801,14 @@ public class InboxProjectionHandlerSpecs
 
         var handler = InboxProjectionTestSupport.CreateHandler(database);
         await InboxProjectionTestSupport.SeedWorkflowRunAsync(database,
-            workflowRunId: "wf_fail", projectId: "proj_a", issueId: "issue_1", issueNumber: 1);
+            workflowRunId: "wf_fail", projectId: "proj_a", issueNumber: 1);
         await InboxProjectionTestSupport.SeedWorkflowRunAsync(database,
-            workflowRunId: "wf_approve", projectId: "proj_a", issueId: "issue_1", issueNumber: 1);
+            workflowRunId: "wf_approve", projectId: "proj_a", issueNumber: 1);
 
         await handler.HandleAsync(InboxProjectionTestSupport.BuildWorkflowEvent(EventCatalog.ReverseDns.WorkflowRunFailed, "wf_fail", "evt-f"), CancellationToken.None);
         await handler.HandleAsync(InboxProjectionTestSupport.BuildWorkflowEvent(EventCatalog.ReverseDns.StageApprovalRequested, "wf_approve", "evt-a"), CancellationToken.None);
-        await handler.HandleAsync(InboxProjectionTestSupport.BuildIssueEvent(EventCatalog.ReverseDns.IssueWorkStarted, "proj_a", "issue_1", 1, "evt-s"), CancellationToken.None);
-        await handler.HandleAsync(InboxProjectionTestSupport.BuildIssueEvent(EventCatalog.ReverseDns.IssueCompleted, "proj_a", "issue_1", 1, "evt-c"), CancellationToken.None);
+        await handler.HandleAsync(InboxProjectionTestSupport.BuildIssueEvent(EventCatalog.ReverseDns.IssueWorkStarted, "proj_a", 1, "evt-s"), CancellationToken.None);
+        await handler.HandleAsync(InboxProjectionTestSupport.BuildIssueEvent(EventCatalog.ReverseDns.IssueCompleted, "proj_a", 1, "evt-c"), CancellationToken.None);
 
         Assert.Empty(await InboxProjectionTestSupport.GetInboxAsync(database, "proj_a"));
     }
@@ -870,7 +821,6 @@ public class InboxProjectionHandlerSpecs
         await using var database = InboxProjectionTestSupport.CreateDatabase();
         await InboxProjectionTestSupport.SeedIssueAsync(database,
             projectId: "proj_a",
-            issueId: "issue_1",
             issueNumber: 1,
             title: "Missing sub");
 
@@ -878,7 +828,6 @@ public class InboxProjectionHandlerSpecs
         var evt = InboxProjectionTestSupport.BuildIssueEvent(
             type: EventCatalog.ReverseDns.IssueWorkStarted,
             projectId: "proj_a",
-            issueId: "issue_1",
             issueNumber: 1,
             eventId: "evt-no-sub");
 
@@ -896,13 +845,11 @@ public class InboxProjectionHandlerSpecs
         await using var database = InboxProjectionTestSupport.CreateDatabase();
         await InboxProjectionTestSupport.SeedIssueAsync(database,
             projectId: "proj_a",
-            issueId: "issue_1",
             issueNumber: 1,
             title: "Existing item");
         await InboxProjectionTestSupport.SeedWorkflowRunAsync(database,
             workflowRunId: "wf_existing",
             projectId: "proj_a",
-            issueId: "issue_1",
             issueNumber: 1);
 
         // First, create an item with kind enabled.
@@ -943,13 +890,11 @@ public class InboxProjectionHandlerSpecs
         await using var database = InboxProjectionTestSupport.CreateDatabase();
         await InboxProjectionTestSupport.SeedIssueAsync(database,
             projectId: "proj_a",
-            issueId: "issue_1",
             issueNumber: 1,
             title: "Re-enable test");
         await InboxProjectionTestSupport.SeedWorkflowRunAsync(database,
             workflowRunId: "wf_re",
             projectId: "proj_a",
-            issueId: "issue_1",
             issueNumber: 1);
 
         var handler = InboxProjectionTestSupport.CreateHandler(database);
@@ -973,7 +918,6 @@ public class InboxProjectionHandlerSpecs
         await InboxProjectionTestSupport.SeedWorkflowRunAsync(database,
             workflowRunId: "wf_re2",
             projectId: "proj_a",
-            issueId: "issue_1",
             issueNumber: 1);
 
         var evtAfter = InboxProjectionTestSupport.BuildWorkflowEvent(
@@ -995,13 +939,11 @@ public class InboxProjectionHandlerSpecs
         await using var database = InboxProjectionTestSupport.CreateDatabase();
         await InboxProjectionTestSupport.SeedIssueAsync(database,
             projectId: "proj_a",
-            issueId: "issue_1",
             issueNumber: 1,
             title: "Replay disabled");
         await InboxProjectionTestSupport.SeedWorkflowRunAsync(database,
             workflowRunId: "wf_replay_disabled",
             projectId: "proj_a",
-            issueId: "issue_1",
             issueNumber: 1);
 
         await InboxProjectionTestSupport.SeedSubscriptionAsync(database, "proj_a",

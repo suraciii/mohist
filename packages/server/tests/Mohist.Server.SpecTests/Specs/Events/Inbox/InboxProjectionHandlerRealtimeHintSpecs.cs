@@ -18,7 +18,7 @@ namespace Mohist.Server.SpecTests.Specs.Events.Inbox;
 /// "Server emits a project-scoped realtime hint strictly after an inbox
 /// item is persisted": exactly one hint per non-duplicate insert, no
 /// hint on deduplicated inserts, no hint on insert failure, identity-only
-/// payload, lineage extensions (projectid / issueid / issue) stamped,
+/// payload, lineage extensions (projectid / issue) stamped,
 /// envelope satisfies <see cref="EventCatalog.RequiredAttributes"/> for
 /// <c>com.mohist.inbox.item-persisted</c>, and publish failure propagation.
 /// Shared DB / scope / event-builder helpers live in
@@ -37,7 +37,6 @@ public class InboxProjectionHandlerRealtimeHintSpecs
         await using var database = InboxProjectionTestSupport.CreateDatabase();
         await InboxProjectionTestSupport.SeedIssueAsync(database,
             projectId: "proj_a",
-            issueId: "issue_1",
             issueNumber: 42,
             title: "Issue 42");
 
@@ -46,7 +45,6 @@ public class InboxProjectionHandlerRealtimeHintSpecs
         var evt = InboxProjectionTestSupport.BuildIssueEvent(
             type: EventCatalog.ReverseDns.IssueWorkStarted,
             projectId: "proj_a",
-            issueId: "issue_1",
             issueNumber: 42,
             eventId: "evt-hint-once");
 
@@ -65,7 +63,6 @@ public class InboxProjectionHandlerRealtimeHintSpecs
         await using var database = InboxProjectionTestSupport.CreateDatabase();
         await InboxProjectionTestSupport.SeedIssueAsync(database,
             projectId: "proj_a",
-            issueId: "issue_1",
             issueNumber: 1,
             title: "Issue 1");
 
@@ -74,7 +71,6 @@ public class InboxProjectionHandlerRealtimeHintSpecs
         var evt = InboxProjectionTestSupport.BuildIssueEvent(
             type: EventCatalog.ReverseDns.IssueWorkStarted,
             projectId: "proj_a",
-            issueId: "issue_1",
             issueNumber: 1,
             eventId: "evt-dedup");
 
@@ -101,7 +97,6 @@ public class InboxProjectionHandlerRealtimeHintSpecs
         await using var database = InboxProjectionTestSupport.CreateDatabase();
         await InboxProjectionTestSupport.SeedIssueAsync(database,
             projectId: "proj_a",
-            issueId: "issue_1",
             issueNumber: 1,
             title: "Issue 1");
 
@@ -121,7 +116,6 @@ public class InboxProjectionHandlerRealtimeHintSpecs
         var evt = InboxProjectionTestSupport.BuildIssueEvent(
             type: EventCatalog.ReverseDns.IssueWorkStarted,
             projectId: "proj_a",
-            issueId: "issue_1",
             issueNumber: 1,
             eventId: "evt-insert-fails");
 
@@ -141,7 +135,6 @@ public class InboxProjectionHandlerRealtimeHintSpecs
         await using var database = InboxProjectionTestSupport.CreateDatabase();
         await InboxProjectionTestSupport.SeedIssueAsync(database,
             projectId: "proj_a",
-            issueId: "issue_42",
             issueNumber: 42,
             title: "Approval target");
 
@@ -150,7 +143,6 @@ public class InboxProjectionHandlerRealtimeHintSpecs
         var evt = InboxProjectionTestSupport.BuildIssueEvent(
             type: EventCatalog.ReverseDns.IssueWorkStarted,
             projectId: "proj_a",
-            issueId: "issue_42",
             issueNumber: 42,
             eventId: "evt-identity");
 
@@ -158,17 +150,16 @@ public class InboxProjectionHandlerRealtimeHintSpecs
 
         var hint = Assert.Single(publisher.Published);
         var data = Assert.IsType<JsonElement>(hint.Data);
-        // Strict identity-only payload: exactly five fields, no inbox
+        // Strict identity-only payload: exactly four fields, no inbox
         // state, no source event details, no body / text / read state.
         Assert.Equal(JsonValueKind.Object, data.ValueKind);
         var propertyNames = data.EnumerateObject().Select(p => p.Name).ToHashSet(StringComparer.Ordinal);
         Assert.Equal(new HashSet<string>(StringComparer.Ordinal)
         {
-            "itemId", "projectId", "kind", "issueId", "issueNumber",
+            "itemId", "projectId", "kind", "issueNumber",
         }, propertyNames);
         Assert.Equal(NotificationKinds.IssueStarted, data.GetProperty("kind").GetString());
         Assert.Equal("proj_a", data.GetProperty("projectId").GetString());
-        Assert.Equal("issue_42", data.GetProperty("issueId").GetString());
         Assert.Equal(42, data.GetProperty("issueNumber").GetInt32());
         // itemId matches the row that was persisted (i.e. is the new
         // inbox item's id, not the source event id).
@@ -184,7 +175,6 @@ public class InboxProjectionHandlerRealtimeHintSpecs
         await using var database = InboxProjectionTestSupport.CreateDatabase();
         await InboxProjectionTestSupport.SeedIssueAsync(database,
             projectId: "proj_x",
-            issueId: "issue_x",
             issueNumber: 1,
             title: "X");
 
@@ -193,7 +183,6 @@ public class InboxProjectionHandlerRealtimeHintSpecs
         var evt = InboxProjectionTestSupport.BuildIssueEvent(
             type: EventCatalog.ReverseDns.IssueWorkStarted,
             projectId: "proj_x",
-            issueId: "issue_x",
             issueNumber: 1,
             eventId: "evt-projectid");
 
@@ -212,7 +201,6 @@ public class InboxProjectionHandlerRealtimeHintSpecs
         await using var database = InboxProjectionTestSupport.CreateDatabase();
         await InboxProjectionTestSupport.SeedIssueAsync(database,
             projectId: "proj_lineage",
-            issueId: "issue_lineage",
             issueNumber: 42,
             title: "Lineage");
 
@@ -221,7 +209,6 @@ public class InboxProjectionHandlerRealtimeHintSpecs
         var evt = InboxProjectionTestSupport.BuildIssueEvent(
             type: EventCatalog.ReverseDns.IssueWorkStarted,
             projectId: "proj_lineage",
-            issueId: "issue_lineage",
             issueNumber: 42,
             eventId: "evt-lineage");
 
@@ -232,7 +219,6 @@ public class InboxProjectionHandlerRealtimeHintSpecs
         // Lineage keys are lifted from the InboxItemDraft already held in
         // scope — no extra lookup. Values must match the draft exactly.
         Assert.Equal("proj_lineage", hint.Extensions![EventCatalog.Lineage.ProjectId]);
-        Assert.Equal("issue_lineage", hint.Extensions[EventCatalog.Lineage.IssueId]);
         Assert.Equal("42", hint.Extensions[EventCatalog.Lineage.Issue]);
     }
 
@@ -247,33 +233,27 @@ public class InboxProjectionHandlerRealtimeHintSpecs
         await InboxProjectionTestSupport.SeedWorkflowRunAsync(database,
             workflowRunId: "wf_conformance_failed",
             projectId: "proj_conformance",
-            issueId: "issue_conformance_failed",
             issueNumber: 1);
         await InboxProjectionTestSupport.SeedWorkflowRunAsync(database,
             workflowRunId: "wf_conformance_approval",
             projectId: "proj_conformance",
-            issueId: "issue_conformance_approval",
             issueNumber: 2);
         // Seed the two issues the workflow runs reference.
         await InboxProjectionTestSupport.SeedIssueAsync(database,
             projectId: "proj_conformance",
-            issueId: "issue_conformance_failed",
             issueNumber: 1,
             title: "Failed");
         await InboxProjectionTestSupport.SeedIssueAsync(database,
             projectId: "proj_conformance",
-            issueId: "issue_conformance_approval",
             issueNumber: 2,
             title: "Approval");
         // Seed two more issues for the issue-branch path.
         await InboxProjectionTestSupport.SeedIssueAsync(database,
             projectId: "proj_conformance",
-            issueId: "issue_conformance_started",
             issueNumber: 3,
             title: "Started");
         await InboxProjectionTestSupport.SeedIssueAsync(database,
             projectId: "proj_conformance",
-            issueId: "issue_conformance_completed",
             issueNumber: 4,
             title: "Completed");
 
@@ -284,14 +264,14 @@ public class InboxProjectionHandlerRealtimeHintSpecs
         await handler.HandleAsync(InboxProjectionTestSupport.BuildWorkflowEvent(
             EventCatalog.ReverseDns.StageApprovalRequested, "wf_conformance_approval", "evt-cf-approval"), CancellationToken.None);
         await handler.HandleAsync(InboxProjectionTestSupport.BuildIssueEvent(
-            EventCatalog.ReverseDns.IssueWorkStarted, "proj_conformance", "issue_conformance_started", 3, "evt-cf-started"), CancellationToken.None);
+            EventCatalog.ReverseDns.IssueWorkStarted, "proj_conformance", 3, "evt-cf-started"), CancellationToken.None);
         await handler.HandleAsync(InboxProjectionTestSupport.BuildIssueEvent(
-            EventCatalog.ReverseDns.IssueCompleted, "proj_conformance", "issue_conformance_completed", 4, "evt-cf-completed"), CancellationToken.None);
+            EventCatalog.ReverseDns.IssueCompleted, "proj_conformance", 4, "evt-cf-completed"), CancellationToken.None);
 
         var hintType = EventCatalog.ReverseDns.InboxItemPersisted;
         Assert.True(EventCatalog.HasLineageDeclaration(hintType));
         var required = EventCatalog.RequiredAttributes(hintType);
-        Assert.Equal(new[] { EventCatalog.Lineage.ProjectId, EventCatalog.Lineage.IssueId, EventCatalog.Lineage.Issue }, required);
+        Assert.Equal(new[] { EventCatalog.Lineage.ProjectId, EventCatalog.Lineage.Issue }, required.ToArray());
 
         Assert.Equal(4, publisher.Published.Count);
         // Every emitted hint must satisfy the catalog's required-attribute
@@ -314,7 +294,6 @@ public class InboxProjectionHandlerRealtimeHintSpecs
         await using var database = InboxProjectionTestSupport.CreateDatabase();
         await InboxProjectionTestSupport.SeedIssueAsync(database,
             projectId: "proj_a",
-            issueId: "issue_1",
             issueNumber: 1,
             title: "Issue 1");
 
@@ -325,7 +304,6 @@ public class InboxProjectionHandlerRealtimeHintSpecs
         var evt = InboxProjectionTestSupport.BuildIssueEvent(
             type: EventCatalog.ReverseDns.IssueWorkStarted,
             projectId: "proj_a",
-            issueId: "issue_1",
             issueNumber: 1,
             eventId: "evt-publish-fails");
 
@@ -351,7 +329,6 @@ public class InboxProjectionHandlerRealtimeHintSpecs
         await using var database = InboxProjectionTestSupport.CreateDatabase();
         await InboxProjectionTestSupport.SeedIssueAsync(database,
             projectId: "proj_atomic",
-            issueId: "issue_atomic",
             issueNumber: 7,
             title: "Atomic hint");
 
@@ -368,7 +345,6 @@ public class InboxProjectionHandlerRealtimeHintSpecs
         var evt = InboxProjectionTestSupport.BuildIssueEvent(
             type: EventCatalog.ReverseDns.IssueWorkStarted,
             projectId: "proj_atomic",
-            issueId: "issue_atomic",
             issueNumber: 7,
             eventId: "evt-atomic-hint");
 
@@ -409,21 +385,17 @@ public class InboxProjectionHandlerRealtimeHintSpecs
         await InboxProjectionTestSupport.SeedWorkflowRunAsync(database,
             workflowRunId: "wf_failed",
             projectId: "proj_a",
-            issueId: "issue_1",
             issueNumber: 1);
         await InboxProjectionTestSupport.SeedWorkflowRunAsync(database,
             workflowRunId: "wf_approval",
             projectId: "proj_a",
-            issueId: "issue_2",
             issueNumber: 2);
         await InboxProjectionTestSupport.SeedIssueAsync(database,
             projectId: "proj_a",
-            issueId: "issue_1",
             issueNumber: 1,
             title: "Failed issue");
         await InboxProjectionTestSupport.SeedIssueAsync(database,
             projectId: "proj_a",
-            issueId: "issue_2",
             issueNumber: 2,
             title: "Approval issue");
 
@@ -431,8 +403,8 @@ public class InboxProjectionHandlerRealtimeHintSpecs
         var handler = InboxProjectionTestSupport.CreateHandler(database, publisher);
         await handler.HandleAsync(InboxProjectionTestSupport.BuildWorkflowEvent(EventCatalog.ReverseDns.WorkflowRunFailed, "wf_failed", "evt-f"), CancellationToken.None);
         await handler.HandleAsync(InboxProjectionTestSupport.BuildWorkflowEvent(EventCatalog.ReverseDns.StageApprovalRequested, "wf_approval", "evt-a"), CancellationToken.None);
-        await handler.HandleAsync(InboxProjectionTestSupport.BuildIssueEvent(EventCatalog.ReverseDns.IssueWorkStarted, "proj_a", "issue_1", 1, "evt-s"), CancellationToken.None);
-        await handler.HandleAsync(InboxProjectionTestSupport.BuildIssueEvent(EventCatalog.ReverseDns.IssueCompleted, "proj_a", "issue_2", 2, "evt-c"), CancellationToken.None);
+        await handler.HandleAsync(InboxProjectionTestSupport.BuildIssueEvent(EventCatalog.ReverseDns.IssueWorkStarted, "proj_a", 1, "evt-s"), CancellationToken.None);
+        await handler.HandleAsync(InboxProjectionTestSupport.BuildIssueEvent(EventCatalog.ReverseDns.IssueCompleted, "proj_a", 2, "evt-c"), CancellationToken.None);
 
         Assert.Equal(4, publisher.Published.Count);
         var kinds = publisher.Published
@@ -455,7 +427,6 @@ public class InboxProjectionHandlerRealtimeHintSpecs
         await using var database = InboxProjectionTestSupport.CreateDatabase();
         await InboxProjectionTestSupport.SeedIssueAsync(database,
             projectId: "proj_a",
-            issueId: "issue_1",
             issueNumber: 42,
             title: "No hint when disabled");
         await InboxProjectionTestSupport.SeedSubscriptionAsync(database, "proj_a",
@@ -466,7 +437,6 @@ public class InboxProjectionHandlerRealtimeHintSpecs
         var evt = InboxProjectionTestSupport.BuildIssueEvent(
             type: EventCatalog.ReverseDns.IssueWorkStarted,
             projectId: "proj_a",
-            issueId: "issue_1",
             issueNumber: 42,
             eventId: "evt-no-hint-disabled");
 
@@ -488,11 +458,9 @@ public class InboxProjectionHandlerRealtimeHintSpecs
         await InboxProjectionTestSupport.SeedWorkflowRunAsync(database,
             workflowRunId: "wf_owned_by_b",
             projectId: "proj_b",
-            issueId: "issue_1",
             issueNumber: 1);
         await InboxProjectionTestSupport.SeedIssueAsync(database,
             projectId: "proj_b",
-            issueId: "issue_1",
             issueNumber: 1,
             title: "Owned by B");
 
