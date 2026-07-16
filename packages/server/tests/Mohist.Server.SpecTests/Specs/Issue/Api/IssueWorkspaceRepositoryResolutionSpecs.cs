@@ -244,7 +244,7 @@ public class IssueWorkspaceRepositoryResolutionSpecs : IAsyncLifetime
         });
 
         var issue = await _client.GetDataAsync<IssueDto>($"/api/projects/{projectId}/issues/{number}");
-        var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(issue.Id));
+        var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(projectId, issue.Number)));
         var issueStatus = await issueGrain.GetWorkflowStatusAsync();
         var wrId = issueStatus!.WorkflowRunId!;
 

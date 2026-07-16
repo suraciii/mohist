@@ -84,15 +84,12 @@ public class WorkflowItemTranslatorSpecs : IAsyncLifetime
         return Task.CompletedTask;
     }
 
-    private async Task<WorkflowRun> SeedRunningWorkflowAsync(string workflowRunId, string projectId, string? issueId = null)
+    private async Task<WorkflowRun> SeedRunningWorkflowAsync(string workflowRunId, string projectId)
     {
         var annotations = new Dictionary<string, string>(StringComparer.Ordinal)
         {
             ["projectId"] = projectId,
         };
-        if (!string.IsNullOrWhiteSpace(issueId))
-            annotations["issueId"] = issueId;
-
         var run = WorkflowRunExtensions.Create(
             workflowRunId,
             new WorkflowDefinition("spec/workflow",
@@ -104,11 +101,11 @@ public class WorkflowItemTranslatorSpecs : IAsyncLifetime
             DateTimeOffset.UnixEpoch,
             new WorkflowRunMetadata(null, DateTimeOffset.UnixEpoch, Annotations: annotations));
 
-        await SeedProfileAsync(projectId, issueId, workflowRunId, run);
+        await SeedProfileAsync(projectId, workflowRunId, run);
         return run;
     }
 
-    private async Task SeedProfileAsync(string projectId, string? issueId, string workflowRunId, WorkflowRun run)
+    private async Task SeedProfileAsync(string projectId, string workflowRunId, WorkflowRun run)
     {
         await using var db = new MohistDbContext(_options);
         var definitionJson = JsonSerializer.Serialize(
@@ -137,21 +134,6 @@ public class WorkflowItemTranslatorSpecs : IAsyncLifetime
             WorkflowRunId = workflowRunId,
             State = JsonSerializer.Serialize(run),
         });
-
-        if (!string.IsNullOrWhiteSpace(issueId))
-        {
-            db.Issues.Add(new IssueRow
-            {
-                IssueId = issueId,
-                State = JsonSerializer.Serialize(new
-                {
-                    Id = issueId,
-                    ProjectId = projectId,
-                    Number = 1,
-                    WorkflowRunId = workflowRunId,
-                }),
-            });
-        }
 
         await db.SaveChangesAsync();
     }
