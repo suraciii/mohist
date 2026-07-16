@@ -27,7 +27,6 @@ public sealed class HermesIssueNotificationRenderer
             draft.SourceEventId,
             draft.OccurredAt,
             draft.ProjectId,
-            draft.IssueId,
             draft.IssueNumber,
             draft.IssueTitle,
             draft.WorkflowRunId,

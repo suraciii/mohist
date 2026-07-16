@@ -5,6 +5,7 @@ using Microsoft.Extensions.Options;
 using Mohist.Server.Infrastructure.Data;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Events;
+using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Inbox;
 using Mohist.Server.Issue.Domain.Events;
 using Mohist.Server.Notifications;
@@ -124,7 +125,6 @@ public sealed class HermesIssueNotificationHandler : ICloudEventHandler
             evt.Id,
             evt.Time,
             resolved.Value.ProjectId,
-            resolved.Value.IssueId,
             resolved.Value.IssueNumber,
             issue.Title,
             resolved.Value.WorkflowRunId,
@@ -145,21 +145,19 @@ public sealed class HermesIssueNotificationHandler : ICloudEventHandler
         var annotations = run?.Metadata.Annotations;
         if (annotations is null
             || !annotations.TryGetValue("projectId", out var projectId) || string.IsNullOrWhiteSpace(projectId)
-            || !annotations.TryGetValue("issueId", out var issueId) || string.IsNullOrWhiteSpace(issueId)
             || !annotations.TryGetValue("issueNumber", out var issueNumberText) || string.IsNullOrWhiteSpace(issueNumberText)
             || !int.TryParse(issueNumberText, out var issueNumber))
         {
             return null;
         }
 
-        return new ResolvedIdentity(projectId, issueId, issueNumber, workflowRunId);
+        return new ResolvedIdentity(projectId, issueNumber, workflowRunId);
     }
 
     private static ResolvedIdentity? ResolveFromIssueExtensions(CloudEvent evt)
     {
         var extensions = evt.Extensions;
-        if (!extensions.TryGetValue(EventCatalog.Lineage.ProjectId, out var projectId) || string.IsNullOrWhiteSpace(projectId)
-            || !extensions.TryGetValue(EventCatalog.Lineage.IssueId, out var issueId) || string.IsNullOrWhiteSpace(issueId))
+        if (!extensions.TryGetValue(EventCatalog.Lineage.ProjectId, out var projectId) || string.IsNullOrWhiteSpace(projectId))
         {
             return null;
         }
@@ -177,7 +175,7 @@ public sealed class HermesIssueNotificationHandler : ICloudEventHandler
             _ => null,
         };
 
-        return new ResolvedIdentity(projectId, issueId, issueNumber, workflowRunId);
+        return new ResolvedIdentity(projectId, issueNumber, workflowRunId);
     }
 
     private static string? TryReadIssueNumberText(IReadOnlyDictionary<string, string> extensions)
@@ -199,7 +197,7 @@ public sealed class HermesIssueNotificationHandler : ICloudEventHandler
 
     private async Task<DomainIssue?> ResolveIssueAsync(ResolvedIdentity resolved, IStateStore<DomainIssue> issueStore)
     {
-        var issue = await issueStore.LoadAsync(resolved.IssueId).ConfigureAwait(false);
+        var issue = await issueStore.LoadAsync(GrainKey.Issue(new IssueKey(resolved.ProjectId, resolved.IssueNumber))).ConfigureAwait(false);
         if (issue is null)
             return null;
 
@@ -240,7 +238,6 @@ public sealed class HermesIssueNotificationHandler : ICloudEventHandler
 
     private readonly record struct ResolvedIdentity(
         string ProjectId,
-        string IssueId,
         int IssueNumber,
         string? WorkflowRunId);
 }
