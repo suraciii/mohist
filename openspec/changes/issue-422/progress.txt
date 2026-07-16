@@ -1,0 +1,15 @@
+## Codebase Patterns
+
+- Recovery configuration remains on `TaskDefinition` and `TaskRun.Recovery`; consumed allowance is `TaskRun.RecoveryRemaining`.
+- Fresh stage, runtime, and manual-retry task attempts use `TaskRun.MakeTask` and persist explicit null. Runner-produced continuation attempts use `TaskRun.MakeContinuationTask` with an explicit numeric value.
+- `JsonIgnoreCondition.Never` is required on persisted and poll response nullable recovery state because shared JSON options omit nulls.
+- Runner recovery state is presence-sensitive: absent `recoveryRemaining` is ineligible, explicit null initializes from the declaration, and numeric values are clamped before matching.
+- Runner-produced recovery follow-ups with a declaration must carry numeric remaining state; `WorkflowWorkLifecycle` rejects missing or null continuation state before completing the current task.
+- Legacy workflow JSON migration must inspect property presence before deserialization. It canonicalizes same-definition declarations while ignoring only recovery budget fields, preserves explicit null/zero, and rejects structurally ambiguous groups.
+
+## Decisions And Gotchas
+
+- Existing server recovery fixtures that represented exhaustion by changing `RecoveryDefinition.Budget` must keep the original declaration and send `RecoveryRemaining: 0`.
+- Read-side workflow JSON consumers also call `WorkflowRunStore.MigrateLegacyWorkflowRunJson` so task history and projections see canonical declarations.
+- New Orleans fields are appended: `WorkItem` uses id 9/10, `WorkDispatch` id 17, `RuntimeTaskInput` id 9. Existing ids remain unchanged.
+- `ActionContext` intentionally exposes recovery declaration only; it does not carry remaining state.

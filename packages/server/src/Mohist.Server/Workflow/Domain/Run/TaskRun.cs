@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Services;
 
@@ -32,6 +33,8 @@ public sealed class TaskRun
     public TaskArtifactCapture? Artifacts { get; init; }
     public Dictionary<string, string>? SetVars { get; init; }
     public RecoveryDefinition? Recovery { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public int? RecoveryRemaining { get; init; }
     public TaskClassification Classification { get; init; } = TaskClassification.UserFacing;
     public string? CausedByFeedbackId { get; init; }
     public string? CausedByFailedTaskId { get; init; }
@@ -139,6 +142,30 @@ public static class TaskRunExtensions
             TaskDefinition input,
             string? causedByFeedbackId = null,
             string? causedByFailedTaskId = null)
+            => MakeTask(existing, input, recoveryRemaining: null, causedByFeedbackId, causedByFailedTaskId);
+
+        internal static TaskRun MakeContinuationTask(
+            IEnumerable<TaskRun> existing,
+            TaskDefinition input,
+            int recoveryRemaining,
+            string? causedByFeedbackId = null,
+            string? causedByFailedTaskId = null)
+        {
+            if (input.Recovery is null)
+                throw new InvalidOperationException("A continuation task requires a recovery declaration");
+            if (recoveryRemaining < 0 || recoveryRemaining > Math.Max(0, input.Recovery.Budget))
+                throw new InvalidOperationException(
+                    $"Recovery remaining value {recoveryRemaining} is outside the declared budget {input.Recovery.Budget}");
+
+            return MakeTask(existing, input, recoveryRemaining, causedByFeedbackId, causedByFailedTaskId);
+        }
+
+        private static TaskRun MakeTask(
+            IEnumerable<TaskRun> existing,
+            TaskDefinition input,
+            int? recoveryRemaining,
+            string? causedByFeedbackId,
+            string? causedByFailedTaskId)
         {
             var attempt = existing
                               .Where(t => t.DefinitionId == input.Id)
@@ -160,10 +187,20 @@ public static class TaskRunExtensions
                 Artifacts = input.Artifacts,
                 SetVars = input.SetVars,
                 Recovery = input.Recovery,
+                RecoveryRemaining = recoveryRemaining,
                 Classification = classification,
                 CausedByFeedbackId = causedByFeedbackId,
                 CausedByFailedTaskId = causedByFailedTaskId
             };
         }
     }
+
+    public static TaskDefinition ToDefinition(this TaskRun task) => new(
+        task.DefinitionId,
+        task.Title,
+        task.Uses,
+        task.WithInput,
+        task.Artifacts,
+        task.SetVars,
+        task.Recovery);
 }

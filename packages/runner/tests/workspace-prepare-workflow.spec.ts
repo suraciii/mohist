@@ -180,6 +180,7 @@ describe("workspace-prepare stage-boundary dispatch regression", () => {
             },
           ],
         },
+        recoveryRemaining: null,
       }),
       new AbortController().signal,
     )

@@ -161,6 +161,7 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
         var (firstAttempt, r1) = await PollWorkAnyAsync();
         Assert.StartsWith("merge-pr.1", firstAttempt.WorkId);
         Assert.NotNull(firstAttempt.Recovery);
+        Assert.Null(firstAttempt.RecoveryRemaining);
         await ReportAsync(r1, firstAttempt.WorkId, "failed", "transient gh EOF");
 
         await workflow.RetryAsync();
@@ -169,6 +170,7 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
         Assert.StartsWith("merge-pr.2", retriedAttempt.WorkId);
         Assert.Equal(r1, r2);
         Assert.NotNull(retriedAttempt.Recovery);
+        Assert.Null(retriedAttempt.RecoveryRemaining);
         using (var recoveryJson = JsonDocument.Parse(retriedAttempt.Recovery!))
         {
             Assert.Equal("errorCode=base-moved",
@@ -187,13 +189,112 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
                 new RuntimeTaskInput(
                     "recover:rebase",
                     "Rebase after base moved",
-                    "spec/task")
+                    "spec/task"),
+                new RuntimeTaskInput(
+                    "merge-pr",
+                    "Merge PR",
+                    "spec/task",
+                    Recovery: recovery,
+                    RecoveryRemaining: 1)
             ]));
 
         var (recoveryTask, r3) = await PollWorkAnyAsync();
         Assert.StartsWith("recover:rebase.1", recoveryTask.WorkId);
         Assert.Equal(r2, r3);
+
+        await ReportAsync(r3, recoveryTask.WorkId, "completed");
+        var (selfRetry, r4) = await PollWorkAnyAsync();
+        Assert.StartsWith("merge-pr.3", selfRetry.WorkId);
+        Assert.Equal(1, selfRetry.RecoveryRemaining);
+        using var selfRetryRecovery = JsonDocument.Parse(selfRetry.Recovery!);
+        Assert.Equal(2, selfRetryRecovery.RootElement.GetProperty("budget").GetInt32());
     }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public async Task RecoveryFollowUpWithoutRemainingState_IsRejectedBeforeCompletion()
+    {
+        var recovery = new RecoveryDefinition(
+            2,
+            [new RecoveryHandlerDefinition("errorCode=base-moved", [], RetrySelf: false)]);
+        var workflow = await StartWorkflowAsync(SingleStage(
+            tasks: [new TaskDefinition("merge-pr", "Merge PR", "spec/task", Recovery: recovery)],
+            checks: []));
+        var (task, runnerId) = await PollWorkAnyAsync();
+
+        await Assert.ThrowsAnyAsync<Exception>(() => ReportAsync(runnerId, task.WorkId, new WorkResult(
+            "completed",
+            Output: "{}",
+            AddTasks: [new RuntimeTaskInput("recover", "Recover", "spec/task", Recovery: recovery)])));
+
+        var persisted = await LoadRunAsync(_workflowId!);
+        Assert.Equal(TaskRunStatus.Running, persisted.CurrentStage().Tasks.Single().Status);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public async Task ExhaustedRecoveryRound_UserRetryStartsNewFullRound()
+    {
+        var recovery = new RecoveryDefinition(
+            2,
+            [new RecoveryHandlerDefinition(
+                "errorCode=fail",
+                [new TaskDefinition("fix", "Fix", "spec/fix")],
+                RetrySelf: true)]);
+        var workflow = await StartWorkflowAsync(SingleStage(
+            tasks: [new TaskDefinition("review", "Review", "spec/review", Recovery: recovery)],
+            checks: []));
+
+        var (first, runnerId) = await PollWorkAnyAsync();
+        Assert.Null(first.RecoveryRemaining);
+        await ReportAsync(runnerId, first, new WorkResult(
+            "completed",
+            Output: "{\"errorCode\":\"fail\"}",
+            AddTasks: RecoveryFollowUps(recovery, 1)));
+
+        var (fix1, sameRunner) = await PollWorkAnyAsync();
+        Assert.StartsWith("fix.1", fix1.WorkId);
+        await ReportAsync(sameRunner, fix1, "completed");
+        var (second, runnerAfterFix1) = await PollWorkAnyAsync();
+        Assert.Equal(1, second.RecoveryRemaining);
+        await ReportAsync(runnerAfterFix1, second, new WorkResult(
+            "completed",
+            Output: "{\"errorCode\":\"fail\"}",
+            AddTasks: RecoveryFollowUps(recovery, 0)));
+
+        var (fix2, runnerAfterSecond) = await PollWorkAnyAsync();
+        Assert.StartsWith("fix.2", fix2.WorkId);
+        await ReportAsync(runnerAfterSecond, fix2, "completed");
+        var (exhausted, runnerAfterFix2) = await PollWorkAnyAsync();
+        Assert.Equal(0, exhausted.RecoveryRemaining);
+        await ReportAsync(runnerAfterFix2, exhausted, new WorkResult(
+            "failed",
+            "review failed",
+            Output: "{\"errorCode\":\"fail\"}"));
+
+        await workflow.RetryAsync();
+
+        var (fresh, retryRunner) = await PollWorkAnyAsync();
+        Assert.StartsWith("review.4", fresh.WorkId);
+        Assert.Null(fresh.RecoveryRemaining);
+        await ReportAsync(retryRunner, fresh, new WorkResult(
+            "completed",
+            Output: "{\"errorCode\":\"fail\"}",
+            AddTasks: RecoveryFollowUps(recovery, 1)));
+
+        var persisted = await LoadRunAsync(_workflowId!);
+        var attempts = persisted.CurrentStage().Tasks.Where(t => t.DefinitionId == "review").ToList();
+        Assert.Equal(new int?[] { null, 1, 0, null, 1 }, attempts.Select(t => t.RecoveryRemaining).ToArray());
+        Assert.All(attempts, task => Assert.Equal(2, task.Recovery!.Budget));
+    }
+
+    private static List<RuntimeTaskInput> RecoveryFollowUps(RecoveryDefinition recovery, int remaining) =>
+    [
+        new RuntimeTaskInput("fix", "Fix", "spec/fix"),
+        new RuntimeTaskInput("review", "Review", "spec/review", Recovery: recovery, RecoveryRemaining: remaining),
+    ];
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]

@@ -1778,7 +1778,7 @@ public class IssueMetricsQuerier : IScopedService
 
     private static WorkflowRun? DeserializeRun(string json)
     {
-        try { return JsonSerializer.Deserialize<WorkflowRun>(json, JSON.Options); }
+        try { return JsonSerializer.Deserialize<WorkflowRun>(WorkflowRunStore.MigrateLegacyWorkflowRunJson(json), JSON.Options); }
         catch { return null; }
     }
 }

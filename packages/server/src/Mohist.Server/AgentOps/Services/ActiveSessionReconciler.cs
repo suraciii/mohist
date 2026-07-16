@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Sessions;
+using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Services;
 using Mohist.Server.Workflow.Domain.Run;
@@ -70,7 +71,7 @@ internal static class ActiveSessionReconciler
     {
         try
         {
-            return JsonSerializer.Deserialize<WorkflowRun>(json, AgentSessionJson.JsonOptions);
+            return JsonSerializer.Deserialize<WorkflowRun>(WorkflowRunStore.MigrateLegacyWorkflowRunJson(json), AgentSessionJson.JsonOptions);
         }
         catch
         {

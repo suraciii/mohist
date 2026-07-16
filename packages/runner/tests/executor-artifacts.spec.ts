@@ -136,6 +136,7 @@ describe("WorkExecutor artifact capture", () => {
           },
         ],
       },
+      recoveryRemaining: null,
     }, new AbortController().signal)
 
     expect(result.status).toBe("completed")
@@ -154,8 +155,9 @@ describe("WorkExecutor artifact capture", () => {
     expect(result.addTasks?.[1]).toMatchObject({
       id: "work-1",
       recovery: {
-        budget: 1,
+        budget: 2,
       },
+      recoveryRemaining: 1,
     })
   })
 

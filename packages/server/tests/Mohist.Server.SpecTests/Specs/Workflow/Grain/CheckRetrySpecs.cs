@@ -74,7 +74,7 @@ public class CheckRetrySpecs : WorkflowGrainSpecs
             AddTasks:
             [
                 new RuntimeTaskInput("recover:fix-tests", "Fix failing tests", "spec/fix"),
-                new RuntimeTaskInput("verify", "Verify", "spec/verify", Recovery: recovery with { Budget = 0 })
+                new RuntimeTaskInput("verify", "Verify", "spec/verify", Recovery: recovery, RecoveryRemaining: 0)
             ]));
 
         var (fix, r2) = await PollWorkAnyAsync();

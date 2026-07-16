@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Time.Testing;
+using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Infrastructure.Data.Workflow;
@@ -184,6 +185,31 @@ public class WorkflowItemTranslatorSpecs : IAsyncLifetime
         Assert.NotNull(dispatch.Variables);
         Assert.NotNull(dispatch.Artifacts);
         Assert.NotNull(dispatch.SetVars);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public async Task TranslateToDispatch_PreservesExplicitNullAndNumericRecoveryState()
+    {
+        var runId = $"wr-{Guid.NewGuid():N}";
+        var projectId = "proj-translate-recovery";
+        var run = await SeedRunningWorkflowAsync(runId, projectId);
+        var recovery = new RecoveryDefinition(
+            2,
+            [new RecoveryHandlerDefinition("error=one", [], RetrySelf: true)]);
+
+        var fresh = await _translator.TranslateToDispatchAsync(
+            WorkItem.Task("build", "task-1.1", "Task 1", "spec/task", null, recovery: recovery, recoveryRemaining: null),
+            runId, run, "runner-1");
+        var continuation = await _translator.TranslateToDispatchAsync(
+            WorkItem.Task("build", "task-1.2", "Task 1", "spec/task", null, recovery: recovery, recoveryRemaining: 1),
+            runId, run, "runner-1");
+
+        Assert.Null(fresh.RecoveryRemaining);
+        Assert.Equal(1, continuation.RecoveryRemaining);
+        Assert.Equal(JSON.Serialize(recovery), fresh.Recovery);
+        Assert.Equal(fresh.Recovery, continuation.Recovery);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]

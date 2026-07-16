@@ -137,7 +137,7 @@ public class WorkflowRunStore : IWorkflowRunStore
         catch (Exception ex)
         {
             throw new InvalidOperationException(
-                $"Failed to deserialize workflow run state. The persisted JSON is corrupt.", ex);
+                $"Failed to deserialize workflow run state: {ex.Message}", ex);
         }
     }
 
@@ -148,22 +148,120 @@ public class WorkflowRunStore : IWorkflowRunStore
         if (root.ValueKind != JsonValueKind.Object)
             return json;
 
+        var legacyRecovery = BuildLegacyRecoveryPlan(root);
         var changed = root.TryGetProperty("claim", out _)
             || (root.TryGetProperty("assignment", out var assignment) && assignment.ValueKind == JsonValueKind.Object && assignment.TryGetProperty("runnerId", out _))
-            || ContainsLegacyTaskRunnerId(root);
+            || ContainsLegacyTaskRunnerId(root)
+            || legacyRecovery.Count > 0;
         if (!changed)
             return json;
 
         using var buffer = new MemoryStream();
         using (var writer = new Utf8JsonWriter(buffer))
         {
-            WriteRunObject(root, writer);
+            WriteRunObject(root, writer, legacyRecovery);
         }
 
         return System.Text.Encoding.UTF8.GetString(buffer.ToArray());
     }
 
-    private static void WriteRunObject(JsonElement root, Utf8JsonWriter writer)
+    private sealed record LegacyRecoveryTask(
+        string DefinitionId,
+        int StageIndex,
+        int TaskIndex,
+        int Attempt,
+        JsonElement? Recovery);
+
+    private sealed record LegacyRecoveryNormalization(JsonElement Recovery, int Remaining);
+
+    private static Dictionary<(int StageIndex, int TaskIndex), LegacyRecoveryNormalization> BuildLegacyRecoveryPlan(JsonElement root)
+    {
+        var groups = new Dictionary<string, List<LegacyRecoveryTask>>(StringComparer.Ordinal);
+        if (!TryGetProperty(root, "stages", out var stages) || stages.ValueKind != JsonValueKind.Array)
+            return [];
+
+        var stageIndex = 0;
+        foreach (var stage in stages.EnumerateArray())
+        {
+            if (stage.ValueKind != JsonValueKind.Object
+                || !TryGetProperty(stage, "tasks", out var tasks)
+                || tasks.ValueKind != JsonValueKind.Array)
+            {
+                stageIndex++;
+                continue;
+            }
+
+            var taskIndex = 0;
+            foreach (var task in tasks.EnumerateArray())
+            {
+                if (task.ValueKind == JsonValueKind.Object
+                    && !TryGetProperty(task, "recoveryRemaining", out _)
+                    && TryGetProperty(task, "definitionId", out var definitionId)
+                    && definitionId.ValueKind == JsonValueKind.String
+                    && !string.IsNullOrWhiteSpace(definitionId.GetString()))
+                {
+                    var recovery = TryGetProperty(task, "recovery", out var recoveryValue)
+                        && recoveryValue.ValueKind == JsonValueKind.Object
+                            ? recoveryValue.Clone()
+                            : (JsonElement?)null;
+                    var entry = new LegacyRecoveryTask(
+                        definitionId.GetString()!,
+                        stageIndex,
+                        taskIndex,
+                        ReadAttempt(task),
+                        recovery);
+                    if (!groups.TryGetValue(entry.DefinitionId, out var group))
+                    {
+                        group = [];
+                        groups.Add(entry.DefinitionId, group);
+                    }
+                    group.Add(entry);
+                }
+
+                taskIndex++;
+            }
+
+            stageIndex++;
+        }
+
+        var plan = new Dictionary<(int StageIndex, int TaskIndex), LegacyRecoveryNormalization>();
+        foreach (var group in groups)
+        {
+            if (group.Value.All(t => t.Recovery is null))
+                continue;
+            if (group.Value.Any(t => t.Recovery is null))
+            {
+                throw new InvalidOperationException(
+                    $"Cannot normalize legacy recovery state for definition id '{group.Key}': some attempts have no recovery declaration");
+            }
+
+            var canonical = group.Value
+                .OrderBy(t => t.Attempt)
+                .ThenBy(t => t.StageIndex)
+                .ThenBy(t => t.TaskIndex)
+                .First();
+
+            if (group.Value.Any(t => !RecoveryDeclarationsMatch(canonical.Recovery!.Value, t.Recovery!.Value)))
+            {
+                throw new InvalidOperationException(
+                    $"Cannot normalize legacy recovery state for definition id '{group.Key}': recovery handlers or task declarations differ");
+            }
+
+            var declaredBudget = Math.Max(0, ReadRecoveryBudget(canonical.Recovery!.Value));
+            foreach (var task in group.Value)
+            {
+                var remaining = Math.Clamp(ReadRecoveryBudget(task.Recovery!.Value), 0, declaredBudget);
+                plan[(task.StageIndex, task.TaskIndex)] = new(canonical.Recovery.Value, remaining);
+            }
+        }
+
+        return plan;
+    }
+
+    private static void WriteRunObject(
+        JsonElement root,
+        Utf8JsonWriter writer,
+        IReadOnlyDictionary<(int StageIndex, int TaskIndex), LegacyRecoveryNormalization> legacyRecovery)
     {
         writer.WriteStartObject();
         foreach (var property in root.EnumerateObject())
@@ -190,7 +288,7 @@ public class WorkflowRunStore : IWorkflowRunStore
                 && property.Value.ValueKind == JsonValueKind.Array)
             {
                 writer.WritePropertyName(property.Name);
-                WriteStagesArray(property.Value, writer);
+                WriteStagesArray(property.Value, writer, legacyRecovery);
                 continue;
             }
 
@@ -225,14 +323,19 @@ public class WorkflowRunStore : IWorkflowRunStore
         writer.WriteEndObject();
     }
 
-    private static void WriteStagesArray(JsonElement stages, Utf8JsonWriter writer)
+    private static void WriteStagesArray(
+        JsonElement stages,
+        Utf8JsonWriter writer,
+        IReadOnlyDictionary<(int StageIndex, int TaskIndex), LegacyRecoveryNormalization> legacyRecovery)
     {
         writer.WriteStartArray();
+        var stageIndex = 0;
         foreach (var stage in stages.EnumerateArray())
         {
             if (stage.ValueKind != JsonValueKind.Object)
             {
                 stage.WriteTo(writer);
+                stageIndex++;
                 continue;
             }
 
@@ -243,46 +346,168 @@ public class WorkflowRunStore : IWorkflowRunStore
                     && property.Value.ValueKind == JsonValueKind.Array)
                 {
                     writer.WritePropertyName(property.Name);
-                    WriteTasksArray(property.Value, writer);
+                    WriteTasksArray(property.Value, writer, stageIndex, legacyRecovery);
                     continue;
                 }
 
                 property.WriteTo(writer);
             }
             writer.WriteEndObject();
+            stageIndex++;
         }
         writer.WriteEndArray();
     }
 
-    private static void WriteTasksArray(JsonElement tasks, Utf8JsonWriter writer)
+    private static void WriteTasksArray(
+        JsonElement tasks,
+        Utf8JsonWriter writer,
+        int stageIndex,
+        IReadOnlyDictionary<(int StageIndex, int TaskIndex), LegacyRecoveryNormalization> legacyRecovery)
     {
         writer.WriteStartArray();
+        var taskIndex = 0;
         foreach (var task in tasks.EnumerateArray())
         {
             if (task.ValueKind != JsonValueKind.Object)
             {
                 task.WriteTo(writer);
+                taskIndex++;
                 continue;
             }
 
-            writer.WriteStartObject();
-            var hasWorkerId = task.TryGetProperty("workerId", out _);
-            foreach (var property in task.EnumerateObject())
-            {
-                if (string.Equals(property.Name, "runnerId", StringComparison.Ordinal))
-                {
-                    if (hasWorkerId) continue;
-                    writer.WritePropertyName("workerId");
-                }
-                else
-                {
-                    writer.WritePropertyName(property.Name);
-                }
-                property.Value.WriteTo(writer);
-            }
-            writer.WriteEndObject();
+            WriteTaskObject(task, writer, stageIndex, taskIndex, legacyRecovery);
+            taskIndex++;
         }
         writer.WriteEndArray();
+    }
+
+    private static void WriteTaskObject(
+        JsonElement task,
+        Utf8JsonWriter writer,
+        int stageIndex,
+        int taskIndex,
+        IReadOnlyDictionary<(int StageIndex, int TaskIndex), LegacyRecoveryNormalization> legacyRecovery)
+    {
+        writer.WriteStartObject();
+        var hasWorkerId = TryGetProperty(task, "workerId", out _);
+        var normalized = legacyRecovery.TryGetValue((stageIndex, taskIndex), out var recovery);
+        var wroteRecovery = false;
+        foreach (var property in task.EnumerateObject())
+        {
+            if (normalized && string.Equals(property.Name, "recoveryRemaining", StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            if (normalized && string.Equals(property.Name, "recovery", StringComparison.OrdinalIgnoreCase))
+            {
+                writer.WritePropertyName(property.Name);
+                recovery!.Recovery.WriteTo(writer);
+                wroteRecovery = true;
+                continue;
+            }
+
+            if (string.Equals(property.Name, "runnerId", StringComparison.Ordinal))
+            {
+                if (hasWorkerId) continue;
+                writer.WritePropertyName("workerId");
+            }
+            else
+            {
+                writer.WritePropertyName(property.Name);
+            }
+            property.Value.WriteTo(writer);
+        }
+
+        if (normalized)
+        {
+            if (!wroteRecovery)
+            {
+                writer.WritePropertyName("recovery");
+                recovery!.Recovery.WriteTo(writer);
+            }
+            writer.WriteNumber("recoveryRemaining", recovery!.Remaining);
+        }
+
+        writer.WriteEndObject();
+    }
+
+    private static bool RecoveryDeclarationsMatch(JsonElement left, JsonElement right) =>
+        JsonValuesEqual(left, right, ignoreBudget: true);
+
+    private static bool JsonValuesEqual(JsonElement left, JsonElement right, bool ignoreBudget)
+    {
+        if (left.ValueKind != right.ValueKind)
+            return false;
+
+        return left.ValueKind switch
+        {
+            JsonValueKind.Object => ObjectsEqual(left, right, ignoreBudget),
+            JsonValueKind.Array => left.EnumerateArray().Zip(right.EnumerateArray()).All(pair => JsonValuesEqual(pair.First, pair.Second, false))
+                && left.GetArrayLength() == right.GetArrayLength(),
+            JsonValueKind.String => left.GetString() == right.GetString(),
+            JsonValueKind.Number => left.TryGetDecimal(out var leftNumber)
+                && right.TryGetDecimal(out var rightNumber)
+                    ? leftNumber == rightNumber
+                    : left.GetRawText() == right.GetRawText(),
+            JsonValueKind.True or JsonValueKind.False => left.GetBoolean() == right.GetBoolean(),
+            JsonValueKind.Null => true,
+            _ => left.GetRawText() == right.GetRawText(),
+        };
+    }
+
+    private static bool ObjectsEqual(JsonElement left, JsonElement right, bool ignoreBudget)
+    {
+        var leftProperties = left.EnumerateObject()
+            .Where(p => !ignoreBudget || !string.Equals(p.Name, "budget", StringComparison.OrdinalIgnoreCase))
+            .ToDictionary(p => p.Name, p => p.Value, StringComparer.Ordinal);
+        var rightProperties = right.EnumerateObject()
+            .Where(p => !ignoreBudget || !string.Equals(p.Name, "budget", StringComparison.OrdinalIgnoreCase))
+            .ToDictionary(p => p.Name, p => p.Value, StringComparer.Ordinal);
+        if (leftProperties.Count != rightProperties.Count)
+            return false;
+
+        foreach (var property in leftProperties)
+        {
+            if (!rightProperties.TryGetValue(property.Key, out var rightValue)
+                || !JsonValuesEqual(property.Value, rightValue,
+                    string.Equals(property.Key, "recovery", StringComparison.OrdinalIgnoreCase)))
+                return false;
+        }
+
+        return true;
+    }
+
+    private static int ReadAttempt(JsonElement task) =>
+        TryGetProperty(task, "attempt", out var attempt)
+        && attempt.ValueKind == JsonValueKind.Number
+        && attempt.TryGetInt32(out var value)
+            ? value
+            : int.MaxValue;
+
+    private static int ReadRecoveryBudget(JsonElement recovery)
+    {
+        if (!TryGetProperty(recovery, "budget", out var budget)
+            || budget.ValueKind != JsonValueKind.Number
+            || !budget.TryGetInt32(out var value))
+            throw new InvalidOperationException("Cannot normalize legacy recovery state: recovery budget is not an integer");
+        return value;
+    }
+
+    private static bool TryGetProperty(JsonElement value, string name, out JsonElement property)
+    {
+        if (value.TryGetProperty(name, out property))
+            return true;
+
+        foreach (var candidate in value.EnumerateObject())
+        {
+            if (string.Equals(candidate.Name, name, StringComparison.OrdinalIgnoreCase))
+            {
+                property = candidate.Value;
+                return true;
+            }
+        }
+
+        property = default;
+        return false;
     }
 
     private static bool ContainsLegacyTaskRunnerId(JsonElement root)

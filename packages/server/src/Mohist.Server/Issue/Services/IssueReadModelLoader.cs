@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Issue.Services.WorkflowProfiles;
 using Mohist.Server.Project.Domain;
@@ -356,7 +357,7 @@ public class IssueReadModelLoader : IScopedService
 
     private static WorkflowRun? DeserializeRun(string json)
     {
-        try { return JsonSerializer.Deserialize<WorkflowRun>(json, JSON.Options); }
+        try { return JsonSerializer.Deserialize<WorkflowRun>(WorkflowRunStore.MigrateLegacyWorkflowRunJson(json), JSON.Options); }
         catch { return null; }
     }
 }
