@@ -248,7 +248,7 @@ public class CliIssueSessionSpecs
     }
 
     [Fact]
-    public async Task SessionCompact_Table_PrintsNewSessionId()
+    public async Task SessionCompact_Table_PrintsCurrentRuntimeSessionId()
     {
         var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
             Task.FromResult(RecordingHttpHandler.Json(new
@@ -257,7 +257,7 @@ public class CliIssueSessionSpecs
                 data = new
                 {
                     id = "sess_1",
-                    agentSessionId = "new_acp_123",
+                    agentSessionId = "acp_123",
                     status = "idle",
                     contextWindowSize = 8192,
                     contextWindowUsed = 512,
@@ -277,13 +277,13 @@ public class CliIssueSessionSpecs
         Assert.Equal($"/api/projects/{ActiveProjectId}/issues/42/sessions/plan/compact", request.RequestUri?.PathAndQuery);
         Assert.Equal("{}", request.Body);
         var stdout = output.ToString();
-        Assert.Contains("New session: new_acp_123", stdout, StringComparison.Ordinal);
+        Assert.Contains("Runtime session: acp_123", stdout, StringComparison.Ordinal);
         Assert.Contains("context:     4096 → 512 (6.25)", stdout, StringComparison.Ordinal);
         Assert.Contains("operation:   compact", stdout, StringComparison.Ordinal);
     }
 
     [Fact]
-    public async Task SessionCompact_DefaultOutput_PrintsNewSessionId()
+    public async Task SessionCompact_DefaultOutput_PrintsCurrentRuntimeSessionId()
     {
         var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
             Task.FromResult(RecordingHttpHandler.Json(new
@@ -292,7 +292,7 @@ public class CliIssueSessionSpecs
                 data = new
                 {
                     id = "sess_1",
-                    agentSessionId = "new_acp_123",
+                    agentSessionId = "acp_123",
                     status = "idle",
                     contextWindowSize = 8192,
                     contextWindowUsed = 512,
@@ -310,7 +310,7 @@ public class CliIssueSessionSpecs
         var request = handler.Requests.Single();
         Assert.Equal(HttpMethod.Post, request.Method);
         Assert.Equal($"/api/projects/{ActiveProjectId}/issues/42/sessions/plan/compact", request.RequestUri?.PathAndQuery);
-        Assert.Contains("New session: new_acp_123", output.ToString(), StringComparison.Ordinal);
+        Assert.Contains("Runtime session: acp_123", output.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -323,7 +323,7 @@ public class CliIssueSessionSpecs
                 data = new
                 {
                     id = "sess_1",
-                    agentSessionId = "new_acp_123",
+                    agentSessionId = "acp_123",
                     status = "idle",
                     operation = "compact",
                     wasCompacted = true,
@@ -335,7 +335,7 @@ public class CliIssueSessionSpecs
 
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();
-        Assert.Contains("\"agentSessionId\": \"new_acp_123\"", stdout, StringComparison.Ordinal);
+        Assert.Contains("\"agentSessionId\": \"acp_123\"", stdout, StringComparison.Ordinal);
         Assert.Contains("\"wasCompacted\": true", stdout, StringComparison.Ordinal);
     }
 
@@ -375,7 +375,7 @@ public class CliIssueSessionSpecs
     }
 
     [Fact]
-    public async Task SessionReset_Table_PrintsNewSessionId()
+    public async Task SessionReset_Table_ExplainsDeferredRuntimeSessionCreation()
     {
         var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
             Task.FromResult(RecordingHttpHandler.Json(new
@@ -384,7 +384,6 @@ public class CliIssueSessionSpecs
                 data = new
                 {
                     id = "sess_1",
-                    agentSessionId = "new_acp_456",
                     status = "idle",
                     contextWindowSize = 8192,
                     contextWindowUsed = 0,
@@ -403,11 +402,11 @@ public class CliIssueSessionSpecs
         Assert.Equal(HttpMethod.Post, request.Method);
         Assert.Equal($"/api/projects/{ActiveProjectId}/issues/42/sessions/plan/reset", request.RequestUri?.PathAndQuery);
         Assert.Equal("{}", request.Body);
-        Assert.Contains("New session: new_acp_456", output.ToString(), StringComparison.Ordinal);
+        Assert.Contains("Runtime session: will be created on the next task", output.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]
-    public async Task SessionReset_DefaultOutput_PrintsNewSessionId()
+    public async Task SessionReset_DefaultOutput_ExplainsDeferredRuntimeSessionCreation()
     {
         var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
             Task.FromResult(RecordingHttpHandler.Json(new
@@ -416,7 +415,6 @@ public class CliIssueSessionSpecs
                 data = new
                 {
                     id = "sess_1",
-                    agentSessionId = "new_acp_456",
                     status = "idle",
                     contextWindowSize = 8192,
                     contextWindowUsed = 0,
@@ -434,7 +432,7 @@ public class CliIssueSessionSpecs
         var request = handler.Requests.Single();
         Assert.Equal(HttpMethod.Post, request.Method);
         Assert.Equal($"/api/projects/{ActiveProjectId}/issues/42/sessions/plan/reset", request.RequestUri?.PathAndQuery);
-        Assert.Contains("New session: new_acp_456", output.ToString(), StringComparison.Ordinal);
+        Assert.Contains("Runtime session: will be created on the next task", output.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -447,7 +445,6 @@ public class CliIssueSessionSpecs
                 data = new
                 {
                     id = "sess_1",
-                    agentSessionId = "new_acp_456",
                     status = "idle",
                     operation = "reset",
                     wasCompacted = false,
@@ -458,7 +455,7 @@ public class CliIssueSessionSpecs
             http, ["issue", "session", "reset", "42", "plan", "-o", "json"], output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
-        Assert.Contains("\"agentSessionId\": \"new_acp_456\"", output.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("\"agentSessionId\"", output.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]

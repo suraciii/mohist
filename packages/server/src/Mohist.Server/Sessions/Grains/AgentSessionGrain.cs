@@ -142,12 +142,12 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
 
         var (events, transcriptEntries) = ApplyRecoveryTransitions(
             session,
-            command.NewAgentSessionId,
             usedBefore,
             usedBefore,
             size,
             "summary",
             summary,
+            clearRuntimeSession: false,
             now);
 
         await PersistRecoveryAsync(session, events, transcriptEntries);
@@ -167,12 +167,12 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
 
         var (events, transcriptEntries) = ApplyRecoveryTransitions(
             session,
-            command.NewAgentSessionId,
             usedBefore,
             usedBefore,
             size,
             "reset",
             summary: null,
+            clearRuntimeSession: true,
             now);
 
         await PersistRecoveryAsync(session, events, transcriptEntries);
@@ -188,16 +188,18 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
 
     private (IReadOnlyList<AgentSessionEvent> Events, IReadOnlyList<RuntimeEventEnvelope> TranscriptEntries) ApplyRecoveryTransitions(
         AgentSession session,
-        string newAgentSessionId,
         long? usedBefore,
         long? usedAfter,
         long? size,
         string strategy,
         string? summary,
+        bool clearRuntimeSession,
         DateTime now)
     {
+        var previousAgentSessionId = session.Status.AgentRuntimeSessionId;
         var events = new List<AgentSessionEvent>();
-        events.AddRange(session.RebindRuntimeSession(newAgentSessionId, usedAfter, size, now));
+        if (clearRuntimeSession)
+            events.AddRange(session.ClearRuntimeSession(usedAfter, size, now));
         events.AddRange(session.RecordCompaction(usedBefore, usedAfter, size, strategy, summary, now));
 
         var transcriptEntries = new List<RuntimeEventEnvelope>
@@ -206,7 +208,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             {
                 Id = -(_realtimeSequence + 1),
                 SessionId = session.Id,
-                AgentSessionId = newAgentSessionId,
+                AgentSessionId = previousAgentSessionId,
                 Sequence = ++_realtimeSequence,
                 Type = "compaction",
                 PayloadJson = BuildCompactionPayload(strategy, usedBefore, usedAfter, size, summary, now),
@@ -216,7 +218,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             {
                 Id = -(_realtimeSequence + 1),
                 SessionId = session.Id,
-                AgentSessionId = newAgentSessionId,
+                AgentSessionId = previousAgentSessionId,
                 Sequence = ++_realtimeSequence,
                 Type = "compaction_event",
                 PayloadJson = BuildCompactionEventPayload(strategy, usedBefore, usedAfter, size, summary, now),
@@ -283,7 +285,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         }
         catch
         {
-            // Recovery transitions (RebindRuntimeSession/RecordCompaction) have
+            // Recovery transitions have
             // already mutated the live session. The store rolled back, so the
             // committed state and AgentSessionEvents rows are unchanged.
             // Quarantine the activation so the mutated in-memory session is
@@ -299,7 +301,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         // if its save fails, the committed domain events stay committed and
         // the un-committed transcript flush stays in _transcript for the next
         // retry. The recovery command returns success because the domain
-        // fact (rebind/compaction) is persistent; only the transcript
+        // fact is persistent; only the transcript
         // evidence is pending.
         _session = session;
         if (transcript is not null)

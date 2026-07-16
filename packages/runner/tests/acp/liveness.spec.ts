@@ -294,6 +294,25 @@ describe("mohist/acp-agent monitorPrompt prompt_timeout diagnostics", () => {
     expect(terminal?.failureCategory).toBe("prompt_timeout")
   })
 
+  it("PromptWithoutExplicitTimeout_UsesOneHourDefault", async () => {
+    useAcpFakeTimers()
+    const fixture = createFixture("cancel-hangs")
+    setAcpProcessFactoryForTest(() => createFakeProcess(fixture.agent))
+
+    const result = await runWithDefaultModelWarning("work-1", () => acpAgentAction(fixture.context({
+      prompt: "hanging prompt default timeout",
+      livenessQuietThresholdMs: 2 * 60 * 60 * 1000,
+      probeTimeoutMs: 5_000,
+    })), async (action) => {
+      await fixture.agent.waitForPrompt()
+      await vi.advanceTimersByTimeAsync(60 * 60 * 1000)
+      return action
+    })
+
+    expect(result.status).toBe("failure")
+    expect(result.message).toContain("Timed out after 3600s")
+  })
+
   it("PromptTimesOut_EmitsLivenessFailedEventWithPromptTimeoutFailureReason", async () => {
     useAcpFakeTimers()
     const fixture = createFixture("cancel-hangs")

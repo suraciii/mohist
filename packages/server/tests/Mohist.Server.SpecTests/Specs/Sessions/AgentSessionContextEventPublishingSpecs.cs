@@ -100,7 +100,6 @@ public class AgentSessionContextEventPublishingSpecs
         _fixture.RecordingTranscriptPublisher.Clear();
 
         await grain.CompactAsync(new CompactAgentSessionCommand(
-            NewAgentSessionId: "acp-after-compact",
             Summary: "## Compacted summary"));
 
         var compactionEvents = _fixture.RecordingTranscriptPublisher.Published
@@ -124,7 +123,7 @@ public class AgentSessionContextEventPublishingSpecs
 
         _fixture.RecordingTranscriptPublisher.Clear();
 
-        await grain.ResetAsync(new ResetAgentSessionCommand(NewAgentSessionId: "acp-after-reset"));
+        await grain.ResetAsync(new ResetAgentSessionCommand());
 
         var compactionEvents = _fixture.RecordingTranscriptPublisher.Published
             .Where(e => e.Type == "compaction_event")

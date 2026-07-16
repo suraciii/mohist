@@ -76,7 +76,16 @@ public class TaskLogRouteSpecs
         string workId)
     {
         var workflowRunId = $"wr_tasklog_spec_{Guid.NewGuid():N}";
+        await SeedActiveWorkflowRunAsync(workflowRunId, taskId, workId, projectId);
+        return (workflowRunId, workId);
+    }
 
+    private async Task SeedActiveWorkflowRunAsync(
+        string workflowRunId,
+        string taskId,
+        string workId,
+        string? projectId = null)
+    {
         await using var scope = _fixture.Services.CreateAsyncScope();
         var runStore = scope.ServiceProvider.GetRequiredService<IWorkflowRunStore>();
         await runStore.SaveAsync(new WorkflowRun
@@ -85,12 +94,12 @@ public class TaskLogRouteSpecs
             Metadata = new WorkflowRunMetadata(
                 Name: null,
                 CreatedAt: _fixture.TimeProvider.GetUtcNow(),
-                Annotations: new Dictionary<string, string>(StringComparer.Ordinal)
-                {
-                    ["projectId"] = projectId,
-                }),
+                Annotations: projectId is null
+                    ? null
+                    : new Dictionary<string, string>(StringComparer.Ordinal) { ["projectId"] = projectId }),
             CurrentStageId = "build",
             Status = WorkflowRunStatus.Running,
+            Assignment = new WorkflowAssignment(RunnerId, _fixture.TimeProvider.GetUtcNow()),
             Stages =
             [
                 new StageRun
@@ -109,15 +118,14 @@ public class TaskLogRouteSpecs
                             Title = "Build it",
                             Uses = "core/script",
                             WorkId = workId,
-                            Status = TaskRunStatus.Completed,
+                            WorkerId = RunnerId,
+                            Status = TaskRunStatus.Running,
                             Classification = TaskClassification.Orchestration,
                         }
                     ],
                 },
             ],
         });
-
-        return (workflowRunId, workId);
     }
 
     private async Task BindIssueToWorkflowRunAsync(string projectId, int issueNumber, string workflowRunId)
@@ -172,7 +180,7 @@ public class TaskLogRouteSpecs
     {
         var workflowRunId = $"wr-tasklog-{Guid.NewGuid():N}";
         var workId = $"work-{Guid.NewGuid():N}";
-        await SeedRunnerWorkAsync(RunnerId, "workflow", workflowRunId, workId);
+        await SeedActiveWorkflowRunAsync(workflowRunId, "task-1", workId);
         var now = _fixture.TimeProvider.GetUtcNow();
         var body = new
         {
@@ -316,7 +324,13 @@ public class TaskLogRouteSpecs
 
         var workflowRunId = $"wr-tasklog-isolated-{Guid.NewGuid():N}";
         var workId = $"work-{Guid.NewGuid():N}";
-        await SeedRunnerWorkAsync(RunnerId, "workflow", workflowRunId, workId);
+        await SeedActiveWorkflowRunAsync(workflowRunId, "task-1", workId);
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var stateBefore = await db.WorkflowRuns.AsNoTracking()
+            .Where(r => r.WorkflowRunId == workflowRunId)
+            .Select(r => r.State)
+            .SingleAsync();
         var now = _fixture.TimeProvider.GetUtcNow();
         var body = new
         {
@@ -330,13 +344,11 @@ public class TaskLogRouteSpecs
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
-        await using var scope = _fixture.Services.CreateAsyncScope();
-        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-        // The run row does not exist — the upload didn't create one
-        // (proves no grain or report call mutated the workflow state).
-        var runRow = await db.WorkflowRuns.AsNoTracking()
-            .FirstOrDefaultAsync(r => r.WorkflowRunId == workflowRunId);
-        Assert.Null(runRow);
+        var stateAfter = await db.WorkflowRuns.AsNoTracking()
+            .Where(r => r.WorkflowRunId == workflowRunId)
+            .Select(r => r.State)
+            .SingleAsync();
+        Assert.Equal(stateBefore, stateAfter);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -368,7 +380,7 @@ public class TaskLogRouteSpecs
         var allowedOwnerId = $"wr-tasklog-owner-{Guid.NewGuid():N}";
         var forgedOwnerId = $"wr-tasklog-forged-{Guid.NewGuid():N}";
         var workId = $"work-{Guid.NewGuid():N}";
-        await SeedRunnerWorkAsync(RunnerId, "workflow", allowedOwnerId, workId);
+        await SeedActiveWorkflowRunAsync(allowedOwnerId, "task-1", workId);
 
         using (var accepted = await PostTaskLogAsync(
             $"/api/workflow-runs/{allowedOwnerId}/work/{workId}/task-log",
@@ -400,7 +412,7 @@ public class TaskLogRouteSpecs
     {
         var workflowRunId = $"wr-tasklog-runner-{Guid.NewGuid():N}";
         var workId = $"work-{Guid.NewGuid():N}";
-        await SeedRunnerWorkAsync(RunnerId, "workflow", workflowRunId, workId);
+        await SeedActiveWorkflowRunAsync(workflowRunId, "task-1", workId);
 
         using (var accepted = await PostTaskLogAsync(
             $"/api/workflow-runs/{workflowRunId}/work/{workId}/task-log",
@@ -454,7 +466,6 @@ public class TaskLogRouteSpecs
         var issueNumber = await CreateIssueAsync(projectId, "with logs");
         var (workflowRunId, workId) = await SeedWorkflowRunAsync(projectId, "build.1", workId: $"work-{Guid.NewGuid():N}");
         await BindIssueToWorkflowRunAsync(projectId, issueNumber, workflowRunId);
-        await SeedRunnerWorkAsync(RunnerId, "workflow", workflowRunId, workId);
 
         var now = _fixture.TimeProvider.GetUtcNow();
         var entries = Enumerable.Range(1, 5).Select(seq => new
@@ -515,7 +526,6 @@ public class TaskLogRouteSpecs
         var issueNumber = await CreateIssueAsync(projectId, "truncated logs");
         var (workflowRunId, workId) = await SeedWorkflowRunAsync(projectId, "build.1", workId: $"work-{Guid.NewGuid():N}");
         await BindIssueToWorkflowRunAsync(projectId, issueNumber, workflowRunId);
-        await SeedRunnerWorkAsync(RunnerId, "workflow", workflowRunId, workId);
 
         var now = _fixture.TimeProvider.GetUtcNow();
         var entries = Enumerable.Range(1, 3).Select(seq => new

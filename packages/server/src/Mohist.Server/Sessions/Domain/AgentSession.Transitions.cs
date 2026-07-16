@@ -148,6 +148,25 @@ public static partial class AgentSessionExtensions
             return events;
         }
 
+        public IReadOnlyList<AgentSessionEvent> ClearRuntimeSession(
+            long? contextWindowUsedAfter,
+            long? contextWindowSizeAfter,
+            DateTime now)
+        {
+            session.Status = session.Status with
+            {
+                AgentRuntimeSessionId = null,
+                BoundAt = null,
+                LastDataAt = now,
+                UsageSummary = (session.Status.UsageSummary ?? new AgentUsageSummary()) with
+                {
+                    ContextWindowUsed = contextWindowUsedAfter,
+                    ContextWindowSize = contextWindowSizeAfter ?? (session.Status.UsageSummary ?? new AgentUsageSummary()).ContextWindowSize,
+                }
+            };
+            return [];
+        }
+
         public IReadOnlyList<AgentSessionEvent> RecordCompaction(
             long? contextWindowUsedBefore,
             long? contextWindowUsedAfter,

@@ -177,7 +177,6 @@ public class TaskLogServicePersistThenPublishSpecs : IAsyncLifetime
         // When the work item is owned by a workflow run, the
         // publisher's envelope must carry the resolved taskId
         // so the Web can route the delta to the expanded task.
-        await SeedOutstandingWorkAsync("runner-A", TaskLogOwnershipKinds.Workflow, "wf-1", "w-x");
         await SeedWorkflowRunAsync("wf-1", "task-X", "w-x");
 
         var publisher = new RecordingPublisher();
@@ -198,7 +197,6 @@ public class TaskLogServicePersistThenPublishSpecs : IAsyncLifetime
     [Fact]
     public async Task AppendAsync_ResolvesTaskIdFromCurrentWorkflowRunState_WhenWorkMappingChanges()
     {
-        await SeedOutstandingWorkAsync("runner-A", TaskLogOwnershipKinds.Workflow, "wf-remap", "w-reused");
         await SeedWorkflowRunAsync("wf-remap", "task-old", "w-reused");
 
         var publisher = new RecordingPublisher();
@@ -221,25 +219,25 @@ public class TaskLogServicePersistThenPublishSpecs : IAsyncLifetime
     }
 
     [Fact]
-    public async Task AppendAsync_RetriesTaskIdResolution_WhenInitialWorkflowMappingIsMissing()
+    public async Task AppendAsync_RejectsWorkflowWorkUntilItIsActive()
     {
-        await SeedOutstandingWorkAsync("runner-A", TaskLogOwnershipKinds.Workflow, "wf-missing-first", "w-late");
         var publisher = new RecordingPublisher();
         var service = NewService(publisher);
 
-        await service.AppendAsync(
+        var beforeActivation = await service.AppendAsync(
             "runner-A", TaskLogOwnershipKinds.Workflow, "wf-missing-first", "w-late",
             NewEntries(1, 1), truncated: false);
 
         await SeedWorkflowRunAsync("wf-missing-first", "task-late", "w-late");
 
-        await service.AppendAsync(
+        var afterActivation = await service.AppendAsync(
             "runner-A", TaskLogOwnershipKinds.Workflow, "wf-missing-first", "w-late",
             NewEntries(2, 1), truncated: false);
 
-        Assert.Equal(2, publisher.Published.Count);
-        Assert.Null(publisher.Published[0].TaskId);
-        Assert.Equal("task-late", publisher.Published[1].TaskId);
+        Assert.False(beforeActivation);
+        Assert.True(afterActivation);
+        var envelope = Assert.Single(publisher.Published);
+        Assert.Equal("task-late", envelope.TaskId);
     }
 
     [Fact]
@@ -309,6 +307,7 @@ public class TaskLogServicePersistThenPublishSpecs : IAsyncLifetime
             Id = workflowRunId,
             Metadata = new WorkflowRunMetadata(Name: null, CreatedAt: now, Annotations: new Dictionary<string, string> { ["projectId"] = "proj-1" }),
             Status = WorkflowRunStatus.Running,
+            Assignment = new WorkflowAssignment("runner-A", now),
             CurrentStageId = "stage-1",
             Stages = new List<StageRun>
             {

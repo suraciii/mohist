@@ -90,6 +90,12 @@ public class AgentSessionRecoveryApiSpecs
         Assert.Equal(currentSession.Id, data.GetProperty("id").GetString());
         Assert.Equal("reset", data.GetProperty("operation").GetString());
         Assert.False(data.GetProperty("wasCompacted").GetBoolean());
+        Assert.False(data.TryGetProperty("agentSessionId", out _));
+
+        using var runnerSession = await _client.GetAsync(RunnerSessionPath(currentSession));
+        Assert.Equal(HttpStatusCode.OK, runnerSession.StatusCode);
+        var runnerData = await runnerSession.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.False(runnerData.TryGetProperty("acpSessionId", out _));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -145,7 +151,7 @@ public class AgentSessionRecoveryApiSpecs
 
         var row = await db.AgentSessions.AsNoTracking()
             .SingleAsync(r => r.Id == currentSession.Id);
-        Assert.False(string.IsNullOrEmpty(row.AgentSessionId));
+        Assert.Null(row.AgentSessionId);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -225,7 +231,7 @@ public class AgentSessionRecoveryApiSpecs
         var projectName = $"recovery-api-{Guid.NewGuid():N}";
         var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", projectName);
         await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", setDefault = true });
-var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = $"Recovery api {name}", body = "track sessions", labels = new Dictionary<string, string>(StringComparer.Ordinal), priority = "p1", projectId = project.Id, isDraft = false });
+        var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = $"Recovery api {name}", body = "track sessions", labels = new Dictionary<string, string>(StringComparer.Ordinal), priority = "p1", projectId = project.Id, isDraft = false });
         return (project, issue);
     }
 

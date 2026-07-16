@@ -48,13 +48,11 @@ public sealed record AppendAgentSessionRuntimeEventsCommand(
 
 [GenerateSerializer]
 public sealed record CompactAgentSessionCommand(
-    [property: Id(0)] string NewAgentSessionId,
-    [property: Id(1)] string? Summary = null,
-    [property: Id(2)] int? MaxSummaryChars = null);
+    [property: Id(0)] string? Summary = null,
+    [property: Id(1)] int? MaxSummaryChars = null);
 
 [GenerateSerializer]
-public sealed record ResetAgentSessionCommand(
-    [property: Id(0)] string NewAgentSessionId);
+public sealed record ResetAgentSessionCommand;
 
 [GenerateSerializer]
 public sealed record AgentSessionRuntimeEventInput(

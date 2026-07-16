@@ -178,7 +178,7 @@ internal static partial class IssueCommands
 
     private static Command BuildSessionReset(MohistCliApi api)
     {
-        var cmd = new Command("reset", "Reset the session and return a new session id");
+        var cmd = new Command("reset", "Reset the session so its next task creates a fresh runtime session");
         var numberArg = NumberArg();
         var nameArg = SessionNameArg();
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();

@@ -4,6 +4,7 @@ using Mohist.Server.Infrastructure.Data.Runner;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Hosting;
+using Mohist.Server.Workflow.Domain.Run;
 
 namespace Mohist.Server.Runner.Services;
 
@@ -80,8 +81,7 @@ public sealed class TaskLogService : IScopedService
 
         ValidateBatchCaps(entries);
 
-        var work = await _runnerWorks.FindAsync(runnerId, ownerKind, ownerId, workId, ct);
-        if (work is null || work.Status != RunnerWorkStatus.Outstanding)
+        if (!await IsActiveWorkAsync(runnerId, ownerKind, ownerId, workId, ct))
             return false;
 
         // 1. Persist FIRST. Authoritative; throw propagates (the
@@ -171,6 +171,23 @@ public sealed class TaskLogService : IScopedService
         }
 
         return null;
+    }
+
+    private async Task<bool> IsActiveWorkAsync(
+        string runnerId,
+        string ownerKind,
+        string ownerId,
+        string workId,
+        CancellationToken ct)
+    {
+        if (string.Equals(ownerKind, TaskLogOwnershipKinds.Workflow, StringComparison.Ordinal))
+        {
+            var run = await _runQuerier.LoadAsync(ownerId, ct);
+            return run?.FindActiveWork(workId, runnerId) is not null;
+        }
+
+        var work = await _runnerWorks.FindAsync(runnerId, ownerKind, ownerId, workId, ct);
+        return work?.Status == RunnerWorkStatus.Outstanding;
     }
 
     /// <summary>
