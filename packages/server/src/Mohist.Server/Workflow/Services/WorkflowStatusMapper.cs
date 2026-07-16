@@ -11,7 +11,6 @@ public static class WorkflowStatusMapper
         raw switch
         {
             "AwaitingApproval" => "awaiting-approval",
-            "AwaitingBinding" => "awaiting-binding",
             _ => raw.ToLowerInvariant(),
         };
     public static WorkflowStatusView? BuildStatusView(

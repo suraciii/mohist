@@ -143,7 +143,7 @@ public class WorkflowQuerier : IScopedService
     {
         var run = DeserializeWorkflowRun(row.State);
         if (run is not null)
-            WorkflowRunLineage.ApplyEpicAffiliation(run, row.EpicNumber);
+            WorkflowRunLineage.RestoreStoredEpicNumber(run, row.EpicNumber);
         return run;
     }
 

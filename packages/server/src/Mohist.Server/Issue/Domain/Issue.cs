@@ -14,7 +14,6 @@ public sealed partial class Issue
     private DateTime? _archivedAt;
     private DateTime? _completedAt;
     private string? _workflowRunId;
-    private bool _workflowBindingPending;
     private int? _epicNumber;
     private IssueStatus _status = IssueStatus.Backlog;
     private int[] _prerequisiteNumbers = [];
@@ -90,31 +89,10 @@ public sealed partial class Issue
         init => _workflowRunId = NormalizeOptional(value);
     }
 
-    public bool WorkflowBindingPending
-    {
-        get => _workflowBindingPending;
-        init => _workflowBindingPending = value;
-    }
-
     public int? EpicNumber
     {
         get => _epicNumber;
         init => _epicNumber = value is > 0 ? value : null;
-    }
-
-    /// <summary>
-    /// Monotonic revision of the Issue's persisted producer snapshot. It
-    /// advances on every Issue save; WorkflowRun receives selected revisions
-    /// only to order applied Issue lineage updates.
-    /// </summary>
-    [JsonIgnore]
-    public long LineageVersion { get; private set; } = 1;
-
-    public void SetLineageVersion(long lineageVersion)
-    {
-        if (lineageVersion < 1)
-            throw new ArgumentOutOfRangeException(nameof(lineageVersion));
-        LineageVersion = lineageVersion;
     }
 
     public IssueStatus Status

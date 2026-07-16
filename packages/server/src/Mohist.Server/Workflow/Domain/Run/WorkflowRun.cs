@@ -12,7 +12,7 @@ namespace Mohist.Server.Workflow.Domain.Run;
 /// <c>Paused</c>, <c>Stopped</c>, and <c>AwaitingApproval</c> only result
 /// from workflow-level commands, never from a task status transition.
 /// </summary>
-public enum WorkflowRunStatus { Created, AwaitingBinding, Pending, Ready, Running, AwaitingApproval, Paused, Stopped, Completed, Failed }
+public enum WorkflowRunStatus { Created, Pending, Ready, Running, AwaitingApproval, Paused, Stopped, Completed, Failed }
 
 public static class WorkflowRunStatusExtensions
 {
@@ -43,7 +43,6 @@ public sealed class WorkflowRun
     public required string Id { get; init; }
     public required WorkflowRunMetadata Metadata { get; set; }
     public WorkflowRunStatus Status { get; set; }
-    public long IssueLineageVersion { get; set; }
     /// <summary>
     /// The active worker assignment for this run. At most one worker may own a
     /// run at a time; running tasks derive their worker id from this assignment

@@ -15,23 +15,20 @@ namespace Mohist.Server.UnitTests.Issue.Domain;
 public class IssueWorkflowRunReferenceTests
 {
     [Fact]
-    public void WorkflowBindingPending_TracksTheDurableBindingProcess()
+    public void StartWorkflow_RecordsTheRunAndDurableStartFact()
     {
         var issue = Mohist.Server.Issue.Domain.Issue.Create(
             "project-1", 1, "Binding", isDraft: false);
 
         issue.StartWorkflow("wr_1");
 
-        Assert.True(issue.WorkflowBindingPending);
-        Assert.False(issue.ConfirmWorkflowBinding("wr_other"));
-        Assert.True(issue.WorkflowBindingPending);
-        Assert.True(issue.ConfirmWorkflowBinding("wr_1"));
-        Assert.False(issue.WorkflowBindingPending);
-        Assert.False(issue.ConfirmWorkflowBinding("wr_1"));
+        Assert.Equal(IssueStatus.InProgress, issue.Status);
+        Assert.Equal("wr_1", issue.WorkflowRunId);
+        Assert.Contains(issue.PendingEvents, evt => evt is IssueWorkStarted started && started.WorkflowRunId == "wr_1");
 
         var reloaded = IssueStore.Deserialize(IssueStore.Serialize(issue));
         Assert.NotNull(reloaded);
-        Assert.False(reloaded!.WorkflowBindingPending);
+        Assert.Equal("wr_1", reloaded!.WorkflowRunId);
     }
 
     [Fact]

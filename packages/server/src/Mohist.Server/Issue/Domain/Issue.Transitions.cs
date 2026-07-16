@@ -118,7 +118,6 @@ public sealed partial class Issue
         if (_workflowRunId is not null)
             throw new InvalidOperationException($"Issue #{Number} already has workflow {_workflowRunId}");
         _workflowRunId = NormalizeOptional(wrId);
-        _workflowBindingPending = true;
         _status = IssueStatus.InProgress;
         Touch(now);
         RecordEvent(new IssueWorkStarted(wrId));
@@ -155,7 +154,6 @@ public sealed partial class Issue
             throw new InvalidOperationException($"Issue #{Number} already has workflow {_workflowRunId}");
 
         _workflowRunId = NormalizeOptional(wrId);
-        _workflowBindingPending = true;
         _status = IssueStatus.InProgress;
         Touch(now);
         RecordEvent(new IssueWorkStarted(wrId));
@@ -165,21 +163,7 @@ public sealed partial class Issue
     {
         if (_workflowRunId != workflowRunId) return;
         _workflowRunId = null;
-        _workflowBindingPending = false;
         Touch(now);
-    }
-
-    public bool ConfirmWorkflowBinding(string workflowRunId, DateTime? now = null)
-    {
-        if (!string.Equals(_workflowRunId, workflowRunId, StringComparison.Ordinal)
-            || !_workflowBindingPending)
-        {
-            return false;
-        }
-
-        _workflowBindingPending = false;
-        Touch(now);
-        return true;
     }
 
     public bool AssignEpic(int epicNumber, DateTime? now = null)
@@ -214,7 +198,6 @@ public sealed partial class Issue
             throw new InvalidOperationException($"Issue #{Number} is {_status}, only InProgress can complete");
         var completedAt = now ?? DateTime.UtcNow;
         _completedAt = completedAt;
-        _workflowBindingPending = false;
         _status = IssueStatus.Done;
         Touch(completedAt);
         RecordEvent(new IssueCompleted(workflowRunId));
@@ -245,7 +228,6 @@ public sealed partial class Issue
             throw new InvalidOperationException($"Issue #{Number} cannot close");
         var completedAt = now ?? DateTime.UtcNow;
         _completedAt = completedAt;
-        _workflowBindingPending = false;
         _status = IssueStatus.Cancelled;
         Touch(completedAt);
         RecordEvent(new IssueCancelled(reason));

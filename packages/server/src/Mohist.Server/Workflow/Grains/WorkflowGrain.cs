@@ -105,69 +105,40 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
         await CommitAsync(events);
     }
 
-    public async Task PrepareIssueStartAsync(WorkflowStartInput input)
+    public async Task EnsureStartedAsync(WorkflowIssueContext context)
     {
-        ArgumentNullException.ThrowIfNull(input);
+        ArgumentNullException.ThrowIfNull(context);
         RejectIfRunReloadRequired();
         if (_run is not null)
         {
-            if (_run.Status == WorkflowRunStatus.AwaitingBinding) return;
-            throw new InvalidOperationException($"Workflow '{GrainKey}' is already {_run.Status}.");
+            RequireIssueContext(context);
+            return;
         }
 
-        await EnsureCreatedRunAsync(input);
-        if (GetIssueNumber() is not > 0)
-            throw new InvalidOperationException($"Workflow '{GrainKey}' cannot await binding without an issue number.");
-        _run!.PrepareForIssueBinding();
-        await SaveRunAsync();
-    }
-
-    public async Task ConfirmIssueBindingAsync(WorkflowIssueBinding binding)
-    {
-        ArgumentNullException.ThrowIfNull(binding);
-        EnsureRun();
-        RequireIssueBinding(binding.ProjectId, binding.IssueNumber);
-        if (!ApplyIssueLineage(binding.EpicNumber, binding.IssueLineageVersion)) return;
-
-        var events = _run!.ConfirmIssueBinding(Now());
+        await EnsureCreatedRunAsync(context);
+        var events = _run!.Start(Now());
         await CommitAsync(events);
     }
 
-    public async Task ApplyIssueLineageAsync(WorkflowIssueLineage lineage)
+    public async Task RefreshIssueContextAsync(WorkflowIssueContext context)
     {
-        ArgumentNullException.ThrowIfNull(lineage);
-        EnsureRun();
-        RequireIssueBinding(lineage.ProjectId, lineage.IssueNumber);
-        if (!ApplyIssueLineage(lineage.EpicNumber, lineage.IssueLineageVersion)) return;
+        ArgumentNullException.ThrowIfNull(context);
+        RejectIfRunReloadRequired();
+        if (_run is null || _run.Status.IsTerminal()) return;
+        RequireIssueContext(context);
+        if (WorkflowRunLineage.ContextEquals(_run, context.ProjectId, context.IssueNumber, context.EpicNumber)) return;
+        WorkflowRunLineage.ApplyContext(_run, context.ProjectId, context.IssueNumber, context.EpicNumber);
         await SaveRunAsync();
     }
 
-    private void RequireIssueBinding(string projectId, int issueNumber)
+    private void RequireIssueContext(WorkflowIssueContext context)
     {
         var expectedProjectId = GetProjectId();
         var expectedIssueNumber = GetIssueNumber();
-        if (!string.Equals(expectedProjectId, projectId, StringComparison.Ordinal)
-            || expectedIssueNumber != issueNumber)
+        if (!string.Equals(expectedProjectId, context.ProjectId, StringComparison.Ordinal)
+            || expectedIssueNumber != context.IssueNumber)
             throw new InvalidOperationException(
-                $"Workflow '{GrainKey}' belongs to issue '{expectedProjectId}#{expectedIssueNumber}', not '{projectId}#{issueNumber}'.");
-    }
-
-    private bool ApplyIssueLineage(int? epicNumber, long issueLineageVersion)
-    {
-        if (issueLineageVersion < _run!.IssueLineageVersion) return false;
-
-        var currentEpicNumber = WorkflowRunLineage.EpicAffiliationOf(_run);
-        if (issueLineageVersion == _run.IssueLineageVersion)
-        {
-            if (currentEpicNumber != epicNumber)
-                throw new InvalidOperationException(
-                    $"Workflow '{GrainKey}' received conflicting issue lineage revision {issueLineageVersion}.");
-            return _run.Status == WorkflowRunStatus.AwaitingBinding;
-        }
-
-        WorkflowRunLineage.ApplyEpicAffiliation(_run, epicNumber);
-        _run.IssueLineageVersion = issueLineageVersion;
-        return true;
+                $"Workflow '{GrainKey}' belongs to issue '{expectedProjectId}#{expectedIssueNumber}', not '{context.ProjectId}#{context.IssueNumber}'.");
     }
 
     private async Task EnsureCreatedRunAsync(WorkflowStartInput? input)
@@ -183,6 +154,16 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
         var structure = await _profileManager.LoadStructureAsync(GrainKey, projectId, issueNumber);
         _run = WorkflowRun.Create(GrainKey, structure, Now(), metadata);
         _run.Workspace = input?.Workspace;
+    }
+
+    private async Task EnsureCreatedRunAsync(WorkflowIssueContext context)
+    {
+        var metadata = new WorkflowRunMetadata(
+            Name: null,
+            CreatedAt: Now(),
+            Annotations: WorkflowRunLineage.AnnotationsFor(context.ProjectId, context.IssueNumber, context.EpicNumber));
+        var structure = await _profileManager.LoadStructureAsync(GrainKey, context.ProjectId, context.IssueNumber);
+        _run = WorkflowRun.Create(GrainKey, structure, Now(), metadata);
     }
 
     public async Task ResumeAsync()
@@ -205,7 +186,7 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
     {
         EnsureRun();
 
-        if (_run.Status is not (WorkflowRunStatus.Created or WorkflowRunStatus.AwaitingBinding or WorkflowRunStatus.Pending or WorkflowRunStatus.Ready or WorkflowRunStatus.Running or WorkflowRunStatus.AwaitingApproval or WorkflowRunStatus.Paused))
+        if (_run.Status is not (WorkflowRunStatus.Created or WorkflowRunStatus.Pending or WorkflowRunStatus.Ready or WorkflowRunStatus.Running or WorkflowRunStatus.AwaitingApproval or WorkflowRunStatus.Paused))
             throw new InvalidOperationException($"Cannot stop workflow in {_run.Status} state");
 
         var stopEvents = _run.Stop();
@@ -266,7 +247,6 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
     public async Task RerunAsync()
     {
         EnsureRun();
-        RejectRecoveryControlWhileAwaitingBinding();
         var rerunStageId = _run.CurrentStageId;
         await ReleaseCurrentStageLocksAsync("rerun");
         var events = _run.Rerun(Now());
@@ -357,7 +337,7 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
     {
         RejectIfRunReloadRequired();
         if (_run is null) return new WorkflowAssignmentResult(WorkflowAssignmentStatus.Rejected, Reason: "missing");
-        if (_run.Status.IsTerminal() || _run.Status is WorkflowRunStatus.Created or WorkflowRunStatus.AwaitingBinding or WorkflowRunStatus.Paused or WorkflowRunStatus.AwaitingApproval)
+        if (_run.Status.IsTerminal() || _run.Status is WorkflowRunStatus.Created or WorkflowRunStatus.Paused or WorkflowRunStatus.AwaitingApproval)
             return new WorkflowAssignmentResult(WorkflowAssignmentStatus.Rejected, Reason: "not-runnable");
         if (_run.Assignment is not null)
         {
@@ -519,13 +499,6 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
     {
         if (_runReloadRequired)
             throw new InvalidOperationException($"Workflow '{GrainKey}' must reload after a failed save");
-    }
-
-    private void RejectRecoveryControlWhileAwaitingBinding()
-    {
-        if (_run?.Status == WorkflowRunStatus.AwaitingBinding)
-            throw new InvalidOperationException(
-                $"Workflow '{GrainKey}' is awaiting issue binding; retry, rerun, and rerun-from-stage are unavailable.");
     }
 
     private async Task CommitAsync(

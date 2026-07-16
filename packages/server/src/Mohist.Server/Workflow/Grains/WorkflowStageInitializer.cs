@@ -55,7 +55,7 @@ internal sealed class WorkflowStageInitializer
                 stageDef.Tasks,
                 stageDef.Checks,
                 _owner.Now(),
-                advance: run.Status != WorkflowRunStatus.AwaitingBinding);
+                advance: true);
             materialized.AddRange(initEvents);
         }
 

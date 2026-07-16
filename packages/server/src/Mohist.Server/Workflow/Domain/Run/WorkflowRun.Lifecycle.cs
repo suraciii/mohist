@@ -77,14 +77,6 @@ public static partial class WorkflowRunExtensions
                 ?? throw new InvalidOperationException($"Current stage {run.CurrentStageId} not found");
         }
 
-        public void PrepareForIssueBinding()
-        {
-            if (run.Status == WorkflowRunStatus.AwaitingBinding) return;
-            if (run.Status != WorkflowRunStatus.Created)
-                throw new InvalidOperationException($"WorkflowRun is {run.Status}, prepare requires Created");
-            run.Status = WorkflowRunStatus.AwaitingBinding;
-        }
-
         public IReadOnlyList<WorkflowEvent> Start(DateTimeOffset now)
         {
             if (run.Status != WorkflowRunStatus.Created && run.Status != WorkflowRunStatus.Paused)
@@ -103,13 +95,6 @@ public static partial class WorkflowRunExtensions
             return wasPaused
                 ? [new WorkflowRunResumed()]
                 : [new WorkflowRunStarted(), new StageStarted(current.Id)];
-        }
-
-        public IReadOnlyList<WorkflowEvent> ConfirmIssueBinding(DateTimeOffset now)
-        {
-            if (run.Status != WorkflowRunStatus.AwaitingBinding) return [];
-            run.Status = WorkflowRunStatus.Created;
-            return run.Start(now);
         }
 
         public IReadOnlyList<WorkflowEvent> Pause()
@@ -135,7 +120,7 @@ public static partial class WorkflowRunExtensions
 
         public IReadOnlyList<WorkflowEvent> Stop()
         {
-            if (run.Status is not (WorkflowRunStatus.Created or WorkflowRunStatus.AwaitingBinding or WorkflowRunStatus.Pending or WorkflowRunStatus.Ready or WorkflowRunStatus.Running or WorkflowRunStatus.AwaitingApproval or WorkflowRunStatus.Paused))
+            if (run.Status is not (WorkflowRunStatus.Created or WorkflowRunStatus.Pending or WorkflowRunStatus.Ready or WorkflowRunStatus.Running or WorkflowRunStatus.AwaitingApproval or WorkflowRunStatus.Paused))
                 throw new InvalidOperationException($"WorkflowRun is {run.Status}, stop requires a non-terminal started state");
 
             run.ClearStaleApprovalGate();

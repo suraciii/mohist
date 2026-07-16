@@ -64,8 +64,8 @@ public class WorkflowArtifactBindingSpecs : WorkflowGrainSpecs
         Assert.True(completedIndex > artifactIndex);
         Assert.Equal(work.WorkflowRunId, events[artifactIndex].Envelope.Extensions[EventCatalog.Lineage.WorkflowRunId]);
         Assert.Equal(TestProjectId(work.WorkflowRunId), events[artifactIndex].Envelope.Extensions[EventCatalog.Lineage.ProjectId]);
-        Assert.Equal(TestIssueId(work.WorkflowRunId), events[artifactIndex].Envelope.Extensions[EventCatalog.Lineage.IssueId]);
-        Assert.Equal("epic_artifact", events[artifactIndex].Envelope.Extensions[EventCatalog.Lineage.EpicId]);
+        Assert.Equal(TestIssueId(work.WorkflowRunId), events[artifactIndex].Envelope.Extensions[EventCatalog.Lineage.Issue]);
+        Assert.Equal("epic_artifact", events[artifactIndex].Envelope.Extensions[EventCatalog.Lineage.Epic]);
         Assert.False(events[artifactIndex].Envelope.Extensions.ContainsKey(EventCatalog.Lineage.Stage));
     }
 
@@ -90,7 +90,7 @@ public class WorkflowArtifactBindingSpecs : WorkflowGrainSpecs
 
         var paused = Assert.Single((await EventStore.ListAsync(work.WorkflowRunId)), entry =>
             entry.Envelope.Type == EventCatalog.ReverseDns.WorkflowRunPaused);
-        Assert.Equal("epic_current", paused.Envelope.Extensions[EventCatalog.Lineage.EpicId]);
+        Assert.Equal("epic_current", paused.Envelope.Extensions[EventCatalog.Lineage.Epic]);
     }
 
     private async Task SeedEpicAsync(string workflowRunId, string epicId)

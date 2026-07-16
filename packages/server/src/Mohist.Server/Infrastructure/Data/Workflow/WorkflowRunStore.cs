@@ -114,7 +114,7 @@ public class WorkflowRunStore : IWorkflowRunStore
         if (entity is null) return null;
         var run = Deserialize(entity.State);
         if (run is not null)
-            WorkflowRunLineage.ApplyEpicAffiliation(run, entity.EpicNumber);
+            WorkflowRunLineage.RestoreStoredEpicNumber(run, entity.EpicNumber);
         return run;
     }
 
@@ -169,8 +169,7 @@ public class WorkflowRunStore : IWorkflowRunStore
         var changed = root.TryGetProperty("claim", out _)
             || (root.TryGetProperty("assignment", out var assignment) && assignment.ValueKind == JsonValueKind.Object && assignment.TryGetProperty("runnerId", out _))
             || ContainsLegacyTaskRunnerId(root)
-            || legacyRecovery.Count > 0
-            || IsLegacyAwaitingBinding(root);
+            || legacyRecovery.Count > 0;
         if (!changed)
             return json;
 
@@ -287,12 +286,6 @@ public class WorkflowRunStore : IWorkflowRunStore
             if (string.Equals(property.Name, "dispatchActivated", StringComparison.Ordinal))
                 continue;
 
-            if (string.Equals(property.Name, "status", StringComparison.Ordinal)
-                && IsLegacyAwaitingBinding(root))
-            {
-                writer.WriteString("status", "awaitingBinding");
-                continue;
-            }
             if (string.Equals(property.Name, "claim", StringComparison.Ordinal))
             {
                 if (!root.TryGetProperty("assignment", out _))
@@ -596,12 +589,6 @@ public class WorkflowRunStore : IWorkflowRunStore
 
         return false;
     }
-
-    private static bool IsLegacyAwaitingBinding(JsonElement root) =>
-        root.TryGetProperty("status", out var status)
-        && string.Equals(status.GetString(), "created", StringComparison.OrdinalIgnoreCase)
-        && root.TryGetProperty("dispatchActivated", out var activated)
-        && activated.ValueKind == JsonValueKind.False;
 
     private static string WorkflowEventSource(string workflowRunId) =>
         $"/mohist/workflow-runs/{workflowRunId}";

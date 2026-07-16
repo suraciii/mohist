@@ -50,11 +50,10 @@ public sealed class IssueEpicChangedHandler : ICloudEventHandler<IssueEpicChange
         if (issue.WorkflowRunId is not null)
         {
             var workflow = _grains.GetGrain<IWorkflowGrain>(issue.WorkflowRunId);
-            await workflow.ApplyIssueLineageAsync(new WorkflowIssueLineage(
+            await workflow.RefreshIssueContextAsync(new WorkflowIssueContext(
                 issue.ProjectId,
                 issue.Number,
-                issue.EpicNumber,
-                issue.LineageVersion));
+                issue.EpicNumber));
         }
     }
 

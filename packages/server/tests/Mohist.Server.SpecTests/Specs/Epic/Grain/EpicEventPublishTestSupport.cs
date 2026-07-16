@@ -252,7 +252,8 @@ internal static class EpicEventPublishTestSupport
         var row = await db.Issues.SingleAsync(issue =>
             issue.ProjectId == "project_1" && issue.Number == issueNumber);
         var issue = IssueStore.Deserialize(row.State);
-        issue.AssignEpic(1);
+        if (issue is null) throw new InvalidOperationException("Seeded Issue state could not be deserialized.");
+        issue!.AssignEpic(1);
         issue.ClearPendingEvents();
         row.EpicNumber = issue.EpicNumber;
         row.State = IssueStore.Serialize(issue);

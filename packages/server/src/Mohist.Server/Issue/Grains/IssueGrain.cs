@@ -171,27 +171,14 @@ public class IssueGrain : Grain, IIssueGrain
         RepositoryInfo repo,
         IReadOnlySet<int>? undeliveredPrerequisites)
     {
-        var input = await BuildWorkflowStartInputAsync(project, wrId, repo);
-
+        await PrepareWorkflowStartContextAsync(project, wrId, repo);
         _issue!.Start(wrId, undeliveredPrerequisites);
         await SaveIssueAsync();
-
-        try
-        {
-            await EnsureCommittedWorkflowBindingAsync(wrId, input);
-        }
-        catch (Exception ex)
-        {
-            _log.LogWarning(ex,
-                "Issue {Key} committed workflow binding {WrId}; durable IssueWorkStarted handling will retry workflow creation",
-                GrainKey,
-                wrId);
-        }
         _log.LogInformation("Issue {Key} started workflow {WrId}", GrainKey, wrId);
         return wrId;
     }
 
-    private async Task<WorkflowStartInput> BuildWorkflowStartInputAsync(
+    private async Task PrepareWorkflowStartContextAsync(
         WorkflowProjectContext? project,
         string wrId,
         RepositoryInfo repo)
@@ -260,54 +247,6 @@ public class IssueGrain : Grain, IIssueGrain
         foreach (var (key, body) in mergedPrompts)
             await _issueProfileManager.SetPromptAsync(issue.ProjectId, issue.Number, key, body);
 
-        return new WorkflowStartInput(
-            Metadata: new WorkflowRunMetadata(
-                Name: null,
-                CreatedAt: DateTimeOffset.UtcNow,
-                Annotations: BuildWorkflowAnnotations(issue, projectContext.Id)),
-            Workspace: workspace);
-    }
-
-    public async Task EnsureWorkflowBindingAsync(string workflowRunId)
-    {
-        EnsureIssue();
-        if (!string.Equals(_issue!.WorkflowRunId, workflowRunId, StringComparison.Ordinal)
-            || !_issue.WorkflowBindingPending)
-        {
-            return;
-        }
-        await EnsureCommittedWorkflowBindingAsync(workflowRunId);
-    }
-
-    private async Task EnsureCommittedWorkflowBindingAsync(
-        string workflowRunId,
-        WorkflowStartInput? preparedInput = null)
-    {
-        var issue = _issue!;
-        if (!string.Equals(issue.WorkflowRunId, workflowRunId, StringComparison.Ordinal))
-            throw new InvalidOperationException(
-                $"Issue '{issue.ProjectId}/#{issue.Number}' is not bound to workflow '{workflowRunId}'.");
-
-        var workflow = GrainFactory.GetGrain<IWorkflowGrain>(workflowRunId);
-        if (await workflow.GetRunStatusAsync() is null)
-        {
-            var input = preparedInput;
-            if (input is null)
-            {
-                var resolution = RequireResolvedRepository(await ResolveIssueRepositoryAtStartAsync(issue));
-                input = await BuildWorkflowStartInputAsync(null, workflowRunId, resolution.Repository!);
-            }
-            await workflow.PrepareIssueStartAsync(input);
-        }
-
-        await workflow.ConfirmIssueBindingAsync(new WorkflowIssueBinding(
-            issue.ProjectId,
-            issue.Number,
-            issue.EpicNumber,
-            issue.LineageVersion));
-
-        if (issue.ConfirmWorkflowBinding(workflowRunId))
-            await SaveIssueAsync();
     }
 
     private async Task<string?> TryReuseActiveWorkflowAsync()
@@ -319,22 +258,10 @@ public class IssueGrain : Grain, IIssueGrain
         try
         {
             var workflow = GrainFactory.GetGrain<IWorkflowGrain>(workflowRunId);
-            if (!issue.WorkflowBindingPending)
+            var status = await workflow.GetRunStatusAsync();
+            if (status is null)
             {
-                if (await workflow.IsStoppedOrTerminalAsync())
-                {
-                    issue.ClearStoppedWorkflow(workflowRunId);
-                    await SaveIssueAsync();
-                    return null;
-                }
-
-                _log.LogInformation("Issue {IssueKey} reusing workflow run {WorkflowRunId}", GrainKey, workflowRunId);
-                return workflowRunId;
-            }
-            if (await workflow.GetRunStatusAsync() is null)
-            {
-                await EnsureCommittedWorkflowBindingAsync(workflowRunId);
-                _log.LogInformation("Issue {IssueKey} restored workflow run {WorkflowRunId}", GrainKey, workflowRunId);
+                _log.LogInformation("Issue {IssueKey} awaits durable workflow start for {WorkflowRunId}", GrainKey, workflowRunId);
                 return workflowRunId;
             }
             if (await workflow.IsStoppedOrTerminalAsync())
@@ -344,11 +271,6 @@ public class IssueGrain : Grain, IIssueGrain
                 return null;
             }
 
-            await workflow.ConfirmIssueBindingAsync(new WorkflowIssueBinding(
-                issue.ProjectId,
-                issue.Number,
-                issue.EpicNumber,
-                issue.LineageVersion));
             _log.LogInformation("Issue {IssueKey} reusing workflow run {WorkflowRunId}", GrainKey, workflowRunId);
             return workflowRunId;
         }
@@ -392,18 +314,6 @@ public class IssueGrain : Grain, IIssueGrain
             repo.BaseBranch);
     }
 
-    private static Dictionary<string, string> BuildWorkflowAnnotations(Domain.Issue issue, string projectId)
-    {
-        var annotations = new Dictionary<string, string>(StringComparer.Ordinal)
-        {
-            ["projectId"] = projectId,
-            ["issueNumber"] = issue.Number.ToString(),
-        };
-        if (issue.EpicNumber is > 0)
-            annotations["epicNumber"] = issue.EpicNumber.Value.ToString();
-        return annotations;
-    }
-
     private WorkspaceIdentity BuildWorkspaceIdentity(Domain.Issue issue, WorkflowProjectContext projectContext, string workflowRunId)
     {
         var runnerRoot = MohistWorkspaceLayout.ResolveRunnerRoot(_configuration, _environment);
@@ -430,13 +340,13 @@ public class IssueGrain : Grain, IIssueGrain
         // the run is not stopped/terminal — a Done or archived issue that
         // preserved its reference is not a running workflow, and Close()
         // already rejects Done/archived itself.
-        // The new WorkflowRunStatus state machine splits the old single
-        // "running" into Created/AwaitingBinding/Pending/Ready/Running; all five
+        // The WorkflowRunStatus state machine splits the old single
+        // "running" into Created/Pending/Ready/Running; all four
         // represent a non-terminal, controllable workflow that the user
         // must explicitly stop before closing the issue.
         var wfStatus = await GetControllableWorkflowStatusAsync();
         if (wfStatus is { } running
-            && running is "created" or "awaiting-binding" or "pending" or "ready" or "running" or "paused" or "awaiting-approval")
+            && running is "created" or "pending" or "ready" or "running" or "paused" or "awaiting-approval")
         {
             throw new InvalidOperationException($"Cannot close issue while workflow is {running}. Stop the workflow first.");
         }

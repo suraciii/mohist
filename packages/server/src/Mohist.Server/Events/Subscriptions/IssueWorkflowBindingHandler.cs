@@ -1,7 +1,9 @@
+using Microsoft.Extensions.DependencyInjection;
+using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Domain.Events;
-using Mohist.Server.Issue.Grains;
+using Mohist.Server.Workflow.Grains;
 
 namespace Mohist.Server.Events.Subscriptions;
 
@@ -9,10 +11,12 @@ namespace Mohist.Server.Events.Subscriptions;
 public sealed class IssueWorkflowBindingHandler : ICloudEventHandler<IssueWorkStarted>
 {
     private readonly IGrainFactory _grains;
+    private readonly IServiceScopeFactory _scopes;
 
-    public IssueWorkflowBindingHandler(IGrainFactory grains)
+    public IssueWorkflowBindingHandler(IGrainFactory grains, IServiceScopeFactory scopes)
     {
         _grains = grains;
+        _scopes = scopes;
     }
 
     public bool Filter(CloudEvent<IssueWorkStarted> evt) => true;
@@ -27,7 +31,20 @@ public sealed class IssueWorkflowBindingHandler : ICloudEventHandler<IssueWorkSt
             throw new InvalidOperationException($"IssueWorkStarted event '{evt.Id}' has no project-scoped issue number.");
         }
 
-        var issue = _grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(projectId, issueNumber)));
-        await issue.EnsureWorkflowBindingAsync(evt.Data.WorkflowRunId);
+        await using var scope = _scopes.CreateAsyncScope();
+        var issues = scope.ServiceProvider.GetRequiredService<IIssueStore>();
+        var issue = await issues.LoadAsync(GrainKey.Issue(new IssueKey(projectId, issueNumber)));
+        if (issue is null
+            || issue.Status != Mohist.Server.Issue.Domain.IssueStatus.InProgress
+            || !string.Equals(issue.WorkflowRunId, evt.Data.WorkflowRunId, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        var workflow = _grains.GetGrain<IWorkflowGrain>(evt.Data.WorkflowRunId);
+        await workflow.EnsureStartedAsync(new WorkflowIssueContext(
+            issue.ProjectId,
+            issue.Number,
+            issue.EpicNumber));
     }
 }

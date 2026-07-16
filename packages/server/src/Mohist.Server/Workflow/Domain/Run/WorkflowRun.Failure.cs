@@ -212,10 +212,5 @@ public static partial class WorkflowRunExtensions
 
     }
 
-    private static void EnsureRecoveryControlAllowed(WorkflowRun run)
-    {
-        if (run.Status == WorkflowRunStatus.AwaitingBinding)
-            throw new InvalidOperationException(
-                "WorkflowRun is awaiting issue binding; retry, rerun, and rerun-from-stage are unavailable");
-    }
+    private static void EnsureRecoveryControlAllowed(WorkflowRun run) { }
 }

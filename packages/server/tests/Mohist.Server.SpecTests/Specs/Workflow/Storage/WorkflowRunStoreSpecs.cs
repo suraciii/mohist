@@ -121,7 +121,7 @@ public class WorkflowRunStoreSpecs
         await store.SaveAsync(run, [new WorkflowRunStarted()]);
 
         var started = Assert.Single(await eventStore.ListAsync(run.Id));
-        Assert.Equal("epic_from_workflow", started.Envelope.Extensions[EventCatalog.Lineage.EpicId]);
+        Assert.Equal("epic_from_workflow", started.Envelope.Extensions[EventCatalog.Lineage.Epic]);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]
@@ -307,9 +307,9 @@ public class WorkflowRunStoreSpecs
         await store.SaveAsync(run, [new WorkflowRunPaused()]);
 
         var events = await eventStore.ListAsync(run.Id);
-        Assert.False(events[0].Envelope.Extensions.ContainsKey(EventCatalog.Lineage.EpicId));
-        Assert.Equal("epic_workflow", events[1].Envelope.Extensions[EventCatalog.Lineage.EpicId]);
-        Assert.False(events[2].Envelope.Extensions.ContainsKey(EventCatalog.Lineage.EpicId));
+        Assert.False(events[0].Envelope.Extensions.ContainsKey(EventCatalog.Lineage.Epic));
+        Assert.Equal("epic_workflow", events[1].Envelope.Extensions[EventCatalog.Lineage.Epic]);
+        Assert.False(events[2].Envelope.Extensions.ContainsKey(EventCatalog.Lineage.Epic));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]

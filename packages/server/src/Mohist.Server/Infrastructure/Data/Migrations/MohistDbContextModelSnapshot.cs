@@ -782,12 +782,6 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.Property<int?>("EpicNumber")
                         .HasColumnType("INTEGER");
 
-                    b.Property<long>("LineageVersion")
-                        .IsConcurrencyToken()
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER")
-                        .HasDefaultValue(1L);
-
                     b.Property<bool?>("IsArchived")
                         .ValueGeneratedOnAddOrUpdate()
                         .HasColumnType("INTEGER")

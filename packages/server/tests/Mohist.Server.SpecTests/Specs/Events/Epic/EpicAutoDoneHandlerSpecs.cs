@@ -768,7 +768,7 @@ public class EpicAutoDoneHandlerSpecs
             extensions: new Dictionary<string, string>(StringComparer.Ordinal)
             {
                 [EventCatalog.Lineage.ProjectId] = "project_1",
-                [EventCatalog.Lineage.IssueId] = "issue_10",
+                [EventCatalog.Lineage.Issue] = "issue_10",
                 [EventCatalog.Lineage.Issue] = "10",
             });
 
@@ -806,7 +806,7 @@ public class EpicAutoDoneHandlerSpecs
             extensions: new Dictionary<string, string>(StringComparer.Ordinal)
             {
                 [EventCatalog.Lineage.ProjectId] = "project_1",
-                [EventCatalog.Lineage.IssueId] = "issue_10",
+                [EventCatalog.Lineage.Issue] = "issue_10",
                 ["issueno"] = "10",
             });
 
@@ -843,7 +843,7 @@ public class EpicAutoDoneHandlerSpecs
             extensions: new Dictionary<string, string>(StringComparer.Ordinal)
             {
                 [EventCatalog.Lineage.ProjectId] = "project_1",
-                [EventCatalog.Lineage.IssueId] = "issue_10",
+                [EventCatalog.Lineage.Issue] = "issue_10",
                 [EventCatalog.Lineage.Issue] = "10",
                 ["issueno"] = "999",
             });
@@ -882,7 +882,7 @@ public class EpicAutoDoneHandlerSpecs
             extensions: new Dictionary<string, string>(StringComparer.Ordinal)
             {
                 [EventCatalog.Lineage.ProjectId] = "project_1",
-                [EventCatalog.Lineage.IssueId] = "issue_1",
+                [EventCatalog.Lineage.Issue] = "issue_1",
             });
 
         await handler.HandleAsync(evt, CancellationToken.None);

@@ -44,8 +44,11 @@ public class EpicAffiliationLineageSpecs
         Assert.Equal(issue.Number.ToString(), linked.Envelope.Extensions[EventCatalog.Lineage.Issue]);
         Assert.Equal(epic.Number.ToString(), linked.Envelope.Extensions[EventCatalog.Lineage.Epic]);
 
-        await _client.DeleteOkAsync(
-            $"/api/projects/{project.Id}/epics/{epic.Number}/issues/{issue.Number}");
+        using (var unlink = await _client.DeleteAsync(
+                   $"/api/projects/{project.Id}/epics/{epic.Number}/issues/{issue.Number}"))
+        {
+            unlink.EnsureSuccessStatusCode();
+        }
 
         var changes = (await events.ListIssueEventsAsync(project.Id, issue.Number, 200))
             .Where(entry => entry.Envelope.Type == EventCatalog.ReverseDns.IssueEpicChanged)

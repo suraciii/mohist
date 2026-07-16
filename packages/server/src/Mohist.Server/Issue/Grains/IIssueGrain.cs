@@ -8,7 +8,6 @@ public interface IIssueGrain : IGrainWithStringKey
 {
     Task<int> CreateAsync(string projectId, int number, string title, string? body, IReadOnlyDictionary<string, string>? labels, string? priority, string? repositoryRef = null, string? risk = null, bool isDraft = false, string[]? attachmentIds = null, string? workflowProfileId = null, int[]? prerequisiteNumbers = null);
     Task<string> StartWorkAsync(WorkflowProjectContext? project = null);
-    Task EnsureWorkflowBindingAsync(string workflowRunId);
     Task CompleteWorkAsync(string workflowRunId);
     Task CancelAsync();
     Task UpdateAsync(string title, string? body);

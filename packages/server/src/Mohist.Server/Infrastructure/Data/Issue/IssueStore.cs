@@ -44,9 +44,7 @@ public class IssueStore : IIssueStore
         var (projectId, issueNumber) = ParseKey(key);
         await using var db = await _dbFactory.CreateDbContextAsync();
         var row = await db.Issues.FindAsync(projectId, issueNumber);
-        var issue = row is null ? null : Deserialize(row.State);
-        issue?.SetLineageVersion(row!.LineageVersion);
-        return issue;
+        return row is null ? null : Deserialize(row.State);
     }
 
     public async Task SaveAsync(string key, DomainIssue state)
@@ -103,17 +101,13 @@ public class IssueStore : IIssueStore
                 State = Serialize(state),
                 Risk = state.Risk,
                 EpicNumber = state.EpicNumber,
-                LineageVersion = 1,
             });
-            state.SetLineageVersion(1);
         }
         else
         {
-            state.SetLineageVersion(row.LineageVersion + 1);
             row.State = Serialize(state);
             row.Risk = state.Risk;
             row.EpicNumber = state.EpicNumber;
-            row.LineageVersion++;
         }
     }
 

@@ -448,7 +448,7 @@ public class DeadLetterStoreSpecs : IAsyncLifetime
     private static Dictionary<string, string> IssueExtensions(string issueId) => new(StringComparer.Ordinal)
     {
         [EventCatalog.Lineage.ProjectId] = "project_1",
-        [EventCatalog.Lineage.IssueId] = issueId,
+        [EventCatalog.Lineage.Issue] = issueId,
         [EventCatalog.Lineage.Issue] = "1",
     };
 

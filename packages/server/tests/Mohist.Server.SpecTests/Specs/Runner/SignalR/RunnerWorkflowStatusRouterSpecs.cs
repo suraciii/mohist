@@ -135,9 +135,8 @@ public class RunnerWorkflowStatusRouterSpecs
         public Task<string?> GetRunStatusAsync() => Task.FromResult<string?>(Status.ToString());
 
         public Task StartAsync(WorkflowStartInput? input = null) => Task.CompletedTask;
-        public Task PrepareIssueStartAsync(WorkflowStartInput input) => Task.CompletedTask;
-        public Task ConfirmIssueBindingAsync(WorkflowIssueBinding binding) => Task.CompletedTask;
-        public Task ApplyIssueLineageAsync(WorkflowIssueLineage lineage) => Task.CompletedTask;
+        public Task EnsureStartedAsync(WorkflowIssueContext context) => Task.CompletedTask;
+        public Task RefreshIssueContextAsync(WorkflowIssueContext context) => Task.CompletedTask;
         public Task ResumeAsync() => Task.CompletedTask;
         public Task PauseAsync(string? reason = null) => Task.CompletedTask;
         public Task StopAsync(string? reason = null) => Task.CompletedTask;

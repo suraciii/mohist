@@ -20,18 +20,45 @@ namespace Mohist.Server.Infrastructure.Data.Workflow;
 /// </remarks>
 public static class WorkflowRunLineage
 {
-    internal static void ApplyEpicAffiliation(WorkflowRun run, int? epicNumber)
+    internal static Dictionary<string, string> AnnotationsFor(string projectId, int issueNumber, int? epicNumber)
     {
-        var annotations = run.Metadata.Annotations is null
-            ? new Dictionary<string, string>(StringComparer.Ordinal)
-            : new Dictionary<string, string>(run.Metadata.Annotations, StringComparer.Ordinal);
+        if (string.IsNullOrWhiteSpace(projectId))
+            throw new ArgumentException("Project id is required.", nameof(projectId));
+        if (issueNumber <= 0)
+            throw new ArgumentOutOfRangeException(nameof(issueNumber));
 
-        if (epicNumber is not > 0)
-            annotations.Remove("epicNumber");
-        else
+        var annotations = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["projectId"] = projectId,
+            ["issueNumber"] = issueNumber.ToString(),
+        };
+        if (epicNumber is > 0)
             annotations["epicNumber"] = epicNumber.Value.ToString();
+        return annotations;
+    }
 
-        run.Metadata = run.Metadata with { Annotations = annotations };
+    internal static void ApplyContext(WorkflowRun run, string projectId, int issueNumber, int? epicNumber)
+    {
+        run.Metadata = run.Metadata with { Annotations = AnnotationsFor(projectId, issueNumber, epicNumber) };
+    }
+
+    internal static bool ContextEquals(WorkflowRun run, string projectId, int issueNumber, int? epicNumber) =>
+        string.Equals(run.Metadata.Annotations?.GetValueOrDefault("projectId"), projectId, StringComparison.Ordinal)
+        && string.Equals(run.Metadata.Annotations?.GetValueOrDefault("issueNumber"), issueNumber.ToString(), StringComparison.Ordinal)
+        && EpicAffiliationOf(run) == epicNumber;
+
+    internal static void RestoreStoredEpicNumber(WorkflowRun run, int? epicNumber)
+    {
+        var projectId = run.Metadata.Annotations?.GetValueOrDefault("projectId");
+        var issueNumberText = run.Metadata.Annotations?.GetValueOrDefault("issueNumber");
+        if (string.IsNullOrWhiteSpace(projectId)
+            || !int.TryParse(issueNumberText, out var issueNumber)
+            || issueNumber <= 0)
+        {
+            return;
+        }
+
+        ApplyContext(run, projectId, issueNumber, epicNumber);
     }
 
     internal static int? EpicAffiliationOf(WorkflowRun run) =>
