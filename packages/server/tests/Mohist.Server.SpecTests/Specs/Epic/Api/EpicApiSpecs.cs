@@ -29,6 +29,16 @@ public class EpicApiSpecs
         await grain.StartAsync();
     }
 
+    private async Task AddOpenIssueAsync(string projectId, EpicDto epic)
+    {
+        var issue = await _client.PostDataAsync<IssueDto>(
+            $"/api/projects/{projectId}/issues",
+            new { title = "Open work", projectId, isDraft = false });
+        await _client.PostOkAsync(
+            $"/api/projects/{projectId}/epics/{epic.Id}/issues",
+            new { issueId = issue.Id });
+    }
+
     private async Task CompleteIssueAsync(string projectId, IssueDto issueInfo)
     {
         var grain = _grains.GetGrain<IIssueGrain>(issueInfo.Id);
@@ -415,6 +425,7 @@ public class EpicApiSpecs
         var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", $"epic-pause-{Guid.NewGuid():N}");
         await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", setDefault = true });
         var created = await _client.PostDataAsync<EpicDto>($"/api/projects/{project.Id}/epics", new { title = "To pause", projectId = project.Id });
+        await AddOpenIssueAsync(project.Id, created);
         await StartEpicAsync(project.Id, created);
 
         var paused = await _client.PostDataAsync<EpicFullDto>(
@@ -457,6 +468,7 @@ public class EpicApiSpecs
         var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", $"epic-pause-noreason-{Guid.NewGuid():N}");
         await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", setDefault = true });
         var created = await _client.PostDataAsync<EpicDto>($"/api/projects/{project.Id}/epics", new { title = "No reason", projectId = project.Id });
+        await AddOpenIssueAsync(project.Id, created);
         await StartEpicAsync(project.Id, created);
 
         var paused = await _client.PostDataAsync<EpicFullDto>($"/api/projects/{project.Id}/epics/{created.Id}/pause");
@@ -496,6 +508,7 @@ public class EpicApiSpecs
         var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", $"epic-paused-done-reject-{Guid.NewGuid():N}");
         await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", setDefault = true });
         var created = await _client.PostDataAsync<EpicDto>($"/api/projects/{project.Id}/epics", new { title = "Paused epic", projectId = project.Id });
+        await AddOpenIssueAsync(project.Id, created);
         await StartEpicAsync(project.Id, created);
         await _client.PostDataAsync<EpicFullDto>($"/api/projects/{project.Id}/epics/{created.Id}/pause", new { reason = "hold" });
 
@@ -516,6 +529,7 @@ public class EpicApiSpecs
         var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", $"epic-close-paused-{Guid.NewGuid():N}");
         await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", setDefault = true });
         var created = await _client.PostDataAsync<EpicDto>($"/api/projects/{project.Id}/epics", new { title = "Paused then close", projectId = project.Id });
+        await AddOpenIssueAsync(project.Id, created);
         await StartEpicAsync(project.Id, created);
         await _client.PostDataAsync<EpicFullDto>($"/api/projects/{project.Id}/epics/{created.Id}/pause", new { reason = "abandon" });
 
@@ -533,6 +547,7 @@ public class EpicApiSpecs
         await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", setDefault = true });
         await _client.PostDataAsync<EpicDto>($"/api/projects/{project.Id}/epics", new { title = "Idle one", projectId = project.Id });
         var paused = await _client.PostDataAsync<EpicDto>($"/api/projects/{project.Id}/epics", new { title = "Paused one", projectId = project.Id });
+        await AddOpenIssueAsync(project.Id, paused);
         await StartEpicAsync(project.Id, paused);
         await _client.PostDataAsync<EpicFullDto>($"/api/projects/{project.Id}/epics/{paused.Id}/pause", new { reason = "hold" });
 
@@ -553,6 +568,7 @@ public class EpicApiSpecs
         var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", $"epic-pause-num-{Guid.NewGuid():N}");
         await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", setDefault = true });
         var created = await _client.PostDataAsync<EpicDto>($"/api/projects/{project.Id}/epics", new { title = "Number pause", projectId = project.Id });
+        await AddOpenIssueAsync(project.Id, created);
         await StartEpicAsync(project.Id, created);
 
         var paused = await _client.PostDataAsync<EpicFullDto>(
@@ -589,6 +605,7 @@ public class EpicApiSpecs
         await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", setDefault = true });
         var created = await _client.PostDataAsync<EpicDto>($"/api/projects/{project.Id}/epics", new { title = "To start", projectId = project.Id });
         Assert.Equal("idle", created.Status);
+        await AddOpenIssueAsync(project.Id, created);
 
         var started = await _client.PostDataAsync<EpicFullDto>($"/api/projects/{project.Id}/epics/{created.Id}/start", null);
 
@@ -607,6 +624,7 @@ public class EpicApiSpecs
         var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", $"epic-start-running-{Guid.NewGuid():N}");
         await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", setDefault = true });
         var created = await _client.PostDataAsync<EpicDto>($"/api/projects/{project.Id}/epics", new { title = "Running twice", projectId = project.Id });
+        await AddOpenIssueAsync(project.Id, created);
         await _client.PostOkAsync($"/api/projects/{project.Id}/epics/{created.Id}/start", null);
 
         var started = await _client.PostDataAsync<EpicFullDto>($"/api/projects/{project.Id}/epics/{created.Id}/start", null);
@@ -622,6 +640,7 @@ public class EpicApiSpecs
         var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", $"epic-start-paused-{Guid.NewGuid():N}");
         await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", setDefault = true });
         var created = await _client.PostDataAsync<EpicDto>($"/api/projects/{project.Id}/epics", new { title = "Paused then start", projectId = project.Id });
+        await AddOpenIssueAsync(project.Id, created);
         await StartEpicAsync(project.Id, created);
         await _client.PostOkAsync($"/api/projects/{project.Id}/epics/{created.Id}/pause", new { reason = "hold" });
 
@@ -700,6 +719,7 @@ public class EpicApiSpecs
         var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", $"epic-start-num-{Guid.NewGuid():N}");
         await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", setDefault = true });
         var created = await _client.PostDataAsync<EpicDto>($"/api/projects/{project.Id}/epics", new { title = "By number", projectId = project.Id });
+        await AddOpenIssueAsync(project.Id, created);
 
         var started = await _client.PostDataAsync<EpicFullDto>($"/api/projects/{project.Id}/epics/{created.Number}/start", null);
 
@@ -737,6 +757,7 @@ public class EpicApiSpecs
         var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", $"epic-pause-twice-{Guid.NewGuid():N}");
         await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", setDefault = true });
         var created = await _client.PostDataAsync<EpicDto>($"/api/projects/{project.Id}/epics", new { title = "Pause twice", projectId = project.Id });
+        await AddOpenIssueAsync(project.Id, created);
         await StartEpicAsync(project.Id, created);
         await _client.PostOkAsync($"/api/projects/{project.Id}/epics/{created.Id}/pause", new { reason = "hold" });
 
