@@ -1302,7 +1302,7 @@ var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/i
             WorkType: "task",
             Stage: "Build",
             Title: issueTitle,
-            Issue: new WorkIssueRef(project.Id, issue.Number.ToString(), issue.Number));
+            Issue: new WorkIssueRef(project.Id, issue.Number));
         sessionName ??= work.WorkId;
         var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(Guid.NewGuid().ToString("N"));
         var info = await grain.OpenAsync(new OpenAgentSessionCommand(

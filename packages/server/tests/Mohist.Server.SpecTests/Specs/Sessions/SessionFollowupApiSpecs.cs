@@ -234,7 +234,7 @@ public class SessionFollowupApiSpecs
             WorkType: "task",
             Stage: "Build",
             Title: $"Session followup {name}",
-            Issue: new WorkIssueRef(project.Id, issue.Number.ToString(), issue.Number));
+            Issue: new WorkIssueRef(project.Id, issue.Number));
 
         await _fixture.Grains.GetGrain<IRunnerGrain>(_runnerId).RegisterAsync(new RunnerInfo(_runnerId, ["spec/*"], "followup-host", project.Id));
 

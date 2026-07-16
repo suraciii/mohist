@@ -280,14 +280,18 @@ public static class WorkflowGrainTestHelpers
         await manager.PatchVariablesAsync(projectId, patch);
     }
 
-    public static async Task PatchIssueVariablesAsync(string connectionString, string issueId, VariableBundle patch)
+    public static async Task PatchIssueVariablesAsync(
+        string connectionString,
+        string projectId,
+        int issueNumber,
+        VariableBundle patch)
     {
         var options = new DbContextOptionsBuilder<MohistDbContext>()
             .UseSqlite(connectionString)
             .Options;
         var factory = new PooledDbContextFactory<MohistDbContext>(options);
         var manager = new IssueWorkflowProfileManager(factory);
-        await manager.PatchVariablesAsync(issueId, patch);
+        await manager.PatchVariablesAsync(projectId, issueNumber, patch);
     }
 
     public static WorkflowDefinition TwoStages()

@@ -940,7 +940,7 @@ public class AgentSessionRecoveryApiSpecs
             WorkType: "task",
             Stage: "Build",
             Title: $"Session api {name}",
-            Issue: new WorkIssueRef(project.Id, issue.Number.ToString(), issue.Number));
+            Issue: new WorkIssueRef(project.Id, issue.Number));
 
         var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(issue.Id);
         await issueGrain.StartWorkAsync();

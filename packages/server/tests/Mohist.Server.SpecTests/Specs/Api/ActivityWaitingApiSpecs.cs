@@ -38,7 +38,6 @@ public class ActivityWaitingApiSpecs
             $"/api/projects/{project.Id}/agent/activity");
 
         var entry = Assert.Single(response.Waiting, w => w.IssueNumber == waitingIssue.Number);
-        Assert.Equal(waitingIssue.Id, entry.IssueId);
         Assert.Equal("Awaiting product review", entry.IssueTitle);
         Assert.Equal("plan", entry.Stage);
         Assert.Equal("Needs Approval", entry.Label);
@@ -100,7 +99,6 @@ public class ActivityWaitingApiSpecs
     {
         var issue = new DomainIssue
         {
-            Id = $"issue_{Guid.NewGuid():N}",
             ProjectId = projectId,
             Number = number,
             Title = title,
@@ -109,18 +107,16 @@ public class ActivityWaitingApiSpecs
         await using var db = await _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>().CreateDbContextAsync();
         db.Issues.Add(new IssueRow
         {
-            IssueId = issue.Id,
             State = IssueStore.Serialize(issue),
         });
         await db.SaveChangesAsync();
-        return new ProjectIssueDto(issue.Id, issue.Number);
+        return new ProjectIssueDto(issue.Number);
     }
 
     private async Task<ProjectIssueDto> InsertDoneIssueAsync(string projectId, int number, string title)
     {
         var issue = new DomainIssue
         {
-            Id = $"issue_{Guid.NewGuid():N}",
             ProjectId = projectId,
             Number = number,
             Title = title,
@@ -129,11 +125,10 @@ public class ActivityWaitingApiSpecs
         await using var db = await _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>().CreateDbContextAsync();
         db.Issues.Add(new IssueRow
         {
-            IssueId = issue.Id,
             State = IssueStore.Serialize(issue),
         });
         await db.SaveChangesAsync();
-        return new ProjectIssueDto(issue.Id, issue.Number);
+        return new ProjectIssueDto(issue.Number);
     }
 
     private async Task<ProjectIssueDto> InsertIssueWithApprovalGateAsync(
@@ -145,7 +140,6 @@ public class ActivityWaitingApiSpecs
         var workflowRunId = $"wf-{Guid.NewGuid():N}";
         var issue = new DomainIssue
         {
-            Id = $"issue_{Guid.NewGuid():N}",
             ProjectId = projectId,
             Number = number,
             Title = title,
@@ -189,7 +183,6 @@ public class ActivityWaitingApiSpecs
         {
             db.Issues.Add(new IssueRow
             {
-                IssueId = issue.Id,
                 State = IssueStore.Serialize(issue),
             });
             await db.SaveChangesAsync();
@@ -202,7 +195,7 @@ public class ActivityWaitingApiSpecs
                 workflowRunId, runState);
         }
 
-        return new ProjectIssueDto(issue.Id, issue.Number);
+        return new ProjectIssueDto(issue.Number);
     }
 
     private async Task<ProjectIssueDto> InsertApprovalGateIssueAsync(
@@ -213,8 +206,8 @@ public class ActivityWaitingApiSpecs
         await InsertIssueWithApprovalGateAsync(projectId, number, title, approvalRequestedAt);
 
     private sealed record ProjectDto(string Id, string Name);
-    private sealed record ProjectIssueDto(string Id, int Number);
-    private sealed record ActivityWaitingEntryDto(string IssueId, int IssueNumber, string IssueTitle, string? Stage, string Label, string? RequestedAt, string? Preview);
+    private sealed record ProjectIssueDto(int Number);
+    private sealed record ActivityWaitingEntryDto(int IssueNumber, string IssueTitle, string? Stage, string Label, string? RequestedAt, string? Preview);
     private sealed record ActivitySummaryDto(int Active, int Waiting, int Completed, int Failed);
     private sealed record ActivityResponseDto(ActivitySummaryDto Summary, object[] Sessions, ActivityWaitingEntryDto[] Waiting);
 }

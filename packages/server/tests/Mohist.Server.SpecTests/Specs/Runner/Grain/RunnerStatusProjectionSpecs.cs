@@ -381,7 +381,7 @@ public class RunnerStatusProjectionSpecs : WorkflowGrainSpecs
         await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "active-ctx-host", "test-project"));
 
         var workflowId = $"wf-ctx-{Guid.NewGuid():N}";
-        var issue = new WorkIssueRef("test-project", "issue-abc", 42);
+        var issue = new WorkIssueRef("test-project", 42);
         var dispatch = await StartIssueWorkflowWorkAsync(
             runnerId,
             workflowId,
@@ -517,7 +517,7 @@ public class RunnerStatusProjectionSpecs : WorkflowGrainSpecs
         await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "issue-proj-host", "test-project"));
 
         var workflowId = $"wf-issue-proj-{Guid.NewGuid():N}";
-        var issue = new WorkIssueRef("test-project", "issue-xyz", 9);
+        var issue = new WorkIssueRef("test-project", 9);
         await StartIssueWorkflowWorkAsync(
             runnerId,
             workflowId,

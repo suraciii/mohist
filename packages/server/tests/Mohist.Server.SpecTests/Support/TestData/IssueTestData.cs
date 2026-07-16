@@ -14,7 +14,6 @@ namespace Mohist.Server.SpecTests.Support.TestData;
 public static class IssueTestData
 {
     public const string DefaultProjectId = "proj-test";
-    public const string DefaultIssueId = "issue-test-1";
     public const int DefaultNumber = 1;
     public const string DefaultTitle = "Test issue";
     public const string DefaultPriority = "p2";
@@ -23,7 +22,6 @@ public static class IssueTestData
     private static readonly DateTime DefaultTimestamp = new(2026, 6, 5, 1, 0, 0, DateTimeKind.Utc);
 
     public static Mohist.Server.Issue.Domain.Issue Create(
-        string id = DefaultIssueId,
         string projectId = DefaultProjectId,
         int number = DefaultNumber,
         string title = DefaultTitle,
@@ -35,7 +33,6 @@ public static class IssueTestData
     {
         return new Mohist.Server.Issue.Domain.Issue
         {
-            Id = id,
             ProjectId = projectId,
             Number = number,
             Title = title,
@@ -50,11 +47,10 @@ public static class IssueTestData
     }
 
     public static Mohist.Server.Issue.Domain.Issue CreateInProgress(
-        string id = DefaultIssueId,
         string projectId = DefaultProjectId,
         int number = DefaultNumber,
         string title = DefaultTitle) =>
-        Create(id, projectId, number, title, IssueStatus.InProgress);
+        Create(projectId, number, title, IssueStatus.InProgress);
 
     public static ProjectInfo CreateProject(
         string id = DefaultProjectId,

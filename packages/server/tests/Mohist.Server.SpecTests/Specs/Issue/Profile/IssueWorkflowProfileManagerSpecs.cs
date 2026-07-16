@@ -13,6 +13,7 @@ namespace Mohist.Server.SpecTests.Specs.Issue.Profile;
 
 public class IssueWorkflowProfileManagerSpecs : IAsyncLifetime
 {
+    private const string ProjectId = "proj_profile";
     private readonly DbContextOptions<MohistDbContext> _options;
     private readonly IssueWorkflowProfileManager _manager;
     private readonly SqliteConnection _keeper;
@@ -29,22 +30,15 @@ public class IssueWorkflowProfileManagerSpecs : IAsyncLifetime
 
         MigratedSqliteTemplate.CopyModelSchemaTo(_keeper);
         using var db = new MohistDbContext(_options);
-        var issueIds = new[]
+        var issueNumbers = new[] { 1, 2, 4, 5, 6, 7, 8, 9 };
+        foreach (var issueNumber in issueNumbers)
         {
-            "issue_1", "issue_2", "issue_4", "issue_5",
-            "issue_s", "issue_p", "issue_isolate", "issue_zh",
-        };
-        for (var index = 0; index < issueIds.Length; index++)
-        {
-            var issueId = issueIds[index];
             db.Issues.Add(new IssueRow
             {
-                IssueId = issueId,
                 State = JSON.Serialize(new
                 {
-                    id = issueId,
-                    projectId = "proj_profile",
-                    number = index + 1,
+                    projectId = ProjectId,
+                    number = issueNumber,
                 }),
             });
         }
@@ -66,7 +60,7 @@ public class IssueWorkflowProfileManagerSpecs : IAsyncLifetime
     [Fact]
     public async Task GetProfile_ReturnsNull_WhenNoRecord()
     {
-        var profile = await _manager.GetProfileAsync("issue_none");
+        var profile = await _manager.GetProfileAsync(ProjectId, 99);
         Assert.Null(profile);
     }
 
@@ -75,15 +69,16 @@ public class IssueWorkflowProfileManagerSpecs : IAsyncLifetime
     [Fact]
     public async Task UpdateTemplate_ProjectReference_StoresSourceTemplateId()
     {
-        var row = await _manager.UpdateTemplateAsync("issue_1",
+        var row = await _manager.UpdateTemplateAsync(ProjectId, 1,
             new IssueTemplateUpdateRequest(ProjectTemplateId: "some-template"));
 
-        Assert.Equal("issue_1", row.IssueId);
+        Assert.Equal(ProjectId, row.ProjectId);
+        Assert.Equal(1, row.IssueNumber);
         Assert.Equal("some-template", row.SourceTemplateId);
         Assert.Null(row.Template);
 
-        var stored = await _manager.GetProfileAsync("issue_1");
-        Assert.Equal("proj_profile", stored!.ProjectId);
+        var stored = await _manager.GetProfileAsync(ProjectId, 1);
+        Assert.Equal(ProjectId, stored!.ProjectId);
         Assert.Equal(1, stored.IssueNumber);
     }
 
@@ -99,13 +94,13 @@ public class IssueWorkflowProfileManagerSpecs : IAsyncLifetime
                 tasks: []
                 checks: []
             """;
-        var row = await _manager.UpdateTemplateAsync("issue_2",
+        var row = await _manager.UpdateTemplateAsync(ProjectId, 2,
             new IssueTemplateUpdateRequest(Template: yaml));
 
         Assert.Null(row.SourceTemplateId);
         Assert.NotNull(row.Template);
 
-        var def = await _manager.GetTemplateAsync("issue_2");
+        var def = await _manager.GetTemplateAsync(ProjectId, 2);
         Assert.NotNull(def);
         Assert.Equal("my-custom", def.Id);
     }
@@ -116,7 +111,7 @@ public class IssueWorkflowProfileManagerSpecs : IAsyncLifetime
     public async Task UpdateTemplate_BothSet_Throws()
     {
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            _manager.UpdateTemplateAsync("issue_3",
+            _manager.UpdateTemplateAsync(ProjectId, 3,
                 new IssueTemplateUpdateRequest(
                     ProjectTemplateId: "t1",
                     Template: """
@@ -134,10 +129,10 @@ public class IssueWorkflowProfileManagerSpecs : IAsyncLifetime
     public async Task UpdateTemplate_NullClears_BothFields()
     {
         // first set
-        await _manager.UpdateTemplateAsync("issue_4",
+        await _manager.UpdateTemplateAsync(ProjectId, 4,
             new IssueTemplateUpdateRequest(ProjectTemplateId: "t1"));
         // then clear
-        var row = await _manager.UpdateTemplateAsync("issue_4",
+        var row = await _manager.UpdateTemplateAsync(ProjectId, 4,
             new IssueTemplateUpdateRequest());
 
         Assert.Null(row.SourceTemplateId);
@@ -163,10 +158,10 @@ public class IssueWorkflowProfileManagerSpecs : IAsyncLifetime
                 tasks: []
                 checks: []
             """;
-        await _manager.UpdateTemplateAsync("issue_5", new IssueTemplateUpdateRequest(Template: yaml1));
-        await _manager.UpdateTemplateAsync("issue_5", new IssueTemplateUpdateRequest(Template: yaml2));
+        await _manager.UpdateTemplateAsync(ProjectId, 5, new IssueTemplateUpdateRequest(Template: yaml1));
+        await _manager.UpdateTemplateAsync(ProjectId, 5, new IssueTemplateUpdateRequest(Template: yaml2));
 
-        var def = await _manager.GetTemplateAsync("issue_5");
+        var def = await _manager.GetTemplateAsync(ProjectId, 5);
         Assert.Single(def!.Stages);
         Assert.Equal("s2", def.Stages[0].Stage);
     }
@@ -178,7 +173,7 @@ public class IssueWorkflowProfileManagerSpecs : IAsyncLifetime
     [Fact]
     public async Task GetVariables_Empty_WhenNoRecord()
     {
-        var bundle = await _manager.GetVariablesAsync("issue_none");
+        var bundle = await _manager.GetVariablesAsync(ProjectId, 99);
         Assert.Same(VariableBundle.Empty, bundle);
     }
 
@@ -190,8 +185,8 @@ public class IssueWorkflowProfileManagerSpecs : IAsyncLifetime
         var bundle = new VariableBundle(
             Vars: JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(new { x = 42 })));
 
-        await _manager.SetVariablesAsync("issue_s", bundle);
-        var got = await _manager.GetVariablesAsync("issue_s");
+        await _manager.SetVariablesAsync(ProjectId, 6, bundle);
+        var got = await _manager.GetVariablesAsync(ProjectId, 6);
 
         Assert.NotNull(got.Vars);
     }
@@ -204,14 +199,14 @@ public class IssueWorkflowProfileManagerSpecs : IAsyncLifetime
         var initial = new VariableBundle(
             Vars: JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(
                 new { agent = new { type = "opencode", timeout = 300 } })));
-        await _manager.SetVariablesAsync("issue_p", initial);
+        await _manager.SetVariablesAsync(ProjectId, 7, initial);
 
         var patch = new VariableBundle(
             Vars: JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(
                 new { agent = new { model = "gpt-4o" } })));
-        await _manager.PatchVariablesAsync("issue_p", patch);
+        await _manager.PatchVariablesAsync(ProjectId, 7, patch);
 
-        var result = await _manager.GetVariablesAsync("issue_p");
+        var result = await _manager.GetVariablesAsync(ProjectId, 7);
         using var doc = JsonDocument.Parse(result.Vars!.Value.GetRawText());
         var agent = doc.RootElement.GetProperty("agent");
 
@@ -228,14 +223,14 @@ public class IssueWorkflowProfileManagerSpecs : IAsyncLifetime
         // set variables
         var bundle = new VariableBundle(
             Vars: JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(new { keep = 1 })));
-        await _manager.SetVariablesAsync("issue_isolate", bundle);
+        await _manager.SetVariablesAsync(ProjectId, 8, bundle);
 
         // set template
-        await _manager.UpdateTemplateAsync("issue_isolate",
+        await _manager.UpdateTemplateAsync(ProjectId, 8,
             new IssueTemplateUpdateRequest(ProjectTemplateId: "some-tmpl"));
 
         // variables still intact
-        var got = await _manager.GetVariablesAsync("issue_isolate");
+        var got = await _manager.GetVariablesAsync(ProjectId, 8);
         Assert.NotNull(got.Vars);
         using var doc = JsonDocument.Parse(got.Vars.Value.GetRawText());
         Assert.Equal(1, doc.RootElement.GetProperty("keep").GetInt32());
@@ -262,18 +257,22 @@ public class IssueWorkflowProfileManagerSpecs : IAsyncLifetime
                 stageName = "构建",
             })).RootElement);
 
-        await _manager.SetVariablesAsync("issue_zh", bundle);
+        await _manager.SetVariablesAsync(ProjectId, 9, bundle);
 
         await using (var db = new MohistDbContext(_options))
         {
             var conn = db.Database.GetDbConnection();
             await conn.OpenAsync();
             await using var cmd = conn.CreateCommand();
-            cmd.CommandText = "SELECT \"Variables\" FROM \"IssueWorkflowProfiles\" WHERE \"IssueId\" = $id";
-            var p = cmd.CreateParameter();
-            p.ParameterName = "$id";
-            p.Value = "issue_zh";
-            cmd.Parameters.Add(p);
+            cmd.CommandText = "SELECT \"Variables\" FROM \"IssueWorkflowProfiles\" WHERE \"ProjectId\" = $projectId AND \"IssueNumber\" = $issueNumber";
+            var project = cmd.CreateParameter();
+            project.ParameterName = "$projectId";
+            project.Value = ProjectId;
+            cmd.Parameters.Add(project);
+            var issue = cmd.CreateParameter();
+            issue.ParameterName = "$issueNumber";
+            issue.Value = 9;
+            cmd.Parameters.Add(issue);
 
             var persisted = (string?)await cmd.ExecuteScalarAsync();
             Assert.NotNull(persisted);
@@ -285,7 +284,7 @@ public class IssueWorkflowProfileManagerSpecs : IAsyncLifetime
             Assert.DoesNotContain("\\u6784", persisted);
         }
 
-        var got = await _manager.GetVariablesAsync("issue_zh");
+        var got = await _manager.GetVariablesAsync(ProjectId, 9);
         Assert.NotNull(got.Vars);
         var raw = got.Vars!.Value.GetRawText();
         Assert.Contains("\"greeting\":\"中文变量值\"", raw);
