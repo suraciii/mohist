@@ -255,11 +255,8 @@ public sealed class EpicStartRetryHandler : ICloudEventHandler<Epic.Domain.Event
 /// wiring. <see cref="EpicAutoDoneHandler"/> (completed),
 /// <see cref="EpicCancelledHandler"/> (cancelled), and
 /// <see cref="EpicDraftChangedHandler"/> (undraft) funnel here so the
-/// CloudEvent <c>projectid</c>/<c>issueid</c>/<c>issue</c> extension
-/// parsing, epic lookup, and grain dispatch stay in one place. The
-/// issue number is read from the unified <c>issue</c> key with a legacy
-/// <c>issueno</c> fallback for pre-change historical rows that were
-/// never backfilled (Non-Goal forbids rewriting history). When
+/// CloudEvent <c>projectid</c>/<c>issue</c> extension parsing, epic lookup,
+/// and grain dispatch stay in one place. When
 /// <paramref name="includePrerequisiteLookup"/> is set, also reverse-looks-up
 /// epics whose members depend on the event's issue as an external
 /// prerequisite — the owning-epic lookup misses those because the
@@ -353,25 +350,10 @@ internal sealed class EpicProgressRecomputeDispatcher
 
     internal static int? TryReadIssueNumber(IReadOnlyDictionary<string, string> extensions)
     {
-        var text = TryReadIssueNumberText(extensions);
-        return int.TryParse(text, out var n) ? n : null;
-    }
-
-    private static string? TryReadIssueNumberText(IReadOnlyDictionary<string, string> extensions)
-    {
-        if (extensions.TryGetValue(EventCatalog.Lineage.Issue, out var unifiedText)
-            && !string.IsNullOrWhiteSpace(unifiedText))
-        {
-            return unifiedText;
-        }
-
-        if (extensions.TryGetValue("issueno", out var legacyText)
-            && !string.IsNullOrWhiteSpace(legacyText))
-        {
-            return legacyText;
-        }
-
-        return null;
+        return extensions.TryGetValue(EventCatalog.Lineage.Issue, out var text)
+            && int.TryParse(text, out var number)
+                ? number
+                : null;
     }
 }
 

@@ -98,6 +98,8 @@ public class IssueStore : IIssueStore
         {
             db.Issues.Add(new IssueRow
             {
+                ProjectId = state.ProjectId,
+                Number = state.Number,
                 State = Serialize(state),
                 Risk = state.Risk,
                 EpicNumber = state.EpicNumber,

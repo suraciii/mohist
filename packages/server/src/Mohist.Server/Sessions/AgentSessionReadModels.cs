@@ -306,7 +306,6 @@ public sealed record ActivitySummaryDto(int Active, int Waiting, int Completed, 
 public sealed record ActivitySlotUsageDto(int Active, int Max);
 
 public sealed record ActivityCardDto(
-    string IssueId,
     int IssueNumber,
     string IssueTitle,
     string IssueStage,

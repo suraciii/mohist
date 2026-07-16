@@ -12,9 +12,7 @@ public partial class RemoveWorkflowBindingState : Migration
 {
     protected override void Up(MigrationBuilder migrationBuilder)
     {
-        migrationBuilder.DropColumn(
-            name: "LineageVersion",
-            table: "Issues");
+        migrationBuilder.Sql("ALTER TABLE \"Issues\" DROP COLUMN \"LineageVersion\";");
     }
 
     protected override void Down(MigrationBuilder migrationBuilder)

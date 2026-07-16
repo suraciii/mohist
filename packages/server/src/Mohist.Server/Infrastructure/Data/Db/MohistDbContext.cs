@@ -287,11 +287,10 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.State).IsRequired();
             entity.Property(e => e.Risk).HasMaxLength(16);
             entity.Property(e => e.ProjectId)
-                .HasComputedColumnSql("COALESCE(json_extract(State, '$.projectId'), json_extract(State, '$.ProjectId'))", stored: true)
-                .ValueGeneratedOnAdd();
+                .HasMaxLength(256)
+                .IsRequired();
             entity.Property(e => e.Number)
-                .HasComputedColumnSql("COALESCE(json_extract(State, '$.number'), json_extract(State, '$.Number'))", stored: true)
-                .ValueGeneratedOnAdd();
+                .IsRequired();
             entity.Property(e => e.Status)
                 .HasComputedColumnSql("COALESCE(json_extract(State, '$.status'), json_extract(State, '$.Status'))");
             entity.Property(e => e.WorkflowRunId)

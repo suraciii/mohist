@@ -191,8 +191,8 @@ public class IssueWorkflowRepositoryResolutionSpecs
         Assert.Equal("git@example.com:server.git", repository.GetProperty("gitUrl").GetString());
         Assert.Equal("release", repository.GetProperty("baseBranch").GetString());
         var issueAfterUpgrade = await LoadIssueStateAsync(projectId, number);
-        Assert.Equal(issueBeforeUpgrade.GetProperty("id").GetString(), issueAfterUpgrade.GetProperty("id").GetString());
         Assert.Equal(issueBeforeUpgrade.GetProperty("projectId").GetString(), issueAfterUpgrade.GetProperty("projectId").GetString());
+        Assert.Equal(issueBeforeUpgrade.GetProperty("number").GetInt32(), issueAfterUpgrade.GetProperty("number").GetInt32());
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]

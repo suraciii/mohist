@@ -82,7 +82,6 @@ public class AgentActivityFeedAssemblerSpecs
         var result = await assembler.GetActivityAsync(project.Id, limit: 10);
 
         var card = Assert.Single(result.Sessions, c => c.SessionId == sessionId);
-        Assert.Equal($"agent_{agentId}", card.IssueId);
         Assert.Equal(7, card.IssueNumber);
         Assert.Equal("Issue #7", card.IssueTitle);
         Assert.Equal(agentId, card.AgentId);
@@ -163,7 +162,7 @@ public class AgentActivityFeedAssemblerSpecs
         var result = await assembler.GetActivityAsync(project.Id, limit: 10);
 
         var card = Assert.Single(result.Sessions, c => c.SessionId == sessionId);
-        Assert.Equal($"issue_{project.Id}_42", card.IssueId);
+        Assert.Equal(42, card.IssueNumber);
         Assert.Null(card.AgentId);
         Assert.Null(card.AgentName);
     }

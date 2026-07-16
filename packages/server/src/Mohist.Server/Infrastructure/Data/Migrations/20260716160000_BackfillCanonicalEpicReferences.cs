@@ -18,42 +18,36 @@ public partial class BackfillCanonicalEpicReferences : Migration
     {
         migrationBuilder.Sql(CanonicalEpicReferenceReconciliation.Sql);
 
-        migrationBuilder.AlterColumn<int>(
-            name: "Number",
-            table: "Epics",
-            type: "INTEGER",
-            nullable: false,
-            oldClrType: typeof(int),
-            oldType: "INTEGER",
-            oldNullable: true);
+        migrationBuilder.Sql("""
+            CREATE TABLE "__Epics" (
+                "ProjectId" TEXT NOT NULL,
+                "Number" INTEGER NOT NULL,
+                "Title" TEXT NOT NULL,
+                "Description" TEXT NOT NULL,
+                "Priority" TEXT NOT NULL,
+                "Status" TEXT NOT NULL,
+                "PauseReason" TEXT NULL,
+                "CreatedAt" TEXT NOT NULL,
+                "UpdatedAt" TEXT NOT NULL,
+                CONSTRAINT "PK_Epics" PRIMARY KEY ("ProjectId", "Number")
+            );
 
-        migrationBuilder.AlterColumn<int>(
-            name: "EpicNumber",
-            table: "EpicIssues",
-            type: "INTEGER",
-            nullable: false,
-            oldClrType: typeof(int),
-            oldType: "INTEGER",
-            oldNullable: true);
+            INSERT INTO "__Epics" (
+                "ProjectId", "Number", "Title", "Description", "Priority",
+                "Status", "PauseReason", "CreatedAt", "UpdatedAt")
+            SELECT
+                "ProjectId", "Number", "Title", "Description", "Priority",
+                "Status", "PauseReason", "CreatedAt", "UpdatedAt"
+            FROM "Epics";
 
-        migrationBuilder.AlterColumn<int>(
-            name: "EpicNumber",
-            table: "EpicActiveIssues",
-            type: "INTEGER",
-            nullable: false,
-            oldClrType: typeof(int),
-            oldType: "INTEGER",
-            oldNullable: true);
+            DROP TABLE "Epics";
+            ALTER TABLE "__Epics" RENAME TO "Epics";
 
-        migrationBuilder.DropIndex(
-            name: "IX_Epics_ProjectId_Number",
-            table: "Epics");
-
-        migrationBuilder.CreateIndex(
-            name: "IX_Epics_ProjectId_Number",
-            table: "Epics",
-            columns: new[] { "ProjectId", "Number" },
-            unique: true);
+            CREATE UNIQUE INDEX "IX_Epics_ProjectId_Number"
+                ON "Epics" ("ProjectId", "Number");
+            CREATE INDEX "IX_Epics_ProjectId_Status_CreatedAt"
+                ON "Epics" ("ProjectId", "Status", "CreatedAt");
+            """);
 
         migrationBuilder.CreateIndex(
             name: "IX_EpicIssues_ProjectId_EpicNumber_IssueNumber",
@@ -83,42 +77,6 @@ public partial class BackfillCanonicalEpicReferences : Migration
 
     protected override void Down(MigrationBuilder migrationBuilder)
     {
-        migrationBuilder.DropIndex(
-            name: "IX_AgentSessions_LabelProjectId_LabelAgentLaunchEpicNumber_CreatedAt",
-            table: "AgentSessions");
-        migrationBuilder.DropIndex(name: "IX_WorkflowRuns_ProjectId_EpicNumber", table: "WorkflowRuns");
-        migrationBuilder.DropIndex(name: "IX_Issues_ProjectId_EpicNumber_Number", table: "Issues");
-        migrationBuilder.DropIndex(name: "IX_EpicActiveIssues_ProjectId_EpicNumber_IssueNumber", table: "EpicActiveIssues");
-        migrationBuilder.DropIndex(name: "IX_EpicIssues_ProjectId_EpicNumber_IssueNumber", table: "EpicIssues");
-        migrationBuilder.DropIndex(name: "IX_Epics_ProjectId_Number", table: "Epics");
-
-        migrationBuilder.CreateIndex(
-            name: "IX_Epics_ProjectId_Number",
-            table: "Epics",
-            columns: new[] { "ProjectId", "Number" });
-
-        migrationBuilder.AlterColumn<int>(
-            name: "EpicNumber",
-            table: "EpicActiveIssues",
-            type: "INTEGER",
-            nullable: true,
-            oldClrType: typeof(int),
-            oldType: "INTEGER");
-
-        migrationBuilder.AlterColumn<int>(
-            name: "EpicNumber",
-            table: "EpicIssues",
-            type: "INTEGER",
-            nullable: true,
-            oldClrType: typeof(int),
-            oldType: "INTEGER");
-
-        migrationBuilder.AlterColumn<int>(
-            name: "Number",
-            table: "Epics",
-            type: "INTEGER",
-            nullable: true,
-            oldClrType: typeof(int),
-            oldType: "INTEGER");
+        throw new NotSupportedException("Canonical epic references cannot be reverted to technical identifiers.");
     }
 }

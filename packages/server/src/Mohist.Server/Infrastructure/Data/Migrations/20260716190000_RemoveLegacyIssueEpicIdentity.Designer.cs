@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Mohist.Server.Infrastructure.Data.Db;
 
@@ -10,11 +11,11 @@ using Mohist.Server.Infrastructure.Data.Db;
 namespace Mohist.Server.Infrastructure.Data.Migrations
 {
     [DbContext(typeof(MohistDbContext))]
-    partial class MohistDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260716190000_RemoveLegacyIssueEpicIdentity")]
+    partial class RemoveLegacyIssueEpicIdentity
     {
-        protected override void BuildModel(ModelBuilder modelBuilder) => BuildModelCore(modelBuilder);
-
-        internal static void BuildModelCore(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.8");
@@ -1284,10 +1285,6 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("RuntimeSessionId")
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
                     b.Property<long>("Sequence")
                         .HasColumnType("INTEGER");
 
@@ -1306,8 +1303,6 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
 
                     b.HasIndex("SessionId", "Sequence")
                         .IsUnique();
-
-                    b.HasIndex("SessionId", "RuntimeSessionId", "Sequence");
 
                     b.ToTable("AgentSessionTranscriptTurns", (string)null);
                 });
