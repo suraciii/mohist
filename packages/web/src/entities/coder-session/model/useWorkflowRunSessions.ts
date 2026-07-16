@@ -64,6 +64,10 @@ export function useWorkflowRunSessions(
         if (detailWorkflowRunId && detailWorkflowRunId !== workflowRunId) return
         invalidate()
       }),
+      onAgentEvent('com.mohist.agent-session.runtime-bound', () => {
+        if (!mountedRef.current) return
+        invalidate()
+      }),
       onAgentEvent('session.closed', (detail) => {
         if (!mountedRef.current) return
         setLiveState((prev) => prev.workflowRunId === workflowRunId

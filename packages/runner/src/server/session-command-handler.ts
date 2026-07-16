@@ -48,7 +48,7 @@ export function registerSessionCommandHandler(
   conn.on("SessionCommand", async (request: SessionCommandRequest | null | undefined) => {
     const handler = deps.handler
     const journal = deps.journal
-    if (!isSessionCommandRequest(request) || !handler || !journal) {
+    if (!isValidSessionCommandRequest(request) || !handler || !journal) {
       return { ok: false, error: "unavailable" } satisfies SessionCommandResult
     }
 
@@ -77,7 +77,7 @@ async function handleCommand(
   const existing = await journal.get(request.sessionId, request.operationId)
   if (existing) {
     if (!sameRequest(existing.request, request)) return unavailable()
-    if (existing.state === "completed") return existing.result!
+    if (existing.state === "completed") return validateResult(request, existing.result!)
 
     const reconciled = reconcileStarted
       ? await reconcileStarted(request)
@@ -97,21 +97,27 @@ async function handleCommand(
   return result
 }
 
-function validateResult(request: SessionCommandRequest, result: SessionCommandResult): SessionCommandResult {
-  if (result.ok) {
-    const isValid = result.error === undefined && (request.command === "compact"
-      ? result.runtimeSessionId === undefined
-      : typeof result.runtimeSessionId === "string" && result.runtimeSessionId.length > 0 && result.runtimeSessionId !== request.runtimeSessionId)
-    return isValid ? result : { ok: false, error: "unavailable" }
-  }
-
-  return result.runtimeSessionId === undefined
-    && (result.error === "conflict" || result.error === "missing" || result.error === "unavailable")
+export function validateResult(request: SessionCommandRequest, result: SessionCommandResult): SessionCommandResult {
+  return isValidSessionCommandResult(request, result)
     ? result
-    : { ok: false, error: "unavailable" }
+    : unavailable()
 }
 
-function isSessionCommandRequest(value: unknown): value is SessionCommandRequest {
+export function isValidSessionCommandResult(request: SessionCommandRequest, result: unknown): result is SessionCommandResult {
+  if (!result || typeof result !== "object") return false
+  const candidate = result as Partial<SessionCommandResult>
+  if (candidate.ok === true) {
+    return candidate.error === undefined && (request.command === "compact"
+      ? candidate.runtimeSessionId === undefined
+      : typeof candidate.runtimeSessionId === "string" && candidate.runtimeSessionId.length > 0 && candidate.runtimeSessionId !== request.runtimeSessionId)
+  }
+
+  return candidate.ok === false
+    && candidate.runtimeSessionId === undefined
+    && (candidate.error === "conflict" || candidate.error === "missing" || candidate.error === "unavailable")
+}
+
+export function isValidSessionCommandRequest(value: unknown): value is SessionCommandRequest {
   if (!value || typeof value !== "object") return false
   const request = value as Partial<SessionCommandRequest>
   return typeof request.sessionId === "string"

@@ -401,6 +401,7 @@ export function SessionDetailShell({
               onSend={sendFollowup}
               isSending={followupIsPending}
               disabled={!canFollowup}
+              className="py-0.5"
             />
           </div>
         )}

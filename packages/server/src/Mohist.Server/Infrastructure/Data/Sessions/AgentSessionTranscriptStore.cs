@@ -47,11 +47,15 @@ public sealed class AgentSessionTranscriptStore : IAgentSessionTranscriptStore
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
         try
         {
+            var turns = db.AgentSessionTranscriptTurns
+                .Where(t => t.SessionId == transcript.Turn.SessionId);
+            if (!string.IsNullOrWhiteSpace(transcript.Turn.RuntimeSessionId))
+                turns = turns.Where(t => t.RuntimeSessionId == transcript.Turn.RuntimeSessionId);
             var turn = transcript.StartNewTurn
                 ? null
-                : await db.AgentSessionTranscriptTurns
+                : await turns
                     .OrderByDescending(t => t.Sequence)
-                    .FirstOrDefaultAsync(t => t.SessionId == transcript.Turn.SessionId, ct);
+                    .FirstOrDefaultAsync(ct);
             if (turn is null)
             {
                 var sequence = transcript.StartNewTurn || transcript.Turn.Sequence <= 0

@@ -105,73 +105,15 @@ public static partial class IssueRoutes
             if (sessionId is null)
                 return ApiResults.NotFound($"Session {name} not found");
 
-            try
-            {
-                await grains.GetGrain<IAgentSessionGrain>(sessionId).EnsureRuntimeSessionPresentAsync();
-            }
-            catch (RuntimeSessionMissingException ex)
-            {
-                return ApiResults.Conflict(
-                    ex.Message,
-                    "runtime_session_missing",
-                    new { sessionId = ex.SessionId, hint = "reset" });
-            }
-
-            var target = await sessions.ResolveFollowupTargetAsync(project.Id, number, name, ctx.RequestAborted);
-            if (target is null)
-                return ApiResults.NotFound($"Session {name} not found");
-
-            if (!string.IsNullOrWhiteSpace(target.TerminalState))
-                return ApiResults.Conflict("Session is no longer active", "session_inactive");
-
-            var connectionId = connections.GetConnectionId(target.RunnerId);
-            if (string.IsNullOrWhiteSpace(connectionId))
-                return ApiResults.Fail("Runner is offline", 503, "runner_offline", new { runnerId = target.RunnerId });
-
-            // Workflow followup payload: keep `workflowRunId` / `sessionName`
-            // populated on the top level so older runners (that branch on
-            // those fields) continue to work, AND emit the unified
-            // `target: SessionTarget` shape (issue-129 T-004 / D3) so the
-            // newer runner can route by target.kind. The runner resolver
-            // prefers `target` when present and falls back to the
-            // top-level workflow fields for backwards compatibility.
-            RunnerFollowupDeliveryResult? delivery;
-            try
-            {
-                delivery = await runnerHub.Clients.Client(connectionId).InvokeAsync<RunnerFollowupDeliveryResult?>(
-                    "ReceiveFollowup",
-                    new
-                    {
-                        workflowRunId = target.WorkflowRunId,
-                        sessionName = target.SessionName,
-                        target = new
-                        {
-                            kind = "workflow",
-                            projectId = project.Id,
-                            workflowRunId = target.WorkflowRunId,
-                            sessionName = target.SessionName,
-                        },
-                        text,
-                    },
-                    ctx.RequestAborted);
-            }
-            catch
-            {
-                return ApiResults.Fail("Runner is unavailable", 503, "runner_unavailable", new { runnerId = target.RunnerId });
-            }
-
-            if (delivery?.Accepted == true)
-                return ApiResults.Ok(new AgentSessionFollowupResult(sessionId));
-
-            if (string.Equals(delivery?.Error, "missing", StringComparison.Ordinal))
-            {
-                return ApiResults.Conflict(
-                    $"Runtime session missing for AgentSession {sessionId}. Reset the session to establish a new binding.",
-                    "runtime_session_missing",
-                    new { sessionId, hint = "reset" });
-            }
-
-            return ApiResults.Fail("Runner is unavailable", 503, "runner_unavailable", new { runnerId = target.RunnerId });
+            return await AgentSessionFollowupRoutes.ExecuteFollowupAsync(
+                project.Id,
+                sessionId,
+                text,
+                sessions,
+                grains,
+                runnerHub,
+                connections,
+                ctx.RequestAborted);
         });
 
         group.MapPost("/{number:int}/sessions/{name}/cancel", async (

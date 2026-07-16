@@ -274,7 +274,7 @@ export function useIssueSessionDataSource(
   const followup = useFollowup()
   const cancelMutation = useCancel()
   const isTerminal = rawStatus === 'completed' || rawStatus === 'failed' || rawStatus === 'cancelled' || rawStatus === 'stopped'
-  const canFollowup = !isTerminal && !!runtimeSessionId && !!recoverySessionName
+  const canFollowup = !isTerminal && !!runtimeSessionId && !!detail?.runtime && !!recoverySessionName
   const sendFollowup = useCallback(async (text: string) => {
     await followup.mutateAsync({ issueNumber, sessionName: recoverySessionName, text })
   }, [followup, issueNumber, recoverySessionName])

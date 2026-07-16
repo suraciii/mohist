@@ -76,6 +76,7 @@ function linkedStreams(): [Stream, Stream] {
 
 class GenericFakeAgent {
   readonly calls: any[] = []
+  failNextPrompt = false
   private connection!: AgentSideConnection
 
   bind(connection: AgentSideConnection) {
@@ -105,6 +106,7 @@ class GenericFakeAgent {
       },
       async prompt(params: { sessionId: string }) {
         self.calls.push({ event: "prompt", sessionId: params.sessionId })
+        if (self.failNextPrompt) throw new Error("generic agent failed")
         await self.connection.sessionUpdate({ sessionId: params.sessionId, update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "done" } } } as never)
         return { stopReason: "end_turn" }
       },
@@ -306,6 +308,20 @@ describe("runAcpAgentSession — generic session dispatch", () => {
     expect(prompts.every((call) => call.sessionId === "acp-session-1")).toBe(true)
     const closedEvents = fixture.serverConnection.calls.filter((entry) => entry.event === "agentSessionRuntimeEvents" && entry.type === "session.closed")
     expect(closedEvents).toHaveLength(0)
+  })
+
+  it("FailedGenericAgentJob_DoesNotEmitSessionClosed", async () => {
+    const fixture = createGenericFixture()
+    fixture.agent.failNextPrompt = true
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
+    try {
+      const result = await runDefaultModelAction(fixture.context({ with: { prompt: "do the work" } as never }))
+
+      expect(result.status).toBe("failure")
+      expect(fixture.serverConnection.calls.filter((entry) => entry.event === "agentSessionRuntimeEvents" && entry.type === "session.closed")).toHaveLength(0)
+    } finally {
+      errorSpy.mockRestore()
+    }
   })
 
   it("RawAgentJobWithProjectIdAndNoSessionId_StaysEphemeral", async () => {

@@ -498,6 +498,71 @@ describe("RunnerHost", () => {
     expect(resolved).toEqual({ connection, sessionId: "acp-1", projectId: "project-from-payload" })
   })
 
+  it("GenericFollowupResolver_CacheMissResumesPersistedBindingOnce", async () => {
+    vi.clearAllMocks()
+    const resumeSession = vi.fn(async () => undefined)
+    const host = new RunnerHost({
+      serverUrl: "http://localhost:3456",
+      runnerId: "runner-test",
+      runnerRoot: "/tmp/mohist-runner-test",
+      pollIntervalMs: 1,
+      heartbeatIntervalMs: 60_000,
+      dispatchLivenessProbeIntervalMs: 60_000,
+    }) as unknown as { sharedAcpConnection: unknown }
+    const connection = { prompt: vi.fn(), cancel: vi.fn(), resumeSession }
+    host.sharedAcpConnection = { connection }
+    const target: SessionTarget = {
+      kind: "generic",
+      projectId: "project-1",
+      sessionId: "gen-1",
+      binding: {
+        runtime: "opencode",
+        runtimeSessionId: "runtime-1",
+        runnerId: "runner-test",
+        workDir: "/tmp/work",
+      },
+    }
+
+    const first = capturedFollowupTargetResolver?.(target)
+    const second = capturedFollowupTargetResolver?.(target)
+
+    await expect(Promise.all([first, second])).resolves.toEqual([
+      { connection, sessionId: "runtime-1", projectId: "project-1" },
+      { connection, sessionId: "runtime-1", projectId: "project-1" },
+    ])
+    expect(resumeSession).toHaveBeenCalledTimes(1)
+    expect(resumeSession).toHaveBeenCalledWith({ sessionId: "runtime-1", cwd: "/tmp/work", mcpServers: [] })
+  })
+
+  it("GenericFollowupResolver_ResumeFailureReturnsMissingTarget", async () => {
+    vi.clearAllMocks()
+    const resumeSession = vi.fn(async () => { throw new Error("runtime unavailable") })
+    const host = new RunnerHost({
+      serverUrl: "http://localhost:3456",
+      runnerId: "runner-test",
+      runnerRoot: "/tmp/mohist-runner-test",
+      pollIntervalMs: 1,
+      heartbeatIntervalMs: 60_000,
+      dispatchLivenessProbeIntervalMs: 60_000,
+    }) as unknown as { sharedAcpConnection: unknown }
+    host.sharedAcpConnection = { connection: { prompt: vi.fn(), cancel: vi.fn(), resumeSession } }
+
+    const resolved = await capturedFollowupTargetResolver?.({
+      kind: "generic",
+      projectId: "project-1",
+      sessionId: "gen-1",
+      binding: {
+        runtime: "opencode",
+        runtimeSessionId: "runtime-1",
+        runnerId: "runner-test",
+        workDir: "/tmp/work",
+      },
+    })
+
+    expect(resolved).toBeNull()
+    expect(resumeSession).toHaveBeenCalledTimes(1)
+  })
+
   it("GenericFollowupResolver_RejectsMismatchedConfiguredRunnerProject", async () => {
     vi.clearAllMocks()
     const host = new RunnerHost({

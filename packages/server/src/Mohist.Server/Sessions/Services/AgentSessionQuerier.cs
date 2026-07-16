@@ -338,6 +338,43 @@ public class AgentSessionQuerier : IScopedService
             AgentSessionJsonHelper.StatusName(record.Session, Now()) == "active");
     }
 
+    public async Task<CanonicalFollowupTarget?> ResolveCanonicalFollowupTargetAsync(
+        string projectId,
+        string sessionId,
+        CancellationToken ct = default)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var records = await _sessionQuery.ListByIdsAsync([sessionId], ct);
+        var record = records.FirstOrDefault();
+        if (record is null || !string.Equals(record.Label(AgentSessionQueryMetadataKeys.ProjectId), projectId, StringComparison.Ordinal))
+            return null;
+
+        var sourceKind = record.Label(AgentSessionQueryMetadataKeys.SourceKind);
+        var workflowRunId = record.Label(AgentSessionQueryMetadataKeys.WorkflowRunId);
+        var sessionName = record.Label(AgentSessionQueryMetadataKeys.SessionName);
+        if (string.Equals(sourceKind, "workflow", StringComparison.Ordinal))
+        {
+            if (string.IsNullOrWhiteSpace(workflowRunId) || string.IsNullOrWhiteSpace(sessionName))
+                return null;
+        }
+        else if (!string.Equals(sourceKind, "agent-launch", StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        var session = record.Session;
+        return new CanonicalFollowupTarget(
+            session.Runtime.RunnerId,
+            session.Id,
+            sourceKind!,
+            workflowRunId,
+            sessionName,
+            await ReadTerminalStateAsync(db, session.Id, ct),
+            session.Runtime.Runtime,
+            session.Status.AgentRuntimeSessionId,
+            session.Runtime.WorkDir);
+    }
+
     public async Task<SessionCancelTarget?> ResolveCancelTargetAsync(string projectId, string sessionId, CancellationToken ct = default)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
@@ -357,12 +394,15 @@ public class AgentSessionQuerier : IScopedService
             return null;
 
         return new SessionCancelTarget(
-            record.Row.RunnerId ?? string.Empty,
+            record.Session.Runtime.RunnerId,
             record.Session.Id,
             sourceKind!,
             workflowRunId,
             sessionName,
-            await ReadTerminalStateAsync(db, sessionId, ct));
+            await ReadTerminalStateAsync(db, sessionId, ct),
+            record.Session.Runtime.Runtime,
+            record.Session.Status.AgentRuntimeSessionId,
+            record.Session.Runtime.WorkDir);
     }
 
     /// <summary>
@@ -801,13 +841,27 @@ public sealed record GenericFollowupTarget(
     string? TerminalState,
     bool IsActive);
 
+public sealed record CanonicalFollowupTarget(
+    string RunnerId,
+    string SessionId,
+    string SourceKind,
+    string? WorkflowRunId,
+    string? SessionName,
+    string? TerminalState,
+    string? Runtime,
+    string? RuntimeSessionId,
+    string? WorkDir);
+
 public sealed record SessionCancelTarget(
     string RunnerId,
     string SessionId,
     string SourceKind,
     string? WorkflowRunId,
     string? SessionName,
-    string? TerminalState);
+    string? TerminalState,
+    string? Runtime,
+    string? RuntimeSessionId,
+    string? WorkDir);
 
 /// <summary>
 /// Cancel target for a generic (non-workflow) <see cref="AgentSession"/>

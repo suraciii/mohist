@@ -119,6 +119,36 @@ describe('useWorkflowRunSessions', () => {
       })
     })
 
+    it('refetches sessions when a runtime binding changes', async () => {
+      _sessionsResponses = [
+        [session({ id: 'sess-1', runtimeSessionId: 'acp-old' })],
+        [session({ id: 'sess-1', runtimeSessionId: 'acp-new' })],
+      ]
+
+      const queryClient = createQueryClient()
+      const wrapper = ({ children }: { children: ReactNode }) => (
+        <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+      )
+      const { result } = renderHook(
+        () => useWorkflowRunSessions('wr-1', workflowRunSessionsFetcher),
+        { wrapper },
+      )
+
+      await waitFor(() => expect(result.current.sessions[0]?.runtimeSessionId).toBe('acp-old'))
+
+      act(() => {
+        dispatchAgentEvent('com.mohist.agent-session.runtime-bound', {
+          issueId: 'issue-1',
+          projectId: 'project-1',
+        })
+      })
+
+      await waitFor(() => {
+        expect(workflowRunSessionsFetcher).toHaveBeenCalledTimes(2)
+        expect(result.current.sessions[0]?.runtimeSessionId).toBe('acp-new')
+      })
+    })
+
     it('ignores runtime events without a physical binding', async () => {
       _sessionsData = [session({ id: 'sess-1', status: 'running' })]
 

@@ -246,7 +246,8 @@ public sealed record AgentSessionStatusSnapshot(
     AgentUsageSummary? UsageSummary = null,
     IReadOnlyList<RuntimeSessionLineageEntry>? RuntimeSessionLineage = null,
     IReadOnlyList<ContextUsageHistoryEntry>? ContextUsageHistory = null,
-    AgentSessionResetReservation? PendingReset = null)
+    AgentSessionResetReservation? PendingReset = null,
+    AgentSessionFollowupLease? PendingFollowup = null)
 {
     public static AgentSessionStatusSnapshot Created(DateTime now) =>
         new(CreatedAt: now, UsageSummary: new AgentUsageSummary(), RuntimeSessionLineage: [], ContextUsageHistory: []);
@@ -281,3 +282,9 @@ public sealed record AgentSessionResetReservation(
     string Runtime,
     DateTime StartedAt,
     string Command = "reset");
+
+[GenerateSerializer]
+public sealed record AgentSessionFollowupLease(
+    [property: Id(0)] string OperationId,
+    [property: Id(1)] string RuntimeSessionId,
+    [property: Id(2)] bool Accepted = false);

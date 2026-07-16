@@ -406,6 +406,53 @@ public class GenericAgentSessionTranscriptAxisSpecs : IAsyncLifetime
     [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
+    public async Task CompactAfterResetWithoutInput_IsStoredOnReplacementRuntime()
+    {
+        var project = await CreateProjectAsync("transcript-recovery-runtime");
+        var sessionId = $"transcript-recovery-runtime-{Guid.NewGuid():N}";
+        var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
+        await grain.OpenAsync(new OpenAgentSessionCommand(
+            RunnerId: _runnerId,
+            AgentRuntime: "opencode",
+            WorkDir: $"/workspaces/{project.Id}",
+            Metadata: GenericAgentSessionMetadata.Metadata(new GenericAgentSessionContext(
+                project.Id,
+                "transcript-recovery-agent",
+                "transcript-recovery-agent"))));
+        await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand("runtime-first", WorkDir: $"/workspaces/{project.Id}"));
+        await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(new[]
+        {
+            new AgentSessionRuntimeEventInput(RuntimeEventTypes.SessionInput, """{"text":"first runtime turn","kind":"task"}"""),
+            new AgentSessionRuntimeEventInput(RuntimeEventTypes.MessageDelta, """{"text":"first runtime reply"}"""),
+        }, "runtime-first"));
+        await grain.FlushForTestAsync();
+
+        _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(6));
+        await grain.ResetAsync(new ResetAgentSessionCommand("runtime-first", "runtime-second"));
+        await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(new[]
+        {
+            new AgentSessionRuntimeEventInput(RuntimeEventTypes.Compaction, """{"strategy":"summary"}"""),
+        }, "runtime-second"));
+        await grain.FlushForTestAsync();
+
+        await using var db = await _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>().CreateDbContextAsync();
+        var turns = await db.AgentSessionTranscriptTurns
+            .Where(turn => turn.SessionId == sessionId)
+            .ToDictionaryAsync(turn => turn.Id, turn => turn.RuntimeSessionId);
+        var compactionTurnIds = await db.AgentSessionTranscriptParts
+            .Where(part => part.Type == TranscriptPartTypes.Compaction && turns.Keys.Contains(part.TurnId))
+            .Select(part => part.TurnId)
+            .ToListAsync();
+
+        var compactionRuntimes = compactionTurnIds.Select(turnId => turns[turnId]).Distinct().ToArray();
+        Assert.Single(compactionRuntimes);
+        Assert.Equal("runtime-second", compactionRuntimes[0]);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
     public async Task GenericTranscript_IsReachable_SolelyBySessionId_WithoutWorkflowRunIdLookup()
     {
         var project = await CreateProjectAsync("transcript-axis-session-id-only");

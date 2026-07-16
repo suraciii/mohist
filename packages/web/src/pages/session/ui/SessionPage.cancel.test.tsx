@@ -246,4 +246,15 @@ describe('SessionPage workflow cancel control', () => {
 
     expect(container.querySelector('[data-testid="session-cancel-trigger"]')).toBeNull()
   })
+
+  it('disables followup while retaining recovery actions when the runtime backend is absent', async () => {
+    _metadataData = baseRunningMetadata({ runtime: null })
+
+    const { container } = await renderIssueSessionPage()
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="session-followup-composer"]')).toHaveAttribute('data-disabled', 'true')
+    })
+    expect(container.querySelector('[data-testid="session-recovery-actions"]')).not.toBeNull()
+  })
 })

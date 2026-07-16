@@ -27,6 +27,13 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
 
         protected override void Down(MigrationBuilder migrationBuilder)
         {
+            migrationBuilder.DropIndex(
+                name: "IX_AgentSessionTranscriptTurns_SessionId_RuntimeSessionId_Sequence",
+                table: "AgentSessionTranscriptTurns");
+
+            migrationBuilder.DropColumn(
+                name: "RuntimeSessionId",
+                table: "AgentSessionTranscriptTurns");
         }
     }
 }

@@ -106,6 +106,7 @@ function makeCompactViewportMetadata(status = 'failed') {
     id: `session-${sessionName}`,
     sessionName,
     runtimeSessionId: `acp-${sessionName}`,
+    runtime: 'opencode',
     status,
     statusKind,
     model: 'minimax/MiniMax-M3',

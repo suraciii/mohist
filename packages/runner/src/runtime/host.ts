@@ -99,6 +99,7 @@ export class RunnerHost {
   private sessionManager: AcpSessionManager = new AcpSessionManager()
   private sharedAcpConnection: SharedAcpConnection | null = null
   private workExecutor: WorkExecutor | null = null
+  private readonly sessionRestorations = new Map<string, Promise<{ sessionId: string; workDir: string } | null>>()
 
   // Process-lifetime reported set (see workKey/InFlightEntry doc above).
   // These Maps outlive poll exceptions and reconnects: a work enters
@@ -167,19 +168,68 @@ export class RunnerHost {
   // services both the issue-scoped followup route (workflow-shaped) and
   // the new generic AgentSession followup route. Workflow keys use the
   // `workflow:` prefix; generic keys use the `generic:` prefix (T-002).
-  // Both branches silently return null when no matching ACP session
-  // entry exists — the runner SignalR handler drops unknown-session
-  // followups without throwing, matching the existing "runner offline
-  // / unknown session" contract.
-  private resolveFollowupTarget(target: SessionTarget): { connection: ClientSideConnection; sessionId: string; projectId: string } | null {
-    if (!this.sharedAcpConnection) return null
+  // On a cache miss, a current persisted binding lets the runner restore
+  // the ACP session before delivering a followup or cancellation.
+  private resolveFollowupTarget(target: SessionTarget): { connection: ClientSideConnection; sessionId: string; projectId: string } | null | Promise<{ connection: ClientSideConnection; sessionId: string; projectId: string } | null> {
+    const sharedConnection = this.sharedAcpConnection
+    if (!sharedConnection) return null
     const key = target.kind === "workflow"
       ? this.sessionManager.workflowKey(target.workflowRunId, target.sessionName)
       : this.sessionManager.genericKey(target.sessionId)
-    const entry = this.sessionManager.get(key)
-    if (!entry) return null
     if (this.options.projectId && this.options.projectId !== target.projectId) return null
-    return { connection: this.sharedAcpConnection.connection, sessionId: entry.sessionId, projectId: target.projectId }
+    if (target.binding?.runnerId !== undefined && target.binding.runnerId !== this.options.runnerId) return null
+
+    const cached = this.sessionManager.get(key)
+    if (cached && (!target.binding || cached.sessionId === target.binding.runtimeSessionId)) {
+      return { connection: sharedConnection.connection, sessionId: cached.sessionId, projectId: target.projectId }
+    }
+    if (!target.binding) return null
+
+    return this.restoreSessionTarget(key, target.binding, sharedConnection)
+      .then((entry) => entry
+        ? { connection: sharedConnection.connection, sessionId: entry.sessionId, projectId: target.projectId }
+        : null)
+  }
+
+  private async restoreSessionTarget(
+    key: string,
+    binding: NonNullable<SessionTarget["binding"]>,
+    sharedConnection: SharedAcpConnection,
+  ): Promise<{ sessionId: string; workDir: string } | null> {
+    if (binding.runtime.toLowerCase() !== "opencode" || binding.runnerId !== this.options.runnerId) return null
+
+    const existing = this.sessionRestorations.get(key)
+    if (existing) {
+      const entry = await existing
+      return entry?.sessionId === binding.runtimeSessionId ? entry : null
+    }
+
+    const restoration = this.resumeSessionTarget(key, binding, sharedConnection)
+    this.sessionRestorations.set(key, restoration)
+    try {
+      return await restoration
+    } finally {
+      this.sessionRestorations.delete(key)
+    }
+  }
+
+  private async resumeSessionTarget(
+    key: string,
+    binding: NonNullable<SessionTarget["binding"]>,
+    sharedConnection: SharedAcpConnection,
+  ): Promise<{ sessionId: string; workDir: string } | null> {
+    try {
+      await sharedConnection.connection.resumeSession({
+        sessionId: binding.runtimeSessionId,
+        cwd: binding.workDir,
+        mcpServers: [],
+      })
+      const entry = { sessionId: binding.runtimeSessionId, workDir: binding.workDir }
+      this.sessionManager.set(key, entry)
+      return entry
+    } catch {
+      return null
+    }
   }
 
   async run(signal: AbortSignal) {

@@ -122,6 +122,16 @@ describe("SessionCommand contract", () => {
     expect(restartedHandler).not.toHaveBeenCalled()
   })
 
+  it("fails closed instead of replaying an invalid completed result", async () => {
+    const journal = new MemoryJournal()
+    const commandRequest = request("compact")
+    await journal.complete(commandRequest, { ok: true, error: "missing" } as SessionCommandResult)
+    const handler = vi.fn(async (): Promise<SessionCommandResult> => ({ ok: true }))
+
+    await expect(register(handler, journal)(commandRequest)).resolves.toEqual({ ok: false, error: "unavailable" })
+    expect(handler).not.toHaveBeenCalled()
+  })
+
   it("reconciles a started operation without blind execution", async () => {
     const journal = new MemoryJournal()
     const commandRequest = request("reset")

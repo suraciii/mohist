@@ -709,6 +709,35 @@ describe("resolveSessionTarget", () => {
     })
   })
 
+  it("CarriesPersistedBinding_WhenPresent", () => {
+    const payload: ReceiveFollowupPayload = {
+      target: {
+        kind: "generic",
+        projectId: "proj-1",
+        sessionId: "gen-1",
+        binding: {
+          runtime: "opencode",
+          runtimeSessionId: "runtime-1",
+          runnerId: "runner-1",
+          workDir: "/work/project",
+        },
+      },
+      text: "x",
+    }
+
+    expect(resolveSessionTarget(payload)).toEqual({
+      kind: "generic",
+      projectId: "proj-1",
+      sessionId: "gen-1",
+      binding: {
+        runtime: "opencode",
+        runtimeSessionId: "runtime-1",
+        runnerId: "runner-1",
+        workDir: "/work/project",
+      },
+    })
+  })
+
   it("ReturnsNull_WhenGenericTargetMissingSessionId", () => {
     const payload: ReceiveFollowupPayload = {
       target: { kind: "generic", projectId: "proj-1" },

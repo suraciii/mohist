@@ -16,6 +16,9 @@ public interface IAgentSessionGrain : IGrainWithStringKey
     Task<AgentSessionRecoveryResult> CompleteCompactAsync(CompleteCompactAgentSessionCommand command);
     Task<AgentSessionRecoveryResult> CompleteResetAsync(CompleteResetAgentSessionCommand command);
     Task AbandonResetAsync(string operationId);
+    Task<AgentSessionFollowupReservation> BeginFollowupAsync();
+    Task ConfirmFollowupAsync(string operationId);
+    Task AbandonFollowupAsync(string operationId);
     Task<AgentSessionInfo?> GetAsync();
     Task EnsureRuntimeSessionPresentAsync();
 
@@ -81,6 +84,10 @@ public sealed record CompleteCompactAgentSessionCommand(
     [property: Id(0)] string OperationId,
     [property: Id(1)] string? Summary = null,
     [property: Id(2)] int? MaxSummaryChars = null);
+
+[GenerateSerializer]
+public sealed record AgentSessionFollowupReservation(
+    [property: Id(0)] string? OperationId);
 
 [GenerateSerializer]
 public sealed record AgentSessionRuntimeEventInput(

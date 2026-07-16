@@ -296,6 +296,49 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         await CommitAsync(session, []);
     }
 
+    public async Task<AgentSessionFollowupReservation> BeginFollowupAsync()
+    {
+        var session = await GetRequiredAsync();
+        EnsureRuntimeSessionPresent(session);
+        if (session.Status.PendingReset is { } recovery)
+            throw new RecoveryOperationInProgressException(session.Id, recovery.Command);
+
+        if (session.Status.PendingFollowup is { } pending)
+            return new AgentSessionFollowupReservation(pending.OperationId);
+
+        if (AgentSessionJsonHelper.StatusName(session, Now()) == "active")
+            return new AgentSessionFollowupReservation(null);
+
+        var lease = new AgentSessionFollowupLease(
+            Guid.NewGuid().ToString("N"),
+            session.Status.AgentRuntimeSessionId!);
+        session.Status = session.Status with { PendingFollowup = lease };
+        await CommitAsync(session, []);
+        return new AgentSessionFollowupReservation(lease.OperationId);
+    }
+
+    public async Task ConfirmFollowupAsync(string operationId)
+    {
+        var session = await GetRequiredAsync();
+        var pending = session.Status.PendingFollowup;
+        if (pending is null || !string.Equals(pending.OperationId, operationId, StringComparison.Ordinal) || pending.Accepted)
+            return;
+
+        session.Status = session.Status with { PendingFollowup = pending with { Accepted = true } };
+        await CommitAsync(session, []);
+    }
+
+    public async Task AbandonFollowupAsync(string operationId)
+    {
+        var session = await GetRequiredAsync();
+        var pending = session.Status.PendingFollowup;
+        if (pending is null || !string.Equals(pending.OperationId, operationId, StringComparison.Ordinal) || pending.Accepted)
+            return;
+
+        session.Status = session.Status with { PendingFollowup = null };
+        await CommitAsync(session, []);
+    }
+
     private static SessionCommandRequest BuildSessionCommandRequest(
         AgentSession session,
         SessionCommandKind command,
@@ -342,7 +385,8 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
 
     private void EnsureSessionIdleForRecovery(AgentSession session)
     {
-        if (AgentSessionJsonHelper.StatusName(session, Now()) == "active")
+        if (session.Status.PendingFollowup is not null
+            || AgentSessionJsonHelper.StatusName(session, Now()) == "active")
             throw new InvalidOperationException(
                 $"AgentSession {session.Id} is currently active; Compact and Reset require an idle session.");
     }
@@ -519,6 +563,13 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         }
 
         var now = Now();
+        if (requireCurrentRuntimeBinding
+            && session.Status.PendingFollowup is { } pendingFollowup
+            && string.Equals(runtimeSessionId, pendingFollowup.RuntimeSessionId, StringComparison.Ordinal)
+            && runtimeEvents.Any(e => string.Equals(e.Type, RuntimeEventTypes.SessionClosed, StringComparison.Ordinal)))
+        {
+            session.Status = session.Status with { PendingFollowup = null };
+        }
         var events = new List<AgentSessionEvent>();
         events.AddRange(session.RecordActivity(now));
         _stateDirty = true;

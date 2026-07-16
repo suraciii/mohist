@@ -175,6 +175,34 @@ public class GenericAgentSessionCancelApiSpecs : IAsyncLifetime
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
+    public async Task Cancel_RunnerInvocationFails_ReturnsNotCancellableState()
+    {
+        var (project, _, sessionId, _) = await LaunchAndOpenGenericSessionAsync("gen-cancel-transport-failure");
+        var tracker = _fixture.Services.GetRequiredService<RunnerConnectionTracker>();
+        var runnerHub = _fixture.Services.GetRequiredService<IHubContext<RunnerHub>>() as RecordingRunnerHubContext
+            ?? throw new InvalidOperationException("Recording runner hub context was not registered.");
+        runnerHub.Clear();
+        runnerHub.SetInvocationResponseFactory("CancelAgentSession", _ =>
+            Task.FromException<AgentSessionCancelReply>(new InvalidOperationException("runner disconnected")));
+        tracker.Register(_runnerId, "conn-gen-cancel-transport-failure");
+        try
+        {
+            using var response = await PostGenericCancelAsync(project.Id, sessionId);
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            Assert.Equal("not-cancellable", doc.RootElement.GetProperty("data").GetProperty("state").GetString());
+            Assert.Single(runnerHub.Invocations);
+        }
+        finally
+        {
+            tracker.Unregister(_runnerId);
+        }
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
     public async Task Cancel_AlreadyTerminalSession_ShortCircuitsWithoutCallingRunner()
     {
         var (project, _, sessionId, _) = await LaunchAndOpenGenericSessionAsync("gen-cancel-terminal");

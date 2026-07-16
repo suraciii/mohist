@@ -90,6 +90,7 @@ export async function runAcpWorkflowAgentSession(context: ActionContext, prompt:
       stage: context.stage,
       title: context.title,
       issueNumber: context.issueNumber,
+      workDir: context.workDir,
     }, context.signal)
 
     if (session.runtimeSessionId) {
@@ -139,6 +140,7 @@ export async function runAcpGenericAgentSession(context: ActionContext, prompt: 
     stage: context.stage,
     title: context.title,
     issueNumber: context.issueNumber,
+    workDir: context.workDir,
   }
   const session = existing?.runtimeSessionId
     ? existing

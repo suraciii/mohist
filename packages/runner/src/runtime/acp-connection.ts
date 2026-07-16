@@ -6,9 +6,16 @@ import { killProcess, sanitizedEnvironment } from "../system/process.js"
 import { assertExternalProcessAllowed, registerExternalProcess } from "../system/process-policy.js"
 import { acpArgs, acpCommand } from "./acp-command.js"
 
+export interface RuntimeSessionBinding {
+  runtime: string
+  runtimeSessionId: string
+  runnerId: string
+  workDir: string
+}
+
 export type SessionTarget =
-  | { kind: "workflow"; projectId: string; workflowRunId: string; sessionName: string }
-  | { kind: "generic"; projectId: string; sessionId: string }
+  | { kind: "workflow"; projectId: string; workflowRunId: string; sessionName: string; binding?: RuntimeSessionBinding }
+  | { kind: "generic"; projectId: string; sessionId: string; binding?: RuntimeSessionBinding }
 
 export interface SharedAcpConnection {
   readonly connection: ClientSideConnection

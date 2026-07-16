@@ -73,7 +73,8 @@ async function handleFollowup(
 
   let target: FollowupTarget | null
   try {
-    target = resolver(sessionTarget)
+    const resolved = resolver(sessionTarget)
+    target = isPromise(resolved) ? await resolved : resolved
   } catch (error) {
     console.error("followup target resolver threw:", error)
     return unavailable()
@@ -149,6 +150,10 @@ async function handleFollowup(
     return unavailable()
   }
   return { accepted: true }
+}
+
+function isPromise<T>(value: T | Promise<T>): value is Promise<T> {
+  return typeof (value as Promise<T> | null)?.then === "function"
 }
 
 function unavailable(): FollowupDeliveryResult {

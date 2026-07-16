@@ -290,6 +290,7 @@ public static class RunnerRoutes
             var session = await grain.OpenAsync(new OpenAgentSessionCommand(
                 runnerId,
                 "opencode",
+                WorkDir: req.WorkDir,
                 Metadata: WorkflowAgentSessionMetadata.Metadata(context)));
             return Results.Ok(ToRunnerAgentSession(projectId, workflowRunId, sessionName, session));
         });
@@ -605,7 +606,13 @@ public record RunnerReportResponse(
     string? OwnerId = null);
 public record RunnerAgentSessionKey(string ProjectId, string WorkflowRunId, string SessionName);
 public record RunnerAgentSessionResponse(RunnerAgentSessionKey Key, [property: JsonPropertyName("runtimeSessionId")] string? AgentSessionId, string Status, string? WorkDir = null, string? Model = null, string? ResolvedModel = null, string? Runtime = null);
-public record AgentSessionOpenRequest(string? WorkId = null, string? WorkType = null, string? Stage = null, string? Title = null, int? IssueNumber = null);
+public record AgentSessionOpenRequest(
+    string? WorkId = null,
+    string? WorkType = null,
+    string? Stage = null,
+    string? Title = null,
+    int? IssueNumber = null,
+    string? WorkDir = null);
 /// <summary>
 /// Body for the runner's <c>POST /api/runner/{runnerId}/agent-sessions/{projectId}/{sessionId}/open</c>
 /// call. Generic (non-workflow) AgentSessions are identified by

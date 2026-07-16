@@ -59,6 +59,9 @@ internal sealed class TranscriptAccumulator
                 continue;
             }
 
+            if (row.Type == RuntimeEventTypes.Compaction || row.Type == RuntimeEventTypes.CompactionEvent)
+                CaptureRecoveryRuntime(row);
+
             var type = ToTranscriptPartType(row.Type);
             _accumulatedParts.Add(CreatePartDelta(
                 row,
@@ -165,6 +168,16 @@ internal sealed class TranscriptAccumulator
         _promptKind = AgentSessionJsonHelper.GetStringProp(payload, "kind")
             ?? AgentSessionJsonHelper.GetStringProp(payload, "source")
             ?? "task";
+        _runtimeSessionId = row.AgentSessionId;
+        _inputCreatedAt = row.CreatedAt;
+    }
+
+    private void CaptureRecoveryRuntime(RuntimeEventEnvelope row)
+    {
+        if (_promptText is not null || string.IsNullOrWhiteSpace(row.AgentSessionId))
+            return;
+
+        _promptKind = "recovery";
         _runtimeSessionId = row.AgentSessionId;
         _inputCreatedAt = row.CreatedAt;
     }

@@ -227,7 +227,12 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         if (isSuccess)
             await CloseGenericSessionAsync("completed", result.ExitCode ?? 0, null, null, null);
         else
-            await CloseGenericSessionAsync("failed", result.ExitCode ?? 1, State.FailureReason, result.Status, State.FailureReason);
+            await CloseGenericSessionAsync(
+                "failed",
+                result.ExitCode ?? 1,
+                State.FailureReason,
+                FailureCategoryFrom(result.Output) ?? result.Status,
+                State.FailureReason);
 
         return new AgentJobReportResult(true);
     }
@@ -682,6 +687,26 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             _log.LogError(ex,
                 "AgentJob {Id} failed to close generic session {SessionId} with status {Status}",
                 Key, sessionId, status);
+        }
+    }
+
+    private static string? FailureCategoryFrom(string? output)
+    {
+        if (string.IsNullOrWhiteSpace(output))
+            return null;
+
+        try
+        {
+            using var document = JsonDocument.Parse(output);
+            return document.RootElement.ValueKind == JsonValueKind.Object
+                && document.RootElement.TryGetProperty("failureCategory", out var category)
+                && category.ValueKind == JsonValueKind.String
+                ? category.GetString()
+                : null;
+        }
+        catch (JsonException)
+        {
+            return null;
         }
     }
 

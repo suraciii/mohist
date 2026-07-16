@@ -20,8 +20,13 @@
 //     dependency, since the cancel reply path is server-less.
 
 import * as signalR from "@microsoft/signalr"
-import type { SessionTarget } from "../runtime/acp-connection.js"
-import type { CancelAgentSessionPayload, CancelAgentSessionReply, FollowupTarget, FollowupTargetResolver } from "./session-target.js"
+import {
+  sessionTargetFromWireTarget,
+  type CancelAgentSessionPayload,
+  type CancelAgentSessionReply,
+  type FollowupTarget,
+  type FollowupTargetResolver,
+} from "./session-target.js"
 
 export interface CancelHandlerDeps {
   followupTargetResolver?: FollowupTargetResolver | null
@@ -66,24 +71,8 @@ async function handleCancel(
     return { state: "not-cancellable" }
   }
 
-  const target = payload.target
-  const sessionTarget: SessionTarget | null = target.kind === "workflow"
-    && target.workflowRunId
-    && target.sessionName
-    ? {
-        kind: "workflow",
-        projectId: target.projectId ?? "",
-        workflowRunId: target.workflowRunId,
-        sessionName: target.sessionName,
-      }
-    : target.kind === "generic" && target.sessionId
-      ? {
-          kind: "generic",
-          projectId: target.projectId ?? "",
-          sessionId: target.sessionId,
-        }
-      : null
-  if (!sessionTarget || !sessionTarget.projectId) return { state: "not-cancellable" }
+  const sessionTarget = sessionTargetFromWireTarget(payload.target)
+  if (!sessionTarget) return { state: "not-cancellable" }
 
   const resolver = deps.followupTargetResolver ?? null
   if (!resolver) {
@@ -92,7 +81,7 @@ async function handleCancel(
 
   let resolved: FollowupTarget | null
   try {
-    resolved = resolver(sessionTarget)
+    resolved = await resolver(sessionTarget)
   } catch (error) {
     console.error("cancel target resolver threw:", error)
     return { state: "not-cancellable" }

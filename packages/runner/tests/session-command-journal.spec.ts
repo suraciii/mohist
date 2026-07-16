@@ -86,4 +86,35 @@ describe("SessionCommandJournal", () => {
     expect(result).toEqual({ ok: false, error: "unavailable" })
     expect(handler).not.toHaveBeenCalled()
   })
+
+  it.each([
+    { ok: true, error: "missing" },
+    { ok: false },
+    { ok: true, runtimeSessionId: "runtime-2" },
+  ])("fails closed for a semantically invalid completed result after restart", async (result) => {
+    const filePath = join(root, ".mohist", "runner-state", "session-commands.json")
+    await import("node:fs/promises").then(async ({ mkdir }) => await mkdir(join(root, ".mohist", "runner-state"), { recursive: true }))
+    await writeFile(filePath, JSON.stringify({
+      version: 1,
+      operations: {
+        "session-1": {
+          "compact-1": { request: request(), state: "completed", result },
+        },
+      },
+    }))
+    const journal = new SessionCommandJournal(root)
+    await journal.load()
+
+    const callbacks = new Map<string, (request: SessionCommandRequest) => Promise<unknown>>()
+    const connection = {
+      on: vi.fn((method: string, callback: (request: SessionCommandRequest) => Promise<unknown>) => {
+        callbacks.set(method, callback)
+      }),
+    } as unknown as signalR.HubConnection
+    const handler = vi.fn(async () => ({ ok: true }))
+    registerSessionCommandHandler(connection, { handler, journal })
+
+    await expect(callbacks.get("SessionCommand")!(request())).resolves.toEqual({ ok: false, error: "unavailable" })
+    expect(handler).not.toHaveBeenCalled()
+  })
 })

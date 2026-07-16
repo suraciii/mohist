@@ -1,6 +1,11 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises"
 import { dirname, join, resolve } from "node:path"
-import type { SessionCommandRequest, SessionCommandResult } from "../server/session-command-handler.js"
+import {
+  isValidSessionCommandRequest,
+  isValidSessionCommandResult,
+  type SessionCommandRequest,
+  type SessionCommandResult,
+} from "../server/session-command-handler.js"
 
 export const DEFAULT_SESSION_COMMAND_JOURNAL_FILE = ".mohist/runner-state/session-commands.json"
 
@@ -158,30 +163,8 @@ function isEntry(value: unknown): value is SessionCommandJournalEntry {
   if (!value || typeof value !== "object") return false
   const entry = value as Partial<SessionCommandJournalEntry>
   return (entry.state === "started" || entry.state === "completed")
-    && isRequest(entry.request)
-    && (entry.state !== "completed" || isResult(entry.result))
-}
-
-function isRequest(value: unknown): value is SessionCommandRequest {
-  if (!value || typeof value !== "object") return false
-  const request = value as Partial<SessionCommandRequest>
-  return typeof request.sessionId === "string"
-    && typeof request.runtime === "string"
-    && (typeof request.runtimeSessionId === "string" || request.runtimeSessionId === null)
-    && typeof request.runnerId === "string"
-    && (typeof request.workDir === "string" || request.workDir === null)
-    && (request.command === "compact" || request.command === "reset")
-    && (request.expectedRuntimeSessionId === undefined || request.expectedRuntimeSessionId === null || typeof request.expectedRuntimeSessionId === "string")
-    && typeof request.operationId === "string"
-    && request.operationId.length > 0
-}
-
-function isResult(value: unknown): value is SessionCommandResult {
-  if (!value || typeof value !== "object") return false
-  const result = value as Partial<SessionCommandResult>
-  return typeof result.ok === "boolean"
-    && (result.runtimeSessionId === undefined || typeof result.runtimeSessionId === "string")
-    && (result.error === undefined || result.error === "conflict" || result.error === "missing" || result.error === "unavailable")
+    && isValidSessionCommandRequest(entry.request)
+    && (entry.state !== "completed" || isValidSessionCommandResult(entry.request, entry.result))
 }
 
 function sameRequest(left: SessionCommandRequest, right: SessionCommandRequest): boolean {

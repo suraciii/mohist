@@ -92,6 +92,17 @@ public static class AgentSessionCancelRoutes
                 new { sessionId = ex.SessionId, hint = "reset" });
         }
 
+        object? binding = !string.IsNullOrWhiteSpace(target.Runtime)
+            && !string.IsNullOrWhiteSpace(target.RuntimeSessionId)
+            && !string.IsNullOrWhiteSpace(target.WorkDir)
+            ? new
+            {
+                runtime = target.Runtime,
+                runtimeSessionId = target.RuntimeSessionId,
+                runnerId = target.RunnerId,
+                workDir = target.WorkDir,
+            }
+            : null;
         object wireTarget = string.Equals(target.SourceKind, "workflow", StringComparison.Ordinal)
             ? new
             {
@@ -99,18 +110,32 @@ public static class AgentSessionCancelRoutes
                 projectId,
                 workflowRunId = target.WorkflowRunId,
                 sessionName = target.SessionName,
+                binding,
             }
             : new
             {
                 kind = "generic",
                 projectId,
                 sessionId = target.SessionId,
+                binding,
             };
 
-        var reply = await runnerHub.Clients.Client(connectionId).InvokeAsync<AgentSessionCancelReply>(
-            "CancelAgentSession",
-            new { target = wireTarget },
-            ct);
+        AgentSessionCancelReply? reply;
+        try
+        {
+            reply = await runnerHub.Clients.Client(connectionId).InvokeAsync<AgentSessionCancelReply>(
+                "CancelAgentSession",
+                new { target = wireTarget },
+                ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            return ApiResults.Ok(new { state = "not-cancellable" });
+        }
 
         if (reply is null || string.IsNullOrWhiteSpace(reply.State))
             return ApiResults.Fail(
