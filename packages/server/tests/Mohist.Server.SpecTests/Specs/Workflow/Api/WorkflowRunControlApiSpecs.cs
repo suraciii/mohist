@@ -3,9 +3,11 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Mohist.Server.Events.Grains;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Workflow;
+using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Project.Grains;
 using Mohist.Server.SpecTests.Support;
@@ -390,6 +392,7 @@ public class WorkflowRunControlApiSpecs
             : await _client.PostAsync($"/api/projects/{issueProjectId}/issues/{issueNumber}/{verb}", content: null);
 
         Assert.Equal(HttpStatusCode.OK, issueResponse.StatusCode);
+        await DispatchEventsAsync();
         var recoveredIssueWrId = await GetIssueWorkflowRunIdAsync(issueProjectId, issueNumber);
         Assert.NotNull(recoveredIssueWrId);
         Assert.NotEqual(issueWrId, recoveredIssueWrId);
@@ -403,6 +406,7 @@ public class WorkflowRunControlApiSpecs
             : await _client.PostAsync($"/api/workflow-runs/{runWrId}/{verb}", content: null);
 
         Assert.Equal(HttpStatusCode.OK, runResponse.StatusCode);
+        await DispatchEventsAsync();
         var recoveredRunWrId = await GetIssueWorkflowRunIdAsync(runProjectId, runIssueNumber);
         Assert.NotNull(recoveredRunWrId);
         Assert.NotEqual(runWrId, recoveredRunWrId);
@@ -493,14 +497,15 @@ public class WorkflowRunControlApiSpecs
         Assert.Equal(HttpStatusCode.Conflict, resumeResponse.StatusCode);
     }
 
-    private async Task<(string projectId, int issueNumber, string issueId, string wrId)> SeedActiveWorkflowAsync()
+    private async Task<(string projectId, int issueNumber, string issueKey, string wrId)> SeedActiveWorkflowAsync()
     {
         var (projectId, _) = await SeedProjectAsync();
-        var (issueId, issueNumber) = await CreateIssueInBacklogAsync(projectId);
+        var (issueKey, issueNumber) = await CreateIssueInBacklogAsync(projectId);
         await SeedWorkflowTemplateAsync(projectId);
-        var grain = _grains.GetGrain<IIssueGrain>(issueId);
+        var grain = _grains.GetGrain<IIssueGrain>(issueKey);
         var wrId = await grain.StartWorkAsync();
-        return (projectId, issueNumber, issueId, wrId);
+        await DispatchEventsAsync();
+        return (projectId, issueNumber, issueKey, wrId);
     }
 
     private async Task<(string projectId, string projectName)> SeedProjectAsync()
@@ -518,14 +523,17 @@ public class WorkflowRunControlApiSpecs
         return (id, name);
     }
 
-    private async Task<(string issueId, int number)> CreateIssueInBacklogAsync(string projectId)
+    private async Task<(string issueKey, int number)> CreateIssueInBacklogAsync(string projectId)
     {
         var number = await _grains.GetGrain<IIssueCounterGrain>(projectId).NextAsync();
-        var issueId = $"issue_{Guid.NewGuid():N}";
-        var grain = _grains.GetGrain<IIssueGrain>(issueId);
-        await grain.CreateAsync(projectId, number, "Workflow control test", null, null, null, null, issueId, isDraft: false);
-        return (issueId, number);
+        var issueKey = GrainKey.Issue(new IssueKey(projectId, number));
+        var grain = _grains.GetGrain<IIssueGrain>(issueKey);
+        await grain.CreateAsync(projectId, number, "Workflow control test", null, null, null, isDraft: false);
+        return (issueKey, number);
     }
+
+    private Task DispatchEventsAsync() =>
+        _grains.GetGrain<IEventDispatcherGrain>(EventDispatcherGrain.Global).DispatchNowAsync();
 
     private async Task SeedWorkflowTemplateAsync(string projectId)
     {

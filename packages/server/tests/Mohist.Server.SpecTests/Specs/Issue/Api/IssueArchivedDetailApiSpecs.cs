@@ -4,6 +4,7 @@ using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Mohist.Server.Events.Grains;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Orleans;
@@ -434,6 +435,7 @@ public class IssueArchivedDetailApiSpecs
         var (issueId, issueNumber) = await CreateIssueInBacklogAsync(projectId);
         var grain = _grains.GetGrain<IIssueGrain>(issueId);
         var wrId = await grain.StartWorkAsync();
+        await DispatchEventsAsync();
         return (projectId, issueNumber, issueId, wrId);
     }
 
@@ -463,6 +465,9 @@ public class IssueArchivedDetailApiSpecs
 
     private static string IssueGrainKey(string projectId, int number) =>
         GrainKey.Issue(new IssueKey(projectId, number));
+
+    private Task DispatchEventsAsync() =>
+        _grains.GetGrain<IEventDispatcherGrain>(EventDispatcherGrain.Global).DispatchNowAsync();
 
     private async Task MarkWorkflowRunCompletedAsync(string workflowRunId)
     {
