@@ -152,12 +152,12 @@ describe('MobileBottomNav unread inbox count badge', () => {
   }
 
   const readItem: InboxItem = {
-    itemId: 'inb-1', notificationKind: 'workflow_failed', issueId: 'i-1', issueNumber: 1,
+    itemId: 'inb-1', notificationKind: 'workflow_failed', issueNumber: 1,
     issueTitle: 'Read', createdAt: '2024-01-01T00:00:00.000Z', isRead: true, isArchived: false,
     readAt: '2024-01-02T00:00:00.000Z', archivedAt: null,
   }
   const unreadItem: InboxItem = {
-    itemId: 'inb-2', notificationKind: 'issue_started', issueId: 'i-2', issueNumber: 2,
+    itemId: 'inb-2', notificationKind: 'issue_started', issueNumber: 2,
     issueTitle: 'Unread', createdAt: '2024-01-01T00:00:00.000Z', isRead: false, isArchived: false,
     readAt: null, archivedAt: null,
   }

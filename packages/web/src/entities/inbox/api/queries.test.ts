@@ -92,17 +92,17 @@ describe('unreadInboxCountQueryOptions', () => {
 
   it('selects the count of unread items from the inbox list', () => {
     const items: InboxItem[] = [
-      { itemId: 'inb-1', notificationKind: 'workflow_failed', issueId: 'i-1', issueNumber: 1, issueTitle: 'A', createdAt: '2024-01-01T00:00:00.000Z', isRead: false, isArchived: false, readAt: null, archivedAt: null },
-      { itemId: 'inb-2', notificationKind: 'issue_started', issueId: 'i-2', issueNumber: 2, issueTitle: 'B', createdAt: '2024-01-01T00:00:00.000Z', isRead: true, isArchived: false, readAt: '2024-01-02T00:00:00.000Z', archivedAt: null },
-      { itemId: 'inb-3', notificationKind: 'approval_requested', issueId: 'i-3', issueNumber: 3, issueTitle: 'C', createdAt: '2024-01-01T00:00:00.000Z', isRead: false, isArchived: false, readAt: null, archivedAt: null },
+      { itemId: 'inb-1', notificationKind: 'workflow_failed', issueNumber: 1, issueTitle: 'A', createdAt: '2024-01-01T00:00:00.000Z', isRead: false, isArchived: false, readAt: null, archivedAt: null },
+      { itemId: 'inb-2', notificationKind: 'issue_started', issueNumber: 2, issueTitle: 'B', createdAt: '2024-01-01T00:00:00.000Z', isRead: true, isArchived: false, readAt: '2024-01-02T00:00:00.000Z', archivedAt: null },
+      { itemId: 'inb-3', notificationKind: 'approval_requested', issueNumber: 3, issueTitle: 'C', createdAt: '2024-01-01T00:00:00.000Z', isRead: false, isArchived: false, readAt: null, archivedAt: null },
     ]
     expect(unreadInboxCountQueryOptions('proj-1').select!(items)).toBe(2)
   })
 
   it('returns 0 when all items are read', () => {
     const items: InboxItem[] = [
-      { itemId: 'inb-1', notificationKind: 'workflow_failed', issueId: 'i-1', issueNumber: 1, issueTitle: 'A', createdAt: '2024-01-01T00:00:00.000Z', isRead: true, isArchived: false, readAt: '2024-01-02T00:00:00.000Z', archivedAt: null },
-      { itemId: 'inb-2', notificationKind: 'issue_started', issueId: 'i-2', issueNumber: 2, issueTitle: 'B', createdAt: '2024-01-01T00:00:00.000Z', isRead: true, isArchived: false, readAt: '2024-01-02T00:00:00.000Z', archivedAt: null },
+      { itemId: 'inb-1', notificationKind: 'workflow_failed', issueNumber: 1, issueTitle: 'A', createdAt: '2024-01-01T00:00:00.000Z', isRead: true, isArchived: false, readAt: '2024-01-02T00:00:00.000Z', archivedAt: null },
+      { itemId: 'inb-2', notificationKind: 'issue_started', issueNumber: 2, issueTitle: 'B', createdAt: '2024-01-01T00:00:00.000Z', isRead: true, isArchived: false, readAt: '2024-01-02T00:00:00.000Z', archivedAt: null },
     ]
     expect(unreadInboxCountQueryOptions('proj-1').select!(items)).toBe(0)
   })
