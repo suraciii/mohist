@@ -18,25 +18,29 @@ public partial class BackfillCanonicalIssueReferences : Migration
     {
         migrationBuilder.Sql(CanonicalIssueReferenceReconciliation.Sql);
 
-        migrationBuilder.AlterColumn<string>(
-            name: "ProjectId",
-            table: "IssueWorkflowProfiles",
-            type: "TEXT",
-            maxLength: 256,
-            nullable: false,
-            oldClrType: typeof(string),
-            oldType: "TEXT",
-            oldMaxLength: 256,
-            oldNullable: true);
+        migrationBuilder.Sql("""
+            CREATE TABLE "__IssueWorkflowProfiles" (
+                "IssueId" TEXT NOT NULL CONSTRAINT "PK_IssueWorkflowProfiles" PRIMARY KEY,
+                "ProjectId" TEXT NOT NULL,
+                "IssueNumber" INTEGER NOT NULL,
+                "SourceTemplateId" TEXT NULL,
+                "Template" TEXT NULL,
+                "Variables" TEXT NOT NULL,
+                "Prompts" TEXT NOT NULL DEFAULT '{}',
+                "UpdatedAt" TEXT NOT NULL
+            );
 
-        migrationBuilder.AlterColumn<int>(
-            name: "IssueNumber",
-            table: "IssueWorkflowProfiles",
-            type: "INTEGER",
-            nullable: false,
-            oldClrType: typeof(int),
-            oldType: "INTEGER",
-            oldNullable: true);
+            INSERT INTO "__IssueWorkflowProfiles" (
+                "IssueId", "ProjectId", "IssueNumber", "SourceTemplateId", "Template",
+                "Variables", "Prompts", "UpdatedAt")
+            SELECT
+                "IssueId", "ProjectId", "IssueNumber", "SourceTemplateId", "Template",
+                "Variables", "Prompts", "UpdatedAt"
+            FROM "IssueWorkflowProfiles";
+
+            DROP TABLE "IssueWorkflowProfiles";
+            ALTER TABLE "__IssueWorkflowProfiles" RENAME TO "IssueWorkflowProfiles";
+            """);
 
         migrationBuilder.CreateIndex(
             name: "IX_IssueWorkflowProfiles_ProjectId_IssueNumber",
@@ -83,22 +87,6 @@ public partial class BackfillCanonicalIssueReferences : Migration
         migrationBuilder.DropIndex(name: "IX_WorkflowArtifacts_ProjectId_IssueNumber_RecordedAt", table: "WorkflowArtifacts");
         migrationBuilder.DropIndex(name: "IX_IssueWorkflowProfiles_ProjectId_IssueNumber", table: "IssueWorkflowProfiles");
 
-        migrationBuilder.AlterColumn<string>(
-            name: "ProjectId",
-            table: "IssueWorkflowProfiles",
-            type: "TEXT",
-            maxLength: 256,
-            nullable: true,
-            oldClrType: typeof(string),
-            oldType: "TEXT",
-            oldMaxLength: 256);
-
-        migrationBuilder.AlterColumn<int>(
-            name: "IssueNumber",
-            table: "IssueWorkflowProfiles",
-            type: "INTEGER",
-            nullable: true,
-            oldClrType: typeof(int),
-            oldType: "INTEGER");
+        throw new NotSupportedException("Canonical Issue references cannot be reverted to nullable transition columns.");
     }
 }

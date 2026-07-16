@@ -37,13 +37,57 @@ public partial class AddCanonicalIssueReferenceColumns : Migration
             type: "INTEGER",
             nullable: true);
 
-        migrationBuilder.AddColumn<int>(
-            name: "IssueNumber",
-            table: "WorkflowRuns",
-            type: "INTEGER",
-            nullable: true,
-            computedColumnSql: "CAST(COALESCE(json_extract(State, '$.metadata.annotations.issueNumber'), json_extract(State, '$.Metadata.Annotations.issueNumber'), json_extract(State, '$.Metadata.Annotations.IssueNumber')) AS INTEGER)",
-            stored: true);
+        migrationBuilder.Sql("""
+            CREATE TABLE "__WorkflowRuns" (
+                "WorkflowRunId" TEXT NOT NULL CONSTRAINT "PK_WorkflowRuns" PRIMARY KEY,
+                "State" TEXT NOT NULL,
+                "EpicId" TEXT NULL,
+                "ETag" INTEGER NOT NULL,
+                "MetadataProjectId" TEXT GENERATED ALWAYS AS (
+                    COALESCE(
+                        json_extract("State", '$.metadata.annotations.projectId'),
+                        json_extract("State", '$.Metadata.Annotations.projectId'),
+                        json_extract("State", '$.Metadata.Annotations.ProjectId'))
+                ) STORED,
+                "IssueNumber" INTEGER GENERATED ALWAYS AS (
+                    CAST(COALESCE(
+                        json_extract("State", '$.metadata.annotations.issueNumber'),
+                        json_extract("State", '$.Metadata.Annotations.issueNumber'),
+                        json_extract("State", '$.Metadata.Annotations.IssueNumber')) AS INTEGER)
+                ) STORED,
+                "CreatedAt" TEXT GENERATED ALWAYS AS (json_extract("State", '$.metadata.createdAt')),
+                "AssignedWorkerId" TEXT GENERATED ALWAYS AS (
+                    COALESCE(
+                        json_extract("State", '$.assignment.workerId'),
+                        json_extract("State", '$.assignment.runnerId'),
+                        json_extract("State", '$.claim.runnerId'))
+                ),
+                "ReadySince" TEXT GENERATED ALWAYS AS (
+                    COALESCE(json_extract("State", '$.readySince'), json_extract("State", '$.ReadySince'))
+                ),
+                "Status" TEXT GENERATED ALWAYS AS (
+                    LOWER(COALESCE(json_extract("State", '$.status'), json_extract("State", '$.Status')))
+                ) STORED
+            );
+
+            INSERT INTO "__WorkflowRuns" ("WorkflowRunId", "State", "EpicId", "ETag")
+            SELECT "WorkflowRunId", "State", "EpicId", "ETag"
+            FROM "WorkflowRuns";
+
+            DROP TABLE "WorkflowRuns";
+            ALTER TABLE "__WorkflowRuns" RENAME TO "WorkflowRuns";
+
+            CREATE INDEX "IX_WorkflowRuns_AssignedWorkerId"
+                ON "WorkflowRuns" ("AssignedWorkerId");
+            CREATE INDEX "IX_WorkflowRuns_MetadataProjectId"
+                ON "WorkflowRuns" ("MetadataProjectId");
+            CREATE INDEX "IX_WorkflowRuns_Status"
+                ON "WorkflowRuns" ("Status", "AssignedWorkerId");
+            CREATE INDEX "IX_WorkflowRuns_MetadataProjectId_AssignedWorkerId_CreatedAt"
+                ON "WorkflowRuns" ("MetadataProjectId", "AssignedWorkerId", "CreatedAt");
+            CREATE INDEX "IX_WorkflowRuns_Status_ReadySince"
+                ON "WorkflowRuns" ("Status", "AssignedWorkerId", "ReadySince");
+            """);
     }
 
     protected override void Down(MigrationBuilder migrationBuilder)

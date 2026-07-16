@@ -355,6 +355,70 @@ server cutover in T-004.
 - The plan contains no accepted path that shares a database transaction across aggregates.
 - Every ambiguous cross-aggregate failure window has a specified idempotent/redelivery outcome.
 
+## T-003 validation repair
+
+The current branch had already carried the first T-003 migration commit, but its migration spec was
+removed by the later runtime cutover. A focused audit and replacement spec now covers the actual
+migration boundary again.
+
+### Complete EpicId owner inventory
+
+- `Epics` is the aggregate root. Current runtime identity is `(ProjectId, Number)` and the row is
+  keyed by that pair. The legacy random `Id` exists only in the pre-T-004 migration input; the
+  T-003 backfill validates it, copies the canonical number, and rebuilds the root without deleting
+  resolvable rows.
+- `EpicIssues` is the retained historical membership input and `EpicActiveIssues` is the retained
+  current-membership input at the T-003 boundary. Both receive nullable transition `EpicNumber`
+  columns, are backfilled from the same-project Epic row, then rebuilt with required `EpicNumber`
+  and scoped `(ProjectId, EpicNumber, IssueNumber)` indexes. They remain migration-only input for
+  the later T-005 deletion; T-003 does not use them as runtime authority.
+- `Issues` is a current-state copied-affiliation owner during the transition. Its nullable
+  `EpicNumber` is backfilled from legacy `EpicId` within the same Project and is indexed with
+  `(ProjectId, EpicNumber, Number)`. The random `EpicId` column and `State.epicId` are migration
+  input only; the later number-only cutover removes them.
+- `WorkflowRuns` is a current-state local-context owner. Its nullable `EpicNumber` is backfilled
+  from legacy `EpicId` and indexed with computed `MetadataProjectId`. Its legacy EpicId column and
+  annotation are migration input; WorkflowRun is not the affiliation authority.
+- Direct Agent-launch `AgentSessions` persist Epic context in the existing
+  `mohist.io/agent-launch/epic-number` label, projected by
+  `LabelAgentLaunchEpicNumber`, with `LabelProjectId` and a Project-scoped recency index. This
+  is metadata owned by the session, not a new relation row. Workflow-origin sessions currently
+  carry issue/run/stage labels but no independent Epic owner; their canonical Workflow context is
+  assigned to T-006/T-008 rather than duplicating a current-state reference here.
+- `EpicQuerier`, Issue read projections, API DTOs, session context DTOs, and Agent launch request
+  shapes are query/read paths over the owners above and use `EpicNumber`; they do not persist a
+  second Epic identity. `EpicCounterRow` is a Project-owned allocator, not an Epic reference.
+- `EpicEvents` and other event rows are historical envelopes. Their source, payload, and extension
+  JSON are intentionally unchanged by this current-state migration, including legacy `epicid`.
+
+### Migration implementation decisions
+
+- `CanonicalEpicReferenceReconciliation.Sql` remains the first-pass guard/backfill executed by
+  `20260716160000_BackfillCanonicalEpicReferences` after
+  `20260716150000_AddCanonicalEpicReferenceColumns`. It validates every owner before updates and
+  fails through named zero-check guard columns; no orphan membership, active, Issue, Epic,
+  WorkflowRun, Session, or event row is deleted.
+- SQLite does not support EF `AlterColumn` for these transition tables or `ADD COLUMN` for a stored
+  computed column. The T-002 predecessor migrations were repaired with explicit table rebuilds for
+  `WorkflowRuns` and `IssueWorkflowProfiles`; T-003 rebuilds retained membership tables after
+  backfill to make relation `EpicNumber` required while preserving all rows and indexes.
+- `CanonicalEpicReferenceReconciliation.ApplyAsync` detects whether the legacy Epic root `Id` and
+  membership tables still exist. The legacy schema path validates and fills canonical columns; the
+  canonical retained-membership path validates only canonical values. This makes a real second
+  execution a no-op instead of querying removed `Epics.Id` / copied `EpicId` columns.
+
+### Focused verification
+
+- `CanonicalEpicReferenceMigrationSpecs`: **9 passed / 0 failed**. It starts from
+  `20260715123000_ReconcileLineageSnapshotsFromMembership`, applies the real EF chain through
+  `20260716160000_BackfillCanonicalEpicReferences`, isolates two Projects sharing Epic 7, checks
+  every current owner and historical envelope, proves the second reconciliation is unchanged,
+  checks required relation columns/indexes, and exercises six unresolved-owner failures without
+  row loss.
+- `CanonicalIssueReferenceMigrationSpecs`: **15 passed / 0 failed** after the SQLite predecessor
+  migration repair.
+- Existing `DropEpicMembershipTablesMigrationSpecs`: **1 passed / 0 failed**.
+
 ## T-001 verification follow-up (2026-07-17)
 
 - The typed identity and codec implementation from `a75479051` is already an ancestor of the

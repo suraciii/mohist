@@ -19,6 +19,52 @@ public partial class BackfillCanonicalEpicReferences : Migration
         migrationBuilder.Sql(CanonicalEpicReferenceReconciliation.Sql);
 
         migrationBuilder.Sql("""
+            CREATE TABLE "__EpicIssues" (
+                "EpicId" TEXT NOT NULL,
+                "IssueId" TEXT NOT NULL,
+                "ProjectId" TEXT NOT NULL,
+                "IssueNumber" INTEGER NOT NULL,
+                "EpicNumber" INTEGER NOT NULL,
+                "CreatedAt" TEXT NOT NULL,
+                CONSTRAINT "PK_EpicIssues" PRIMARY KEY ("EpicId", "IssueId")
+            );
+
+            INSERT INTO "__EpicIssues" (
+                "EpicId", "IssueId", "ProjectId", "IssueNumber", "EpicNumber", "CreatedAt")
+            SELECT "EpicId", "IssueId", "ProjectId", "IssueNumber", "EpicNumber", "CreatedAt"
+            FROM "EpicIssues";
+
+            DROP TABLE "EpicIssues";
+            ALTER TABLE "__EpicIssues" RENAME TO "EpicIssues";
+            CREATE INDEX "IX_EpicIssues_ProjectId_IssueId"
+                ON "EpicIssues" ("ProjectId", "IssueId");
+            CREATE INDEX "IX_EpicIssues_ProjectId_IssueNumber"
+                ON "EpicIssues" ("ProjectId", "IssueNumber");
+            """);
+
+        migrationBuilder.Sql("""
+            CREATE TABLE "__EpicActiveIssues" (
+                "ProjectId" TEXT NOT NULL,
+                "IssueId" TEXT NOT NULL,
+                "EpicId" TEXT NOT NULL,
+                "IssueNumber" INTEGER NOT NULL,
+                "EpicNumber" INTEGER NOT NULL,
+                "CreatedAt" TEXT NOT NULL,
+                CONSTRAINT "PK_EpicActiveIssues" PRIMARY KEY ("ProjectId", "IssueId")
+            );
+
+            INSERT INTO "__EpicActiveIssues" (
+                "ProjectId", "IssueId", "EpicId", "IssueNumber", "EpicNumber", "CreatedAt")
+            SELECT "ProjectId", "IssueId", "EpicId", "IssueNumber", "EpicNumber", "CreatedAt"
+            FROM "EpicActiveIssues";
+
+            DROP TABLE "EpicActiveIssues";
+            ALTER TABLE "__EpicActiveIssues" RENAME TO "EpicActiveIssues";
+            CREATE INDEX "IX_EpicActiveIssues_ProjectId_EpicId"
+                ON "EpicActiveIssues" ("ProjectId", "EpicId");
+            """);
+
+        migrationBuilder.Sql("""
             CREATE TABLE "__Epics" (
                 "ProjectId" TEXT NOT NULL,
                 "Number" INTEGER NOT NULL,
