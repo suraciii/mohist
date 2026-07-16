@@ -91,9 +91,9 @@ public class CanonicalIssueReferenceMigrationSpecs
         Assert.Equal(historicalBefore, await ReadHistoricalEventAsync(verify));
 
         var alphaProfile = await verify.IssueWorkflowProfiles.AsNoTracking()
-            .SingleAsync(row => row.IssueId == "issue_alpha_42");
+            .SingleAsync(row => row.ProjectId == "proj_alpha" && row.IssueNumber == 42);
         var betaProfile = await verify.IssueWorkflowProfiles.AsNoTracking()
-            .SingleAsync(row => row.IssueId == "issue_beta_42");
+            .SingleAsync(row => row.ProjectId == "proj_beta" && row.IssueNumber == 42);
         Assert.Equal(("proj_alpha", 42), (alphaProfile.ProjectId, alphaProfile.IssueNumber));
         Assert.Equal(("proj_beta", 42), (betaProfile.ProjectId, betaProfile.IssueNumber));
 
@@ -431,10 +431,21 @@ public class CanonicalIssueReferenceMigrationSpecs
         Runs: await context.WorkflowRuns.CountAsync(),
         Comments: await context.IssueComments.CountAsync(),
         Inbox: await context.InboxItems.CountAsync(),
-        EpicIssues: await context.EpicIssues.CountAsync(),
-        EpicActiveIssues: await context.EpicActiveIssues.CountAsync(),
+        LegacyEpicIssues: await CountTableAsync(context, "EpicIssues"),
+        LegacyEpicActiveIssues: await CountTableAsync(context, "EpicActiveIssues"),
         Prerequisites: await context.IssuePrerequisites.CountAsync(),
         Sessions: await context.AgentSessions.CountAsync());
+
+    private static Task<long> CountTableAsync(MohistDbContext context, string tableName)
+    {
+        var sql = tableName switch
+        {
+            "EpicIssues" => "SELECT COUNT(*) AS \"Value\" FROM \"EpicIssues\"",
+            "EpicActiveIssues" => "SELECT COUNT(*) AS \"Value\" FROM \"EpicActiveIssues\"",
+            _ => throw new ArgumentOutOfRangeException(nameof(tableName)),
+        };
+        return context.Database.SqlQueryRaw<long>(sql).SingleAsync();
+    }
 
     private static async Task<HistoricalEvent> ReadHistoricalEventAsync(MohistDbContext context)
     {
@@ -446,7 +457,7 @@ public class CanonicalIssueReferenceMigrationSpecs
     private static async Task<ConvergedValues> ReadConvergedValuesAsync(MohistDbContext context)
     {
         var profile = await context.IssueWorkflowProfiles.AsNoTracking()
-            .SingleAsync(row => row.IssueId == "issue_alpha_42");
+            .SingleAsync(row => row.ProjectId == "proj_alpha" && row.IssueNumber == 42);
         var artifact = await context.WorkflowArtifacts.AsNoTracking()
             .SingleAsync(row => row.ArtifactId == "artifact_alpha");
         var attachment = await context.Attachments.AsNoTracking()
@@ -500,8 +511,8 @@ public class CanonicalIssueReferenceMigrationSpecs
         int Runs,
         int Comments,
         int Inbox,
-        int EpicIssues,
-        int EpicActiveIssues,
+        long LegacyEpicIssues,
+        long LegacyEpicActiveIssues,
         int Prerequisites,
         int Sessions);
 
