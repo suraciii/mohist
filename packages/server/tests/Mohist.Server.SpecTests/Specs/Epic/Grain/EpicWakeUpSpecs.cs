@@ -322,7 +322,7 @@ public class EpicWakeUpSpecs
             projectId: ProjectId,
             number: 1,
             title: "T",
-            now: DateTime.UtcNow);
+            now: TestTime.UtcDateTime);
         epic.Start();
 
         var ex = Assert.Throws<EpicAlreadyTerminalException>(() => epic.WakeFromDone());
@@ -340,8 +340,8 @@ public class EpicWakeUpSpecs
             projectId: ProjectId,
             number: 1,
             title: "T",
-            now: DateTime.UtcNow);
-        epic.LinkIssue("issue_terminal", 1, now: DateTime.UtcNow);
+            now: TestTime.UtcDateTime);
+        epic.LinkIssue("issue_terminal", 1, now: TestTime.UtcDateTime);
         epic.MarkDone(openLinkedNumbers: new HashSet<int>());
 
         epic.WakeFromDone();
@@ -402,8 +402,8 @@ public class EpicWakeUpSpecs
             Priority = "p2",
             Status = status,
             PauseReason = pauseReason,
-            CreatedAt = DateTimeOffset.UtcNow,
-            UpdatedAt = DateTimeOffset.UtcNow,
+            CreatedAt = TestTime.UtcNow,
+            UpdatedAt = TestTime.UtcNow,
         });
         await db.SaveChangesAsync();
     }

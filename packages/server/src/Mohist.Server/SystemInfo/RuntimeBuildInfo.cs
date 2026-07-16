@@ -19,13 +19,13 @@ public sealed class RuntimeBuildInfo : IRuntimeBuildInfo, ISingletonService
     public DateTimeOffset StartedAt { get; }
 
     public RuntimeBuildInfo()
-        : this(SystemEnvironmentVariableProvider.Instance)
+        : this(SystemEnvironmentVariableProvider.Instance, TimeProvider.System)
     {
     }
 
-    public RuntimeBuildInfo(IEnvironmentVariableProvider environment)
+    public RuntimeBuildInfo(IEnvironmentVariableProvider environment, TimeProvider? timeProvider = null)
     {
-        StartedAt = DateTimeOffset.UtcNow;
+        StartedAt = (timeProvider ?? TimeProvider.System).GetUtcNow();
         (Version, GitHash) = ResolveIdentity(environment);
     }
 
@@ -39,8 +39,9 @@ public sealed class RuntimeBuildInfo : IRuntimeBuildInfo, ISingletonService
         return ResolveIdentity(
             informationalVersion,
             versionFromAssembly,
-            () => environment.GetEnvironmentVariable(GitHashEnvironmentVariable),
-            TryReadGitHeadFromSource);
+            () => environment.GetEnvironmentVariable(
+                GitHashEnvironmentVariable),
+            () => null);
     }
 
     internal static (string? Version, string? GitHash) ResolveIdentity(
@@ -75,55 +76,4 @@ public sealed class RuntimeBuildInfo : IRuntimeBuildInfo, ISingletonService
         return (version, string.IsNullOrWhiteSpace(gitHash) ? null : gitHash);
     }
 
-    private static string? TryReadGitHeadFromSource()
-    {
-        try
-        {
-            var assemblyLocation = typeof(RuntimeBuildInfo).Assembly.Location;
-            var assemblyDir = Path.GetDirectoryName(assemblyLocation);
-            if (string.IsNullOrWhiteSpace(assemblyDir))
-                return null;
-
-            var root = assemblyDir;
-            while (root != null && !Directory.Exists(Path.Combine(root, ".git")))
-            {
-                root = Directory.GetParent(root)?.FullName;
-            }
-
-            if (root == null)
-                return null;
-
-            return TryReadGitHeadFile(root);
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
-    internal static string? TryReadGitHeadFile(string repoRoot)
-    {
-        try
-        {
-            var headFile = Path.Combine(repoRoot, ".git", "HEAD");
-            if (!File.Exists(headFile))
-                return null;
-
-            var head = File.ReadAllText(headFile).Trim();
-            if (head.StartsWith("ref: ", StringComparison.Ordinal))
-            {
-                var refPath = head[5..];
-                var refFile = Path.Combine(repoRoot, ".git", refPath);
-                if (File.Exists(refFile))
-                    return File.ReadAllText(refFile).Trim();
-                return null;
-            }
-
-            return head;
-        }
-        catch
-        {
-            return null;
-        }
-    }
 }

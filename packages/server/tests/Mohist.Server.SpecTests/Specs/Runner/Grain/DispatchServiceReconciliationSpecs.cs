@@ -239,7 +239,7 @@ public class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTests.Specs.
         });
         run.CurrentStageId = "build";
         run.Status = Enum.Parse<WorkflowRunStatus>(status);
-        run.Assignment = new WorkflowAssignment(runnerId, DateTimeOffset.UtcNow);
+        run.Assignment = new WorkflowAssignment(runnerId, TestTime.UtcNow);
 
         db.WorkflowRuns.Add(new WorkflowRunRow
         {

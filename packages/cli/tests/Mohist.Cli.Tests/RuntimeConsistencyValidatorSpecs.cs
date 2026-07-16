@@ -40,22 +40,8 @@ public class RuntimeConsistencyValidatorSpecs
 
     private static async Task AssertRequestCountAsync(RecordingHttpHandler handler, int expected)
     {
-        for (var attempts = 0; attempts < 10 && handler.Requests.Count < expected; attempts++)
-        {
-            await Task.Yield();
-        }
-
+        await handler.WaitForRequestCountAsync(expected);
         Assert.Equal(expected, handler.Requests.Count);
-    }
-
-    private static async Task AssertCompletedAsync<T>(Task<T> task)
-    {
-        for (var attempts = 0; attempts < 100 && !task.IsCompleted; attempts++)
-        {
-            await Task.Yield();
-        }
-
-        Assert.True(task.IsCompleted, "Expected task to complete without waiting on real time.");
     }
 
     [Fact]
@@ -447,7 +433,7 @@ public class RuntimeConsistencyValidatorSpecs
         context.SourceHead = "abc123";
 
         var checkTask = validator.CheckRunnerIdentityAsync(context, CancellationToken.None);
-        await Task.Yield();
+        await handler.WaitForRequestCountAsync(1);
         Assert.False(checkTask.IsCompleted);
 
         time.Advance(timeout);
@@ -524,7 +510,6 @@ public class RuntimeConsistencyValidatorSpecs
         await AssertRequestCountAsync(handler, 1);
 
         time.Advance(timeout);
-        await AssertCompletedAsync(checkTask);
         var result = await checkTask;
 
         Assert.Equal(RuntimeCheckOutcome.Warn, result.Outcome);

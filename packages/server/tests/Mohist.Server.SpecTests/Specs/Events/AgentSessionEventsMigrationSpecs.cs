@@ -16,7 +16,6 @@ public class AgentSessionEventsMigrationSpecs
 {
     private const string PreviousMigrationId = "20260707120000_WorkflowWorkerAssignment";
     private const string MigrationId = "20260708053533_AddAgentSessionEvents";
-    private const string TypeTimeMigrationId = "20260708113254_AddAgentSessionEventsTypeTimeIndex";
 
     [Fact]
     public async Task DatabaseMigrate_CreatesAgentSessionEventsTableWithDispatchedAtAndUndeliveredIndex()
@@ -49,37 +48,6 @@ public class AgentSessionEventsMigrationSpecs
         Assert.True(await TableExistsAsync(database.Connection, "AgentSessionEvents"));
         await AssertHasPartialUndeliveredIndexAsync(database.Connection, "AgentSessionEvents");
     }
-
-    [Fact]
-    public void FirstMigration_Up_CreatesTableWithoutTypeTimeIndex()
-    {
-        // The first AgentSessionEvents migration lays down the table and the
-        // undelivered index; the Type/Time index is added by the follow-up
-        // migration (covered by SecondMigration_Up_AddsTypeTimeIndex).
-        var source = File.ReadAllText(MigrationSourcePath(MigrationId));
-
-        var tableIndex = source.IndexOf("CreateTable", StringComparison.Ordinal);
-        Assert.True(tableIndex >= 0, "Expected Up() to call CreateTable.");
-        Assert.Contains("name: \"AgentSessionEvents\"", source, StringComparison.Ordinal);
-
-        Assert.DoesNotContain("IX_AgentSessionEvents_Type_Time", source, StringComparison.Ordinal);
-        Assert.Contains("IX_AgentSessionEvents_Undelivered", source, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void SecondMigration_Up_AddsTypeTimeIndex()
-    {
-        var source = File.ReadAllText(MigrationSourcePath(TypeTimeMigrationId));
-
-        Assert.Contains("IX_AgentSessionEvents_Type_Time", source, StringComparison.Ordinal);
-        Assert.Contains("CreateIndex", source, StringComparison.Ordinal);
-    }
-
-    private static string MigrationSourcePath(string migrationId) => Path.GetFullPath(Path.Combine(
-        AppContext.BaseDirectory,
-        "..", "..", "..", "..", "..",
-        "src", "Mohist.Server", "Infrastructure", "Data", "Migrations",
-        $"{migrationId}.cs"));
 
     private static async Task AssertColumnExistsAsync(SqliteConnection connection, string tableName, string columnName)
     {

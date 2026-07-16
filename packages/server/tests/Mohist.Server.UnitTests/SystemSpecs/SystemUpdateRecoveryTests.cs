@@ -200,77 +200,6 @@ public class SystemUpdateRecoveryTests
         Assert.Null(result.Error);
     }
 
-    [Fact]
-    public async Task StartAsync_AfterFileSystemStoreRecovery_FreshStartAsyncAcquiresLock()
-    {
-        var statePath = Path.Combine(Path.GetTempPath(), $"mohist-recovery-{Guid.NewGuid():N}.json");
-        try
-        {
-            var first = CreateFileSystemStore(statePath);
-            Assert.True(await first.TryAcquireLockAsync("stale-job"));
-            var staleUpdatedAt = ProcessStart.AddMinutes(-5);
-            await first.SaveAsync(BuildJob("stale-job", "running", staleUpdatedAt));
-
-            var refreshed = CreateFileSystemStore(statePath);
-            Assert.True(File.Exists(statePath + ".lock"));
-            Assert.False(await refreshed.TryAcquireLockAsync("new-job"));
-
-            var reconciler = BuildReconciler(refreshed, new FakeTimeProvider(staleUpdatedAt.AddMinutes(10)), staleUpdatedAt.AddMinutes(1));
-            await reconciler.StartAsync(CancellationToken.None);
-
-            Assert.False(File.Exists(statePath + ".lock"));
-
-            Assert.True(await refreshed.TryAcquireLockAsync("new-job"));
-        }
-        finally
-        {
-            if (File.Exists(statePath))
-                File.Delete(statePath);
-            if (File.Exists(statePath + ".lock"))
-                File.Delete(statePath + ".lock");
-        }
-    }
-
-    [Fact]
-    public async Task StartAsync_WhenInterruptedRecoveryWasAlreadySaved_RetriesStaleLockRelease()
-    {
-        var statePath = Path.Combine(Path.GetTempPath(), $"mohist-recovery-{Guid.NewGuid():N}.json");
-        try
-        {
-            var first = CreateFileSystemStore(statePath);
-            Assert.True(await first.TryAcquireLockAsync("stale-job"));
-            var staleUpdatedAt = ProcessStart.AddMinutes(-5);
-            await first.SaveAsync(BuildJob(
-                "stale-job",
-                "failed",
-                staleUpdatedAt,
-                completedAt: staleUpdatedAt,
-                reason: SystemUpdateRecoveryService.InterruptedByProcessRestartReason));
-
-            var refreshed = CreateFileSystemStore(statePath);
-            Assert.True(File.Exists(statePath + ".lock"));
-            Assert.False(await refreshed.TryAcquireLockAsync("new-job"));
-
-            var reconciler = BuildReconciler(refreshed, new FakeTimeProvider(FixtureNow), ProcessStart);
-            await reconciler.StartAsync(CancellationToken.None);
-
-            Assert.False(File.Exists(statePath + ".lock"));
-
-            Assert.True(await refreshed.TryAcquireLockAsync("new-job"));
-            var latest = await refreshed.GetLatestAsync();
-            Assert.NotNull(latest);
-            Assert.Equal("failed", latest!.Status);
-            Assert.Equal(SystemUpdateRecoveryService.InterruptedByProcessRestartReason, latest.Reason);
-        }
-        finally
-        {
-            if (File.Exists(statePath))
-                File.Delete(statePath);
-            if (File.Exists(statePath + ".lock"))
-                File.Delete(statePath + ".lock");
-        }
-    }
-
     private static SystemUpdateRecoveryService BuildReconciler(
         ISystemUpdateStore store,
         TimeProvider time,
@@ -302,18 +231,9 @@ public class SystemUpdateRecoveryTests
             new StubCommandRunner(),
             new StubReadinessProbe(new SystemReadinessResult(true, true, true, "/assets/app.js", null)),
             configuration,
-            new MockEnvironmentVariableProvider(),
+            new AvailableManagedAssetCatalog(),
             NullLogger<SystemUpdateService>.Instance,
             time);
-    }
-
-    private static FileSystemSystemUpdateStore CreateFileSystemStore(string statePath)
-    {
-        var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
-        {
-            ["Mohist:SystemUpdate:StatePath"] = statePath
-        }).Build();
-        return new FileSystemSystemUpdateStore(configuration);
     }
 
     private static SystemUpdateJobState BuildJob(
@@ -339,6 +259,11 @@ public class SystemUpdateRecoveryTests
             updatedAt,
             updatedAt,
             completedAt);
+    }
+
+    private sealed class AvailableManagedAssetCatalog : IManagedAssetCatalog
+    {
+        public ManagedAssetCatalogState GetState() => ManagedAssetCatalogState.Available;
     }
 
     private sealed class FakeProcessStartTimeProvider : IProcessStartTimeProvider

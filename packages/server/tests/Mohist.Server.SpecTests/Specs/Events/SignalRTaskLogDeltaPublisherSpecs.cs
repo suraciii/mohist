@@ -208,7 +208,7 @@ public class SignalRTaskLogDeltaPublisherSpecs
 
     private static TaskLogDeltaEnvelope NewEnvelope(string workflowRunId, string taskId, string workId)
     {
-        var now = DateTimeOffset.UtcNow;
+        var now = TestTime.UtcNow;
         return new TaskLogDeltaEnvelope(
             OwnerKind: "workflow",
             OwnerId: workflowRunId,

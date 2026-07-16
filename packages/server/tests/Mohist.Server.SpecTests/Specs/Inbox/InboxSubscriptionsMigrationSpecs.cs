@@ -70,8 +70,8 @@ public class InboxSubscriptionsMigrationSpecs
             Id = "proj_a",
             Name = "project-a",
             RepositoriesJson = "[]",
-            CreatedAt = DateTimeOffset.UtcNow,
-            UpdatedAt = DateTimeOffset.UtcNow,
+            CreatedAt = TestTime.UtcNow,
+            UpdatedAt = TestTime.UtcNow,
         });
 
         context.InboxSubscriptions.Add(new InboxSubscriptionRow
@@ -81,7 +81,7 @@ public class InboxSubscriptionsMigrationSpecs
             ApprovalRequestedEnabled = true,
             IssueStartedEnabled = false,
             IssueCompletedEnabled = true,
-            UpdatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = TestTime.UtcNow,
         });
         await context.SaveChangesAsync();
 

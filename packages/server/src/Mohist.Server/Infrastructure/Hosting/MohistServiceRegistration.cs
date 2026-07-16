@@ -103,10 +103,14 @@ public static class MohistServiceRegistration
         services.TryAddSingleton(TimeProvider.System);
         services.AddSingleton<IFileSystem, PhysicalFileSystem>();
         services.AddSingleton<IEnvironmentVariableProvider>(SystemEnvironmentVariableProvider.Instance);
+        services.AddSingleton<IConfigDocumentStore, FileConfigDocumentStore>();
+        services.AddSingleton<IWebContentProvider, WebContentProvider>();
         services.AddSingleton<ILogPathResolver, LogPathResolver>();
+        services.AddSingleton<ILogTailSource, FileLogTailSource>();
         services.AddSingleton<IGitSourceInspector, GitSourceInspector>();
         services.AddSingleton<IServiceStatusChecker, SystemdServiceStatusChecker>();
         services.AddSingleton<ISystemUpdateStore, FileSystemSystemUpdateStore>();
+        services.AddSingleton<IManagedAssetCatalog, FileSystemManagedAssetCatalog>();
         services.AddSingleton<ISystemUpdateCommandRunner, ProcessSystemUpdateCommandRunner>();
         services.AddHttpClient<ISystemReadinessProbe, HttpSystemReadinessProbe>(client =>
         {

@@ -149,7 +149,7 @@ public sealed class FakeFileSystem : IFileSystem
 
     public Stream OpenWrite(string path) => new RecordingStream(this, path);
 
-    private static string Normalize(string path) => Path.GetFullPath(path);
+    private static string Normalize(string path) => Path.GetFullPath(path, "/");
 
     private sealed class RecordingStream : MemoryStream
     {

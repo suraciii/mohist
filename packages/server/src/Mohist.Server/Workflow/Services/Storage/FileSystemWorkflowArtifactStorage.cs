@@ -328,6 +328,18 @@ public sealed class FileSystemWorkflowArtifactStorage : IWorkflowArtifactStorage
             stream, JSON.Indented, cancellationToken).ConfigureAwait(false);
     }
 
+    public Task DeleteAsync(
+        string storagePath,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var absolute = ResolveAbsolutePath(storagePath);
+        var directory = Path.GetDirectoryName(absolute);
+        if (!string.IsNullOrWhiteSpace(directory) && Directory.Exists(directory))
+            Directory.Delete(directory, recursive: true);
+        return Task.CompletedTask;
+    }
+
     private static string ResolveStorageRoot(WorkflowArtifactStorageOptions options)
     {
         var configured = options.Root;

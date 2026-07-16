@@ -15,7 +15,7 @@ public class TaskLifecycleTests
         ]), DateTimeOffset.UnixEpoch);
         run.Start(DateTimeOffset.UnixEpoch);
         run.InitializeStage([new("compile", "Compile", "spec/task")], [new("build-ok", "Build OK", "spec/check")], DateTimeOffset.UnixEpoch);
-        run.AssignTo("worker-1", DateTimeOffset.UtcNow);
+        run.AssignTo("worker-1", TestTime.UtcNow);
         return run;
     }
 

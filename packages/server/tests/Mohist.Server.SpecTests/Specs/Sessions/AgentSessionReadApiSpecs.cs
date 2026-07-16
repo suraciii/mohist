@@ -34,9 +34,9 @@ public class AgentSessionReadApiSpecs
         var agent = await CreateAgentAsync(project, agentName);
         var sessionIds = new[] { "sess-latest", "sess-mid", "sess-oldest" };
 
-        await InsertGenericSessionAsync(project, sessionIds[2], agent.Id, agentName, createdAt: DateTime.UtcNow.AddHours(-3));
-        await InsertGenericSessionAsync(project, sessionIds[1], agent.Id, agentName, createdAt: DateTime.UtcNow.AddHours(-2));
-        await InsertGenericSessionAsync(project, sessionIds[0], agent.Id, agentName, createdAt: DateTime.UtcNow.AddHours(-1));
+        await InsertGenericSessionAsync(project, sessionIds[2], agent.Id, agentName, createdAt: TestTime.UtcDateTime.AddHours(-3));
+        await InsertGenericSessionAsync(project, sessionIds[1], agent.Id, agentName, createdAt: TestTime.UtcDateTime.AddHours(-2));
+        await InsertGenericSessionAsync(project, sessionIds[0], agent.Id, agentName, createdAt: TestTime.UtcDateTime.AddHours(-1));
 
         var list = await _client.GetDataAsync<JsonElement>(
             $"/api/projects/{project}/agents/{agent.Id}/sessions");
@@ -269,7 +269,7 @@ public class AgentSessionReadApiSpecs
         if (issueNumber.HasValue)
             labels[GenericAgentSessionMetadata.IssueNumber] = issueNumber.Value.ToString();
 
-        var created = createdAt ?? DateTime.UtcNow;
+        var created = createdAt ?? TestTime.UtcDateTime;
         var session = new AgentSession
         {
             Id = sessionId,
@@ -302,7 +302,7 @@ public class AgentSessionReadApiSpecs
         string agentName,
         string runnerId)
     {
-        var startedAt = DateTime.UtcNow.AddMinutes(-5);
+        var startedAt = TestTime.UtcDateTime.AddMinutes(-5);
         var labels = new Dictionary<string, string>(StringComparer.Ordinal)
         {
             [AgentSessionQueryMetadataKeys.ProjectId] = projectId,
@@ -319,7 +319,7 @@ public class AgentSessionReadApiSpecs
             Status = new AgentSessionStatusSnapshot(
                 CreatedAt: startedAt,
                 BoundAt: startedAt.AddSeconds(1),
-                LastDataAt: DateTime.UtcNow,
+                LastDataAt: TestTime.UtcDateTime,
                 AgentRuntimeSessionId: sessionId),
             Metadata = new AgentSessionMetadata(labels),
         };
@@ -344,7 +344,7 @@ public class AgentSessionReadApiSpecs
         string agentId,
         string agentName)
     {
-        var startedAt = DateTime.UtcNow.AddMinutes(-10);
+        var startedAt = TestTime.UtcDateTime.AddMinutes(-10);
         var labels = new Dictionary<string, string>(StringComparer.Ordinal)
         {
             [AgentSessionQueryMetadataKeys.ProjectId] = projectId,
@@ -406,7 +406,7 @@ public class AgentSessionReadApiSpecs
         string projectId,
         string sessionId)
     {
-        var startedAt = DateTime.UtcNow.AddMinutes(-10);
+        var startedAt = TestTime.UtcDateTime.AddMinutes(-10);
         var workflowRunId = $"wf-{Guid.NewGuid():N}";
         var workId = $"work-{Guid.NewGuid():N}";
 
@@ -418,7 +418,7 @@ public class AgentSessionReadApiSpecs
             Status = new AgentSessionStatusSnapshot(
                 CreatedAt: startedAt,
                 BoundAt: startedAt.AddSeconds(1),
-                LastDataAt: DateTime.UtcNow,
+                LastDataAt: TestTime.UtcDateTime,
                 AgentRuntimeSessionId: sessionId),
             Metadata = new AgentSessionMetadata(new Dictionary<string, string>(StringComparer.Ordinal)
             {

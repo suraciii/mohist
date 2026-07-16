@@ -410,11 +410,8 @@ public class OtelExecutionChainTracingSpecs : IClassFixture<MohistIntegrationFix
 
         // The host already has its TracerProvider built (the
         // production provider) by the time the integration fixture
-        // returns from Deploy. The ActivityListener above is the
-        // capture channel for tests; the recording processor is
-        // kept as a fallback for callers that hold a reference to
-        // it after we dispose the listener.
-        await Task.Yield();
+        // returns from Deploy. Registering ActivityListener is synchronous;
+        // it is ready before AddActivityListener returns.
         return new ListenerScope(listener);
     }
 

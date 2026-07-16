@@ -254,7 +254,7 @@ public class UserNotificationDispatcherProjectFilterTests
             id: Guid.NewGuid().ToString(),
             source: new Uri("/mohist/test", UriKind.Relative),
             type: type,
-            time: DateTimeOffset.UtcNow,
+            time: TestTime.UtcNow,
             data: null,
             extensions: extensions);
     }

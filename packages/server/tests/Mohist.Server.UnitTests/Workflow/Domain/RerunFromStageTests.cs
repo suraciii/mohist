@@ -32,7 +32,7 @@ public class RerunFromStageTests
             var def = ThreeStageDefinition().Stages[i];
             run.InitializeStage(def.Tasks, def.Checks, DateTimeOffset.UnixEpoch);
             if (run.Assignment is null)
-                run.AssignTo("worker-1", DateTimeOffset.UtcNow);
+                run.AssignTo("worker-1", TestTime.UtcNow);
             if (i == stageIdx)
                 break;
 
@@ -53,7 +53,7 @@ public class RerunFromStageTests
             [new("draft", "Draft", "spec/task")],
             [new("plan-ok", "Plan OK", "spec/check")],
             DateTimeOffset.UnixEpoch);
-        run.AssignTo("worker-1", DateTimeOffset.UtcNow);
+        run.AssignTo("worker-1", TestTime.UtcNow);
         run.StartTask("draft.1", "worker-1", DateTimeOffset.UnixEpoch);
         run.CompleteTask(DateTimeOffset.UnixEpoch);
         run.PassCheck(new CheckResult("plan-ok", CheckResultStatus.Passed), DateTimeOffset.UnixEpoch);

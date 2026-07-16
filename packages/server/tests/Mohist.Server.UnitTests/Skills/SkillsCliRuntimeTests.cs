@@ -42,19 +42,6 @@ public sealed class SkillsCliRuntimeTests
         Assert.Equal(string.Empty, stderr);
     }
 
-    [Fact]
-    public void CliProgram_PublishableConfiguration_IncludesPackagedSkillData()
-    {
-        var csprojPath = Path.GetFullPath(Path.Combine(
-            AppContext.BaseDirectory,
-            "..", "..", "..", "..", "..", "..",
-            "cli", "Mohist.Cli", "Mohist.Cli.csproj"));
-        var csprojContent = File.ReadAllText(csprojPath);
-
-        Assert.Contains("skill-data\\**\\*", csprojContent, StringComparison.Ordinal);
-        Assert.Contains("PackagePath=\"skill-data/", csprojContent, StringComparison.Ordinal);
-    }
-
     private static async Task<(int ExitCode, string Stdout, string Stderr)> InvokeSkillsAsync(
         FakeFileSystem files,
         MockEnvironmentVariableProvider environment,
@@ -64,16 +51,12 @@ public sealed class SkillsCliRuntimeTests
         using var stderr = new StringWriter();
 
         var exitCode = await MohistCliCommands.RunAsync(
-            new HttpClient
-            {
-                BaseAddress = new Uri(environment.GetEnvironmentVariable("MOHIST_SERVER_URL") ?? "http://localhost:3456"),
-                Timeout = TimeSpan.FromSeconds(30),
-            },
+            RejectingHttpMessageHandler.CreateClient(),
             args,
             stdout,
             stderr,
             files,
-            new SystemCommandExecutor(),
+            new NoopCommandExecutor(),
             environment);
 
         return (exitCode, stdout.ToString(), stderr.ToString());

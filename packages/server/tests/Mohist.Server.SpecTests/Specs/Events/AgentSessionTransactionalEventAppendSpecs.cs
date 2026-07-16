@@ -132,9 +132,9 @@ public class AgentSessionTransactionalEventAppendSpecs : IAsyncLifetime
             new AgentSessionRuntimeBound("acp-1", null),
             new AgentSessionUsageRecorded(new AgentUsageSummary()),
             new AgentSessionModelChanged("anthropic/claude"),
-            new AgentSessionContextCompacted(null, null, null, "summary", "summary text", DateTime.UtcNow),
-            new AgentSessionContextExhausted("context_exhaustion", 96d, 960, 1000, DateTime.UtcNow),
-            new AgentSessionContextHealthUpdated("yellow", 65d, 650, 1000, DateTime.UtcNow),
+            new AgentSessionContextCompacted(null, null, null, "summary", "summary text", TestTime.UtcDateTime),
+            new AgentSessionContextExhausted("context_exhaustion", 96d, 960, 1000, TestTime.UtcDateTime),
+            new AgentSessionContextHealthUpdated("yellow", 65d, 650, 1000, TestTime.UtcDateTime),
         ]);
 
         var stored = await _eventStore.ListAgentSessionEventsAsync("agent_txn_identity");
@@ -190,8 +190,8 @@ public class AgentSessionTransactionalEventAppendSpecs : IAsyncLifetime
         };
         session.Status = session.Status with
         {
-            CreatedAt = DateTime.UtcNow,
-            LastDataAt = DateTime.UtcNow,
+            CreatedAt = TestTime.UtcDateTime,
+            LastDataAt = TestTime.UtcDateTime,
         };
         return session;
     }

@@ -3,10 +3,10 @@ using Xunit;
 namespace Mohist.Server.SpecTests.Support;
 
 /// <summary>
-/// Poll-based wait helpers for tests. The retry budget is computed from the
-/// supplied timeout/step pair but does not use wall-clock timers; each retry
-/// yields to let queued async work run, or invokes the supplied fake-time
-/// advance hook when time progression is part of the behavior under test.
+/// Bounded convergence helper for asynchronous probes. The retry budget is
+/// computed from the supplied timeout/step pair but does not use wall-clock
+/// timers. Each probe must itself cross the asynchronous boundary being
+/// observed, or callers must supply an explicit fake-time/cluster-turn advance.
 /// </summary>
 /// <remarks>
 /// Prefer a deterministic signal (<c>TaskCompletionSource</c>, event await,
@@ -36,7 +36,6 @@ public static class TestWait
                 break;
             if (advance is not null)
                 await advance();
-            await Task.Yield();
         }
 
         Assert.Fail($"Timed out waiting for: {description}. Last value: {current}");
@@ -59,7 +58,6 @@ public static class TestWait
                 break;
             if (advance is not null)
                 await advance();
-            await Task.Yield();
         }
 
         Assert.Fail($"Timed out waiting for: {description}.");

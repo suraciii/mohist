@@ -700,13 +700,13 @@ public class IssueWorkflowProfileApiConsistencySpecs : IAsyncLifetime
                     ProjectId = project.Id,
                     Variables = "{}",
                     DisabledWorkflowProfileIds = ["mohist/local", "mohist/github-pr"],
-                    UpdatedAt = DateTimeOffset.UtcNow,
+                    UpdatedAt = TestTime.UtcNow,
                 });
             }
             else
             {
                 existing.DisabledWorkflowProfileIds = ["mohist/local", "mohist/github-pr"];
-                existing.UpdatedAt = DateTimeOffset.UtcNow;
+                existing.UpdatedAt = TestTime.UtcNow;
             }
             await db.SaveChangesAsync();
         }
@@ -740,13 +740,13 @@ public class IssueWorkflowProfileApiConsistencySpecs : IAsyncLifetime
                     ProjectId = project.Id,
                     Variables = "{}",
                     DisabledWorkflowProfileIds = ["mohist/local", "mohist/github-pr"],
-                    UpdatedAt = DateTimeOffset.UtcNow,
+                    UpdatedAt = TestTime.UtcNow,
                 });
             }
             else
             {
                 existing.DisabledWorkflowProfileIds = ["mohist/local", "mohist/github-pr"];
-                existing.UpdatedAt = DateTimeOffset.UtcNow;
+                existing.UpdatedAt = TestTime.UtcNow;
             }
             await db.SaveChangesAsync();
         }
@@ -782,13 +782,13 @@ public class IssueWorkflowProfileApiConsistencySpecs : IAsyncLifetime
                     ProjectId = project.Id,
                     Variables = "{}",
                     DisabledWorkflowProfileIds = ["mohist/local", "mohist/github-pr"],
-                    UpdatedAt = DateTimeOffset.UtcNow,
+                    UpdatedAt = TestTime.UtcNow,
                 });
             }
             else
             {
                 row.DisabledWorkflowProfileIds = ["mohist/local", "mohist/github-pr"];
-                row.UpdatedAt = DateTimeOffset.UtcNow;
+                row.UpdatedAt = TestTime.UtcNow;
             }
             await db.SaveChangesAsync();
         }

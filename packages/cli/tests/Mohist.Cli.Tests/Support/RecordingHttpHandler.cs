@@ -6,6 +6,8 @@ namespace Mohist.Cli.Tests.Support;
 
 public sealed class RecordingHttpHandler : HttpMessageHandler
 {
+    private readonly object _gate = new();
+    private readonly List<(int Count, TaskCompletionSource Signal)> _requestWaiters = [];
     private Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> _responder;
 
     public RecordingHttpHandler(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> responder)
@@ -22,6 +24,19 @@ public sealed class RecordingHttpHandler : HttpMessageHandler
         _responder = responder;
     }
 
+    public Task WaitForRequestCountAsync(int count)
+    {
+        lock (_gate)
+        {
+            if (Requests.Count >= count)
+                return Task.CompletedTask;
+
+            var signal = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            _requestWaiters.Add((count, signal));
+            return signal.Task;
+        }
+    }
+
     protected override async Task<HttpResponseMessage> SendAsync(
         HttpRequestMessage request, CancellationToken cancellationToken)
     {
@@ -35,7 +50,13 @@ public sealed class RecordingHttpHandler : HttpMessageHandler
                 pair => pair.Value.ToArray(),
                 StringComparer.OrdinalIgnoreCase),
         };
-        Requests.Add(captured);
+        lock (_gate)
+        {
+            Requests.Add(captured);
+            foreach (var waiter in _requestWaiters.Where(waiter => Requests.Count >= waiter.Count))
+                waiter.Signal.TrySetResult();
+            _requestWaiters.RemoveAll(waiter => waiter.Signal.Task.IsCompleted);
+        }
         return await _responder(request, cancellationToken);
     }
 

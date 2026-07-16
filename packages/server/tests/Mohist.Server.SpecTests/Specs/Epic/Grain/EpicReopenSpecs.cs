@@ -334,8 +334,8 @@ public class EpicReopenSpecs
             Description = "",
             Priority = "p2",
             Status = status,
-            CreatedAt = DateTimeOffset.UtcNow,
-            UpdatedAt = DateTimeOffset.UtcNow,
+            CreatedAt = TestTime.UtcNow,
+            UpdatedAt = TestTime.UtcNow,
         });
         await db.SaveChangesAsync();
     }
@@ -382,7 +382,7 @@ public class EpicReopenSpecs
             ProjectId = projectId,
             IssueId = issueId,
             IssueNumber = issueNumber,
-            CreatedAt = DateTimeOffset.UtcNow,
+            CreatedAt = TestTime.UtcNow,
         });
         await db.SaveChangesAsync();
     }

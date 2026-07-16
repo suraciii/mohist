@@ -328,8 +328,8 @@ public class WorkflowArtifactBindingSpecs : WorkflowGrainSpecs
             ContentHash = $"sha256:{Guid.NewGuid():N}",
             Size = 42,
             StoragePath = $"workflows/{workflowRunId}/tasks/{taskRunId}/artifacts/{uploadId}/content",
-            CreatedAt = DateTimeOffset.UtcNow,
-            ExpiresAt = DateTimeOffset.UtcNow.AddDays(1),
+            CreatedAt = TestTime.UtcNow,
+            ExpiresAt = TestTime.UtcNow.AddDays(1),
         };
         db.WorkflowArtifactPendingUploads.Add(pending);
         await db.SaveChangesAsync();

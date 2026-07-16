@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text;
+using System.Threading.Channels;
 using Xunit;
 using Mohist.Cli;
 using Mohist.Server.SpecTests.Support;
@@ -8,7 +9,7 @@ namespace Mohist.Server.SpecTests.Specs.SystemSpecs;
 
 public class WindowsInstallSpecs
 {
-    private static string UserProfile => Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+    private const string UserProfile = "/mohist-tests/user";
     private static string ServiceDir => Path.Combine(UserProfile, ".mohist", "service");
     private static string ServerLauncher => Path.Combine(ServiceDir, "mohist-server.cmd");
     private static string RunnerLauncher => Path.Combine(ServiceDir, "mohist-runner.cmd");
@@ -25,7 +26,7 @@ public class WindowsInstallSpecs
         StringWriter? output = null,
         StringWriter? error = null,
         Func<ProcessStartInfo, Process?>? processLauncher = null,
-        Func<string, FileSystemWatcher>? watcherFactory = null,
+        Func<string, ILogChangeObserver>? logChangeObserverFactory = null,
         Func<string, Task<bool>>? healthProbe = null)
     {
         return new WindowsScheduledTaskInstaller(
@@ -34,8 +35,9 @@ public class WindowsInstallSpecs
             files,
             commands,
             processLauncher,
-            watcherFactory,
-            healthProbe);
+            logChangeObserverFactory,
+            healthProbe,
+            UserProfile);
     }
 
     private static ServiceInstallOptions InstallOptions(bool dryRun = false, string? repoRoot = "/repo", string? listenUrl = null, string? serverUrl = null, string? runnerRoot = null)
@@ -786,7 +788,7 @@ public class WindowsInstallSpecs
             files,
             new FakeCommandExecutor(),
             output: output,
-            watcherFactory: _ => watcher);
+            logChangeObserverFactory: _ => watcher);
         installer.TestFollowToken = cts.Token;
         installer.TestFollowStarted = () => followStarted.TrySetResult();
 
@@ -798,7 +800,7 @@ public class WindowsInstallSpecs
             "server log follow watcher to start");
 
         files.WriteAllText(ServerLog, "initial\nnew line 1\nnew line 2\n");
-        watcher.RaiseChanged();
+        await watcher.RaiseChangedAsync();
         await TestWait.ForAsync(
             () => output.ToString().Contains("new line 1", StringComparison.Ordinal),
             TimeSpan.FromSeconds(2),
@@ -1175,7 +1177,7 @@ public class WindowsInstallSpecs
             files,
             new FakeCommandExecutor(),
             output: output,
-            watcherFactory: _ => watcher);
+            logChangeObserverFactory: _ => watcher);
         installer.TestFollowToken = cts.Token;
         installer.TestFollowStarted = () => followStarted.TrySetResult();
 
@@ -1187,7 +1189,7 @@ public class WindowsInstallSpecs
             "runner log follow watcher to start");
 
         files.WriteAllText(RunnerLog, "initial\nnew line 1\nnew line 2\n");
-        watcher.RaiseChanged();
+        await watcher.RaiseChangedAsync();
         await TestWait.ForAsync(
             () => output.ToString().Contains("new line 1", StringComparison.Ordinal),
             TimeSpan.FromSeconds(2),
@@ -1354,12 +1356,32 @@ public class WindowsInstallSpecs
         }
     }
 
-    private sealed class FakeFileSystemWatcher : FileSystemWatcher
+    private sealed class FakeFileSystemWatcher : ILogChangeObserver
     {
-        public FakeFileSystemWatcher() : base(".", "*")
+        private readonly Channel<TaskCompletionSource> _changes = Channel.CreateUnbounded<TaskCompletionSource>();
+
+        public async Task ObserveAsync(Func<Task> onChanged, CancellationToken cancellationToken)
         {
+            try
+            {
+                await foreach (var completed in _changes.Reader.ReadAllAsync(cancellationToken))
+                {
+                    await onChanged();
+                    completed.TrySetResult();
+                }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+            }
         }
 
-        public void RaiseChanged() => OnChanged(new FileSystemEventArgs(WatcherChangeTypes.Changed, ".", "*"));
+        public async Task RaiseChangedAsync()
+        {
+            var completed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            await _changes.Writer.WriteAsync(completed);
+            await completed.Task;
+        }
+
+        public void Dispose() => _changes.Writer.TryComplete();
     }
 }

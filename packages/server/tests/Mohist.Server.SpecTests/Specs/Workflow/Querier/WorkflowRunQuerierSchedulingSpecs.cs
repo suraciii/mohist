@@ -420,7 +420,7 @@ public class WorkflowRunQuerierSchedulingSpecs
     {
         var metadata = new WorkflowRunMetadata(
             Name: null,
-            CreatedAt: DateTimeOffset.UtcNow,
+            CreatedAt: TestTime.UtcNow,
             Annotations: new Dictionary<string, string>(StringComparer.Ordinal)
             {
                 ["projectId"] = projectId,
@@ -453,7 +453,7 @@ public class WorkflowRunQuerierSchedulingSpecs
         run.Status = Enum.Parse<WorkflowRunStatus>(status);
         run.Assignment = assignedWorkerId is null
             ? null
-            : new WorkflowAssignment(assignedWorkerId, DateTimeOffset.UtcNow);
+            : new WorkflowAssignment(assignedWorkerId, TestTime.UtcNow);
 
         return JSON.Serialize(run);
     }

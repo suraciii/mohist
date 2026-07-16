@@ -1,7 +1,9 @@
+using System.Text;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Configuration.Json;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Primitives;
 using Mohist.Server.Infrastructure.Config;
 using Mohist.Server.Infrastructure.Hosting;
 using Xunit;
@@ -9,155 +11,196 @@ using Xunit;
 namespace Mohist.Server.UnitTests.SystemSpecs;
 
 [Collection("ConsoleCapture")]
-public class MohistConfigurationExtensionsTests : IDisposable
+public class MohistConfigurationExtensionsTests
 {
-    private readonly List<string> _tempFiles = [];
-
-    public void Dispose()
-    {
-        foreach (var file in _tempFiles)
-        {
-            try { if (File.Exists(file)) File.Delete(file); } catch { /* best effort */ }
-        }
-    }
-
-    private string CreateTempJsonc(string content)
-    {
-        var path = Path.Combine(Path.GetTempPath(), $"mohist-config-ext-{Guid.NewGuid():N}.jsonc");
-        File.WriteAllText(path, content);
-        _tempFiles.Add(path);
-        return path;
-    }
+    private const string ConfigPath = "/mohist-tests/config.jsonc";
 
     [Fact]
     public void AddMohistUserConfigFile_WhenEnvironmentIsTesting_DoesNotRegisterJsonSource()
     {
-        var path = CreateTempJsonc("""{ "Mohist": { "Host": "from-user-file" } }""");
+        var files = new InMemoryFileProvider().AddText(
+            ConfigPath,
+            """{ "Mohist": { "Host": "from-user-file" } }""");
         var environment = new TestHostEnvironment(MohistHostEnvironment.Testing);
 
         var builder = new ConfigurationBuilder();
-        builder.AddMohistUserConfigFile(environment, path: path, optional: true, reloadOnChange: true);
-        var cfg = builder.Build();
+        builder.AddMohistUserConfigFile(
+            environment,
+            ConfigPath,
+            optional: true,
+            reloadOnChange: true,
+            files);
+        var configuration = builder.Build();
 
         Assert.Empty(builder.Sources.OfType<JsonConfigurationSource>());
-        Assert.Null(cfg["Mohist:Host"]);
+        Assert.Null(configuration["Mohist:Host"]);
     }
 
     [Fact]
     public void AddMohistUserConfigFile_WhenEnvironmentIsNotTesting_RegistersJsonSource()
     {
-        var path = CreateTempJsonc("""{ "Mohist": { "Host": "from-user-file" } }""");
+        var files = new InMemoryFileProvider().AddText(
+            ConfigPath,
+            """{ "Mohist": { "Host": "from-user-file" } }""");
         var environment = new TestHostEnvironment(Environments.Production);
 
         var builder = new ConfigurationBuilder();
-        builder.AddMohistUserConfigFile(environment, path: path, optional: true, reloadOnChange: false);
-        var cfg = builder.Build();
+        builder.AddMohistUserConfigFile(
+            environment,
+            ConfigPath,
+            optional: true,
+            reloadOnChange: false,
+            files);
+        var configuration = builder.Build();
 
         Assert.Single(builder.Sources.OfType<JsonConfigurationSource>());
-        Assert.Equal("from-user-file", cfg["Mohist:Host"]);
+        Assert.Equal("from-user-file", configuration["Mohist:Host"]);
     }
 
     [Fact]
     public void AddMohistConfigFile_RegistersJsonConfigurationSourceWithReloadOnChangeTrue()
     {
-        var path = CreateTempJsonc("""{ "Mohist": { "Host": "h" } }""");
-
+        var files = new InMemoryFileProvider().AddText(ConfigPath, "{}");
         var builder = new ConfigurationBuilder();
-        builder.AddMohistConfigFile(path: path, optional: true, reloadOnChange: true);
 
-        var jsonSource = builder.Sources.OfType<JsonConfigurationSource>().SingleOrDefault();
-        Assert.NotNull(jsonSource);
-        Assert.True(jsonSource.ReloadOnChange,
-            "AddMohistConfigFile must wire reloadOnChange into the underlying JsonConfigurationSource");
-        Assert.True(jsonSource.Optional);
+        builder.AddMohistConfigFile(
+            ConfigPath,
+            optional: true,
+            reloadOnChange: true,
+            files);
+
+        var source = Assert.Single(builder.Sources.OfType<JsonConfigurationSource>());
+        Assert.True(source.ReloadOnChange);
+        Assert.True(source.Optional);
+        Assert.Same(files, source.FileProvider);
     }
 
     [Fact]
-    public void AddMohistConfigFile_JsoncWithLineAndBlockCommentsAndTrailingCommas_LoadsEveryConfiguredKey()
+    public void AddMohistConfigFile_JsoncWithCommentsAndTrailingCommas_LoadsEveryConfiguredKey()
     {
-        var path = CreateTempJsonc("""
+        var files = new InMemoryFileProvider().AddText(ConfigPath, """
             // top-level line comment
             {
               /* block comment before Mohist */
               "Mohist": {
-                // nested line comment
                 "WorkspaceCleanup": {
-                  /* block comment between keys */
                   "RetentionDays": 30,
                   "StorageBudgetBytes": 1073741824,
-                  "StorageTargetWatermarkBytes": 536870912, /* inline block, trailing comma follows */
+                  "StorageTargetWatermarkBytes": 536870912,
                 },
               },
             }
             """);
 
-        var cfg = new ConfigurationBuilder()
-            .AddMohistConfigFile(path: path, optional: true, reloadOnChange: false)
+        var configuration = new ConfigurationBuilder()
+            .AddMohistConfigFile(
+                ConfigPath,
+                optional: true,
+                reloadOnChange: false,
+                files)
             .Build();
 
-        Assert.Equal("30", cfg["Mohist:WorkspaceCleanup:RetentionDays"]);
-        Assert.Equal("1073741824", cfg["Mohist:WorkspaceCleanup:StorageBudgetBytes"]);
-        Assert.Equal("536870912", cfg["Mohist:WorkspaceCleanup:StorageTargetWatermarkBytes"]);
+        Assert.Equal("30", configuration["Mohist:WorkspaceCleanup:RetentionDays"]);
+        Assert.Equal("1073741824", configuration["Mohist:WorkspaceCleanup:StorageBudgetBytes"]);
+        Assert.Equal("536870912", configuration["Mohist:WorkspaceCleanup:StorageTargetWatermarkBytes"]);
     }
 
     [Fact]
     public void AddMohistConfigFile_MissingFile_BuildsWithoutThrowing()
     {
-        var missing = Path.Combine(Path.GetTempPath(), $"mohist-missing-{Guid.NewGuid():N}.jsonc");
-
-        var cfg = new ConfigurationBuilder()
-            .AddMohistConfigFile(path: missing, optional: true, reloadOnChange: false)
+        var configuration = new ConfigurationBuilder()
+            .AddMohistConfigFile(
+                ConfigPath,
+                optional: true,
+                reloadOnChange: false,
+                new InMemoryFileProvider())
             .Build();
 
-        Assert.Null(cfg["Mohist:Host"]);
+        Assert.Null(configuration["Mohist:Host"]);
     }
 
     [Fact]
     public void AddMohistConfigFile_MalformedFile_BuildsWithoutThrowingAndFallsBackToEmpty()
     {
-        // Capture the OnLoadException warning we deliberately write to stderr so the
-        // test output is not polluted by the expected warning under success.
-        var originalErr = Console.Error;
-        var capturedErr = new StringWriter();
-        Console.SetError(capturedErr);
+        var originalError = Console.Error;
+        var capturedError = new StringWriter();
+        Console.SetError(capturedError);
         try
         {
-            var path = CreateTempJsonc("{ not valid jsonc");
+            var files = new InMemoryFileProvider().AddText(ConfigPath, "{ not valid jsonc");
+            var configuration = new ConfigurationBuilder()
+                .AddMohistConfigFile(
+                    ConfigPath,
+                    optional: true,
+                    reloadOnChange: false,
+                    files)
+                .Build();
 
-            var builder = new ConfigurationBuilder();
-            builder.AddMohistConfigFile(path: path, optional: true, reloadOnChange: false);
-            var cfg = builder.Build();
-
-            // Host starts; no exception escaped; defaults / other sources still queryable.
-            Assert.Null(cfg["Mohist:Host"]);
-
-            // The OnLoadException handler fired and logged to stderr.
-            var stderr = capturedErr.ToString();
-            Assert.Contains("[mohist-config]", stderr, StringComparison.Ordinal);
+            Assert.Null(configuration["Mohist:Host"]);
+            Assert.Contains("[mohist-config]", capturedError.ToString(), StringComparison.Ordinal);
         }
         finally
         {
-            Console.SetError(originalErr);
+            Console.SetError(originalError);
         }
     }
 
     [Fact]
     public void AddMohistConfigFile_ReloadOnChangeFalse_PassesThroughToJsonSource()
     {
-        var path = CreateTempJsonc("""{ "Mohist": { "Host": "h" } }""");
-
         var builder = new ConfigurationBuilder();
-        builder.AddMohistConfigFile(path: path, optional: true, reloadOnChange: false);
 
-        var jsonSource = builder.Sources.OfType<JsonConfigurationSource>().Single();
-        Assert.False(jsonSource.ReloadOnChange);
+        builder.AddMohistConfigFile(
+            ConfigPath,
+            optional: true,
+            reloadOnChange: false,
+            new InMemoryFileProvider().AddText(ConfigPath, "{}"));
+
+        Assert.False(Assert.Single(builder.Sources.OfType<JsonConfigurationSource>()).ReloadOnChange);
+    }
+
+    private sealed class InMemoryFileProvider : IFileProvider
+    {
+        private readonly Dictionary<string, byte[]> _files = new(StringComparer.Ordinal);
+
+        public InMemoryFileProvider AddText(string path, string content)
+        {
+            _files[Normalize(path)] = Encoding.UTF8.GetBytes(content);
+            return this;
+        }
+
+        public IDirectoryContents GetDirectoryContents(string subpath) =>
+            NotFoundDirectoryContents.Singleton;
+
+        public IFileInfo GetFileInfo(string subpath)
+        {
+            var path = Normalize(subpath);
+            return _files.TryGetValue(path, out var content)
+                ? new InMemoryFileInfo(path, content)
+                : new NotFoundFileInfo(path);
+        }
+
+        public IChangeToken Watch(string filter) => NullChangeToken.Singleton;
+
+        private static string Normalize(string path) => path.TrimStart('/');
+
+        private sealed class InMemoryFileInfo(string name, byte[] content) : IFileInfo
+        {
+            public bool Exists => true;
+            public long Length => content.LongLength;
+            public string? PhysicalPath => null;
+            public string Name => name;
+            public DateTimeOffset LastModified => DateTimeOffset.UnixEpoch;
+            public bool IsDirectory => false;
+            public Stream CreateReadStream() => new MemoryStream(content, writable: false);
+        }
     }
 
     private sealed class TestHostEnvironment(string environmentName) : IHostEnvironment
     {
         public string EnvironmentName { get; set; } = environmentName;
-        public string ApplicationName { get; set; } = "Mohist.Server.SpecTests";
-        public string ContentRootPath { get; set; } = Directory.GetCurrentDirectory();
+        public string ApplicationName { get; set; } = "Mohist.Server.UnitTests";
+        public string ContentRootPath { get; set; } = "/mohist-tests";
         public IFileProvider ContentRootFileProvider { get; set; } = new NullFileProvider();
     }
 }

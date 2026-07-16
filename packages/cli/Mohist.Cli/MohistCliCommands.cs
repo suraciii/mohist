@@ -126,10 +126,20 @@ internal static class MohistCliCommands
 
     internal static string Escape(string value) => Uri.EscapeDataString(value);
 
-    internal static Task<int> RunAsync(HttpClient http, string[] args, TextWriter output, TextWriter error, IFileSystem fileSystem, ICommandExecutor commandExecutor, IEnvironmentVariableProvider? environment = null, TextReader? standardInput = null, IOtelQueryExecutor? queryExecutor = null, IServiceInstaller? installer = null, SourceCodeUpdater? updater = null)
+    internal static Task<int> RunAsync(HttpClient http, string[] args, TextWriter output, TextWriter error, IFileSystem fileSystem, ICommandExecutor commandExecutor, IEnvironmentVariableProvider? environment = null, TextReader? standardInput = null, IOtelQueryExecutor? queryExecutor = null, IServiceInstaller? installer = null, SourceCodeUpdater? updater = null, Func<string>? getUserHome = null)
     {
         environment ??= SystemEnvironmentVariableProvider.Instance;
-        var api = new MohistCliApi(http, output, error, fileSystem, commandExecutor, standardInput);
+        getUserHome ??= fileSystem is RealFileSystem
+            ? null
+            : () => "/mohist-tests/user";
+        var api = new MohistCliApi(
+            http,
+            output,
+            error,
+            fileSystem,
+            commandExecutor,
+            standardInput,
+            getUserHome);
         var services = new ServiceCollection();
         services.AddSingleton(api);
         services.AddSingleton(output);

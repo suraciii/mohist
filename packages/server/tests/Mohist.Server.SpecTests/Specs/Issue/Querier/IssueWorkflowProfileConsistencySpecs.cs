@@ -41,8 +41,8 @@ public class IssueWorkflowProfileConsistencySpecs
         {
             Id = project.Id,
             Name = project.Name,
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow,
+            CreatedAt = TestTime.UtcDateTime,
+            UpdatedAt = TestTime.UtcDateTime,
         });
         var issue = new Mohist.Server.Issue.Domain.Issue
         {
@@ -81,8 +81,8 @@ public class IssueWorkflowProfileConsistencySpecs
         {
             Id = project.Id,
             Name = project.Name,
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow,
+            CreatedAt = TestTime.UtcDateTime,
+            UpdatedAt = TestTime.UtcDateTime,
         });
         var issue = new Mohist.Server.Issue.Domain.Issue
         {
@@ -122,8 +122,8 @@ public class IssueWorkflowProfileConsistencySpecs
         {
             Id = project.Id,
             Name = project.Name,
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow,
+            CreatedAt = TestTime.UtcDateTime,
+            UpdatedAt = TestTime.UtcDateTime,
         });
         var issue = new Mohist.Server.Issue.Domain.Issue
         {
@@ -163,8 +163,8 @@ public class IssueWorkflowProfileConsistencySpecs
         {
             Id = project.Id,
             Name = project.Name,
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow,
+            CreatedAt = TestTime.UtcDateTime,
+            UpdatedAt = TestTime.UtcDateTime,
         });
         var issue = new Mohist.Server.Issue.Domain.Issue
         {
@@ -207,8 +207,8 @@ public class IssueWorkflowProfileConsistencySpecs
         {
             Id = project.Id,
             Name = project.Name,
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow,
+            CreatedAt = TestTime.UtcDateTime,
+            UpdatedAt = TestTime.UtcDateTime,
         });
         // Manually craft state so we can simulate a legacy/corrupted row
         // pointing at an id that is not in the registry. The aggregate
@@ -251,8 +251,8 @@ public class IssueWorkflowProfileConsistencySpecs
         {
             Id = project.Id,
             Name = project.Name,
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow,
+            CreatedAt = TestTime.UtcDateTime,
+            UpdatedAt = TestTime.UtcDateTime,
         });
         db.ProjectWorkflowProfiles.Add(new ProjectWorkflowProfile
         {

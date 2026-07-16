@@ -1,0 +1,7 @@
+P:System.DateTime.Now; Read time through TimeProvider.
+P:System.DateTime.Today; Read time through TimeProvider.
+P:System.DateTimeOffset.Now; Read time through TimeProvider.
+M:System.Threading.Tasks.Task.Yield; Await an explicit completion signal instead of yielding to the scheduler.
+M:System.Threading.Thread.Sleep(System.Int32); Use TimeProvider-backed scheduling or an explicit completion signal.
+M:System.Threading.Thread.Sleep(System.TimeSpan); Use TimeProvider-backed scheduling or an explicit completion signal.
+M:System.Threading.SpinWait.SpinOnce; Await an explicit completion signal instead of spinning.

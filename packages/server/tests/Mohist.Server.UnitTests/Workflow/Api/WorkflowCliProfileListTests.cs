@@ -302,7 +302,7 @@ public class WorkflowCliProfileListTests
             stdout,
             stderr,
             new FakeFileSystem(),
-            new SystemCommandExecutor(),
+            new NoopCommandExecutor(),
             new MockEnvironmentVariableProvider());
 
         Assert.True(exitCode == 0, $"help exit={exitCode} stderr:\n{stderr}");
@@ -331,7 +331,7 @@ public class WorkflowCliProfileListTests
             stdout,
             stderr,
             files,
-            new SystemCommandExecutor(),
+            new NoopCommandExecutor(),
             environment);
 
         return (exitCode, stdout.ToString(), stderr.ToString());

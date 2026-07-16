@@ -167,7 +167,7 @@ public class EpicQuerierListAsyncSpecs
     {
         await using var database = CreateDatabase();
         await SeedEpicAsync(database, "proj_1", "epic_1", 1);
-        await SeedIssueAsync(database, "proj_1", "issue_1", 1, IssueStatus.Done, archivedAt: DateTime.UtcNow);
+        await SeedIssueAsync(database, "proj_1", "issue_1", 1, IssueStatus.Done, archivedAt: TestTime.UtcDateTime);
         await SeedLinkAsync(database, "epic_1", "issue_1", 1, "proj_1");
 
         var querier = new EpicQuerier(database.Factory, new ThrowingIssueQuerier());
@@ -331,7 +331,7 @@ public class EpicQuerierListAsyncSpecs
 
     private static async Task SeedEpicAsync(TestDatabase database, string projectId, string epicId, int number, string priority = "p2", DateTimeOffset? updatedAt = null)
     {
-        var now = updatedAt ?? DateTimeOffset.UtcNow;
+        var now = updatedAt ?? TestTime.UtcNow;
         await using var db = database.CreateDbContext();
         db.Epics.Add(new EpicRow
         {
@@ -370,8 +370,8 @@ public class EpicQuerierListAsyncSpecs
             IsDraft = isDraft,
             PrerequisiteNumbers = prerequisiteNumbers ?? [],
             ArchivedAt = archivedAt,
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow,
+            CreatedAt = TestTime.UtcDateTime,
+            UpdatedAt = TestTime.UtcDateTime,
         };
         var json = IssueStore.Serialize(issue);
         await using var db = database.CreateDbContext();
@@ -392,7 +392,7 @@ public class EpicQuerierListAsyncSpecs
             ProjectId = projectId,
             IssueId = issueId,
             IssueNumber = issueNumber,
-            CreatedAt = DateTimeOffset.UtcNow,
+            CreatedAt = TestTime.UtcNow,
         });
         await db.SaveChangesAsync();
     }

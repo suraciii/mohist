@@ -466,7 +466,7 @@ public class IssueWorkflowProfileStorageIntegritySpecs : IAsyncLifetime
         {
             IssueId = issueId,
             Variables = variablesJson,
-            UpdatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = TestTime.UtcNow,
         });
         await db.SaveChangesAsync();
     }

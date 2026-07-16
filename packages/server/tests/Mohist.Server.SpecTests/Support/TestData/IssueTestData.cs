@@ -8,7 +8,7 @@ namespace Mohist.Server.SpecTests.Support.TestData;
 /// Centralized factory methods for the <see cref="Mohist.Server.Issue.Domain.Issue"/>
 /// domain object and its <see cref="ProjectInfo"/>. Replaces inline
 /// <c>private static Issue Create*</c> methods scattered across spec files.
-/// All factories are deterministic (no random IDs, no <c>DateTime.UtcNow</c>)
+/// All factories are deterministic (no random IDs, no <c>TestTime.UtcDateTime</c>)
 /// so test failure snapshots are reproducible.
 /// </summary>
 public static class IssueTestData

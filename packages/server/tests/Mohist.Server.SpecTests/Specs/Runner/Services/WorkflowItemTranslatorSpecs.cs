@@ -311,8 +311,8 @@ public class WorkflowItemTranslatorSpecs : IAsyncLifetime
                 Kind = "file",
                 Size = 5,
                 ContentType = "text/markdown",
-                CreatedAt = DateTimeOffset.UtcNow,
-                ExpiresAt = DateTimeOffset.UtcNow.AddHours(1),
+                CreatedAt = TestTime.UtcNow,
+                ExpiresAt = TestTime.UtcNow.AddHours(1),
                 StoragePath = "/tmp/review.md",
             });
             await db.SaveChangesAsync();

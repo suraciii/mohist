@@ -141,7 +141,7 @@ public class AgentJobRoutesSpecs
             time,
             CancellationToken.None);
 
-        await Task.Yield();
+        await grain.Submitted;
         Assert.False(responseTask.IsCompleted);
         time.Advance(TimeSpan.FromSeconds(38));
 
@@ -223,7 +223,9 @@ internal sealed class TerminalAgentJobGrain : IAgentJobGrain
 
 internal sealed class PendingAgentJobGrain : IAgentJobGrain
 {
+    private readonly TaskCompletionSource _submitted = new(TaskCreationOptions.RunContinuationsAsynchronously);
     public int SubmitCount { get; private set; }
+    public Task Submitted => _submitted.Task;
     private string? _failureReason;
 
     public Task<bool> IsWorkRunnableAsync(string runnerId, string workId) => Task.FromResult(false);
@@ -234,6 +236,7 @@ internal sealed class PendingAgentJobGrain : IAgentJobGrain
     public Task SubmitAsync(AgentJobInput input)
     {
         SubmitCount++;
+        _submitted.TrySetResult();
         return Task.CompletedTask;
     }
     public Task EnsureSubmittedAsync(AgentJobInput input) => SubmitAsync(input);

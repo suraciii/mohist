@@ -11,253 +11,221 @@ public class UpdateTests
     [Fact]
     public async Task UpdateAll_UpdatesCliThenContinuesWithRefreshedProcess()
     {
-        var tempRoot = Path.Combine(Path.GetTempPath(), $"mohist-update-all-{Guid.NewGuid():N}");
+        var tempRoot = "/mohist-tests/mohist-update-all";
         var files = new FakeFileSystem();
         WritePackagedSkillAssets(files, Path.Combine(tempRoot, ".publish", "cli", "skill-data"));
         WriteRunnerUnit(files, "/units");
 
-        try
-        {
 
-            var commands = new FakeCommandExecutor();
-            commands.SetStdoutFor(
+        var commands = new FakeCommandExecutor();
+        commands.SetStdoutFor(
+            "/home/user/.local/bin/mo",
+            args => args.SequenceEqual([
+                "update",
+                "--continue-after-cli-update",
+                "--cli-path",
                 "/home/user/.local/bin/mo",
-                args => args.SequenceEqual([
-                    "update",
-                    "--continue-after-cli-update",
-                    "--cli-path",
-                    "/home/user/.local/bin/mo",
-                    "--repo-root",
-                    tempRoot,
-                ]),
-                "continued update output\n");
-            var installer = new SystemdServiceInstaller(
-                new StringWriter(),
-                new StringWriter(),
-                files,
-                commands);
-            var http = new HttpClient(SequenceHttpHandler.WithSystemInfo(HealthySystemInfoJson(runningGitHash: "testsha"), new ResponseSpec(HttpStatusCode.OK)))
-            {
-                BaseAddress = new Uri("http://localhost:3456"),
-            };
-            var updater = SourceCodeUpdater.CreateWithDefaults(
-                new StringWriter(),
-                new StringWriter(),
-                installer,
-                commands,
-                files,
-                new MockEnvironmentVariableProvider(),
-                http,
-                getUserHome: () => tempRoot,
-                unitDir: "/units");
-
-            var exitCode = await updater.UpdateAllAsync(tempRoot, dryRun: false, cliPath: "/home/user/.local/bin/mo");
-
-            var explicitCli = "/home/user/.local/bin/mo";
-            var wrapper = Path.Combine(tempRoot, ".local", "bin", "mo").Replace('\\', '/');
-            Assert.Equal(0, exitCode);
-            Assert.Equal("dotnet", commands.ExecutedCommands[0].FileName);
-            Assert.Equal("publish", commands.ExecutedCommands[0].Args[0]);
-            Assert.Equal("cp", commands.ExecutedCommands[1].FileName);
-            Assert.Equal(explicitCli + ".tmp", commands.ExecutedCommands[1].Args[1]);
-            Assert.Equal("chmod", commands.ExecutedCommands[2].FileName);
-            Assert.Equal("mv", commands.ExecutedCommands[3].FileName);
-            Assert.Equal(explicitCli, commands.ExecutedCommands[3].Args[1]);
-            Assert.DoesNotContain(commands.ExecutedCommands, c => c.FileName == "chmod" && c.Args.SequenceEqual(["+x", wrapper]));
-            Assert.Contains(commands.ExecutedCommands, c =>
-                c.FileName == explicitCli
-                && c.WorkingDirectory == tempRoot
-                && c.Args.SequenceEqual([
-                    "update",
-                    "--continue-after-cli-update",
-                    "--cli-path",
-                    explicitCli,
-                    "--repo-root",
-                    tempRoot,
-                ]));
-            Assert.DoesNotContain(commands.ExecutedCommands, c =>
-                c.FileName == "systemctl" && c.Args.SequenceEqual(["--user", "stop", "mohist-runner.service"]));
-            Assert.DoesNotContain(commands.ExecutedCommands, c =>
-                c.FileName == "dotnet" && c.Args.SequenceEqual(["build", "Mohist.sln"]));
-            Assert.DoesNotContain(commands.ExecutedCommands, c => c.FileName == "npm");
-            Assert.DoesNotContain(commands.ExecutedCommands, c => c.FileName == "git" && c.Args.SequenceEqual(["pull"]));
-            AssertManagedSkillAssetsSynced(files, tempRoot);
-        }
-        finally
+                "--repo-root",
+                tempRoot,
+            ]),
+            "continued update output\n");
+        var installer = new SystemdServiceInstaller(
+            new StringWriter(),
+            new StringWriter(),
+            files,
+            commands);
+        var http = new HttpClient(SequenceHttpHandler.WithSystemInfo(HealthySystemInfoJson(runningGitHash: "testsha"), new ResponseSpec(HttpStatusCode.OK)))
         {
-            if (Directory.Exists(tempRoot))
-                Directory.Delete(tempRoot, recursive: true);
-        }
+            BaseAddress = new Uri("http://localhost:3456"),
+        };
+        var updater = SourceCodeUpdater.CreateWithDefaults(
+            new StringWriter(),
+            new StringWriter(),
+            installer,
+            commands,
+            files,
+            new MockEnvironmentVariableProvider(),
+            http,
+            getUserHome: () => tempRoot,
+            unitDir: "/units");
+
+        var exitCode = await updater.UpdateAllAsync(tempRoot, dryRun: false, cliPath: "/home/user/.local/bin/mo");
+
+        var explicitCli = "/home/user/.local/bin/mo";
+        var wrapper = Path.Combine(tempRoot, ".local", "bin", "mo").Replace('\\', '/');
+        Assert.Equal(0, exitCode);
+        Assert.Equal("dotnet", commands.ExecutedCommands[0].FileName);
+        Assert.Equal("publish", commands.ExecutedCommands[0].Args[0]);
+        Assert.Equal("cp", commands.ExecutedCommands[1].FileName);
+        Assert.Equal(explicitCli + ".tmp", commands.ExecutedCommands[1].Args[1]);
+        Assert.Equal("chmod", commands.ExecutedCommands[2].FileName);
+        Assert.Equal("mv", commands.ExecutedCommands[3].FileName);
+        Assert.Equal(explicitCli, commands.ExecutedCommands[3].Args[1]);
+        Assert.DoesNotContain(commands.ExecutedCommands, c => c.FileName == "chmod" && c.Args.SequenceEqual(["+x", wrapper]));
+        Assert.Contains(commands.ExecutedCommands, c =>
+            c.FileName == explicitCli
+            && c.WorkingDirectory == tempRoot
+            && c.Args.SequenceEqual([
+                "update",
+                "--continue-after-cli-update",
+                "--cli-path",
+                explicitCli,
+                "--repo-root",
+                tempRoot,
+            ]));
+        Assert.DoesNotContain(commands.ExecutedCommands, c =>
+            c.FileName == "systemctl" && c.Args.SequenceEqual(["--user", "stop", "mohist-runner.service"]));
+        Assert.DoesNotContain(commands.ExecutedCommands, c =>
+            c.FileName == "dotnet" && c.Args.SequenceEqual(["build", "Mohist.sln"]));
+        Assert.DoesNotContain(commands.ExecutedCommands, c => c.FileName == "npm");
+        Assert.DoesNotContain(commands.ExecutedCommands, c => c.FileName == "git" && c.Args.SequenceEqual(["pull"]));
+        AssertManagedSkillAssetsSynced(files, tempRoot);
     }
 
     [Fact]
     public async Task UpdateAll_WhenContinuingAfterCliUpdate_UpdatesServerAndRunnerWithoutPulling()
     {
-        var tempRoot = Path.Combine(Path.GetTempPath(), $"mohist-update-all-continue-{Guid.NewGuid():N}");
+        var tempRoot = "/mohist-tests/mohist-update-all-continue";
         var files = new FakeFileSystem();
         WritePackagedSkillAssets(files, Path.Combine(tempRoot, ".publish", "cli", "skill-data"));
         WriteRunnerUnit(files, "/units");
 
-        try
+        var commands = new FakeCommandExecutor();
+        commands.SetStdoutFor("systemctl", args => args.Length >= 3 && args[1] == "is-active", "active\n");
+        commands.SetStdoutFor("/home/user/.local/bin/mo", _ => true, "1.0.0+testsha");
+        commands.SetStdoutFor("git", _ => true, "testsha");
+        var installer = new SystemdServiceInstaller(
+            new StringWriter(),
+            new StringWriter(),
+            files,
+            commands);
+        var http = new HttpClient(SequenceHttpHandler.WithSystemInfo(HealthySystemInfoJson(runningGitHash: "testsha"), new ResponseSpec(HttpStatusCode.OK)))
         {
-            var commands = new FakeCommandExecutor();
-            commands.SetStdoutFor("systemctl", args => args.Length >= 3 && args[1] == "is-active", "active\n");
-            commands.SetStdoutFor("/home/user/.local/bin/mo", _ => true, "1.0.0+testsha");
-            commands.SetStdoutFor("git", _ => true, "testsha");
-            var installer = new SystemdServiceInstaller(
-                new StringWriter(),
-                new StringWriter(),
-                files,
-                commands);
-            var http = new HttpClient(SequenceHttpHandler.WithSystemInfo(HealthySystemInfoJson(runningGitHash: "testsha"), new ResponseSpec(HttpStatusCode.OK)))
-            {
-                BaseAddress = new Uri("http://localhost:3456"),
-            };
-            var updater = SourceCodeUpdater.CreateWithDefaults(
-                new StringWriter(),
-                new StringWriter(),
-                installer,
-                commands,
-                files,
-                new MockEnvironmentVariableProvider(),
-                http,
-                getUserHome: () => tempRoot,
-                unitDir: "/units");
+            BaseAddress = new Uri("http://localhost:3456"),
+        };
+        var updater = SourceCodeUpdater.CreateWithDefaults(
+            new StringWriter(),
+            new StringWriter(),
+            installer,
+            commands,
+            files,
+            new MockEnvironmentVariableProvider(),
+            http,
+            getUserHome: () => tempRoot,
+            unitDir: "/units");
 
-            var exitCode = await updater.UpdateAllAsync(
-                tempRoot,
-                dryRun: false,
-                cliPath: "/home/user/.local/bin/mo",
-                continueAfterCliUpdate: true);
+        var exitCode = await updater.UpdateAllAsync(
+            tempRoot,
+            dryRun: false,
+            cliPath: "/home/user/.local/bin/mo",
+            continueAfterCliUpdate: true);
 
-            Assert.Equal(0, exitCode);
-            Assert.DoesNotContain(commands.ExecutedCommands, c =>
-                c.FileName == "dotnet" && c.Args.Length > 0 && c.Args[0] == "publish");
-            Assert.Contains(commands.ExecutedCommands, c =>
-                c.FileName == "systemctl" && c.Args.SequenceEqual(["--user", "is-active", "mohist-runner.service"]));
-            Assert.Contains(commands.ExecutedCommands, c =>
-                c.FileName == "systemctl" && c.Args.SequenceEqual(["--user", "stop", "mohist-runner.service"]));
-            Assert.Contains(commands.ExecutedCommands, c =>
-                c.FileName == "dotnet" && c.Args.SequenceEqual(["build", "Mohist.sln"]));
-            Assert.Contains(commands.ExecutedCommands, c =>
-                c.FileName == "systemctl" && c.Args.SequenceEqual(["--user", "restart", "mohist.service"]));
-            Assert.Contains(commands.ExecutedCommands, c => c.FileName == "npm");
-            Assert.Contains(commands.ExecutedCommands, c =>
-                c.FileName == "systemctl" && c.Args.SequenceEqual(["--user", "start", "mohist-runner.service"]));
-            Assert.Contains(commands.ExecutedCommands, c =>
-                c.FileName == "git" && c.Args.SequenceEqual(["rev-parse", "HEAD"]));
-            Assert.DoesNotContain(commands.ExecutedCommands, c => c.FileName == "git" && c.Args.SequenceEqual(["pull"]));
-        }
-        finally
-        {
-            if (Directory.Exists(tempRoot))
-                Directory.Delete(tempRoot, recursive: true);
-        }
+        Assert.Equal(0, exitCode);
+        Assert.DoesNotContain(commands.ExecutedCommands, c =>
+            c.FileName == "dotnet" && c.Args.Length > 0 && c.Args[0] == "publish");
+        Assert.Contains(commands.ExecutedCommands, c =>
+            c.FileName == "systemctl" && c.Args.SequenceEqual(["--user", "is-active", "mohist-runner.service"]));
+        Assert.Contains(commands.ExecutedCommands, c =>
+            c.FileName == "systemctl" && c.Args.SequenceEqual(["--user", "stop", "mohist-runner.service"]));
+        Assert.Contains(commands.ExecutedCommands, c =>
+            c.FileName == "dotnet" && c.Args.SequenceEqual(["build", "Mohist.sln"]));
+        Assert.Contains(commands.ExecutedCommands, c =>
+            c.FileName == "systemctl" && c.Args.SequenceEqual(["--user", "restart", "mohist.service"]));
+        Assert.Contains(commands.ExecutedCommands, c => c.FileName == "npm");
+        Assert.Contains(commands.ExecutedCommands, c =>
+            c.FileName == "systemctl" && c.Args.SequenceEqual(["--user", "start", "mohist-runner.service"]));
+        Assert.Contains(commands.ExecutedCommands, c =>
+            c.FileName == "git" && c.Args.SequenceEqual(["rev-parse", "HEAD"]));
+        Assert.DoesNotContain(commands.ExecutedCommands, c => c.FileName == "git" && c.Args.SequenceEqual(["pull"]));
     }
 
     [Fact]
     public async Task UpdateAll_WhenRunnerNotInstalled_SkipsRunnerRefreshAfterServerUpdate()
     {
-        var tempRoot = Path.Combine(Path.GetTempPath(), $"mohist-update-all-no-runner-{Guid.NewGuid():N}");
+        var tempRoot = "/mohist-tests/mohist-update-all-no-runner";
         var files = new FakeFileSystem();
         WritePackagedSkillAssets(files, Path.Combine(tempRoot, ".publish", "cli", "skill-data"));
 
-        try
-        {
-            var commands = new FakeCommandExecutor();
-            var stdout = new StringWriter();
-            var stderr = new StringWriter();
-            var installer = new SystemdServiceInstaller(
-                stdout,
-                stderr,
-                files,
-                commands);
-            var updater = SourceCodeUpdater.CreateWithDefaults(
-                stdout,
-                stderr,
-                installer,
-                commands,
-                files,
-                new MockEnvironmentVariableProvider(),
-                new HttpClient(new SequenceHttpHandler(HttpStatusCode.OK))
-                {
-                    BaseAddress = new Uri("http://localhost:3456"),
-                },
-                getUserHome: () => tempRoot);
+        var commands = new FakeCommandExecutor();
+        var stdout = new StringWriter();
+        var stderr = new StringWriter();
+        var installer = new SystemdServiceInstaller(
+            stdout,
+            stderr,
+            files,
+            commands);
+        var updater = SourceCodeUpdater.CreateWithDefaults(
+            stdout,
+            stderr,
+            installer,
+            commands,
+            files,
+            new MockEnvironmentVariableProvider(),
+            new HttpClient(new SequenceHttpHandler(HttpStatusCode.OK))
+            {
+                BaseAddress = new Uri("http://localhost:3456"),
+            },
+            getUserHome: () => tempRoot);
 
-            var exitCode = await updater.UpdateAllAsync(tempRoot, dryRun: false, cliPath: "/home/user/.local/bin/mo", continueAfterCliUpdate: true);
+        var exitCode = await updater.UpdateAllAsync(tempRoot, dryRun: false, cliPath: "/home/user/.local/bin/mo", continueAfterCliUpdate: true);
 
-            Assert.Equal(0, exitCode);
-            Assert.DoesNotContain(commands.ExecutedCommands, c =>
-                c.FileName == "systemctl" && c.Args.SequenceEqual(["--user", "stop", "mohist-runner.service"]));
-            Assert.Contains(commands.ExecutedCommands, c =>
-                c.FileName == "dotnet" && c.Args.SequenceEqual(["build", "Mohist.sln"]));
-            Assert.DoesNotContain(commands.ExecutedCommands, c => c.FileName == "npm");
-            var output = stdout.ToString();
-            Assert.Contains("Runner service is not installed; skipping pre-server runner stop.", output);
-            Assert.Contains("Runner refresh skipped: runner service is not installed", output);
-            Assert.Contains("runner-refresh-skipped(runner service is not installed)", output);
-        }
-        finally
-        {
-            if (Directory.Exists(tempRoot))
-                Directory.Delete(tempRoot, recursive: true);
-        }
+        Assert.Equal(0, exitCode);
+        Assert.DoesNotContain(commands.ExecutedCommands, c =>
+            c.FileName == "systemctl" && c.Args.SequenceEqual(["--user", "stop", "mohist-runner.service"]));
+        Assert.Contains(commands.ExecutedCommands, c =>
+            c.FileName == "dotnet" && c.Args.SequenceEqual(["build", "Mohist.sln"]));
+        Assert.DoesNotContain(commands.ExecutedCommands, c => c.FileName == "npm");
+        var output = stdout.ToString();
+        Assert.Contains("Runner service is not installed; skipping pre-server runner stop.", output);
+        Assert.Contains("Runner refresh skipped: runner service is not installed", output);
+        Assert.Contains("runner-refresh-skipped(runner service is not installed)", output);
     }
 
     [Fact]
     public async Task UpdateCli_PublishesAndReplacesResolvedMoBinary()
     {
-        var tempRoot = Path.Combine(Path.GetTempPath(), $"mohist-update-cli-{Guid.NewGuid():N}");
+        var tempRoot = "/mohist-tests/mohist-update-cli";
         var files = new FakeFileSystem();
         WritePackagedSkillAssets(files, Path.Combine(tempRoot, ".publish", "cli", "skill-data"));
 
-        try
-        {
 
-            var commands = new FakeCommandExecutor();
-            var installer = new SystemdServiceInstaller(
-                new StringWriter(),
-                new StringWriter(),
-                files,
-                commands);
-            var updater = SourceCodeUpdater.CreateWithDefaults(
-                new StringWriter(),
-                new StringWriter(),
-                installer,
-                commands,
-                files,
-                new MockEnvironmentVariableProvider(),
-                new HttpClient(new SequenceHttpHandler(HttpStatusCode.OK))
-                {
-                    BaseAddress = new Uri("http://localhost:3456"),
-                },
-                getUserHome: () => tempRoot,
-                unitDir: "/units");
+        var commands = new FakeCommandExecutor();
+        var installer = new SystemdServiceInstaller(
+            new StringWriter(),
+            new StringWriter(),
+            files,
+            commands);
+        var updater = SourceCodeUpdater.CreateWithDefaults(
+            new StringWriter(),
+            new StringWriter(),
+            installer,
+            commands,
+            files,
+            new MockEnvironmentVariableProvider(),
+            new HttpClient(new SequenceHttpHandler(HttpStatusCode.OK))
+            {
+                BaseAddress = new Uri("http://localhost:3456"),
+            },
+            getUserHome: () => tempRoot,
+            unitDir: "/units");
 
-            var exitCode = await updater.UpdateCliAsync(tempRoot, dryRun: false);
+        var exitCode = await updater.UpdateCliAsync(tempRoot, dryRun: false);
 
-            var managedCli = Path.Combine(tempRoot, ".local", "share", "mohist", "cli", "mo").Replace('\\', '/');
-            var wrapper = Path.Combine(tempRoot, ".local", "bin", "mo").Replace('\\', '/');
-            Assert.Equal(0, exitCode);
-            Assert.Equal("dotnet", commands.ExecutedCommands[0].FileName);
-            Assert.Equal("publish", commands.ExecutedCommands[0].Args[0]);
-            Assert.Equal("cp", commands.ExecutedCommands[1].FileName);
-            Assert.Equal(managedCli + ".tmp", commands.ExecutedCommands[1].Args[1]);
-            Assert.Equal("chmod", commands.ExecutedCommands[2].FileName);
-            Assert.Equal("mv", commands.ExecutedCommands[3].FileName);
-            Assert.Equal(managedCli, commands.ExecutedCommands[3].Args[1]);
-            Assert.Equal("chmod", commands.ExecutedCommands[4].FileName);
-            Assert.Equal("+x", commands.ExecutedCommands[4].Args[0]);
-            Assert.Equal(wrapper + ".tmp", commands.ExecutedCommands[4].Args[1]);
-            Assert.Equal($"#!/bin/sh{Environment.NewLine}exec \"{managedCli}\" \"$@\"{Environment.NewLine}", files.ReadAllText(wrapper));
-            AssertManagedSkillAssetsSynced(files, tempRoot);
-        }
-        finally
-        {
-            if (Directory.Exists(tempRoot))
-                Directory.Delete(tempRoot, recursive: true);
-        }
+        var managedCli = Path.Combine(tempRoot, ".local", "share", "mohist", "cli", "mo").Replace('\\', '/');
+        var wrapper = Path.Combine(tempRoot, ".local", "bin", "mo").Replace('\\', '/');
+        Assert.Equal(0, exitCode);
+        Assert.Equal("dotnet", commands.ExecutedCommands[0].FileName);
+        Assert.Equal("publish", commands.ExecutedCommands[0].Args[0]);
+        Assert.Equal("cp", commands.ExecutedCommands[1].FileName);
+        Assert.Equal(managedCli + ".tmp", commands.ExecutedCommands[1].Args[1]);
+        Assert.Equal("chmod", commands.ExecutedCommands[2].FileName);
+        Assert.Equal("mv", commands.ExecutedCommands[3].FileName);
+        Assert.Equal(managedCli, commands.ExecutedCommands[3].Args[1]);
+        Assert.Equal("chmod", commands.ExecutedCommands[4].FileName);
+        Assert.Equal("+x", commands.ExecutedCommands[4].Args[0]);
+        Assert.Equal(wrapper + ".tmp", commands.ExecutedCommands[4].Args[1]);
+        Assert.Equal($"#!/bin/sh{Environment.NewLine}exec \"{managedCli}\" \"$@\"{Environment.NewLine}", files.ReadAllText(wrapper));
+        AssertManagedSkillAssetsSynced(files, tempRoot);
     }
 
     [Fact]
@@ -783,310 +751,262 @@ public class UpdateTests
     [Fact]
     public async Task UpdateAll_WhenServerUpdateFailsAfterStoppingRunner_RestoresRunner()
     {
-        var tempRoot = Path.Combine(Path.GetTempPath(), $"mohist-update-all-fail1-{Guid.NewGuid():N}");
+        var tempRoot = "/mohist-tests/mohist-update-all-fail1";
         var files = new FakeFileSystem();
         WritePackagedSkillAssets(files, Path.Combine(tempRoot, ".publish", "cli", "skill-data"));
         WriteRunnerUnit(files, "/units");
 
-        try
-        {
 
-            var commands = new FakeCommandExecutor();
-            commands.SetStdoutFor("systemctl", args => args.Length >= 3 && args[1] == "is-active", "active\n");
-            commands.SetExitCodeFor("dotnet", args => args.Length > 0 && args[0] == "build", 1);
-            var stderr = new StringWriter();
-            var stdout = new StringWriter();
-            var installer = new SystemdServiceInstaller(
-                stdout,
-                stderr,
-                files,
-                commands);
-            var updater = SourceCodeUpdater.CreateWithDefaults(
-                stdout,
-                stderr,
-                installer,
-                commands,
-                files,
-                new MockEnvironmentVariableProvider(),
-                new HttpClient(new SequenceHttpHandler(HttpStatusCode.OK))
-                {
-                    BaseAddress = new Uri("http://localhost:3456"),
-                },
-                getUserHome: () => tempRoot,
-                unitDir: "/units");
+        var commands = new FakeCommandExecutor();
+        commands.SetStdoutFor("systemctl", args => args.Length >= 3 && args[1] == "is-active", "active\n");
+        commands.SetExitCodeFor("dotnet", args => args.Length > 0 && args[0] == "build", 1);
+        var stderr = new StringWriter();
+        var stdout = new StringWriter();
+        var installer = new SystemdServiceInstaller(
+            stdout,
+            stderr,
+            files,
+            commands);
+        var updater = SourceCodeUpdater.CreateWithDefaults(
+            stdout,
+            stderr,
+            installer,
+            commands,
+            files,
+            new MockEnvironmentVariableProvider(),
+            new HttpClient(new SequenceHttpHandler(HttpStatusCode.OK))
+            {
+                BaseAddress = new Uri("http://localhost:3456"),
+            },
+            getUserHome: () => tempRoot,
+            unitDir: "/units");
 
-            var exitCode = await updater.UpdateAllAsync(tempRoot, dryRun: false, cliPath: "/home/user/.local/bin/mo", continueAfterCliUpdate: true);
+        var exitCode = await updater.UpdateAllAsync(tempRoot, dryRun: false, cliPath: "/home/user/.local/bin/mo", continueAfterCliUpdate: true);
 
-            Assert.Equal(1, exitCode);
-            Assert.Contains(commands.ExecutedCommands, c =>
-                c.FileName == "systemctl" && c.Args.SequenceEqual(["--user", "is-active", "mohist-runner.service"]));
-            Assert.Contains(commands.ExecutedCommands, c =>
-                c.FileName == "systemctl" && c.Args.SequenceEqual(["--user", "stop", "mohist-runner.service"]));
-            Assert.Contains(commands.ExecutedCommands, c =>
-                c.FileName == "systemctl" && c.Args.SequenceEqual(["--user", "start", "mohist-runner.service"]));
-            Assert.Contains("Restoring workflow runner", stdout.ToString());
-        }
-        finally
-        {
-            if (Directory.Exists(tempRoot))
-                Directory.Delete(tempRoot, recursive: true);
-        }
+        Assert.Equal(1, exitCode);
+        Assert.Contains(commands.ExecutedCommands, c =>
+            c.FileName == "systemctl" && c.Args.SequenceEqual(["--user", "is-active", "mohist-runner.service"]));
+        Assert.Contains(commands.ExecutedCommands, c =>
+            c.FileName == "systemctl" && c.Args.SequenceEqual(["--user", "stop", "mohist-runner.service"]));
+        Assert.Contains(commands.ExecutedCommands, c =>
+            c.FileName == "systemctl" && c.Args.SequenceEqual(["--user", "start", "mohist-runner.service"]));
+        Assert.Contains("Restoring workflow runner", stdout.ToString());
     }
 
     [Fact]
     public async Task UpdateAll_WhenServerUpdateFailsAfterStoppingRunnerAndRunnerWasNotRunning_DoesNotRestoreRunner()
     {
-        var tempRoot = Path.Combine(Path.GetTempPath(), $"mohist-update-all-fail1b-{Guid.NewGuid():N}");
+        var tempRoot = "/mohist-tests/mohist-update-all-fail1b";
         var files = new FakeFileSystem();
         WritePackagedSkillAssets(files, Path.Combine(tempRoot, ".publish", "cli", "skill-data"));
         WriteRunnerUnit(files, "/units");
 
-        try
-        {
-            var commands = new FakeCommandExecutor();
-            commands.SetStdoutFor("systemctl", args => args.Length >= 3 && args[1] == "is-active", "inactive\n");
-            commands.SetExitCodeFor("dotnet", args => args.Length > 0 && args[0] == "build", 1);
-            var stderr = new StringWriter();
-            var installer = new SystemdServiceInstaller(
-                new StringWriter(),
-                stderr,
-                files,
-                commands);
-            var updater = SourceCodeUpdater.CreateWithDefaults(
-                new StringWriter(),
-                stderr,
-                installer,
-                commands,
-                files,
-                new MockEnvironmentVariableProvider(),
-                new HttpClient(new SequenceHttpHandler(HttpStatusCode.OK))
-                {
-                    BaseAddress = new Uri("http://localhost:3456"),
-                },
-                getUserHome: () => tempRoot,
-                unitDir: "/units");
+        var commands = new FakeCommandExecutor();
+        commands.SetStdoutFor("systemctl", args => args.Length >= 3 && args[1] == "is-active", "inactive\n");
+        commands.SetExitCodeFor("dotnet", args => args.Length > 0 && args[0] == "build", 1);
+        var stderr = new StringWriter();
+        var installer = new SystemdServiceInstaller(
+            new StringWriter(),
+            stderr,
+            files,
+            commands);
+        var updater = SourceCodeUpdater.CreateWithDefaults(
+            new StringWriter(),
+            stderr,
+            installer,
+            commands,
+            files,
+            new MockEnvironmentVariableProvider(),
+            new HttpClient(new SequenceHttpHandler(HttpStatusCode.OK))
+            {
+                BaseAddress = new Uri("http://localhost:3456"),
+            },
+            getUserHome: () => tempRoot,
+            unitDir: "/units");
 
-            var exitCode = await updater.UpdateAllAsync(tempRoot, dryRun: false, cliPath: "/home/user/.local/bin/mo", continueAfterCliUpdate: true);
+        var exitCode = await updater.UpdateAllAsync(tempRoot, dryRun: false, cliPath: "/home/user/.local/bin/mo", continueAfterCliUpdate: true);
 
-            Assert.Equal(1, exitCode);
-            Assert.Contains(commands.ExecutedCommands, c =>
-                c.FileName == "systemctl" && c.Args.SequenceEqual(["--user", "is-active", "mohist-runner.service"]));
-            Assert.DoesNotContain(commands.ExecutedCommands, c =>
-                c.FileName == "systemctl" && c.Args.SequenceEqual(["--user", "stop", "mohist-runner.service"]));
-            Assert.DoesNotContain(commands.ExecutedCommands, c =>
-                c.FileName == "systemctl" && c.Args.SequenceEqual(["--user", "start", "mohist-runner.service"]));
-        }
-        finally
-        {
-            if (Directory.Exists(tempRoot))
-                Directory.Delete(tempRoot, recursive: true);
-        }
+        Assert.Equal(1, exitCode);
+        Assert.Contains(commands.ExecutedCommands, c =>
+            c.FileName == "systemctl" && c.Args.SequenceEqual(["--user", "is-active", "mohist-runner.service"]));
+        Assert.DoesNotContain(commands.ExecutedCommands, c =>
+            c.FileName == "systemctl" && c.Args.SequenceEqual(["--user", "stop", "mohist-runner.service"]));
+        Assert.DoesNotContain(commands.ExecutedCommands, c =>
+            c.FileName == "systemctl" && c.Args.SequenceEqual(["--user", "start", "mohist-runner.service"]));
     }
 
     [Fact]
     public async Task UpdateAll_WhenReadinessTimeoutAfterStoppingRunner_RestoresRunner()
     {
-        var tempRoot = Path.Combine(Path.GetTempPath(), $"mohist-update-all-timeout-{Guid.NewGuid():N}");
+        var tempRoot = "/mohist-tests/mohist-update-all-timeout";
         var files = new FakeFileSystem();
         WritePackagedSkillAssets(files, Path.Combine(tempRoot, ".publish", "cli", "skill-data"));
         WriteRunnerUnit(files, "/units");
 
-        try
-        {
-            var commands = new FakeCommandExecutor();
-            commands.SetStdoutFor("systemctl", args => args.Length >= 3 && args[1] == "is-active", "active\n");
-            var stderr = new StringWriter();
-            var stdout = new StringWriter();
-            var installer = new SystemdServiceInstaller(
-                stdout,
-                stderr,
-                files,
-                commands);
-            var readiness = new SequenceHttpHandler(
-                new ResponseSpec(HttpStatusCode.ServiceUnavailable));
-            var updater = SourceCodeUpdater.CreateWithDefaults(
-                stdout,
-                stderr,
-                installer,
-                commands,
-                files,
-                new MockEnvironmentVariableProvider(),
-                new HttpClient(readiness)
-                {
-                    BaseAddress = new Uri("http://localhost:3456"),
-                },
-                TimeSpan.FromMilliseconds(150),
-                getUserHome: () => tempRoot,
-                unitDir: "/units");
+        var commands = new FakeCommandExecutor();
+        commands.SetStdoutFor("systemctl", args => args.Length >= 3 && args[1] == "is-active", "active\n");
+        var stderr = new StringWriter();
+        var stdout = new StringWriter();
+        var installer = new SystemdServiceInstaller(
+            stdout,
+            stderr,
+            files,
+            commands);
+        var readiness = new SequenceHttpHandler(
+            new ResponseSpec(HttpStatusCode.ServiceUnavailable));
+        var updater = SourceCodeUpdater.CreateWithDefaults(
+            stdout,
+            stderr,
+            installer,
+            commands,
+            files,
+            new MockEnvironmentVariableProvider(),
+            new HttpClient(readiness)
+            {
+                BaseAddress = new Uri("http://localhost:3456"),
+            },
+            TimeSpan.FromMilliseconds(150),
+            getUserHome: () => tempRoot,
+            unitDir: "/units");
 
-            var exitCode = await updater.UpdateAllAsync(tempRoot, dryRun: false, cliPath: "/home/user/.local/bin/mo", continueAfterCliUpdate: true);
+        var exitCode = await updater.UpdateAllAsync(tempRoot, dryRun: false, cliPath: "/home/user/.local/bin/mo", continueAfterCliUpdate: true);
 
-            Assert.Equal(1, exitCode);
-            Assert.Contains(commands.ExecutedCommands, c =>
-                c.FileName == "systemctl" && c.Args.SequenceEqual(["--user", "stop", "mohist-runner.service"]));
-            Assert.Contains(commands.ExecutedCommands, c =>
-                c.FileName == "systemctl" && c.Args.SequenceEqual(["--user", "start", "mohist-runner.service"]));
-            Assert.Contains("Restoring workflow runner", stdout.ToString());
-        }
-        finally
-        {
-            if (Directory.Exists(tempRoot))
-                Directory.Delete(tempRoot, recursive: true);
-        }
+        Assert.Equal(1, exitCode);
+        Assert.Contains(commands.ExecutedCommands, c =>
+            c.FileName == "systemctl" && c.Args.SequenceEqual(["--user", "stop", "mohist-runner.service"]));
+        Assert.Contains(commands.ExecutedCommands, c =>
+            c.FileName == "systemctl" && c.Args.SequenceEqual(["--user", "start", "mohist-runner.service"]));
+        Assert.Contains("Restoring workflow runner", stdout.ToString());
     }
 
     [Fact]
     public async Task UpdateAll_WhenInterruptedAfterRunnerStop_RestoresRunner()
     {
-        var tempRoot = Path.Combine(Path.GetTempPath(), $"mohist-update-all-ctrlc-{Guid.NewGuid():N}");
+        var tempRoot = "/mohist-tests/mohist-update-all-ctrlc";
         var files = new FakeFileSystem();
         WritePackagedSkillAssets(files, Path.Combine(tempRoot, ".publish", "cli", "skill-data"));
         WriteRunnerUnit(files, "/units");
 
-        try
-        {
-            var commands = new FakeCommandExecutor();
-            commands.SetStdoutFor("systemctl", args => args.Length >= 3 && args[1] == "is-active", "active\n");
-            var stderr = new StringWriter();
-            var installer = new SystemdServiceInstaller(
-                new StringWriter(),
-                stderr,
-                files,
-                commands);
-            var updater = SourceCodeUpdater.CreateWithDefaults(
-                new StringWriter(),
-                stderr,
-                installer,
-                commands,
-                files,
-                new MockEnvironmentVariableProvider(),
-                new HttpClient(new SequenceHttpHandler(
-                    new ResponseSpec(HttpStatusCode.ServiceUnavailable)))
-                {
-                    BaseAddress = new Uri("http://localhost:3456"),
-                },
-                TimeSpan.FromSeconds(10),
-                getUserHome: () => tempRoot,
-                unitDir: "/units");
-
-            using var cts = new CancellationTokenSource();
-            commands.OnExecute = (fileName, args) =>
+        var commands = new FakeCommandExecutor();
+        commands.SetStdoutFor("systemctl", args => args.Length >= 3 && args[1] == "is-active", "active\n");
+        var stderr = new StringWriter();
+        var installer = new SystemdServiceInstaller(
+            new StringWriter(),
+            stderr,
+            files,
+            commands);
+        var updater = SourceCodeUpdater.CreateWithDefaults(
+            new StringWriter(),
+            stderr,
+            installer,
+            commands,
+            files,
+            new MockEnvironmentVariableProvider(),
+            new HttpClient(new SequenceHttpHandler(
+                new ResponseSpec(HttpStatusCode.ServiceUnavailable)))
             {
-                if (fileName == "systemctl" && args.SequenceEqual(["--user", "stop", "mohist-runner.service"]))
-                    cts.Cancel();
-            };
-            var exitCode = await updater.UpdateAllAsync(tempRoot, dryRun: false, cliPath: "/home/user/.local/bin/mo", cts.Token, continueAfterCliUpdate: true);
+                BaseAddress = new Uri("http://localhost:3456"),
+            },
+            TimeSpan.FromSeconds(10),
+            getUserHome: () => tempRoot,
+            unitDir: "/units");
 
-            Assert.Equal(130, exitCode);
-            Assert.Contains(commands.ExecutedCommands, c =>
-                c.FileName == "systemctl" && c.Args.SequenceEqual(["--user", "stop", "mohist-runner.service"]));
-            Assert.Contains(commands.ExecutedCommands, c =>
-                c.FileName == "systemctl" && c.Args.SequenceEqual(["--user", "start", "mohist-runner.service"]));
-        }
-        finally
+        using var cts = new CancellationTokenSource();
+        commands.OnExecute = (fileName, args) =>
         {
-            if (Directory.Exists(tempRoot))
-                Directory.Delete(tempRoot, recursive: true);
-        }
+            if (fileName == "systemctl" && args.SequenceEqual(["--user", "stop", "mohist-runner.service"]))
+                cts.Cancel();
+        };
+        var exitCode = await updater.UpdateAllAsync(tempRoot, dryRun: false, cliPath: "/home/user/.local/bin/mo", cts.Token, continueAfterCliUpdate: true);
+
+        Assert.Equal(130, exitCode);
+        Assert.Contains(commands.ExecutedCommands, c =>
+            c.FileName == "systemctl" && c.Args.SequenceEqual(["--user", "stop", "mohist-runner.service"]));
+        Assert.Contains(commands.ExecutedCommands, c =>
+            c.FileName == "systemctl" && c.Args.SequenceEqual(["--user", "start", "mohist-runner.service"]));
     }
 
     [Fact]
     public async Task UpdateAll_WhenInterruptedBeforeRunnerStop_ExitsCleanlyWithoutRestoringRunner()
     {
-        var tempRoot = Path.Combine(Path.GetTempPath(), $"mohist-update-all-early-cancel-{Guid.NewGuid():N}");
+        var tempRoot = "/mohist-tests/mohist-update-all-early-cancel";
         var files = new FakeFileSystem();
         WritePackagedSkillAssets(files, Path.Combine(tempRoot, ".publish", "cli", "skill-data"));
 
-        try
-        {
-            var commands = new FakeCommandExecutor();
-            commands.SetStdoutFor("systemctl", args => args.Length >= 3 && args[1] == "is-active", "active\n");
-            var stderr = new StringWriter();
-            var stdout = new StringWriter();
-            var installer = new SystemdServiceInstaller(
-                stdout,
-                stderr,
-                files,
-                commands);
-            var updater = SourceCodeUpdater.CreateWithDefaults(
-                stdout,
-                stderr,
-                installer,
-                commands,
-                files,
-                new MockEnvironmentVariableProvider(),
-                new HttpClient(new SequenceHttpHandler(HttpStatusCode.OK))
-                {
-                    BaseAddress = new Uri("http://localhost:3456"),
-                },
-                getUserHome: () => tempRoot,
-                unitDir: "/units");
+        var commands = new FakeCommandExecutor();
+        commands.SetStdoutFor("systemctl", args => args.Length >= 3 && args[1] == "is-active", "active\n");
+        var stderr = new StringWriter();
+        var stdout = new StringWriter();
+        var installer = new SystemdServiceInstaller(
+            stdout,
+            stderr,
+            files,
+            commands);
+        var updater = SourceCodeUpdater.CreateWithDefaults(
+            stdout,
+            stderr,
+            installer,
+            commands,
+            files,
+            new MockEnvironmentVariableProvider(),
+            new HttpClient(new SequenceHttpHandler(HttpStatusCode.OK))
+            {
+                BaseAddress = new Uri("http://localhost:3456"),
+            },
+            getUserHome: () => tempRoot,
+            unitDir: "/units");
 
-            using var cts = new CancellationTokenSource();
-            cts.Cancel();
-            var exitCode = await updater.UpdateAllAsync(tempRoot, dryRun: false, cliPath: "/home/user/.local/bin/mo", cts.Token, continueAfterCliUpdate: true);
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        var exitCode = await updater.UpdateAllAsync(tempRoot, dryRun: false, cliPath: "/home/user/.local/bin/mo", cts.Token, continueAfterCliUpdate: true);
 
-            Assert.Equal(130, exitCode);
-            Assert.Contains("No recovery needed", stdout.ToString());
-            Assert.DoesNotContain(commands.ExecutedCommands, c =>
-                c.FileName == "systemctl" && c.Args.SequenceEqual(["--user", "stop", "mohist-runner.service"]));
-            Assert.DoesNotContain(commands.ExecutedCommands, c =>
-                c.FileName == "systemctl" && c.Args.SequenceEqual(["--user", "start", "mohist-runner.service"]));
-        }
-        finally
-        {
-            if (Directory.Exists(tempRoot))
-                Directory.Delete(tempRoot, recursive: true);
-        }
+        Assert.Equal(130, exitCode);
+        Assert.Contains("No recovery needed", stdout.ToString());
+        Assert.DoesNotContain(commands.ExecutedCommands, c =>
+            c.FileName == "systemctl" && c.Args.SequenceEqual(["--user", "stop", "mohist-runner.service"]));
+        Assert.DoesNotContain(commands.ExecutedCommands, c =>
+            c.FileName == "systemctl" && c.Args.SequenceEqual(["--user", "start", "mohist-runner.service"]));
     }
 
     [Fact]
     public async Task UpdateAll_WhenRunnerRestoreFails_ReportsUnavailableCapabilityAndManualCommand()
     {
-        var tempRoot = Path.Combine(Path.GetTempPath(), $"mohist-update-all-restore-fail-{Guid.NewGuid():N}");
+        var tempRoot = "/mohist-tests/mohist-update-all-restore-fail";
         var files = new FakeFileSystem();
         WritePackagedSkillAssets(files, Path.Combine(tempRoot, ".publish", "cli", "skill-data"));
         WriteRunnerUnit(files, "/units");
 
-        try
-        {
-            var commands = new FakeCommandExecutor();
-            commands.SetStdoutFor("systemctl", args => args.Length >= 3 && args[1] == "is-active", "active\n");
-            commands.SetExitCodeFor("systemctl", args => args.Length >= 2 && args[1] == "start", 1);
-            var stderr = new StringWriter();
-            var installer = new SystemdServiceInstaller(
-                new StringWriter(),
-                stderr,
-                files,
-                commands);
-            var readiness = new SequenceHttpHandler(
-                new ResponseSpec(HttpStatusCode.ServiceUnavailable));
-            var updater = SourceCodeUpdater.CreateWithDefaults(
-                new StringWriter(),
-                stderr,
-                installer,
-                commands,
-                files,
-                new MockEnvironmentVariableProvider(),
-                new HttpClient(readiness)
-                {
-                    BaseAddress = new Uri("http://localhost:3456"),
-                },
-                TimeSpan.FromMilliseconds(150),
-                getUserHome: () => tempRoot,
-                unitDir: "/units");
+        var commands = new FakeCommandExecutor();
+        commands.SetStdoutFor("systemctl", args => args.Length >= 3 && args[1] == "is-active", "active\n");
+        commands.SetExitCodeFor("systemctl", args => args.Length >= 2 && args[1] == "start", 1);
+        var stderr = new StringWriter();
+        var installer = new SystemdServiceInstaller(
+            new StringWriter(),
+            stderr,
+            files,
+            commands);
+        var readiness = new SequenceHttpHandler(
+            new ResponseSpec(HttpStatusCode.ServiceUnavailable));
+        var updater = SourceCodeUpdater.CreateWithDefaults(
+            new StringWriter(),
+            stderr,
+            installer,
+            commands,
+            files,
+            new MockEnvironmentVariableProvider(),
+            new HttpClient(readiness)
+            {
+                BaseAddress = new Uri("http://localhost:3456"),
+            },
+            TimeSpan.FromMilliseconds(150),
+            getUserHome: () => tempRoot,
+            unitDir: "/units");
 
-            var exitCode = await updater.UpdateAllAsync(tempRoot, dryRun: false, cliPath: "/home/user/.local/bin/mo", continueAfterCliUpdate: true);
+        var exitCode = await updater.UpdateAllAsync(tempRoot, dryRun: false, cliPath: "/home/user/.local/bin/mo", continueAfterCliUpdate: true);
 
-            Assert.Equal(1, exitCode);
-            Assert.Contains("Runner unavailable", stderr.ToString());
-            Assert.Contains("mo server start --runner", stderr.ToString());
-        }
-        finally
-        {
-            if (Directory.Exists(tempRoot))
-                Directory.Delete(tempRoot, recursive: true);
-        }
+        Assert.Equal(1, exitCode);
+        Assert.Contains("Runner unavailable", stderr.ToString());
+        Assert.Contains("mo server start --runner", stderr.ToString());
     }
 
     [Fact]
@@ -1199,280 +1119,230 @@ public class UpdateTests
     [Fact]
     public async Task UpdateAll_VerifyRuntime_AllChecksPass_ReportsReadyOutcome()
     {
-        var tempRoot = Path.Combine(Path.GetTempPath(), $"mohist-verify-allpass-{Guid.NewGuid():N}");
+        var tempRoot = "/mohist-tests/mohist-verify-allpass";
         var files = new FakeFileSystem();
         WritePackagedSkillAssets(files, Path.Combine(tempRoot, ".publish", "cli", "skill-data"));
         WriteManagedSkillAssets(files, tempRoot);
 
-        try
-        {
-            var commands = new FakeCommandExecutor();
-            commands.SetStdoutFor("systemctl", args => args.Length >= 3 && args[1] == "is-active", "active\n");
-            commands.SetStdoutFor("/home/user/.local/bin/mo", _ => true, "1.0.0+abc123");
-            commands.SetStdoutFor("git", _ => true, "abc123");
-            var stdout = new StringWriter();
-            var stderr = new StringWriter();
-            var installer = new SystemdServiceInstaller(
-                stdout,
-                stderr,
-                files,
-                commands);
-            var systemInfo = HealthySystemInfoJson(runningGitHash: "abc123", runnerStatus: "active");
-            var handler = SequenceHttpHandler.WithSystemInfo(systemInfo, new ResponseSpec(HttpStatusCode.OK));
-            var updater = SourceCodeUpdater.CreateWithDefaults(
-                stdout,
-                stderr,
-                installer,
-                commands,
-                files,
-                new MockEnvironmentVariableProvider(),
-                new HttpClient(handler)
-                {
-                    BaseAddress = new Uri("http://localhost:3456"),
-                },
-                getUserHome: () => tempRoot);
+        var commands = new FakeCommandExecutor();
+        commands.SetStdoutFor("systemctl", args => args.Length >= 3 && args[1] == "is-active", "active\n");
+        commands.SetStdoutFor("/home/user/.local/bin/mo", _ => true, "1.0.0+abc123");
+        commands.SetStdoutFor("git", _ => true, "abc123");
+        var stdout = new StringWriter();
+        var stderr = new StringWriter();
+        var installer = new SystemdServiceInstaller(
+            stdout,
+            stderr,
+            files,
+            commands);
+        var systemInfo = HealthySystemInfoJson(runningGitHash: "abc123", runnerStatus: "active");
+        var handler = SequenceHttpHandler.WithSystemInfo(systemInfo, new ResponseSpec(HttpStatusCode.OK));
+        var updater = SourceCodeUpdater.CreateWithDefaults(
+            stdout,
+            stderr,
+            installer,
+            commands,
+            files,
+            new MockEnvironmentVariableProvider(),
+            new HttpClient(handler)
+            {
+                BaseAddress = new Uri("http://localhost:3456"),
+            },
+            getUserHome: () => tempRoot);
 
-            var exitCode = await updater.UpdateAllAsync(tempRoot, dryRun: false, cliPath: "/home/user/.local/bin/mo", continueAfterCliUpdate: true);
+        var exitCode = await updater.UpdateAllAsync(tempRoot, dryRun: false, cliPath: "/home/user/.local/bin/mo", continueAfterCliUpdate: true);
 
-            Assert.Equal(0, exitCode);
-            var output = stdout.ToString();
-            Assert.Contains("Verifying workflow runtime", output);
-            Assert.Contains("Update complete. Mohist is ready.", output);
-            Assert.DoesNotContain("recovered with warnings", output);
-            Assert.DoesNotContain("not fully usable", output);
-        }
-        finally
-        {
-            if (Directory.Exists(tempRoot))
-                Directory.Delete(tempRoot, recursive: true);
-        }
+        Assert.Equal(0, exitCode);
+        var output = stdout.ToString();
+        Assert.Contains("Verifying workflow runtime", output);
+        Assert.Contains("Update complete. Mohist is ready.", output);
+        Assert.DoesNotContain("recovered with warnings", output);
+        Assert.DoesNotContain("not fully usable", output);
     }
 
     [Fact]
     public async Task UpdateAll_VerifyRuntime_ServerIdentityMismatch_ReportsRecoveredWithWarnings()
     {
-        var tempRoot = Path.Combine(Path.GetTempPath(), $"mohist-verify-identity-{Guid.NewGuid():N}");
+        var tempRoot = "/mohist-tests/mohist-verify-identity";
         var files = new FakeFileSystem();
         WritePackagedSkillAssets(files, Path.Combine(tempRoot, ".publish", "cli", "skill-data"));
 
-        try
-        {
-            var commands = new FakeCommandExecutor();
-            commands.SetStdoutFor("systemctl", args => args.Length >= 3 && args[1] == "is-active", "active\n");
-            commands.SetStdoutFor("/home/user/.local/bin/mo", _ => true, "1.0.0+oldhash");
-            commands.SetStdoutFor("git", _ => true, "newhash");
-            var stdout = new StringWriter();
-            var stderr = new StringWriter();
-            var installer = new SystemdServiceInstaller(
-                stdout,
-                stderr,
-                files,
-                commands);
-            var systemInfo = HealthySystemInfoJson(runningGitHash: "oldhash");
-            var updater = SourceCodeUpdater.CreateWithDefaults(
-                stdout,
-                stderr,
-                installer,
-                commands,
-                files,
-                new MockEnvironmentVariableProvider(),
-                new HttpClient(SequenceHttpHandler.WithSystemInfo(systemInfo, new ResponseSpec(HttpStatusCode.OK)))
-                {
-                    BaseAddress = new Uri("http://localhost:3456"),
-                },
-                getUserHome: () => tempRoot);
+        var commands = new FakeCommandExecutor();
+        commands.SetStdoutFor("systemctl", args => args.Length >= 3 && args[1] == "is-active", "active\n");
+        commands.SetStdoutFor("/home/user/.local/bin/mo", _ => true, "1.0.0+oldhash");
+        commands.SetStdoutFor("git", _ => true, "newhash");
+        var stdout = new StringWriter();
+        var stderr = new StringWriter();
+        var installer = new SystemdServiceInstaller(
+            stdout,
+            stderr,
+            files,
+            commands);
+        var systemInfo = HealthySystemInfoJson(runningGitHash: "oldhash");
+        var updater = SourceCodeUpdater.CreateWithDefaults(
+            stdout,
+            stderr,
+            installer,
+            commands,
+            files,
+            new MockEnvironmentVariableProvider(),
+            new HttpClient(SequenceHttpHandler.WithSystemInfo(systemInfo, new ResponseSpec(HttpStatusCode.OK)))
+            {
+                BaseAddress = new Uri("http://localhost:3456"),
+            },
+            getUserHome: () => tempRoot);
 
-            var exitCode = await updater.UpdateAllAsync(tempRoot, dryRun: false, cliPath: "/home/user/.local/bin/mo", continueAfterCliUpdate: true);
+        var exitCode = await updater.UpdateAllAsync(tempRoot, dryRun: false, cliPath: "/home/user/.local/bin/mo", continueAfterCliUpdate: true);
 
-            Assert.Equal(0, exitCode);
-            var output = stdout.ToString();
-            Assert.Contains("Verifying workflow runtime", output);
-            Assert.Contains("recovered with warnings", output);
-            Assert.Contains("Server identity", output);
-            Assert.Contains("does not match source HEAD", output);
-            Assert.DoesNotContain("not fully usable", output);
-        }
-        finally
-        {
-            if (Directory.Exists(tempRoot))
-                Directory.Delete(tempRoot, recursive: true);
-        }
+        Assert.Equal(0, exitCode);
+        var output = stdout.ToString();
+        Assert.Contains("Verifying workflow runtime", output);
+        Assert.Contains("recovered with warnings", output);
+        Assert.Contains("Server identity", output);
+        Assert.Contains("does not match source HEAD", output);
+        Assert.DoesNotContain("not fully usable", output);
     }
 
     [Fact]
     public async Task UpdateAll_VerifyRuntime_RunnerUnavailable_ReportsFailedOutcome()
     {
-        var tempRoot = Path.Combine(Path.GetTempPath(), $"mohist-verify-runner-{Guid.NewGuid():N}");
+        var tempRoot = "/mohist-tests/mohist-verify-runner";
         var files = new FakeFileSystem();
         WritePackagedSkillAssets(files, Path.Combine(tempRoot, ".publish", "cli", "skill-data"));
 
-        try
-        {
-            var commands = new FakeCommandExecutor();
-            commands.SetStdoutFor("systemctl", args => args.Length >= 3 && args[1] == "is-active", "active\n");
-            commands.SetStdoutFor("/home/user/.local/bin/mo", _ => true, "1.0.0+match");
-            commands.SetStdoutFor("git", _ => true, "match");
-            var stdout = new StringWriter();
-            var stderr = new StringWriter();
-            var installer = new SystemdServiceInstaller(
-                stdout,
-                stderr,
-                files,
-                commands);
-            var systemInfo = HealthySystemInfoJson(runnerStatus: "inactive");
-            var updater = SourceCodeUpdater.CreateWithDefaults(
-                stdout,
-                stderr,
-                installer,
-                commands,
-                files,
-                new MockEnvironmentVariableProvider(),
-                new HttpClient(SequenceHttpHandler.WithSystemInfo(systemInfo, new ResponseSpec(HttpStatusCode.OK)))
-                {
-                    BaseAddress = new Uri("http://localhost:3456"),
-                },
-                getUserHome: () => tempRoot);
+        var commands = new FakeCommandExecutor();
+        commands.SetStdoutFor("systemctl", args => args.Length >= 3 && args[1] == "is-active", "active\n");
+        commands.SetStdoutFor("/home/user/.local/bin/mo", _ => true, "1.0.0+match");
+        commands.SetStdoutFor("git", _ => true, "match");
+        var stdout = new StringWriter();
+        var stderr = new StringWriter();
+        var installer = new SystemdServiceInstaller(
+            stdout,
+            stderr,
+            files,
+            commands);
+        var systemInfo = HealthySystemInfoJson(runnerStatus: "inactive");
+        var updater = SourceCodeUpdater.CreateWithDefaults(
+            stdout,
+            stderr,
+            installer,
+            commands,
+            files,
+            new MockEnvironmentVariableProvider(),
+            new HttpClient(SequenceHttpHandler.WithSystemInfo(systemInfo, new ResponseSpec(HttpStatusCode.OK)))
+            {
+                BaseAddress = new Uri("http://localhost:3456"),
+            },
+            getUserHome: () => tempRoot);
 
-            var exitCode = await updater.UpdateAllAsync(tempRoot, dryRun: false, cliPath: "/home/user/.local/bin/mo", continueAfterCliUpdate: true);
+        var exitCode = await updater.UpdateAllAsync(tempRoot, dryRun: false, cliPath: "/home/user/.local/bin/mo", continueAfterCliUpdate: true);
 
-            Assert.Equal(1, exitCode);
-            var errOutput = stderr.ToString();
-            Assert.Contains("not fully usable", errOutput);
-            Assert.Contains("Runner unavailable", errOutput);
-            Assert.Contains("mo server start --runner", errOutput);
-        }
-        finally
-        {
-            if (Directory.Exists(tempRoot))
-                Directory.Delete(tempRoot, recursive: true);
-        }
+        Assert.Equal(1, exitCode);
+        var errOutput = stderr.ToString();
+        Assert.Contains("not fully usable", errOutput);
+        Assert.Contains("Runner unavailable", errOutput);
+        Assert.Contains("mo server start --runner", errOutput);
     }
 
     [Fact]
     public async Task UpdateAll_VerifyRuntime_SkillAssetsMissing_ReportsRecoveredWithWarnings()
     {
-        var tempRoot = Path.Combine(Path.GetTempPath(), $"mohist-verify-skills-{Guid.NewGuid():N}");
+        var tempRoot = "/mohist-tests/mohist-verify-skills";
         var files = new FakeFileSystem();
         WritePackagedSkillAssets(files, Path.Combine(tempRoot, ".publish", "cli", "skill-data"));
 
-        try
-        {
-            var commands = new FakeCommandExecutor();
-            commands.SetStdoutFor("systemctl", args => args.Length >= 3 && args[1] == "is-active", "active\n");
-            commands.SetStdoutFor("/home/user/.local/bin/mo", _ => true, "1.0.0+match");
-            commands.SetStdoutFor("git", _ => true, "match");
-            var stdout = new StringWriter();
-            var stderr = new StringWriter();
-            var installer = new SystemdServiceInstaller(
-                stdout,
-                stderr,
-                files,
-                commands);
-            var systemInfo = HealthySystemInfoJson();
-            // Use a separate temp root for the user home so the managed skill
-            // assets are not present.
-            var emptyHome = Path.Combine(Path.GetTempPath(), $"mohist-verify-skills-home-{Guid.NewGuid():N}");
-            Directory.CreateDirectory(emptyHome);
-            try
+        var commands = new FakeCommandExecutor();
+        commands.SetStdoutFor("systemctl", args => args.Length >= 3 && args[1] == "is-active", "active\n");
+        commands.SetStdoutFor("/home/user/.local/bin/mo", _ => true, "1.0.0+match");
+        commands.SetStdoutFor("git", _ => true, "match");
+        var stdout = new StringWriter();
+        var stderr = new StringWriter();
+        var installer = new SystemdServiceInstaller(
+            stdout,
+            stderr,
+            files,
+            commands);
+        var systemInfo = HealthySystemInfoJson();
+        var emptyHome = "/mohist-tests/mohist-verify-skills-home";
+        files.AddDirectory(emptyHome);
+        var updater = SourceCodeUpdater.CreateWithDefaults(
+            stdout,
+            stderr,
+            installer,
+            commands,
+            files,
+            new MockEnvironmentVariableProvider(),
+            new HttpClient(SequenceHttpHandler.WithSystemInfo(systemInfo, new ResponseSpec(HttpStatusCode.OK)))
             {
-                var updater = SourceCodeUpdater.CreateWithDefaults(
-                    stdout,
-                    stderr,
-                    installer,
-                    commands,
-                    files,
-                    new MockEnvironmentVariableProvider(),
-                    new HttpClient(SequenceHttpHandler.WithSystemInfo(systemInfo, new ResponseSpec(HttpStatusCode.OK)))
-                    {
-                        BaseAddress = new Uri("http://localhost:3456"),
-                    },
-                    getUserHome: () => emptyHome);
+                BaseAddress = new Uri("http://localhost:3456"),
+            },
+            getUserHome: () => emptyHome);
 
-                var exitCode = await updater.UpdateAllAsync(tempRoot, dryRun: false, cliPath: "/home/user/.local/bin/mo", continueAfterCliUpdate: true);
+        var exitCode = await updater.UpdateAllAsync(tempRoot, dryRun: false, cliPath: "/home/user/.local/bin/mo", continueAfterCliUpdate: true);
 
-                Assert.Equal(0, exitCode);
-                var output = stdout.ToString();
-                Assert.Contains("Verifying workflow runtime", output);
-                Assert.Contains("recovered with warnings", output);
-                Assert.Contains("Managed skill assets", output);
-                Assert.DoesNotContain("not fully usable", output);
-            }
-            finally
-            {
-                if (Directory.Exists(emptyHome))
-                    Directory.Delete(emptyHome, recursive: true);
-            }
-        }
-        finally
-        {
-            if (Directory.Exists(tempRoot))
-                Directory.Delete(tempRoot, recursive: true);
-        }
+        Assert.Equal(0, exitCode);
+        var output = stdout.ToString();
+        Assert.Contains("Verifying workflow runtime", output);
+        Assert.Contains("recovered with warnings", output);
+        Assert.Contains("Managed skill assets", output);
+        Assert.DoesNotContain("not fully usable", output);
     }
 
     [Fact]
     public async Task UpdateAll_VerifyRuntime_WebAssetsUnavailable_ReportsFailedOutcome()
     {
-        var tempRoot = Path.Combine(Path.GetTempPath(), $"mohist-verify-webassets-{Guid.NewGuid():N}");
+        var tempRoot = "/mohist-tests/mohist-verify-webassets";
         var files = new FakeFileSystem();
         WritePackagedSkillAssets(files, Path.Combine(tempRoot, ".publish", "cli", "skill-data"));
 
-        try
-        {
-            var commands = new FakeCommandExecutor();
-            commands.SetStdoutFor("systemctl", args => args.Length >= 3 && args[1] == "is-active", "active\n");
-            commands.SetStdoutFor("/home/user/.local/bin/mo", _ => true, "1.0.0+match");
-            commands.SetStdoutFor("git", _ => true, "match");
-            var stdout = new StringWriter();
-            var stderr = new StringWriter();
-            var installer = new SystemdServiceInstaller(
-                stdout,
-                stderr,
-                files,
-                commands);
-            // System info is healthy; readiness passes; verification GET /
-            // returns 500. The verification stage should fail with web asset
-            // unavailability.
-            var systemInfo = HealthySystemInfoJson();
-            var handler = SequenceHttpHandler.WithSystemInfo(
-                systemInfo,
-                new ResponseSpec(HttpStatusCode.OK),
-                new ResponseSpec(HttpStatusCode.OK, "<html><script src=\"/assets/app.js\"></script></html>", "text/html"),
-                new ResponseSpec(HttpStatusCode.OK),
-                new ResponseSpec(HttpStatusCode.InternalServerError));
-            var updater = SourceCodeUpdater.CreateWithDefaults(
-                stdout,
-                stderr,
-                installer,
-                commands,
-                files,
-                new MockEnvironmentVariableProvider(),
-                new HttpClient(handler)
-                {
-                    BaseAddress = new Uri("http://localhost:3456"),
-                },
-                getUserHome: () => tempRoot);
+        var commands = new FakeCommandExecutor();
+        commands.SetStdoutFor("systemctl", args => args.Length >= 3 && args[1] == "is-active", "active\n");
+        commands.SetStdoutFor("/home/user/.local/bin/mo", _ => true, "1.0.0+match");
+        commands.SetStdoutFor("git", _ => true, "match");
+        var stdout = new StringWriter();
+        var stderr = new StringWriter();
+        var installer = new SystemdServiceInstaller(
+            stdout,
+            stderr,
+            files,
+            commands);
+        // System info is healthy; readiness passes; verification GET /
+        // returns 500. The verification stage should fail with web asset
+        // unavailability.
+        var systemInfo = HealthySystemInfoJson();
+        var handler = SequenceHttpHandler.WithSystemInfo(
+            systemInfo,
+            new ResponseSpec(HttpStatusCode.OK),
+            new ResponseSpec(HttpStatusCode.OK, "<html><script src=\"/assets/app.js\"></script></html>", "text/html"),
+            new ResponseSpec(HttpStatusCode.OK),
+            new ResponseSpec(HttpStatusCode.InternalServerError));
+        var updater = SourceCodeUpdater.CreateWithDefaults(
+            stdout,
+            stderr,
+            installer,
+            commands,
+            files,
+            new MockEnvironmentVariableProvider(),
+            new HttpClient(handler)
+            {
+                BaseAddress = new Uri("http://localhost:3456"),
+            },
+            getUserHome: () => tempRoot);
 
-            var exitCode = await updater.UpdateAllAsync(tempRoot, dryRun: false, cliPath: "/home/user/.local/bin/mo", continueAfterCliUpdate: true);
+        var exitCode = await updater.UpdateAllAsync(tempRoot, dryRun: false, cliPath: "/home/user/.local/bin/mo", continueAfterCliUpdate: true);
 
-            // Verification detects web assets unavailability; the outcome is
-            // failed with the Web assets capability reported.
-            Assert.Equal(1, exitCode);
-            var errOutput = stderr.ToString();
-            Assert.Contains("not fully usable", errOutput);
-            Assert.Contains("Web assets", errOutput);
-        }
-        finally
-        {
-            if (Directory.Exists(tempRoot))
-                Directory.Delete(tempRoot, recursive: true);
-        }
+        // Verification detects web assets unavailability; the outcome is
+        // failed with the Web assets capability reported.
+        Assert.Equal(1, exitCode);
+        var errOutput = stderr.ToString();
+        Assert.Contains("not fully usable", errOutput);
+        Assert.Contains("Web assets", errOutput);
     }
 
     [Fact]
     public async Task CheckCliBinary_WhenMoVersionSucceeds_ReportsPass()
     {
-        var tempRoot = Path.Combine(Path.GetTempPath(), $"mohist-check-cli-pass-{Guid.NewGuid():N}");
+        var tempRoot = "/mohist-tests/mohist-check-cli-pass";
         var files = new FakeFileSystem();
         var commands = new FakeCommandExecutor();
         commands.SetStdoutFor("/usr/local/bin/mo", _ => true, "mo 1.0.0+abc");
@@ -1495,25 +1365,17 @@ public class UpdateTests
             getUserHome: () => tempRoot);
         var context = new UpdateContext(dryRun: false, repoRoot: tempRoot, cliPath: "/usr/local/bin/mo", CancellationToken.None);
 
-        try
-        {
-            var result = await updater.Validator.CheckCliBinaryAsync(context, CancellationToken.None);
+        var result = await updater.Validator.CheckCliBinaryAsync(context, CancellationToken.None);
 
-            Assert.Equal("CLI binary", result.Component);
-            Assert.Equal(RuntimeCheckOutcome.Pass, result.Outcome);
-            Assert.Contains("mo 1.0.0+abc", result.Message);
-        }
-        finally
-        {
-            if (Directory.Exists(tempRoot))
-                Directory.Delete(tempRoot, recursive: true);
-        }
+        Assert.Equal("CLI binary", result.Component);
+        Assert.Equal(RuntimeCheckOutcome.Pass, result.Outcome);
+        Assert.Contains("mo 1.0.0+abc", result.Message);
     }
 
     [Fact]
     public async Task CheckCliBinary_WhenMoVersionFails_ReportsFail()
     {
-        var tempRoot = Path.Combine(Path.GetTempPath(), $"mohist-check-cli-fail-{Guid.NewGuid():N}");
+        var tempRoot = "/mohist-tests/mohist-check-cli-fail";
         var files = new FakeFileSystem();
         var commands = new FakeCommandExecutor();
         commands.SetExitCodeFor("/usr/local/bin/mo", _ => true, 1);
@@ -1536,24 +1398,16 @@ public class UpdateTests
             getUserHome: () => tempRoot);
         var context = new UpdateContext(dryRun: false, repoRoot: tempRoot, cliPath: "/usr/local/bin/mo", CancellationToken.None);
 
-        try
-        {
-            var result = await updater.Validator.CheckCliBinaryAsync(context, CancellationToken.None);
+        var result = await updater.Validator.CheckCliBinaryAsync(context, CancellationToken.None);
 
-            Assert.Equal("CLI binary", result.Component);
-            Assert.Equal(RuntimeCheckOutcome.Fail, result.Outcome);
-        }
-        finally
-        {
-            if (Directory.Exists(tempRoot))
-                Directory.Delete(tempRoot, recursive: true);
-        }
+        Assert.Equal("CLI binary", result.Component);
+        Assert.Equal(RuntimeCheckOutcome.Fail, result.Outcome);
     }
 
     [Fact]
     public async Task CheckCliBinary_WhenCliPathMissing_ReportsFail()
     {
-        var tempRoot = Path.Combine(Path.GetTempPath(), $"mohist-check-cli-missing-{Guid.NewGuid():N}");
+        var tempRoot = "/mohist-tests/mohist-check-cli-missing";
         var files = new FakeFileSystem();
         var commands = new FakeCommandExecutor();
         var installer = new SystemdServiceInstaller(
@@ -1575,25 +1429,17 @@ public class UpdateTests
             getUserHome: () => tempRoot);
         var context = new UpdateContext(dryRun: false, repoRoot: tempRoot, cliPath: null, CancellationToken.None);
 
-        try
-        {
-            var result = await updater.Validator.CheckCliBinaryAsync(context, CancellationToken.None);
+        var result = await updater.Validator.CheckCliBinaryAsync(context, CancellationToken.None);
 
-            Assert.Equal("CLI binary", result.Component);
-            Assert.Equal(RuntimeCheckOutcome.Fail, result.Outcome);
-            Assert.Contains("not resolved", result.Message);
-        }
-        finally
-        {
-            if (Directory.Exists(tempRoot))
-                Directory.Delete(tempRoot, recursive: true);
-        }
+        Assert.Equal("CLI binary", result.Component);
+        Assert.Equal(RuntimeCheckOutcome.Fail, result.Outcome);
+        Assert.Contains("not resolved", result.Message);
     }
 
     [Fact]
     public async Task CheckServerIdentity_WhenHashesMatch_ReportsPass()
     {
-        var tempRoot = Path.Combine(Path.GetTempPath(), $"mohist-check-identity-pass-{Guid.NewGuid():N}");
+        var tempRoot = "/mohist-tests/mohist-check-identity-pass";
         var files = new FakeFileSystem();
         var commands = new FakeCommandExecutor();
         commands.SetStdoutFor("git", _ => true, "abc123");
@@ -1616,23 +1462,15 @@ public class UpdateTests
             getUserHome: () => tempRoot);
         var context = new UpdateContext(dryRun: false, repoRoot: tempRoot, cliPath: "/usr/local/bin/mo", CancellationToken.None);
 
-        try
-        {
-            var result = await updater.Validator.CheckServerIdentityAsync(context, CancellationToken.None);
+        var result = await updater.Validator.CheckServerIdentityAsync(context, CancellationToken.None);
 
-            Assert.Equal(RuntimeCheckOutcome.Pass, result.Outcome);
-        }
-        finally
-        {
-            if (Directory.Exists(tempRoot))
-                Directory.Delete(tempRoot, recursive: true);
-        }
+        Assert.Equal(RuntimeCheckOutcome.Pass, result.Outcome);
     }
 
     [Fact]
     public async Task CheckServerIdentity_WhenHashesMismatch_ReportsWarn()
     {
-        var tempRoot = Path.Combine(Path.GetTempPath(), $"mohist-check-identity-warn-{Guid.NewGuid():N}");
+        var tempRoot = "/mohist-tests/mohist-check-identity-warn";
         var files = new FakeFileSystem();
         var commands = new FakeCommandExecutor();
         commands.SetStdoutFor("git", _ => true, "newhash");
@@ -1655,24 +1493,16 @@ public class UpdateTests
             getUserHome: () => tempRoot);
         var context = new UpdateContext(dryRun: false, repoRoot: tempRoot, cliPath: "/usr/local/bin/mo", CancellationToken.None);
 
-        try
-        {
-            var result = await updater.Validator.CheckServerIdentityAsync(context, CancellationToken.None);
+        var result = await updater.Validator.CheckServerIdentityAsync(context, CancellationToken.None);
 
-            Assert.Equal(RuntimeCheckOutcome.Warn, result.Outcome);
-            Assert.Contains("does not match source HEAD", result.Message);
-        }
-        finally
-        {
-            if (Directory.Exists(tempRoot))
-                Directory.Delete(tempRoot, recursive: true);
-        }
+        Assert.Equal(RuntimeCheckOutcome.Warn, result.Outcome);
+        Assert.Contains("does not match source HEAD", result.Message);
     }
 
     [Fact]
     public async Task CheckRunnerConnection_WhenRunnerActive_ReportsPass()
     {
-        var tempRoot = Path.Combine(Path.GetTempPath(), $"mohist-check-runner-pass-{Guid.NewGuid():N}");
+        var tempRoot = "/mohist-tests/mohist-check-runner-pass";
         var files = new FakeFileSystem();
         var commands = new FakeCommandExecutor();
         var installer = new SystemdServiceInstaller(
@@ -1694,23 +1524,15 @@ public class UpdateTests
             getUserHome: () => tempRoot);
         var context = new UpdateContext(dryRun: false, repoRoot: tempRoot, cliPath: "/usr/local/bin/mo", CancellationToken.None);
 
-        try
-        {
-            var result = await updater.Validator.CheckRunnerConnectionAsync(context, CancellationToken.None);
+        var result = await updater.Validator.CheckRunnerConnectionAsync(context, CancellationToken.None);
 
-            Assert.Equal(RuntimeCheckOutcome.Pass, result.Outcome);
-        }
-        finally
-        {
-            if (Directory.Exists(tempRoot))
-                Directory.Delete(tempRoot, recursive: true);
-        }
+        Assert.Equal(RuntimeCheckOutcome.Pass, result.Outcome);
     }
 
     [Fact]
     public async Task CheckRunnerConnection_WhenRunnerInactive_ReportsFail()
     {
-        var tempRoot = Path.Combine(Path.GetTempPath(), $"mohist-check-runner-fail-{Guid.NewGuid():N}");
+        var tempRoot = "/mohist-tests/mohist-check-runner-fail";
         var files = new FakeFileSystem();
         var commands = new FakeCommandExecutor();
         var installer = new SystemdServiceInstaller(
@@ -1732,24 +1554,16 @@ public class UpdateTests
             getUserHome: () => tempRoot);
         var context = new UpdateContext(dryRun: false, repoRoot: tempRoot, cliPath: "/usr/local/bin/mo", CancellationToken.None);
 
-        try
-        {
-            var result = await updater.Validator.CheckRunnerConnectionAsync(context, CancellationToken.None);
+        var result = await updater.Validator.CheckRunnerConnectionAsync(context, CancellationToken.None);
 
-            Assert.Equal(RuntimeCheckOutcome.Fail, result.Outcome);
-            Assert.Contains("'inactive'", result.Message);
-        }
-        finally
-        {
-            if (Directory.Exists(tempRoot))
-                Directory.Delete(tempRoot, recursive: true);
-        }
+        Assert.Equal(RuntimeCheckOutcome.Fail, result.Outcome);
+        Assert.Contains("'inactive'", result.Message);
     }
 
     [Fact]
     public async Task CheckManagedSkillAssets_WhenSkillFilePresent_ReportsPass()
     {
-        var tempRoot = Path.Combine(Path.GetTempPath(), $"mohist-check-skills-pass-{Guid.NewGuid():N}");
+        var tempRoot = "/mohist-tests/mohist-check-skills-pass";
         var files = new FakeFileSystem();
         files.AddFile(
             Path.Combine(tempRoot, ".mohist", "cli", "skill-data", "mohist", "SKILL.md"),
@@ -1774,23 +1588,15 @@ public class UpdateTests
             getUserHome: () => tempRoot);
         var context = new UpdateContext(dryRun: false, repoRoot: tempRoot, cliPath: "/usr/local/bin/mo", CancellationToken.None);
 
-        try
-        {
-            var result = await updater.Validator.CheckManagedSkillAssetsAsync(context, CancellationToken.None);
+        var result = await updater.Validator.CheckManagedSkillAssetsAsync(context, CancellationToken.None);
 
-            Assert.Equal(RuntimeCheckOutcome.Pass, result.Outcome);
-        }
-        finally
-        {
-            if (Directory.Exists(tempRoot))
-                Directory.Delete(tempRoot, recursive: true);
-        }
+        Assert.Equal(RuntimeCheckOutcome.Pass, result.Outcome);
     }
 
     [Fact]
     public async Task CheckManagedSkillAssets_WhenSkillFilesMissing_ReportsWarn()
     {
-        var tempRoot = Path.Combine(Path.GetTempPath(), $"mohist-check-skills-warn-{Guid.NewGuid():N}");
+        var tempRoot = "/mohist-tests/mohist-check-skills-warn";
         var files = new FakeFileSystem();
         var commands = new FakeCommandExecutor();
         var installer = new SystemdServiceInstaller(
@@ -1812,24 +1618,16 @@ public class UpdateTests
             getUserHome: () => tempRoot);
         var context = new UpdateContext(dryRun: false, repoRoot: tempRoot, cliPath: "/usr/local/bin/mo", CancellationToken.None);
 
-        try
-        {
-            var result = await updater.Validator.CheckManagedSkillAssetsAsync(context, CancellationToken.None);
+        var result = await updater.Validator.CheckManagedSkillAssetsAsync(context, CancellationToken.None);
 
-            Assert.Equal(RuntimeCheckOutcome.Warn, result.Outcome);
-            Assert.Contains("missing", result.Message);
-        }
-        finally
-        {
-            if (Directory.Exists(tempRoot))
-                Directory.Delete(tempRoot, recursive: true);
-        }
+        Assert.Equal(RuntimeCheckOutcome.Warn, result.Outcome);
+        Assert.Contains("missing", result.Message);
     }
 
     [Fact]
     public async Task CheckWebAssets_WhenIndexAndAssetSucceed_ReportsPass()
     {
-        var tempRoot = Path.Combine(Path.GetTempPath(), $"mohist-check-web-pass-{Guid.NewGuid():N}");
+        var tempRoot = "/mohist-tests/mohist-check-web-pass";
         var files = new FakeFileSystem();
         var commands = new FakeCommandExecutor();
         var installer = new SystemdServiceInstaller(
@@ -1851,23 +1649,15 @@ public class UpdateTests
             getUserHome: () => tempRoot);
         var context = new UpdateContext(dryRun: false, repoRoot: tempRoot, cliPath: "/usr/local/bin/mo", CancellationToken.None);
 
-        try
-        {
-            var result = await updater.Validator.CheckWebAssetsAsync(context, CancellationToken.None);
+        var result = await updater.Validator.CheckWebAssetsAsync(context, CancellationToken.None);
 
-            Assert.Equal(RuntimeCheckOutcome.Pass, result.Outcome);
-        }
-        finally
-        {
-            if (Directory.Exists(tempRoot))
-                Directory.Delete(tempRoot, recursive: true);
-        }
+        Assert.Equal(RuntimeCheckOutcome.Pass, result.Outcome);
     }
 
     [Fact]
     public async Task CheckWebAssets_WhenIndexFails_ReportsFail()
     {
-        var tempRoot = Path.Combine(Path.GetTempPath(), $"mohist-check-web-fail-{Guid.NewGuid():N}");
+        var tempRoot = "/mohist-tests/mohist-check-web-fail";
         var files = new FakeFileSystem();
         var commands = new FakeCommandExecutor();
         var installer = new SystemdServiceInstaller(
@@ -1892,18 +1682,10 @@ public class UpdateTests
             getUserHome: () => tempRoot);
         var context = new UpdateContext(dryRun: false, repoRoot: tempRoot, cliPath: "/usr/local/bin/mo", CancellationToken.None);
 
-        try
-        {
-            var result = await updater.Validator.CheckWebAssetsAsync(context, CancellationToken.None);
+        var result = await updater.Validator.CheckWebAssetsAsync(context, CancellationToken.None);
 
-            Assert.Equal(RuntimeCheckOutcome.Fail, result.Outcome);
-            Assert.Contains("500", result.Message);
-        }
-        finally
-        {
-            if (Directory.Exists(tempRoot))
-                Directory.Delete(tempRoot, recursive: true);
-        }
+        Assert.Equal(RuntimeCheckOutcome.Fail, result.Outcome);
+        Assert.Contains("500", result.Message);
     }
 
     private static string HealthySystemInfoJson(string runningGitHash = "abc123", string runnerStatus = "active")
@@ -1933,224 +1715,192 @@ public class UpdateTests
     [Fact]
     public async Task UpdateAll_WhenServerReachable_PostsOutcomeToServer()
     {
-        var tempRoot = Path.Combine(Path.GetTempPath(), $"mohist-outcome-posted-{Guid.NewGuid():N}");
+        var tempRoot = "/mohist-tests/mohist-outcome-posted";
         var files = new FakeFileSystem();
         WritePackagedSkillAssets(files, Path.Combine(tempRoot, ".publish", "cli", "skill-data"));
         WriteManagedSkillAssets(files, tempRoot);
 
-        try
-        {
-            var commands = new FakeCommandExecutor();
-            commands.SetStdoutFor("systemctl", args => args.Length >= 3 && args[1] == "is-active", "active\n");
-            commands.SetStdoutFor("/home/user/.local/bin/mo", _ => true, "1.0.0+abc123");
-            commands.SetStdoutFor("git", _ => true, "abc123");
-            var stdout = new StringWriter();
-            var stderr = new StringWriter();
-            var installer = new SystemdServiceInstaller(
-                stdout,
-                stderr,
-                files,
-                commands);
-            var systemInfo = HealthySystemInfoJson(runningGitHash: "abc123", runnerStatus: "active");
-            var handler = new OutcomeCapturingHttpHandler(systemInfo);
-            var updater = SourceCodeUpdater.CreateWithDefaults(
-                stdout,
-                stderr,
-                installer,
-                commands,
-                files,
-                new MockEnvironmentVariableProvider(),
-                new HttpClient(handler)
-                {
-                    BaseAddress = new Uri("http://localhost:3456"),
-                },
-                getUserHome: () => tempRoot);
+        var commands = new FakeCommandExecutor();
+        commands.SetStdoutFor("systemctl", args => args.Length >= 3 && args[1] == "is-active", "active\n");
+        commands.SetStdoutFor("/home/user/.local/bin/mo", _ => true, "1.0.0+abc123");
+        commands.SetStdoutFor("git", _ => true, "abc123");
+        var stdout = new StringWriter();
+        var stderr = new StringWriter();
+        var installer = new SystemdServiceInstaller(
+            stdout,
+            stderr,
+            files,
+            commands);
+        var systemInfo = HealthySystemInfoJson(runningGitHash: "abc123", runnerStatus: "active");
+        var handler = new OutcomeCapturingHttpHandler(systemInfo);
+        var updater = SourceCodeUpdater.CreateWithDefaults(
+            stdout,
+            stderr,
+            installer,
+            commands,
+            files,
+            new MockEnvironmentVariableProvider(),
+            new HttpClient(handler)
+            {
+                BaseAddress = new Uri("http://localhost:3456"),
+            },
+            getUserHome: () => tempRoot);
 
-            var exitCode = await updater.UpdateAllAsync(tempRoot, dryRun: false, cliPath: "/home/user/.local/bin/mo", continueAfterCliUpdate: true);
+        var exitCode = await updater.UpdateAllAsync(tempRoot, dryRun: false, cliPath: "/home/user/.local/bin/mo", continueAfterCliUpdate: true);
 
-            Assert.Equal(0, exitCode);
-            Assert.NotNull(handler.LastOutcomeRequest);
-            var outcome = handler.LastOutcomeRequest!;
-            Assert.False(string.IsNullOrWhiteSpace(outcome.JobId));
-            Assert.Equal("succeeded", outcome.Status);
-            Assert.Equal("succeeded", outcome.Outcome);
-            Assert.Null(outcome.UnavailableCapability);
-            Assert.NotNull(outcome.Logs);
-            Assert.NotEmpty(outcome.Logs!);
-            Assert.DoesNotContain(outcome.Logs!, l => l.Stage == "Updating CLI");
-            Assert.Contains(outcome.Logs!, l => l.Stage == "Preparing workflow runner");
-            Assert.Contains(outcome.Logs!, l => l.Stage == "Verifying workflow runtime");
-            Assert.Equal("abc123", outcome.SourceHead);
-            Assert.Contains("Update outcome persisted to server.", stdout.ToString());
-        }
-        finally
-        {
-            if (Directory.Exists(tempRoot))
-                Directory.Delete(tempRoot, recursive: true);
-        }
+        Assert.Equal(0, exitCode);
+        Assert.NotNull(handler.LastOutcomeRequest);
+        var outcome = handler.LastOutcomeRequest!;
+        Assert.False(string.IsNullOrWhiteSpace(outcome.JobId));
+        Assert.Equal("succeeded", outcome.Status);
+        Assert.Equal("succeeded", outcome.Outcome);
+        Assert.Null(outcome.UnavailableCapability);
+        Assert.NotNull(outcome.Logs);
+        Assert.NotEmpty(outcome.Logs!);
+        Assert.DoesNotContain(outcome.Logs!, l => l.Stage == "Updating CLI");
+        Assert.Contains(outcome.Logs!, l => l.Stage == "Preparing workflow runner");
+        Assert.Contains(outcome.Logs!, l => l.Stage == "Verifying workflow runtime");
+        Assert.Equal("abc123", outcome.SourceHead);
+        Assert.Contains("Update outcome persisted to server.", stdout.ToString());
     }
 
     [Fact]
     public async Task UpdateAll_WhenServerUnreachable_SkipsOutcomePostWithMessage()
     {
-        var tempRoot = Path.Combine(Path.GetTempPath(), $"mohist-outcome-unreachable-{Guid.NewGuid():N}");
+        var tempRoot = "/mohist-tests/mohist-outcome-unreachable";
         var files = new FakeFileSystem();
         WritePackagedSkillAssets(files, Path.Combine(tempRoot, ".publish", "cli", "skill-data"));
         WriteManagedSkillAssets(files, tempRoot);
 
-        try
+        var commands = new FakeCommandExecutor();
+        commands.SetStdoutFor("systemctl", args => args.Length >= 3 && args[1] == "is-active", "active\n");
+        commands.SetStdoutFor("/home/user/.local/bin/mo", _ => true, "1.0.0+abc123");
+        commands.SetStdoutFor("git", _ => true, "abc123");
+        var stdout = new StringWriter();
+        var stderr = new StringWriter();
+        var installer = new SystemdServiceInstaller(
+            stdout,
+            stderr,
+            files,
+            commands);
+        var systemInfo = HealthySystemInfoJson(runningGitHash: "abc123", runnerStatus: "active");
+        var handler = new OutcomeCapturingHttpHandler(systemInfo)
         {
-            var commands = new FakeCommandExecutor();
-            commands.SetStdoutFor("systemctl", args => args.Length >= 3 && args[1] == "is-active", "active\n");
-            commands.SetStdoutFor("/home/user/.local/bin/mo", _ => true, "1.0.0+abc123");
-            commands.SetStdoutFor("git", _ => true, "abc123");
-            var stdout = new StringWriter();
-            var stderr = new StringWriter();
-            var installer = new SystemdServiceInstaller(
-                stdout,
-                stderr,
-                files,
-                commands);
-            var systemInfo = HealthySystemInfoJson(runningGitHash: "abc123", runnerStatus: "active");
-            var handler = new OutcomeCapturingHttpHandler(systemInfo)
+            OutcomeResponseStatusCode = HttpStatusCode.ServiceUnavailable,
+        };
+        var updater = SourceCodeUpdater.CreateWithDefaults(
+            stdout,
+            stderr,
+            installer,
+            commands,
+            files,
+            new MockEnvironmentVariableProvider(),
+            new HttpClient(handler)
             {
-                OutcomeResponseStatusCode = HttpStatusCode.ServiceUnavailable,
-            };
-            var updater = SourceCodeUpdater.CreateWithDefaults(
-                stdout,
-                stderr,
-                installer,
-                commands,
-                files,
-                new MockEnvironmentVariableProvider(),
-                new HttpClient(handler)
-                {
-                    BaseAddress = new Uri("http://localhost:3456"),
-                },
-                getUserHome: () => tempRoot);
+                BaseAddress = new Uri("http://localhost:3456"),
+            },
+            getUserHome: () => tempRoot);
 
-            var exitCode = await updater.UpdateAllAsync(tempRoot, dryRun: false, cliPath: "/home/user/.local/bin/mo", continueAfterCliUpdate: true);
+        var exitCode = await updater.UpdateAllAsync(tempRoot, dryRun: false, cliPath: "/home/user/.local/bin/mo", continueAfterCliUpdate: true);
 
-            Assert.Equal(0, exitCode);
-            var output = stdout.ToString();
-            Assert.Contains("Update complete. Mohist is ready.", output);
-            Assert.Contains("Could not persist update outcome to server", output);
-            Assert.DoesNotContain("Update outcome persisted to server.", output);
-        }
-        finally
-        {
-            if (Directory.Exists(tempRoot))
-                Directory.Delete(tempRoot, recursive: true);
-        }
+        Assert.Equal(0, exitCode);
+        var output = stdout.ToString();
+        Assert.Contains("Update complete. Mohist is ready.", output);
+        Assert.Contains("Could not persist update outcome to server", output);
+        Assert.DoesNotContain("Update outcome persisted to server.", output);
     }
 
     [Fact]
     public async Task UpdateAll_WhenInterruptedBeforeRunnerStop_DoesNotPostOutcomeToServer()
     {
-        var tempRoot = Path.Combine(Path.GetTempPath(), $"mohist-cancel-no-post-{Guid.NewGuid():N}");
+        var tempRoot = "/mohist-tests/mohist-cancel-no-post";
         var files = new FakeFileSystem();
         WritePackagedSkillAssets(files, Path.Combine(tempRoot, ".publish", "cli", "skill-data"));
 
-        try
-        {
-            var commands = new FakeCommandExecutor();
-            var stdout = new StringWriter();
-            var stderr = new StringWriter();
-            var installer = new SystemdServiceInstaller(
-                stdout,
-                stderr,
-                files,
-                commands);
-            var handler = new OutcomeCapturingHttpHandler(HealthySystemInfoJson());
-            var updater = SourceCodeUpdater.CreateWithDefaults(
-                stdout,
-                stderr,
-                installer,
-                commands,
-                files,
-                new MockEnvironmentVariableProvider(),
-                new HttpClient(handler)
-                {
-                    BaseAddress = new Uri("http://localhost:3456"),
-                },
-                getUserHome: () => tempRoot);
+        var commands = new FakeCommandExecutor();
+        var stdout = new StringWriter();
+        var stderr = new StringWriter();
+        var installer = new SystemdServiceInstaller(
+            stdout,
+            stderr,
+            files,
+            commands);
+        var handler = new OutcomeCapturingHttpHandler(HealthySystemInfoJson());
+        var updater = SourceCodeUpdater.CreateWithDefaults(
+            stdout,
+            stderr,
+            installer,
+            commands,
+            files,
+            new MockEnvironmentVariableProvider(),
+            new HttpClient(handler)
+            {
+                BaseAddress = new Uri("http://localhost:3456"),
+            },
+            getUserHome: () => tempRoot);
 
-            using var cts = new CancellationTokenSource();
-            cts.Cancel();
-            var exitCode = await updater.UpdateAllAsync(tempRoot, dryRun: false, cliPath: "/home/user/.local/bin/mo", cts.Token, continueAfterCliUpdate: true);
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        var exitCode = await updater.UpdateAllAsync(tempRoot, dryRun: false, cliPath: "/home/user/.local/bin/mo", cts.Token, continueAfterCliUpdate: true);
 
-            Assert.Equal(130, exitCode);
-            Assert.Contains("No recovery needed", stdout.ToString());
-            Assert.Contains("no outcome was posted", stdout.ToString());
-            Assert.Null(handler.LastOutcomeRequest);
-        }
-        finally
-        {
-            if (Directory.Exists(tempRoot))
-                Directory.Delete(tempRoot, recursive: true);
-        }
+        Assert.Equal(130, exitCode);
+        Assert.Contains("No recovery needed", stdout.ToString());
+        Assert.Contains("no outcome was posted", stdout.ToString());
+        Assert.Null(handler.LastOutcomeRequest);
     }
 
     [Fact]
     public async Task UpdateAll_WebUiCanReadCliOutcomeViaStatusEndpoint()
     {
-        var tempRoot = Path.Combine(Path.GetTempPath(), $"mohist-outcome-webui-{Guid.NewGuid():N}");
+        var tempRoot = "/mohist-tests/mohist-outcome-webui";
         var files = new FakeFileSystem();
         WritePackagedSkillAssets(files, Path.Combine(tempRoot, ".publish", "cli", "skill-data"));
         WriteManagedSkillAssets(files, tempRoot);
 
-        try
-        {
-            var commands = new FakeCommandExecutor();
-            commands.SetStdoutFor("systemctl", args => args.Length >= 3 && args[1] == "is-active", "active\n");
-            commands.SetStdoutFor("/home/user/.local/bin/mo", _ => true, "1.0.0+abc123");
-            commands.SetStdoutFor("git", _ => true, "abc123");
-            var stdout = new StringWriter();
-            var stderr = new StringWriter();
-            var installer = new SystemdServiceInstaller(
-                stdout,
-                stderr,
-                files,
-                commands);
-            var systemInfo = HealthySystemInfoJson(runningGitHash: "abc123", runnerStatus: "active");
-            var handler = new OutcomeCapturingHttpHandler(systemInfo);
-            var updater = SourceCodeUpdater.CreateWithDefaults(
-                stdout,
-                stderr,
-                installer,
-                commands,
-                files,
-                new MockEnvironmentVariableProvider(),
-                new HttpClient(handler)
-                {
-                    BaseAddress = new Uri("http://localhost:3456"),
-                },
-                getUserHome: () => tempRoot);
+        var commands = new FakeCommandExecutor();
+        commands.SetStdoutFor("systemctl", args => args.Length >= 3 && args[1] == "is-active", "active\n");
+        commands.SetStdoutFor("/home/user/.local/bin/mo", _ => true, "1.0.0+abc123");
+        commands.SetStdoutFor("git", _ => true, "abc123");
+        var stdout = new StringWriter();
+        var stderr = new StringWriter();
+        var installer = new SystemdServiceInstaller(
+            stdout,
+            stderr,
+            files,
+            commands);
+        var systemInfo = HealthySystemInfoJson(runningGitHash: "abc123", runnerStatus: "active");
+        var handler = new OutcomeCapturingHttpHandler(systemInfo);
+        var updater = SourceCodeUpdater.CreateWithDefaults(
+            stdout,
+            stderr,
+            installer,
+            commands,
+            files,
+            new MockEnvironmentVariableProvider(),
+            new HttpClient(handler)
+            {
+                BaseAddress = new Uri("http://localhost:3456"),
+            },
+            getUserHome: () => tempRoot);
 
-            var exitCode = await updater.UpdateAllAsync(tempRoot, dryRun: false, cliPath: "/home/user/.local/bin/mo", continueAfterCliUpdate: true);
+        var exitCode = await updater.UpdateAllAsync(tempRoot, dryRun: false, cliPath: "/home/user/.local/bin/mo", continueAfterCliUpdate: true);
 
-            Assert.Equal(0, exitCode);
-            Assert.NotNull(handler.LastOutcomeRequest);
-            var postedJobId = handler.LastOutcomeRequest!.JobId;
-            Assert.False(string.IsNullOrWhiteSpace(postedJobId));
+        Assert.Equal(0, exitCode);
+        Assert.NotNull(handler.LastOutcomeRequest);
+        var postedJobId = handler.LastOutcomeRequest!.JobId;
+        Assert.False(string.IsNullOrWhiteSpace(postedJobId));
 
-            // The "Web UI" call to GET /api/system/update/status would invoke the
-            // server-side SystemUpdateService. The captured handler records the
-            // same JSON body the server would respond with for the GET, simulating
-            // the round-trip.
-            var statusJson = handler.BuildStatusResponseJson();
-            using var statusDoc = System.Text.Json.JsonDocument.Parse(statusJson);
-            var root = statusDoc.RootElement;
-            Assert.Equal(postedJobId, root.GetProperty("jobId").GetString());
-            Assert.Equal("succeeded", root.GetProperty("status").GetString());
-            Assert.Equal("succeeded", root.GetProperty("outcome").GetString());
-            Assert.Equal("abc123", root.GetProperty("sourceHead").GetString());
-        }
-        finally
-        {
-            if (Directory.Exists(tempRoot))
-                Directory.Delete(tempRoot, recursive: true);
-        }
+        // The "Web UI" call to GET /api/system/update/status would invoke the
+        // server-side SystemUpdateService. The captured handler records the
+        // same JSON body the server would respond with for the GET, simulating
+        // the round-trip.
+        var statusJson = handler.BuildStatusResponseJson();
+        using var statusDoc = System.Text.Json.JsonDocument.Parse(statusJson);
+        var root = statusDoc.RootElement;
+        Assert.Equal(postedJobId, root.GetProperty("jobId").GetString());
+        Assert.Equal("succeeded", root.GetProperty("status").GetString());
+        Assert.Equal("succeeded", root.GetProperty("outcome").GetString());
+        Assert.Equal("abc123", root.GetProperty("sourceHead").GetString());
     }
 
     private sealed class FakeFileSystem : Mohist.Server.UnitTests.Support.FakeFileSystem
@@ -2434,9 +2184,9 @@ public class UpdateTests
                     stage = l.Stage,
                     message = l.Message,
                 }),
-                createdAt = DateTimeOffset.UtcNow,
-                updatedAt = DateTimeOffset.UtcNow,
-                completedAt = DateTimeOffset.UtcNow,
+                createdAt = TestTime.UtcNow,
+                updatedAt = TestTime.UtcNow,
+                completedAt = TestTime.UtcNow,
             };
             return JsonSerializer.Serialize(response, JsonOptions);
         }

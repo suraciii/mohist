@@ -1,13 +1,9 @@
 using System.Net;
 using System.Net.Http.Json;
-using System.Text;
 using System.Text.Json;
-using EnvironmentAbstractions.TestHelpers;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
 using Mohist.Server.Api;
 using Mohist.Server.Logging;
+using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.SpecTests.Support;
 using Xunit;
 
@@ -23,29 +19,15 @@ public class LogsRouteSpecs
         _fixture = fixture;
     }
 
-    private string LogFilePath => Path.Combine(_fixture.LogsPath, FileLoggerProvider.LogFileName);
+    private InMemoryLogTailSource Source =>
+        _fixture.Services.GetRequiredService<InMemoryLogTailSource>();
 
-    /// <summary>
-    /// Removes any existing log directory so the next test starts from
-    /// a known missing state. The fixture's per-run <c>Mohist:LogsPath</c>
-    /// is shared across all tests in the collection, so each test must
-    /// arrange its own state.
-    /// </summary>
-    private void ResetState()
-    {
-        if (Directory.Exists(_fixture.LogsPath))
-        {
-            Directory.Delete(_fixture.LogsPath, recursive: true);
-        }
-    }
+    private void ResetState() => Source.ResetDirectoryMissing();
 
-    private async Task SeedServerLogAsync(params string[] lines)
+    private Task SeedServerLogAsync(params string[] lines)
     {
-        Directory.CreateDirectory(_fixture.LogsPath);
-        // UTF-8 without BOM so byte offsets match the cursor math
-        // (BOMs would add 3 unaccounted bytes at the file head).
-        var encoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
-        await File.WriteAllLinesAsync(LogFilePath, lines, encoding);
+        Source.SetLines(lines);
+        return Task.CompletedTask;
     }
 
     private static async Task<JsonElement> GetTailAsync(HttpClient client, string? query = null)
@@ -99,7 +81,7 @@ public class LogsRouteSpecs
         Assert.Equal(0, data.GetProperty("lines").GetArrayLength());
 
         var expectedLocation = data.GetProperty("expectedLocation").GetString();
-        Assert.Equal(LogFilePath, expectedLocation);
+        Assert.Equal(Source.ExpectedLocation, expectedLocation);
 
         var reason = data.GetProperty("reason").GetString();
         Assert.NotNull(reason);
@@ -111,14 +93,12 @@ public class LogsRouteSpecs
     [Fact]
     public async Task Get_WhenLogDirectoryExistsButServerLogMissing_ReturnsUnavailableWithReason()
     {
-        ResetState();
-        // server.log intentionally absent
-        Directory.CreateDirectory(_fixture.LogsPath);
+        Source.ResetFileMissing();
 
         var data = await GetTailAsync(_fixture.Client);
 
         Assert.True(data.GetProperty("unavailable").GetBoolean());
-        Assert.Equal(LogFilePath, data.GetProperty("expectedLocation").GetString());
+        Assert.Equal(Source.ExpectedLocation, data.GetProperty("expectedLocation").GetString());
         var reason = data.GetProperty("reason").GetString();
         Assert.NotNull(reason);
         Assert.Contains("is missing", reason);
@@ -155,7 +135,7 @@ public class LogsRouteSpecs
 
         // source reflects the active log file name so the Web renders
         // it as the File: line.
-        Assert.Equal(FileLoggerProvider.LogFileName, data.GetProperty("source").GetString());
+        Assert.Equal(InMemoryLogTailSource.SourceName, data.GetProperty("source").GetString());
 
         // cursor/nextCursor remain the EOF byte offset so auto-follow can
         // poll from the end without replaying the file.
@@ -226,7 +206,7 @@ public class LogsRouteSpecs
             .ToArray();
         await SeedServerLogAsync(lines);
 
-        var fileLength = new FileInfo(LogFilePath).Length;
+        var fileLength = System.Text.Encoding.UTF8.GetByteCount(string.Concat(lines.Select(line => line + "\n")));
         // Pretend the client had a cursor near the end of the file, but
         // the file has now been rotated/truncated so its length is
         // smaller. The endpoint must detect the shrink, restart from
@@ -298,10 +278,7 @@ public class LogsRouteSpecs
         Assert.Equal(0, emptyPoll.GetProperty("lines").GetArrayLength());
         Assert.Equal(eofCursor, emptyPoll.GetProperty("nextCursor").GetInt64());
 
-        await File.AppendAllLinesAsync(
-            LogFilePath,
-            new[] { appendedLine },
-            new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+        Source.AppendLine(appendedLine);
 
         var afterAppend = await GetTailAsync(_fixture.Client, $"?cursor={eofCursor}&limit=10");
         Assert.False(afterAppend.GetProperty("reset").GetBoolean());
@@ -441,63 +418,24 @@ public class LogsRouteSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
-    public async Task Get_RecordWrittenByFileLoggerProvider_RoundTripsThroughLogEntryProjectionWithoutFieldLoss()
+    public async Task Get_SerializedLogRecord_RoundTripsWithoutFieldLoss()
     {
-        ResetState();
-
-        // Drive the FileLoggerProvider end-to-end against a fresh
-        // temp directory and stand up an ILogPathResolver pointed at
-        // it, then point a brand-new FileLoggerProvider at the same
-        // path so its writes are what the tail reads. The route is
-        // wired to the singleton ILogPathResolver (fixture's logs
-        // path), so we copy the produced file into that location
-        // before reading through the API. This isolates the test
-        // from the singleton provider's file handle, which may be
-        // stale from earlier tests in the collection that delete the
-        // logs directory.
-        var tempDir = Path.Combine(Path.GetTempPath(), $"mohist-logs-provider-{Guid.NewGuid():N}");
-        var configuration = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>
-            {
-                [LogPathResolver.ConfigurationKey] = tempDir,
-            })
-            .Build();
-        ILogPathResolver resolver = new LogPathResolver(configuration, new MockEnvironmentVariableProvider());
-        using (var freshProvider = new FileLoggerProvider(resolver, _fixture.TimeProvider))
-        {
-            var freshLogger = freshProvider.CreateLogger("Mohist.Server.Workflow.Grains");
-            const string probe = "logger-roundtrip 42";
-            freshLogger.LogInformation(probe);
-
-            // Copy the fresh file into the fixture's logs directory as
-            // `server.log` so the tail endpoint reads it through its
-            // own (singleton) ILogPathResolver.
-            Directory.CreateDirectory(_fixture.LogsPath);
-            File.Copy(freshProvider.LogFilePath, LogFilePath, overwrite: true);
-        }
+        var record = new LogRecord(
+            "INFO",
+            _fixture.TimeProvider.GetUtcNow(),
+            "Mohist.Server",
+            "logger-roundtrip 42");
+        Source.SetLines(JsonSerializer.Serialize(record, Mohist.Server.Infrastructure.JSON.Options));
 
         var data = await GetTailAsync(_fixture.Client);
-        var lines = data.GetProperty("lines").EnumerateArray().ToList();
-        Assert.Single(lines);
-        var entry = AssertEntry(lines[0]);
+        var entry = AssertEntry(Assert.Single(data.GetProperty("lines").EnumerateArray()));
 
         Assert.Equal("INFO", entry.Level);
         Assert.Equal("Mohist.Server", entry.Service);
         Assert.Equal("logger-roundtrip 42", entry.Message);
-        Assert.NotNull(entry.Time);
-        Assert.NotEmpty(entry.Raw);
-
-        // The raw on the wire must parse back to a LogRecord with the
-        // same fields — proves the on-disk format and the wire format
-        // share JSON.Options and the round-trip is lossless.
         var parsedBack = JsonSerializer.Deserialize<LogRecord>(entry.Raw, Mohist.Server.Infrastructure.JSON.Options);
         Assert.NotNull(parsedBack);
-        Assert.Equal("INFO", parsedBack!.Level);
-        Assert.Equal("Mohist.Server", parsedBack.Service);
-        Assert.Equal("logger-roundtrip 42", parsedBack.Message);
-
-        // Cleanup the temp dir we created.
-        try { Directory.Delete(tempDir, recursive: true); } catch { /* best-effort */ }
+        Assert.Equal(record, parsedBack);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -512,6 +450,6 @@ public class LogsRouteSpecs
         await SeedServerLogAsync(firstLine);
 
         var data = await GetTailAsync(_fixture.Client);
-        Assert.Equal(FileLoggerProvider.LogFileName, data.GetProperty("source").GetString());
+        Assert.Equal(InMemoryLogTailSource.SourceName, data.GetProperty("source").GetString());
     }
 }

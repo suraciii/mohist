@@ -32,7 +32,7 @@ public class ActivityWaitingApiSpecs
             project.Id,
             number: 1,
             title: "Awaiting product review",
-            approvalRequestedAt: DateTimeOffset.UtcNow.AddMinutes(-3));
+            approvalRequestedAt: TestTime.UtcNow.AddMinutes(-3));
 
         var response = await _client.GetDataAsync<ActivityResponseDto>(
             $"/api/projects/{project.Id}/agent/activity");
@@ -72,7 +72,7 @@ public class ActivityWaitingApiSpecs
             project.Id,
             number: 3,
             title: "Gated",
-            approvalRequestedAt: DateTimeOffset.UtcNow);
+            approvalRequestedAt: TestTime.UtcNow);
 
         var response = await _client.GetDataAsync<ActivityResponseDto>(
             $"/api/projects/{project.Id}/agent/activity");
@@ -156,7 +156,7 @@ public class ActivityWaitingApiSpecs
         var runState = JsonSerializer.Serialize(new
         {
             Id = workflowRunId,
-            Metadata = new { CreatedAt = DateTimeOffset.UtcNow, Name = "test" },
+            Metadata = new { CreatedAt = TestTime.UtcNow, Name = "test" },
             Status = "AwaitingApproval",
             CurrentStageId = "plan",
             Stages = new[]

@@ -360,176 +360,6 @@ public class SystemUpdateServiceSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
-    public async Task FileSystemStore_TryAcquireLockAsync_IsDurableAcrossStoreInstances()
-    {
-        var statePath = Path.Combine(Path.GetTempPath(), $"mohist-system-update-{Guid.NewGuid():N}.json");
-        try
-        {
-            var first = CreateFileSystemStore(statePath);
-            var second = CreateFileSystemStore(statePath);
-
-            Assert.True(await first.TryAcquireLockAsync("job-1"));
-            Assert.False(await second.TryAcquireLockAsync("job-2"));
-
-            await first.ReleaseLockAsync("job-1");
-            Assert.True(await second.TryAcquireLockAsync("job-2"));
-        }
-        finally
-        {
-            if (File.Exists(statePath))
-                File.Delete(statePath);
-            if (File.Exists(statePath + ".lock"))
-                File.Delete(statePath + ".lock");
-        }
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
-    [Fact]
-    public async Task FileSystemStore_TryAcquireLockAsync_RejectsPersistedActiveJobAfterRestart()
-    {
-        var statePath = Path.Combine(Path.GetTempPath(), $"mohist-system-update-{Guid.NewGuid():N}.json");
-        try
-        {
-            var now = FixedNow;
-            var first = CreateFileSystemStore(statePath);
-            await first.SaveAsync(new SystemUpdateJobState(
-                "job-1",
-                "waiting-for-reconnect",
-                "Waiting for reconnect",
-                true,
-                "oldhash",
-                "newhash",
-                "/repo",
-                "mohist.service",
-                "mohist-runner.service",
-                "Waiting",
-                [new SystemUpdateLogEntry(now, "Waiting for reconnect", "Waiting")],
-                now,
-                now,
-                null));
-
-            var restarted = CreateFileSystemStore(statePath);
-
-            Assert.False(await restarted.TryAcquireLockAsync("job-2"));
-        }
-        finally
-        {
-            if (File.Exists(statePath))
-                File.Delete(statePath);
-            if (File.Exists(statePath + ".lock"))
-                File.Delete(statePath + ".lock");
-        }
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
-    [Fact]
-    public async Task FileSystemStore_ReleaseStaleLockAsync_DeletesStaleLockFileAndAllowsReacquisitionOnFreshInstance()
-    {
-        var statePath = Path.Combine(Path.GetTempPath(), $"mohist-system-update-{Guid.NewGuid():N}.json");
-        try
-        {
-            var first = CreateFileSystemStore(statePath);
-            Assert.True(await first.TryAcquireLockAsync("stale-job"));
-
-            var refreshed = CreateFileSystemStore(statePath);
-            Assert.False(await refreshed.TryAcquireLockAsync("new-job"));
-
-            await refreshed.ReleaseStaleLockAsync("stale-job");
-
-            Assert.False(File.Exists(statePath + ".lock"));
-
-            Assert.True(await refreshed.TryAcquireLockAsync("new-job"));
-        }
-        finally
-        {
-            if (File.Exists(statePath))
-                File.Delete(statePath);
-            if (File.Exists(statePath + ".lock"))
-                File.Delete(statePath + ".lock");
-        }
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
-    [Fact]
-    public async Task FileSystemStore_ReleaseStaleLockAsync_IsIdempotentWhenLockFileAbsent()
-    {
-        var statePath = Path.Combine(Path.GetTempPath(), $"mohist-system-update-{Guid.NewGuid():N}.json");
-        try
-        {
-            var store = CreateFileSystemStore(statePath);
-
-            await store.ReleaseStaleLockAsync("any-job");
-
-            Assert.False(File.Exists(statePath + ".lock"));
-        }
-        finally
-        {
-            if (File.Exists(statePath))
-                File.Delete(statePath);
-            if (File.Exists(statePath + ".lock"))
-                File.Delete(statePath + ".lock");
-        }
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
-    [Fact]
-    public async Task FileSystemStore_ReleaseStaleLockAsync_LeavesLockHeldByDifferentOwner()
-    {
-        var statePath = Path.Combine(Path.GetTempPath(), $"mohist-system-update-{Guid.NewGuid():N}.json");
-        try
-        {
-            var first = CreateFileSystemStore(statePath);
-            Assert.True(await first.TryAcquireLockAsync("real-owner"));
-
-            var refreshed = CreateFileSystemStore(statePath);
-            await refreshed.ReleaseStaleLockAsync("someone-else");
-
-            Assert.True(File.Exists(statePath + ".lock"));
-
-            Assert.False(await refreshed.TryAcquireLockAsync("new-job"));
-        }
-        finally
-        {
-            if (File.Exists(statePath))
-                File.Delete(statePath);
-            if (File.Exists(statePath + ".lock"))
-                File.Delete(statePath + ".lock");
-        }
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
-    [Fact]
-    public async Task FileSystemStore_ReleaseLockAsync_StillNoOpsAfterRestart()
-    {
-        var statePath = Path.Combine(Path.GetTempPath(), $"mohist-system-update-{Guid.NewGuid():N}.json");
-        try
-        {
-            var first = CreateFileSystemStore(statePath);
-            Assert.True(await first.TryAcquireLockAsync("stale-job"));
-
-            var refreshed = CreateFileSystemStore(statePath);
-
-            await refreshed.ReleaseLockAsync("stale-job");
-
-            Assert.True(File.Exists(statePath + ".lock"));
-        }
-        finally
-        {
-            if (File.Exists(statePath))
-                File.Delete(statePath);
-            if (File.Exists(statePath + ".lock"))
-                File.Delete(statePath + ".lock");
-        }
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
-    [Fact]
     public async Task InMemoryUpdateStore_ReleaseStaleLockAsync_ReleasesHeldLockWithoutProcessLocalMatch()
     {
         var store = new InMemoryUpdateStore();
@@ -1025,59 +855,6 @@ public class SystemUpdateServiceSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
-    public async Task GetLatestStatusAsync_DoesNotPersistStateFile()
-    {
-        var statePath = Path.Combine(Path.GetTempPath(), $"mohist-system-update-{Guid.NewGuid():N}.json");
-        try
-        {
-            var store = CreateFileSystemStore(statePath);
-            var commands = new RecordingCommandRunner();
-            var now = FixedNow;
-            var initial = new SystemUpdateJobState(
-                "job-1",
-                "waiting-for-reconnect",
-                "Waiting for reconnect",
-                true,
-                "oldhash",
-                "newhash",
-                "/repo",
-                "mohist.service",
-                "mohist-runner.service",
-                "Waiting for restart",
-                [new SystemUpdateLogEntry(now, "Waiting for reconnect", "Waiting for restart")],
-                now,
-                now,
-                null);
-            await store.SaveAsync(initial);
-
-            var beforeBytes = await File.ReadAllBytesAsync(statePath);
-
-            var service = CreateService(
-                new SequencedSystemInfo(CreateInfo(runningGitHash: "newhash", sourceHead: "newhash")),
-                store,
-                commands,
-                new StubReadinessProbe(new(true, true, true, "/assets/app.js", null)));
-
-            var status = await service.GetLatestStatusAsync();
-
-            Assert.NotNull(status);
-            Assert.Empty(commands.Requests);
-
-            var afterBytes = await File.ReadAllBytesAsync(statePath);
-            Assert.Equal(beforeBytes, afterBytes);
-        }
-        finally
-        {
-            if (File.Exists(statePath))
-                File.Delete(statePath);
-            if (File.Exists(statePath + ".lock"))
-                File.Delete(statePath + ".lock");
-        }
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
-    [Fact]
     public async Task GetLatestStatusAsync_DoesNotReleaseLockAndStartStillRejected()
     {
         var store = new InMemoryUpdateStore();
@@ -1350,29 +1127,17 @@ public class SystemUpdateServiceSpecs
     [Fact]
     public async Task GetConsistencyAsync_AllCoherentReturnsConsistent()
     {
-        var store = new InMemoryUpdateStore();
-        var skillDataDir = Path.Combine(Path.GetTempPath(), $"mohist-consistency-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(skillDataDir);
-        Directory.CreateDirectory(Path.Combine(skillDataDir, "mohist"));
-        File.WriteAllText(Path.Combine(skillDataDir, "mohist", "SKILL.md"), "---\nname: mohist\ndescription: test.\n---\n\n# mohist\n");
-        try
-        {
-            var service = CreateConsistencyService(
-                new SequencedSystemInfo(CreateInfo(runningGitHash: "newhash", sourceHead: "newhash")),
-                store,
-                new RecordingCommandRunner(),
-                new StubReadinessProbe(new(true, true, true, "/assets/app.js", null)),
-                skillDataDir);
+        var service = CreateService(
+            new SequencedSystemInfo(CreateInfo(runningGitHash: "newhash", sourceHead: "newhash")),
+            new InMemoryUpdateStore(),
+            new RecordingCommandRunner(),
+            new StubReadinessProbe(new(true, true, true, "/assets/app.js", null)),
+            managedAssets: new InMemoryManagedAssetCatalog());
 
-            var response = await service.GetConsistencyAsync();
+        var response = await service.GetConsistencyAsync();
 
-            Assert.Equal("consistent", response.Status);
-            Assert.All(response.Components, component => Assert.Equal("consistent", component.Status));
-        }
-        finally
-        {
-            Directory.Delete(skillDataDir, recursive: true);
-        }
+        Assert.Equal("consistent", response.Status);
+        Assert.All(response.Components, component => Assert.Equal("consistent", component.Status));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]
@@ -1380,34 +1145,22 @@ public class SystemUpdateServiceSpecs
     [Fact]
     public async Task GetConsistencyAsync_RunnerUnavailableIsReported()
     {
-        var store = new InMemoryUpdateStore();
-        var skillDataDir = Path.Combine(Path.GetTempPath(), $"mohist-consistency-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(skillDataDir);
-        Directory.CreateDirectory(Path.Combine(skillDataDir, "mohist"));
-        File.WriteAllText(Path.Combine(skillDataDir, "mohist", "SKILL.md"), "---\nname: mohist\ndescription: test.\n---\n\n# mohist\n");
-        try
-        {
-            var service = CreateConsistencyService(
-                new SequencedSystemInfo(CreateInfo(
-                    runningGitHash: "newhash",
-                    sourceHead: "newhash",
-                    serverServiceStatus: "active",
-                    runnerServiceStatus: "inactive")),
-                store,
-                new RecordingCommandRunner(),
-                new StubReadinessProbe(new(true, true, true, "/assets/app.js", null)),
-                skillDataDir);
+        var service = CreateService(
+            new SequencedSystemInfo(CreateInfo(
+                runningGitHash: "newhash",
+                sourceHead: "newhash",
+                serverServiceStatus: "active",
+                runnerServiceStatus: "inactive")),
+            new InMemoryUpdateStore(),
+            new RecordingCommandRunner(),
+            new StubReadinessProbe(new(true, true, true, "/assets/app.js", null)),
+            managedAssets: new InMemoryManagedAssetCatalog());
 
-            var response = await service.GetConsistencyAsync();
+        var response = await service.GetConsistencyAsync();
 
-            Assert.Equal("inconsistent", response.Status);
-            var runner = Assert.Single(response.Components, c => c.Name == "runner");
-            Assert.Equal("unavailable", runner.Status);
-        }
-        finally
-        {
-            Directory.Delete(skillDataDir, recursive: true);
-        }
+        Assert.Equal("inconsistent", response.Status);
+        var runner = Assert.Single(response.Components, c => c.Name == "runner");
+        Assert.Equal("unavailable", runner.Status);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]
@@ -1641,60 +1394,24 @@ public class SystemUpdateServiceSpecs
 
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.System)]
-    [Fact]
-    public async Task GetConsistencyAsync_ManagedAssetsMismatchedWhenSkillFilesMissing()
+    [Theory]
+    [InlineData(ManagedAssetCatalogState.Empty)]
+    [InlineData(ManagedAssetCatalogState.Unavailable)]
+    public async Task GetConsistencyAsync_ManagedAssetsMismatchedWhenCatalogIsNotAvailable(
+        ManagedAssetCatalogState state)
     {
-        var store = new InMemoryUpdateStore();
-        var missingDir = Path.Combine(Path.GetTempPath(), $"mohist-consistency-{Guid.NewGuid():N}");
-        try
-        {
-            var service = CreateConsistencyService(
-                new SequencedSystemInfo(CreateInfo(runningGitHash: "newhash", sourceHead: "newhash")),
-                store,
-                new RecordingCommandRunner(),
-                new StubReadinessProbe(new(true, true, true, "/assets/app.js", null)),
-                missingDir);
+        var service = CreateService(
+            new SequencedSystemInfo(CreateInfo(runningGitHash: "newhash", sourceHead: "newhash")),
+            new InMemoryUpdateStore(),
+            new RecordingCommandRunner(),
+            new StubReadinessProbe(new(true, true, true, "/assets/app.js", null)),
+            managedAssets: new InMemoryManagedAssetCatalog(state));
 
-            var response = await service.GetConsistencyAsync();
+        var response = await service.GetConsistencyAsync();
 
-            Assert.Equal("inconsistent", response.Status);
-            var managed = Assert.Single(response.Components, c => c.Name == "managed-assets");
-            Assert.Equal("mismatched", managed.Status);
-        }
-        finally
-        {
-            if (Directory.Exists(missingDir))
-                Directory.Delete(missingDir, recursive: true);
-        }
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
-    [Fact]
-    public async Task GetConsistencyAsync_ManagedAssetsMismatchedWhenSkillDataDirMissing()
-    {
-        var store = new InMemoryUpdateStore();
-        var skillDataDir = Path.Combine(Path.GetTempPath(), $"mohist-consistency-{Guid.NewGuid():N}");
-        try
-        {
-            var service = CreateConsistencyService(
-                new SequencedSystemInfo(CreateInfo(runningGitHash: "newhash", sourceHead: "newhash")),
-                store,
-                new RecordingCommandRunner(),
-                new StubReadinessProbe(new(true, true, true, "/assets/app.js", null)),
-                skillDataDir);
-
-            var response = await service.GetConsistencyAsync();
-
-            Assert.Equal("inconsistent", response.Status);
-            var managed = Assert.Single(response.Components, c => c.Name == "managed-assets");
-            Assert.Equal("mismatched", managed.Status);
-        }
-        finally
-        {
-            if (Directory.Exists(skillDataDir))
-                Directory.Delete(skillDataDir, recursive: true);
-        }
+        Assert.Equal("inconsistent", response.Status);
+        var managed = Assert.Single(response.Components, c => c.Name == "managed-assets");
+        Assert.Equal("mismatched", managed.Status);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]
@@ -1743,15 +1460,6 @@ public class SystemUpdateServiceSpecs
         return CreateService(new SequencedSystemInfo(systemInfo), store, commandRunner, readinessProbe, enabled, includeEnabled);
     }
 
-    private static FileSystemSystemUpdateStore CreateFileSystemStore(string statePath)
-    {
-        var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
-        {
-            ["Mohist:SystemUpdate:StatePath"] = statePath
-        }).Build();
-        return new FileSystemSystemUpdateStore(configuration);
-    }
-
     private static SystemUpdateService CreateService(
         SequencedSystemInfo systemInfo,
         ISystemUpdateStore store,
@@ -1759,6 +1467,22 @@ public class SystemUpdateServiceSpecs
         ISystemReadinessProbe readinessProbe)
     {
         return CreateService(systemInfo, store, commandRunner, readinessProbe, enabled: "true");
+    }
+
+    private static SystemUpdateService CreateService(
+        SequencedSystemInfo systemInfo,
+        ISystemUpdateStore store,
+        ISystemUpdateCommandRunner commandRunner,
+        ISystemReadinessProbe readinessProbe,
+        IManagedAssetCatalog managedAssets)
+    {
+        return CreateService(
+            systemInfo,
+            store,
+            commandRunner,
+            readinessProbe,
+            new FakeTimeProvider(FixedNow),
+            managedAssets: managedAssets).Service;
     }
 
     private static SystemUpdateService CreateService(
@@ -1786,7 +1510,8 @@ public class SystemUpdateServiceSpecs
         ISystemReadinessProbe readinessProbe,
         FakeTimeProvider time,
         string? enabled = "true",
-        bool includeEnabled = true)
+        bool includeEnabled = true,
+        IManagedAssetCatalog? managedAssets = null)
     {
         var settings = new Dictionary<string, string?>();
         if (includeEnabled)
@@ -1800,7 +1525,7 @@ public class SystemUpdateServiceSpecs
             commandRunner,
             readinessProbe,
             configuration,
-            new MockEnvironmentVariableProvider(),
+            managedAssets ?? new InMemoryManagedAssetCatalog(),
             NullLogger<SystemUpdateService>.Instance,
             time);
         return (service, time);
@@ -1824,42 +1549,6 @@ public class SystemUpdateServiceSpecs
             new UpdateInfo(updateStatus, available, updateStatus),
             new ServiceInfo(serverServiceStatus, runnerServiceStatus),
             new SystemPaths("/db", "/config", "/logs", "/opencode"));
-    }
-
-    private static SystemUpdateService CreateConsistencyService(
-        SequencedSystemInfo systemInfo,
-        ISystemUpdateStore store,
-        ISystemUpdateCommandRunner commandRunner,
-        ISystemReadinessProbe readinessProbe,
-        string managedAssetsPath)
-    {
-        return CreateConsistencyService(systemInfo, store, commandRunner, readinessProbe, managedAssetsPath, new FakeTimeProvider(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero))).Service;
-    }
-
-    private static (SystemUpdateService Service, FakeTimeProvider Time) CreateConsistencyService(
-        SequencedSystemInfo systemInfo,
-        ISystemUpdateStore store,
-        ISystemUpdateCommandRunner commandRunner,
-        ISystemReadinessProbe readinessProbe,
-        string managedAssetsPath,
-        FakeTimeProvider time)
-    {
-        var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
-        {
-            ["Mohist:SystemUpdate:Enabled"] = "true",
-            ["Mohist:CliSkillDataPath"] = managedAssetsPath
-        }).Build();
-
-        var service = new SystemUpdateService(
-            systemInfo.GetSystemInfoAsync,
-            store,
-            commandRunner,
-            readinessProbe,
-            configuration,
-            new MockEnvironmentVariableProvider(),
-            NullLogger<SystemUpdateService>.Instance,
-            time);
-        return (service, time);
     }
 
     private sealed class OrderTrackingStore : ISystemUpdateStore

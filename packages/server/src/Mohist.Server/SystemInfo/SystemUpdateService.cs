@@ -12,7 +12,7 @@ public sealed class SystemUpdateService : ISingletonService
     private readonly ISystemUpdateCommandRunner _commandRunner;
     private readonly ISystemReadinessProbe _readinessProbe;
     private readonly IConfiguration _configuration;
-    private readonly IEnvironmentVariableProvider _environment;
+    private readonly IManagedAssetCatalog _managedAssets;
     private readonly ILogger<SystemUpdateService> _logger;
     private readonly TimeProvider _time;
 
@@ -22,9 +22,9 @@ public sealed class SystemUpdateService : ISingletonService
         ISystemUpdateCommandRunner commandRunner,
         ISystemReadinessProbe readinessProbe,
         IConfiguration configuration,
-        IEnvironmentVariableProvider environment,
+        IManagedAssetCatalog managedAssets,
         ILogger<SystemUpdateService> logger)
-        : this(_ => systemInfoService.GetSystemInfoAsync(), store, commandRunner, readinessProbe, configuration, environment, logger, TimeProvider.System)
+        : this(_ => systemInfoService.GetSystemInfoAsync(), store, commandRunner, readinessProbe, configuration, managedAssets, logger, TimeProvider.System)
     {
     }
 
@@ -34,7 +34,7 @@ public sealed class SystemUpdateService : ISingletonService
         ISystemUpdateCommandRunner commandRunner,
         ISystemReadinessProbe readinessProbe,
         IConfiguration configuration,
-        IEnvironmentVariableProvider environment,
+        IManagedAssetCatalog managedAssets,
         ILogger<SystemUpdateService> logger,
         TimeProvider time)
     {
@@ -43,7 +43,7 @@ public sealed class SystemUpdateService : ISingletonService
         _commandRunner = commandRunner;
         _readinessProbe = readinessProbe;
         _configuration = configuration;
-        _environment = environment;
+        _managedAssets = managedAssets;
         _logger = logger;
         _time = time;
     }
@@ -386,40 +386,21 @@ public sealed class SystemUpdateService : ISingletonService
 
     private RuntimeConsistencyComponent BuildManagedAssetsComponent(SystemInfoResponse info)
     {
-        var assetRoot = ResolveManagedAssetRoot();
-        if (string.IsNullOrWhiteSpace(assetRoot) || !Directory.Exists(assetRoot))
+        return _managedAssets.GetState() switch
         {
-            return new RuntimeConsistencyComponent(
-                "managed-assets",
-                "mismatched",
-                "Managed skill asset directory is missing or unreadable.");
-        }
-
-        try
-        {
-            var hasSkill = Directory.EnumerateFiles(assetRoot, "SKILL.md", new EnumerationOptions
-            {
-                RecurseSubdirectories = true,
-                IgnoreInaccessible = true,
-            }).Any();
-
-            if (!hasSkill)
-            {
-                return new RuntimeConsistencyComponent(
+            ManagedAssetCatalogState.Available =>
+                new RuntimeConsistencyComponent("managed-assets", "consistent", null),
+            ManagedAssetCatalogState.Empty =>
+                new RuntimeConsistencyComponent(
                     "managed-assets",
                     "mismatched",
-                    $"Managed skill assets at '{assetRoot}' contain no skill.");
-            }
-        }
-        catch
-        {
-            return new RuntimeConsistencyComponent(
-                "managed-assets",
-                "mismatched",
-                "Managed skill asset directory is missing or unreadable.");
-        }
-
-        return new RuntimeConsistencyComponent("managed-assets", "consistent", null);
+                    "Managed skill assets contain no skill."),
+            _ =>
+                new RuntimeConsistencyComponent(
+                    "managed-assets",
+                    "mismatched",
+                    "Managed skill asset directory is missing or unreadable."),
+        };
     }
 
     private static RuntimeConsistencyComponent BuildCliComponent(SystemInfoResponse info)
@@ -430,17 +411,6 @@ public sealed class SystemUpdateService : ISingletonService
         }
 
         return new RuntimeConsistencyComponent("cli", "consistent", null);
-    }
-
-    private string ResolveManagedAssetRoot()
-    {
-        var configured = _configuration["Mohist:CliSkillDataPath"];
-        if (!string.IsNullOrWhiteSpace(configured))
-            return configured;
-
-        var home = _environment.GetEnvironmentVariable(HomeEnvironmentVariable)
-            ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        return Path.Combine(home, ".mohist", "cli", "skill-data");
     }
 
     private static string NormalizeOutcomeStatus(string? status)

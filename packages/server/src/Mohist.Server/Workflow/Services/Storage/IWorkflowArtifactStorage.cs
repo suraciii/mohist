@@ -66,6 +66,10 @@ public interface IWorkflowArtifactStorage
         string storagePath,
         CancellationToken cancellationToken = default);
 
+    Task DeleteAsync(
+        string storagePath,
+        CancellationToken cancellationToken = default);
+
     /// <summary>
     /// Resolves a storage-root-relative path into an absolute filesystem path.
     /// </summary>

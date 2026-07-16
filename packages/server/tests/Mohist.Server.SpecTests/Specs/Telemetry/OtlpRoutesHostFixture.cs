@@ -21,8 +21,6 @@ public sealed class OtlpRoutesHostFixture : IAsyncLifetime
     public const int OtlpPort = 14318;
 
     private SqliteConnection _keeper = null!;
-    private string _runnerRoot = null!;
-    private string _systemUpdateStatePath = null!;
     private TestClusterPortAllocator? _portAllocator;
 
     public OtlpRoutesWebApplicationFactory Factory { get; private set; } = null!;
@@ -33,17 +31,13 @@ public sealed class OtlpRoutesHostFixture : IAsyncLifetime
         _keeper = new SqliteConnection(connectionString);
         await _keeper.OpenAsync();
 
-        _runnerRoot = Path.Combine(Path.GetTempPath(), $"mohist-runner-otel-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(_runnerRoot);
-        _systemUpdateStatePath = Path.Combine(Path.GetTempPath(), $"mohist-sys-otel-{Guid.NewGuid():N}.json");
-
         _portAllocator = new TestClusterPortAllocator();
         var (siloPort, gatewayPort) = _portAllocator.AllocateConsecutivePortPairs(1);
 
         Factory = new OtlpRoutesWebApplicationFactory(
             connectionString,
-            _runnerRoot,
-            _systemUpdateStatePath,
+            "/mohist-tests/otel/runner",
+            "/mohist-tests/otel/system-update.json",
             OtlpPort,
             siloPort,
             gatewayPort);
@@ -80,7 +74,5 @@ public sealed class OtlpRoutesHostFixture : IAsyncLifetime
         Factory?.Dispose();
         _portAllocator?.Dispose();
         await _keeper.DisposeAsync();
-        try { if (Directory.Exists(_runnerRoot)) Directory.Delete(_runnerRoot, recursive: true); } catch { }
-        try { if (File.Exists(_systemUpdateStatePath)) File.Delete(_systemUpdateStatePath); } catch { }
     }
 }

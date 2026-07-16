@@ -3,6 +3,7 @@ namespace Mohist.Cli.Tests.Support;
 public static class CliTestFactory
 {
     public const string BaseAddress = "http://localhost:3456";
+    public const string UserHome = "/mohist-tests/user";
 
     public static (RecordingHttpHandler Handler, HttpClient Http, StringWriter Output, StringWriter Error, FakeFileSystem Fs, FakeCommandExecutor Executor)
         Create(
@@ -48,7 +49,7 @@ public static class CliTestFactory
         if (activeProjectId is not null)
         {
             fs.AddFile(
-                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".mohist", "cli-state.json"),
+                Path.Combine(CliTestFactory.UserHome, ".mohist", "cli-state.json"),
                 $"{{\"activeProjectId\":\"{activeProjectId}\"}}");
         }
         return (handler, http, output, error, fs, new FakeCommandExecutor(), installer ?? new FakeServiceInstaller());

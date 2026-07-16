@@ -46,17 +46,26 @@ Do not use `Harness` in active test filenames, identifiers, or descriptions.
 
 Must pass in container with no network, no git, no node, no opencode, empty HOME.
 
-No real network, processes, git, shell, agent binaries, DB files, system services, env vars.
+No real network, processes, git, shell, agent binaries, DB files, system services, env vars, or filesystem access.
 
-Inject fakes (see cheat sheet). Temp dirs allowed.
+- Tests never read or write the host filesystem, including temp directories, HOME, the current checkout, build output, or assembly content roots. There are no exceptions for tests whose production adapter is file-backed.
+- Tests never instantiate or resolve physical filesystem adapters. Test composition roots use in-memory stores, catalogs, file providers, and named shared-memory SQLite only.
+- Built-in prompts, templates, workflow definitions, skills, and static assets enter tests as embedded/generated catalogs or explicit in-memory values, never through source/output paths.
+- Pure lexical path operations are allowed with fixed virtual roots. Host-derived paths (`GetTempPath`, current directory, HOME, `AppContext.BaseDirectory`, single-argument `GetFullPath`) are forbidden.
+- `MemoryStream`, `StringReader` / `StringWriter`, in-memory `IFileProvider`, and in-memory SQLite are not filesystem access.
+
+Inject fakes (see cheat sheet).
 
 ### 2. No real time
 
 Fake clock not advancing = time logic never fires.
 
 - Inject `TimeProvider` (C#) or `vi.useFakeTimers` / `now` param (TS).
+- New or modified C# product time behavior reads through injected `TimeProvider`; composition roots may register `TimeProvider.System`. The compiler rejects local wall-clock APIs (`DateTime.Now` / `Today`, `DateTimeOffset.Now`) and scheduler-based waits. Existing direct UTC reads are migration debt; expand the product deny list to `UtcNow` only after their domain/store APIs accept an injected time source.
+- C# tests use fixed timestamp constants or `FakeTimeProvider`. Direct wall-clock reads are forbidden even for seed data and tolerance assertions.
 - No wall-clock waits: no `while(now<deadline)`, no `Delay`/`setTimeout`/`Sleep`, no `elapsed < N` asserts.
-- Use awaitable signals or fake timer advance.
+- C# tests never call `Task.Delay`, `Thread.Sleep`, `Task.Yield`, `SpinWait` or timer APIs. `Task.Yield` is a scheduler hint, not an awaitable completion condition or duration.
+- Wait for an awaitable signal (`TaskCompletionSource` with `RunContinuationsAsynchronously`, callback, observer, channel) or advance fake time. If no signal exists, add one at the async boundary instead of polling harder.
 
 ### 3. Deterministic (no flaky)
 
@@ -99,14 +108,15 @@ xUnit collection = scheduling unit; classes inside a collection run serially, so
 ## Guards (automated)
 
 Existing:
-- ArchTests: layer deps, spec naming, namespace, public.
-- BannedApiAnalyzer: compile-time ban on direct env reads.
+- ArchTests: layer deps, spec naming, namespace, public, and analyzer wiring backstops.
+- `BannedApiAnalyzers`: compile-time enforcement of product and test API deny lists; test projects additionally ban wall-clock, scheduler-based waiting, host paths, physical adapters, and real filesystem APIs.
+- EnvironmentAbstractions BannedApiAnalyzer: compile-time ban on direct env reads.
 - vitest: `isolate: false`; restoreMocks, unstubGlobals, unstubEnvs auto; projects by suffix.
 - web boundary guards: `vi.mock` ratchet locked at zero; MSW unhandled requests fail; weekly shuffled suite records a reproducible seed.
 
 Planned:
-- C# BannedSymbols: `DateTime.UtcNow`, `Task.Delay`, `Thread.Sleep`, bare `new HttpClient()`, `Process.Start`, test `Migrate()`.
 - UnitTests csproj backstop: ban heavy fixtures (WebApplicationFactory, Orleans.TestingHost).
+- C# product deny-list expansion after direct `DateTime.UtcNow` / `DateTimeOffset.UtcNow` reads are migrated to `TimeProvider`.
 - ESLint: ban `child_process`, real `@microsoft/signalr` import in tests.
 
 ## Fake quick reference

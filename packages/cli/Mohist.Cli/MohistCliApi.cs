@@ -22,6 +22,7 @@ internal sealed class MohistCliApi
     private readonly IFileSystem _fileSystem;
     private readonly ICommandExecutor _commandExecutor;
     private readonly TextReader _standardInput;
+    private readonly Func<string> _getUserHome;
 
     internal TextWriter Output => _out;
     internal TextWriter Error => _err;
@@ -36,7 +37,8 @@ internal sealed class MohistCliApi
         TextWriter error,
         IFileSystem fileSystem,
         ICommandExecutor commandExecutor,
-        TextReader? standardInput = null)
+        TextReader? standardInput = null,
+        Func<string>? getUserHome = null)
     {
         _http = http;
         _out = output;
@@ -44,6 +46,9 @@ internal sealed class MohistCliApi
         _fileSystem = fileSystem;
         _commandExecutor = commandExecutor;
         _standardInput = standardInput ?? Console.In;
+        _getUserHome = getUserHome ?? (fileSystem is RealFileSystem
+            ? () => Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)
+            : () => "/mohist-tests/user");
     }
 
     public async Task<int> PrintGetAsync(string path)
@@ -977,7 +982,7 @@ internal sealed class MohistCliApi
     internal string ProjectStatePath => ProjectStatePathOverride is not null
         ? ProjectStatePathOverride()
         : Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            _getUserHome(),
             ".mohist",
             "cli-state.json");
 

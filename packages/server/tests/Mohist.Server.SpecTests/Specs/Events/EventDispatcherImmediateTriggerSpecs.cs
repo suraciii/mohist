@@ -221,12 +221,9 @@ public class EventDispatcherImmediateTriggerSpecs
 
     private async Task AwaitReminderTickAsync()
     {
-        // Advance the fake clock past the 1-hour reminder period so the
-        // next reminder tick fires within Orleans' reminder scheduling
-        // window. The yield gives the reminder dispatcher a chance to
-        // run a cycle.
+        // Advance the fake clock past the 1-hour reminder period, then cross
+        // a cluster turn so reminder bookkeeping and the dispatcher can run.
         _fixture.TimeProvider.Advance(TimeSpan.FromHours(2));
-        await Task.Yield();
         // Drive a cluster turn to settle any pending reminder bookkeeping.
         await _fixture.Grains
             .GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global)
@@ -272,8 +269,8 @@ public class EventDispatcherImmediateTriggerSpecs
         };
         session.Status = session.Status with
         {
-            CreatedAt = DateTime.UtcNow,
-            LastDataAt = DateTime.UtcNow,
+            CreatedAt = TestTime.UtcDateTime,
+            LastDataAt = TestTime.UtcDateTime,
         };
         return session;
     }

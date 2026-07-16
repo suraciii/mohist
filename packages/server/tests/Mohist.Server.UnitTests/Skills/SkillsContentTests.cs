@@ -74,7 +74,7 @@ public sealed class SkillsContentTests
     [Fact]
     public async Task Get_PrintsPackagedFullGuidance_NotInstalledStub()
     {
-        var agentsStubDir = Path.Combine(Path.GetTempPath(), $"agents-stubs-{Guid.NewGuid():N}", ".agents", "skills", "mohist");
+        var agentsStubDir = Path.Combine("/mohist-tests", $"agents-stubs-{Guid.NewGuid():N}", ".agents", "skills", "mohist");
         _files.AddDirectory(agentsStubDir);
         _files.AddFile(Path.Combine(agentsStubDir, "SKILL.md"), "stub");
 
@@ -156,7 +156,7 @@ public sealed class SkillsContentTests
     [Fact]
     public async Task Path_PrintsManagedCachePath_WhenManagedCacheIsSelected()
     {
-        var userHome = Path.Combine(Path.GetTempPath(), $"mohist-content-home-{Guid.NewGuid():N}");
+        var userHome = Path.Combine("/mohist-tests", $"mohist-content-home-{Guid.NewGuid():N}");
         var managedRoot = Path.Combine(userHome, ".mohist", "cli", "skill-data");
         _files.AddDirectory(managedRoot);
         WriteSkill(managedRoot, "mohist", "managed mohist body");
@@ -186,7 +186,7 @@ public sealed class SkillsContentTests
     [Fact]
     public async Task Get_ReturnsFullPackagedGuidance_FromManagedCache_WhenSelected()
     {
-        var userHome = Path.Combine(Path.GetTempPath(), $"mohist-content-home-{Guid.NewGuid():N}");
+        var userHome = Path.Combine("/mohist-tests", $"mohist-content-home-{Guid.NewGuid():N}");
         var managedRoot = Path.Combine(userHome, ".mohist", "cli", "skill-data");
         _files.AddDirectory(managedRoot);
         WriteSkill(managedRoot, "mohist", "managed mohist body");
@@ -213,7 +213,7 @@ public sealed class SkillsContentTests
     [Fact]
     public async Task Path_FallsBackToSiblingRoot_WhenManagedCacheIsAbsent()
     {
-        var siblingRoot = Path.Combine(AppContext.BaseDirectory, "skill-data");
+        var siblingRoot = "/mohist-tests/sibling-skill-data";
         _files.AddDirectory(siblingRoot);
         WriteSkill(siblingRoot, "mohist", "sibling mohist body");
         WriteSkill(siblingRoot, "mohist-explore", "sibling explore body");
@@ -224,7 +224,8 @@ public sealed class SkillsContentTests
             _environment,
             getOverrideAssetRoot: () => null,
             getManagedAssetRoot: null,
-            getUserHome: () => Path.Combine(Path.GetTempPath(), $"empty-home-{Guid.NewGuid():N}"));
+            getUserHome: () => Path.Combine("/mohist-tests", $"empty-home-{Guid.NewGuid():N}"),
+            getSiblingAssetRoot: () => siblingRoot);
         var assets = new SkillAssetService(_files, _environment, resolver);
 
         var exitCode = await BuildRootCommand(stdout, assets: assets).Parse(["skills", "path", "mohist"]).InvokeAsync();
@@ -237,7 +238,7 @@ public sealed class SkillsContentTests
     [Fact]
     public async Task Get_FailsWithRepairGuidance_WhenNoAssetRootIsResolvable()
     {
-        var userHome = Path.Combine(Path.GetTempPath(), $"user-home-{Guid.NewGuid():N}");
+        var userHome = Path.Combine("/mohist-tests", $"user-home-{Guid.NewGuid():N}");
 
         using var stdout = new StringWriter();
         using var stderr = new StringWriter();
@@ -262,7 +263,7 @@ public sealed class SkillsContentTests
     [Fact]
     public async Task Commands_UseMohistSkillsDirOverride_ForListGetAndPath()
     {
-        var overrideRoot = Path.Combine(Path.GetTempPath(), $"override-assets-{Guid.NewGuid():N}");
+        var overrideRoot = Path.Combine("/mohist-tests", $"override-assets-{Guid.NewGuid():N}");
         _files.AddDirectory(overrideRoot);
         WriteSkill(overrideRoot, "mohist", "override mohist");
         WriteSkill(overrideRoot, "mohist-explore", "override explore");
@@ -306,7 +307,7 @@ public sealed class SkillsContentTests
     [Fact]
     public async Task ContentCommands_DoNotTouchDotMohistSkills()
     {
-        var mohistSkillsDir = Path.Combine(Path.GetTempPath(), $"mohist-skills-content-runtime-{Guid.NewGuid():N}", ".mohist", "skills");
+        var mohistSkillsDir = Path.Combine("/mohist-tests", $"mohist-skills-content-runtime-{Guid.NewGuid():N}", ".mohist", "skills");
         _files.AddDirectory(mohistSkillsDir);
         var sentinel = Path.Combine(mohistSkillsDir, "sentinel.txt");
         _files.AddFile(sentinel, "keep");
@@ -325,18 +326,18 @@ public sealed class SkillsContentTests
         output ??= TextWriter.Null;
         error ??= TextWriter.Null;
         var services = new ServiceCollection();
-        services.AddSingleton(new MohistCliApi(new HttpClient(), output, error, _files, new SystemCommandExecutor()));
+        services.AddSingleton(new MohistCliApi(RejectingHttpMessageHandler.CreateClient(), output, error, _files, new NoopCommandExecutor()));
         services.AddSingleton(output);
         services.AddSingleton(error);
         services.AddSingleton<IFileSystem>(_files);
-        services.AddSingleton<ICommandExecutor>(new SystemCommandExecutor());
+        services.AddSingleton<ICommandExecutor>(new NoopCommandExecutor());
         services.AddSingleton<IEnvironmentVariableProvider>(_environment);
         services.AddSingleton<IServiceInstaller>(sp => new SystemdServiceInstaller(output, error, _files, sp.GetRequiredService<ICommandExecutor>()));
         services.AddSingleton(sp => new UpdateOperations(output, error, sp.GetRequiredService<IServiceInstaller>(), sp.GetRequiredService<ICommandExecutor>(), _files, _environment));
-        services.AddSingleton(new RuntimeConsistencyValidator(new HttpClient(), new SystemCommandExecutor(), _files, _environment, output));
-        services.AddSingleton(new ServiceReadinessProbe(new HttpClient(), output));
-        services.AddSingleton(new RunnerRefreshVerifier(new HttpClient(), new SystemCommandExecutor(), _files));
-        services.AddSingleton(new UpdateOutcomeReporter(new HttpClient(), output));
+        services.AddSingleton(new RuntimeConsistencyValidator(RejectingHttpMessageHandler.CreateClient(), new NoopCommandExecutor(), _files, _environment, output));
+        services.AddSingleton(new ServiceReadinessProbe(RejectingHttpMessageHandler.CreateClient(), output));
+        services.AddSingleton(new RunnerRefreshVerifier(RejectingHttpMessageHandler.CreateClient(), new NoopCommandExecutor(), _files));
+        services.AddSingleton(new UpdateOutcomeReporter(RejectingHttpMessageHandler.CreateClient(), output));
         services.AddSingleton<SourceCodeUpdater>();
         services.AddSingleton(assets ?? BuildDefaultService());
         services.AddSingleton<InfoVerboseCollector>();
@@ -367,7 +368,7 @@ public sealed class SkillsContentTests
 
     private string PopulateDefaultAssets()
     {
-        var targetRoot = Path.Combine(Path.GetTempPath(), $"mohist-content-defaults-{Guid.NewGuid():N}", "skill-data");
+        var targetRoot = Path.Combine("/mohist-tests", $"mohist-content-defaults-{Guid.NewGuid():N}", "skill-data");
         _files.AddDirectory(targetRoot);
 
         WriteSkill(targetRoot, "mohist", "managed mohist body");
@@ -381,7 +382,7 @@ public sealed class SkillsContentTests
 
     private string SetUpManagedCache()
     {
-        var managedRoot = Path.Combine(Path.GetTempPath(), $"mohist-skills-content-managed-{Guid.NewGuid():N}", ".mohist", "cli", "skill-data");
+        var managedRoot = Path.Combine("/mohist-tests", $"mohist-skills-content-managed-{Guid.NewGuid():N}", ".mohist", "cli", "skill-data");
         _files.AddDirectory(managedRoot);
         WriteSkill(managedRoot, "mohist", "managed mohist body");
         WriteSkill(managedRoot, "mohist-explore", "managed explore body");

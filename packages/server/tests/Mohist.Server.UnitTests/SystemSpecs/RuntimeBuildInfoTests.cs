@@ -1,4 +1,5 @@
-using System.Reflection;
+using EnvironmentAbstractions.TestHelpers;
+using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.SystemInfo;
 using Xunit;
 
@@ -9,13 +10,14 @@ public class RuntimeBuildInfoTests
     [Fact]
     public void MetadataIdentity_WhenAssemblyHasInformationalVersion_ReturnsVersionAndGitHash()
     {
-        var info = new RuntimeBuildInfo();
+        var time = new FakeTimeProvider(TestTime.UtcNow);
+        var info = new RuntimeBuildInfo(new MockEnvironmentVariableProvider(), time);
 
         Assert.NotNull(info.Version);
         Assert.NotNull(info.GitHash);
         Assert.NotEmpty(info.Version);
         Assert.NotEmpty(info.GitHash);
-        Assert.True(info.StartedAt <= DateTimeOffset.UtcNow);
+        Assert.Equal(TestTime.UtcNow, info.StartedAt);
     }
 
     [Fact]
@@ -57,72 +59,11 @@ public class RuntimeBuildInfoTests
     [Fact]
     public void StartedAt_IsCapturedAtInitialization()
     {
-        var before = DateTimeOffset.UtcNow.AddMilliseconds(-100);
-        var info = new RuntimeBuildInfo();
-        var after = DateTimeOffset.UtcNow.AddMilliseconds(100);
+        var time = new FakeTimeProvider(TestTime.UtcNow);
 
-        Assert.True(info.StartedAt >= before, "StartedAt should be after initialization began");
-        Assert.True(info.StartedAt <= after, "StartedAt should be before initialization completed");
+        var info = new RuntimeBuildInfo(new MockEnvironmentVariableProvider(), time);
+
+        Assert.Equal(TestTime.UtcNow, info.StartedAt);
     }
 
-    [Fact]
-    public void TryReadGitHeadFile_WhenRepoHasDetachedHead_ReturnsHash()
-    {
-        var repoDir = Path.Combine(Path.GetTempPath(), $"mohist-git-test-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(repoDir);
-        try
-        {
-            Directory.CreateDirectory(Path.Combine(repoDir, ".git"));
-            File.WriteAllText(Path.Combine(repoDir, ".git", "HEAD"), "abc123def456");
-
-            var hash = RuntimeBuildInfo.TryReadGitHeadFile(repoDir);
-
-            Assert.Equal("abc123def456", hash);
-        }
-        finally
-        {
-            Directory.Delete(repoDir, recursive: true);
-        }
-    }
-
-    [Fact]
-    public void TryReadGitHeadFile_WhenRepoHasSymbolicRef_ReturnsRefHash()
-    {
-        var repoDir = Path.Combine(Path.GetTempPath(), $"mohist-git-test-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(repoDir);
-        try
-        {
-            Directory.CreateDirectory(Path.Combine(repoDir, ".git", "refs", "heads"));
-            File.WriteAllText(Path.Combine(repoDir, ".git", "refs", "heads", "main"), "def789abc012");
-            File.WriteAllText(Path.Combine(repoDir, ".git", "HEAD"), "ref: refs/heads/main");
-
-            var hash = RuntimeBuildInfo.TryReadGitHeadFile(repoDir);
-
-            Assert.Equal("def789abc012", hash);
-        }
-        finally
-        {
-            Directory.Delete(repoDir, recursive: true);
-        }
-    }
-
-    [Fact]
-    public void TryReadGitHeadFile_WhenRepoHasMissingRef_ReturnsNull()
-    {
-        var repoDir = Path.Combine(Path.GetTempPath(), $"mohist-git-test-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(repoDir);
-        try
-        {
-            Directory.CreateDirectory(Path.Combine(repoDir, ".git"));
-            File.WriteAllText(Path.Combine(repoDir, ".git", "HEAD"), "ref: refs/heads/nonexistent");
-
-            var hash = RuntimeBuildInfo.TryReadGitHeadFile(repoDir);
-
-            Assert.Null(hash);
-        }
-        finally
-        {
-            Directory.Delete(repoDir, recursive: true);
-        }
-    }
 }

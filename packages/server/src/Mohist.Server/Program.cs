@@ -72,7 +72,7 @@ using (var scope = app.Services.CreateScope())
 app.UseOtelPortIsolation();
 
 app.MapMohistApi();
-app.MapMohistWeb(builder.Configuration);
+app.MapMohistWeb();
 
 // 启动 host 并对 OTLP 端口绑定失败做兜底：main API 端口应能继续
 // 监听，而 collector 状态如实报告为离线。Kestrel 在 listen
@@ -135,7 +135,7 @@ static WebApplication BuildAlternateApp(string[] args)
     }
     alt.UseOtelPortIsolation();
     alt.MapMohistApi();
-    alt.MapMohistWeb(alt.Configuration);
+    alt.MapMohistWeb();
     return alt;
 }
 

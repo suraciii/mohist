@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Configuration.Json;
+using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
 using Mohist.Server.Infrastructure.Hosting;
 
@@ -12,26 +13,28 @@ public static class MohistConfigurationExtensions
         IHostEnvironment environment,
         string? path = null,
         bool optional = true,
-        bool reloadOnChange = true)
+        bool reloadOnChange = true,
+        IFileProvider? fileProvider = null)
     {
         if (environment.IsEnvironment(MohistHostEnvironment.Testing))
             return builder;
 
-        return builder.AddMohistConfigFile(path, optional, reloadOnChange);
+        return builder.AddMohistConfigFile(path, optional, reloadOnChange, fileProvider);
     }
 
     public static IConfigurationBuilder AddMohistConfigFile(
         this IConfigurationBuilder builder,
         string? path = null,
         bool optional = true,
-        bool reloadOnChange = true)
+        bool reloadOnChange = true,
+        IFileProvider? fileProvider = null)
     {
         var configPath = path ?? Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
             ".mohist",
             "config.jsonc");
 
-        if (!File.Exists(configPath))
+        if (fileProvider is null && !File.Exists(configPath))
             return builder;
 
         // Use the configureSource overload so we have a direct reference to the
@@ -47,7 +50,11 @@ public static class MohistConfigurationExtensions
             source.Path = configPath;
             source.Optional = optional;
             source.ReloadOnChange = reloadOnChange;
-            source.ResolveFileProvider();
+            source.FileProvider = fileProvider;
+            if (fileProvider is null)
+            {
+                source.ResolveFileProvider();
+            }
             source.OnLoadException = ctx =>
             {
                 ctx.Ignore = true;
