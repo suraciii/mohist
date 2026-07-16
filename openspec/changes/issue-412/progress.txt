@@ -52,7 +52,7 @@ These are expected before new build tasks run. They must not be treated as compa
 
 | Task | State |
 |---|---|
-| T-001 scoped keys and persisted references | pending |
+| T-001 scoped keys and persisted references | done — typed IssueKey/EpicKey + ScopedGrainKeyCodec; AdoptScopedIssueEpicIdentity migration; codec + migration specs all pass |
 | T-002 number-only server model/APIs | pending |
 | T-003 Issue-owned membership and Epic progression | pending |
 | T-004 durable EnsureStarted Workflow handoff | pending |
@@ -60,6 +60,71 @@ These are expected before new build tasks run. They must not be treated as compa
 | T-006 server lineage consumers/integrations | pending |
 | T-007 CLI/Web cutover | pending |
 | T-008 cleanup and end-to-end recovery verification | pending |
+
+## T-001 delivered
+
+### Files added / changed
+
+- `packages/server/src/Mohist.Server/Infrastructure/Orleans/ScopedGrainKeyCodec.cs`
+  - `IssueKey(ProjectId, IssueNumber)` and `EpicKey(ProjectId, EpicNumber)` strong types.
+  - `ScopedGrainKeyCodec.Format/Parse/TryParse` shared between both keys; one source of truth
+    for the `projectId:number` grain-key string.
+  - `GrainKeyString` decode shape so callers can pattern-match the partition without going
+    through `Split(':')` themselves.
+- `packages/server/src/Mohist.Server/Infrastructure/Orleans/GrainKey.cs`
+  - Adds typed `Issue(projectId, issueNumber)`, `Issue(IssueKey)`, `Epic(projectId, epicNumber)`,
+    `Epic(EpicKey)` overloads that route through `ScopedGrainKeyCodec`.
+  - Keeps the legacy `Issue(string issueId)` overload as a T-001/T-002 transition shim; no
+    obsolete attribute yet (call sites are rewritten by T-002 — adding `Obsolete` now would
+    break the build under `TreatWarningsAsErrors`).
+- `packages/server/src/Mohist.Server/Infrastructure/Data/Migrations/20260716120000_AdoptScopedIssueEpicIdentity.cs`
+  - Idempotent data migration; runs once on startup on top of the existing schema.
+  - Backfills `IssueComments.IssueId` from `ProjectId + IssueNumber` (and vice versa when the
+    seed had `IssueId = ''`).
+  - Backfills `InboxItems.IssueId` from `ProjectId + IssueNumber`.
+  - Removes orphan `EpicIssues` and `EpicActiveIssues` rows whose (Project, Number) pair no
+    longer resolves to a real Issue / Epic.
+  - No runtime aggregate commands touch two aggregates in one transaction; each statement
+    operates on one side (Issue side or Epic side).
+  - `Down()` is intentionally a no-op — the migration is a one-way projection; restoring from
+    a snapshot is out of scope (consistent with the precedent `BackfillIssueEpicAffiliation`).
+- `packages/server/tests/Mohist.Server.UnitTests/Orleans/ScopedGrainKeyCodecTests.cs`
+  - Codec round-trip, format invariants, `IssueKey` / `EpicKey` typed equality, single-codec
+    invariant, defensive input validation.
+- `packages/server/tests/Mohist.Server.SpecTests/Specs/Issue/Data/ScopedIssueEpicIdentityMigrationSpecs.cs`
+  - Migration spec: same shape as `DatabaseInitializationSpecs` / `EpicIdleRenameMigrationSpecs`.
+  - Seeds two projects with overlapping Issue 42 / Epic 7, runs the migration SQL twice, asserts
+    canonical references resolve, no duplicates, orphans removed.
+
+### Out of T-001 scope (preserved as T-002..T-008 work)
+
+- Runtime grain activation still keys `IssueGrain` by its legacy `Issue_xxx` random id; call
+  sites and `IIdentityResolver` are rewritten by T-002.
+- `IssueRow.IssueId` / `EpicRow.Id` random id PKs are retained as legacy columns; EF model +
+  column removal belongs to T-002 / T-008.
+- `WorkflowArtifactRow.IssueId` does not yet have a `(ProjectId, IssueNumber)` reference —
+  T-001's audit found it was the only owner missing `IssueNumber`, and adding the column +
+  computed projection belongs with T-005 / T-006 (producer lineage work).
+- `WorkflowRunRow.State` JSON annotations `{projectId, issueId, issueNumber, epicId}` stay as
+  they are; the migration's data projection only addresses EF-owned rows. T-004 rebuilds the
+  Workflow context shape from current Issue state.
+
+### Test results
+
+- `dotnet test packages/server/tests/Mohist.Server.UnitTests/Mohist.Server.UnitTests.csproj`:
+  **1422 passed / 0 failed / 0 skipped** (10 new codec tests).
+- `dotnet test packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj --filter ScopedIssueEpicIdentityMigrationSpecs`:
+  **4 passed / 0 failed** — Migration runs once and converges references; idempotent on second
+  run; orphan membership rows removed; migration recorded in `__EFMigrationsHistory`.
+- `DatabaseInitializationSpecs` (regression): all existing migration-history assertions still
+  pass under the new migration set.
+- `IssueDerivedColumnsSpecs` (regression): the issue `/epic scoped identity` migration runs
+  alongside the existing computed-column model without disturbing it.
+- ArchTests: **22/22 pass**; new `ScopedGrainKeyCodec.cs` lives in `Infrastructure/Orleans`
+  with no banned-symbol hits, and no public API beyond a few `static` factories leaked into
+  the world.
+- Server build: `dotnet build packages/server/src/Mohist.Server/Mohist.Server.csproj -p:SkipWebBuild=true`
+  is clean under `TreatWarningsAsErrors=true`.
 
 ## Validation of planning artifacts
 
