@@ -164,7 +164,7 @@ public class WorkflowGrainConcurrencySpecs : WorkflowGrainSpecs
         {
             var workflow = Grains.GetGrain<IWorkflowGrain>(id);
             await SeedWorkflowTemplateAsync(id, SingleStage(checks: []), TestProjectId(id));
-            await workflow.StartAsync(ConcurrencyInput(TestProjectId(id), TestIssueId(id)));
+            await workflow.StartAsync(ConcurrencyInput(TestProjectId(id), TestIssueNumber(id)));
             workflows.Add(workflow);
         }
 
@@ -196,14 +196,14 @@ public class WorkflowGrainConcurrencySpecs : WorkflowGrainSpecs
         }
     }
 
-    private WorkflowStartInput ConcurrencyInput(string projectId, string issueId) =>
+    private WorkflowStartInput ConcurrencyInput(string projectId, int issueNumber) =>
         new(Metadata: new WorkflowRunMetadata(
             Name: null,
             CreatedAt: _fixture.TimeProvider.GetUtcNow(),
             Annotations: new Dictionary<string, string>(StringComparer.Ordinal)
             {
                 ["projectId"] = projectId,
-                ["issueId"] = issueId,
+                ["issueNumber"] = issueNumber.ToString(),
             }));
 
     private static void AssertAllowedSerializedState(string? status)

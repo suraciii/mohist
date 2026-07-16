@@ -296,8 +296,9 @@ server cutover in T-004.
   workflow-profile, activity-card, workflow-reference, event-append, issue-creation, and profile
   storage fixtures to scoped numbers. Full SpecTests compile diagnostics have reduced from 710 to
   183 before the T-006 protocol cutover. Its removal exposed 205 stale fixtures that still invoke
-  binding/revision APIs; the first recovery and workflow-grain fixtures are now replaced, reducing
-  the current SpecTests compile backlog to 182 without restoring random identity aliases.
+  binding/revision APIs; recovery, workflow storage/scheduling, concurrency, and Issue metrics
+  fixtures now use scoped numbers, reducing the current SpecTests compile backlog to 139 without
+  restoring random identity aliases.
 - T-004 is not complete until the current-state server contracts and all affected specs compile
   without legacy identity aliases.
 

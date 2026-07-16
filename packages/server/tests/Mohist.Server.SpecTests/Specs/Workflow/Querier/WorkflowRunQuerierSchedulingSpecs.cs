@@ -350,7 +350,6 @@ public class WorkflowRunQuerierSchedulingSpecs
         var statuses = new (string suffix, WorkflowRunStatus status)[]
         {
             ("created", WorkflowRunStatus.Created),
-            ("awaiting-binding", WorkflowRunStatus.AwaitingBinding),
             ("pending", WorkflowRunStatus.Pending),
             ("ready", WorkflowRunStatus.Ready),
             ("running", WorkflowRunStatus.Running),
@@ -425,7 +424,7 @@ public class WorkflowRunQuerierSchedulingSpecs
             Annotations: new Dictionary<string, string>(StringComparer.Ordinal)
             {
                 ["projectId"] = projectId,
-                ["issueId"] = $"issue-{id}",
+                ["issueNumber"] = "1",
             });
 
         var run = WorkflowRun.Create(id, BuildMinimalDefinition(), DateTimeOffset.UnixEpoch, metadata);
