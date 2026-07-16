@@ -45,7 +45,26 @@ public sealed class WorkflowReportService : IScopedService
             return (ReportAck.Stale.ToString().ToLowerInvariant(), null);
 
         if (activeWork.IsTask)
-            RuntimeTaskFollowUps.Project(result.AddTasks);
+        {
+            try
+            {
+                RuntimeTaskFollowUps.Project(result.AddTasks);
+            }
+            catch (InvalidOperationException ex)
+            {
+                // A permanently invalid recovery follow-up (missing/out-of-range
+                // recoveryRemaining, or remaining without a declaration) must not
+                // escape as a non-2xx response: the runner would keep the result in
+                // awaitingAck and resend it forever, and the run would never reach a
+                // terminal state. Validation runs before any task mutation, so fail
+                // the active work durably and ack so the runner retires the work.
+                _log.LogError(
+                    "Workflow {RunId} work {WorkId} rejected recovery follow-up: {Error}",
+                    workflowRunId, workId, ex.Message);
+                await workflow.FailActiveWorkAsync(workerId, $"Recovery follow-up rejected: {ex.Message}");
+                return (ReportAck.Accepted.ToString().ToLowerInvariant(), await workflow.GetRunStatusAsync());
+            }
+        }
 
         var report = await _translator.TranslateResultAsync(activeWork.Item, result, workflowRunId, run);
         ReportAck ack = report switch

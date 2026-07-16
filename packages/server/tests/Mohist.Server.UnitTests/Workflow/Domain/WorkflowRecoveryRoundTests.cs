@@ -167,25 +167,48 @@ public sealed class WorkflowRecoveryRoundTests
     }
 
     [Fact]
-    public void NestedRecoveryBudgetIsIgnoredOnlyInsideRecoveryDeclarations()
+    public void NestedHandlerTaskRecoveryBudgetDifferenceIsRejected()
     {
-        const string first = """
-            {"stages":[{"tasks":[{"definitionId":"review","attempt":1,"recovery":{"budget":2,"handlers":[{"when":"error=one","tasks":[{"id":"fix","title":"Fix","with":{"budget":2},"recovery":{"budget":4,"handlers":[]}}],"retrySelf":true}]}}]}]}
-            """;
-        const string second = """
-            {"stages":[{"tasks":[{"definitionId":"review","attempt":2,"recovery":{"budget":1,"handlers":[{"when":"error=one","tasks":[{"id":"fix","title":"Fix","with":{"budget":2},"recovery":{"budget":1,"handlers":[]}}],"retrySelf":true}]}}]}]}
+        // The outer attempts encode their consumed allowance as the root
+        // recovery.budget (2 -> 1), which normalization must absorb. But a
+        // handler task's own recovery declaration is definition data: a budget
+        // difference there (4 -> 1) is ambiguous and must be rejected rather
+        // than silently rewritten to the canonical outer attempt's value.
+        const string json = """
+            {"stages":[{"tasks":[
+              {"definitionId":"review","attempt":1,"recovery":{"budget":2,"handlers":[{"when":"error=one","tasks":[{"id":"fix","title":"Fix","with":{"budget":2},"recovery":{"budget":4,"handlers":[]}}],"retrySelf":true}]}},
+              {"definitionId":"review","attempt":2,"recovery":{"budget":1,"handlers":[{"when":"error=one","tasks":[{"id":"fix","title":"Fix","with":{"budget":2},"recovery":{"budget":1,"handlers":[]}}],"retrySelf":true}]}}
+            ]}]}
             """;
 
-        using var firstDocument = JsonDocument.Parse(first);
-        using var secondDocument = JsonDocument.Parse(second);
-        var combined = $"{{\"stages\":[{{\"tasks\":[{firstDocument.RootElement.GetProperty("stages")[0].GetProperty("tasks")[0].GetRawText()},{secondDocument.RootElement.GetProperty("stages")[0].GetProperty("tasks")[0].GetRawText()}]}}]}}";
+        Assert.Throws<InvalidOperationException>(() =>
+            WorkflowRunStore.MigrateLegacyWorkflowRunJson(json));
+    }
 
-        var normalized = WorkflowRunStore.MigrateLegacyWorkflowRunJson(combined);
-        using var normalizedDocument = JsonDocument.Parse(normalized);
-        Assert.All(normalizedDocument.RootElement.GetProperty("stages")[0].GetProperty("tasks").EnumerateArray(), task =>
+    [Fact]
+    public void NestedHandlerTaskRecoveryDeclarationIsNormalizedWhenIdentical()
+    {
+        // Root recovery.budget encodes consumption (2 -> 1) and is absorbed;
+        // the handler task's own recovery declaration is identical across
+        // attempts, so normalization succeeds and the nested declaration is
+        // preserved verbatim (budget 4 on both attempts).
+        const string legacy = """
+            {"stages":[{"tasks":[
+              {"definitionId":"review","attempt":1,"recovery":{"budget":2,"handlers":[{"when":"error=one","tasks":[{"id":"fix","title":"Fix","with":{"budget":2},"recovery":{"budget":4,"handlers":[]}}],"retrySelf":true}]}},
+              {"definitionId":"review","attempt":2,"recovery":{"budget":1,"handlers":[{"when":"error=one","tasks":[{"id":"fix","title":"Fix","with":{"budget":2},"recovery":{"budget":4,"handlers":[]}}],"retrySelf":true}]}}
+            ]}]}
+            """;
+
+        var normalized = WorkflowRunStore.MigrateLegacyWorkflowRunJson(legacy);
+        using var json = JsonDocument.Parse(normalized);
+        var tasks = json.RootElement.GetProperty("stages")[0].GetProperty("tasks");
+        Assert.Equal(new[] { 2, 1 }, tasks.EnumerateArray()
+            .Select(t => t.GetProperty("recoveryRemaining").GetInt32()).ToArray());
+        Assert.All(tasks.EnumerateArray(), task =>
         {
             Assert.Equal(2, task.GetProperty("recovery").GetProperty("budget").GetInt32());
-            Assert.Equal(4, task.GetProperty("recovery").GetProperty("handlers")[0].GetProperty("tasks")[0].GetProperty("recovery").GetProperty("budget").GetInt32());
+            Assert.Equal(4, task.GetProperty("recovery").GetProperty("handlers")[0]
+                .GetProperty("tasks")[0].GetProperty("recovery").GetProperty("budget").GetInt32());
         });
     }
 

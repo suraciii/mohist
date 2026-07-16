@@ -29,15 +29,18 @@ public class IssueReadModelLoader : IScopedService
     private readonly IssueWorkflowProfileRegistry _profiles;
     private readonly EffectiveWorkflowProfileResolver _effectiveProfileResolver;
     private readonly ProjectWorkflowProfileManager _projectProfileManager;
+    private readonly ILogger<IssueReadModelLoader> _logger;
 
     public IssueReadModelLoader(
         IssueWorkflowProfileRegistry profiles,
         EffectiveWorkflowProfileResolver effectiveProfileResolver,
-        ProjectWorkflowProfileManager projectProfileManager)
+        ProjectWorkflowProfileManager projectProfileManager,
+        ILogger<IssueReadModelLoader> logger)
     {
         _profiles = profiles;
         _effectiveProfileResolver = effectiveProfileResolver;
         _projectProfileManager = projectProfileManager;
+        _logger = logger;
     }
 
     /// <summary>
@@ -206,7 +209,7 @@ public class IssueReadModelLoader : IScopedService
         var workflows = new Dictionary<string, WorkflowStatusView>(StringComparer.Ordinal);
         foreach (var row in runRows)
         {
-            var run = DeserializeRun(row.State);
+            var run = DeserializeRun(row.WorkflowRunId, row.State);
             if (run is null) continue;
             var snapshot = WorkflowStatusMapper.BuildStatusView(run, definition: null);
             if (snapshot is not null)
@@ -234,7 +237,7 @@ public class IssueReadModelLoader : IScopedService
         var result = new Dictionary<string, IReadOnlyList<ApprovalFeedback>>(StringComparer.Ordinal);
         foreach (var row in runRows)
         {
-            var run = DeserializeRun(row.State);
+            var run = DeserializeRun(row.WorkflowRunId, row.State);
             if (run is null) continue;
             if (run.Feedback.Count == 0) continue;
             result[row.WorkflowRunId] = run.Feedback;
@@ -355,9 +358,18 @@ public class IssueReadModelLoader : IScopedService
             || (currentStage.Tasks.All(t => t.Status == "completed") && currentStage.Checks.All(c => c.Status == "completed"));
     }
 
-    private static WorkflowRun? DeserializeRun(string json)
+    private WorkflowRun? DeserializeRun(string workflowRunId, string json)
     {
-        try { return JsonSerializer.Deserialize<WorkflowRun>(WorkflowRunStore.MigrateLegacyWorkflowRunJson(json), JSON.Options); }
-        catch { return null; }
+        try
+        {
+            return JsonSerializer.Deserialize<WorkflowRun>(WorkflowRunStore.MigrateLegacyWorkflowRunJson(json), JSON.Options);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "Cannot project workflow run {WorkflowRunId} into the issue read model: persisted state is invalid. The workflow will be omitted from issue projections until repaired.",
+                workflowRunId);
+            return null;
+        }
     }
 }

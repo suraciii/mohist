@@ -83,6 +83,77 @@ public sealed class RunnerPollRecoveryStateApiSpecs
         }
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
+    [Fact]
+    public async Task Report_MalformedRecoveryFollowUpAcksAndFailsTheRunTerminally()
+    {
+        var projectId = $"runner-recovery-malformed-{Guid.NewGuid():N}";
+        var workflowRunId = $"wr-poll-recovery-malformed-{Guid.NewGuid():N}";
+        var runnerId = $"runner-recovery-malformed-{Guid.NewGuid():N}";
+        var recovery = new RecoveryDefinition(
+            2,
+            [new RecoveryHandlerDefinition("promise=FAIL", [], RetrySelf: true)]);
+        var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
+
+        try
+        {
+            await SeedWorkflowAsync(projectId, workflowRunId, recovery);
+            await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "test-host", projectId));
+
+            var fresh = await PollAsync(runnerId);
+
+            // Follow-up carries a recovery declaration but omits the required
+            // numeric recoveryRemaining. This is a permanent validation failure:
+            // the server must ack (2xx) so the runner retires the work from
+            // awaitingAck, and must fail the active task terminally rather than
+            // leaving it running or throwing a non-2xx that the runner resends.
+            using var report = await _fixture.Client.PostAsJsonAsync($"/api/runner/{runnerId}/report", new
+            {
+                workflowRunId,
+                workId = fresh.GetProperty("workId").GetString(),
+                status = "completed",
+                addTasks = new[]
+                {
+                    new
+                    {
+                        id = "review",
+                        title = "Review",
+                        uses = "spec/review",
+                        recovery = new
+                        {
+                            budget = 2,
+                            handlers = new[]
+                            {
+                                new { when = "promise=FAIL", tasks = Array.Empty<object>(), retrySelf = true },
+                            },
+                        },
+                    },
+                },
+            });
+
+            Assert.Equal(HttpStatusCode.OK, report.StatusCode);
+            var reportBody = await report.Content.ReadFromJsonAsync<JsonElement>();
+            Assert.True(reportBody.GetProperty("tracked").GetBoolean());
+            Assert.Equal("accepted", reportBody.GetProperty("reason").GetString());
+
+            var workflow = _fixture.Grains.GetGrain<IWorkflowGrain>(workflowRunId);
+            Assert.Equal("Failed", await workflow.GetRunStatusAsync());
+
+            var status = await _fixture.Services
+                .GetRequiredService<WorkflowQuerier>()
+                .GetStatusAsync(workflowRunId);
+            Assert.NotNull(status);
+            Assert.NotNull(status!.Failure);
+            Assert.Contains("Recovery follow-up rejected", status.Failure!.Message ?? string.Empty);
+        }
+        finally
+        {
+            await runner.UnregisterAsync();
+        }
+    }
+
     private async Task SeedWorkflowAsync(string projectId, string workflowRunId, RecoveryDefinition recovery)
     {
         var definition = new WorkflowDefinition(

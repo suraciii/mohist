@@ -106,7 +106,7 @@ public class WorkflowArtifactBindingSpecs : WorkflowGrainSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public async Task InvalidRecoveryFollowUp_LeavesUploadPendingUntilCorrectedReport()
+    public async Task InvalidRecoveryFollowUp_AcksAndFailsTheRunWithoutBindingArtifacts()
     {
         var recovery = new RecoveryDefinition(
             2,
@@ -127,36 +127,21 @@ public class WorkflowArtifactBindingSpecs : WorkflowGrainSpecs
         var (work, runnerId) = await PollWorkAnyAsync();
         var uploadId = await SeedPendingUploadAsync(work.WorkflowRunId, work.WorkId, "task-1.1", "review.md");
 
-        await Assert.ThrowsAnyAsync<Exception>(() => ReportAsync(runnerId, work.WorkId, new WorkResult(
-            "completed",
-            Output: "{}",
-            ArtifactUploadIds: [uploadId],
-            AddTasks: [new RuntimeTaskInput("task-1", "Task 1", "spec/task", Recovery: recovery)])));
-
-        await using (var db = CreateDb())
-        {
-            Assert.Empty(await db.WorkflowArtifacts.Where(a => a.WorkflowRunId == work.WorkflowRunId).ToListAsync());
-            Assert.Single(await db.WorkflowArtifactPendingUploads
-                .Where(p => p.WorkflowRunId == work.WorkflowRunId && p.UploadId == uploadId)
-                .ToListAsync());
-        }
-
+        // A permanently invalid recovery follow-up acks and fails the run
+        // terminally rather than throwing. The terminal failure path does not
+        // bind artifacts, so the upload remains pending (recoverable by retry).
         await ReportAsync(runnerId, work.WorkId, new WorkResult(
             "completed",
             Output: "{}",
             ArtifactUploadIds: [uploadId],
-            AddTasks: [new RuntimeTaskInput(
-                "task-1",
-                "Task 1",
-                "spec/task",
-                Recovery: recovery,
-                RecoveryRemaining: 1)]));
+            AddTasks: [new RuntimeTaskInput("task-1", "Task 1", "spec/task", Recovery: recovery)]));
 
-        await using var correctedDb = CreateDb();
-        Assert.Single(await correctedDb.WorkflowArtifacts
-            .Where(a => a.WorkflowRunId == work.WorkflowRunId)
-            .ToListAsync());
-        Assert.Empty(await correctedDb.WorkflowArtifactPendingUploads
+        var workflow = Grains.GetGrain<IWorkflowGrain>(work.WorkflowRunId);
+        Assert.Equal("Failed", await workflow.GetRunStatusAsync());
+
+        await using var db = CreateDb();
+        Assert.Empty(await db.WorkflowArtifacts.Where(a => a.WorkflowRunId == work.WorkflowRunId).ToListAsync());
+        Assert.Single(await db.WorkflowArtifactPendingUploads
             .Where(p => p.WorkflowRunId == work.WorkflowRunId && p.UploadId == uploadId)
             .ToListAsync());
     }

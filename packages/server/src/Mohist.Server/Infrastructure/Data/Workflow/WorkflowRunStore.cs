@@ -434,15 +434,19 @@ public class WorkflowRunStore : IWorkflowRunStore
     private enum JsonComparisonContext
     {
         Ordinary,
-        RecoveryDeclaration,
+        RecoveryDeclarationRoot,
         RecoveryHandlers,
         RecoveryHandler,
         TaskDefinitions,
         TaskDefinition,
     }
 
+    // Only the root recovery object of the legacy task attempt being normalized
+    // ignores `budget` (that budget encodes the consumed allowance of this
+    // attempt's round). Nested handler-task recovery declarations are definition
+    // data and must match verbatim, so their comparison uses Ordinary context.
     private static bool RecoveryDeclarationsMatch(JsonElement left, JsonElement right) =>
-        JsonValuesEqual(left, right, JsonComparisonContext.RecoveryDeclaration);
+        JsonValuesEqual(left, right, JsonComparisonContext.RecoveryDeclarationRoot);
 
     private static bool JsonValuesEqual(JsonElement left, JsonElement right, JsonComparisonContext context)
     {
@@ -469,11 +473,11 @@ public class WorkflowRunStore : IWorkflowRunStore
     private static bool ObjectsEqual(JsonElement left, JsonElement right, JsonComparisonContext context)
     {
         var leftProperties = left.EnumerateObject()
-            .Where(p => context != JsonComparisonContext.RecoveryDeclaration
+            .Where(p => context != JsonComparisonContext.RecoveryDeclarationRoot
                 || !string.Equals(p.Name, "budget", StringComparison.OrdinalIgnoreCase))
             .ToDictionary(p => p.Name, p => p.Value, StringComparer.Ordinal);
         var rightProperties = right.EnumerateObject()
-            .Where(p => context != JsonComparisonContext.RecoveryDeclaration
+            .Where(p => context != JsonComparisonContext.RecoveryDeclarationRoot
                 || !string.Equals(p.Name, "budget", StringComparison.OrdinalIgnoreCase))
             .ToDictionary(p => p.Name, p => p.Value, StringComparer.Ordinal);
         if (leftProperties.Count != rightProperties.Count)
@@ -498,15 +502,15 @@ public class WorkflowRunStore : IWorkflowRunStore
 
     private static JsonComparisonContext PropertyContext(JsonComparisonContext context, string propertyName)
     {
-        if (context == JsonComparisonContext.RecoveryDeclaration
+        if (context == JsonComparisonContext.RecoveryDeclarationRoot
             && string.Equals(propertyName, "handlers", StringComparison.OrdinalIgnoreCase))
             return JsonComparisonContext.RecoveryHandlers;
         if (context == JsonComparisonContext.RecoveryHandler
             && string.Equals(propertyName, "tasks", StringComparison.OrdinalIgnoreCase))
             return JsonComparisonContext.TaskDefinitions;
-        if (context == JsonComparisonContext.TaskDefinition
-            && string.Equals(propertyName, "recovery", StringComparison.OrdinalIgnoreCase))
-            return JsonComparisonContext.RecoveryDeclaration;
+        // Nested handler-task recovery declarations compare as Ordinary (verbatim,
+        // including their own budget) — only the root recovery of the attempt
+        // being normalized ignores budget.
 
         return JsonComparisonContext.Ordinary;
     }
