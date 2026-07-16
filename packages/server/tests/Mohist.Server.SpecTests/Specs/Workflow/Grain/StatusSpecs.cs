@@ -152,7 +152,7 @@ public class StatusSpecs : WorkflowGrainSpecs
                 State = JSON.Serialize(new
                 {
                     Id = workflowId,
-                    Metadata = new { CreatedAt = DateTimeOffset.UtcNow },
+                    Metadata = new { CreatedAt = TestTime.UtcNow },
                     Status = "Failed",
                     CurrentStageId = "build",
                     Stages = new[]

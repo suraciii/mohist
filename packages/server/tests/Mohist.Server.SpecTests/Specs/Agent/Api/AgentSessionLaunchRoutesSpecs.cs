@@ -576,8 +576,6 @@ public class AgentSessionLaunchRoutesSpecs
 
             foreach (var other in others)
                 await DrainDispatchElementAsync(runnerId, other);
-            if (dispatches.Count == 0)
-                await Task.Yield();
 
             if (match is not null) return match;
         }

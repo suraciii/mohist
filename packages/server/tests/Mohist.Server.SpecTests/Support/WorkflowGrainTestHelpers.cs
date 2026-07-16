@@ -45,7 +45,7 @@ public static class WorkflowGrainTestHelpers
             annotations["issueId"] = issueId;
         return new WorkflowStartInput(Metadata: new WorkflowRunMetadata(
             Name: null,
-            CreatedAt: DateTimeOffset.UtcNow,
+            CreatedAt: TestTime.UtcNow,
             Annotations: annotations));
     }
 
@@ -118,7 +118,7 @@ public static class WorkflowGrainTestHelpers
             .UseSqlite(connectionString)
             .Options;
         var factory = new PooledDbContextFactory<MohistDbContext>(options);
-        var promptLoader = new Mohist.Server.Workflow.Services.Prompts.FilePromptLoader();
+        var promptLoader = new InMemoryPromptLoader();
         return new WorkflowQuerier(
             factory,
             new WorkflowProfileManager(
@@ -141,7 +141,7 @@ public static class WorkflowGrainTestHelpers
             new ConfigurationBuilder().Build(),
             new MockEnvironmentVariableProvider(),
             NullLogger<ConfigService>.Instance,
-            configPath: "/nonexistent/mohist-config-test.jsonc");
+            new InMemoryConfigDocumentStore());
 
     public static async Task ClearBacklogAsync(IGrainFactory grains, string connectionString)
     {
@@ -249,7 +249,7 @@ public static class WorkflowGrainTestHelpers
         else
         {
             existingTemplate.Template = templateJson;
-            existingTemplate.UpdatedAt = DateTimeOffset.UtcNow;
+            existingTemplate.UpdatedAt = TestTime.UtcNow;
         }
 
         var projectProfile = await db.ProjectWorkflowProfiles.FindAsync(projectId);
@@ -264,7 +264,7 @@ public static class WorkflowGrainTestHelpers
         else
         {
             projectProfile.DefaultTemplateId = templateId;
-            projectProfile.UpdatedAt = DateTimeOffset.UtcNow;
+            projectProfile.UpdatedAt = TestTime.UtcNow;
         }
 
         await db.SaveChangesAsync();

@@ -358,7 +358,7 @@ public class IssueMetricsApiSpecs
     public async Task ApprovalWaitMetrics_HasCompletedApprovals_ReturnsWindowSampleCountAndStats()
     {
         var project = await CreateProjectAsync($"approval-wait-present-{Guid.NewGuid():N}");
-        var requestedAt = DateTimeOffset.UtcNow.AddDays(-1);
+        var requestedAt = _fixture.TimeProvider.GetUtcNow().AddDays(-1);
         var approvedWait = TimeSpan.FromHours(3.2);
         var rejectedWait = TimeSpan.FromHours(1.4);
         var issueId = $"issue_approval_present_{Guid.NewGuid():N}";
@@ -383,10 +383,10 @@ public class IssueMetricsApiSpecs
             rejectedWait,
             "rejected");
 
-        var before = DateTimeOffset.UtcNow;
+        var before = _fixture.TimeProvider.GetUtcNow();
         using var response = await _client.GetAsync(
             $"/api/projects/{project.Id}/issues/metrics/approval-wait");
-        var after = DateTimeOffset.UtcNow;
+        var after = _fixture.TimeProvider.GetUtcNow();
         response.EnsureSuccessStatusCode();
 
         var payload = await ReadDataAsync<ApprovalWaitMetricsResponse>(response);
@@ -406,7 +406,7 @@ public class IssueMetricsApiSpecs
     public async Task ApprovalWaitMetrics_MultipleCompletedApprovalStagesInOneRun_CountsEachGate()
     {
         var project = await CreateProjectAsync($"approval-wait-multi-{Guid.NewGuid():N}");
-        var requestedAt = DateTimeOffset.UtcNow.AddDays(-1);
+        var requestedAt = _fixture.TimeProvider.GetUtcNow().AddDays(-1);
         var planWait = TimeSpan.FromHours(1);
         var checkWait = TimeSpan.FromHours(4);
         var issueId = $"issue_approval_multi_{Guid.NewGuid():N}";

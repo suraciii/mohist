@@ -27,7 +27,7 @@ public class EventBridgeSpecs
             id: Guid.NewGuid().ToString(),
             source: new Uri("/mohist/workflow/workflow-1", UriKind.RelativeOrAbsolute),
             type: "com.mohist.workflow.run.completed",
-            time: DateTimeOffset.UtcNow,
+            time: TestTime.UtcNow,
             data: null,
             subject: null,
             extensions: new Dictionary<string, string>
@@ -65,7 +65,7 @@ public class EventBridgeSpecs
             id: Guid.NewGuid().ToString(),
             source: new Uri("/mohist/workflow/workflow-1", UriKind.RelativeOrAbsolute),
             type: "com.mohist.workflow.run.paused",
-            time: DateTimeOffset.UtcNow,
+            time: TestTime.UtcNow,
             data: null);
 
         await bridge.HandleAsync(evt, CancellationToken.None);

@@ -526,8 +526,8 @@ public class EpicProgressionSpecs
             Priority = "p2",
             Status = status,
             PauseReason = pauseReason,
-            CreatedAt = DateTimeOffset.UtcNow,
-            UpdatedAt = DateTimeOffset.UtcNow,
+            CreatedAt = TestTime.UtcNow,
+            UpdatedAt = TestTime.UtcNow,
         });
         await db.SaveChangesAsync();
     }
@@ -575,7 +575,7 @@ public class EpicProgressionSpecs
             ProjectId = "project_1",
             IssueId = issueId,
             IssueNumber = issueNumber,
-            CreatedAt = DateTimeOffset.UtcNow,
+            CreatedAt = TestTime.UtcNow,
         });
         await db.SaveChangesAsync();
     }

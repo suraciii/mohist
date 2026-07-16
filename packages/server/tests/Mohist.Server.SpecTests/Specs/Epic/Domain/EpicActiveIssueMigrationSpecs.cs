@@ -22,7 +22,7 @@ public class EpicActiveIssueMigrationSpecs
 
         Assert.False(await TableExistsAsync(context, "EpicActiveIssues"));
 
-        var createdAt = DateTimeOffset.UtcNow;
+        var createdAt = TestTime.UtcNow;
         context.Epics.AddRange(
             NewEpic("epic_idle", 1, "idle", createdAt),
             NewEpic("epic_running", 2, "running", createdAt.AddMinutes(1)),

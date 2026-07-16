@@ -9,159 +9,207 @@ namespace Mohist.Server.UnitTests.Security;
 
 public sealed class OperatorCredentialTests
 {
-    private const string Token = "test-operator-token-0123456789abcdef";
+    private const string Token =
+        "test-operator-token-0123456789abcdef";
 
     [Fact]
     public void AuthorizesOnlyOneExactCredentialValue()
     {
-        var configuration = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>
-            {
-                ["Mohist:OperatorToken"] = Token,
-            })
-            .Build();
+        var configuration = ConfigurationWith(
+            "Mohist:OperatorToken",
+            Token);
         var credential = new OperatorCredential(
             configuration,
-            new MockEnvironmentVariableProvider(addExistingEnvironmentVariables: false));
+            EmptyEnvironment());
         var context = new DefaultHttpContext();
 
-        Assert.False(credential.Authorizes(context.Request.Headers));
+        Assert.False(
+            credential.Authorizes(
+                context.Request.Headers));
 
-        context.Request.Headers[OperatorCredential.HeaderName] = "wrong-operator-token-0123456789abcdef";
-        Assert.False(credential.Authorizes(context.Request.Headers));
+        context.Request.Headers[
+            OperatorCredential.HeaderName] =
+            "wrong-operator-token-0123456789abcdef";
+        Assert.False(
+            credential.Authorizes(
+                context.Request.Headers));
 
-        context.Request.Headers[OperatorCredential.HeaderName] = Token;
-        Assert.True(credential.Authorizes(context.Request.Headers));
+        context.Request.Headers[
+            OperatorCredential.HeaderName] = Token;
+        Assert.True(
+            credential.Authorizes(
+                context.Request.Headers));
 
-        context.Request.Headers[OperatorCredential.HeaderName] = new StringValues([Token, Token]);
-        Assert.False(credential.Authorizes(context.Request.Headers));
+        context.Request.Headers[
+            OperatorCredential.HeaderName] =
+            new StringValues([Token, Token]);
+        Assert.False(
+            credential.Authorizes(
+                context.Request.Headers));
     }
 
     [Fact]
-    public void DefaultCredential_IsCreatedOnceInUserOnlyFileAndReused()
+    public void DefaultCredential_IsCreatedOnceAndReused()
     {
-        var home = Path.Combine(Path.GetTempPath(), $"mohist-operator-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(home);
-        try
-        {
-            var environment = new MockEnvironmentVariableProvider(addExistingEnvironmentVariables: false)
-            {
-                ["HOME"] = home,
-            };
-            var configuration = new ConfigurationBuilder().Build();
+        const string home =
+            "/mohist-tests/operator/default";
+        var environment = EmptyEnvironment();
+        environment["HOME"] = home;
+        var store = new InMemoryCredentialStore();
+        var configuration =
+            new ConfigurationBuilder().Build();
 
-            var first = new OperatorCredential(configuration, environment);
-            var path = Path.Combine(home, ".mohist", "operator-token");
-            var token = File.ReadAllText(path).Trim();
-            Assert.True(token.Length >= 32);
+        var first = new OperatorCredential(
+            configuration,
+            environment,
+            store);
+        var path = Path.Combine(
+            home,
+            ".mohist",
+            "operator-token");
+        var token = store.ReadExplicit(path).Trim();
+        Assert.True(token.Length >= 32);
 
-            var second = new OperatorCredential(configuration, environment);
-            var context = new DefaultHttpContext();
-            context.Request.Headers[OperatorCredential.HeaderName] = token;
-            Assert.True(first.Authorizes(context.Request.Headers));
-            Assert.True(second.Authorizes(context.Request.Headers));
+        var second = new OperatorCredential(
+            configuration,
+            environment,
+            store);
+        var context = new DefaultHttpContext();
+        context.Request.Headers[
+            OperatorCredential.HeaderName] = token;
 
-            if (!OperatingSystem.IsWindows())
-            {
-                Assert.Equal(
-                    UnixFileMode.UserRead | UnixFileMode.UserWrite,
-                    File.GetUnixFileMode(path));
-            }
-        }
-        finally
-        {
-            Directory.Delete(home, recursive: true);
-        }
+        Assert.True(
+            first.Authorizes(context.Request.Headers));
+        Assert.True(
+            second.Authorizes(context.Request.Headers));
+        Assert.Equal(1, store.CreateCount);
     }
 
     [Fact]
     public void EnvironmentCredentialOverridesConfigCredential()
     {
-        var environment = new MockEnvironmentVariableProvider(addExistingEnvironmentVariables: false)
-        {
-            [OperatorCredential.TokenEnvironmentVariable] = "environment-operator-token-0123456789abcdef",
-        };
-        var configuration = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>
-            {
-                ["Mohist:OperatorToken"] = "configuration-operator-token-0123456789abcdef",
-            })
-            .Build();
-        var credential = new OperatorCredential(configuration, environment);
+        var environment = EmptyEnvironment();
+        environment[
+            OperatorCredential.TokenEnvironmentVariable] =
+            "environment-operator-token-0123456789abcdef";
+        var configuration = ConfigurationWith(
+            "Mohist:OperatorToken",
+            "configuration-operator-token-0123456789abcdef");
+        var credential = new OperatorCredential(
+            configuration,
+            environment);
         var context = new DefaultHttpContext();
 
-        context.Request.Headers[OperatorCredential.HeaderName] =
+        context.Request.Headers[
+            OperatorCredential.HeaderName] =
             "configuration-operator-token-0123456789abcdef";
-        Assert.False(credential.Authorizes(context.Request.Headers));
+        Assert.False(
+            credential.Authorizes(
+                context.Request.Headers));
 
-        context.Request.Headers[OperatorCredential.HeaderName] =
+        context.Request.Headers[
+            OperatorCredential.HeaderName] =
             "environment-operator-token-0123456789abcdef";
-        Assert.True(credential.Authorizes(context.Request.Headers));
+        Assert.True(
+            credential.Authorizes(
+                context.Request.Headers));
     }
 
     [Fact]
-    public void ExplicitCredentialPath_AllowsManagedSymlink()
+    public void ExplicitCredentialPath_ReadsManagedToken()
     {
-        if (OperatingSystem.IsWindows())
-            return;
+        const string path =
+            "/mohist-tests/operator/explicit/token";
+        var store = new InMemoryCredentialStore();
+        store.Set(path, Token);
+        var configuration = ConfigurationWith(
+            "Mohist:OperatorTokenPath",
+            path);
 
-        var root = Path.Combine(Path.GetTempPath(), $"mohist-operator-explicit-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(root);
-        try
-        {
-            var target = Path.Combine(root, "..data-token");
-            var link = Path.Combine(root, "operator-token");
-            File.WriteAllText(target, Token);
-            File.CreateSymbolicLink(link, target);
-            var configuration = new ConfigurationBuilder()
-                .AddInMemoryCollection(new Dictionary<string, string?>
-                {
-                    ["Mohist:OperatorTokenPath"] = link,
-                })
-                .Build();
+        var credential = new OperatorCredential(
+            configuration,
+            EmptyEnvironment(),
+            store);
+        var context = new DefaultHttpContext();
+        context.Request.Headers[
+            OperatorCredential.HeaderName] = Token;
 
-            var credential = new OperatorCredential(
+        Assert.True(
+            credential.Authorizes(
+                context.Request.Headers));
+        Assert.Equal(path, store.LastExplicitPath);
+    }
+
+    [Fact]
+    public void ExplicitCredentialPath_ReportsReadFailure()
+    {
+        const string path =
+            "/mohist-tests/operator/missing/token";
+        var configuration = ConfigurationWith(
+            "Mohist:OperatorTokenPath",
+            path);
+
+        var error = Assert.Throws<InvalidOperationException>(
+            () => new OperatorCredential(
                 configuration,
-                new MockEnvironmentVariableProvider(addExistingEnvironmentVariables: false));
-            var context = new DefaultHttpContext();
-            context.Request.Headers[OperatorCredential.HeaderName] = Token;
+                EmptyEnvironment(),
+                new InMemoryCredentialStore()));
 
-            Assert.True(credential.Authorizes(context.Request.Headers));
-        }
-        finally
-        {
-            Directory.Delete(root, recursive: true);
-        }
+        Assert.Contains(
+            path,
+            error.Message,
+            StringComparison.Ordinal);
     }
 
-    [Fact]
-    public void DefaultCredentialPath_RejectsSymlink()
+    private static IConfiguration ConfigurationWith(
+        string key,
+        string value) =>
+        new ConfigurationBuilder()
+            .AddInMemoryCollection(
+                new Dictionary<string, string?>
+                {
+                    [key] = value,
+                })
+            .Build();
+
+    private static MockEnvironmentVariableProvider
+        EmptyEnvironment() =>
+            new(addExistingEnvironmentVariables: false);
+
+    private sealed class InMemoryCredentialStore
+        : OperatorCredential.IOperatorCredentialStore
     {
-        if (OperatingSystem.IsWindows())
-            return;
+        private readonly Dictionary<string, string>
+            _tokens = new(StringComparer.Ordinal);
 
-        var home = Path.Combine(Path.GetTempPath(), $"mohist-operator-default-link-{Guid.NewGuid():N}");
-        var directory = Path.Combine(home, ".mohist");
-        Directory.CreateDirectory(directory);
-        try
+        public int CreateCount { get; private set; }
+
+        public string? LastExplicitPath { get; private set; }
+
+        public void Set(string path, string token) =>
+            _tokens[path] = token;
+
+        public string LoadOrCreateDefault(string path)
         {
-            var target = Path.Combine(home, "managed-token");
-            var link = Path.Combine(directory, "operator-token");
-            File.WriteAllText(target, Token);
-            File.CreateSymbolicLink(link, target);
-            var environment = new MockEnvironmentVariableProvider(addExistingEnvironmentVariables: false)
-            {
-                ["HOME"] = home,
-            };
+            if (_tokens.TryGetValue(path, out var token))
+                return token;
 
-            var error = Assert.Throws<InvalidOperationException>(() =>
-                new OperatorCredential(new ConfigurationBuilder().Build(), environment));
-
-            Assert.Contains("symbolic link", error.Message, StringComparison.OrdinalIgnoreCase);
+            CreateCount++;
+            token =
+                "generated-operator-token-0123456789abcdef";
+            _tokens[path] = token;
+            return token;
         }
-        finally
+
+        public string ReadExplicit(string path)
         {
-            Directory.Delete(home, recursive: true);
+            LastExplicitPath = path;
+            if (_tokens.TryGetValue(path, out var token))
+                return token;
+
+            throw new InvalidOperationException(
+                $"Mohist operator credential could not " +
+                $"be read from '{path}'.");
         }
     }
 }

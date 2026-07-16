@@ -1239,7 +1239,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         var existing = await db.ProjectWorkflowTemplates.FindAsync(projectId, templateId);
         Assert.NotNull(existing);
         existing!.Template = templateJson;
-        existing.UpdatedAt = DateTimeOffset.UtcNow;
+        existing.UpdatedAt = TestTime.UtcNow;
         await db.SaveChangesAsync();
     }
 
@@ -1487,7 +1487,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
                 Id = runId,
                 Metadata = new
                 {
-                    CreatedAt = DateTimeOffset.UtcNow,
+                    CreatedAt = TestTime.UtcNow,
                     Annotations = new Dictionary<string, string> { ["issueId"] = issueId },
                 },
                 Status = "Failed",

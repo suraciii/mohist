@@ -420,7 +420,7 @@ public class InboxProjectionHandlerSpecs
             id: "evt-no-ext",
             source: new Uri("/mohist/issue/issue_x", UriKind.Relative),
             type: EventCatalog.ReverseDns.IssueWorkStarted,
-            time: DateTimeOffset.UtcNow,
+            time: TestTime.UtcNow,
             data: null,
             extensions: new Dictionary<string, string>
             {
@@ -446,7 +446,7 @@ public class InboxProjectionHandlerSpecs
             id: "evt-no-issue",
             source: new Uri("/mohist/issue/issue_x", UriKind.Relative),
             type: EventCatalog.ReverseDns.IssueCompleted,
-            time: DateTimeOffset.UtcNow,
+            time: TestTime.UtcNow,
             data: null,
             extensions: new Dictionary<string, string>
             {
@@ -516,7 +516,7 @@ public class InboxProjectionHandlerSpecs
             id: "evt-no-source",
             source: new Uri("/mohist/something/else", UriKind.Relative),
             type: EventCatalog.ReverseDns.StageApprovalRequested,
-            time: DateTimeOffset.UtcNow,
+            time: TestTime.UtcNow,
             data: null);
 
         await handler.HandleAsync(evt, CancellationToken.None);
@@ -608,7 +608,7 @@ public class InboxProjectionHandlerSpecs
             id: "e",
             source: new Uri("/mohist/issue/issue_1", UriKind.Relative),
             type: EventCatalog.ReverseDns.IssueCancelled,
-            time: DateTimeOffset.UtcNow,
+            time: TestTime.UtcNow,
             data: null)));
     }
 

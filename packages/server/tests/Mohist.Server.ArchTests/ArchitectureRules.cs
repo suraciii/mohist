@@ -171,14 +171,7 @@ public class ArchitectureRules
     [Fact]
     public void FeatureDirectories_ShouldOnlyContainDomainGrainsAndServices()
     {
-        var sourceRoot = Path.GetFullPath(Path.Combine(
-            AppContext.BaseDirectory,
-            "..", "..", "..", "..", "..", "src", "Mohist.Server"));
-
-        var sourceFiles = Directory
-            .EnumerateFiles(sourceRoot, "*.cs", SearchOption.AllDirectories)
-            .Select(Path.GetFullPath)
-            .ToArray();
+        var sourceFiles = EmbeddedSources("ServerSources/");
 
         var featureRoots = new HashSet<string>(StringComparer.Ordinal)
         {
@@ -205,8 +198,7 @@ public class ArchitectureRules
         };
 
         var violations = sourceFiles
-            .Select(path => Path.GetRelativePath(sourceRoot, path))
-            .Select(path => path.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar))
+            .Select(source => source.Path.Split('/'))
             .Where(parts => parts.Length >= 2 && featureRoots.Contains(parts[0]))
             .Where(parts => !(allowedFeatureSegments.Contains(parts[1])
                 || (parts.Length == 2 && allowedFeatureRootFiles.Contains(parts[1]))))
@@ -217,6 +209,63 @@ public class ArchitectureRules
         Assert.True(
             violations.Count == 0,
             "Feature directories must only contain Domain, Grains, and Services. Violations: " + string.Join(", ", violations));
+    }
+
+    [Fact]
+    public void ServerSource_ShouldUseSharedJsonSerializerOptions()
+    {
+        var localConstructorOffenders = new List<string>();
+        var localFieldOffenders = new List<string>();
+        var fieldPattern = new System.Text.RegularExpressions.Regex(
+            @"static\s+readonly\s+JsonSerializerOptions\s+\w+\s*=",
+            System.Text.RegularExpressions.RegexOptions.None);
+
+        foreach (var source in EmbeddedSources("ServerSources/")
+                     .Where(source => !source.Path.Equals(
+                         "Infrastructure/JSON.cs",
+                         StringComparison.Ordinal)))
+        {
+            var lineNumber = 1;
+            foreach (var line in source.Content.Split('\n'))
+            {
+                if (line.Contains("new JsonSerializerOptions(", StringComparison.Ordinal))
+                    localConstructorOffenders.Add($"{source.Path}:{lineNumber}");
+
+                if (fieldPattern.IsMatch(line)
+                    && !line.Contains("JSON.Options", StringComparison.Ordinal)
+                    && !line.Contains("JSON.Indented", StringComparison.Ordinal))
+                {
+                    localFieldOffenders.Add($"{source.Path}:{lineNumber}");
+                }
+
+                lineNumber++;
+            }
+        }
+
+        Assert.True(
+            localConstructorOffenders.Count == 0,
+            "Found local JsonSerializerOptions construction outside the JSON facade: "
+            + string.Join(", ", localConstructorOffenders));
+        Assert.True(
+            localFieldOffenders.Count == 0,
+            "Found local static JsonSerializerOptions fields outside the JSON facade: "
+            + string.Join(", ", localFieldOffenders));
+    }
+
+    [Fact]
+    public void ProductionProjects_ShouldReferenceEnvironmentAnalyzer()
+    {
+        var missing = EmbeddedSources("ProductionProjects/")
+            .Where(project => !project.Content.Contains(
+                "EnvironmentAbstractions.BannedApiAnalyzer",
+                StringComparison.Ordinal))
+            .Select(project => project.Path)
+            .ToArray();
+
+        Assert.True(
+            missing.Length == 0,
+            "Production projects must reference EnvironmentAbstractions.BannedApiAnalyzer: "
+            + string.Join(", ", missing));
     }
 
     [Fact]
@@ -347,53 +396,6 @@ public class ArchitectureRules
         }
     }
 
-    /// <summary>
-    /// Enforces the convention that all environment variable access goes through
-    /// <c>System.IEnvironmentVariableProvider</c> (from the <c>EnvironmentAbstractions</c> NuGet package).
-    /// </summary>
-    /// <remarks>
-    /// ArchUnitNET's call graph only tracks instance method dispatches and does not
-    /// detect static method invocations on <c>System.Environment</c>. The primary
-    /// enforcement is at compile time via the <c>EnvironmentAbstractions.BannedApiAnalyzer</c>
-    /// Roslyn analyzer, which blocks any direct call to
-    /// <c>System.Environment.GetEnvironmentVariable</c> /
-    /// <c>System.Environment.SetEnvironmentVariable</c>. This archtest is a backstop:
-    /// it verifies every production csproj references the analyzer so the compile-time
-    /// enforcement actually runs.
-    /// </remarks>
-    [Fact]
-    public void ProductionCode_ShouldNotCallSystemEnvironmentDirectly()
-    {
-        var repoRoot = Path.GetFullPath(Path.Combine(
-            AppContext.BaseDirectory,
-            "..", "..", "..", "..", "..", "src"));
-
-        var productionProjects = new[]
-        {
-            ("Mohist.Server", Path.Combine(repoRoot, "Mohist.Server", "Mohist.Server.csproj")),
-            ("Mohist.Cli",    Path.Combine(repoRoot, "..", "..", "cli", "Mohist.Cli", "Mohist.Cli.csproj")),
-        };
-
-        var missing = new List<string>();
-        foreach (var (name, csprojPath) in productionProjects)
-        {
-            var csproj = File.ReadAllText(csprojPath);
-            if (!csproj.Contains("EnvironmentAbstractions.BannedApiAnalyzer", StringComparison.Ordinal))
-            {
-                missing.Add(name);
-            }
-        }
-
-        Assert.True(
-            missing.Count == 0,
-            "These production csprojs must reference EnvironmentAbstractions.BannedApiAnalyzer to " +
-            "enforce IEnvironmentVariableProvider usage at compile time: " + string.Join(", ", missing));
-    }
-
-    private static string GetSpecsRoot() => Path.GetFullPath(Path.Combine(
-        AppContext.BaseDirectory,
-        "..", "..", "..", "..",
-        "Mohist.Server.SpecTests", "Specs"));
 
     /// <summary>
     /// Spec files in <c>Specs/</c> must end with <c>Specs</c> or
@@ -403,14 +405,8 @@ public class ArchitectureRules
     [Fact]
     public void SpecFiles_MustHaveSpecOrCollectionSuffix()
     {
-        var specsRoot = GetSpecsRoot();
-        Assert.True(Directory.Exists(specsRoot), $"Spec root not found: {specsRoot}");
-
-        var specFiles = Directory.EnumerateFiles(
-            specsRoot, "*.cs", SearchOption.AllDirectories);
-
-        var violations = specFiles
-            .Select(p => Path.GetFileNameWithoutExtension(p)!)
+        var violations = EmbeddedSources("SpecSources/")
+            .Select(source => Path.GetFileNameWithoutExtension(source.Path)!)
             .Where(name => !name.EndsWith("Specs")
                         && !name.EndsWith("Collection")
                         && !name.EndsWith("Fixture")
@@ -438,23 +434,19 @@ public class ArchitectureRules
     [Fact]
     public void SpecClasses_MustBePublic()
     {
-        var specsRoot = GetSpecsRoot();
-        Assert.True(Directory.Exists(specsRoot), $"Spec root not found: {specsRoot}");
-
         var classRegex = new System.Text.RegularExpressions.Regex(
             @"^\s*(?:(public|internal|private|protected)\s+)?(?:static\s+|sealed\s+|abstract\s+|partial\s+)*class\s+(\w+Specs)\b",
             System.Text.RegularExpressions.RegexOptions.Multiline);
 
         var violations = new List<string>();
-        foreach (var path in Directory.EnumerateFiles(specsRoot, "*.cs", SearchOption.AllDirectories))
+        foreach (var source in EmbeddedSources("SpecSources/"))
         {
-            var src = File.ReadAllText(path);
-            foreach (System.Text.RegularExpressions.Match m in classRegex.Matches(src))
+            foreach (System.Text.RegularExpressions.Match m in classRegex.Matches(source.Content))
             {
                 var access = m.Groups[1].Success ? m.Groups[1].Value : "default";
                 if (access != "public")
                 {
-                    violations.Add($"{Path.GetRelativePath(specsRoot, path)}: {access} {m.Groups[2].Value}");
+                    violations.Add($"{source.Path}: {access} {m.Groups[2].Value}");
                 }
             }
         }
@@ -473,18 +465,14 @@ public class ArchitectureRules
     [Fact]
     public void SpecNamespaces_MustBeUnderSpecs()
     {
-        var specsRoot = GetSpecsRoot();
-        Assert.True(Directory.Exists(specsRoot), $"Spec root not found: {specsRoot}");
-
         var namespaceRegex = new System.Text.RegularExpressions.Regex(
             @"^\s*namespace\s+([\w\.]+)\s*;",
             System.Text.RegularExpressions.RegexOptions.Multiline);
 
         var violations = new List<string>();
-        foreach (var path in Directory.EnumerateFiles(specsRoot, "*.cs", SearchOption.AllDirectories))
+        foreach (var source in EmbeddedSources("SpecSources/"))
         {
-            var src = File.ReadAllText(path);
-            var m = namespaceRegex.Match(src);
+            var m = namespaceRegex.Match(source.Content);
             if (!m.Success)
             {
                 // No namespace declaration; skip (the existing test in
@@ -494,7 +482,7 @@ public class ArchitectureRules
             var ns = m.Groups[1].Value;
             if (!ns.StartsWith("Mohist.Server.SpecTests.Specs", StringComparison.Ordinal))
             {
-                violations.Add($"{Path.GetRelativePath(specsRoot, path)}: {ns}");
+                violations.Add($"{source.Path}: {ns}");
             }
         }
 
@@ -503,4 +491,21 @@ public class ArchitectureRules
             "Spec namespaces must be under 'Mohist.Server.SpecTests.Specs'. Violations: " +
             string.Join(", ", violations));
     }
+
+    private static IReadOnlyList<EmbeddedSource> EmbeddedSources(string prefix)
+    {
+        var assembly = typeof(ArchitectureRules).Assembly;
+        return assembly.GetManifestResourceNames()
+            .Where(name => name.StartsWith(prefix, StringComparison.Ordinal))
+            .OrderBy(name => name, StringComparer.Ordinal)
+            .Select(name =>
+            {
+                using var stream = assembly.GetManifestResourceStream(name)!;
+                using var reader = new StreamReader(stream);
+                return new EmbeddedSource(name[prefix.Length..], reader.ReadToEnd());
+            })
+            .ToArray();
+    }
+
+    private sealed record EmbeddedSource(string Path, string Content);
 }

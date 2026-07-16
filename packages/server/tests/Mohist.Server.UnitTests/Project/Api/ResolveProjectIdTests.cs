@@ -122,7 +122,7 @@ public class ResolveProjectIdTests
     {
         var files = new FakeFileSystem();
         var statePath = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            "/mohist-tests/user",
             ".mohist",
             "cli-state.json");
         files.AddDirectory(Path.GetDirectoryName(statePath)!);
@@ -145,7 +145,7 @@ public class ResolveProjectIdTests
     {
         var files = new FakeFileSystem();
         var statePath = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            "/mohist-tests/user",
             ".mohist",
             "cli-state.json");
         files.AddDirectory(Path.GetDirectoryName(statePath)!);
@@ -177,7 +177,8 @@ public class ResolveProjectIdTests
             output,
             error,
             files,
-            new NoopCommandExecutor());
+            new NoopCommandExecutor(),
+            getUserHome: () => "/mohist-tests/user");
 
         Assert.Equal(1, exitCode);
         Assert.Contains("mo project use", error.ToString());
@@ -190,7 +191,7 @@ public class ResolveProjectIdTests
     {
         var files = new FakeFileSystem();
         var statePath = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            "/mohist-tests/user",
             ".mohist",
             "cli-state.json");
         files.AddDirectory(Path.GetDirectoryName(statePath)!);
@@ -206,7 +207,8 @@ public class ResolveProjectIdTests
             output,
             error,
             files,
-            new NoopCommandExecutor());
+            new NoopCommandExecutor(),
+            getUserHome: () => "/mohist-tests/user");
 
         Assert.Equal(0, exitCode);
         Assert.Equal("/api/projects/other-project/issues/83", http.Requests.Single().RequestUri!.PathAndQuery);
@@ -218,7 +220,8 @@ public class ResolveProjectIdTests
             output,
             error,
             files,
-            new NoopCommandExecutor());
+            new NoopCommandExecutor(),
+            getUserHome: () => "/mohist-tests/user");
 
     private sealed class NoopCommandExecutor : ICommandExecutor
     {

@@ -95,11 +95,7 @@ public class SourceCodeUpdaterVerifyRuntimeSpecs
 
     private static async Task AssertRequestCountAsync(RecordingHttpHandler handler, string path, int expected)
     {
-        for (var attempts = 0; attempts < 20 && CountRequests(handler, path) < expected; attempts++)
-        {
-            await Task.Yield();
-        }
-
+        await handler.WaitForRequestCountAsync(expected);
         Assert.Equal(expected, CountRequests(handler, path));
     }
 

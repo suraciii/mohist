@@ -285,7 +285,7 @@ public static class GrainTestConfig
         });
         siloBuilder.Services.AddSingleton<EventDispatcherService>();
         siloBuilder.Services.AddSingleton<ITranscriptEventPublisher, NoopTranscriptEventPublisher>();
-        siloBuilder.Services.AddSingleton<TimeProvider>(timeProvider ?? TimeProvider.System);
+        siloBuilder.Services.AddSingleton<TimeProvider>(timeProvider ?? new FakeTimeProvider(TestTime.UtcNow));
         siloBuilder.Services.AddScoped<IWorkflowArtifactBindService, WorkflowArtifactBindService>();
         siloBuilder.Services.AddScoped<AgentSessionQuery>();
         siloBuilder.Services.Configure<AgentJobOptions>(opts =>

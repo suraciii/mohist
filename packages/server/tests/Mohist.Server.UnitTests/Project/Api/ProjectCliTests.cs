@@ -28,7 +28,8 @@ public class ProjectCliTests
             output,
             error,
             files,
-            new NoopCommandExecutor());
+            new NoopCommandExecutor(),
+            getUserHome: () => "/mohist-tests/user");
 
         Assert.Equal(0, exitCode);
         Assert.Equal(HttpMethod.Post, http.Requests.Single().Method);
@@ -58,7 +59,8 @@ public class ProjectCliTests
             output,
             error,
             files,
-            new NoopCommandExecutor());
+            new NoopCommandExecutor(),
+            getUserHome: () => "/mohist-tests/user");
 
         Assert.Equal(0, exitCode);
         var request = http.Requests.Single();
@@ -76,7 +78,7 @@ public class ProjectCliTests
     {
         var files = new FakeFileSystem();
         var statePath = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            "/mohist-tests/user",
             ".mohist",
             "cli-state.json");
         files.AddDirectory(Path.GetDirectoryName(statePath)!);
@@ -101,7 +103,8 @@ public class ProjectCliTests
             output,
             error,
             files,
-            new NoopCommandExecutor());
+            new NoopCommandExecutor(),
+            getUserHome: () => "/mohist-tests/user");
 
         Assert.Equal(0, exitCode);
         Assert.Equal("/api/projects", http.Requests.Single().RequestUri!.PathAndQuery);
@@ -118,7 +121,7 @@ public class ProjectCliTests
     {
         var files = new FakeFileSystem();
         var statePath = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            "/mohist-tests/user",
             ".mohist",
             "cli-state.json");
         files.AddDirectory(Path.GetDirectoryName(statePath)!);
@@ -145,7 +148,8 @@ public class ProjectCliTests
             output,
             error,
             files,
-            new NoopCommandExecutor());
+            new NoopCommandExecutor(),
+            getUserHome: () => "/mohist-tests/user");
 
         Assert.Equal(0, exitCode);
         var request = http.Requests.Single();
@@ -166,7 +170,7 @@ public class ProjectCliTests
     {
         var files = new FakeFileSystem();
         var statePath = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            "/mohist-tests/user",
             ".mohist",
             "cli-state.json");
         files.AddDirectory(Path.GetDirectoryName(statePath)!);
@@ -181,7 +185,8 @@ public class ProjectCliTests
             output,
             error,
             files,
-            new NoopCommandExecutor());
+            new NoopCommandExecutor(),
+            getUserHome: () => "/mohist-tests/user");
 
         Assert.NotEqual(0, exitCode);
         Assert.Empty(http.Requests);
@@ -193,7 +198,7 @@ public class ProjectCliTests
     {
         var files = new FakeFileSystem();
         var statePath = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            "/mohist-tests/user",
             ".mohist",
             "cli-state.json");
         files.AddDirectory(Path.GetDirectoryName(statePath)!);
@@ -215,7 +220,8 @@ public class ProjectCliTests
             output,
             error,
             files,
-            new NoopCommandExecutor());
+            new NoopCommandExecutor(),
+            getUserHome: () => "/mohist-tests/user");
 
         Assert.NotEqual(0, exitCode);
         var request = http.Requests.Single();
@@ -231,7 +237,7 @@ public class ProjectCliTests
     {
         var files = new FakeFileSystem();
         var statePath = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            "/mohist-tests/user",
             ".mohist",
             "cli-state.json");
         files.AddDirectory(Path.GetDirectoryName(statePath)!);
@@ -245,7 +251,8 @@ public class ProjectCliTests
             new StringWriter(),
             new StringWriter(),
             files,
-            new NoopCommandExecutor());
+            new NoopCommandExecutor(),
+            getUserHome: () => "/mohist-tests/user");
 
         Assert.Equal(0, exitCode);
         Assert.Equal("/api/projects/proj_123/issues", http.Requests.Single().RequestUri!.PathAndQuery);

@@ -181,7 +181,10 @@ public sealed class UpdateInstallSyncTests
             exploreResult.Skill!.DirectoryPath);
     }
 
-    private string NewIsolatedRoot(string label) => Path.Combine(Path.GetTempPath(), $"mohist-update-sync-{label}-{Guid.NewGuid():N}");
+    private static string NewIsolatedRoot(string label) =>
+        Path.Combine(
+            "/mohist-tests/update-install-sync",
+            label);
 
     private void WritePackagedSkillAssets(string tempRoot)
     {

@@ -336,7 +336,7 @@ public class ProjectTemplateRoutesSpecs
         var name = $"template-routes-{Guid.NewGuid():N}";
         return await _client.PostDataAsync<ProjectDto>(
             "/api/projects",
-            new { name, path = Directory.GetCurrentDirectory(), baseBranch = "main" });
+            new { name, path = "/mohist-tests/projects/template-routes", baseBranch = "main" });
     }
 
     private async Task UpsertOverrideAsync(string projectId, string key, object body)

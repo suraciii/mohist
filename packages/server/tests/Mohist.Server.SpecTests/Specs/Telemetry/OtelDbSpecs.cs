@@ -15,17 +15,10 @@ namespace Mohist.Server.SpecTests.Specs.Telemetry;
 public class OtelDbSpecs : IDisposable
 {
     private readonly OtelDb _db;
-    // Keeper keeps the in-memory SQLite database alive for the test's lifetime.
     private readonly SqliteConnection _keeper;
 
     public OtelDbSpecs()
     {
-        // The schema-creation specs exercise OtelDb.EnsureInitialized against an
-        // in-memory shared-cache database so no real otel.db file is touched
-        // (design/testing.md hard-constraint 1). File-specific contracts (WAL
-        // mode, physical read-only enforcement, file materialization) cannot be
-        // expressed against an in-memory database and are intentionally not
-        // tested here — see the historical rationale in the test-suite audit.
         (_db, _keeper) = InMemoryOtelDb.Create();
     }
 
@@ -99,9 +92,6 @@ public class OtelDbSpecs : IDisposable
     [Fact]
     public void OpenReadOnlyConnection_OpensAndExposesSchema()
     {
-        // EnsureInitialized has already run via the keeper; open a read-only
-        // connection and confirm it sees the schema. (The physical read-only
-        // enforcement is a file-specific contract not exercised here.)
         using var readOnly = _db.OpenReadOnlyConnection();
         Assert.True(TableExists(readOnly, OtelDb.TracesTable));
         Assert.True(TableExists(readOnly, OtelDb.SpansTable));
@@ -115,7 +105,7 @@ public class OtelDbSpecs : IDisposable
         var options = new OtelOptions { DbPath = "/tmp/some-otel.db" };
         var path = OtelDb.ResolveDatabasePath(options, new MockEnvironment());
 
-        Assert.Equal(Path.GetFullPath("/tmp/some-otel.db"), path);
+        Assert.Equal("/tmp/some-otel.db", path);
     }
 
     [Fact]
@@ -127,7 +117,7 @@ public class OtelDbSpecs : IDisposable
 
         var path = OtelDb.ResolveDatabasePath(options, environment);
 
-        Assert.Equal(Path.GetFullPath("/tmp/from-env-otel.db"), path);
+        Assert.Equal("/tmp/from-env-otel.db", path);
     }
 
     [Fact]
@@ -140,9 +130,7 @@ public class OtelDbSpecs : IDisposable
 
         var path = OtelDb.ResolveDatabasePath(options, environment);
 
-        Assert.Equal(
-            Path.GetFullPath(Path.Combine(Path.GetDirectoryName(mainDbPath)!, OtelDb.DefaultDatabaseFileName)),
-            path);
+        Assert.Equal("/data/custom-main/otel.db", path);
     }
 
     [Fact]
@@ -154,9 +142,7 @@ public class OtelDbSpecs : IDisposable
 
         var path = OtelDb.ResolveDatabasePath(options, environment);
 
-        Assert.Equal(
-            Path.GetFullPath(Path.Combine("/home/testuser", OtelDb.DataDirectoryName, OtelDb.DefaultDatabaseFileName)),
-            path);
+        Assert.Equal("/home/testuser/.mohist/otel.db", path);
     }
 
     [Fact]
@@ -168,7 +154,7 @@ public class OtelDbSpecs : IDisposable
 
         var path = OtelDb.ResolveDatabasePath(options, environment);
 
-        Assert.Equal(Path.GetFullPath("/tmp/explicit-otel.db"), path);
+        Assert.Equal("/tmp/explicit-otel.db", path);
     }
 
     private static bool TableExists(SqliteConnection connection, string tableName)

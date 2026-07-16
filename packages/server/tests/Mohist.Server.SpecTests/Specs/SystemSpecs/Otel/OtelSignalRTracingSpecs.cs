@@ -83,8 +83,7 @@ public class OtelSignalRTracingSpecs
         // at least one Server-kind activity (the OnConnectedAsync
         // hook fired at connection establishment) has been captured.
         await host.Recorder.WaitForAsync(s => s
-            .Any(a => a.Source?.Name == MohistOpenTelemetryRegistration.SignalRServerActivitySourceName),
-            TimeSpan.FromSeconds(5));
+            .Any(a => a.Source?.Name == MohistOpenTelemetryRegistration.SignalRServerActivitySourceName));
 
         var signalrActivities = host.Recorder.EndedActivities
             .Where(a => a.Source?.Name == MohistOpenTelemetryRegistration.SignalRServerActivitySourceName)

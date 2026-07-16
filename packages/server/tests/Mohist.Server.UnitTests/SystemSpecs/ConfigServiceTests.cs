@@ -7,23 +7,19 @@ using EnvironmentAbstractions.TestHelpers;
 
 namespace Mohist.Server.UnitTests.SystemSpecs;
 
-public class ConfigServiceTests : IAsyncLifetime
+public class ConfigServiceTests
 {
-    private ConfigService _svc = null!;
-    private string _configPath = null!;
+    private readonly InMemoryConfigDocumentStore _documents = new();
+    private readonly ConfigService _svc;
 
-    public Task InitializeAsync()
+    public ConfigServiceTests()
     {
         var config = new ConfigurationBuilder().Build();
-        _configPath = Path.Combine(Path.GetTempPath(), $"mohist-config-{Guid.NewGuid():N}.jsonc");
-        _svc = new ConfigService(config, new MockEnvironmentVariableProvider(), Microsoft.Extensions.Logging.Abstractions.NullLogger<ConfigService>.Instance, _configPath);
-        return Task.CompletedTask;
-    }
-
-    public Task DisposeAsync()
-    {
-        if (File.Exists(_configPath)) File.Delete(_configPath);
-        return Task.CompletedTask;
+        _svc = new ConfigService(
+            config,
+            new MockEnvironmentVariableProvider(),
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<ConfigService>.Instance,
+            _documents);
     }
 
     [Fact]
@@ -88,7 +84,7 @@ public class ConfigServiceTests : IAsyncLifetime
     [Fact]
     public async Task GetVariables_OnlyModelSet_ReturnsEmptyBundle()
     {
-        await File.WriteAllTextAsync(_configPath, """{ "Mohist": { "Config": { "model": "anthropic/claude" } } }""");
+        _documents.Content = """{ "Mohist": { "Config": { "model": "anthropic/claude" } } }""";
 
         var bundle = await _svc.GetVariables();
 
@@ -99,7 +95,7 @@ public class ConfigServiceTests : IAsyncLifetime
     [Fact]
     public async Task GetAgentConfig_OnlyModelSet_ReturnsNull()
     {
-        await File.WriteAllTextAsync(_configPath, """{ "Mohist": { "Config": { "model": "anthropic/claude" } } }""");
+        _documents.Content = """{ "Mohist": { "Config": { "model": "anthropic/claude" } } }""";
 
         var agent = await _svc.GetAgentConfigAsync();
 
@@ -354,7 +350,7 @@ public class ConfigServiceTests : IAsyncLifetime
     public async Task ReadConfigFile_WithLineComments_ParsesAllKeys()
     {
         var jsonc = "// leading line comment\n{\n  \"Mohist\": {\n    // nested line comment\n    \"Config\": {\n      \"serverPort\": 8080,\n      \"serverHost\": \"example\"\n    }\n  }\n}\n";
-        await File.WriteAllTextAsync(_configPath, jsonc);
+        _documents.Content = jsonc;
 
         var cfg = await _svc.GetConfigAsync();
 
@@ -365,7 +361,7 @@ public class ConfigServiceTests : IAsyncLifetime
     [Fact]
     public async Task ReadConfigFile_WithBlockCommentsAndTrailingCommas_ParsesAllKeys()
     {
-        await File.WriteAllTextAsync(_configPath, """
+        _documents.Content = """
             /* file header block comment */
             {
               "Mohist": {
@@ -375,7 +371,7 @@ public class ConfigServiceTests : IAsyncLifetime
                 },
               },
             }
-            """);
+            """;
 
         var cfg = await _svc.GetConfigAsync();
 
@@ -386,7 +382,7 @@ public class ConfigServiceTests : IAsyncLifetime
     [Fact]
     public async Task ReadConfigFile_GenuinelyMalformed_ReturnsEmptyDictionarySoDefaultsApply()
     {
-        await File.WriteAllTextAsync(_configPath, "{ this is not jsonc ");
+        _documents.Content = "{ this is not jsonc ";
 
         var cfg = await _svc.GetConfigAsync();
 
@@ -398,7 +394,7 @@ public class ConfigServiceTests : IAsyncLifetime
     [Fact]
     public async Task WriteConfigFileAsync_RoundTripsCommentedConfig_AndAppliesNewValue()
     {
-        await File.WriteAllTextAsync(_configPath, """
+        _documents.Content = """
             // user comment we should be able to load
             {
               "Mohist": {
@@ -407,7 +403,7 @@ public class ConfigServiceTests : IAsyncLifetime
                 }
               }
             }
-            """);
+            """;
 
         await _svc.SetAsync("serverHost", "after");
 
@@ -418,7 +414,7 @@ public class ConfigServiceTests : IAsyncLifetime
     [Fact]
     public async Task WriteConfigFileAsync_OnMalformedExistingFile_FallsBackToFreshJsonObjectAndAppliesChange()
     {
-        await File.WriteAllTextAsync(_configPath, "{ broken jsonc ");
+        _documents.Content = "{ broken jsonc ";
 
         await _svc.SetAsync("serverPort", 9090);
 

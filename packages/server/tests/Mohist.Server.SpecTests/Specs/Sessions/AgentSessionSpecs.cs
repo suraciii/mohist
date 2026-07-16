@@ -986,7 +986,7 @@ public class AgentSessionSpecs
             var workflowBGrain = _fixture.Grains.GetGrain<IWorkflowGrain>(workflowB);
             var startInput = new WorkflowStartInput(Metadata: new WorkflowRunMetadata(
                 Name: null,
-                CreatedAt: DateTimeOffset.UtcNow,
+                CreatedAt: TestTime.UtcNow,
                 Annotations: new Dictionary<string, string>(StringComparer.Ordinal)
                 {
                     ["projectId"] = workflowProjectId,
@@ -1047,7 +1047,7 @@ public class AgentSessionSpecs
         else
         {
             existing.Template = templateJson;
-            existing.UpdatedAt = DateTimeOffset.UtcNow;
+            existing.UpdatedAt = TestTime.UtcNow;
         }
         if (await db.ProjectWorkflowProfiles.FindAsync(projectId) is null)
         {
@@ -1203,10 +1203,7 @@ public class AgentSessionSpecs
             using var response = await _client.PostAsync($"/api/runner/{_runnerId}/poll", null);
             var work = await response.ReadFirstDispatchAsync<WorkDispatchDto>();
             if (work is null)
-            {
-                await Task.Yield();
                 continue;
-            }
 
             if (work.WorkType == "task" && work.Uses == "mohist/openspec-tasks")
             {

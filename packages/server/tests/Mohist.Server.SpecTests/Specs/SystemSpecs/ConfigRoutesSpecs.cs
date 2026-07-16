@@ -17,7 +17,7 @@ namespace Mohist.Server.SpecTests.Specs.SystemSpecs;
 
 public class ConfigRoutesSpecs : IAsyncLifetime
 {
-    private readonly string _configPath = Path.Combine(Path.GetTempPath(), $"mohist-config-routes-{Guid.NewGuid():N}.jsonc");
+    private readonly InMemoryConfigDocumentStore _documents = new();
     private WebApplication _app = null!;
     private HttpClient _client = null!;
 
@@ -38,7 +38,7 @@ public class ConfigRoutesSpecs : IAsyncLifetime
             sp.GetRequiredService<IConfiguration>(),
             sp.GetRequiredService<IEnvironmentVariableProvider>(),
             sp.GetRequiredService<ILogger<ConfigService>>(),
-            _configPath));
+            _documents));
 
         _app = builder.Build();
         _app.MapConfigRoutes();
@@ -54,8 +54,6 @@ public class ConfigRoutesSpecs : IAsyncLifetime
             await _app.StopAsync();
             await _app.DisposeAsync();
         }
-        if (File.Exists(_configPath))
-            File.Delete(_configPath);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]

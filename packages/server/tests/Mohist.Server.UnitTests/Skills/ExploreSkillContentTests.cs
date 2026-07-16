@@ -5,23 +5,10 @@ using Xunit;
 
 namespace Mohist.Server.UnitTests.Skills;
 
-/// <summary>
-/// Verifies the packaged <c>mohist-explore</c> skill guidance carries the
-/// three-lens requirement-distillation workflow. The explore skill produces
-/// clarified thinking only — it does not define issue-body sections or carry
-/// a body template. Section structure and per-section writing rules live in
-/// the server-side issue templates; issue-creation mechanics (frontmatter,
-/// workflow, risk, CLI handoff) live in <c>mohist-create-issue</c>.
-/// These specs read the actual packaged asset on disk so they catch drift
-/// between the served skill content and the spec.
-/// </summary>
 public sealed class ExploreSkillContentTests
 {
-    private static readonly string SkillDataRoot = ResolveSkillDataRoot();
-
-    private static string SkillMarkdown => File.ReadAllText(Path.Combine(SkillDataRoot, "mohist-explore", "SKILL.md"));
-
-    private static string ReferencesRoot => Path.Combine(SkillDataRoot, "mohist-explore", "references");
+    private static string SkillMarkdown =>
+        EmbeddedSkillData.ReadText("mohist-explore/SKILL.md");
 
     [Fact]
     public void PackagedExploreSkill_PreservesAgentFrontmatter()
@@ -55,9 +42,7 @@ public sealed class ExploreSkillContentTests
     [Fact]
     public void PackagedExploreSkill_EnforcesSerialDependencyChain()
     {
-        var content = SkillMarkdown;
-
-        Assert.Contains("dependency chain", content, StringComparison.Ordinal);
+        Assert.Contains("dependency chain", SkillMarkdown, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -65,8 +50,6 @@ public sealed class ExploreSkillContentTests
     {
         var content = SkillMarkdown;
 
-        // Execution knowledge was moved to the mohist skill. Explore must stay
-        // immune to CLI mechanics so it does not drift with CLI versions.
         Assert.DoesNotContain("mo workflow list --described", content, StringComparison.Ordinal);
         Assert.DoesNotContain("recommended_workflow", content, StringComparison.Ordinal);
         Assert.DoesNotContain("--body-file", content, StringComparison.Ordinal);
@@ -75,30 +58,26 @@ public sealed class ExploreSkillContentTests
     [Fact]
     public void PackagedExploreSkill_DoesNotCarryBodyTemplateReference()
     {
-        // Section structure and per-section writing rules live in the server-side issue templates,
-        // fetched by mohist-create-issue via `mo issue template get`. Explore must not carry its own
-        // body template — that would duplicate and drift from the canonical templates.
-        var templatePath = Path.Combine(ReferencesRoot, "issue-body-template.md");
-        Assert.False(File.Exists(templatePath),
-            $"explore must not ship a body template reference, but '{templatePath}' exists.");
-        Assert.False(Directory.Exists(ReferencesRoot),
-            $"explore must not ship a references/ directory.");
+        Assert.DoesNotContain(
+            "mohist-explore/references/issue-body-template.md",
+            EmbeddedSkillData.Paths());
+        Assert.DoesNotContain(
+            EmbeddedSkillData.Paths(),
+            path => path.StartsWith("mohist-explore/references/", StringComparison.Ordinal));
     }
 
     [Fact]
     public void PackagedExploreSkill_IsStillValidAccordingToSkillAssetService()
     {
         var files = new FakeFileSystem();
+        EmbeddedSkillData.Populate(files);
         var environment = new MockEnvironmentVariableProvider();
-        var isolatedRoot = Path.Combine("/tmp", $"mohist-explore-content-{Guid.NewGuid():N}", "skill-data");
-        CopyDirectory(SkillDataRoot, isolatedRoot, files);
-
         var resolver = new SkillAssetRootResolver(
             files,
             environment,
-            getOverrideAssetRoot: () => isolatedRoot,
+            getOverrideAssetRoot: () => EmbeddedSkillData.VirtualRoot,
             getManagedAssetRoot: null,
-            getUserHome: () => isolatedRoot);
+            getUserHome: () => "/mohist-tests/user");
         var service = new SkillAssetService(files, environment, resolver);
 
         var result = service.GetSkill("mohist-explore", includeSupplementaryFiles: true);
@@ -106,54 +85,17 @@ public sealed class ExploreSkillContentTests
         Assert.True(result.Found, result.Error);
         Assert.NotNull(result.Skill);
         Assert.Equal("mohist-explore", result.Skill!.Name);
-        // Explore no longer ships a supplementary body-template file; it produces clarified
-        // thinking only, and the create skills own the templates.
         Assert.Empty(result.Skill.SupplementaryFiles);
     }
 
     [Fact]
     public void PackagedSkillData_ContainsMohistAndExploreSkills()
     {
-        var skills = Directory.GetDirectories(SkillDataRoot)
-            .Select(Path.GetFileName)
-            .Where(name => File.Exists(Path.Combine(SkillDataRoot, name!, "SKILL.md")))
-            .ToList();
+        var skillFiles = EmbeddedSkillData.Paths()
+            .Where(path => path.EndsWith("/SKILL.md", StringComparison.Ordinal))
+            .ToArray();
 
-        Assert.Contains("mohist", skills);
-        Assert.Contains("mohist-explore", skills);
-
-        foreach (var skill in skills)
-        {
-            var skillFile = Path.Combine(SkillDataRoot, skill!, "SKILL.md");
-            Assert.True(File.Exists(skillFile), $"Skill dir '{skill}' is missing '{skillFile}'.");
-        }
-    }
-
-    private static string ResolveSkillDataRoot()
-    {
-        var candidate = Path.GetFullPath(Path.Combine(
-            AppContext.BaseDirectory,
-            "..", "..", "..", "..", "..", "..",
-            "cli", "Mohist.Cli", "skill-data"));
-        if (!Directory.Exists(candidate))
-        {
-            throw new FileNotFoundException(
-                $"Packaged skill-data directory was not found at '{candidate}'. Test cannot run.");
-        }
-
-        return candidate;
-    }
-
-    private static void CopyDirectory(string sourceRoot, string targetRoot, FakeFileSystem files)
-    {
-        foreach (var file in Directory.EnumerateFiles(sourceRoot, "*", SearchOption.AllDirectories))
-        {
-            var relative = Path.GetRelativePath(sourceRoot, file);
-            var target = Path.Combine(targetRoot, relative);
-            var directory = Path.GetDirectoryName(target);
-            if (!string.IsNullOrEmpty(directory))
-                files.AddDirectory(directory);
-            files.AddFile(target, File.ReadAllText(file));
-        }
+        Assert.Contains("mohist/SKILL.md", skillFiles);
+        Assert.Contains("mohist-explore/SKILL.md", skillFiles);
     }
 }

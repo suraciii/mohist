@@ -7,6 +7,7 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" />
     <PackageReference Include="xunit" />
     <PackageReference Include="xunit.runner.visualstudio" />
     <PackageReference Include="TngTech.ArchUnitNET.xUnit" />
@@ -15,6 +16,35 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Mohist.Server\Mohist.Server.csproj" />
     <ProjectReference Include="..\..\..\cli\Mohist.Cli\Mohist.Cli.csproj" />
+    <Reference Include="Microsoft.CodeAnalysis.BannedApiAnalyzers">
+      <HintPath>$(PkgMicrosoft_CodeAnalysis_BannedApiAnalyzers)/analyzers/dotnet/cs/Microsoft.CodeAnalysis.BannedApiAnalyzers.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="Microsoft.CodeAnalysis.CSharp.BannedApiAnalyzers">
+      <HintPath>$(PkgMicrosoft_CodeAnalysis_BannedApiAnalyzers)/analyzers/dotnet/cs/Microsoft.CodeAnalysis.CSharp.BannedApiAnalyzers.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="..\..\src\Mohist.Server\**\*.cs">
+      <LogicalName>ServerSources/%(RecursiveDir)%(Filename)%(Extension)</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="..\Mohist.Server.SpecTests\Specs\**\*.cs">
+      <LogicalName>SpecSources/%(RecursiveDir)%(Filename)%(Extension)</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="..\..\src\Mohist.Server\Mohist.Server.csproj">
+      <LogicalName>ProductionProjects/Mohist.Server.csproj</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="..\..\..\cli\Mohist.Cli\Mohist.Cli.csproj">
+      <LogicalName>ProductionProjects/Mohist.Cli.csproj</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="..\..\..\..\eng\BannedSymbols.Product.txt">
+      <LogicalName>BannedSymbols.Product.txt</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="..\..\..\..\eng\BannedSymbols.Tests.txt">
+      <LogicalName>BannedSymbols.Tests.txt</LogicalName>
+    </EmbeddedResource>
   </ItemGroup>
 
 </Project>

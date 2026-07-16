@@ -26,9 +26,17 @@ public sealed class AgentJobGrainFixture : IAsyncLifetime
     public ControllableRunnerGrainAssignmentObserver RunnerAssignmentObserver { get; } = new();
     public ControllableRunnerGrainCloseoutObserver CloseoutObserver { get; } = new();
 
-    private readonly InMemoryEventBus _sharedEventBus = new(new RecordingEventStore(), System.TimeProvider.System, NullLogger<InMemoryEventBus>.Instance);
+    private readonly InMemoryEventBus _sharedEventBus;
     private readonly RecordingEventStore _sharedEventStore = new();
     private SqliteConnection _keeper = null!;
+
+    public AgentJobGrainFixture()
+    {
+        _sharedEventBus = new InMemoryEventBus(
+            _sharedEventStore,
+            TimeProvider,
+            NullLogger<InMemoryEventBus>.Instance);
+    }
 
     public Task InitializeAsync()
     {

@@ -35,12 +35,10 @@ public class OtlpRoutesWebApplicationFactory : WebApplicationFactory<Program>
     private readonly string _connectionString;
     private readonly string _runnerRoot;
     private readonly string _systemUpdateStatePath;
-    private readonly string _artifactStorageRoot;
     private readonly SqliteConnection _otelKeeper;
     private readonly OtelDb _otelDb;
     private readonly int _siloPort;
     private readonly int _gatewayPort;
-    private string? _webRoot;
 
     public int OtlpPort { get; }
 
@@ -58,17 +56,7 @@ public class OtlpRoutesWebApplicationFactory : WebApplicationFactory<Program>
         OtlpPort = otlpPort;
         _siloPort = siloPort ?? EndpointOptions.DEFAULT_SILO_PORT;
         _gatewayPort = gatewayPort ?? EndpointOptions.DEFAULT_GATEWAY_PORT;
-        // OTel ingester/query storage is backed by an in-memory shared-cache
-        // SQLite database so the integration specs never touch a real otel.db
-        // file (design/testing.md hard-constraint 1). The keeper connection
-        // keeps the database alive for the factory's lifetime; it is disposed
-        // in Dispose(bool). The physical read-only contract is not enforced
-        // against an in-memory database, which is acceptable here because
-        // TraceQuerier only issues SELECTs (the read-only guard is a production
-        // CLI safety constraint, not a behavior under test).
         (_otelDb, _otelKeeper) = InMemoryOtelDb.Create();
-        _artifactStorageRoot = Path.Combine(Path.GetTempPath(), $"mohist-artifacts-otel-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(_artifactStorageRoot);
     }
 
     /// <summary>The in-memory <see cref="OtelDb"/> shared by the integration specs.</summary>
@@ -77,12 +65,10 @@ public class OtlpRoutesWebApplicationFactory : WebApplicationFactory<Program>
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment(MohistHostEnvironment.Testing);
-        _webRoot ??= CreateWebRoot();
         builder.UseSetting("Mohist:SqliteConnectionString", _connectionString);
-        builder.UseSetting("Mohist:WebRoot", _webRoot);
         builder.UseSetting("Mohist:RunnerRoot", _runnerRoot);
         builder.UseSetting("Mohist:SystemUpdate:StatePath", _systemUpdateStatePath);
-        builder.UseSetting("Mohist:ArtifactStorage:Root", _artifactStorageRoot);
+        builder.UseSetting("Mohist:ArtifactStorage:Root", "/mohist-tests/otel/artifacts");
         builder.UseSetting("Mohist:Otel:Port", OtlpPort.ToString());
         builder.UseSetting("Mohist:ServerUrl", "http://127.0.0.1:3456");
         builder.UseSetting("Mohist:Silo:SiloPort", _siloPort.ToString(System.Globalization.CultureInfo.InvariantCulture));
@@ -93,10 +79,9 @@ public class OtlpRoutesWebApplicationFactory : WebApplicationFactory<Program>
             config.AddInMemoryCollection(new Dictionary<string, string?>
             {
                 ["Mohist:SqliteConnectionString"] = _connectionString,
-                ["Mohist:WebRoot"] = _webRoot,
                 ["Mohist:RunnerRoot"] = _runnerRoot,
                 ["Mohist:SystemUpdate:StatePath"] = _systemUpdateStatePath,
-                ["Mohist:ArtifactStorage:Root"] = _artifactStorageRoot,
+                ["Mohist:ArtifactStorage:Root"] = "/mohist-tests/otel/artifacts",
                 ["Mohist:Otel:Port"] = OtlpPort.ToString(),
                 ["Mohist:Silo:SiloPort"] = _siloPort.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 ["Mohist:Silo:GatewayPort"] = _gatewayPort.ToString(System.Globalization.CultureInfo.InvariantCulture),
@@ -110,6 +95,14 @@ public class OtlpRoutesWebApplicationFactory : WebApplicationFactory<Program>
 
         builder.ConfigureTestServices(services =>
         {
+            services.RemoveAll<IWebContentProvider>();
+            services.AddSingleton<IWebContentProvider, InMemoryWebContentProvider>();
+            services.RemoveAll<Mohist.Server.SystemInfo.IFileSystem>();
+            services.AddSingleton<Mohist.Server.SystemInfo.IFileSystem, InMemoryServerFileSystem>();
+            services.RemoveAll<ISystemUpdateStore>();
+            services.AddSingleton<ISystemUpdateStore, InMemorySystemUpdateStore>();
+            services.RemoveAll<IManagedAssetCatalog>();
+            services.AddSingleton<IManagedAssetCatalog, InMemoryManagedAssetCatalog>();
             services.RemoveAll<IGitService>();
             services.AddSingleton<FakeGitService>();
             services.AddSingleton<IGitService>(provider => provider.GetRequiredService<FakeGitService>());
@@ -127,9 +120,6 @@ public class OtlpRoutesWebApplicationFactory : WebApplicationFactory<Program>
             services.AddDbContextFactory<MohistDbContext>(options =>
                 options
                     .UseSqlite(_connectionString));
-            // Replace the file-backed production OtelDb with the in-memory
-            // instance so the OTLP/query routes exercise the real TraceIngester
-            // and TraceQuerier without touching the filesystem.
             services.RemoveAll<OtelDb>();
             services.AddSingleton(_otelDb);
         });
@@ -214,11 +204,4 @@ public class OtlpRoutesWebApplicationFactory : WebApplicationFactory<Program>
         await db.Database.ExecuteSqlRawAsync("CREATE INDEX IF NOT EXISTS \"IX_Attachments_ProjectId_Owner\" ON \"Attachments\" (\"ProjectId\", \"OwnerKind\", \"OwnerId\");");
     }
 
-    private static string CreateWebRoot()
-    {
-        var root = Path.Combine(Path.GetTempPath(), $"mohist-web-otel-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(root);
-        File.WriteAllText(Path.Combine(root, "index.html"), "<html><body>Mohist OTel Test Web</body></html>");
-        return root;
-    }
 }

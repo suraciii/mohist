@@ -210,7 +210,7 @@ public class AgentSessionQuerySpecs
         };
         await using (var db = fixture.CreateDbContext())
         {
-            db.AgentSessions.Add(BuildRow("s_triggered", labels, createdAt: DateTime.UtcNow));
+            db.AgentSessions.Add(BuildRow("s_triggered", labels, createdAt: TestTime.UtcDateTime));
             await db.SaveChangesAsync();
         }
 
@@ -288,7 +288,7 @@ public class AgentSessionQuerySpecs
             metadata = new { labels = storedLabels },
             runtime = new { runnerId = "runtime-runner", workDir = (string?)null },
             settings = new { },
-            status = new { createdAt = DateTime.UtcNow },
+            status = new { createdAt = TestTime.UtcDateTime },
         }, JSON.Options);
         await using (var db = fixture.CreateDbContext())
         {
@@ -297,7 +297,7 @@ public class AgentSessionQuerySpecs
                 Id = "s_runtime",
                 State = state,
                 Status = "opened",
-                CreatedAt = DateTime.UtcNow,
+                CreatedAt = TestTime.UtcDateTime,
             });
             await db.SaveChangesAsync();
         }

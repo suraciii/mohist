@@ -47,7 +47,7 @@ public class AgentSessionStoreSpecs : IAsyncLifetime
     public async Task SavePartsAsync_RetrySameCorrelationKey_UpdatesExistingPart()
     {
         var sessionId = $"transcript-{Guid.NewGuid():N}";
-        var now = DateTime.UtcNow;
+        var now = TestTime.UtcDateTime;
         var turn = new AgentSessionTranscriptTurnUpsert(sessionId, 1, "prompt", "task", now, now);
         var parts = new[]
         {
@@ -72,7 +72,7 @@ public class AgentSessionStoreSpecs : IAsyncLifetime
     public async Task SavePartsAsync_NewCorrelationKey_InsertsAdditionalPart()
     {
         var sessionId = $"transcript-{Guid.NewGuid():N}";
-        var now = DateTime.UtcNow;
+        var now = TestTime.UtcDateTime;
         var turn = new AgentSessionTranscriptTurnUpsert(sessionId, 1, "prompt", "task", now, now);
         var firstParts = new[]
         {

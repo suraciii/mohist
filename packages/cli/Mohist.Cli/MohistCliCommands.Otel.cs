@@ -170,7 +170,9 @@ internal static class OtelCommands
                 return directory;
         }
 
-        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        var home = environment.GetEnvironmentVariable("HOME");
+        if (string.IsNullOrWhiteSpace(home))
+            home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         return Path.Combine(home, DataDirectoryName);
     }
 

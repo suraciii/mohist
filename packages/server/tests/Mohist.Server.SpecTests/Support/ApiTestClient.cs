@@ -113,10 +113,13 @@ public static class ApiTestClient
         TimeSpan? timeout = null,
         TimeSpan? pollInterval = null)
     {
-        var deadline = DateTime.UtcNow + (timeout ?? TimeSpan.FromSeconds(10));
+        var budget = timeout ?? TimeSpan.FromSeconds(10);
         var interval = pollInterval ?? TimeSpan.FromMilliseconds(50);
+        var attempts = Math.Max(1, (int)Math.Ceiling(
+            budget.TotalMilliseconds / Math.Max(1, interval.TotalMilliseconds)));
         T? latest = default;
-        while (DateTime.UtcNow < deadline)
+
+        for (var attempt = 0; attempt < attempts; attempt++)
         {
             try
             {
@@ -127,12 +130,11 @@ public static class ApiTestClient
             catch
             {
             }
-            await Task.Delay(interval).ConfigureAwait(false);
         }
+
         throw new TimeoutException(
-            $"Resource at '{path}' did not reach status '{expectedStatus}' within " +
-            $"{(timeout ?? TimeSpan.FromSeconds(10)).TotalSeconds:0.##}s " +
-            $"(last seen: '{statusSelector(latest!)}').");
+            $"Resource at '{path}' did not reach status '{expectedStatus}' after " +
+            $"{attempts} probes (last seen: '{statusSelector(latest!)}').");
     }
 
     private static async Task EnsureSuccessWithBodyAsync(HttpResponseMessage response)

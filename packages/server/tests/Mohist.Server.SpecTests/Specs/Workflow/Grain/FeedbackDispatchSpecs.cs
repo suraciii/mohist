@@ -124,7 +124,7 @@ public class FeedbackDispatchSpecs : WorkflowGrainSpecs
 
         var metadata = new WorkflowRunMetadata(
             Name: null,
-            CreatedAt: DateTimeOffset.UtcNow,
+            CreatedAt: TestTime.UtcNow,
             Annotations: new Dictionary<string, string>(StringComparer.Ordinal)
             {
                 ["projectId"] = projectId,

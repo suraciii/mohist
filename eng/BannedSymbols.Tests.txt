@@ -1,0 +1,51 @@
+P:System.DateTime.UtcNow; Use a fixed timestamp or FakeTimeProvider.
+P:System.DateTimeOffset.UtcNow; Use a fixed timestamp or FakeTimeProvider.
+M:System.Threading.Tasks.Task.Delay(System.Int32); Await an explicit completion signal or advance FakeTimeProvider.
+M:System.Threading.Tasks.Task.Delay(System.Int32,System.Threading.CancellationToken); Await an explicit completion signal or advance FakeTimeProvider.
+M:System.Threading.Tasks.Task.Delay(System.TimeSpan); Await an explicit completion signal or advance FakeTimeProvider.
+M:System.Threading.Tasks.Task.Delay(System.TimeSpan,System.Threading.CancellationToken); Await an explicit completion signal or advance FakeTimeProvider.
+M:System.Threading.Tasks.Task.Delay(System.TimeSpan,System.TimeProvider); Await an explicit completion signal or advance FakeTimeProvider.
+M:System.Threading.Tasks.Task.Delay(System.TimeSpan,System.TimeProvider,System.Threading.CancellationToken); Await an explicit completion signal or advance FakeTimeProvider.
+T:System.Threading.Timer; Use FakeTimeProvider or an explicit completion signal.
+T:System.Timers.Timer; Use FakeTimeProvider or an explicit completion signal.
+T:System.Threading.PeriodicTimer; Use FakeTimeProvider or an explicit completion signal.
+T:System.IO.File; Tests must use an in-memory filesystem or a domain storage fake.
+T:System.IO.Directory; Tests must use an in-memory filesystem or a domain storage fake.
+T:System.IO.FileStream; Tests must use MemoryStream or a domain storage fake.
+T:System.IO.FileInfo; Tests must use explicit in-memory metadata.
+T:System.IO.DirectoryInfo; Tests must use fixed virtual paths or an in-memory catalog.
+T:System.IO.FileSystemInfo; Tests must use explicit in-memory metadata.
+T:System.IO.FileSystemWatcher; Tests must trigger an injected change observer.
+M:System.IO.Path.GetTempPath; Tests must use fixed virtual paths.
+M:System.IO.Path.GetFullPath(System.String); Use the overload with an explicit virtual base path.
+P:System.AppContext.BaseDirectory; Tests must not discover files through build output.
+P:System.Environment.CurrentDirectory; Tests must use a fixed virtual path.
+M:System.Environment.GetFolderPath(System.Environment.SpecialFolder); Tests must use an injected virtual home path.
+T:Microsoft.Extensions.FileProviders.PhysicalFileProvider; Tests must use an in-memory file provider.
+T:Mohist.Cli.RealFileSystem; Tests must use FakeFileSystem.
+T:Mohist.Server.SystemInfo.PhysicalFileSystem; Tests must use an in-memory filesystem.
+T:Mohist.Server.Workflow.Storage.FileSystemAttachmentStorage; Tests must use an in-memory IAttachmentStorage.
+T:Mohist.Server.Workflow.Storage.FileSystemWorkflowArtifactStorage; Tests must use an in-memory IWorkflowArtifactStorage.
+T:Mohist.Server.SystemInfo.FileSystemSystemUpdateStore; Tests must use an in-memory ISystemUpdateStore.
+T:Mohist.Server.SystemInfo.FileSystemManagedAssetCatalog; Tests must use an in-memory IManagedAssetCatalog.
+T:Mohist.Server.Infrastructure.Config.FileConfigDocumentStore; Tests must use an in-memory IConfigDocumentStore.
+T:Mohist.Server.Infrastructure.Hosting.WebContentProvider; Tests must use an in-memory IWebContentProvider.
+T:Mohist.Server.Logging.FileLogTailSource; Tests must use an in-memory ILogTailSource.
+T:Mohist.Server.Logging.FileLoggerProvider; Tests must use an in-memory log sink.
+T:Mohist.Cli.FileSystemLogChangeObserver; Tests must trigger an injected change observer.
+T:Mohist.Cli.SystemCommandExecutor; Tests must use a fake ICommandExecutor.
+T:Mohist.Cli.SqliteOtelQueryExecutor; Tests must use a fake IOtelQueryExecutor.
+T:EnvironmentAbstractions.SystemEnvironmentVariableProvider; Tests must use an in-memory environment provider.
+M:System.Net.Http.HttpClient.#ctor; Tests must use a fake or rejecting HttpMessageHandler.
+T:System.Net.Http.HttpClientHandler; Tests must use a fake or rejecting HttpMessageHandler.
+M:System.Net.Http.HttpClientHandler.#ctor; Tests must use a fake or rejecting HttpMessageHandler.
+T:System.Net.Http.SocketsHttpHandler; Tests must use a fake or rejecting HttpMessageHandler.
+M:System.Net.Http.SocketsHttpHandler.#ctor; Tests must use a fake or rejecting HttpMessageHandler.
+P:System.Net.Http.HttpClient.Timeout; Tests must await an explicit completion signal without a wall-clock timeout.
+P:System.TimeProvider.System; Tests must use a fixed TimeProvider or FakeTimeProvider.
+M:System.Threading.CancellationTokenSource.#ctor(System.TimeSpan); Tests must use explicit completion signals or cancellation controlled by FakeTimeProvider.
+M:System.Threading.CancellationTokenSource.#ctor(System.TimeSpan,System.TimeProvider); Tests must use cancellation controlled by FakeTimeProvider.
+M:System.Threading.CancellationTokenSource.CancelAfter(System.Int32); Tests must use cancellation controlled by FakeTimeProvider.
+M:System.Threading.CancellationTokenSource.CancelAfter(System.TimeSpan); Tests must use cancellation controlled by FakeTimeProvider.
+M:System.Threading.Tasks.Task.WaitAsync(System.TimeSpan); Tests must await an explicit completion signal.
+M:System.Threading.Tasks.Task.WaitAsync(System.TimeSpan,System.TimeProvider); Tests must await an explicit completion signal.

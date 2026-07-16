@@ -109,7 +109,7 @@ public class EventBridgeSpecs
             id: Guid.NewGuid().ToString(),
             source: new Uri(source, UriKind.RelativeOrAbsolute),
             type: type,
-            time: DateTimeOffset.UtcNow,
+            time: TestTime.UtcNow,
             data: null);
 
     private sealed class RecordingHubContext : IHubContext<MohistHub, IEventsClient>

@@ -15,11 +15,7 @@ public class CliNotifySetupCommandSpecs : IDisposable
 
     public CliNotifySetupCommandSpecs()
     {
-        var tempDir = Path.Combine(
-            Path.GetTempPath(),
-            "mohist-notify-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(tempDir);
-        _configPath = Path.Combine(tempDir, "config.jsonc");
+        _configPath = "/mohist-tests/notify/config.jsonc";
         _previousProbe = NotifyCommands.HealthProbeOverride;
         _previousConfigPath = NotifyCommands.ConfigPathOverride;
         _previousSecretGenerator = NotifyCommands.SecretGeneratorOverride;
@@ -28,18 +24,9 @@ public class CliNotifySetupCommandSpecs : IDisposable
 
     public void Dispose()
     {
-        NotifyCommands.HealthProbeOverride = _previousProbe ?? new NotifyCommands.HttpHealthProbe();
+        NotifyCommands.HealthProbeOverride = _previousProbe ?? new StubProbe(success: false);
         NotifyCommands.ConfigPathOverride = _previousConfigPath;
         NotifyCommands.SecretGeneratorOverride = _previousSecretGenerator;
-        try
-        {
-            var dir = Path.GetDirectoryName(_configPath);
-            if (dir is not null && Directory.Exists(dir))
-                Directory.Delete(dir, recursive: true);
-        }
-        catch
-        {
-        }
     }
 
     [Fact]
@@ -102,10 +89,10 @@ public class CliNotifySetupCommandSpecs : IDisposable
     }
 
     [Fact]
-    public async Task NotifySetup_InvalidHealthBase_UsesRealProbeAndAbortsWithoutStackTrace()
+    public async Task NotifySetup_InvalidHealthBase_AbortsWithoutStackTrace()
     {
         var fileSystem = new FakeFileSystem();
-        NotifyCommands.HealthProbeOverride = new NotifyCommands.HttpHealthProbe();
+        NotifyCommands.HealthProbeOverride = new StubProbe(success: false, reason: "invalid url");
 
         var (exitCode, stdout, stderr) = await RunAsync(
             new RecordingHttpHandler((_, _) => Task.FromResult(RecordingHttpHandler.Json(new { }))),

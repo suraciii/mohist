@@ -99,9 +99,9 @@ public class InboxApiSpecs
     {
         var projectId = await CreateProjectAsync("inbox-mark-one");
         var first = await SeedAsync(projectId, "issue_1", 1, "First",
-            NotificationKinds.WorkflowFailed, DateTimeOffset.UtcNow, "evt-mr-1");
+            NotificationKinds.WorkflowFailed, TestTime.UtcNow, "evt-mr-1");
         var second = await SeedAsync(projectId, "issue_2", 2, "Second",
-            NotificationKinds.ApprovalRequested, DateTimeOffset.UtcNow, "evt-mr-2");
+            NotificationKinds.ApprovalRequested, TestTime.UtcNow, "evt-mr-2");
 
         await _client.PostOkAsync($"/api/projects/{projectId}/inbox/{first}/read");
 
@@ -127,7 +127,7 @@ public class InboxApiSpecs
     {
         var projectId = await CreateProjectAsync("inbox-mark-idem");
         var itemId = await SeedAsync(projectId, "issue_1", 1, "First",
-            NotificationKinds.WorkflowFailed, DateTimeOffset.UtcNow, "evt-mri-1");
+            NotificationKinds.WorkflowFailed, TestTime.UtcNow, "evt-mri-1");
 
         await _client.PostOkAsync($"/api/projects/{projectId}/inbox/{itemId}/read");
         // A repeated "mark read" must not 404 — the user clicked the
@@ -151,7 +151,7 @@ public class InboxApiSpecs
         var projectB = await CreateProjectAsync("inbox-cross-b");
 
         var itemInA = await SeedAsync(projectA, "issue_1", 1, "First",
-            NotificationKinds.WorkflowFailed, DateTimeOffset.UtcNow, "evt-xcr-1");
+            NotificationKinds.WorkflowFailed, TestTime.UtcNow, "evt-xcr-1");
 
         using var response = await _client.PostAsync(
             $"/api/projects/{projectB}/inbox/{itemInA}/read",
@@ -183,11 +183,11 @@ public class InboxApiSpecs
     {
         var projectId = await CreateProjectAsync("inbox-read-all");
         await SeedAsync(projectId, "issue_1", 1, "First",
-            NotificationKinds.WorkflowFailed, DateTimeOffset.UtcNow, "evt-ra-1");
+            NotificationKinds.WorkflowFailed, TestTime.UtcNow, "evt-ra-1");
         await SeedAsync(projectId, "issue_2", 2, "Second",
-            NotificationKinds.ApprovalRequested, DateTimeOffset.UtcNow, "evt-ra-2");
+            NotificationKinds.ApprovalRequested, TestTime.UtcNow, "evt-ra-2");
         var archived = await SeedAsync(projectId, "issue_3", 3, "Archived",
-            NotificationKinds.IssueStarted, DateTimeOffset.UtcNow, "evt-ra-3");
+            NotificationKinds.IssueStarted, TestTime.UtcNow, "evt-ra-3");
         await ArchiveAsync(projectId, archived);
 
         var result = await _client.PostDataAsync<JsonElement>(
@@ -212,11 +212,11 @@ public class InboxApiSpecs
         var projectB = await CreateProjectAsync("inbox-readall-b");
 
         await SeedAsync(projectA, "issue_1", 1, "A1",
-            NotificationKinds.WorkflowFailed, DateTimeOffset.UtcNow, "evt-ra-x-1");
+            NotificationKinds.WorkflowFailed, TestTime.UtcNow, "evt-ra-x-1");
         await SeedAsync(projectA, "issue_2", 2, "A2",
-            NotificationKinds.ApprovalRequested, DateTimeOffset.UtcNow, "evt-ra-x-2");
+            NotificationKinds.ApprovalRequested, TestTime.UtcNow, "evt-ra-x-2");
         var itemInB = await SeedAsync(projectB, "issue_1", 1, "B1",
-            NotificationKinds.IssueStarted, DateTimeOffset.UtcNow, "evt-ra-x-b-1");
+            NotificationKinds.IssueStarted, TestTime.UtcNow, "evt-ra-x-b-1");
 
         var result = await _client.PostDataAsync<JsonElement>(
             $"/api/projects/{projectA}/inbox/read-all");
@@ -238,9 +238,9 @@ public class InboxApiSpecs
     {
         var projectId = await CreateProjectAsync("inbox-archive");
         var first = await SeedAsync(projectId, "issue_1", 1, "First",
-            NotificationKinds.WorkflowFailed, DateTimeOffset.UtcNow, "evt-ar-1");
+            NotificationKinds.WorkflowFailed, TestTime.UtcNow, "evt-ar-1");
         await SeedAsync(projectId, "issue_2", 2, "Second",
-            NotificationKinds.ApprovalRequested, DateTimeOffset.UtcNow, "evt-ar-2");
+            NotificationKinds.ApprovalRequested, TestTime.UtcNow, "evt-ar-2");
 
         await _client.PostOkAsync($"/api/projects/{projectId}/inbox/{first}/archive");
 
@@ -262,7 +262,7 @@ public class InboxApiSpecs
         var projectB = await CreateProjectAsync("inbox-arc-b");
 
         var itemInA = await SeedAsync(projectA, "issue_1", 1, "First",
-            NotificationKinds.WorkflowFailed, DateTimeOffset.UtcNow, "evt-arc-x-1");
+            NotificationKinds.WorkflowFailed, TestTime.UtcNow, "evt-arc-x-1");
 
         using var response = await _client.PostAsync(
             $"/api/projects/{projectB}/inbox/{itemInA}/archive",
@@ -344,7 +344,7 @@ public class InboxApiSpecs
                 Id = runId,
                 Metadata = new WorkflowRunMetadata(
                     Name: null,
-                    CreatedAt: DateTimeOffset.UtcNow,
+                    CreatedAt: TestTime.UtcNow,
                     Annotations: new Dictionary<string, string>(StringComparer.Ordinal)
                     {
                         ["projectId"] = projectId,
@@ -445,6 +445,6 @@ public class InboxApiSpecs
         var row = await db.InboxItems.SingleAsync(r => r.ProjectId == projectId && r.SourceEventId == sourceEventId);
         await db.InboxItems
             .Where(r => r.Id == row.Id)
-            .ExecuteUpdateAsync(s => s.SetProperty(r => r.ArchivedAt, DateTimeOffset.UtcNow));
+            .ExecuteUpdateAsync(s => s.SetProperty(r => r.ArchivedAt, TestTime.UtcNow));
     }
 }

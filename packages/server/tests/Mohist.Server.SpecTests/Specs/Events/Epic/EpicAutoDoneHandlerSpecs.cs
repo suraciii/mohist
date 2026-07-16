@@ -197,7 +197,7 @@ public class EpicAutoDoneHandlerSpecs
                         e.DataContentType, e.Subject, e.SpecVersion, e.Extensions),
                     ct)),
         };
-        var bus = new InMemoryEventBus(subscriptions, store, TimeProvider.System, NullLogger<InMemoryEventBus>.Instance);
+        var bus = new InMemoryEventBus(subscriptions, store, new FakeTimeProvider(EventTime), NullLogger<InMemoryEventBus>.Instance);
 
         var extensions = new Dictionary<string, string>
         {
@@ -321,7 +321,7 @@ public class EpicAutoDoneHandlerSpecs
             id: Guid.NewGuid().ToString(),
             source: new Uri("/mohist/issue/issue_1", UriKind.Relative),
             type: EventCatalog.ReverseDns.IssueCompleted,
-            time: DateTimeOffset.UtcNow,
+            time: TestTime.UtcNow,
             data: new IssueCompleted("wr_1"),
             subject: "1",
             extensions: new Dictionary<string, string> { ["issueid"] = "issue_1" });
@@ -496,7 +496,7 @@ public class EpicAutoDoneHandlerSpecs
             id: Guid.NewGuid().ToString(),
             source: new Uri("/mohist/issue/issue_1", UriKind.Relative),
             type: EventCatalog.ReverseDns.IssueCancelled,
-            time: DateTimeOffset.UtcNow,
+            time: TestTime.UtcNow,
             data: new IssueCancelled("cancel reason"),
             subject: "1",
             extensions: new Dictionary<string, string> { ["issueid"] = "issue_1" });
@@ -522,7 +522,7 @@ public class EpicAutoDoneHandlerSpecs
             id: Guid.NewGuid().ToString(),
             source: new Uri("/mohist/issue/issue_1", UriKind.Relative),
             type: EventCatalog.ReverseDns.IssueCancelled,
-            time: DateTimeOffset.UtcNow,
+            time: TestTime.UtcNow,
             data: new IssueCancelled("cancel reason"),
             subject: "1",
             extensions: new Dictionary<string, string> { ["projectid"] = "project_1" });
@@ -606,7 +606,7 @@ public class EpicAutoDoneHandlerSpecs
             id: Guid.NewGuid().ToString(),
             source: new Uri("/mohist/epic/epic_1", UriKind.Relative),
             type: EventCatalog.ReverseDns.EpicIssueLinked,
-            time: DateTimeOffset.UtcNow,
+            time: TestTime.UtcNow,
             data: new EpicIssueLinked("issue_1", 1),
             subject: "1",
             extensions: new Dictionary<string, string> { ["epicid"] = "epic_1" });
@@ -1035,8 +1035,8 @@ public class EpicAutoDoneHandlerSpecs
             Priority = "p2",
             Status = status,
             PauseReason = pauseReason,
-            CreatedAt = DateTimeOffset.UtcNow,
-            UpdatedAt = DateTimeOffset.UtcNow,
+            CreatedAt = TestTime.UtcNow,
+            UpdatedAt = TestTime.UtcNow,
         });
         await db.SaveChangesAsync();
     }
@@ -1077,7 +1077,7 @@ public class EpicAutoDoneHandlerSpecs
             ProjectId = "project_1",
             IssueId = issueId,
             IssueNumber = issueNumber,
-            CreatedAt = DateTimeOffset.UtcNow,
+            CreatedAt = TestTime.UtcNow,
         });
         var epic = await db.Epics.AsNoTracking().FirstAsync(e => e.ProjectId == "project_1" && e.Id == epicId);
         if (epic.Status is not ("done" or "closed"))
@@ -1088,7 +1088,7 @@ public class EpicAutoDoneHandlerSpecs
                 IssueId = issueId,
                 EpicId = epicId,
                 IssueNumber = issueNumber,
-                CreatedAt = DateTimeOffset.UtcNow,
+                CreatedAt = TestTime.UtcNow,
             });
         }
         await db.SaveChangesAsync();

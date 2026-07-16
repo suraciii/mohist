@@ -375,7 +375,7 @@ public class GenericAgentSessionCancelApiSpecs : IAsyncLifetime
         var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new
         {
             name = projectName,
-            path = Directory.GetCurrentDirectory(),
+            path = "/mohist-tests/projects/generic-session-cancel",
             baseBranch = "main",
         });
         await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new

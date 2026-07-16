@@ -548,7 +548,7 @@ public class WorkflowRunControlApiSpecs
         else
         {
             existingTemplate.Template = JsonSerializer.Serialize(definition, WorkflowYamlSerializer.JsonOptions);
-            existingTemplate.UpdatedAt = DateTimeOffset.UtcNow;
+            existingTemplate.UpdatedAt = TestTime.UtcNow;
         }
 
         var profile = await db.ProjectWorkflowProfiles.FindAsync(projectId);
@@ -563,7 +563,7 @@ public class WorkflowRunControlApiSpecs
         else
         {
             profile.DefaultTemplateId = definition.Id;
-            profile.UpdatedAt = DateTimeOffset.UtcNow;
+            profile.UpdatedAt = TestTime.UtcNow;
         }
         await db.SaveChangesAsync();
     }
@@ -689,7 +689,7 @@ public class WorkflowRunControlApiSpecs
                     stage["approvalStatus"] = JsonSerializer.SerializeToElement(new
                     {
                         result = (string?)null,
-                        requestedAt = DateTimeOffset.UtcNow.ToString("O"),
+                        requestedAt = TestTime.UtcNow.ToString("O"),
                         respondedAt = (string?)null,
                     }, JSON.Options);
                 }

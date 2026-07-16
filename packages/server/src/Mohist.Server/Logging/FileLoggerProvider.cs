@@ -31,7 +31,7 @@ namespace Mohist.Server.Logging;
 /// endpoint emits to the Web client.
 /// </para>
 /// </remarks>
-public sealed class FileLoggerProvider : ILoggerProvider
+public sealed class FileLoggerProvider : ILoggerProvider, ILogRecordSink
 {
     public const string LogFileName = "server.log";
 
@@ -58,7 +58,7 @@ public sealed class FileLoggerProvider : ILoggerProvider
     }
 
     /// <summary>Exposed for tests so they can drive the time field directly.</summary>
-    internal TimeProvider TimeProvider => _timeProvider;
+    TimeProvider ILogRecordSink.TimeProvider => _timeProvider;
 
     /// <summary>Absolute path of the log file the provider writes to.</summary>
     public string LogFilePath => _logFilePath;
@@ -68,7 +68,7 @@ public sealed class FileLoggerProvider : ILoggerProvider
     public ILogger CreateLogger(string categoryName)
         => _loggers.GetOrAdd(categoryName, name => new FileLogger(name, this));
 
-    internal void WriteRecord(LogRecord record)
+    void ILogRecordSink.WriteRecord(LogRecord record)
     {
         if (_disposed)
         {

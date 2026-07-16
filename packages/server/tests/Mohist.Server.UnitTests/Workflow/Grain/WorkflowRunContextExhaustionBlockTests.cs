@@ -16,7 +16,7 @@ public class WorkflowRunContextExhaustionBlockTests
         var run = WorkflowRun.Create("wr-block-1", def, DateTimeOffset.UnixEpoch);
         run.Start(DateTimeOffset.UnixEpoch);
         run.InitializeStage(def.Stages[0].Tasks, def.Stages[0].Checks, DateTimeOffset.UnixEpoch);
-        run.AssignTo("runner-1", DateTimeOffset.UtcNow);
+        run.AssignTo("runner-1", TestTime.UtcNow);
         run.StartTask("work-1", "runner-1", DateTimeOffset.UnixEpoch);
         run.FailTask(new TaskResult("failed", "compile error"), DateTimeOffset.UnixEpoch);
         Assert.Equal(FailureReason.TaskFailed, run.Failure?.Reason);
@@ -48,7 +48,7 @@ public class WorkflowRunContextExhaustionBlockTests
         var run = WorkflowRun.Create("wr-block-2", def, DateTimeOffset.UnixEpoch);
         run.Start(DateTimeOffset.UnixEpoch);
         run.InitializeStage(def.Stages[0].Tasks, def.Stages[0].Checks, DateTimeOffset.UnixEpoch);
-        run.AssignTo("runner-2", DateTimeOffset.UtcNow);
+        run.AssignTo("runner-2", TestTime.UtcNow);
         run.StartTask("work-2", "runner-2", DateTimeOffset.UnixEpoch);
         run.FailTask(new TaskResult("failed", "boom"), DateTimeOffset.UnixEpoch);
 
@@ -66,7 +66,7 @@ public class WorkflowRunContextExhaustionBlockTests
         var run = WorkflowRun.Create("wr-block-3", def, DateTimeOffset.UnixEpoch);
         run.Start(DateTimeOffset.UnixEpoch);
         run.InitializeStage(def.Stages[0].Tasks, def.Stages[0].Checks, DateTimeOffset.UnixEpoch);
-        run.AssignTo("runner-3", DateTimeOffset.UtcNow);
+        run.AssignTo("runner-3", TestTime.UtcNow);
         run.StartTask("work-3", "runner-3", DateTimeOffset.UnixEpoch);
         run.FailTask(new TaskResult("failed", "boom"), DateTimeOffset.UnixEpoch);
         run.BlockStageWithContextExhaustion(taskId: "task-1.1", contextUsagePercent: 95d, sessionId: null);
@@ -94,7 +94,7 @@ public class WorkflowRunContextExhaustionBlockTests
         var run = WorkflowRun.Create("wr-block-4", BuildDefinition(), DateTimeOffset.UnixEpoch);
         run.Start(DateTimeOffset.UnixEpoch);
         run.InitializeStage(BuildDefinition().Stages[0].Tasks, BuildDefinition().Stages[0].Checks, DateTimeOffset.UnixEpoch);
-        run.AssignTo("runner-1", DateTimeOffset.UtcNow);
+        run.AssignTo("runner-1", TestTime.UtcNow);
         run.StartTask("work-1", "runner-1", DateTimeOffset.UnixEpoch);
         run.FailTask(new TaskResult("failed", "compile error"), DateTimeOffset.UnixEpoch);
         run.BlockStageWithContextExhaustion(taskId: "task-1.1", contextUsagePercent: 95d, sessionId: null);
@@ -117,7 +117,7 @@ public class WorkflowRunContextExhaustionBlockTests
         var run = WorkflowRun.Create("wr-block-5", def, DateTimeOffset.UnixEpoch);
         run.Start(DateTimeOffset.UnixEpoch);
         run.InitializeStage(def.Stages[0].Tasks, def.Stages[0].Checks, DateTimeOffset.UnixEpoch);
-        run.AssignTo("runner-5", DateTimeOffset.UtcNow);
+        run.AssignTo("runner-5", TestTime.UtcNow);
         run.StartTask("work-5", "runner-5", DateTimeOffset.UnixEpoch);
         run.FailTask(new TaskResult("failed", "compile error"), DateTimeOffset.UnixEpoch);
         var original = run.Failure;

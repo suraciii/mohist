@@ -48,7 +48,7 @@ public class AgentSessionDomainTests
     {
         var session = CreateSession();
 
-        session.AttachPhysicalSession("acp-1", "intent-model", "/work", "/change", 123, DateTime.UtcNow);
+        session.AttachPhysicalSession("acp-1", "intent-model", "/work", "/change", 123, TestTime.UtcDateTime);
         session.ApplyUsage(10, 5, 15, 1, 2, 0.01, "USD", 100, 200, new DateTime(2026, 6, 10, 0, 0, 0, DateTimeKind.Utc));
         var json = JsonSerializer.Serialize(session);
 
@@ -93,7 +93,7 @@ public class AgentSessionDomainTests
     {
         var session = CreateSession();
 
-        var events = session.AttachPhysicalSession("runtime-session-1", "model-a", "/work", null, null, DateTime.UtcNow);
+        var events = session.AttachPhysicalSession("runtime-session-1", "model-a", "/work", null, null, TestTime.UtcDateTime);
 
         Assert.Collection(events,
             e => Assert.Equal("runtime-session-1", Assert.IsType<AgentSessionRuntimeBound>(e.Value).AgentRuntimeSessionId),
@@ -104,9 +104,9 @@ public class AgentSessionDomainTests
     public void AttachPhysicalSession_SamePhysicalSession_IsIdempotent()
     {
         var session = CreateSession();
-        session.AttachPhysicalSession("runtime-session-1", "model-a", "/work", null, null, DateTime.UtcNow);
+        session.AttachPhysicalSession("runtime-session-1", "model-a", "/work", null, null, TestTime.UtcDateTime);
 
-        var events = session.AttachPhysicalSession("runtime-session-1", "model-a", "/other", null, null, DateTime.UtcNow);
+        var events = session.AttachPhysicalSession("runtime-session-1", "model-a", "/other", null, null, TestTime.UtcDateTime);
 
         Assert.Empty(events);
         Assert.Equal("runtime-session-1", session.Status.AgentRuntimeSessionId);
@@ -214,7 +214,7 @@ public class AgentSessionDomainTests
     public void ApplyUsage_AfterRuntimeCloseObservation_StillMutates()
     {
         var session = CreateSession();
-        session.RecordActivity(DateTime.UtcNow);
+        session.RecordActivity(TestTime.UtcDateTime);
 
         session.ApplyUsage(10, 5, 15, null, null, 0.001, "USD", 100, 200, new DateTime(2026, 6, 10, 0, 0, 0, DateTimeKind.Utc));
 

@@ -63,7 +63,7 @@ public class WorkflowRunStoreSpecs
             Id = WorkflowRunId,
             Metadata = new WorkflowRunMetadata(
                 Name: null,
-                CreatedAt: DateTimeOffset.UtcNow,
+                CreatedAt: TestTime.UtcNow,
                 Annotations: new Dictionary<string, string>(StringComparer.Ordinal)
                 {
                     ["projectId"] = ProjectId,
@@ -96,7 +96,7 @@ public class WorkflowRunStoreSpecs
             Id = WorkflowRunId,
             Metadata = new WorkflowRunMetadata(
                 Name: null,
-                CreatedAt: DateTimeOffset.UtcNow,
+                CreatedAt: TestTime.UtcNow,
                 Annotations: new Dictionary<string, string>(StringComparer.Ordinal)
                 {
                     ["projectId"] = ProjectId,
@@ -127,7 +127,7 @@ public class WorkflowRunStoreSpecs
             Id = WorkflowRunId,
             Metadata = new WorkflowRunMetadata(
                 Name: null,
-                CreatedAt: DateTimeOffset.UtcNow),
+                CreatedAt: TestTime.UtcNow),
             Stages = [],
         };
 
@@ -152,7 +152,7 @@ public class WorkflowRunStoreSpecs
             Id = WorkflowRunId,
             Metadata = new WorkflowRunMetadata(
                 Name: null,
-                CreatedAt: DateTimeOffset.UtcNow,
+                CreatedAt: TestTime.UtcNow,
                 Annotations: new Dictionary<string, string>(StringComparer.Ordinal)
                 {
                     ["projectId"] = ProjectId,

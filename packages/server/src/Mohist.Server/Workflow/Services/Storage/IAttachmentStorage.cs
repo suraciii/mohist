@@ -38,6 +38,10 @@ public interface IAttachmentStorage
         string storagePath,
         CancellationToken cancellationToken = default);
 
+    Task DeleteAsync(
+        string storagePath,
+        CancellationToken cancellationToken = default);
+
     /// <summary>
     /// Resolves a storage path relative to the storage root into an
     /// absolute filesystem path.

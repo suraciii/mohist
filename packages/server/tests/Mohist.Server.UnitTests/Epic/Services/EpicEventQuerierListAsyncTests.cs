@@ -62,9 +62,9 @@ public class EpicEventQuerierListAsyncTests
     {
         var eventStore = new RecordingEventStore();
         await AppendEpicEventAsync(eventStore, EpicId, ProjectId,
-            new EpicCreated("Auth", "desc", "p2"), DateTimeOffset.UtcNow, subject: "1");
+            new EpicCreated("Auth", "desc", "p2"), TestTime.UtcNow, subject: "1");
         await AppendEpicEventAsync(eventStore, OtherEpicId, ProjectId,
-            new EpicCreated("Billing", "desc", "p2"), DateTimeOffset.UtcNow, subject: "1");
+            new EpicCreated("Billing", "desc", "p2"), TestTime.UtcNow, subject: "1");
 
         var querier = new EpicEventQuerier(eventStore);
         var first = await querier.ListAsync(EpicId);

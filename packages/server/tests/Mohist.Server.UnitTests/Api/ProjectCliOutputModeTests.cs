@@ -67,7 +67,8 @@ public class ProjectCliOutputModeTests
             output,
             error,
             new FakeFileSystem(),
-            new NoopCommandExecutor());
+            new NoopCommandExecutor(),
+            getUserHome: () => "/mohist-tests/user");
 
         Assert.Equal(0, exitCode);
         Assert.Equal("", error.ToString());
@@ -109,7 +110,8 @@ public class ProjectCliOutputModeTests
             output,
             error,
             fileSystem,
-            new NoopCommandExecutor());
+            new NoopCommandExecutor(),
+            getUserHome: () => "/mohist-tests/user");
 
         Assert.Equal(0, exitCode);
         var lines = output.ToString().Split('\n').Where(l => l.Contains("proj_active") || l.Contains("proj_other")).ToList();
@@ -142,7 +144,8 @@ public class ProjectCliOutputModeTests
             defaultOutput,
             defaultError,
             new FakeFileSystem(),
-            new NoopCommandExecutor());
+            new NoopCommandExecutor(),
+            getUserHome: () => "/mohist-tests/user");
 
         var explicitHttp = new RecordingHttpHandler();
         explicitHttp.EnqueueJson(HttpStatusCode.OK, json);
@@ -154,7 +157,8 @@ public class ProjectCliOutputModeTests
             explicitOutput,
             explicitError,
             new FakeFileSystem(),
-            new NoopCommandExecutor());
+            new NoopCommandExecutor(),
+            getUserHome: () => "/mohist-tests/user");
 
         Assert.Equal(defaultExit, explicitExit);
         Assert.Equal("", defaultError.ToString());
@@ -184,7 +188,8 @@ public class ProjectCliOutputModeTests
             new StringWriter(),
             new StringWriter(),
             new FakeFileSystem(),
-            new NoopCommandExecutor());
+            new NoopCommandExecutor(),
+            getUserHome: () => "/mohist-tests/user");
 
         var tableHttp = new RecordingHttpHandler();
         tableHttp.EnqueueJson(HttpStatusCode.OK, json);
@@ -194,7 +199,8 @@ public class ProjectCliOutputModeTests
             new StringWriter(),
             new StringWriter(),
             new FakeFileSystem(),
-            new NoopCommandExecutor());
+            new NoopCommandExecutor(),
+            getUserHome: () => "/mohist-tests/user");
 
         var jsonReq = jsonHttp.Requests.Single();
         var tableReq = tableHttp.Requests.Single();
@@ -218,7 +224,8 @@ public class ProjectCliOutputModeTests
             output,
             error,
             new FakeFileSystem(),
-            new NoopCommandExecutor());
+            new NoopCommandExecutor(),
+            getUserHome: () => "/mohist-tests/user");
 
         Assert.Equal(1, exitCode);
         Assert.Empty(http.Requests);
@@ -256,7 +263,8 @@ public class ProjectCliOutputModeTests
             output,
             error,
             new FakeFileSystem(),
-            new NoopCommandExecutor());
+            new NoopCommandExecutor(),
+            getUserHome: () => "/mohist-tests/user");
 
         Assert.Equal(0, exitCode);
         Assert.Equal("", error.ToString());
@@ -282,7 +290,8 @@ public class ProjectCliOutputModeTests
             output,
             error,
             new FakeFileSystem(),
-            new NoopCommandExecutor());
+            new NoopCommandExecutor(),
+            getUserHome: () => "/mohist-tests/user");
 
         Assert.Equal(1, exitCode);
         Assert.Empty(http.Requests);
@@ -294,18 +303,19 @@ public class ProjectCliOutputModeTests
 
     private static string StatePath()
     {
-        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        const string home = "/mohist-tests/user";
         return System.IO.Path.Combine(home, ".mohist", "cli-state.json");
     }
 
     private static string RenderHelp(string[] args)
     {
         var services = new ServiceCollection();
-        services.AddSingleton(new MohistCliApi(new HttpClient(), TextWriter.Null, TextWriter.Null, RealFileSystem.Instance, new SystemCommandExecutor()));
+        services.AddSingleton(new MohistCliApi(RejectingHttpMessageHandler.CreateClient(), TextWriter.Null, TextWriter.Null, new FakeFileSystem(), new NoopCommandExecutor()));
         services.AddSingleton<TextWriter>(TextWriter.Null);
-        services.AddSingleton<IFileSystem>(RealFileSystem.Instance);
-        services.AddSingleton<ICommandExecutor>(new SystemCommandExecutor());
-        services.AddSingleton<IServiceInstaller>(new SystemdServiceInstaller(TextWriter.Null, TextWriter.Null, RealFileSystem.Instance, new SystemCommandExecutor()));
+        services.AddSingleton<IFileSystem>(new FakeFileSystem());
+        services.AddSingleton<ICommandExecutor>(
+            new NoopCommandExecutor());
+        services.AddSingleton<IServiceInstaller>(new SystemdServiceInstaller(TextWriter.Null, TextWriter.Null, new FakeFileSystem(), new NoopCommandExecutor()));
         services.AddSingleton<SourceCodeUpdater>();
         services.AddSingleton<SkillAssetService>();
         services.AddSingleton<SkillInstallService>();

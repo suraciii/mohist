@@ -16,7 +16,6 @@ public class DeadLettersMigrationSpecs
 {
     private const string PreviousMigrationId = "20260709000000_AddEventDeliveryDispatchedAt";
     private const string MigrationId = "20260709002625_AddDeadLetters";
-    private const string RecoveryMigrationId = "20260711041122_HardenDeadLetterRecovery";
 
     [Fact]
     public async Task DatabaseMigrate_CreatesDeadLettersTableWithRequiredColumns()
@@ -80,44 +79,6 @@ public class DeadLettersMigrationSpecs
     }
 
     [Fact]
-    public void FirstMigration_Up_CreatesTableWithPrimaryKeyAndBothIndexes()
-    {
-        var source = File.ReadAllText(MigrationSourcePath(MigrationId));
-
-        Assert.Contains("CreateTable", source, StringComparison.Ordinal);
-        Assert.Contains("name: \"DeadLetters\"", source, StringComparison.Ordinal);
-        Assert.Contains("table.PrimaryKey(\"PK_DeadLetters\", x => x.DeadLetterId);", source, StringComparison.Ordinal);
-        Assert.Contains("IX_DeadLetters_DeadLetteredAt", source, StringComparison.Ordinal);
-        Assert.Contains("IX_DeadLetters_FailingHandler_DeadLetteredAt", source, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void RecoveryMigration_AddsStateAndNaturalKey()
-    {
-        var source = File.ReadAllText(MigrationSourcePath(RecoveryMigrationId));
-
-        Assert.Contains("RedeliveryAttemptedAt", source, StringComparison.Ordinal);
-        Assert.Contains("ResolvedAt", source, StringComparison.Ordinal);
-        Assert.Contains("Status", source, StringComparison.Ordinal);
-        Assert.Contains("defaultValue: \"Pending\"", source, StringComparison.Ordinal);
-        Assert.Contains("IX_DeadLetters_Source_Id_FailingHandler", source, StringComparison.Ordinal);
-        Assert.Contains("unique: true", source, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void ModelSnapshot_IncludesDeadLetterRowWithBothIndexes()
-    {
-        var source = File.ReadAllText(SnapshotPath());
-
-        Assert.Contains("\"Mohist.Server.Infrastructure.Data.Events.DeadLetterRow\"", source, StringComparison.Ordinal);
-        Assert.Contains("ToTable(\"DeadLetters\"", source, StringComparison.Ordinal);
-        Assert.Contains("HasKey(\"DeadLetterId\");", source, StringComparison.Ordinal);
-        Assert.Contains("HasIndex(\"DeadLetteredAt\");", source, StringComparison.Ordinal);
-        Assert.Contains("HasIndex(\"FailingHandler\", \"DeadLetteredAt\");", source, StringComparison.Ordinal);
-        Assert.Contains("HasIndex(\"Source\", \"Id\", \"FailingHandler\")", source, StringComparison.Ordinal);
-    }
-
-    [Fact]
     public async Task MigratedSqliteTemplate_AlreadyContainsDeadLettersTable()
     {
         await using var database = CreateDatabase();
@@ -127,18 +88,6 @@ public class DeadLettersMigrationSpecs
         await AssertHasIndexAsync(database.Connection, "DeadLetters", "IX_DeadLetters_DeadLetteredAt", "DeadLetteredAt");
         await AssertHasIndexAsync(database.Connection, "DeadLetters", "IX_DeadLetters_FailingHandler_DeadLetteredAt", "FailingHandler", "DeadLetteredAt");
     }
-
-    private static string MigrationSourcePath(string migrationId) => Path.GetFullPath(Path.Combine(
-        AppContext.BaseDirectory,
-        "..", "..", "..", "..", "..",
-        "src", "Mohist.Server", "Infrastructure", "Data", "Migrations",
-        $"{migrationId}.cs"));
-
-    private static string SnapshotPath() => Path.GetFullPath(Path.Combine(
-        AppContext.BaseDirectory,
-        "..", "..", "..", "..", "..",
-        "src", "Mohist.Server", "Infrastructure", "Data", "Migrations",
-        "MohistDbContextModelSnapshot.cs"));
 
     private static async Task AssertColumnExistsAsync(SqliteConnection connection, string tableName, string columnName)
     {

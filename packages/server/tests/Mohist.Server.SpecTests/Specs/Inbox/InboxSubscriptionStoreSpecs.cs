@@ -195,8 +195,8 @@ public class InboxSubscriptionStoreSpecs
             Id = projectId,
             Name = projectId.Replace('_', '-'),
             RepositoriesJson = "[]",
-            CreatedAt = DateTimeOffset.UtcNow,
-            UpdatedAt = DateTimeOffset.UtcNow,
+            CreatedAt = TestTime.UtcNow,
+            UpdatedAt = TestTime.UtcNow,
         });
         await db.SaveChangesAsync();
     }

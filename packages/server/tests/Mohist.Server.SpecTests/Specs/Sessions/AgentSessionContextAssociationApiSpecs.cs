@@ -177,7 +177,7 @@ public class AgentSessionContextAssociationApiSpecs
         if (epicNumber is not null)
             labels[GenericAgentSessionMetadata.EpicNumber] = epicNumber;
 
-        var createdAt = DateTime.UtcNow;
+        var createdAt = TestTime.UtcDateTime;
         var session = new AgentSession
         {
             Id = sessionId,

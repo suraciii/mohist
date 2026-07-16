@@ -16,7 +16,7 @@ public class WorkflowRunInvariantTests
         run.Start(DateTimeOffset.UnixEpoch);
         run.InitializeStage([new("compile", "Compile", "spec/task")], [], DateTimeOffset.UnixEpoch);
         if (assign)
-            run.AssignTo("worker-1", DateTimeOffset.UtcNow);
+            run.AssignTo("worker-1", TestTime.UtcNow);
         return run;
     }
 
@@ -27,7 +27,7 @@ public class WorkflowRunInvariantTests
         ]), DateTimeOffset.UnixEpoch);
         run.Start(DateTimeOffset.UnixEpoch);
         run.InitializeStage([new("compile", "Compile", "spec/task"), new("test", "Test", "spec/task")], [], DateTimeOffset.UnixEpoch);
-        run.AssignTo("worker-1", DateTimeOffset.UtcNow);
+        run.AssignTo("worker-1", TestTime.UtcNow);
         return run;
     }
 
@@ -35,10 +35,10 @@ public class WorkflowRunInvariantTests
     public void SecondAssignmentRejectedWhenOneExists()
     {
         var run = BuildRun(assign: false);
-        run.AssignTo("worker-1", DateTimeOffset.UtcNow);
+        run.AssignTo("worker-1", TestTime.UtcNow);
 
         var ex = Assert.Throws<InvalidOperationException>(() =>
-            run.AssignTo("worker-2", DateTimeOffset.UtcNow));
+            run.AssignTo("worker-2", TestTime.UtcNow));
 
         Assert.Contains("already assigned", ex.Message);
         Assert.True(run.IsAssignedTo("worker-1"));
@@ -50,7 +50,7 @@ public class WorkflowRunInvariantTests
     public void RunningTaskWorkerIdEqualsAssignmentWorkerId()
     {
         var run = BuildRun(assign: false);
-        run.AssignTo("worker-1", DateTimeOffset.UtcNow);
+        run.AssignTo("worker-1", TestTime.UtcNow);
 
         run.StartTask("work-1", "worker-1", DateTimeOffset.UnixEpoch);
         var task = run.CurrentStage().Tasks[0];

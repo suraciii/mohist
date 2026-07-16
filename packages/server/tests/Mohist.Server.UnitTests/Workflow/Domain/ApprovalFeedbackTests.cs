@@ -34,7 +34,7 @@ public class ApprovalFeedbackTests
             [new("draft", "Draft", "spec/task")],
             [new("plan-ok", "Plan OK", "spec/check")],
             DateTimeOffset.UnixEpoch);
-        run.AssignTo("worker-1", DateTimeOffset.UtcNow);
+        run.AssignTo("worker-1", TestTime.UtcNow);
         run.StartTask("draft.1", "worker-1", DateTimeOffset.UnixEpoch);
         run.CompleteTask(DateTimeOffset.UnixEpoch);
         run.PassCheck(new CheckResult("plan-ok", CheckResultStatus.Passed), DateTimeOffset.UnixEpoch);
@@ -119,7 +119,7 @@ public class ApprovalFeedbackTests
             [new("compile", "Compile", "spec/task")],
             [new("build-ok", "Build OK", "spec/check")],
             DateTimeOffset.UnixEpoch);
-        run.AssignTo("worker-1", DateTimeOffset.UtcNow);
+        run.AssignTo("worker-1", TestTime.UtcNow);
         var current = run.CurrentStage();
         Assert.Equal(StageRunStatus.Running, current.Status);
 
@@ -253,7 +253,7 @@ public class ApprovalFeedbackTests
             [new("compile", "Compile", "spec/task")],
             [new("build-ok", "Build OK", "spec/check")],
             DateTimeOffset.UnixEpoch);
-        run.AssignTo("worker-1", DateTimeOffset.UtcNow);
+        run.AssignTo("worker-1", TestTime.UtcNow);
         run.StartTask("compile.1", "worker-1", DateTimeOffset.UnixEpoch);
         run.FailTask(new TaskResult("failed", "boom"), DateTimeOffset.UnixEpoch);
 

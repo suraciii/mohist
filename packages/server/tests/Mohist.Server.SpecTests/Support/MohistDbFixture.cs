@@ -4,6 +4,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Events.Grains;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Issue;
@@ -13,6 +14,9 @@ using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Infrastructure.Workspace;
 using Mohist.Server.Otel;
+using Mohist.Server.SystemInfo;
+using Mohist.Server.Workflow.Storage;
+using Mohist.Server.Workflow.Services.Prompts;
 using EnvironmentAbstractions;
 using EnvironmentAbstractions.TestHelpers;
 using Orleans;
@@ -37,7 +41,7 @@ public sealed class MohistDbFixture : IAsyncLifetime
 {
     private readonly InMemoryEventBus _eventBus = new(
         new NoopEventStore(),
-        TimeProvider.System,
+        new FakeTimeProvider(TestTime.UtcNow),
         NullLogger<InMemoryEventBus>.Instance);
     private readonly RecordingEventStore _eventStore = new();
     private SqliteConnection _keeper = null!;
@@ -70,18 +74,15 @@ public sealed class MohistDbFixture : IAsyncLifetime
         _keeper = new SqliteConnection(_connectionString);
         _keeper.Open();
 
-        var runnerRoot = Path.Combine(Path.GetTempPath(), $"mohist-runner-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(runnerRoot);
-        var systemUpdateStatePath = Path.Combine(Path.GetTempPath(), $"mohist-sys-{Guid.NewGuid():N}.json");
-        var artifactStorageRoot = Path.Combine(Path.GetTempPath(), $"mohist-artifacts-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(artifactStorageRoot);
+        const string runnerRoot = "/mohist-tests/runner";
+        const string systemUpdateStatePath = "/mohist-tests/system-update.json";
+        const string artifactStorageRoot = "/mohist-tests/artifacts";
 
         var config = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
                 ["Mohist:SqliteConnectionString"] = _connectionString,
                 ["Mohist:RunnerRoot"] = runnerRoot,
-                ["Mohist:WebRoot"] = Path.Combine(Path.GetTempPath(), $"mohist-web-{Guid.NewGuid():N}"),
                 ["Mohist:SystemUpdate:StatePath"] = systemUpdateStatePath,
                 ["Mohist:ArtifactStorage:Root"] = artifactStorageRoot,
                 ["Mohist:ServerUrl"] = "http://127.0.0.1:3456",
@@ -96,10 +97,28 @@ public sealed class MohistDbFixture : IAsyncLifetime
         // Test-only overrides so the fixture doesn't touch the real
         // filesystem, the real git, the real env vars.
         services.RemoveAll<IGitService>();
+        services.RemoveAll<IFileSystem>();
+        services.AddSingleton<IFileSystem, InMemoryServerFileSystem>();
+        services.RemoveAll<ISystemUpdateStore>();
+        services.AddSingleton<InMemorySystemUpdateStore>();
+        services.AddSingleton<ISystemUpdateStore>(sp => sp.GetRequiredService<InMemorySystemUpdateStore>());
+        services.RemoveAll<IAttachmentStorage>();
+        services.AddSingleton<InMemoryAttachmentStorage>();
+        services.AddSingleton<IAttachmentStorage>(sp => sp.GetRequiredService<InMemoryAttachmentStorage>());
+        services.RemoveAll<IWorkflowArtifactStorage>();
+        services.AddSingleton<InMemoryWorkflowArtifactStorage>();
+        services.AddSingleton<IWorkflowArtifactStorage>(sp => sp.GetRequiredService<InMemoryWorkflowArtifactStorage>());
+        services.RemoveAll<IWebContentProvider>();
+        services.AddSingleton<IWebContentProvider, InMemoryWebContentProvider>();
+        services.RemoveAll<IPromptLoader>();
+        services.AddSingleton<IPromptLoader>(_ => new InMemoryPromptLoader());
         services.AddSingleton<FakeGitService>();
         services.AddSingleton<IGitService>(sp => sp.GetRequiredService<FakeGitService>());
         services.RemoveAll<IEnvironmentVariableProvider>();
         services.AddSingleton<IEnvironmentVariableProvider, MockEnvironmentVariableProvider>();
+        services.RemoveAll<Mohist.Server.Infrastructure.Config.IConfigDocumentStore>();
+        services.AddSingleton<InMemoryConfigDocumentStore>();
+        services.AddSingleton<Mohist.Server.Infrastructure.Config.IConfigDocumentStore>(sp => sp.GetRequiredService<InMemoryConfigDocumentStore>());
         // IEventPublisher is shared so all tests in the same fixture see
         // each other's emissions, mirroring MohistIntegrationFixture's
         // behaviour. IEventStore is left as the real production

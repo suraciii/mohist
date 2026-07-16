@@ -88,7 +88,7 @@ public class RunnerRegistrySpecs : WorkflowGrainSpecs
     {
         var runnerId = $"runner-info-{Guid.NewGuid():N}";
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
-        var registeredAt = DateTimeOffset.UtcNow.AddMinutes(-5);
+        var registeredAt = TestTime.UtcNow.AddMinutes(-5);
         await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*", "workflow"], "my-host", "test-project", ["openai/gpt-4", "anthropic/claude-3"], "external", registeredAt));
 
         var registry = Grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);

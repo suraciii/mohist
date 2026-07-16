@@ -90,7 +90,7 @@ public class RunnerGlobalizationSpecs : WorkflowGrainSpecs
             await SeedWorkflowTemplateAsync(workflowId, def, projectId);
             await workflow.StartAsync(new WorkflowStartInput(Metadata: new WorkflowRunMetadata(
                 Name: null,
-                CreatedAt: DateTimeOffset.UtcNow,
+                CreatedAt: TestTime.UtcNow,
                 Annotations: new Dictionary<string, string>(StringComparer.Ordinal)
                 {
                     ["projectId"] = projectId,

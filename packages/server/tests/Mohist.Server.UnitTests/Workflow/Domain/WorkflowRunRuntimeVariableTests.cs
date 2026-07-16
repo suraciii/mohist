@@ -75,7 +75,7 @@ public class WorkflowRunRuntimeVariableTests
             [new("task-1", "Task 1", "spec/task")],
             [new("check-1", "Check 1", "spec/check")],
             DateTimeOffset.UnixEpoch);
-        run.AssignTo("worker-1", DateTimeOffset.UtcNow);
+        run.AssignTo("worker-1", TestTime.UtcNow);
         var events2 = run.StartTask("work-1", "worker-1", DateTimeOffset.UnixEpoch);
         var task = run.CurrentStage().Tasks.First(t => t.DefinitionId == "task-1");
         task.Output = JsonSerializer.Deserialize<JsonElement>("{\"prNumber\":42}");

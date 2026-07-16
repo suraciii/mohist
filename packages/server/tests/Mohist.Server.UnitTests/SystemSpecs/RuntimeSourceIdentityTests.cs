@@ -1,0 +1,47 @@
+using Mohist.Server.SystemInfo;
+using Xunit;
+
+namespace Mohist.Server.UnitTests.SystemSpecs;
+
+public class RuntimeSourceIdentityTests
+{
+    [Fact]
+    public void ResolveGitHead_WhenHeadReferencesBranch_ReturnsCommit()
+    {
+        var files = new FakeFileSystem()
+            .Add("/repo/.git", string.Empty)
+            .Add("/repo/.git/HEAD", "ref: refs/heads/main\n")
+            .Add("/repo/.git/refs/heads/main", "abc123\n");
+
+        var head = RuntimeSourceIdentity.ResolveGitHead(files, "/repo/bin/Debug/net11.0");
+
+        Assert.Equal("abc123", head);
+    }
+
+    [Fact]
+    public void ResolveGitHead_WhenWorktreeUsesGitFile_ReturnsCommit()
+    {
+        var files = new FakeFileSystem()
+            .Add("/repo/worktree/.git", "gitdir: /repo/.git/worktrees/test\n")
+            .Add("/repo/.git/worktrees/test/HEAD", "def456\n");
+
+        var head = RuntimeSourceIdentity.ResolveGitHead(files, "/repo/worktree/bin");
+
+        Assert.Equal("def456", head);
+    }
+
+    private sealed class FakeFileSystem : IFileSystem
+    {
+        private readonly Dictionary<string, string> _files = new(StringComparer.Ordinal);
+
+        public FakeFileSystem Add(string path, string content)
+        {
+            _files[path] = content;
+            return this;
+        }
+
+        public bool Exists(string path) => _files.ContainsKey(path);
+
+        public string ReadAllText(string path) => _files[path];
+    }
+}

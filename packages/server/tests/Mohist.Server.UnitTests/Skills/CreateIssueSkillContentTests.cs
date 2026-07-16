@@ -4,9 +4,8 @@ namespace Mohist.Server.UnitTests.Skills;
 
 public sealed class CreateIssueSkillContentTests
 {
-    private static readonly string SkillDataRoot = ResolveSkillDataRoot();
-
-    private static string SkillMarkdown => File.ReadAllText(Path.Combine(SkillDataRoot, "mohist-create-issue", "SKILL.md"));
+    private static string SkillMarkdown =>
+        EmbeddedSkillData.ReadText("mohist-create-issue/SKILL.md");
 
     [Fact]
     public void PackagedCreateIssueSkill_StopsWhenNoWorkflowProfileIsEnabled()
@@ -26,27 +25,9 @@ public sealed class CreateIssueSkillContentTests
     {
         var content = SkillMarkdown;
 
-        // The skill must discover templates via the CLI, not from a bundled static copy.
         Assert.Contains("mo issue template list", content, StringComparison.Ordinal);
         Assert.Contains("mo issue template get", content, StringComparison.Ordinal);
-        // The boundary question drives template selection.
         Assert.Contains("does external behavior change", content, StringComparison.OrdinalIgnoreCase);
-        // The static per-template reference file is gone.
         Assert.DoesNotContain("references/issue-templates.md", content, StringComparison.Ordinal);
-    }
-
-    private static string ResolveSkillDataRoot()
-    {
-        var candidate = Path.GetFullPath(Path.Combine(
-            AppContext.BaseDirectory,
-            "..", "..", "..", "..", "..", "..",
-            "cli", "Mohist.Cli", "skill-data"));
-        if (!Directory.Exists(candidate))
-        {
-            throw new FileNotFoundException(
-                $"Packaged skill-data directory was not found at '{candidate}'. Test cannot run.");
-        }
-
-        return candidate;
     }
 }

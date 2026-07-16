@@ -869,27 +869,11 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         Assert.Equal(JsonSerializer.Serialize(expected.With), JsonSerializer.Serialize(actual.With));
     }
 
-    private static string ReadResourceYaml(string fileName)
-    {
-        var baseDir = AppContext.BaseDirectory;
-        var path = Path.Combine(baseDir, "Workflow", "Services", "Profiles", fileName);
-        if (File.Exists(path)) return File.ReadAllText(path);
+    private static string ReadResourceYaml(string fileName) =>
+        Mohist.Server.Infrastructure.Resources.BuiltinTextResources
+            .ReadWorkflowProfile(fileName);
 
-        var sourceProbe = Path.Combine(baseDir, "..", "..", "..", "..", "..", "..", "src", "Mohist.Server", "Workflow", "Services", "Profiles", fileName);
-        if (File.Exists(sourceProbe)) return File.ReadAllText(Path.GetFullPath(sourceProbe));
-
-        throw new FileNotFoundException($"YAML resource not found: {fileName}");
-    }
-
-    private static string ReadBuiltinPrompt(string fileName)
-    {
-        var baseDir = AppContext.BaseDirectory;
-        var path = Path.Combine(baseDir, "Workflow", "Services", "Prompts", "builtins", fileName);
-        if (File.Exists(path)) return File.ReadAllText(path);
-
-        var sourceProbe = Path.Combine(baseDir, "..", "..", "..", "..", "..", "..", "src", "Mohist.Server", "Workflow", "Services", "Prompts", "builtins", fileName);
-        if (File.Exists(sourceProbe)) return File.ReadAllText(Path.GetFullPath(sourceProbe));
-
-        throw new FileNotFoundException($"Builtin prompt not found: {fileName}");
-    }
+    private static string ReadBuiltinPrompt(string fileName) =>
+        Mohist.Server.Infrastructure.Resources.BuiltinTextResources
+            .ReadPrompt(fileName);
 }

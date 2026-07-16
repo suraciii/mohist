@@ -33,9 +33,9 @@ public sealed class SkillsInstallTests
     [Fact]
     public async Task Install_PathTarget_WritesOnlyToSelectedRepository()
     {
-        var targetRoot = Path.Combine(Path.GetTempPath(), $"skills-install-path-{Guid.NewGuid():N}");
+        var targetRoot = "/mohist-tests/skills-install/path-target";
         _files.AddDirectory(targetRoot);
-        _files.SetCurrentDirectory(Path.Combine(Path.GetTempPath(), $"skills-install-cwd-{Guid.NewGuid():N}"));
+        _files.SetCurrentDirectory("/mohist-tests/skills-install/path-cwd");
 
         var assets = BuildDefaultAssetService();
         var exitCode = await BuildRootCommand()
@@ -50,7 +50,7 @@ public sealed class SkillsInstallTests
     [Fact]
     public async Task Install_ClaudeTarget_WritesClaudeSkillsOnly()
     {
-        _files.SetCurrentDirectory(Path.Combine(Path.GetTempPath(), $"skills-install-claude-{Guid.NewGuid():N}"));
+        _files.SetCurrentDirectory("/mohist-tests/skills-install/claude-target");
 
         var assets = BuildDefaultAssetService();
         var exitCode = await BuildRootCommand()
@@ -69,7 +69,7 @@ public sealed class SkillsInstallTests
     [Fact]
     public async Task Install_OverwritesExistingBuiltInStubContent()
     {
-        _files.SetCurrentDirectory(Path.Combine(Path.GetTempPath(), $"skills-install-overwrite-{Guid.NewGuid():N}"));
+        _files.SetCurrentDirectory("/mohist-tests/skills-install/overwrite");
         var skillDir = Path.Combine(_files.Cwd, ".agents", "skills", "mohist");
         _files.AddDirectory(skillDir);
         _files.AddFile(Path.Combine(skillDir, "SKILL.md"), "old content");
@@ -87,7 +87,7 @@ public sealed class SkillsInstallTests
     [Fact]
     public async Task Install_DoesNotTouchUnrelatedUserAuthoredSkillDirectories()
     {
-        _files.SetCurrentDirectory(Path.Combine(Path.GetTempPath(), $"skills-install-untouched-{Guid.NewGuid():N}"));
+        _files.SetCurrentDirectory("/mohist-tests/skills-install/untouched");
         var userSkillDir = Path.Combine(_files.Cwd, ".agents", "skills", "mohist-po");
         _files.AddDirectory(userSkillDir);
         var sentinelPath = Path.Combine(userSkillDir, "SKILL.md");
@@ -106,7 +106,7 @@ public sealed class SkillsInstallTests
     [Fact]
     public async Task Install_HermesTarget_WritesEntryDiscoveryStub()
     {
-        var hermesHome = Path.Combine(Path.GetTempPath(), $"hermes-home-{Guid.NewGuid():N}");
+        var hermesHome = "/mohist-tests/skills-install/hermes-home";
         _environment[SkillInstallService.HermesHomeEnvironmentVariable] = hermesHome;
         using var stdout = new StringWriter();
         using var stderr = new StringWriter();
@@ -140,8 +140,8 @@ public sealed class SkillsInstallTests
     [Fact]
     public async Task Install_HermesTarget_UsesConfiguredHermesHomeAndReportsUpdatedOnRepeatInstall()
     {
-        var hermesHome = Path.Combine(Path.GetTempPath(), $"custom-hermes-home-{Guid.NewGuid():N}");
-        var defaultHermesRoot = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".hermes", "skills");
+        var hermesHome = "/mohist-tests/skills-install/custom-hermes-home";
+        var defaultHermesRoot = "/mohist-tests/skills-install/default-hermes-home/.hermes/skills";
         _environment[SkillInstallService.HermesHomeEnvironmentVariable] = hermesHome;
 
         try
@@ -178,8 +178,8 @@ public sealed class SkillsInstallTests
     [InlineData("--hermes", "--path", "repo")]
     public async Task Install_HermesTarget_RejectsIncompatibleOptionsBeforeWriting(params string[] args)
     {
-        var hermesHome = Path.Combine(Path.GetTempPath(), $"hermes-home-{Guid.NewGuid():N}");
-        var repoPath = Path.Combine(Path.GetTempPath(), $"hermes-repo-{Guid.NewGuid():N}");
+        var hermesHome = "/mohist-tests/skills-install/hermes-home";
+        var repoPath = "/mohist-tests/skills-install/hermes-repo";
         _files.AddDirectory(repoPath);
         _environment[SkillInstallService.HermesHomeEnvironmentVariable] = hermesHome;
         using var stdout = new StringWriter();
@@ -208,7 +208,7 @@ public sealed class SkillsInstallTests
     [Fact]
     public async Task Install_HermesTarget_DoesNotTouchHermesConfigFiles()
     {
-        var hermesHome = Path.Combine(Path.GetTempPath(), $"hermes-config-{Guid.NewGuid():N}");
+        var hermesHome = "/mohist-tests/skills-install/hermes-config";
         var configPath = Path.Combine(hermesHome, "config.yaml");
         _files.AddDirectory(hermesHome);
         _files.AddFile(configPath, "skills:\n  external_dirs:\n    - /existing\n");
@@ -233,7 +233,7 @@ public sealed class SkillsInstallTests
     [Fact]
     public async Task Install_DoesNotTouchDotMohistSkills()
     {
-        _files.SetCurrentDirectory(Path.Combine(Path.GetTempPath(), $"skills-install-runtime-{Guid.NewGuid():N}"));
+        _files.SetCurrentDirectory("/mohist-tests/skills-install/runtime");
         var mohistSkillsDir = Path.Combine(_files.Cwd, ".mohist", "skills");
         _files.AddDirectory(mohistSkillsDir);
         var sentinelPath = Path.Combine(mohistSkillsDir, "sentinel.txt");
@@ -251,7 +251,7 @@ public sealed class SkillsInstallTests
 
     private SkillAssetService BuildDefaultAssetService()
     {
-        var targetRoot = Path.Combine(Path.GetTempPath(), $"skills-install-assets-{Guid.NewGuid():N}");
+        var targetRoot = "/mohist-tests/skills-install/assets";
         _files.AddDirectory(targetRoot);
         _assetRoot = targetRoot;
 
@@ -286,18 +286,18 @@ public sealed class SkillsInstallTests
         output ??= TextWriter.Null;
         error ??= TextWriter.Null;
         var services = new ServiceCollection();
-        services.AddSingleton(new MohistCliApi(new HttpClient(), output, error, _files, new SystemCommandExecutor()));
+        services.AddSingleton(new MohistCliApi(RejectingHttpMessageHandler.CreateClient(), output, error, _files, new NoopCommandExecutor()));
         services.AddSingleton(output);
         services.AddSingleton(error);
         services.AddSingleton<IFileSystem>(_files);
-        services.AddSingleton<ICommandExecutor>(new SystemCommandExecutor());
+        services.AddSingleton<ICommandExecutor>(new NoopCommandExecutor());
         services.AddSingleton<IEnvironmentVariableProvider>(_environment);
         services.AddSingleton<IServiceInstaller>(sp => new SystemdServiceInstaller(output, error, _files, sp.GetRequiredService<ICommandExecutor>()));
         services.AddSingleton(sp => new UpdateOperations(output, error, sp.GetRequiredService<IServiceInstaller>(), sp.GetRequiredService<ICommandExecutor>(), _files, _environment));
-        services.AddSingleton(new RuntimeConsistencyValidator(new HttpClient(), new SystemCommandExecutor(), _files, _environment, output));
-        services.AddSingleton(new ServiceReadinessProbe(new HttpClient(), output));
-        services.AddSingleton(new RunnerRefreshVerifier(new HttpClient(), new SystemCommandExecutor(), _files));
-        services.AddSingleton(new UpdateOutcomeReporter(new HttpClient(), output));
+        services.AddSingleton(new RuntimeConsistencyValidator(RejectingHttpMessageHandler.CreateClient(), new NoopCommandExecutor(), _files, _environment, output));
+        services.AddSingleton(new ServiceReadinessProbe(RejectingHttpMessageHandler.CreateClient(), output));
+        services.AddSingleton(new RunnerRefreshVerifier(RejectingHttpMessageHandler.CreateClient(), new NoopCommandExecutor(), _files));
+        services.AddSingleton(new UpdateOutcomeReporter(RejectingHttpMessageHandler.CreateClient(), output));
         services.AddSingleton<SourceCodeUpdater>();
         services.AddSingleton(assets ?? BuildDefaultAssetService());
         services.AddSingleton<InfoVerboseCollector>();

@@ -262,8 +262,8 @@ public class IssueQuerierPrimaryEpicSpecs
             Description = "",
             Priority = "p1",
             Status = status,
-            CreatedAt = DateTimeOffset.UtcNow,
-            UpdatedAt = DateTimeOffset.UtcNow,
+            CreatedAt = TestTime.UtcNow,
+            UpdatedAt = TestTime.UtcNow,
         };
         db.Epics.Add(row);
         db.SaveChanges();
@@ -283,7 +283,7 @@ public class IssueQuerierPrimaryEpicSpecs
             EpicId = epicId,
             IssueId = issueId,
             IssueNumber = issueNumber,
-            CreatedAt = DateTimeOffset.UtcNow,
+            CreatedAt = TestTime.UtcNow,
         });
         db.SaveChanges();
     }

@@ -123,7 +123,7 @@ public class IssueArchivedDetailApiSpecs
 
         // Inject two feedback records on the archived run so the
         // feedback sub-resource is non-empty and shape-comparable.
-        var archivedBaseTime = DateTimeOffset.UtcNow.AddMinutes(-10);
+        var archivedBaseTime = TestTime.UtcNow.AddMinutes(-10);
         var archivedRun = await LoadWorkflowRunAsync(archivedSeed.wrId);
         Assert.NotNull(archivedRun);
         archivedRun!.Feedback.Add(new ApprovalFeedback(
@@ -135,7 +135,7 @@ public class IssueArchivedDetailApiSpecs
             CreatedAt: archivedBaseTime));
         await SaveWorkflowRunAsync(archivedSeed.wrId, archivedRun);
 
-        var nonArchivedBaseTime = DateTimeOffset.UtcNow.AddMinutes(-10);
+        var nonArchivedBaseTime = TestTime.UtcNow.AddMinutes(-10);
         var nonArchivedRun = await LoadWorkflowRunAsync(nonArchivedSeed.wrId);
         Assert.NotNull(nonArchivedRun);
         nonArchivedRun!.Feedback.Add(new ApprovalFeedback(
@@ -476,7 +476,7 @@ public class IssueArchivedDetailApiSpecs
         var run = JsonSerializer.Deserialize<WorkflowRun>(row!.State, ReadJsonOptions);
         Assert.NotNull(run);
         run!.Status = WorkflowRunStatus.Completed;
-        run.CompletedAt = DateTimeOffset.UtcNow;
+        run.CompletedAt = TestTime.UtcNow;
         row.State = JsonSerializer.Serialize(run, ReadJsonOptions);
         await db.SaveChangesAsync();
         // Deactivate the workflow grain so it re-reads the updated
@@ -501,7 +501,7 @@ public class IssueArchivedDetailApiSpecs
             Kind = "file",
             ContentType = "text/markdown",
             Size = body.Length,
-            RecordedAt = DateTimeOffset.UtcNow,
+            RecordedAt = TestTime.UtcNow,
             DisplayName = path,
             ArtifactStoragePath = $"memory://{wrId}/{path}",
         });

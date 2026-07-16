@@ -46,7 +46,7 @@ public class WorkflowRunStatusTransitionTests
     {
         var run = BuildPendingRun();
 
-        run.AssignTo(WorkerId, DateTimeOffset.UtcNow);
+        run.AssignTo(WorkerId, TestTime.UtcNow);
 
         Assert.Equal(WorkflowRunStatus.Ready, run.Status);
         Assert.Equal(WorkerId, run.Assignment!.WorkerId);
@@ -313,7 +313,7 @@ public class WorkflowRunStatusTransitionTests
             [new("compile", "Compile", "spec/t")],
             [new("verify", "Verify", "spec/check")],
             DateTimeOffset.UnixEpoch);
-        run.AssignTo(WorkerId, DateTimeOffset.UtcNow);
+        run.AssignTo(WorkerId, TestTime.UtcNow);
         run.StartTask("w-compile", WorkerId, DateTimeOffset.UnixEpoch);
         run.CompleteTask(DateTimeOffset.UnixEpoch);
         run.PassCheck(new CheckResult("verify", CheckResultStatus.Passed), DateTimeOffset.UnixEpoch);
@@ -433,7 +433,7 @@ public class WorkflowRunStatusTransitionTests
         ]), DateTimeOffset.UnixEpoch);
         run.Start(DateTimeOffset.UnixEpoch);
         run.InitializeStage([new("draft", "Draft", "spec/task")], [new("plan-ok", "Plan OK", "spec/check")], DateTimeOffset.UnixEpoch);
-        run.AssignTo(WorkerId, DateTimeOffset.UtcNow);
+        run.AssignTo(WorkerId, TestTime.UtcNow);
         run.StartTask("work-1", WorkerId, DateTimeOffset.UnixEpoch);
         run.CompleteTask(DateTimeOffset.UnixEpoch);
         run.PassCheck(new CheckResult("plan-ok", CheckResultStatus.Passed), DateTimeOffset.UnixEpoch);
@@ -446,7 +446,7 @@ public class WorkflowRunStatusTransitionTests
         List<CheckDefinition>? checks = null)
     {
         var run = BuildPendingRun(tasks, checks);
-        run.AssignTo(WorkerId, DateTimeOffset.UtcNow);
+        run.AssignTo(WorkerId, TestTime.UtcNow);
         Assert.Equal(WorkflowRunStatus.Ready, run.Status);
         return run;
     }

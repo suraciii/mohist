@@ -1,6 +1,7 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.SpecTests.Support;
 using Orleans;
@@ -44,7 +45,7 @@ public class BacklogFixture : IAsyncLifetime
     {
         builder.ConfigureSilo((_, siloBuilder) =>
             GrainTestConfig.ConfigureSilo(siloBuilder, connectionString,
-                new InMemoryEventBus(new NoopEventStore(), TimeProvider.System, NullLogger<InMemoryEventBus>.Instance),
+                new InMemoryEventBus(new NoopEventStore(), new FakeTimeProvider(TestTime.UtcNow), NullLogger<InMemoryEventBus>.Instance),
                 new NoopEventStore()));
     }
 }

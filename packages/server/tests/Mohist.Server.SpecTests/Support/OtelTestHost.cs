@@ -225,21 +225,9 @@ public sealed class RecordingActivityProcessor : BaseProcessor<Activity>
         }
     }
 
-    /// <summary>
-    /// Awaits the captured span list deterministically: resolves as soon
-    /// as <see cref="OnEnd"/> appends an activity that makes
-    /// <paramref name="predicate"/> true, rather than polling the wall
-    /// clock. <paramref name="timeout"/> is only a safety bound for the
-    /// never-satisfied case so a missing span fails loudly instead of
-    /// hanging the test runner.
-    /// </summary>
-    public Task<List<Activity>> WaitForAsync(Func<List<Activity>, bool> predicate, TimeSpan timeout)
-    {
-        using var cts = new CancellationTokenSource(timeout);
-        return WaitForAsync(predicate, cts.Token);
-    }
-
-    public Task<List<Activity>> WaitForAsync(Func<List<Activity>, bool> predicate, CancellationToken cancellationToken)
+    public Task<List<Activity>> WaitForAsync(
+        Func<List<Activity>, bool> predicate,
+        CancellationToken cancellationToken = default)
     {
         lock (_gate)
         {

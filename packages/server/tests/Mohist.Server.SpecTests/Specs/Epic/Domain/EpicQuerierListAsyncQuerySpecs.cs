@@ -307,7 +307,7 @@ public class EpicQuerierListAsyncQuerySpecs
         DateTimeOffset? updatedAt = null,
         string title = "")
     {
-        var now = updatedAt ?? DateTimeOffset.UtcNow;
+        var now = updatedAt ?? TestTime.UtcNow;
         await using var db = database.CreateDbContext();
         db.Epics.Add(new EpicRow
         {

@@ -28,7 +28,7 @@ public sealed class SkillAssetRootResolverTests
         var resolution = resolver.Resolve();
 
         Assert.Equal(SkillAssetRootSource.ManagedCache, resolution.Source);
-        Assert.Equal(Path.GetFullPath(managedRoot), Path.GetFullPath(resolution.AssetRoot!));
+        Assert.Equal(Path.GetFullPath(managedRoot, "/"), Path.GetFullPath(resolution.AssetRoot!, "/"));
         Assert.True(resolution.IsSelected);
         Assert.Null(resolution.DiagnosticSummary);
     }
@@ -47,7 +47,7 @@ public sealed class SkillAssetRootResolverTests
         var resolution = resolver.Resolve();
 
         Assert.Equal(SkillAssetRootSource.Override, resolution.Source);
-        Assert.Equal(Path.GetFullPath(overrideRoot), Path.GetFullPath(resolution.AssetRoot!));
+        Assert.Equal(Path.GetFullPath(overrideRoot, "/"), Path.GetFullPath(resolution.AssetRoot!, "/"));
     }
 
     [Fact]
@@ -62,7 +62,7 @@ public sealed class SkillAssetRootResolverTests
         var resolution = resolver.Resolve();
 
         Assert.Equal(SkillAssetRootSource.Override, resolution.Source);
-        Assert.Equal(Path.GetFullPath(overrideRoot), Path.GetFullPath(resolution.AssetRoot!));
+        Assert.Equal(Path.GetFullPath(overrideRoot, "/"), Path.GetFullPath(resolution.AssetRoot!, "/"));
     }
 
     [Fact]
@@ -85,7 +85,7 @@ public sealed class SkillAssetRootResolverTests
     [Fact]
     public void Resolve_FallsBackToSiblingRoot_WhenManagedCacheIsAbsent()
     {
-        var siblingRoot = Path.Combine(AppContext.BaseDirectory, "skill-data");
+        const string siblingRoot = "/mohist-tests/app/skill-data";
         _files.AddDirectory(siblingRoot);
         WriteSkill(siblingRoot, "mohist");
 
@@ -96,8 +96,8 @@ public sealed class SkillAssetRootResolverTests
 
         Assert.Equal(SkillAssetRootSource.SiblingFallback, resolution.Source);
         Assert.Equal(
-            Path.GetFullPath(siblingRoot),
-            Path.GetFullPath(resolution.AssetRoot!));
+            Path.GetFullPath(siblingRoot, "/"),
+            Path.GetFullPath(resolution.AssetRoot!, "/"));
     }
 
     [Fact]
@@ -145,27 +145,21 @@ public sealed class SkillAssetRootResolverTests
 
         Assert.Equal(SkillAssetRootSource.ManagedCache, resolution.Source);
         Assert.Equal(
-            Path.GetFullPath(expectedManagedRoot),
-            Path.GetFullPath(resolution.AssetRoot!));
+            Path.GetFullPath(expectedManagedRoot, "/"),
+            Path.GetFullPath(resolution.AssetRoot!, "/"));
     }
 
     [Fact]
-    public void Resolve_ReportsSiblingPath_InDiagnostic_WhenNoAssetRootFound()
+    public void Resolve_ReportsManagedPath_InDiagnostic_WhenNoAssetRootFound()
     {
-        var resolver = new SkillAssetRootResolver(_files, _environment);
+        const string home = "/mohist-tests/user-home";
+        var resolver = CreateResolver(home);
 
         var computed = resolver.DefaultManagedAssetRoot();
 
-        var home = _environment.GetEnvironmentVariable(SkillAssetRootResolver.HomeEnvironmentVariable);
-        if (string.IsNullOrWhiteSpace(home))
-            home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        var expected = string.IsNullOrWhiteSpace(home)
-            ? Path.Combine(AppContext.BaseDirectory, "skill-data")
-            : Path.Combine(home, ".mohist", "cli", "skill-data");
-
         Assert.Equal(
-            Path.GetFullPath(expected),
-            Path.GetFullPath(computed));
+            Path.Combine(home, ".mohist", "cli", "skill-data"),
+            computed);
     }
 
     [Fact]
@@ -193,7 +187,8 @@ public sealed class SkillAssetRootResolverTests
             _environment,
             getOverrideAssetRoot: getOverrideAssetRoot,
             getManagedAssetRoot: null,
-            getUserHome: () => home);
+            getUserHome: () => home,
+            getSiblingAssetRoot: () => "/mohist-tests/app/skill-data");
     }
 
     private void WriteAssetRoot(string root)

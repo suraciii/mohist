@@ -173,7 +173,7 @@ public class TransactionalEventAppendSpecs : IAsyncLifetime
             Id = "wr_txn_unbound",
             Metadata = new WorkflowRunMetadata(
                 Name: null,
-                CreatedAt: DateTimeOffset.UtcNow,
+                CreatedAt: TestTime.UtcNow,
                 Annotations: new Dictionary<string, string>(StringComparer.Ordinal)
                 {
                     ["projectId"] = ProjectId,
@@ -222,7 +222,7 @@ public class TransactionalEventAppendSpecs : IAsyncLifetime
             Id = id,
             Metadata = new WorkflowRunMetadata(
                 Name: null,
-                CreatedAt: DateTimeOffset.UtcNow,
+                CreatedAt: TestTime.UtcNow,
                 Annotations: annotations),
             Stages = [],
         };

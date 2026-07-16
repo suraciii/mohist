@@ -30,7 +30,7 @@ public class EventStoreSpecs
             id: Guid.NewGuid().ToString(),
             source: source,
             type: "com.mohist.workflow.run.started",
-            time: DateTimeOffset.UtcNow,
+            time: TestTime.UtcNow,
             data: null));
 
         var events = await store.ListAsync(workflowRunId);
@@ -57,7 +57,7 @@ public class EventStoreSpecs
             id: Guid.NewGuid().ToString(),
             source: new Uri($"/mohist/workflow-runs/{workflowRunId}", UriKind.Relative),
             type: "com.mohist.workflow.task.completed",
-            time: DateTimeOffset.UtcNow,
+            time: TestTime.UtcNow,
             data: null,
             subject: "42",
             extensions: extensions));

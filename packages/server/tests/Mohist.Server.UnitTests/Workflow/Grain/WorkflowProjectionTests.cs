@@ -41,7 +41,7 @@ public class WorkflowProjectionTests
         var run = new WorkflowRun
         {
             Id = "wf-multiple",
-            Metadata = new WorkflowRunMetadata("test", DateTimeOffset.UtcNow),
+            Metadata = new WorkflowRunMetadata("test", TestTime.UtcNow),
             Status = WorkflowRunStatus.Running,
             CurrentStageId = "plan",
             Stages =
@@ -92,7 +92,7 @@ public class WorkflowProjectionTests
         var run = new WorkflowRun
         {
             Id = "wf-nofiles",
-            Metadata = new WorkflowRunMetadata("test", DateTimeOffset.UtcNow),
+            Metadata = new WorkflowRunMetadata("test", TestTime.UtcNow),
             Status = WorkflowRunStatus.Running,
             CurrentStageId = "build",
             Stages =
@@ -355,7 +355,7 @@ public class WorkflowProjectionTests
         return new WorkflowRun
         {
             Id = "wf-1",
-            Metadata = new WorkflowRunMetadata("test", DateTimeOffset.UtcNow),
+            Metadata = new WorkflowRunMetadata("test", TestTime.UtcNow),
             Status = WorkflowRunStatus.Running,
             CurrentStageId = "plan",
             Stages =
@@ -478,8 +478,8 @@ public class WorkflowProjectionTests
     {
         var summaries = new List<ArtifactSummaryView>
         {
-            new("art_abc", "review.md", "file", "review.md", DateTimeOffset.UtcNow, 1024),
-            new("art_def", "design.md", "file", "design.md", DateTimeOffset.UtcNow, 2048),
+            new("art_abc", "review.md", "file", "review.md", TestTime.UtcNow, 1024),
+            new("art_def", "design.md", "file", "design.md", TestTime.UtcNow, 2048),
         };
 
         var task = new TaskStatusView(
@@ -539,7 +539,7 @@ public class WorkflowProjectionTests
     public void ArtifactSummaryView_ContainsOnlyDtoFields_NoStoragePaths()
     {
         var summary = new ArtifactSummaryView(
-            "art_123", "review.md", "file", "Review Report", DateTimeOffset.UtcNow, 4096);
+            "art_123", "review.md", "file", "Review Report", TestTime.UtcNow, 4096);
 
         var json = JsonSerializer.Serialize(summary);
 

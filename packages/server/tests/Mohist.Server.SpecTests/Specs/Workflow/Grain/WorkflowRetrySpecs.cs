@@ -318,8 +318,8 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
         stage.Status = StageRunStatus.Failed;
         stage.ApprovalStatus = new ApprovalStatus(
             "rejected",
-            DateTimeOffset.UtcNow.AddMinutes(-1).ToString("O"),
-            DateTimeOffset.UtcNow.ToString("O"));
+            TestTime.UtcNow.AddMinutes(-1).ToString("O"),
+            TestTime.UtcNow.ToString("O"));
         stage.Failure = new FailureDetails(FailureReason.ApprovalRejected, stage.Id, Message: "needs rework");
         run.Status = WorkflowRunStatus.Failed;
 

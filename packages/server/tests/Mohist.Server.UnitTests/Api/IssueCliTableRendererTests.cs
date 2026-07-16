@@ -50,7 +50,7 @@ public class IssueCliTableRendererTests
             "/home/test/.mohist/cli-state.json",
             """{ "activeProjectId": "proj_bbb" }""");
         var api = new MohistCliApi(
-            new HttpClient(new HttpClientHandler()) { BaseAddress = new Uri("http://localhost:3456") },
+            RejectingHttpMessageHandler.CreateClient(),
             output,
             new StringWriter(),
             fs,
@@ -83,7 +83,7 @@ public class IssueCliTableRendererTests
             """);
         var output = new StringWriter();
         var api = new MohistCliApi(
-            new HttpClient(new HttpClientHandler()) { BaseAddress = new Uri("http://localhost:3456") },
+            RejectingHttpMessageHandler.CreateClient(),
             output,
             new StringWriter(),
             new FakeFileSystem(),
@@ -116,7 +116,7 @@ public class IssueCliTableRendererTests
 
         var output = new StringWriter();
         var api = new MohistCliApi(
-            new HttpClient(new HttpClientHandler()) { BaseAddress = new Uri("http://localhost:3456") },
+            RejectingHttpMessageHandler.CreateClient(),
             output,
             new StringWriter(),
             new FakeFileSystem(),
@@ -156,7 +156,7 @@ public class IssueCliTableRendererTests
 
         var output = new StringWriter();
         var api = new MohistCliApi(
-            new HttpClient(new HttpClientHandler()) { BaseAddress = new Uri("http://localhost:3456") },
+            RejectingHttpMessageHandler.CreateClient(),
             output,
             new StringWriter(),
             new FakeFileSystem(),
@@ -204,7 +204,7 @@ public class IssueCliTableRendererTests
 
         var output = new StringWriter();
         var api = new MohistCliApi(
-            new HttpClient(new HttpClientHandler()) { BaseAddress = new Uri("http://localhost:3456") },
+            RejectingHttpMessageHandler.CreateClient(),
             output,
             new StringWriter(),
             new FakeFileSystem(),
@@ -232,7 +232,7 @@ public class IssueCliTableRendererTests
 
         var output = new StringWriter();
         var api = new MohistCliApi(
-            new HttpClient(new HttpClientHandler()) { BaseAddress = new Uri("http://localhost:3456") },
+            RejectingHttpMessageHandler.CreateClient(),
             output,
             new StringWriter(),
             new FakeFileSystem(),
@@ -263,7 +263,7 @@ public class IssueCliTableRendererTests
 
         var output = new StringWriter();
         var api = new MohistCliApi(
-            new HttpClient(new HttpClientHandler()) { BaseAddress = new Uri("http://localhost:3456") },
+            RejectingHttpMessageHandler.CreateClient(),
             output,
             new StringWriter(),
             new FakeFileSystem(),
@@ -590,7 +590,7 @@ public class IssueCliTableRendererTests
 
         var output = new StringWriter();
         var api = new MohistCliApi(
-            new HttpClient(new HttpClientHandler()) { BaseAddress = new Uri("http://localhost:3456") },
+            RejectingHttpMessageHandler.CreateClient(),
             output,
             new StringWriter(),
             new FakeFileSystem(),
@@ -638,7 +638,7 @@ public class IssueCliTableRendererTests
 
         var output = new StringWriter();
         var api = new MohistCliApi(
-            new HttpClient(new HttpClientHandler()) { BaseAddress = new Uri("http://localhost:3456") },
+            RejectingHttpMessageHandler.CreateClient(),
             output,
             new StringWriter(),
             new FakeFileSystem(),
@@ -686,7 +686,7 @@ public class IssueCliTableRendererTests
 
         var output = new StringWriter();
         var api = new MohistCliApi(
-            new HttpClient(new HttpClientHandler()) { BaseAddress = new Uri("http://localhost:3456") },
+            RejectingHttpMessageHandler.CreateClient(),
             output,
             new StringWriter(),
             new FakeFileSystem(),
@@ -744,7 +744,7 @@ public class IssueCliTableRendererTests
 
         var output = new StringWriter();
         var api = new MohistCliApi(
-            new HttpClient(new HttpClientHandler()) { BaseAddress = new Uri("http://localhost:3456") },
+            RejectingHttpMessageHandler.CreateClient(),
             output,
             new StringWriter(),
             new FakeFileSystem(),
@@ -841,7 +841,7 @@ public class IssueCliTableRendererTests
 
         var output = new StringWriter();
         var api = new MohistCliApi(
-            new HttpClient(new HttpClientHandler()) { BaseAddress = new Uri("http://localhost:3456") },
+            RejectingHttpMessageHandler.CreateClient(),
             output,
             new StringWriter(),
             new FakeFileSystem(),
