@@ -57,6 +57,7 @@ public static class ProjectRepositoryDataUpgrader
         repositoriesJson = null;
         diagnostic = string.Empty;
         List<RepositoryInfo>? declarations;
+        var legacyMetadata = new List<LegacyRepositoryMetadata>();
 
         try
         {
@@ -78,6 +79,9 @@ public static class ProjectRepositoryDataUpgrader
                     return false;
                 }
 
+                legacyMetadata.Add(declaration.ValueKind == JsonValueKind.Object
+                    ? new(GetOptionalString(declaration, "remote"), GetOptionalString(declaration, "path"))
+                    : new(null, null));
                 index++;
             }
 
@@ -98,12 +102,18 @@ public static class ProjectRepositoryDataUpgrader
         }
 
         var repositories = declarations?
-            .Select(declaration => new RepositoryPolicy.NormalizedRepository(
+            .Select((declaration, index) => new RepositoryPolicy.NormalizedRepository(
                 declaration.Name,
-                declaration.GitUrl,
+                ResolveGitUrl(declaration.GitUrl, legacyMetadata[index]),
                 declaration.BaseBranch,
                 declaration.IsDefault))
             .ToList() ?? [];
+        var recoveredLegacyGitUrl = declarations?
+            .Select((declaration, index) => !string.Equals(
+                declaration.GitUrl,
+                ResolveGitUrl(declaration.GitUrl, legacyMetadata[index]),
+                StringComparison.Ordinal))
+            .Any(recovered => recovered) == true;
         var validationErrors = RepositoryPolicy.Validate(repositories)
             .Where(error => !RepairableValidationCodes.Contains(error.Code))
             .ToList();
@@ -136,7 +146,7 @@ public static class ProjectRepositoryDataUpgrader
             })
             .ToList();
         var normalizedJson = JSON.Serialize(normalizedDeclarations);
-        if (!RepositoryListsEqual(repositories, normalized))
+        if (recoveredLegacyGitUrl || !RepositoryListsEqual(repositories, normalized))
             repositoriesJson = normalizedJson;
         return true;
     }
@@ -153,4 +163,23 @@ public static class ProjectRepositoryDataUpgrader
     private static bool HasProperty(JsonElement element, string name) =>
         element.EnumerateObject().Any(property =>
             string.Equals(property.Name, name, StringComparison.OrdinalIgnoreCase));
+
+    private static string ResolveGitUrl(string? gitUrl, LegacyRepositoryMetadata legacy) =>
+        !string.IsNullOrWhiteSpace(gitUrl) ? gitUrl
+        : !string.IsNullOrWhiteSpace(legacy.Remote) ? legacy.Remote
+        : legacy.Path ?? string.Empty;
+
+    private static string? GetOptionalString(JsonElement element, string name)
+    {
+        foreach (var property in element.EnumerateObject())
+        {
+            if (string.Equals(property.Name, name, StringComparison.OrdinalIgnoreCase)
+                && property.Value.ValueKind == JsonValueKind.String)
+                return property.Value.GetString();
+        }
+
+        return null;
+    }
+
+    private sealed record LegacyRepositoryMetadata(string? Remote, string? Path);
 }

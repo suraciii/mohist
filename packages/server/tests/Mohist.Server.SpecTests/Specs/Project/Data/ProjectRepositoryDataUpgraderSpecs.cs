@@ -80,6 +80,33 @@ public class ProjectRepositoryDataUpgraderSpecs
         Assert.Equal(firstJson, (await LoadProjectAsync(db, "proj_legacy")).RepositoriesJson);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
+    [Fact]
+    public async Task UpgradeAsync_MigratesLegacyRemoteOrPathIntoGitUrl()
+    {
+        await using var connection = await OpenDatabaseAsync();
+        await using var db = CreateContext(connection);
+        await SeedProjectJsonAsync(db, "proj_legacy_locations", "legacy locations", """
+            [
+              { "Name": "local", "Path": "/repos/local", "Remote": null, "BaseBranch": "main", "IsDefault": true },
+              { "Name": "remote", "Path": "/repos/remote", "Remote": "git@example.com:team/remote.git", "BaseBranch": "develop", "IsDefault": false }
+            ]
+            """);
+
+        await ProjectRepositoryDataUpgrader.UpgradeAsync(db);
+
+        var firstJson = (await LoadProjectAsync(db, "proj_legacy_locations")).RepositoriesJson;
+        AssertRepositories(
+            await LoadProjectAsync(db, "proj_legacy_locations"),
+            ("local", "/repos/local", "main", true),
+            ("remote", "git@example.com:team/remote.git", "develop", false));
+
+        await ProjectRepositoryDataUpgrader.UpgradeAsync(db);
+
+        Assert.Equal(firstJson, (await LoadProjectAsync(db, "proj_legacy_locations")).RepositoriesJson);
+    }
+
     public static TheoryData<string, string, string> InvalidProjects => new()
     {
         { "[]", "Project 'broken' (proj_broken)", "at least one repository" },
