@@ -764,7 +764,7 @@ public class IssueMetricsQuerier : IScopedService
             var completedAtDt = DateTime.SpecifyKind(issue.CompletedAt.Value, DateTimeKind.Utc);
 
             double? cycleDays = null;
-            if (earliestWorkStartedByIssue.TryGetValue(issue.Id, out var firstStart))
+            if (earliestWorkStartedByIssue.TryGetValue(issue.Number.ToString(), out var firstStart))
             {
                 var cycleSpan = completedAtDt - firstStart.UtcDateTime;
                 cycleDays = cycleSpan.TotalDays;
@@ -978,7 +978,7 @@ public class IssueMetricsQuerier : IScopedService
         var perIssue = new List<PerIssueCycleBreakdown>();
         var samplesByStage = new Dictionary<string, List<double>>(StringComparer.Ordinal);
 
-        foreach (var issue in issuesById.Values)
+        foreach (var issue in issuesByNumber.Values)
         {
             if (!string.Equals(issue.Status, "done", StringComparison.OrdinalIgnoreCase)) continue;
             if (string.IsNullOrWhiteSpace(issue.CompletedAt)) continue;
@@ -992,14 +992,14 @@ public class IssueMetricsQuerier : IScopedService
             var completedAtDt = DateTime.SpecifyKind(completedAtRaw, DateTimeKind.Utc);
             if (completedAtDt < windowFrom.UtcDateTime || completedAtDt > windowTo.UtcDateTime) continue;
 
-            if (!runIdsByIssue.TryGetValue(issue.Id, out var issueRunIds)) continue;
+            if (!runIdsByIssue.TryGetValue(issue.Number.ToString(), out var issueRunIds)) continue;
 
             // Attribution core: the snapshot and the stage-duration
             // surface share the same latest-run decision. When the
             // attribution model can identify the active workflow run,
             // durations are computed from that run only so historical
             // invalidated runs cannot contribute samples.
-            var lifecycleForIssue = lifecycleEventsByIssue.TryGetValue(issue.Id, out var le)
+            var lifecycleForIssue = lifecycleEventsByIssue.TryGetValue(issue.Number.ToString(), out var le)
                 ? le
                 : (IReadOnlyList<IssueStageAttribution.AttributionEvent>)Array.Empty<IssueStageAttribution.AttributionEvent>();
             var attribution = ComputeIssueAttribution(lifecycleForIssue, issueRunIds, stageEventsByRun, stageOrder, dayEndUtc: now);
@@ -1013,7 +1013,7 @@ public class IssueMetricsQuerier : IScopedService
 
             // Cycle = CompletedAt - earliest IssueWorkStarted.
             double? cycleSeconds = null;
-            if (earliestWorkStartedByIssue.TryGetValue(issue.Id, out var firstStart))
+            if (earliestWorkStartedByIssue.TryGetValue(issue.Number.ToString(), out var firstStart))
             {
                 var span = completedAtDt - firstStart.UtcDateTime;
                 cycleSeconds = span.TotalSeconds;
@@ -1134,18 +1134,19 @@ public class IssueMetricsQuerier : IScopedService
         IReadOnlyCollection<string>? typeFilter = null,
         bool includeData = false)
     {
-        var projectIssueIds = await db.Issues.AsNoTracking()
+        var projectIssueNumbers = await db.Issues.AsNoTracking()
             .Where(row => row.ProjectId == projectId)
-            .Select(row => row.IssueId)
+            .Where(row => row.Number != null)
+            .Select(row => row.Number!.Value)
             .ToListAsync();
 
-        if (projectIssueIds.Count == 0)
+        if (projectIssueNumbers.Count == 0)
         {
             return new List<IssueEventRowLite>();
         }
 
         var projectSources = new HashSet<string>(
-            projectIssueIds.Select(id => IssueSourcePrefix + id),
+            projectIssueNumbers.Select(number => IssueEventPersistence.IssueSource(projectId, number)),
             StringComparer.Ordinal);
 
         var typeSet = typeFilter is null
@@ -1169,6 +1170,9 @@ public class IssueMetricsQuerier : IScopedService
             .Select(r => new IssueEventRowLite(r.Source, r.Id, r.Type, r.Time, r.Data))
             .ToList();
     }
+
+    private static string IssueSourcePrefixFor(string projectId) =>
+        IssueEventPersistence.ProjectSourcePrefix(projectId);
 
     private readonly record struct IssueEventRowLite(
         string Source,

@@ -3,7 +3,7 @@ using Mohist.Server.Infrastructure.Data.Db;
 
 namespace Mohist.Server.Infrastructure.Data.Epic;
 
-public static class EpicIssueAffiliationResolver
+internal static class EpicIssueAffiliationResolver
 {
     public static async Task<int?> ResolveAsync(
         MohistDbContext db,

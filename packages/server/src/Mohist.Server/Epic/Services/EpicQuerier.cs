@@ -173,15 +173,16 @@ public class EpicQuerier : IScopedService
             return null;
         await using var db = await _dbFactory.CreateDbContextAsync();
         var activeOwner = await (
-            from active in db.EpicActiveIssues.AsNoTracking()
+            from issue in db.Issues.AsNoTracking()
             join epic in db.Epics.AsNoTracking()
-                on new { active.ProjectId, EpicNumber = active.EpicNumber } equals new { epic.ProjectId, EpicNumber = epic.Number }
-            where active.ProjectId == projectId
-                && active.IssueNumber == issueNumber
+                on new { issue.ProjectId, EpicNumber = issue.EpicNumber } equals new { epic.ProjectId, EpicNumber = (int?)epic.Number }
+            where issue.ProjectId == projectId
+                && issue.Number == issueNumber
+                && issue.EpicNumber != null
                 && epic.ProjectId == projectId
                 && epic.Status != EpicStatusName.Done
                 && epic.Status != EpicStatusName.Closed
-            select active.EpicNumber
+            select issue.EpicNumber
         ).FirstOrDefaultAsync();
         return activeOwner;
     }
@@ -211,15 +212,17 @@ public class EpicQuerier : IScopedService
         if (issueNumberRows.Count == 0) return [];
 
         var epicIds = await (
-            from active in db.EpicActiveIssues.AsNoTracking()
+            from issue in db.Issues.AsNoTracking()
             join epic in db.Epics.AsNoTracking()
-                on new { active.ProjectId, EpicNumber = active.EpicNumber } equals new { epic.ProjectId, EpicNumber = epic.Number }
-            where active.ProjectId == projectId
-                && issueNumberRows.Contains(active.IssueNumber)
+                on new { issue.ProjectId, EpicNumber = issue.EpicNumber } equals new { epic.ProjectId, EpicNumber = (int?)epic.Number }
+            where issue.ProjectId == projectId
+                && issue.Number != null
+                && issueNumberRows.Contains(issue.Number.Value)
+                && issue.EpicNumber != null
                 && epic.ProjectId == projectId
                 && epic.Status != EpicStatusName.Done
                 && epic.Status != EpicStatusName.Closed
-            select active.EpicNumber
+            select issue.EpicNumber.GetValueOrDefault()
         ).Distinct().ToListAsync();
         return epicIds;
     }
