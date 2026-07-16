@@ -1316,11 +1316,7 @@ public class SystemUpdateServiceSpecs
 
         var result = await service.StartAsync(new SystemUpdateRequest(), CancellationToken.None);
         await commands.WaitForCountAsync(2);
-        await WaitUntilAsync(async () =>
-        {
-            var current = await store.GetLatestAsync();
-            return current?.Status == "failed" && current.Stage == "Failed";
-        });
+        await store.WaitForStatusAndStageAsync("failed", "Failed");
 
         var latest = await store.GetLatestAsync();
         Assert.True(result.Started);
@@ -1731,15 +1727,18 @@ public class SystemUpdateServiceSpecs
 
         public Task WaitForStatusAndStageAsync(string status, string stage)
         {
-            if (string.Equals(_latest?.Status, status, StringComparison.Ordinal)
-                && string.Equals(_latest?.Stage, stage, StringComparison.Ordinal))
+            lock (_gate)
             {
-                return Task.CompletedTask;
-            }
+                if (string.Equals(_latest?.Status, status, StringComparison.Ordinal)
+                    && string.Equals(_latest?.Stage, stage, StringComparison.Ordinal))
+                {
+                    return Task.CompletedTask;
+                }
 
-            var waiter = new StatusWaiter(status, stage);
-            _statusWaiters.Add(waiter);
-            return waiter.Task;
+                var waiter = new StatusWaiter(status, stage);
+                _statusWaiters.Add(waiter);
+                return waiter.Task;
+            }
         }
 
         private void CompleteStatusWaiters()
@@ -2006,13 +2005,4 @@ public class SystemUpdateServiceSpecs
         }
     }
 
-    private static async Task WaitUntilAsync(Func<Task<bool>> condition)
-    {
-        await TestWait.ForAsync(
-            condition,
-            value => value,
-            TimeSpan.FromSeconds(5),
-            TimeSpan.FromMilliseconds(25),
-            "system update condition");
-    }
 }
