@@ -139,6 +139,27 @@ public class CliProjectCommandSpecs
     }
 
     [Fact]
+    public async Task ProjectCreate_RelativeOrigin_RejectsBeforeAnyRequest()
+    {
+        var (handler, http, output, error, fileSystem, executor) = CliTestFactory.Create(
+            async (_, _) => RecordingHttpHandler.Json(new { success = true, data = new { } }, HttpStatusCode.Created),
+            activeProjectId: null);
+
+        fileSystem.CreateDirectory(RepoRoot);
+        QueueGit(executor, RepoRoot, ["rev-parse", "--show-toplevel"], 0, RepoRoot + "\n");
+        QueueGit(executor, RepoRoot, ["rev-parse", "HEAD"], 0, "abc123\n");
+        QueueGit(executor, RepoRoot, ["remote", "get-url", "origin"], 0, "../remote.git\n");
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["project", "create", "my-project", "--path", RepoRoot], output, error, fileSystem, executor);
+
+        Assert.NotEqual(0, exitCode);
+        Assert.Empty(handler.Requests);
+        Assert.Contains("Runner", error.ToString(), StringComparison.OrdinalIgnoreCase);
+        executor.AssertExpectedCommandsExecuted();
+    }
+
+    [Fact]
     public async Task ProjectCreate_PathHasNoResolvableBranch_RejectsBeforeAnyRequest()
     {
         var (handler, http, output, error, fileSystem, executor) = CliTestFactory.Create(

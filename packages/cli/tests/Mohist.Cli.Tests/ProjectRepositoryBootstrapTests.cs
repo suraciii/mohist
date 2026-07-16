@@ -131,6 +131,43 @@ public class ProjectRepositoryBootstrapTests
     }
 
     [Fact]
+    public async Task TryResolveAsync_RelativeOriginUrl_ReportsRunnerInaccessibleOrigin()
+    {
+        var fs = new FakeFileSystem();
+        fs.CreateDirectory(WorkTreeRoot);
+        var executor = new FakeCommandExecutor();
+        QueueGit(executor, WorkTreeRoot, ["rev-parse", "--show-toplevel"], 0, WorkTreeRoot + "\n");
+        QueueGit(executor, WorkTreeRoot, ["rev-parse", "HEAD"], 0, "abc123\n");
+        QueueGit(executor, WorkTreeRoot, ["remote", "get-url", "origin"], 0, "../remote.git\n");
+
+        var outcome = await ProjectRepositoryBootstrap.TryResolveAsync(WorkTreeRoot, fs, executor);
+
+        var failure = Assert.IsType<ProjectRepositoryBootstrap.Outcome.Failure>(outcome);
+        Assert.Contains("Runner", failure.Message, StringComparison.OrdinalIgnoreCase);
+        executor.AssertExpectedCommandsExecuted();
+    }
+
+    [Theory]
+    [InlineData("ssh://localhost/remote.git")]
+    [InlineData("https://127.0.0.1/remote.git")]
+    [InlineData("git@localhost:remote.git")]
+    public async Task TryResolveAsync_LoopbackOriginUrl_ReportsRunnerInaccessibleOrigin(string origin)
+    {
+        var fs = new FakeFileSystem();
+        fs.CreateDirectory(WorkTreeRoot);
+        var executor = new FakeCommandExecutor();
+        QueueGit(executor, WorkTreeRoot, ["rev-parse", "--show-toplevel"], 0, WorkTreeRoot + "\n");
+        QueueGit(executor, WorkTreeRoot, ["rev-parse", "HEAD"], 0, "abc123\n");
+        QueueGit(executor, WorkTreeRoot, ["remote", "get-url", "origin"], 0, origin + "\n");
+
+        var outcome = await ProjectRepositoryBootstrap.TryResolveAsync(WorkTreeRoot, fs, executor);
+
+        var failure = Assert.IsType<ProjectRepositoryBootstrap.Outcome.Failure>(outcome);
+        Assert.Contains("Runner", failure.Message, StringComparison.OrdinalIgnoreCase);
+        executor.AssertExpectedCommandsExecuted();
+    }
+
+    [Fact]
     public async Task TryResolveAsync_NoResolvableBranch_ReportsBranchMissing()
     {
         var fs = new FakeFileSystem();

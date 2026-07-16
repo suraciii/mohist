@@ -52,6 +52,29 @@ public class ProjectApiSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
+    public async Task PostProject_WithCredentialedGitUrl_ReturnsBadRequestAndDoesNotCreateProject()
+    {
+        var name = $"credentialed-project-{Guid.NewGuid():N}";
+        using var response = await _client.PostAsJsonAsync("/api/projects", new
+        {
+            name,
+            repository = new
+            {
+                name = "server",
+                gitUrl = "https://user:token@example.test/server.git",
+                baseBranch = "main",
+            },
+        });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.DoesNotContain(
+            await _client.GetDataAsync<List<ProjectInfo>>("/api/projects"),
+            project => project.Name == name);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
+    [Fact]
     public async Task PostProject_WithInitialIsDefault_ReturnsBadRequestAndDoesNotCreateProject()
     {
         var name = $"initial-default-forbidden-{Guid.NewGuid():N}";
@@ -289,6 +312,21 @@ public class ProjectApiSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
+    public async Task PostRepository_WithCredentialedGitUrl_ReturnsBadRequestAndDoesNotMutate()
+    {
+        var created = await CreateRepositoryUpdateProjectAsync();
+
+        using var response = await _client.PostAsJsonAsync(
+            $"/api/projects/{created.Id}/repositories",
+            new { name = "web", gitUrl = "https://user:token@example.test/web.git", baseBranch = "main" });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        await AssertRepositoryUnchangedAsync(created.Id);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
+    [Fact]
     public async Task PostRepository_WithIsDefault_ReturnsBadRequestAndDoesNotMutate()
     {
         var created = await CreateRepositoryUpdateProjectAsync();
@@ -394,6 +432,21 @@ public class ProjectApiSpecs
         using var response = await _client.PatchAsJsonAsync(
             $"/api/projects/{created.Id}/repositories/backend",
             new { gitUrl = " ", baseBranch = "release" });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        await AssertRepositoryUnchangedAsync(created.Id);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
+    [Fact]
+    public async Task PatchRepository_WithCredentialedGitUrl_ReturnsBadRequestAndDoesNotMutate()
+    {
+        var created = await CreateRepositoryUpdateProjectAsync();
+
+        using var response = await _client.PatchAsJsonAsync(
+            $"/api/projects/{created.Id}/repositories/backend",
+            new { gitUrl = "https://user:token@example.test/backend.git" });
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         await AssertRepositoryUnchangedAsync(created.Id);

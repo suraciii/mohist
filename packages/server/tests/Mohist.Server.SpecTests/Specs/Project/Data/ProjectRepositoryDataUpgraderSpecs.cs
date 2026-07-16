@@ -92,6 +92,8 @@ public class ProjectRepositoryDataUpgraderSpecs
         { "[{\"name\":null,\"gitUrl\":\"git@example.com:server.git\",\"baseBranch\":\"main\",\"isDefault\":false}]", "Project 'broken' (proj_broken)", "repositories[0].name" },
         { "[{\"name\":\"server\",\"gitUrl\":null,\"baseBranch\":\"main\",\"isDefault\":false}]", "Project 'broken' (proj_broken)", "repositories[0].gitUrl" },
         { "[{\"name\":\"server\",\"gitUrl\":\"git@example.com:server.git\",\"baseBranch\":null,\"isDefault\":false}]", "Project 'broken' (proj_broken)", "repositories[0].baseBranch" },
+        { "[{\"name\":\"server\",\"gitUrl\":\"git@example.com:server.git\",\"isDefault\":false}]", "Project 'broken' (proj_broken)", "repositories[0].baseBranch" },
+        { "[{\"name\":\"server\",\"gitUrl\":\"https://user:token@example.test/server.git\",\"baseBranch\":\"main\",\"isDefault\":false}]", "Project 'broken' (proj_broken)", "embedded HTTP credentials" },
         { JSON.Serialize(new[] { Repository("server", "git@example.com:one.git", "main", false), Repository("SERVER", "git@example.com:two.git", "main", false) }), "Project 'broken' (proj_broken)", "Duplicate repository name 'SERVER'" },
     };
 

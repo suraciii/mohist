@@ -60,6 +60,27 @@ public static class ProjectRepositoryDataUpgrader
 
         try
         {
+            using var document = JsonDocument.Parse(project.RepositoriesJson);
+            if (document.RootElement.ValueKind != JsonValueKind.Array)
+            {
+                diagnostic = FormatDiagnostic(project, "RepositoriesJson must be an array.");
+                return false;
+            }
+
+            var index = 0;
+            foreach (var declaration in document.RootElement.EnumerateArray())
+            {
+                if (declaration.ValueKind is not JsonValueKind.Null
+                    && (declaration.ValueKind is not JsonValueKind.Object
+                        || !HasProperty(declaration, "baseBranch")))
+                {
+                    diagnostic = FormatDiagnostic(project, $"repositories[{index}].baseBranch must be present.");
+                    return false;
+                }
+
+                index++;
+            }
+
             declarations = JsonSerializer.Deserialize<List<RepositoryInfo>>(
                 project.RepositoriesJson,
                 JSON.Options);
@@ -128,4 +149,8 @@ public static class ProjectRepositoryDataUpgrader
 
     private static string FormatDiagnostic(ProjectRow project, string message) =>
         $"Project '{project.Name}' ({project.Id}): {message}";
+
+    private static bool HasProperty(JsonElement element, string name) =>
+        element.EnumerateObject().Any(property =>
+            string.Equals(property.Name, name, StringComparison.OrdinalIgnoreCase));
 }

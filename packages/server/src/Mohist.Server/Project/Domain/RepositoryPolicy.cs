@@ -66,6 +66,20 @@ public static class RepositoryPolicy
         return !string.IsNullOrEmpty(value);
     }
 
+    public static bool TryNormalizeGitUrl(string? raw, out string value)
+    {
+        if (!TryNormalize(raw, out value))
+            return false;
+
+        if (HasEmbeddedHttpCredentials(value))
+        {
+            value = string.Empty;
+            return false;
+        }
+
+        return true;
+    }
+
     public static List<ValidationError> Validate(IReadOnlyList<NormalizedRepository> repositories)
     {
         var errors = new List<ValidationError>();
@@ -91,6 +105,8 @@ public static class RepositoryPolicy
 
             if (string.IsNullOrWhiteSpace(repo.GitUrl))
                 errors.Add(new($"{prefix}.gitUrl", $"{prefix}.gitUrl must be a non-empty string."));
+            else if (HasEmbeddedHttpCredentials(repo.GitUrl))
+                errors.Add(new($"{prefix}.gitUrl", $"{prefix}.gitUrl must not contain embedded HTTP credentials."));
 
             if (string.IsNullOrWhiteSpace(repo.BaseBranch))
                 errors.Add(new($"{prefix}.baseBranch", $"{prefix}.baseBranch must be a non-empty string."));
@@ -163,8 +179,8 @@ public static class RepositoryPolicy
 
         if (!TryNormalize(input.Name, out var name))
             errors.Add(new("name", "Repository name is required."));
-        if (!TryNormalize(input.GitUrl, out var gitUrl))
-            errors.Add(new("gitUrl", "gitUrl is required."));
+        if (!TryNormalizeGitUrl(input.GitUrl, out var gitUrl))
+            errors.Add(new("gitUrl", "gitUrl is required and must not contain embedded HTTP credentials."));
         if (!TryNormalizeBaseBranch(input.BaseBranch, out var baseBranch))
             errors.Add(new("baseBranch", "baseBranch must be a non-empty string."));
 
@@ -210,8 +226,8 @@ public static class RepositoryPolicy
             return new(default!, new[] { new ValidationError("update", "Provide gitUrl and/or baseBranch to update.") });
 
         var gitUrl = repo.GitUrl;
-        if (hasGitUrl && !TryNormalize(input.GitUrl, out gitUrl))
-            return new(default!, new[] { new ValidationError("gitUrl", "gitUrl must be a non-empty string.") });
+        if (hasGitUrl && !TryNormalizeGitUrl(input.GitUrl, out gitUrl))
+            return new(default!, new[] { new ValidationError("gitUrl", "gitUrl must be a non-empty string and must not contain embedded HTTP credentials.") });
 
         var baseBranch = repo.BaseBranch;
         if (hasBaseBranch && !TryNormalizeBaseBranch(input.BaseBranch, out baseBranch))
@@ -291,4 +307,10 @@ public static class RepositoryPolicy
 
     public static string ResolveBaseBranch(string? raw) =>
         TryNormalizeBaseBranch(raw, out var value) ? value : DefaultBaseBranch;
+
+    private static bool HasEmbeddedHttpCredentials(string gitUrl) =>
+        Uri.TryCreate(gitUrl, UriKind.Absolute, out var uri)
+        && (uri.Scheme.Equals(Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase)
+            || uri.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
+        && !string.IsNullOrEmpty(uri.UserInfo);
 }

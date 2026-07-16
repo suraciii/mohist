@@ -23,6 +23,31 @@ public class CliRepositoryCommandSpecs
         yield return [new[] { "repo", "delete", "origin", "--project-id", "proj_by_id" }, HttpMethod.Delete, "/api/projects/proj_by_id/repositories/origin"];
     }
 
+    public static IEnumerable<object[]> SingleFieldUpdateCases()
+    {
+        yield return [new[] { "repo", "update", "origin", "--git-url", "git@example.com:repo-v2.git" }, "gitUrl", "git@example.com:repo-v2.git"];
+        yield return [new[] { "repo", "update", "origin", "--base-branch", "release" }, "baseBranch", "release"];
+    }
+
+    public static IEnumerable<object[]> NoResolvableProjectCases()
+    {
+        yield return [new[] { "repo", "list" }];
+        yield return [new[] { "repo", "add", "origin", "--git-url", "git@example.com:repo.git" }];
+        yield return [new[] { "repo", "update", "origin", "--base-branch", "release" }];
+        yield return [new[] { "repo", "set-default", "origin" }];
+        yield return [new[] { "repo", "delete", "origin" }];
+    }
+
+    public static IEnumerable<object[]> MutationOutputCases()
+    {
+        yield return [new[] { "repo", "update", "origin", "--base-branch", "release", "--output", "table" }, false];
+        yield return [new[] { "repo", "update", "origin", "--base-branch", "release", "--output", "json" }, true];
+        yield return [new[] { "repo", "set-default", "origin", "--output", "table" }, false];
+        yield return [new[] { "repo", "set-default", "origin", "--output", "json" }, true];
+        yield return [new[] { "repo", "delete", "origin", "--output", "table" }, false];
+        yield return [new[] { "repo", "delete", "origin", "--output", "json" }, true];
+    }
+
     private static (RecordingHttpHandler handler, HttpClient http, StringWriter output, StringWriter error, FakeFileSystem fs, FakeCommandExecutor executor)
         SetupEnv(
             Func<HttpRequestMessage, HttpResponseMessage>? responder = null,
@@ -201,6 +226,23 @@ public class CliRepositoryCommandSpecs
         Assert.Equal("git@example.com:repo-v2.git", body["gitUrl"]?.GetValue<string>());
         Assert.Equal("develop", body["baseBranch"]?.GetValue<string>());
         Assert.Equal(2, body.AsObject().Count);
+    }
+
+    [Theory]
+    [MemberData(nameof(SingleFieldUpdateCases))]
+    public async Task RepoUpdate_WithOneMetadataField_SendsOnlyThatField(
+        string[] args,
+        string expectedField,
+        string expectedValue)
+    {
+        var (handler, http, output, error, fs, executor) = SetupEnv();
+
+        var exitCode = await MohistCliCommands.RunAsync(http, args, output, error, fs, executor);
+
+        Assert.Equal(0, exitCode);
+        var body = JsonNode.Parse(handler.Requests.Single().Body!)!.AsObject();
+        Assert.Single(body);
+        Assert.Equal(expectedValue, body[expectedField]?.GetValue<string>());
     }
 
     [Fact]
@@ -488,6 +530,19 @@ public class CliRepositoryCommandSpecs
         Assert.Empty(handler.Requests);
     }
 
+    [Theory]
+    [MemberData(nameof(NoResolvableProjectCases))]
+    public async Task RepoSubcommand_NoResolvableProject_FailsClearlyWithoutDispatch(string[] args)
+    {
+        var (handler, http, output, error, fs, executor) = SetupEnv(activeProjectId: null);
+
+        var exitCode = await MohistCliCommands.RunAsync(http, args, output, error, fs, executor);
+
+        Assert.NotEqual(0, exitCode);
+        Assert.Contains("mo project use", error.ToString(), StringComparison.Ordinal);
+        Assert.Empty(handler.Requests);
+    }
+
     [Fact]
     public async Task RepoList_TableMode_RendersGitMetadataAndDefaultStatus()
     {
@@ -617,6 +672,42 @@ public class CliRepositoryCommandSpecs
         var stdout = output.ToString();
         Assert.Contains("\"name\": \"origin\"", stdout, StringComparison.Ordinal);
         Assert.DoesNotContain("\"success\"", stdout, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [MemberData(nameof(MutationOutputCases))]
+    public async Task RepoMutations_RenderRepositoryStateForEveryOutputMode(string[] args, bool jsonOutput)
+    {
+        var (handler, http, output, error, fs, executor) = SetupEnv(_ =>
+            RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new
+                {
+                    repositories = new[]
+                    {
+                        new { name = "server", gitUrl = "git@example.com:server.git", baseBranch = "main", isDefault = false },
+                        new { name = "origin", gitUrl = "git@example.com:repo.git", baseBranch = "release", isDefault = true },
+                    },
+                },
+            }));
+
+        var exitCode = await MohistCliCommands.RunAsync(http, args, output, error, fs, executor);
+
+        Assert.Equal(0, exitCode);
+        Assert.Single(handler.Requests);
+        var stdout = output.ToString();
+        if (jsonOutput)
+        {
+            Assert.Contains("\"repositories\"", stdout, StringComparison.Ordinal);
+            Assert.DoesNotContain("\"success\"", stdout, StringComparison.Ordinal);
+        }
+        else
+        {
+            Assert.Contains("git URL", stdout, StringComparison.Ordinal);
+            Assert.Contains("origin", stdout, StringComparison.Ordinal);
+            Assert.Contains("yes", stdout, StringComparison.Ordinal);
+        }
     }
 
     [Fact]
