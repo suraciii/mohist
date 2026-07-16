@@ -66,7 +66,7 @@ membership authority each have a separately enforceable boundary. Do not reuse t
 | T-001 typed scoped identities and codec | done — strict IssueKey/EpicKey, exact canonical codec, typed-only GrainKey access |
 | T-002 canonical Issue reference migration | done - every current-state owner classified; missing scoped columns, reconciliation, writer coverage and migration regressions landed |
 | T-003 canonical Epic reference migration | done - all current owners classified; scoped columns, guarded backfill, writer coverage and migration regressions landed |
-| T-004 number-only server model/APIs | pending |
+| T-004 number-only server model/APIs | in progress — production cutover and UnitTests compile; SpecTests fixture migration continues |
 | T-005 Issue-owned membership and Epic progression | pending |
 | T-006 durable EnsureStarted Workflow handoff | pending |
 | T-007 canonical lineage and producer-family conformance | pending |
@@ -283,6 +283,17 @@ server cutover in T-004.
   validation pass.
 - Full `npm test` passes: CLI **861**, Web **4683**, and Runner **1018** in addition to the server
   suites above; Web/Runner typechecks and boundary checks are green.
+
+## T-004 current progress
+
+- Issue/Epic domain, server routes, grains, event sources, inbox and Hermes test support now use
+  `ProjectId` plus number without random Issue/Epic identity fields.
+- Server UnitTests build and pass: **1484 passed / 0 failed / 0 skipped**.
+- SpecTests fixture migration is in progress. Inbox projection and Issue metrics helpers now seed
+  canonical sources and scoped rows; the remaining failures include stale Epic relation-row specs
+  that are intentionally owned by T-005.
+- T-004 is not complete until the current-state server contracts and all affected specs compile
+  without legacy identity aliases.
 
 ## Validation of planning artifacts
 
