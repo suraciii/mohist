@@ -114,8 +114,12 @@ public static partial class IssueRoutes
             if (grain is null) return ApiResults.NotFound($"Issue #{number} not found");
             try
             {
-                await grain.ReopenAsync();
+                await grain.ReopenWithTargetCheckAsync();
                 return ApiResults.Ok();
+            }
+            catch (IssueRepositoryMissingOnReopenException ex)
+            {
+                return ApiResults.Conflict(ex.Message, "repository_missing_on_reopen");
             }
             catch (InvalidOperationException ex)
             {

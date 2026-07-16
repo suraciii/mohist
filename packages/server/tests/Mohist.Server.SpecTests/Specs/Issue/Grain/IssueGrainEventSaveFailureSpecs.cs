@@ -193,6 +193,7 @@ public class IssueGrainEventSaveFailureSpecs
             Title = $"Issue {issueNumber}",
             Status = status,
             WorkflowRunId = null,
+            RepositoryRef = "main",
         };
         db.Issues.Add(new IssueRow
         {

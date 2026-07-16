@@ -14,7 +14,8 @@ public union IssueEvent(
     IssueCancelled,
     IssueArchived,
     IssueUnarchived,
-    IssueReopened);
+    IssueReopened,
+    IssueRepositoryChanged);
 
 public sealed record IssueCreated(
     string Title,
@@ -22,6 +23,13 @@ public sealed record IssueCreated(
     IReadOnlyDictionary<string, string> Labels,
     string? Risk,
     string? RepositoryRef);
+
+public sealed record IssueRepositoryChanged(
+    string? OldRepositoryRef,
+    string NewRepositoryRef,
+    string CommandId,
+    long? ExpectedRevision,
+    long? AppliedRevision);
 
 public sealed record IssueLabelsChanged(
     IReadOnlyDictionary<string, string> OldLabels,

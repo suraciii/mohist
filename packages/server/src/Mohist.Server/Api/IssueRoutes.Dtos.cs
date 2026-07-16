@@ -57,6 +57,7 @@ public record UpdateIssueRequest
     public bool? IsDraft { get; init; }
     public string[]? AttachmentIds { get; init; }
     public string? WorkflowProfileId { get; init; }
+    public string? RepositoryName { get; init; }
 
     /// <summary>
     /// Raw JSON body, captured at bind time. Used by the route handler to
@@ -104,6 +105,7 @@ public record UpdateIssueRequest
         if (raw.TryGetProperty("isDraft", out _)) fields.Add(nameof(IsDraft));
         if (raw.TryGetProperty("attachmentIds", out _)) fields.Add(nameof(AttachmentIds));
         if (raw.TryGetProperty("workflowProfileId", out _)) fields.Add(nameof(WorkflowProfileId));
+        if (raw.TryGetProperty("repositoryName", out _)) fields.Add(nameof(RepositoryName));
 
         return new UpdateIssueRequest
         {
@@ -120,6 +122,7 @@ public record UpdateIssueRequest
             IsDraft = GetNullableBool(raw, "isDraft"),
             AttachmentIds = GetStringArray(raw, "attachmentIds"),
             WorkflowProfileId = GetString(raw, "workflowProfileId"),
+            RepositoryName = GetString(raw, "repositoryName"),
             Raw = raw,
             Fields = fields,
         };

@@ -408,7 +408,60 @@ public class IssueGrain : Grain, IIssueGrain
     public async Task ReopenAsync()
     {
         EnsureIssue();
-        _issue!.Reopen();
+        // The target-existence check is a coordinator concern (T-005).
+        // Route-level callers go through the coordinator, which fences the
+        // reopen and only invokes this method after verifying the stored
+        // target still resolves. Direct callers (e.g. tests) opt into the
+        // verification path explicitly via ReopenWithTargetCheckAsync so
+        // they can react to a missing target before mutating state.
+        _issue!.Reopen(targetExists: true);
+        await SaveIssueAsync();
+    }
+
+    public async Task ReopenWithTargetCheckAsync()
+    {
+        EnsureIssue();
+        var targetExists = await ResolveReopenTargetExistsAsync();
+        _issue!.Reopen(targetExists);
+        await SaveIssueAsync();
+    }
+
+    private Task<bool> ResolveReopenTargetExistsAsync()
+    {
+        if (_issue is null || string.IsNullOrWhiteSpace(_issue.RepositoryRef))
+            return Task.FromResult(false);
+        return ResolveReopenTargetExistsCoreAsync();
+    }
+
+    private async Task<bool> ResolveReopenTargetExistsCoreAsync()
+    {
+        var project = await GrainFactory.GetGrain<IProjectGrain>(_issue!.ProjectId).GetAsync();
+        return project is not null
+            && !string.IsNullOrWhiteSpace(_issue.RepositoryRef)
+            && project.GetRepository(_issue.RepositoryRef) is not null;
+    }
+
+    public async Task ChangeRepositoryAsync(string canonicalName, string commandId, long? expectedRevision)
+    {
+        EnsureIssue();
+        if (string.IsNullOrWhiteSpace(canonicalName))
+            throw new IssueRepositoryUnknownException(canonicalName ?? string.Empty);
+
+        var project = await GrainFactory.GetGrain<IProjectGrain>(_issue!.ProjectId).GetAsync();
+        if (project is null)
+            throw new IssueRepositoryUnknownException(canonicalName);
+        var match = project.GetRepository(canonicalName);
+        if (match is null)
+            throw new IssueRepositoryUnknownException(canonicalName);
+
+        _issue!.ChangeRepository(match.Name, commandId, expectedRevision);
+        await SaveIssueAsync();
+    }
+
+    public async Task RecordRepositoryCommandReceiptAsync(string commandId, string kind, long? expectedRevision)
+    {
+        EnsureIssue();
+        _issue!.RecordRepositoryCommandReceipt(commandId, kind, expectedRevision);
         await SaveIssueAsync();
     }
 
@@ -423,6 +476,7 @@ public class IssueGrain : Grain, IIssueGrain
         var hasIsDraft = present.Contains(nameof(UpdateIssueData.IsDraft));
         var hasAttachments = present.Contains(nameof(UpdateIssueData.AttachmentIds));
         var hasWorkflowProfile = present.Contains(nameof(UpdateIssueData.WorkflowProfileId));
+        var hasRepository = present.Contains(nameof(UpdateIssueData.RepositoryName));
 
         var title = hasTitle ? data.Title : null;
         var body = hasBody ? data.Body : null;
@@ -442,6 +496,25 @@ public class IssueGrain : Grain, IIssueGrain
         if (hasWorkflowProfile && _issue!.WorkflowRunId is not null)
         {
             throw new WorkflowProfileLockedException(_issue.Number, _issue.WorkflowRunId);
+        }
+
+        // Repository reassignment is validated and applied first (before any
+        // other PATCH field is touched). This guarantees that an unknown or
+        // post-start-lock rejection leaves every other field unchanged —
+        // ChangeRepository throws without mutating _issue when the issue has
+        // already started, and the canonical-name lookup below throws when
+        // the Project does not declare the requested repository.
+        if (hasRepository)
+        {
+            if (string.IsNullOrWhiteSpace(data.RepositoryName))
+                throw new IssueRepositoryUnknownException(string.Empty);
+            var project = await GrainFactory.GetGrain<IProjectGrain>(_issue!.ProjectId).GetAsync();
+            if (project is null)
+                throw new IssueRepositoryUnknownException(data.RepositoryName!);
+            var match = project.GetRepository(data.RepositoryName);
+            if (match is null)
+                throw new IssueRepositoryUnknownException(data.RepositoryName!);
+            _issue!.ChangeRepository(match.Name, data.RepositoryCommandId ?? Guid.NewGuid().ToString("N"), data.RepositoryExpectedRevision);
         }
 
         // For labels, the grain honors three-state semantics:
@@ -510,15 +583,18 @@ public class IssueGrain : Grain, IIssueGrain
             wfStatus);
     }
 
-    public async Task<int> CreateAsync(string projectId, int number, string title, string? body, IReadOnlyDictionary<string, string>? labels, string? priority, string? repositoryRef = null, string? risk = null, bool isDraft = false, string[]? attachmentIds = null, string? workflowProfileId = null, int[]? prerequisiteNumbers = null)
+    public async Task<string> CreateAsync(string projectId, int number, string title, string? body, IReadOnlyDictionary<string, string>? labels, string? priority, string? repositoryRef = null, string? issueId = null, string? risk = null, bool isDraft = false, string[]? attachmentIds = null, string? workflowProfileId = null, int[]? prerequisiteNumbers = null, string? commandId = null, long? expectedRevision = null)
     {
         var key = ParseIssueKey();
         EnsureIdentityMatches(key, projectId, number);
         if (_issue is not null)
             throw new InvalidOperationException($"Issue '{GrainKey}' already exists");
 
-        var resolvedRef = await ResolveRepositoryRefAsync(key.ProjectId, repositoryRef);
-        await _attachmentService.ValidateIssueBindAsync(key.ProjectId, key.IssueNumber, attachmentIds);
+        var resolvedRef = await ResolveRepositoryRefAsync(projectId, repositoryRef);
+        if (string.IsNullOrWhiteSpace(resolvedRef))
+            throw new InvalidOperationException($"Cannot create issue without a resolved target repository for project '{projectId}'");
+        var resolvedIssueId = issueId ?? $"issue_{Guid.NewGuid():N}";
+        await _attachmentService.ValidateIssueBindAsync(projectId, resolvedIssueId, attachmentIds);
 
         if (!string.IsNullOrWhiteSpace(workflowProfileId) && !_profiles.Exists(workflowProfileId))
         {
@@ -535,7 +611,9 @@ public class IssueGrain : Grain, IIssueGrain
             resolvedRef,
             risk,
             isDraft,
-            workflowProfileId);
+            workflowProfileId,
+            commandId,
+            expectedRevision);
 
         // Stage the in-memory aggregate so LoadIssueSummaryAsync can resolve
         // the project id from _issue.ProjectId during prerequisite existence
@@ -800,5 +878,8 @@ public record UpdateIssueData(
     [property: Id(4)] bool? IsDraft = null,
     [property: Id(5)] string[]? AttachmentIds = null,
     [property: Id(6)] IReadOnlySet<string>? PresentFields = null,
-    [property: Id(7)] string? WorkflowProfileId = null
+    [property: Id(7)] string? WorkflowProfileId = null,
+    [property: Id(8)] string? RepositoryName = null,
+    [property: Id(9)] string? RepositoryCommandId = null,
+    [property: Id(10)] long? RepositoryExpectedRevision = null
 );

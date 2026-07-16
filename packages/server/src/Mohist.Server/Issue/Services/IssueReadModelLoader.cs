@@ -132,6 +132,7 @@ public class IssueReadModelLoader : IScopedService
             WorkflowProfileId = resolvedProfileId,
             PrerequisiteNumbers = issue.PrerequisiteNumbers,
             IsDraft = issue.IsDraft,
+            RepositoryName = issue.RepositoryRef,
             Repository = resolution.Repository,
             RepositoryProblem = resolution.Problem,
         };
@@ -172,6 +173,7 @@ public class IssueReadModelLoader : IScopedService
         IsDraft = issue.IsDraft,
         CanStart = issue.CanStart,
         Blocker = issue.Blocker,
+        RepositoryName = issue.RepositoryName,
         Repository = issue.Repository,
         RepositoryProblem = issue.RepositoryProblem,
     };

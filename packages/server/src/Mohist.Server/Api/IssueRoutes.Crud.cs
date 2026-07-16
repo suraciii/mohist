@@ -9,6 +9,7 @@ using Mohist.Server.Project.Services;
 using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Services;
 using IssueDomain = Mohist.Server.Issue.Domain;
+using Mohist.Server.Issue.Domain;
 
 namespace Mohist.Server.Api;
 
@@ -24,13 +25,14 @@ public static partial class IssueRoutes
             string? priority,
             bool? archived,
             bool? all,
+            string? repository,
             IssueQuerier issuesQuery) =>
         {
             var project = GetRequiredProject(ctx);
             if (TryValidateLabelFilters(label, out var labelError) is false)
                 return ApiResults.BadRequest(labelError!, "invalid_label");
 
-            var list = await issuesQuery.ListWithLabelFiltersAsync(project.Id, project, stage, label, priority, archived, all);
+            var list = await issuesQuery.ListWithLabelFiltersAsync(project.Id, project, stage, label, priority, archived, all, repository);
             return ApiResults.Ok(list);
         });
 
@@ -177,6 +179,17 @@ public static partial class IssueRoutes
 
             var grain = await GetIssueGrainAsync(grains, issuesQuery, project.Id, number);
             if (grain is null) return ApiResults.NotFound($"Issue #{number} not found");
+
+            // Repository reassignment: when present in the PATCH body, the
+            // grain applies it as the first transaction step (before any
+            // other field is touched) and rejects post-start, unknown, and
+            // stale-revision changes with typed conflicts. Pre-validation
+            // here matches the create path so unknown names fail with the
+            // same HTTP code as unknown workflow profiles.
+            var repositoryUpdateName = (string?)null;
+            if (req.Contains(nameof(UpdateIssueRequest.RepositoryName)))
+                repositoryUpdateName = req.RepositoryName;
+
             try
             {
                 await grain.UpdateFullAsync(new UpdateIssueData(
@@ -187,11 +200,24 @@ public static partial class IssueRoutes
                     IsDraft: req.IsDraft,
                     AttachmentIds: req.AttachmentIds,
                     PresentFields: req.Fields,
-                    WorkflowProfileId: workflowProfileIdForUpdate));
+                    WorkflowProfileId: workflowProfileIdForUpdate,
+                    RepositoryName: repositoryUpdateName));
             }
             catch (IssueDomain.WorkflowProfileLockedException ex)
             {
                 return ApiResults.Conflict(ex.Message, "workflow_profile_locked");
+            }
+            catch (IssueRepositoryUnknownException ex)
+            {
+                return ApiResults.BadRequest(ex.Message, "repository_not_found");
+            }
+            catch (IssueRepositoryLockedException ex)
+            {
+                return ApiResults.Conflict(ex.Message, "repository_locked");
+            }
+            catch (IssueRepositoryStaleRevisionException ex)
+            {
+                return ApiResults.Conflict(ex.Message, "repository_stale_revision");
             }
             catch (InvalidOperationException ex)
             {

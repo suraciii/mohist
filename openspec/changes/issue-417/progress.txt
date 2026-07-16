@@ -54,3 +54,80 @@
 - `dotnet test` 全跑过：911 CLI + 1372 unit + 27 arch + 2789 spec
   + 1016 runner，`dotnet build Mohist.sln -p:SkipWebBuild=true`
   在 warnings-as-errors 下 0 warning 0 error。
+
+## T-003 notes (Issue repository binding)
+
+- Issue 聚合的「目标仓库」现在有两条解析路径：
+  - 创建（`Issue.Create`）接受「显式名称」或「留空走 Project default」，
+    留空由 grain 层在调用聚合前解析成 canonical 名称再传入；
+  - 重分配（`ChangeRepository`）只接受 non-empty canonical 名称，永远
+    不回退到 default——这一点对协调者（`IssueRepositoryCoordinatorGrain`）
+    的失败语义很关键：重分配校验失败时不应 fallback 到任何隐含仓库。
+- `HasWorkflowStarted` 与 `_workflowRunId` 不同：前者是「开始事实」
+  且原子地在 `Issue.Start`/`StartWorkflow` 内与第一次 WorkflowRunId
+  一同置位、并跟着 issue 走完 `Done`/`Cancelled`/`Reopen`/`ClearStoppedWorkflow`
+  全程不被清掉；后者只是「最近一次执行的引用」，可能被
+  `ClearStoppedWorkflow` 清空。spec 要求「target lock 通过
+  `HasWorkflowStarted` 而非 `_workflowRunId` 或 status」就是为了
+  区分这两层语义。
+- `ChangeRepository` 的「失败必须在写入其他字段之前」在 grain 层
+  用「先调用 `_issue.ChangeRepository`，再调用 `_issue.Update` /
+  `_issue.SetDraft` / …」的顺序来保证。一旦 lock / unknown /
+  stale-revision 任何一种 throw，aggregate 状态零改动、其他字段
+  不会被部分应用；T-005 的协调者会在它外面再包一层 fencing。
+- `Issue.Reopen(targetExists)` 把「目标仓库是否还存在」的事实推
+  进了聚合——grain 层提供一个 `ReopenWithTargetCheckAsync`（调用
+  `GrainFactory.GetGrain<IProjectGrain>` 解析后传入），还有一个
+  纯桩子 `ReopenAsync(targetExists: true)`，给不需要走 target 校验
+  的内部 / 测试代码使用。这样既不破坏现有 fault-isolation 测试
+  （`IssueGrainEventSaveFailureSpecs`）的语义，也保证了 API 路由
+  的 `/reopen` 走真实校验路径返回 `repository_missing_on_reopen`。
+- `IssueRepositoryBindingReceipt` 的「即使 no-op 也记录 receipt」
+  是设计 D2 关键不变量——lost response 之后重放不能从「未提交」
+  跳过「post-start lock」分支。T-003 在聚合层就把它落下来：成功的
+  `_issue.RecordRepositoryCommandReceipt` 也会推一个 `revision`
+  增长 + 写 receipt，但不产生 `IssueRepositoryChanged` 事件。
+- `IssueEvent` 是个 C# 14 union，加新 case 必须同时改：
+  - 联合声明（`IssueEvent.cs`）
+  - `IssueEventSerializer.BusType` 与 `Unwrap` 的 switch
+  - `EventCatalog.ReverseDns` 常量与 `EventCatalog.All` 列表
+  - `ProjectEventFilter.IssueTypes` 数组（让事件能进入 feed）
+  T-003 这五处全部更新并加了对应单元 / spec 测试。
+- 共享的 Git URL normalizer (`GitRemoteUrlNormalizer`) 几个
+  不能省的细节：
+  - SCP-like `git@host:path` 与 `ssh://git@host/path` 必须等价
+    （前者第一个 `:` 当 host/path 分隔符）；
+  - `https://example.com:443/...` 必须 strip 默认端口（`8443` 等
+    非默认端口保留），host 之后才 lowercase；
+  - userinfo（user:pw@...）整段丢弃，fingerprint 永不包含凭证；
+  - 路径大小写保留（Git 远端大小写敏感性跟操作系统相关，仓库策略
+    需要保留声明时的大小写）——这条对 `RepositoryPolicy` 的 alias
+    检测至关重要，否则 `Owner/Repo` vs `owner/repo` 会被错判成
+    同一个远端。
+  `GitRemoteUrlNormalizer.NormalizationVersion` 钉在 `git-remote-url/v1`，
+  任何字段变更视为 breaking change，server 与 runner 必须同步。
+- IssueGrain 既有 `CreateAsync` 现在有 `commandId` /
+  `expectedRevision` 两个新可选参数——调用者（API 路由、协调者）必须
+  决定要不要生成 receipt；domain 测试里绝大多数旧测试只关心
+  状态机行为而不是 receipt，所以一律不传 `commandId`。
+- API 路由上「PATCH 必须先做 repository 校验再处理其他字段」是
+  spec 明确要求——`IssueRoutes.Crud.cs` 的 `UpdateFullAsync` 在
+  `_issue.Update(title, body, ...)` 之前就先把 `_issue.ChangeRepository`
+  走完，确保任何 throw 都让 issue 状态零改动。
+- IssueGrain 接口扩展的连锁影响：所有 `: IIssueGrain` 的 test fake
+  （Epic recovery / Epic progression / Issue workflow completion
+  handler 的 RecordingIssueGrain 等）都要补 `ChangeRepositoryAsync`、
+  `RecordRepositoryCommandReceiptAsync`、`ReopenWithTargetCheckAsync`
+  三个方法和 `CreateAsync` 的两个新可选参数。我用了一个一次性
+  Python 脚本扫描 + 注入，避免手工漏改。
+- 修复 `IssueGrainEventSaveFailureSpecs` 时遇到的「grains 不挂
+  Orleans runtime 就 NRE」问题——其 grain 直接 `new IssueGrain(...)`，
+  而 `ReopenAsync` 又调用 `GrainFactory.GetGrain<IProjectGrain>`，
+  GrainFactory 是 `null`。这暴露了「grain 的子方法不能默认调用
+  Orleans runtime」。我最终拆成 `ReopenAsync(targetExists: true)`
+  + `ReopenWithTargetCheckAsync()` 两个方法：前者给 fault-isolation
+  测试用，后者给真实 API 路径用。
+- `dotnet test Mohist.sln -p:SkipWebBuild=true --no-build` 全绿：
+  911 CLI + 1423 unit + 27 arch + 2802 spec（其中包含我新加的
+  30 个 issue binding / normalizer / event serializer / api spec
+  case）+ 1016 runner，0 warning 0 error。
