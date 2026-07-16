@@ -215,7 +215,7 @@ public class BackfillIssueCompletedEventsMigrationSpecs
             )
             SELECT
                 1 AS Id,
-                '/mohist/issues/' || i.IssueId AS Source,
+                '/mohist/issues/' || json_extract(i.State, '$.id') AS Source,
                 lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-' || hex(randomblob(2))
                       || '-' || hex(randomblob(2)) || '-' || hex(randomblob(6))) AS EventId,
                 'com.mohist.issue.completed' AS Type,
@@ -232,7 +232,7 @@ public class BackfillIssueCompletedEventsMigrationSpecs
                 ) AS Data,
                 json_object(
                     'projectid', json_extract(i.State, '$.projectId'),
-                    'issueid',   i.IssueId,
+                    'issueid',   json_extract(i.State, '$.id'),
                     'issueno',   CAST(CAST(json_extract(i.State, '$.number') AS INTEGER) AS TEXT)
                 ) AS ExtensionsJson
             FROM Issues i
@@ -240,7 +240,7 @@ public class BackfillIssueCompletedEventsMigrationSpecs
               AND NOT EXISTS (
                   SELECT 1
                   FROM IssueEvents e
-                  WHERE e.Source = '/mohist/issues/' || i.IssueId
+                  WHERE e.Source = '/mohist/issues/' || json_extract(i.State, '$.id')
                     AND e.Type = 'com.mohist.issue.completed'
               );
             """);
@@ -250,10 +250,12 @@ public class BackfillIssueCompletedEventsMigrationSpecs
     {
         using var command = ctx.Database.GetDbConnection().CreateCommand();
         command.CommandText = """
-            INSERT INTO Issues (IssueId, State)
-            VALUES ($id, $state);
+            INSERT INTO Issues (ProjectId, Number, State)
+            VALUES (
+                COALESCE(json_extract($state, '$.projectId'), json_extract($state, '$.ProjectId'), 'migration-test'),
+                CAST(COALESCE(json_extract($state, '$.number'), json_extract($state, '$.Number')) AS INTEGER),
+                $state);
             """;
-        AddParam(command, "$id", issueId);
         AddParam(command, "$state", stateJson);
         await command.ExecuteNonQueryAsync();
     }
