@@ -55,7 +55,7 @@ public class IssueTitleLookupSpecs
         // Seed an issue so the table is non-empty; this also proves the
         // short-circuit doesn't accidentally pick anything up.
         var seeded = NewIssue("proj-empty-input", 1, "Should not surface");
-        db.Issues.Add(new IssueRow { IssueId = seeded.Id, State = IssueStore.Serialize(seeded) });
+        db.Issues.Add(new IssueRow { ProjectId = seeded.ProjectId, Number = seeded.Number, State = IssueStore.Serialize(seeded) });
         await db.SaveChangesAsync();
 
         DetachTracked(db);
@@ -75,7 +75,7 @@ public class IssueTitleLookupSpecs
 
         var projectId = $"proj-dedup-{Guid.NewGuid():N}";
         var issue = NewIssue(projectId, 42, "Deduped title");
-        db.Issues.Add(new IssueRow { IssueId = issue.Id, State = IssueStore.Serialize(issue) });
+        db.Issues.Add(new IssueRow { ProjectId = issue.ProjectId, Number = issue.Number, State = IssueStore.Serialize(issue) });
         await db.SaveChangesAsync();
 
         DetachTracked(db);
@@ -102,9 +102,9 @@ public class IssueTitleLookupSpecs
         var i2 = NewIssue(projectId, 2, "Second");
         var i3 = NewIssue(projectId, 3, "Third");
         db.Issues.AddRange(
-            new IssueRow { IssueId = i1.Id, State = IssueStore.Serialize(i1) },
-            new IssueRow { IssueId = i2.Id, State = IssueStore.Serialize(i2) },
-            new IssueRow { IssueId = i3.Id, State = IssueStore.Serialize(i3) });
+            new IssueRow { ProjectId = i1.ProjectId, Number = i1.Number, State = IssueStore.Serialize(i1) },
+            new IssueRow { ProjectId = i2.ProjectId, Number = i2.Number, State = IssueStore.Serialize(i2) },
+            new IssueRow { ProjectId = i3.ProjectId, Number = i3.Number, State = IssueStore.Serialize(i3) });
         await db.SaveChangesAsync();
 
         DetachTracked(db);
@@ -132,9 +132,9 @@ public class IssueTitleLookupSpecs
         var own2 = NewIssue(ownProject, 2, "Mine 2");
         var foreign = NewIssue(otherProject, 1, "Foreign #1");
         db.Issues.AddRange(
-            new IssueRow { IssueId = own1.Id, State = IssueStore.Serialize(own1) },
-            new IssueRow { IssueId = own2.Id, State = IssueStore.Serialize(own2) },
-            new IssueRow { IssueId = foreign.Id, State = IssueStore.Serialize(foreign) });
+            new IssueRow { ProjectId = own1.ProjectId, Number = own1.Number, State = IssueStore.Serialize(own1) },
+            new IssueRow { ProjectId = own2.ProjectId, Number = own2.Number, State = IssueStore.Serialize(own2) },
+            new IssueRow { ProjectId = foreign.ProjectId, Number = foreign.Number, State = IssueStore.Serialize(foreign) });
         await db.SaveChangesAsync();
 
         DetachTracked(db);
@@ -215,9 +215,9 @@ public class IssueTitleLookupSpecs
         var i2 = NewIssue(projectId, 22, "Querier/Assembler: 22");
         var i3 = NewIssue(projectId, 33, "Querier/Assembler: 33");
         db.Issues.AddRange(
-            new IssueRow { IssueId = i1.Id, State = IssueStore.Serialize(i1) },
-            new IssueRow { IssueId = i2.Id, State = IssueStore.Serialize(i2) },
-            new IssueRow { IssueId = i3.Id, State = IssueStore.Serialize(i3) });
+            new IssueRow { ProjectId = i1.ProjectId, Number = i1.Number, State = IssueStore.Serialize(i1) },
+            new IssueRow { ProjectId = i2.ProjectId, Number = i2.Number, State = IssueStore.Serialize(i2) },
+            new IssueRow { ProjectId = i3.ProjectId, Number = i3.Number, State = IssueStore.Serialize(i3) });
         await db.SaveChangesAsync();
 
         await InsertGenericSessionAsync(db, projectId, $"session-{Guid.NewGuid():N}", 11, new DateTime(2026, 6, 1, 0, 0, 0, DateTimeKind.Utc));
@@ -286,7 +286,6 @@ public class IssueTitleLookupSpecs
 
     private static Mohist.Server.Issue.Domain.Issue NewIssue(string projectId, int number, string title) => new()
     {
-        Id = $"issue_{projectId}_{number}",
         ProjectId = projectId,
         Number = number,
         Title = title,

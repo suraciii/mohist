@@ -103,8 +103,8 @@ public class AgentActivityFeedAssemblerSpecs
 
         var waiting = new List<ActivityWaitingCardDto>
         {
-            new(IssueId: "issue-1", IssueNumber: 1, IssueTitle: "Issue #1", Stage: "approval", Label: "Needs Approval", RequestedAt: "2026-06-30T00:00:00Z", Preview: null),
-            new(IssueId: "issue-2", IssueNumber: 2, IssueTitle: "Issue #2", Stage: "approval", Label: "Needs Approval", RequestedAt: null, Preview: null),
+            new(IssueNumber: 1, IssueTitle: "Issue #1", Stage: "approval", Label: "Needs Approval", RequestedAt: "2026-06-30T00:00:00Z", Preview: null),
+            new(IssueNumber: 2, IssueTitle: "Issue #2", Stage: "approval", Label: "Needs Approval", RequestedAt: null, Preview: null),
         };
 
         var assembler = ResolveAssembler();
