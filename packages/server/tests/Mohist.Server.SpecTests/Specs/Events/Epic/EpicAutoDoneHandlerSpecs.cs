@@ -1369,7 +1369,7 @@ public class EpicAutoDoneHandlerSpecs
             _issueId = issueId;
         }
 
-        public Task<string> CreateAsync(string projectId, int number, string title, string? body, IReadOnlyDictionary<string, string>? labels, string? priority, string? repositoryRef = null, string? issueId = null, string? risk = null, bool isDraft = false, string[]? attachmentIds = null, string? workflowProfileId = null, int[]? prerequisiteNumbers = null) => throw new NotSupportedException();
+        public Task<int> CreateAsync(string projectId, int number, string title, string? body, IReadOnlyDictionary<string, string>? labels, string? priority, string? repositoryRef = null, string? risk = null, bool isDraft = false, string[]? attachmentIds = null, string? workflowProfileId = null, int[]? prerequisiteNumbers = null) => throw new NotSupportedException();
 
         public Task<string> StartWorkAsync(WorkflowProjectContext? project = null)
         {
@@ -1394,7 +1394,7 @@ public class EpicAutoDoneHandlerSpecs
         public Task<IssueStartReadiness> GetStartReadinessAsync() => throw new NotSupportedException();
         public Task<IssueCommentResult> AddCommentAsync(string body, string[]? attachmentIds = null) => throw new NotSupportedException();
         public Task DeactivateForTestAsync() => throw new NotSupportedException();
-        public Task SetEpicAffiliationAsync(string? epicId) => Task.CompletedTask;
+        public Task SetEpicAffiliationAsync(int? epicNumber) => Task.CompletedTask;
     }
 
     public sealed record RecordedGrainCall(string GrainKey);
