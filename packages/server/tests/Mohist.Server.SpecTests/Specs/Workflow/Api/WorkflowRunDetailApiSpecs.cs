@@ -61,7 +61,7 @@ public class WorkflowRunDetailApiSpecs
     [Fact]
     public async Task Get_ReturnsFullDetailWithAssociatedIssue()
     {
-        var (_, _, _, issueNumber, wrId) = await SeedActiveWorkflowAsync();
+        var (projectId, _, _, issueNumber, wrId) = await SeedActiveWorkflowAsync();
 
         var response = await _client.GetAsync($"/api/workflow-runs/{wrId}");
 
@@ -81,6 +81,7 @@ public class WorkflowRunDetailApiSpecs
         // Associated issue joins through IssueQuerier.GetIssueRefForWorkflowRunAsync.
         var issueRef = data.GetProperty("issueRef");
         Assert.Equal(JsonValueKind.Object, issueRef.ValueKind);
+        Assert.Equal(projectId, issueRef.GetProperty("projectId").GetString());
         Assert.Equal(issueNumber, issueRef.GetProperty("number").GetInt32());
         Assert.Equal("Workflow control test", issueRef.GetProperty("title").GetString());
     }
@@ -90,7 +91,7 @@ public class WorkflowRunDetailApiSpecs
     [Fact]
     public async Task Get_WhenIssueRowIsTerminal_IssueRefStillCarriesCorrelationContext()
     {
-        var (_, _, _, issueNumber, wrId) = await SeedActiveWorkflowAsync();
+        var (projectId, _, _, issueNumber, wrId) = await SeedActiveWorkflowAsync();
         await ForceIssueStatusAsync(wrId, terminal: true);
 
         var response = await _client.GetAsync($"/api/workflow-runs/{wrId}");
@@ -107,6 +108,7 @@ public class WorkflowRunDetailApiSpecs
         Assert.Equal(wrId, data.GetProperty("status").GetProperty("workflowRunId").GetString());
         var issueRef = data.GetProperty("issueRef");
         Assert.Equal(JsonValueKind.Object, issueRef.ValueKind);
+        Assert.Equal(projectId, issueRef.GetProperty("projectId").GetString());
         Assert.Equal(issueNumber, issueRef.GetProperty("number").GetInt32());
         Assert.Equal("Workflow control test", issueRef.GetProperty("title").GetString());
     }

@@ -5,7 +5,8 @@ namespace Mohist.Server.Infrastructure.Data.Events;
 /// <summary>
 /// CloudEvents 1.0.2 envelope persisted for each issue domain event.
 /// One row per (Source, Id) where Source identifies the issue
-/// (<c>/mohist/issues/{issueId}</c>) and Id is the per-source sequence.
+/// (<c>/mohist/projects/{projectId}/issues/{issueNumber}</c>) and Id is the
+/// per-source sequence.
 /// Mirrors <see cref="WorkflowRunEventRow"/>; the two are kept as
 /// separate tables so workflow and issue remain distinct bounded
 /// contexts at the storage layer.

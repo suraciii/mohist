@@ -121,6 +121,15 @@ public class CanonicalIssueReferenceMigrationSpecs
             row => Assert.Equal(("proj_alpha", 42), (row.MetadataProjectId, row.IssueNumber)),
             row => Assert.Equal(("proj_beta", 42), (row.MetadataProjectId, row.IssueNumber)));
 
+        var pending = await (
+            from upload in verify.WorkflowArtifactPendingUploads.AsNoTracking()
+            join run in verify.WorkflowRuns.AsNoTracking()
+                on upload.WorkflowRunId equals run.WorkflowRunId
+            select new { upload.UploadId, run.MetadataProjectId, run.IssueNumber })
+            .SingleAsync();
+        Assert.Equal("upload_alpha", pending.UploadId);
+        Assert.Equal(("proj_alpha", 42), (pending.MetadataProjectId, pending.IssueNumber));
+
         var comments = await verify.IssueComments.AsNoTracking().OrderBy(row => row.Id).ToListAsync();
         Assert.Collection(
             comments,
@@ -171,6 +180,12 @@ public class CanonicalIssueReferenceMigrationSpecs
     [InlineData("artifact", "CK_CanonicalIssueReference_Artifacts")]
     [InlineData("attachment", "CK_CanonicalIssueReference_Attachments")]
     [InlineData("workflow", "CK_CanonicalIssueReference_WorkflowRuns")]
+    [InlineData("comment", "CK_CanonicalIssueReference_Comments")]
+    [InlineData("inbox", "CK_CanonicalIssueReference_Inbox")]
+    [InlineData("epic-link", "CK_CanonicalIssueReference_EpicIssues")]
+    [InlineData("epic-active", "CK_CanonicalIssueReference_EpicActiveIssues")]
+    [InlineData("prerequisite", "CK_CanonicalIssueReference_Prerequisites")]
+    [InlineData("session", "CK_CanonicalIssueReference_Sessions")]
     public async Task Reconciliation_FailsExplicitlyForUnresolvedOrMismatchedLegacyOwner(
         string owner,
         string expectedConstraint)
@@ -193,11 +208,53 @@ public class CanonicalIssueReferenceMigrationSpecs
             case "workflow":
                 await SeedWorkflowRunAsync(context, "run_bad", "proj_alpha", "issue_missing");
                 break;
+            case "comment":
+                await context.Database.ExecuteSqlInterpolatedAsync($"""
+                    INSERT INTO "IssueComments" ("Id", "ProjectId", "IssueId", "IssueNumber", "Body", "CreatedAt")
+                    VALUES ('comment_bad', 'proj_alpha', 'issue_missing', 42, 'bad', {SeedTime});
+                    """);
+                break;
+            case "inbox":
+                await context.Database.ExecuteSqlInterpolatedAsync($"""
+                    INSERT INTO "InboxItems" (
+                        "Id", "ProjectId", "IssueId", "IssueNumber", "IssueTitle", "NotificationKind",
+                        "SourceEventSource", "SourceEventId", "CreatedAt", "ReadAt", "ArchivedAt")
+                    VALUES ('inbox_bad', 'proj_alpha', 'issue_missing', 42, 'bad', 'issue_started',
+                            '/legacy/bad', 'source_bad', {SeedTime}, NULL, NULL);
+                    """);
+                break;
+            case "epic-link":
+                await context.Database.ExecuteSqlInterpolatedAsync($"""
+                    INSERT INTO "EpicIssues" ("EpicId", "IssueId", "ProjectId", "IssueNumber", "CreatedAt")
+                    VALUES ('epic_bad', 'issue_missing', 'proj_alpha', 42, {SeedTime});
+                    """);
+                break;
+            case "epic-active":
+                await context.Database.ExecuteSqlInterpolatedAsync($"""
+                    INSERT INTO "EpicActiveIssues" ("ProjectId", "IssueId", "EpicId", "IssueNumber", "CreatedAt")
+                    VALUES ('proj_alpha', 'issue_missing', 'epic_bad', 42, {SeedTime});
+                    """);
+                break;
+            case "prerequisite":
+                await context.Database.ExecuteSqlInterpolatedAsync($"""
+                    INSERT INTO "IssuePrerequisites" ("ProjectId", "IssueNumber", "PrerequisiteNumber", "CreatedAt")
+                    VALUES ('proj_alpha', 42, 99, {SeedTime});
+                    """);
+                break;
+            case "session":
+                await SeedSessionAsync(context, "session_bad", new Dictionary<string, string>
+                {
+                    ["mohist.io/project-id"] = "proj_alpha",
+                    ["mohist.io/issue-number"] = "99",
+                });
+                break;
         }
 
+        var before = await CountOwnersAsync(context);
         var exception = await Assert.ThrowsAsync<SqliteException>(
             () => CanonicalIssueReferenceReconciliation.ApplyAsync(context));
         Assert.Contains(expectedConstraint, exception.Message, StringComparison.Ordinal);
+        Assert.Equal(before, await CountOwnersAsync(context));
     }
 
     [Fact]
@@ -239,6 +296,7 @@ public class CanonicalIssueReferenceMigrationSpecs
         await SeedAttachmentAsync(context, "att_alpha_comment", "proj_alpha", "comment", "comment_alpha");
         await SeedWorkflowRunAsync(context, "run_alpha", "proj_alpha", "issue_alpha_42");
         await SeedWorkflowRunAsync(context, "run_beta", "proj_beta", "issue_beta_42");
+        await SeedPendingUploadAsync(context, "upload_alpha", "run_alpha");
 
         await ExecuteAsync(context, """
             INSERT INTO "IssueComments" ("Id", "ProjectId", "IssueId", "IssueNumber", "Body", "CreatedAt")
@@ -272,7 +330,8 @@ public class CanonicalIssueReferenceMigrationSpecs
             """, SeedTime);
         await ExecuteAsync(context, """
             INSERT INTO "IssuePrerequisites" ("ProjectId", "IssueNumber", "PrerequisiteNumber", "CreatedAt")
-            VALUES ('proj_alpha', 42, 7, {0});
+            VALUES ('proj_alpha', 42, 7, {0}),
+                   ('proj_beta', 42, 7, {0});
             """, SeedTime);
 
         await SeedSessionAsync(context, "session_agent_beta", new Dictionary<string, string>
@@ -307,6 +366,7 @@ public class CanonicalIssueReferenceMigrationSpecs
         await SeedIssueAsync(context, "issue_alpha_42", "proj_alpha", 42);
         await SeedIssueAsync(context, "issue_beta_42", "proj_beta", 42);
         await SeedIssueAsync(context, "issue_alpha_7", "proj_alpha", 7);
+        await SeedIssueAsync(context, "issue_beta_7", "proj_beta", 7);
     }
 
     private static async Task SeedIssueAsync(
@@ -406,6 +466,18 @@ public class CanonicalIssueReferenceMigrationSpecs
             """);
     }
 
+    private static Task SeedPendingUploadAsync(
+        MohistDbContext context,
+        string uploadId,
+        string workflowRunId) =>
+        context.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO "WorkflowArtifactPendingUploads" (
+                "UploadId", "WorkflowRunId", "WorkId", "TaskRunId", "Path", "Kind",
+                "FileCount", "ContentType", "ContentHash", "Size", "StoragePath", "CreatedAt", "ExpiresAt")
+            VALUES ({uploadId}, {workflowRunId}, 'work_alpha', 'task_alpha', '/artifact.txt', 'file',
+                    NULL, 'text/plain', 'hash_alpha', 1, '/store/' || {uploadId}, {SeedTime}, {SeedTime});
+            """);
+
     private static async Task SeedSessionAsync(
         MohistDbContext context,
         string sessionId,
@@ -425,8 +497,12 @@ public class CanonicalIssueReferenceMigrationSpecs
         context.Database.ExecuteSqlRawAsync(sql, value);
 
     private static async Task<OwnerCounts> CountOwnersAsync(MohistDbContext context) => new(
+        Projects: await context.Projects.CountAsync(),
+        Issues: await context.Issues.CountAsync(),
+        Epics: await context.Epics.CountAsync(),
         Profiles: await context.IssueWorkflowProfiles.CountAsync(),
         Artifacts: await context.WorkflowArtifacts.CountAsync(),
+        PendingUploads: await context.WorkflowArtifactPendingUploads.CountAsync(),
         Attachments: await context.Attachments.CountAsync(),
         Runs: await context.WorkflowRuns.CountAsync(),
         Comments: await context.IssueComments.CountAsync(),
@@ -434,7 +510,8 @@ public class CanonicalIssueReferenceMigrationSpecs
         LegacyEpicIssues: await CountTableAsync(context, "EpicIssues"),
         LegacyEpicActiveIssues: await CountTableAsync(context, "EpicActiveIssues"),
         Prerequisites: await context.IssuePrerequisites.CountAsync(),
-        Sessions: await context.AgentSessions.CountAsync());
+        Sessions: await context.AgentSessions.CountAsync(),
+        IssueEvents: await context.IssueEvents.CountAsync());
 
     private static Task<long> CountTableAsync(MohistDbContext context, string tableName)
     {
@@ -505,8 +582,12 @@ public class CanonicalIssueReferenceMigrationSpecs
     }
 
     private sealed record OwnerCounts(
+        int Projects,
+        int Issues,
+        int Epics,
         int Profiles,
         int Artifacts,
+        int PendingUploads,
         int Attachments,
         int Runs,
         int Comments,
@@ -514,7 +595,8 @@ public class CanonicalIssueReferenceMigrationSpecs
         long LegacyEpicIssues,
         long LegacyEpicActiveIssues,
         int Prerequisites,
-        int Sessions);
+        int Sessions,
+        int IssueEvents);
 
     private sealed record HistoricalEvent(string Source, string Data, string Extensions);
 

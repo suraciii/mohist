@@ -94,7 +94,7 @@ public class IssueQuerierSpecs
             .GetIssueRefForWorkflowRunAsync("wr_17");
 
         Assert.NotNull(issue);
-        Assert.Equal((17, "Workflow issue"), (issue!.Number, issue.Title));
+        Assert.Equal((project.Id, 17, "Workflow issue"), (issue!.ProjectId, issue.Number, issue.Title));
     }
 
     private static ProjectInfo NewProject(string name) => new()

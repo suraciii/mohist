@@ -125,10 +125,14 @@ public class IssueQuerier : IScopedService
         await using var db = await _dbFactory.CreateDbContextAsync();
         var row = await db.Issues.AsNoTracking()
             .Where(r => r.WorkflowRunId == workflowRunId)
-            .Select(r => new { r.Number, r.Title })
+            .Select(r => new { r.ProjectId, r.Number, r.Title })
             .FirstOrDefaultAsync();
-        if (row is null || row.Number is null || row.Title is null) return null;
-        return new WorkflowRunIssueRef(row.Number.Value, row.Title);
+        if (row is null
+            || string.IsNullOrWhiteSpace(row.ProjectId)
+            || row.Number is null
+            || row.Title is null)
+            return null;
+        return new WorkflowRunIssueRef(row.ProjectId, row.Number.Value, row.Title);
     }
 
     private static async Task<Domain.Issue?> LoadIssueAsync(MohistDbContext db, string projectId, int number)

@@ -365,3 +365,38 @@ server cutover in T-004.
   rather than relying only on the exact-length formatter for ordinary project ids.
 - Focused Orleans identity tests pass (**28 passed / 0 failed**), architecture tests pass
   (**27 passed / 0 failed**), and the server build passes with zero warnings/errors.
+
+## T-002 verification follow-up (2026-07-17)
+
+The T-002 owner inventory was rechecked against production source and the EF model. The complete
+classification is:
+
+- Current canonical owners: `IssueRow` uses `ProjectId + Number`; `IssueCommentRow`,
+  `InboxItemRow`, and `IssuePrerequisiteRow` use scoped number columns; `IssueWorkflowProfile`
+  uses required `ProjectId + IssueNumber`; `WorkflowArtifactRow` uses `ProjectId + IssueNumber`;
+  issue-owned `AttachmentRow` uses `ProjectId + OwnerIssueNumber`; and `WorkflowRunRow` exposes
+  `MetadataProjectId + IssueNumber` from its persisted run metadata and indexes that pair.
+- Derived current references: `WorkflowArtifactPendingUploadRow` is owned by `WorkflowRunId`, so
+  its Issue scope is derived by joining the canonical WorkflowRun context; `WorkIssueRef` and
+  runner work state carry `ProjectId + IssueNumber`; workflow, session, inbox, comment, artifact,
+  and issue query projections read the same scoped pair. The workflow-run detail projection now
+  includes `ProjectId` beside `Number`, so it cannot emit an ambiguous number-only reference.
+- Session origin references: `AgentSessionRow` workflow and direct-agent labels are computed from
+  persisted metadata, validated against `LabelProjectId + issue number`, and indexed by Project.
+- Already-canonical or separately identified resources: Issue prerequisites are verified by both
+  `(ProjectId, IssueNumber)` and `(ProjectId, PrerequisiteNumber)`; comment attachments use their
+  independently identified comment owner; WorkflowRunId, SessionId, AgentId, RunnerId,
+  attachment id, and event id are independent identities rather than Issue references.
+- Historical or later-removal references: legacy `IssueId` columns and JSON annotations exist only
+  in the migration boundary until T-004; old migration/designer files and persisted CloudEvent
+  source, payload, and extension JSON remain immutable history. No current production source path
+  retains an `IssueId` reference after the projection/comment audit.
+
+Migration specs now seed both Projects with Issue 42 plus their scoped prerequisite, every retained
+owner family, a pending upload derived through its WorkflowRun, and an immutable historical event.
+They assert root/current/history/pending row counts, cross-Project relationships, and explicit
+guarded failures for profiles, artifacts, attachments, WorkflowRuns, comments, inbox, both Epic
+relation shapes, prerequisites, and sessions. Focused migration, querier, and workflow-detail
+verification passes: **29 passed / 0 failed / 0 skipped**. Server UnitTests pass (**1453**),
+ArchTests pass (**27**), and the server build has zero errors. A full SpecTests run had one transient
+`IssueRebaseApi_QueuesWorkflowTask` conflict response; rerunning that exact case passed.
