@@ -63,7 +63,7 @@ membership authority each have a separately enforceable boundary. Do not reuse t
 
 | Task | State |
 |---|---|
-| T-001 typed scoped identities and codec | pending |
+| T-001 typed scoped identities and codec | done — strict IssueKey/EpicKey, exact canonical codec, typed-only GrainKey access |
 | T-002 canonical Issue reference migration | pending |
 | T-003 canonical Epic reference migration | pending |
 | T-004 number-only server model/APIs | pending |
@@ -73,6 +73,82 @@ membership authority each have a separately enforceable boundary. Do not reuse t
 | T-008 server lineage consumers/integrations | pending |
 | T-009 CLI/Web cutover | pending |
 | T-010 cleanup and end-to-end recovery verification | pending |
+
+## T-001 delivered
+
+### Files added
+
+- `packages/server/src/Mohist.Server/Infrastructure/Orleans/ScopedGrainKeyCodec.cs`
+- `packages/server/src/Mohist.Server/Infrastructure/Orleans/IssueKey.cs`
+- `packages/server/src/Mohist.Server/Infrastructure/Orleans/EpicKey.cs`
+- `packages/server/tests/Mohist.Server.UnitTests/Orleans/ScopedGrainKeyCodecTests.cs`
+
+### Files changed
+
+- `packages/server/src/Mohist.Server/Infrastructure/Orleans/GrainKey.cs` — typed-only
+  `Issue(IssueKey)` / `Epic(EpicKey)` public surface; legacy random-id `Issue(string)` kept
+  as `internal` so existing IssueGrain activation paths keep compiling until T-004 removes it.
+  No `(string, int)` shortcut — that would re-open the validation bypass the typed keys exist
+  to prevent.
+
+### Constructive details
+
+- `IssueKey` and `EpicKey` are `readonly record struct`s that validate in the primary
+  constructor. Blank ProjectId and ProjectId containing the `:` separator throw
+  `ArgumentException`. Non-positive numbers throw `ArgumentOutOfRangeException`. Default-like
+  values cannot enter runtime use through the public surface; default values via the
+  `default` keyword are visible but no caller route can construct them.
+- `ScopedGrainKeyCodec` formats the exact canonical length for `(ProjectId, Number)`: number
+  digits are computed up front and the destination span is allocated to that size, so the
+  output never contains padding or NUL characters. Number text is invariant-culture
+  `int.TryFormat`. `int.MaxValue` (10 digits) round-trips losslessly.
+- `TryParse(string?, out string, out int)` validates both halves: separator must be present,
+  exactly one separator (separator ambiguity is rejected), neither side may be blank, every
+  character of the number side must be `0`-`9`, parsed number must be strictly positive.
+- `Parse(string, out string, out int)` is the throwing counterpart used by typed-key callers.
+- `GrainKey.Issue(IssueKey)` and `GrainKey.Epic(EpicKey)` are the only public Issue / Epic
+  access methods. Reflection-surface test (`GrainKey_DoesNotExposeScalarIssueOverload` /
+  `GrainKey_DoesNotExposeScalarEpicOverload`) confirms there is no `(string, int)` Issue or
+  Epic overload to bypass typed construction.
+- The one necessary comment lives on the `internal` legacy overload and explains only its
+  reason and removal task (T-004). Names explain normal behavior.
+
+### Test coverage (41 new tests)
+
+- Round-trip (Format → TryParse → Format yields the original).
+- Exact output length: `projectId.Length + 1 + NumberDigits(number)`.
+- No NUL padding for short numbers.
+- `int.MaxValue` (2_147_483_647, 10 digits) encoded exactly as `p:2147483647` with length
+  12; round-trips losslessly.
+- Invariant-culture number text (no thousand separators, no decimal).
+- Construction rejects: blank ProjectId, separator-containing ProjectId, non-positive
+  number (`0`, `-1`).
+- TryParse rejects: `null`, empty, `:`, `proj_a`, `proj_a:`, `:1`, `proj_a:notanumber`,
+  `proj_a:0`, `proj_a:-1`, `proj_a:1:2` (separator ambiguity), `proj::a:1`,
+  `proj_a:1 ` (trailing whitespace), `proj_a: 1` (leading whitespace), `proj_a:1\0` (NUL).
+- Cross-Project same-number isolation: `proj_a:42 != proj_b:42` and the typed keys are
+  unequal.
+- Reflection surface test proves the public GrainKey Issue / Epic surface has no
+  `(string, int)` shortcut.
+- Reflection surface test proves the random-id `Issue(string)` overload is non-public.
+
+### Test results
+
+- `dotnet test packages/server/tests/Mohist.Server.UnitTests/Mohist.Server.UnitTests.csproj`
+  — **1453 passed / 0 failed / 0 skipped** (was 1422; +31 new tests).
+- `dotnet test packages/server/tests/Mohist.Server.ArchTests/Mohist.Server.ArchTests.csproj`
+  — **22/22 pass**.
+- Server build clean with `TreatWarningsAsErrors=true`.
+- SpecTests build clean (no behavioral changes; existing calls to internal `Issue(string)`
+  keep resolving via the `InternalsVisibleTo("Mohist.Server.SpecTests")` attribute).
+
+### Out of T-001 scope
+
+- EF migrations: explicitly NOT in this task. The previous T-001 attempt at a data
+  migration (`20260716120000_AdoptScopedIssueEpicIdentity`) was rejected; the rejected
+  filename must not be recreated. Owner migrations for Issue/Epic live in T-002 and T-003.
+- Runtime cutover of existing random-id IssueGrain call sites: T-004.
+- Issue/Epic membership authority and lineage: T-005..T-008.
 
 ## Validation of planning artifacts
 
