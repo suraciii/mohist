@@ -71,7 +71,7 @@ YAML budget:2 ──► TaskRun ──────────► WorkItem / dis
 |---|---|
 | workflow YAML | declares budget, handlers (when, tasks, retrySelf) |
 | action | returns normal output. Zero recovery awareness |
-| runner executor | matches `when`, computes `remaining = recoveryRemaining ?? budget`, constructs `addTasks` |
+| runner executor | matches `when`, treats explicit `null` as the declared budget, clamps numeric continuation state, fails closed when the field is absent, and constructs `addTasks` |
 | engine | mechanically inserts `addTasks`; passes `recoveryRemaining` through as opaque per-attempt state; manual retry rebuilds from definition fields only |
 
 ## Runner executor flow
