@@ -953,7 +953,7 @@ public class IssueMetricsQuerierSpecs
 
         var issue = SeedIssue(db, project, "issue_quality_null_run_1", workflowRunId: workflowRunId, status: IssueStatus.Done);
         await db.SaveChangesAsync();
-        SeedEvent(db, issue.Id, EventCatalog.ReverseDns.IssueCompleted, now.AddDays(-2), workflowRunId);
+        SeedEvent(db, issue, EventCatalog.ReverseDns.IssueCompleted, now.AddDays(-2), workflowRunId);
         await db.Database.ExecuteSqlRawAsync(
             "INSERT OR REPLACE INTO WorkflowRuns (WorkflowRunId, State, ETag) VALUES ({0}, {1}, 0)",
             workflowRunId,
