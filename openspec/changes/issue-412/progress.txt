@@ -293,9 +293,10 @@ server cutover in T-004.
   canonical sources and scoped rows; the remaining failures include stale Epic relation-row specs
   that are intentionally owned by T-005.
 - The number-only fixture pass has removed obsolete Epic membership/reopen suites and converted
-  workflow-profile, activity-card, and workflow-reference fixtures to scoped numbers. Full
-  SpecTests compile diagnostics have reduced from 710 to 433; remaining failures are grouped by
-  stale current-state fixtures and will be migrated without restoring random identity aliases.
+  workflow-profile, activity-card, workflow-reference, event-append, issue-creation, and profile
+  storage fixtures to scoped numbers. Full SpecTests compile diagnostics have reduced from 710 to
+  183; remaining failures are grouped by stale current-state fixtures and will be migrated without
+  restoring random identity aliases.
 - T-004 is not complete until the current-state server contracts and all affected specs compile
   without legacy identity aliases.
 

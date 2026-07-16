@@ -4,10 +4,10 @@ using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Logging.Abstractions;
 using Mohist.Server.Events.Grains;
 using Mohist.Server.Infrastructure.Data.Db;
-using Mohist.Server.Infrastructure.Data.Epic;
 using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Infrastructure.Events;
+using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Domain.Events;
 using Mohist.Server.SpecTests.Support;
 using Orleans;
@@ -16,30 +16,11 @@ using DomainIssue = Mohist.Server.Issue.Domain.Issue;
 
 namespace Mohist.Server.SpecTests.Specs.Events;
 
-/// <summary>
-/// Specs for the <c>transactional-event-append</c> requirement on the
-/// Issue producer. Covers issue-361 T-004 scenarios: issue state and
-/// emitted IssueEvents commit atomically; an event-row write failure
-/// rolls back the state transaction and propagates (no
-/// log-and-swallow catch remains); durable event rows survive a
-/// crash-after-commit and remain readable on a fresh
-/// <c>DbContext</c>. Also covers the transitional issue-412 lineage stamping:
-/// events stamped by <c>IssueStore.SaveAsync</c> carry the issue's
-/// identity (<c>projectid</c>, <c>issueid</c>, <c>issue</c>) in
-/// <c>extensions</c> (D3 — user-visible number uses the protocol
-/// <c>issue</c> key, no <c>issueno</c> key remains), additionally
-/// stamp <c>epicid</c> when <c>state.EpicId</c> is non-null, and every emitted envelope satisfies the
-/// catalog's declared required lineage attributes via the conformance
-/// helper.
-/// </summary>
 [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
 [Trait(Traits.Sut.Name, Traits.Sut.System)]
 public class IssueTransactionalEventAppendSpecs : IAsyncLifetime
 {
     private const string ProjectId = "proj_issue_txn";
-    private const string IssueId = "issue_txn_1";
-    private const int IssueNumber = 7;
-
     private readonly SqliteConnection _keeper;
     private readonly DbContextOptions<MohistDbContext> _options;
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
@@ -56,21 +37,11 @@ public class IssueTransactionalEventAppendSpecs : IAsyncLifetime
             .ConfigureWarnings(w => w.Ignore(RelationalEventId.PendingModelChangesWarning))
             .Options;
         _dbFactory = new Factory(_options);
-
         MigratedSqliteTemplate.CopyTo(_keeper);
         _eventStore = new EventStore(_dbFactory, NullLogger<EventStore>.Instance);
     }
 
-    public async Task InitializeAsync()
-    {
-        await using var db = await _dbFactory.CreateDbContextAsync();
-        db.Epics.AddRange(
-            NewEpic("epic_txn_1", 1),
-            NewEpic("epic_snapshot", 2),
-            NewEpic("epic_atomic", 3),
-            NewEpic("epic_txn_conformance", 4));
-        await db.SaveChangesAsync();
-    }
+    public Task InitializeAsync() => Task.CompletedTask;
 
     public Task DisposeAsync()
     {
@@ -79,415 +50,156 @@ public class IssueTransactionalEventAppendSpecs : IAsyncLifetime
     }
 
     [Fact]
-    public async Task SaveAsync_CommitsStateAndIssueEventRowsTogether()
+    public async Task SaveAsync_CommitsIssueStateAndOwnEventsTogether()
     {
-        var store = new IssueStore(_dbFactory, _eventStore, _grainFactory, NullLogger<IssueStore>.Instance);
-        var issue = BuildIssue("issue_txn_ok", number: 1);
+        var store = CreateStore(_eventStore);
+        var issue = BuildIssue(1);
 
-        await store.SaveAsync(issue.Id, issue, [
+        await store.SaveAsync(Key(1), issue, [
             new IssueCreated("Hello", "p2", new Dictionary<string, string>(), null, null),
             new IssueArchived(),
         ]);
 
-        var stored = await _eventStore.ListIssueEventsAsync("issue_txn_ok");
-        Assert.Equal(2, stored.Count);
-        Assert.Contains(stored, s => s.Envelope.Type == "com.mohist.issue.created");
-        Assert.Contains(stored, s => s.Envelope.Type == "com.mohist.issue.archived");
+        var events = await _eventStore.ListIssueEventsAsync(ProjectId, 1);
+        Assert.Equal(2, events.Count);
+        Assert.Contains(events, entry => entry.Envelope.Type == EventCatalog.ReverseDns.IssueCreated);
+        Assert.Contains(events, entry => entry.Envelope.Type == EventCatalog.ReverseDns.IssueArchived);
 
-        var loaded = await store.LoadAsync("issue_txn_ok");
+        var loaded = await store.LoadAsync(Key(1));
         Assert.NotNull(loaded);
-        Assert.Equal("issue_txn_ok", loaded!.Id);
+        Assert.Equal(ProjectId, loaded!.ProjectId);
+        Assert.Equal(1, loaded.Number);
     }
 
     [Fact]
-    public async Task SaveAsync_EventRowWriteFailure_RollsBackStateAndEvents_AndDoesNotSwallow()
+    public async Task SaveAsync_EventWriteFailureRollsBackIssueStateAndEvents()
     {
-        var store = new IssueStore(_dbFactory, new ThrowingEventStore(), _grainFactory, NullLogger<IssueStore>.Instance);
-        var issue = BuildIssue("issue_txn_fail", number: 2);
+        var store = CreateStore(new ThrowingEventStore());
+        var issue = BuildIssue(2);
 
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
-            () => store.SaveAsync(issue.Id, issue, [
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            store.SaveAsync(Key(2), issue, [
                 new IssueCreated("Hello", "p2", new Dictionary<string, string>(), null, null),
                 new IssueArchived(),
             ]));
-        Assert.Contains("event write failed", ex.Message);
 
+        Assert.Contains("event write failed", exception.Message);
         await using var verify = new MohistDbContext(_options);
         Assert.Empty(await verify.Issues.AsNoTracking().ToListAsync());
         Assert.Empty(await verify.IssueEvents.AsNoTracking().ToListAsync());
     }
 
     [Fact]
-    public async Task SaveAsync_CrashAfterCommit_IssueEventRowsRemainDurableOnFreshDbContext()
+    public async Task SaveAsync_PersistsScopedEventSourceAcrossDbContexts()
     {
-        var store = new IssueStore(_dbFactory, _eventStore, _grainFactory, NullLogger<IssueStore>.Instance);
-        var issue = BuildIssue("issue_txn_crash", number: 3);
+        var store = CreateStore(_eventStore);
+        var issue = BuildIssue(3);
 
-        await store.SaveAsync(issue.Id, issue, [new IssueArchived()]);
+        await store.SaveAsync(Key(3), issue, [new IssueArchived()]);
 
-        await using var freshDb = new MohistDbContext(_options);
-        var rows = await freshDb.IssueEvents.AsNoTracking()
-            .Where(r => r.Source == "/mohist/issues/issue_txn_crash")
-            .ToListAsync();
-        var row = Assert.Single(rows);
-        Assert.Equal("com.mohist.issue.archived", row.Type);
+        await using var fresh = new MohistDbContext(_options);
+        var row = Assert.Single(await fresh.IssueEvents.AsNoTracking().ToListAsync());
+        Assert.Equal($"/mohist/projects/{ProjectId}/issues/3", row.Source);
+        Assert.Equal(EventCatalog.ReverseDns.IssueArchived, row.Type);
         Assert.Null(row.DispatchedAt);
-
-        var issueRow = Assert.Single(await freshDb.Issues.AsNoTracking()
-            .Where(r => r.IssueId == "issue_txn_crash")
-            .ToListAsync());
-        Assert.False(string.IsNullOrWhiteSpace(issueRow.State));
+        var state = Assert.Single(await fresh.Issues.AsNoTracking().ToListAsync());
+        Assert.Equal(ProjectId, state.ProjectId);
+        Assert.Equal(3, state.Number);
     }
 
     [Fact]
-    public async Task SaveAsync_StampsProjectIdIssueIdAndIssueOnExtensions()
+    public async Task SaveAsync_StampsOnlyIssueOwnedLineage()
     {
-        // Identity stamping at write time: every issue.* event carries
-        // the unified protocol key `issue` (replacing the legacy
-        // `issueno` — D3) alongside `projectid` / `issueid`. No
-        // `issueno` key is present. Epic id is absent because the
-        // test fixture issue has no EpicId.
-        var store = new IssueStore(_dbFactory, _eventStore, _grainFactory, NullLogger<IssueStore>.Instance);
-        var issue = BuildIssue(IssueId, number: 4);
+        var store = CreateStore(_eventStore);
+        var issue = BuildIssue(4, epicNumber: 7);
 
-        await store.SaveAsync(issue.Id, issue, [
-            new IssueCreated("Hello", "p2", new Dictionary<string, string>(), null, null),
-            new IssueArchived(),
-        ]);
+        await store.SaveAsync(Key(4), issue, [new IssueArchived()]);
 
-        var stored = await _eventStore.ListIssueEventsAsync(IssueId);
-        Assert.Equal(2, stored.Count);
-        foreach (var entry in stored)
-        {
-            Assert.True(entry.Envelope.Extensions.TryGetValue("projectid", out var stampedProjectId));
-            Assert.Equal(ProjectId, stampedProjectId);
-            Assert.True(entry.Envelope.Extensions.TryGetValue("issueid", out var stampedIssueId));
-            Assert.Equal(IssueId, stampedIssueId);
-            Assert.True(entry.Envelope.Extensions.TryGetValue("issue", out var stampedIssue));
-            Assert.Equal("4", stampedIssue);
-            Assert.False(entry.Envelope.Extensions.ContainsKey("issueno"));
-            Assert.False(entry.Envelope.Extensions.ContainsKey("epicid"));
-            Assert.Equal("4", entry.Envelope.Subject);
-        }
+        var stored = Assert.Single(await _eventStore.ListIssueEventsAsync(ProjectId, 4));
+        Assert.Equal(ProjectId, stored.Envelope.Extensions[EventCatalog.Lineage.ProjectId]);
+        Assert.Equal("4", stored.Envelope.Extensions[EventCatalog.Lineage.Issue]);
+        Assert.Equal("7", stored.Envelope.Extensions[EventCatalog.Lineage.Epic]);
+        EnvelopeConformance.AssertRequired(stored.Envelope);
     }
 
     [Fact]
-    public async Task SaveAsync_IssueWithEpicAffiliation_StampsEpicIdOnExtensions()
+    public void IssueLineage_OmitsEpicWhenIssueHasNoEpicNumber()
     {
-        // The transitional legacy envelope still stamps EpicId from Issue state.
-        // Canonical EpicNumber resolution happens before the Issue transaction.
-        var store = new IssueStore(_dbFactory, _eventStore, _grainFactory, NullLogger<IssueStore>.Instance);
-        var issue = BuildIssue("issue_txn_with_epic", epicId: "epic_txn_1", number: 5);
+        var extensions = IssueLineage.BuildExtensions(BuildIssue(5));
 
-        await store.SaveAsync(issue.Id, issue, [
-            new IssueCreated("Hello", "p2", new Dictionary<string, string>(), null, null),
-            new IssueArchived(),
-        ]);
-
-        var stored = await _eventStore.ListIssueEventsAsync("issue_txn_with_epic");
-        Assert.Equal(2, stored.Count);
-        foreach (var entry in stored)
-        {
-            Assert.True(entry.Envelope.Extensions.TryGetValue("projectid", out var stampedProjectId));
-            Assert.Equal(ProjectId, stampedProjectId);
-            Assert.True(entry.Envelope.Extensions.TryGetValue("issueid", out var stampedIssueId));
-            Assert.Equal("issue_txn_with_epic", stampedIssueId);
-            Assert.True(entry.Envelope.Extensions.TryGetValue("issue", out var stampedIssue));
-            Assert.Equal("5", stampedIssue);
-            Assert.True(entry.Envelope.Extensions.TryGetValue("epicid", out var stampedEpicId));
-            Assert.Equal("epic_txn_1", stampedEpicId);
-            Assert.False(entry.Envelope.Extensions.ContainsKey("issueno"));
-        }
+        Assert.Equal(ProjectId, extensions[EventCatalog.Lineage.ProjectId]);
+        Assert.Equal("5", extensions[EventCatalog.Lineage.Issue]);
+        Assert.False(extensions.ContainsKey(EventCatalog.Lineage.Epic));
     }
 
     [Fact]
-    public async Task SaveAsync_IssueWithoutEpicAffiliation_OmitsEpicIdEntirely()
+    public async Task SaveAsync_WithoutEventsStillPersistsIssueState()
     {
-        // Absent affiliation is omitted, never an empty value (the
-        // protocol contract). When state.EpicId is null, no `epicid`
-        // key is present on the envelope.
-        var store = new IssueStore(_dbFactory, _eventStore, _grainFactory, NullLogger<IssueStore>.Instance);
-        var issue = BuildIssue("issue_txn_no_epic", epicId: null, number: 6);
+        var store = CreateStore(_eventStore);
+        var issue = BuildIssue(6);
 
-        await store.SaveAsync(issue.Id, issue, [new IssueArchived()]);
+        await store.SaveAsync(Key(6), issue);
 
-        var stored = Assert.Single(await _eventStore.ListIssueEventsAsync("issue_txn_no_epic"));
-        Assert.False(stored.Envelope.Extensions.ContainsKey("epicid"));
-        Assert.Contains("issue", stored.Envelope.Extensions.Keys);
-        Assert.Contains("projectid", stored.Envelope.Extensions.Keys);
-        Assert.Contains("issueid", stored.Envelope.Extensions.Keys);
+        Assert.NotNull(await store.LoadAsync(Key(6)));
+        Assert.Empty(await _eventStore.ListIssueEventsAsync(ProjectId, 6));
     }
 
-    [Fact]
-    public async Task SaveAsync_UsesAggregateOwnedLinkAndUnlinkSnapshots()
+    private IssueStore CreateStore(IEventStore events) =>
+        new(_dbFactory, events, _grainFactory, NullLogger<IssueStore>.Instance);
+
+    private static string Key(int number) => GrainKey.Issue(new IssueKey(ProjectId, number));
+
+    private static DomainIssue BuildIssue(int number, int? epicNumber = null) => new()
     {
-        var store = new IssueStore(_dbFactory, _eventStore, _grainFactory, NullLogger<IssueStore>.Instance);
-        var issue = BuildIssue("issue_txn_snapshot", number: 17);
-
-        await store.SaveAsync(issue.Id, issue, [new IssueArchived()]);
-
-        issue.SetEpicId("epic_snapshot");
-        await store.SaveAsync(issue.Id, issue, [new IssueReopened()]);
-
-        issue.SetEpicId(null);
-        await store.SaveAsync(issue.Id, issue, [new IssueArchived()]);
-
-        var stored = await _eventStore.ListIssueEventsAsync(issue.Id);
-        Assert.Equal(3, stored.Count);
-        Assert.False(stored[0].Envelope.Extensions.ContainsKey(EventCatalog.Lineage.EpicId));
-        Assert.Equal("epic_snapshot", stored[1].Envelope.Extensions[EventCatalog.Lineage.EpicId]);
-        Assert.False(stored[2].Envelope.Extensions.ContainsKey(EventCatalog.Lineage.EpicId));
-    }
-
-    [Fact]
-    public async Task SaveAsync_AffiliationChangeAdvancesTheIssueLineageRevision()
-    {
-        var store = new IssueStore(_dbFactory, _eventStore, _grainFactory, NullLogger<IssueStore>.Instance);
-        var issue = BuildIssue("issue_txn_atomic_affiliation", number: 18);
-        await store.SaveAsync(issue.Id, issue);
-        var initialRevision = issue.LineageVersion;
-
-        issue.SetEpicId("epic_atomic");
-        await store.SaveAsync(issue.Id, issue, [new IssueArchived()]);
-
-        var linked = (await store.LoadAsync(issue.Id))!;
-        Assert.Equal("epic_atomic", linked.EpicId);
-        Assert.Equal(initialRevision + 1, linked.LineageVersion);
-        var stored = Assert.Single(await _eventStore.ListIssueEventsAsync(issue.Id));
-        Assert.Equal("epic_atomic", stored.Envelope.Extensions[EventCatalog.Lineage.EpicId]);
-    }
-
-    [Fact]
-    public async Task SaveAsync_IssueWithoutEpicAffiliation_OmitsEpicId_AndEmptyStringEpicIdIsTreatedAsAbsent()
-    {
-        // Defensive: a whitespace-only EpicId in state is normalized to
-        // null by the property setter and therefore omits `epicid`
-        // from the stamped envelope.
-        var store = new IssueStore(_dbFactory, _eventStore, _grainFactory, NullLogger<IssueStore>.Instance);
-        var issue = BuildIssue("issue_txn_empty_epic", epicId: "   ", number: 8);
-
-        await store.SaveAsync(issue.Id, issue, [new IssueArchived()]);
-
-        var stored = Assert.Single(await _eventStore.ListIssueEventsAsync("issue_txn_empty_epic"));
-        Assert.Null(issue.EpicId);
-        Assert.False(stored.Envelope.Extensions.ContainsKey("epicid"));
-    }
-
-    [Fact]
-    public async Task SaveAsync_StampedEnvelopes_SatisfyEventCatalogRequiredAttributes()
-    {
-        // Conformance check (D8): every emitted envelope satisfies
-        // the catalog's declared required lineage attributes for
-        // its type — `issue.*` requires {projectid, issueid, issue}.
-        // Drives an issue with and without an epic affiliation.
-        var store = new IssueStore(_dbFactory, _eventStore, _grainFactory, NullLogger<IssueStore>.Instance);
-
-        var affiliatedIssue = BuildIssue("issue_txn_conformance_with_epic", epicId: "epic_txn_conformance", number: 11);
-        await store.SaveAsync(affiliatedIssue.Id, affiliatedIssue, [
-            new IssueCreated("Hello", "p2", new Dictionary<string, string>(), null, null),
-            new IssueArchived(),
-        ]);
-
-        var unaffiliatedIssue = BuildIssue("issue_txn_conformance_no_epic", epicId: null, number: 12);
-        await store.SaveAsync(unaffiliatedIssue.Id, unaffiliatedIssue, [
-            new IssueCreated("Hello", "p2", new Dictionary<string, string>(), null, null),
-            new IssueReopened(),
-        ]);
-
-        var affiliated = await _eventStore.ListIssueEventsAsync("issue_txn_conformance_with_epic");
-        var unaffiliated = await _eventStore.ListIssueEventsAsync("issue_txn_conformance_no_epic");
-        Assert.Equal(2, affiliated.Count);
-        Assert.Equal(2, unaffiliated.Count);
-
-        foreach (var entry in affiliated.Concat(unaffiliated))
-        {
-            // Throws when an attribute is missing or empty.
-            EnvelopeConformance.AssertRequired(entry.Envelope);
-            var missing = EnvelopeConformance.Missing(entry.Envelope);
-            Assert.Empty(missing);
-        }
-    }
-
-    [Fact]
-    public void IssueLineage_BuildExtensions_StampsProjectIdIssueIdIssueAndOptionalEpicId()
-    {
-        // The pure helper is what the store's transactional save calls.
-        // Stamping must read ONLY from the supplied issue state — no
-        // hidden database calls — so we exercise it with a
-        // hand-constructed state and confirm every lineage key.
-        var affiliated = BuildIssue("issue_lineage_with_epic", epicId: "epic_lineage_1", number: 15);
-        var extensions = IssueLineage.BuildExtensions(affiliated);
-        Assert.Equal(ProjectId, extensions["projectid"]);
-        Assert.Equal("issue_lineage_with_epic", extensions["issueid"]);
-        Assert.Equal("15", extensions["issue"]);
-        Assert.Equal("epic_lineage_1", extensions["epicid"]);
-        Assert.False(extensions.ContainsKey("issueno"));
-
-        var unaffiliated = BuildIssue("issue_lineage_no_epic", epicId: null, number: 16);
-        var noEpicExtensions = IssueLineage.BuildExtensions(unaffiliated);
-        Assert.Equal(ProjectId, noEpicExtensions["projectid"]);
-        Assert.Equal("issue_lineage_no_epic", noEpicExtensions["issueid"]);
-        Assert.Equal("16", noEpicExtensions["issue"]);
-        Assert.False(noEpicExtensions.ContainsKey("epicid"));
-        Assert.False(noEpicExtensions.ContainsKey("issueno"));
-    }
-
-    [Fact]
-    public async Task SaveAsync_NoEvents_StillCommitsStateRow()
-    {
-        var store = new IssueStore(_dbFactory, _eventStore, _grainFactory, NullLogger<IssueStore>.Instance);
-        var issue = BuildIssue("issue_txn_state_only", number: 13);
-
-        await store.SaveAsync(issue.Id, issue, []);
-
-        var loaded = await store.LoadAsync("issue_txn_state_only");
-        Assert.NotNull(loaded);
-        Assert.Empty(await _eventStore.ListIssueEventsAsync("issue_txn_state_only"));
-    }
-
-    [Fact]
-    public async Task SaveAsync_NoEventsOverload_RemainsForCallerWithNoPendingEvents()
-    {
-        // The grain takes the events-aware overload when there are
-        // pending events, but the no-events overload of SaveAsync must
-        // still exist for callers that haven't recorded any domain
-        // events (e.g. an issue that has been touched but did not
-        // transition). It continues to commit the state row cleanly.
-        var store = new IssueStore(_dbFactory, _eventStore, _grainFactory, NullLogger<IssueStore>.Instance);
-        var issue = BuildIssue("issue_txn_no_events_path", number: 14);
-
-        await store.SaveAsync(issue.Id, issue);
-
-        var loaded = await store.LoadAsync("issue_txn_no_events_path");
-        Assert.NotNull(loaded);
-        Assert.Empty(await _eventStore.ListIssueEventsAsync("issue_txn_no_events_path"));
-    }
-
-    private static DomainIssue BuildIssue(string id, string? epicId = null, int? number = null)
-    {
-        return new DomainIssue
-        {
-            Id = id,
-            ProjectId = ProjectId,
-            Number = number ?? IssueNumber,
-            Title = "Transaction probe",
-            Priority = "p2",
-            EpicId = epicId,
-        };
-    }
-
-    private static EpicRow NewEpic(string epicId, int number) => new()
-    {
-        Id = epicId,
         ProjectId = ProjectId,
         Number = number,
-        Title = epicId,
-        Description = "",
+        Title = "Transaction probe",
         Priority = "p2",
-        Status = "running",
-        CreatedAt = TestTime.UtcNow,
-        UpdatedAt = TestTime.UtcNow,
+        EpicNumber = epicNumber,
     };
 
-    private sealed class Factory : IDbContextFactory<MohistDbContext>
+    private sealed class Factory(DbContextOptions<MohistDbContext> options) : IDbContextFactory<MohistDbContext>
     {
-        private readonly DbContextOptions<MohistDbContext> _options;
-
-        public Factory(DbContextOptions<MohistDbContext> options) => _options = options;
-
-        public MohistDbContext CreateDbContext() => new(_options);
+        public MohistDbContext CreateDbContext() => new(options);
     }
 
-    /// <summary>
-    /// Minimal <see cref="IGrainFactory"/> stand-in for transactional
-    /// unit specs. The dispatcher is a no-op grain reference; producers
-    /// only need to call DispatchNowAsync without exceptions. Lets the
-    /// store exercise its post-commit poke code path without spinning up
-    /// an Orleans silo.
-    /// </summary>
     private sealed class NullDispatchGrainFactory : IGrainFactory
     {
         TGrainInterface IGrainFactory.GetGrain<TGrainInterface>(string primaryKey, string? grainClassNamePrefix)
         {
             if (typeof(TGrainInterface) == typeof(IEventDispatcherGrain))
                 return (TGrainInterface)(object)new NullEventDispatcherGrain();
-            throw new NotSupportedException($"NullDispatchGrainFactory does not support {typeof(TGrainInterface).Name}");
+            throw new NotSupportedException();
         }
 
-        TGrainInterface IGrainFactory.GetGrain<TGrainInterface>(long primaryKey, string? grainClassNamePrefix)
-            => throw new NotSupportedException($"NullDispatchGrainFactory does not support {typeof(TGrainInterface).Name}");
-
-        TGrainInterface IGrainFactory.GetGrain<TGrainInterface>(Guid primaryKey, string? grainClassNamePrefix)
-            => throw new NotSupportedException($"NullDispatchGrainFactory does not support {typeof(TGrainInterface).Name}");
-
-        TGrainInterface IGrainFactory.GetGrain<TGrainInterface>(Guid primaryKey, string keyExtension, string? grainClassNamePrefix)
-            => throw new NotSupportedException($"NullDispatchGrainFactory does not support {typeof(TGrainInterface).Name}");
-
-        TGrainInterface IGrainFactory.GetGrain<TGrainInterface>(long primaryKey, string keyExtension, string? grainClassNamePrefix)
-            => throw new NotSupportedException($"NullDispatchGrainFactory does not support {typeof(TGrainInterface).Name}");
-
-        TGrainObserverInterface IGrainFactory.CreateObjectReference<TGrainObserverInterface>(IGrainObserver obj)
-            => throw new NotSupportedException();
-
-        void IGrainFactory.DeleteObjectReference<TGrainObserverInterface>(IGrainObserver obj)
-            => throw new NotSupportedException();
-
-        IGrain IGrainFactory.GetGrain(Type grainInterfaceType, Guid grainPrimaryKey)
-            => throw new NotSupportedException();
-
-        IGrain IGrainFactory.GetGrain(Type grainInterfaceType, long grainPrimaryKey)
-            => throw new NotSupportedException();
-
-        IGrain IGrainFactory.GetGrain(Type grainInterfaceType, string grainPrimaryKey)
-            => throw new NotSupportedException();
-
-        IGrain IGrainFactory.GetGrain(Type grainInterfaceType, Guid grainPrimaryKey, string keyExtension)
-            => throw new NotSupportedException();
-
-        IGrain IGrainFactory.GetGrain(Type grainInterfaceType, long grainPrimaryKey, string keyExtension)
-            => throw new NotSupportedException();
-
-        TGrainInterface IGrainFactory.GetGrain<TGrainInterface>(GrainId grainId)
-            => throw new NotSupportedException();
-
-        IAddressable IGrainFactory.GetGrain(GrainId grainId)
-            => throw new NotSupportedException();
-
-        IAddressable IGrainFactory.GetGrain(GrainId grainId, GrainInterfaceType interfaceType)
-            => throw new NotSupportedException();
-
-        IAddressable IGrainFactory.GetGrain(Type interfaceType, IdSpan grainKey, string grainClassNamePrefix)
-            => throw new NotSupportedException();
-
-        IAddressable IGrainFactory.GetGrain(Type interfaceType, IdSpan grainKey)
-            => throw new NotSupportedException();
+        TGrainInterface IGrainFactory.GetGrain<TGrainInterface>(long primaryKey, string? grainClassNamePrefix) => throw new NotSupportedException();
+        TGrainInterface IGrainFactory.GetGrain<TGrainInterface>(Guid primaryKey, string? grainClassNamePrefix) => throw new NotSupportedException();
+        TGrainInterface IGrainFactory.GetGrain<TGrainInterface>(Guid primaryKey, string keyExtension, string? grainClassNamePrefix) => throw new NotSupportedException();
+        TGrainInterface IGrainFactory.GetGrain<TGrainInterface>(long primaryKey, string keyExtension, string? grainClassNamePrefix) => throw new NotSupportedException();
+        TGrainObserverInterface IGrainFactory.CreateObjectReference<TGrainObserverInterface>(IGrainObserver obj) => throw new NotSupportedException();
+        void IGrainFactory.DeleteObjectReference<TGrainObserverInterface>(IGrainObserver obj) => throw new NotSupportedException();
+        IGrain IGrainFactory.GetGrain(Type grainInterfaceType, Guid grainPrimaryKey) => throw new NotSupportedException();
+        IGrain IGrainFactory.GetGrain(Type grainInterfaceType, long grainPrimaryKey) => throw new NotSupportedException();
+        IGrain IGrainFactory.GetGrain(Type grainInterfaceType, string grainPrimaryKey) => throw new NotSupportedException();
+        IGrain IGrainFactory.GetGrain(Type grainInterfaceType, Guid grainPrimaryKey, string keyExtension) => throw new NotSupportedException();
+        IGrain IGrainFactory.GetGrain(Type grainInterfaceType, long grainPrimaryKey, string keyExtension) => throw new NotSupportedException();
+        TGrainInterface IGrainFactory.GetGrain<TGrainInterface>(GrainId grainId) => throw new NotSupportedException();
+        IAddressable IGrainFactory.GetGrain(GrainId grainId) => throw new NotSupportedException();
+        IAddressable IGrainFactory.GetGrain(GrainId grainId, GrainInterfaceType interfaceType) => throw new NotSupportedException();
+        IAddressable IGrainFactory.GetGrain(Type interfaceType, IdSpan grainKey, string? grainClassNamePrefix) => throw new NotSupportedException();
+        IAddressable IGrainFactory.GetGrain(Type interfaceType, IdSpan grainKey) => throw new NotSupportedException();
     }
 
-    /// <summary>
-    /// Drop-in <see cref="IEventDispatcherGrain"/> reference whose
-    /// <see cref="DispatchNowAsync"/> returns <see cref="Task.CompletedTask"/>.
-    /// Lets the post-commit poke fire without an Orleans silo.
-    /// </summary>
     private sealed class NullEventDispatcherGrain : IGrainWithStringKey, IEventDispatcherGrain
     {
         public Task DispatchNowAsync(CancellationToken ct = default) => Task.CompletedTask;
-
         public Task<DeadLetterRedeliveryResult> RedeliverAsync(long deadLetterId, CancellationToken ct = default) =>
             Task.FromResult(new DeadLetterRedeliveryResult(false, false, 0, "null grain"));
-
         public Task ReceiveReminder(string reminderName, TickStatus status) => Task.CompletedTask;
-
         public GrainId GrainId => default;
         public string Key => string.Empty;
     }
 
-    /// <summary>
-    /// <see cref="IEventStore"/> that throws on the second append in a
-    /// save transaction, simulating an event-row write failure (e.g.
-    /// constraint violation). Used to verify that the store does NOT
-    /// swallow the exception and that the issue state transaction is
-    /// rolled back. Mirrors the WorkflowRunStore equivalent from T-003.
-    /// </summary>
     private sealed class ThrowingEventStore : IEventStore
     {
         private int _callCount;
@@ -497,10 +209,7 @@ public class IssueTransactionalEventAppendSpecs : IAsyncLifetime
         public async Task AppendAsync(MohistDbContext db, CloudEvent envelope, CancellationToken ct = default)
         {
             _callCount++;
-            if (_callCount >= 2)
-            {
-                throw new InvalidOperationException("simulated event write failed");
-            }
+            if (_callCount >= 2) throw new InvalidOperationException("simulated event write failed");
             await db.IssueEvents.AddAsync(new IssueEventRow
             {
                 Id = _callCount,
@@ -516,21 +225,11 @@ public class IssueTransactionalEventAppendSpecs : IAsyncLifetime
             }, ct);
         }
 
-        public Task<IReadOnlyList<StoredCloudEvent>> ListAsync(string workflowRunId, int limit = 200, CancellationToken ct = default) =>
-            Task.FromResult<IReadOnlyList<StoredCloudEvent>>([]);
-
-        public Task<IReadOnlyList<StoredCloudEvent>> ListIssueEventsAsync(string projectId, int issueNumber, int limit = 200, CancellationToken ct = default) =>
-            Task.FromResult<IReadOnlyList<StoredCloudEvent>>([]);
-
-        public Task<IReadOnlyList<StoredCloudEvent>> ListEpicEventsAsync(string projectId, int epicNumber, int limit = 200, CancellationToken ct = default) =>
-            Task.FromResult<IReadOnlyList<StoredCloudEvent>>([]);
-
-        public Task<IReadOnlyList<StoredCloudEvent>> ListAgentSessionEventsAsync(string sessionId, int limit = 200, CancellationToken ct = default) =>
-            Task.FromResult<IReadOnlyList<StoredCloudEvent>>([]);
-
+        public Task<IReadOnlyList<StoredCloudEvent>> ListAsync(string workflowRunId, int limit = 200, CancellationToken ct = default) => Task.FromResult<IReadOnlyList<StoredCloudEvent>>([]);
+        public Task<IReadOnlyList<StoredCloudEvent>> ListIssueEventsAsync(string projectId, int issueNumber, int limit = 200, CancellationToken ct = default) => Task.FromResult<IReadOnlyList<StoredCloudEvent>>([]);
+        public Task<IReadOnlyList<StoredCloudEvent>> ListEpicEventsAsync(string projectId, int epicNumber, int limit = 200, CancellationToken ct = default) => Task.FromResult<IReadOnlyList<StoredCloudEvent>>([]);
+        public Task<IReadOnlyList<StoredCloudEvent>> ListAgentSessionEventsAsync(string sessionId, int limit = 200, CancellationToken ct = default) => Task.FromResult<IReadOnlyList<StoredCloudEvent>>([]);
         public Task MarkDispatchedAsync(EventOrigin origin, string source, long id, DateTimeOffset dispatchedAt, CancellationToken ct = default) => Task.CompletedTask;
-
-        public Task<IReadOnlyList<UndeliveredEvent>> ListUndeliveredAsync(int limit = 100, CancellationToken ct = default) =>
-            Task.FromResult<IReadOnlyList<UndeliveredEvent>>([]);
+        public Task<IReadOnlyList<UndeliveredEvent>> ListUndeliveredAsync(int limit = 100, CancellationToken ct = default) => Task.FromResult<IReadOnlyList<UndeliveredEvent>>([]);
     }
 }

@@ -53,9 +53,9 @@ public class DropEpicMembershipTablesMigrationSpecs
 
         var row = await verify.Issues.SingleAsync();
         Assert.Equal(7, row.EpicNumber);
-        var issue = IssueStore.Deserialize(row.State);
-        Assert.NotNull(issue);
-        Assert.Equal(7, issue!.EpicNumber);
+        var materialized = IssueStore.Deserialize(row.State);
+        Assert.NotNull(materialized);
+        Assert.Equal(7, materialized!.EpicNumber);
     }
 
     private static async Task<bool> TableExistsAsync(MohistDbContext context, string tableName)

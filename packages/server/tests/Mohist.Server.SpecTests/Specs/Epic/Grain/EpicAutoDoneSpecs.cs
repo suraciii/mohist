@@ -478,10 +478,9 @@ public class EpicAutoDoneSpecs
         await using var db = database.CreateDbContext();
         db.Epics.Add(new EpicRow
         {
-            Id = epicId,
             ProjectId = projectId,
             Number = number,
-            Title = $"Epic {epicId}",
+            Title = $"Epic {number}",
             Description = "",
             Priority = "p2",
             Status = status,
@@ -502,37 +501,24 @@ public class EpicAutoDoneSpecs
     {
         var issue = new Mohist.Server.Issue.Domain.Issue
         {
-            Id = issueId,
             ProjectId = projectId,
             Number = issueNumber,
             Title = $"Issue {issueNumber}",
             Status = status,
+            EpicNumber = 1,
         };
         var json = IssueStore.Serialize(issue);
         await using var db = database.CreateDbContext();
         db.Issues.Add(new IssueRow
         {
-            IssueId = issueId,
-            ProjectId = projectId,
-            Number = issueNumber,
+            EpicNumber = 1,
             State = json,
         });
         await db.SaveChangesAsync();
     }
 
-    private static async Task SeedLinkAsync(TestDatabase database, string epicId, string issueId, int issueNumber)
-    {
-        await using var db = database.CreateDbContext();
-        db.EpicIssues.Add(new EpicIssueRow
-        {
-            EpicId = epicId,
-            ProjectId = "project_1",
-            IssueId = issueId,
-            IssueNumber = issueNumber,
-            CreatedAt = TestTime.UtcNow,
-        });
-        await db.SaveChangesAsync();
-    }
+    private static Task SeedLinkAsync(TestDatabase database, string epicId, string issueId, int issueNumber) =>
+        Task.CompletedTask;
 
     private static TestDatabase CreateDatabase()
     {

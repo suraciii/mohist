@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Infrastructure.Events;
+using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Services;
@@ -50,11 +51,13 @@ public class IssueCreationSpecs
     private async Task<IssueInfo> CreateIssueAsync(string projectId, string title, string? body = null, IReadOnlyDictionary<string, string>? labels = null, string? priority = null, string? risk = null, bool isDraft = false, int[]? prerequisiteNumbers = null)
     {
         var number = await _grains.GetGrain<IIssueCounterGrain>(projectId).NextAsync();
-        var issueId = $"issue_{Guid.NewGuid():N}";
-        var grain = _grains.GetGrain<IIssueGrain>(issueId);
-        await grain.CreateAsync(projectId, number, title, body, labels, priority, null, issueId, risk, isDraft, null, null, prerequisiteNumbers);
+        var grain = IssueGrain(projectId, number);
+        await grain.CreateAsync(projectId, number, title, body, labels, priority, null, risk, isDraft, null, null, prerequisiteNumbers);
         return (await GetIssueInfoAsync(projectId, number))!;
     }
+
+    private IIssueGrain IssueGrain(string projectId, int number) =>
+        _grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(projectId, number)));
 
     private async Task<IssueInfo?> GetIssueInfoAsync(string projectId, int number)
     {
@@ -93,7 +96,6 @@ public class IssueCreationSpecs
         Assert.Equal("backlog", issue.Status);
         Assert.Equal("active", issue.Health);
         Assert.Equal(project.Id, issue.ProjectId);
-        Assert.StartsWith("issue_", issue.Id);
         Assert.Equal("mohist/local", issue.WorkflowProfileId);
     }
 
@@ -115,14 +117,14 @@ public class IssueCreationSpecs
 
         using var scope = _services.CreateScope();
         var events = scope.ServiceProvider.GetRequiredService<IEventStore>();
-        var stored = await events.ListIssueEventsAsync(issue.Id);
+        var stored = await events.ListIssueEventsAsync(project.Id, issue.Number);
 
         // issue-361 T-004: events now append inside the state transaction
         // exactly once per IssueEvent recorded by the aggregate, so the
         // single IssuedCreated event lands as a single row.
         var created = Assert.Single(stored);
         Assert.Equal("com.mohist.issue.created", created.Envelope.Type);
-        Assert.Equal($"/mohist/issues/{issue.Id}", created.Envelope.Source.ToString());
+        Assert.Equal($"/mohist/projects/{project.Id}/issues/{issue.Number}", created.Envelope.Source.ToString());
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -152,7 +154,7 @@ public class IssueCreationSpecs
         var project = await SetupProjectAsync();
         var created = await CreateIssueAsync(project.Id, "Context");
 
-        var grain = _grains.GetGrain<IIssueGrain>(created.Id);
+        var grain = IssueGrain(project.Id, created.Number);
         var wrId = await grain.StartWorkAsync(new WorkflowProjectContext(project.Id, "My Project"));
 
         Assert.StartsWith("wr_", wrId);
@@ -213,7 +215,7 @@ public class IssueCreationSpecs
         }
 
         var created = await CreateIssueAsync(project.Id, "Project template issue");
-        var grain = _grains.GetGrain<IIssueGrain>(created.Id);
+        var grain = IssueGrain(project.Id, created.Number);
         var wrId = await grain.StartWorkAsync();
 
         var runnerId = $"runner-template-test-{Guid.NewGuid():N}";
@@ -290,7 +292,7 @@ public class IssueCreationSpecs
         var project = await SetupProjectAsync();
         var created = await CreateIssueAsync(project.Id, "Original", "old body");
 
-        var grain = _grains.GetGrain<IIssueGrain>(created.Id);
+        var grain = IssueGrain(project.Id, created.Number);
         await grain.UpdateAsync("Updated", "new body");
         var info = await GetIssueInfoAsync(project.Id, created.Number);
 
@@ -307,7 +309,7 @@ public class IssueCreationSpecs
         var project = await SetupProjectAsync();
         var created = await CreateIssueAsync(project.Id, "Closable");
 
-        var grain = _grains.GetGrain<IIssueGrain>(created.Id);
+        var grain = IssueGrain(project.Id, created.Number);
         var wrId = await grain.StartWorkAsync();
 
         var wfGrain = _grains.GetGrain<IWorkflowGrain>(wrId);
@@ -329,7 +331,7 @@ public class IssueCreationSpecs
         var project = await SetupProjectAsync();
         var created = await CreateIssueAsync(project.Id, "Cancelable");
 
-        var issue = _grains.GetGrain<IIssueGrain>(created.Id);
+        var issue = IssueGrain(project.Id, created.Number);
         var workflowRunId = await issue.StartWorkAsync(new WorkflowProjectContext(project.Id, project.Name, RepositoryBaseBranch: project.DefaultRepository?.BaseBranch ?? "main"));
 
         var runnerId = $"runner-{Guid.NewGuid():N}";
@@ -362,7 +364,7 @@ public class IssueCreationSpecs
         var project = await SetupProjectAsync();
         var created = await CreateIssueAsync(project.Id, "Dup");
 
-        var grain = _grains.GetGrain<IIssueGrain>(created.Id);
+        var grain = IssueGrain(project.Id, created.Number);
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
             grain.CreateAsync(project.Id, 999, "dup", null, null, null, null));
     }
@@ -375,7 +377,7 @@ public class IssueCreationSpecs
         var project = await SetupProjectAsync();
         var created = await CreateIssueAsync(project.Id, "Add Search");
 
-        var grain = _grains.GetGrain<IIssueGrain>(created.Id);
+        var grain = IssueGrain(project.Id, created.Number);
         await grain.StartWorkAsync(new WorkflowProjectContext(project.Id, "My Project", RepositoryBaseBranch: "main"));
 
         var status = await grain.GetWorkflowStatusAsync();
@@ -407,7 +409,7 @@ public class IssueCreationSpecs
         var project = await SetupProjectAsync();
         var prereq = await CreateIssueAsync(project.Id, "Prereq");
         var dependent = await CreateIssueAsync(project.Id, "Dependent");
-        var grain = _grains.GetGrain<IIssueGrain>(dependent.Id);
+        var grain = IssueGrain(project.Id, dependent.Number);
 
         await grain.AddPrerequisiteAsync(prereq.Number);
         var info = await GetIssueInfoAsync(project.Id, dependent.Number);
@@ -429,8 +431,8 @@ public class IssueCreationSpecs
         var project = await SetupProjectAsync();
         var prereq = await CreateIssueAsync(project.Id, "Prereq");
         var dependent = await CreateIssueAsync(project.Id, "Dependent");
-        var prereqGrain = _grains.GetGrain<IIssueGrain>(prereq.Id);
-        var dependentGrain = _grains.GetGrain<IIssueGrain>(dependent.Id);
+        var prereqGrain = IssueGrain(project.Id, prereq.Number);
+        var dependentGrain = IssueGrain(project.Id, dependent.Number);
 
         await dependentGrain.AddPrerequisiteAsync(prereq.Number);
         var prereqRunId = await prereqGrain.StartWorkAsync(new WorkflowProjectContext(project.Id, "My Project", RepositoryBaseBranch: "main"));
@@ -474,9 +476,8 @@ public class IssueCreationSpecs
         var project = await SetupProjectAsync();
 
         var number = await _grains.GetGrain<IIssueCounterGrain>(project.Id).NextAsync();
-        var issueId = $"issue_{Guid.NewGuid():N}";
-        var grain = _grains.GetGrain<IIssueGrain>(issueId);
-        await grain.CreateAsync(project.Id, number, "Medium risk", body: null, labels: null, priority: null, repositoryRef: null, issueId: issueId, risk: "medium");
+        var grain = IssueGrain(project.Id, number);
+        await grain.CreateAsync(project.Id, number, "Medium risk", body: null, labels: null, priority: null, repositoryRef: null, risk: "medium");
 
         using var scope = _services.CreateScope();
         var issuesQuery = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
@@ -493,11 +494,10 @@ public class IssueCreationSpecs
     {
         var project = await SetupProjectAsync();
         var number = await _grains.GetGrain<IIssueCounterGrain>(project.Id).NextAsync();
-        var issueId = $"issue_{Guid.NewGuid():N}";
-        var grain = _grains.GetGrain<IIssueGrain>(issueId);
+        var grain = IssueGrain(project.Id, number);
 
         await Assert.ThrowsAsync<ArgumentException>(() =>
-            grain.CreateAsync(project.Id, number, "Bad", null, null, null, null, issueId, "unknown"));
+            grain.CreateAsync(project.Id, number, "Bad", null, null, null, null, "unknown"));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -773,8 +773,7 @@ public class IssueCreationSpecs
         var project = await SetupProjectAsync();
 
         var attemptNumber = await _grains.GetGrain<IIssueCounterGrain>(project.Id).NextAsync();
-        var issueId = $"issue_{Guid.NewGuid():N}";
-        var grain = _grains.GetGrain<IIssueGrain>(issueId);
+        var grain = IssueGrain(project.Id, attemptNumber);
 
         await Assert.ThrowsAsync<PrerequisiteValidationException>(() =>
             grain.CreateAsync(
@@ -785,7 +784,6 @@ public class IssueCreationSpecs
                 labels: null,
                 priority: null,
                 repositoryRef: null,
-                issueId: issueId,
                 risk: null,
                 isDraft: false,
                 attachmentIds: null,
@@ -819,8 +817,7 @@ public class IssueCreationSpecs
     {
         var project = await SetupProjectAsync();
 
-        var first = await CreateIssueAsync(project.Id, "First");
-        var grain = _grains.GetGrain<IIssueGrain>(first.Id);
+        await CreateIssueAsync(project.Id, "First");
 
         // AddPrerequisiteAsync path cannot self-reference (it would have to
         // know its own number in advance). For create, we simulate the
@@ -829,8 +826,7 @@ public class IssueCreationSpecs
         // next number, then attempt CreateAsync on a fresh grain with
         // prerequisiteNumbers pointing at it.
         var reserved = await _grains.GetGrain<IIssueCounterGrain>(project.Id).NextAsync();
-        var issueId = $"issue_{Guid.NewGuid():N}";
-        var freshGrain = _grains.GetGrain<IIssueGrain>(issueId);
+        var freshGrain = IssueGrain(project.Id, reserved);
 
         await Assert.ThrowsAsync<PrerequisiteValidationException>(() =>
             freshGrain.CreateAsync(
@@ -841,7 +837,6 @@ public class IssueCreationSpecs
                 labels: null,
                 priority: null,
                 repositoryRef: null,
-                issueId: issueId,
                 risk: null,
                 isDraft: false,
                 attachmentIds: null,
@@ -859,7 +854,7 @@ public class IssueCreationSpecs
     {
         var project = await SetupProjectAsync();
         var prereq = await CreateIssueAsync(project.Id, "Will complete");
-        var prereqGrain = _grains.GetGrain<IIssueGrain>(prereq.Id);
+        var prereqGrain = IssueGrain(project.Id, prereq.Number);
 
         // Drive the prerequisite to a completed workflow so the
         // read-model exposes it as Completed and the blocker is null.
@@ -891,8 +886,7 @@ public class IssueCreationSpecs
         var prereq = await _client.PostDataAsync<CreateIssueApiDto>(
             $"/api/projects/{project.Id}/issues",
             new { title = "Completed API prereq", isDraft = false });
-        var prereqInfo = await GetIssueInfoAsync(project.Id, prereq.Number);
-        var prereqGrain = _grains.GetGrain<IIssueGrain>(prereqInfo!.Id);
+        var prereqGrain = IssueGrain(project.Id, prereq.Number);
         var wrId = await prereqGrain.StartWorkAsync(new WorkflowProjectContext(
             project.Id,
             project.Name,
@@ -921,8 +915,7 @@ public class IssueCreationSpecs
         var prereq = await _client.PostDataAsync<CreateIssueApiDto>(
             $"/api/projects/{project.Id}/issues",
             new { title = "Archived completed prereq", isDraft = false });
-        var prereqInfo = await GetIssueInfoAsync(project.Id, prereq.Number);
-        var prereqGrain = _grains.GetGrain<IIssueGrain>(prereqInfo!.Id);
+        var prereqGrain = IssueGrain(project.Id, prereq.Number);
         var wrId = await prereqGrain.StartWorkAsync(new WorkflowProjectContext(
             project.Id,
             project.Name,
@@ -999,7 +992,6 @@ public class IssueCreationSpecs
     private sealed record ApiEnvelope<T>(bool Success, T? Data, string? Error = null, string? Code = null);
 
     private sealed record CreateIssueApiDto(
-        string Id,
         int Number,
         string Title,
         int[] PrerequisiteNumbers,

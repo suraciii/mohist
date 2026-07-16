@@ -660,7 +660,7 @@ public class IssueWorkflowCompletionHandlerSpecs
             var fromMemory = await _stateStore.LoadAsync(key);
             if (fromMemory is not null) return fromMemory;
             await using var db = await _dbFactory.CreateDbContextAsync();
-            var (projectId, issueNumber) = Mohist.Server.Infrastructure.Orleans.ScopedGrainKeyCodec.Parse(key);
+            Mohist.Server.Infrastructure.Orleans.ScopedGrainKeyCodec.Parse(key, out var projectId, out var issueNumber);
             var row = await db.Issues.AsNoTracking().FirstOrDefaultAsync(r => r.ProjectId == projectId && r.Number == issueNumber);
             if (row is null) return null;
             var state = IssueStore.Deserialize(row.State);
@@ -672,7 +672,7 @@ public class IssueWorkflowCompletionHandlerSpecs
         private async Task PersistAsync(string key, DomainIssue state)
         {
             await using var db = await _dbFactory.CreateDbContextAsync();
-            var (projectId, issueNumber) = Mohist.Server.Infrastructure.Orleans.ScopedGrainKeyCodec.Parse(key);
+            Mohist.Server.Infrastructure.Orleans.ScopedGrainKeyCodec.Parse(key, out var projectId, out var issueNumber);
             var row = await db.Issues.FirstOrDefaultAsync(r => r.ProjectId == projectId && r.Number == issueNumber);
             if (row is null) return;
             row.State = IssueStore.Serialize(state);
@@ -689,7 +689,7 @@ public class IssueWorkflowCompletionHandlerSpecs
 
         private static RecordedCall RecordedCallFor(string grainKey, string workflowRunId)
         {
-            var (projectId, issueNumber) = Mohist.Server.Infrastructure.Orleans.ScopedGrainKeyCodec.Parse(grainKey);
+            Mohist.Server.Infrastructure.Orleans.ScopedGrainKeyCodec.Parse(grainKey, out var projectId, out var issueNumber);
             return new RecordedCall(new IssueWorkflowRef(projectId, issueNumber), workflowRunId);
         }
         public Task CancelAsync() => throw new NotSupportedException();

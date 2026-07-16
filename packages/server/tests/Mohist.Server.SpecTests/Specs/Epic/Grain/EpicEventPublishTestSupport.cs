@@ -87,7 +87,7 @@ internal sealed class RecordingIssueGrain : IIssueGrain
 
     public Task<bool> AssignEpicAsync(int epicNumber)
     {
-        _owner.AffiliationCalls.Add(new AffiliationCall(IssueId, epicNumber, IsLink: epicNumber is not null));
+        _owner.AffiliationCalls.Add(new AffiliationCall(IssueId, epicNumber, IsLink: true));
         return Task.FromResult(true);
     }
 
