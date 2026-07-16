@@ -194,7 +194,7 @@ public class AttachmentApiSpecs
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
         var row = await db.Attachments.AsNoTracking().SingleAsync(a => a.Id == upload.Id);
         Assert.Equal("issue", row.OwnerKind);
-        Assert.Equal(issue.GetProperty("id").GetString(), row.OwnerId);
+        Assert.Null(row.OwnerId);
         Assert.Equal(issue.GetProperty("number").GetInt32(), row.OwnerIssueNumber);
         Assert.Null(row.ExpiresAt);
     }

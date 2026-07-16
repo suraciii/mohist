@@ -53,11 +53,11 @@ public class InboxApiSpecs
     {
         var projectId = await CreateProjectAsync("inbox-list");
 
-        var firstId = await SeedAsync(projectId, "issue_1", 1, "First",
+        var firstId = await SeedAsync(projectId, 1, "First",
             NotificationKinds.WorkflowFailed, new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero), "evt-1");
-        var secondId = await SeedAsync(projectId, "issue_2", 2, "Second",
+        var secondId = await SeedAsync(projectId, 2, "Second",
             NotificationKinds.ApprovalRequested, new DateTimeOffset(2026, 1, 2, 0, 0, 0, TimeSpan.Zero), "evt-2");
-        await SeedAsync(projectId, "issue_3", 3, "Archived",
+        await SeedAsync(projectId, 3, "Archived",
             NotificationKinds.IssueStarted, new DateTimeOffset(2026, 1, 3, 0, 0, 0, TimeSpan.Zero), "evt-3");
         await ArchiveDirectAsync(projectId, "evt-3");
 
@@ -70,7 +70,6 @@ public class InboxApiSpecs
         var approval = items[0];
         Assert.Equal(secondId, approval.GetProperty("itemId").GetString());
         Assert.Equal(NotificationKinds.ApprovalRequested, approval.GetProperty("notificationKind").GetString());
-        Assert.Equal("issue_2", approval.GetProperty("issueId").GetString());
         Assert.Equal(2, approval.GetProperty("issueNumber").GetInt32());
         Assert.Equal("Second", approval.GetProperty("issueTitle").GetString());
         Assert.True(approval.GetProperty("createdAt").GetDateTimeOffset() > new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
@@ -85,7 +84,6 @@ public class InboxApiSpecs
         var failed = items[1];
         Assert.Equal(firstId, failed.GetProperty("itemId").GetString());
         Assert.Equal(NotificationKinds.WorkflowFailed, failed.GetProperty("notificationKind").GetString());
-        Assert.Equal("issue_1", failed.GetProperty("issueId").GetString());
         Assert.Equal(1, failed.GetProperty("issueNumber").GetInt32());
         Assert.Equal("First", failed.GetProperty("issueTitle").GetString());
         Assert.False(failed.GetProperty("isRead").GetBoolean());
@@ -98,9 +96,9 @@ public class InboxApiSpecs
     public async Task MarkRead_SetsItemRead_LeavesOthersUnchanged()
     {
         var projectId = await CreateProjectAsync("inbox-mark-one");
-        var first = await SeedAsync(projectId, "issue_1", 1, "First",
+        var first = await SeedAsync(projectId, 1, "First",
             NotificationKinds.WorkflowFailed, TestTime.UtcNow, "evt-mr-1");
-        var second = await SeedAsync(projectId, "issue_2", 2, "Second",
+        var second = await SeedAsync(projectId, 2, "Second",
             NotificationKinds.ApprovalRequested, TestTime.UtcNow, "evt-mr-2");
 
         await _client.PostOkAsync($"/api/projects/{projectId}/inbox/{first}/read");
@@ -126,7 +124,7 @@ public class InboxApiSpecs
     public async Task MarkRead_RepeatedCall_StaysOk()
     {
         var projectId = await CreateProjectAsync("inbox-mark-idem");
-        var itemId = await SeedAsync(projectId, "issue_1", 1, "First",
+        var itemId = await SeedAsync(projectId, 1, "First",
             NotificationKinds.WorkflowFailed, TestTime.UtcNow, "evt-mri-1");
 
         await _client.PostOkAsync($"/api/projects/{projectId}/inbox/{itemId}/read");
@@ -150,7 +148,7 @@ public class InboxApiSpecs
         var projectA = await CreateProjectAsync("inbox-cross-a");
         var projectB = await CreateProjectAsync("inbox-cross-b");
 
-        var itemInA = await SeedAsync(projectA, "issue_1", 1, "First",
+        var itemInA = await SeedAsync(projectA, 1, "First",
             NotificationKinds.WorkflowFailed, TestTime.UtcNow, "evt-xcr-1");
 
         using var response = await _client.PostAsync(
@@ -182,11 +180,11 @@ public class InboxApiSpecs
     public async Task MarkAllRead_MarksAllNonArchivedItemsInProject()
     {
         var projectId = await CreateProjectAsync("inbox-read-all");
-        await SeedAsync(projectId, "issue_1", 1, "First",
+        await SeedAsync(projectId, 1, "First",
             NotificationKinds.WorkflowFailed, TestTime.UtcNow, "evt-ra-1");
-        await SeedAsync(projectId, "issue_2", 2, "Second",
+        await SeedAsync(projectId, 2, "Second",
             NotificationKinds.ApprovalRequested, TestTime.UtcNow, "evt-ra-2");
-        var archived = await SeedAsync(projectId, "issue_3", 3, "Archived",
+        var archived = await SeedAsync(projectId, 3, "Archived",
             NotificationKinds.IssueStarted, TestTime.UtcNow, "evt-ra-3");
         await ArchiveAsync(projectId, archived);
 
@@ -211,11 +209,11 @@ public class InboxApiSpecs
         var projectA = await CreateProjectAsync("inbox-readall-a");
         var projectB = await CreateProjectAsync("inbox-readall-b");
 
-        await SeedAsync(projectA, "issue_1", 1, "A1",
+        await SeedAsync(projectA, 1, "A1",
             NotificationKinds.WorkflowFailed, TestTime.UtcNow, "evt-ra-x-1");
-        await SeedAsync(projectA, "issue_2", 2, "A2",
+        await SeedAsync(projectA, 2, "A2",
             NotificationKinds.ApprovalRequested, TestTime.UtcNow, "evt-ra-x-2");
-        var itemInB = await SeedAsync(projectB, "issue_1", 1, "B1",
+        var itemInB = await SeedAsync(projectB, 1, "B1",
             NotificationKinds.IssueStarted, TestTime.UtcNow, "evt-ra-x-b-1");
 
         var result = await _client.PostDataAsync<JsonElement>(
@@ -237,9 +235,9 @@ public class InboxApiSpecs
     public async Task Archive_ExcludesItemFromDefaultList()
     {
         var projectId = await CreateProjectAsync("inbox-archive");
-        var first = await SeedAsync(projectId, "issue_1", 1, "First",
+        var first = await SeedAsync(projectId, 1, "First",
             NotificationKinds.WorkflowFailed, TestTime.UtcNow, "evt-ar-1");
-        await SeedAsync(projectId, "issue_2", 2, "Second",
+        await SeedAsync(projectId, 2, "Second",
             NotificationKinds.ApprovalRequested, TestTime.UtcNow, "evt-ar-2");
 
         await _client.PostOkAsync($"/api/projects/{projectId}/inbox/{first}/archive");
@@ -248,7 +246,7 @@ public class InboxApiSpecs
             $"/api/projects/{projectId}/inbox");
 
         var surviving = Assert.Single(items);
-        Assert.Equal("issue_2", surviving.GetProperty("issueId").GetString());
+        Assert.Equal(2, surviving.GetProperty("issueNumber").GetInt32());
         Assert.False(surviving.GetProperty("isArchived").GetBoolean());
     }
 
@@ -261,7 +259,7 @@ public class InboxApiSpecs
         var projectA = await CreateProjectAsync("inbox-arc-a");
         var projectB = await CreateProjectAsync("inbox-arc-b");
 
-        var itemInA = await SeedAsync(projectA, "issue_1", 1, "First",
+        var itemInA = await SeedAsync(projectA, 1, "First",
             NotificationKinds.WorkflowFailed, TestTime.UtcNow, "evt-arc-x-1");
 
         using var response = await _client.PostAsync(
@@ -333,7 +331,6 @@ public class InboxApiSpecs
                 isDraft = false,
             });
         var issueNumber = issue.GetProperty("number").GetInt32();
-        var issueId = issue.GetProperty("id").GetString()!;
 
         var runId = $"wr_inbox_spec_{Guid.NewGuid():N}";
         await using (var scope = _fixture.Services.CreateAsyncScope())
@@ -348,7 +345,6 @@ public class InboxApiSpecs
                     Annotations: new Dictionary<string, string>(StringComparer.Ordinal)
                     {
                         ["projectId"] = projectId,
-                        ["issueId"] = issueId,
                         ["issueNumber"] = issueNumber.ToString(),
                     }),
                 Stages = [],
@@ -410,7 +406,6 @@ public class InboxApiSpecs
 
     private async Task<string> SeedAsync(
         string projectId,
-        string issueId,
         int issueNumber,
         string title,
         string notificationKind,
@@ -424,7 +419,7 @@ public class InboxApiSpecs
             IssueNumber: issueNumber,
             IssueTitle: title,
             NotificationKind: notificationKind,
-            SourceEventSource: $"/mohist/issues/{issueId}",
+            SourceEventSource: $"/mohist/projects/{projectId}/issues/{issueNumber}",
             SourceEventId: sourceEventId,
             CreatedAt: createdAt));
         return result.Id;

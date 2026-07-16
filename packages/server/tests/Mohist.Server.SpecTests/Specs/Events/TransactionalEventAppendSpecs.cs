@@ -23,8 +23,8 @@ namespace Mohist.Server.SpecTests.Specs.Events;
 /// atomically; event-row write failures roll back the state transaction
 /// and are not swallowed; event rows survive a crash-after-commit and
 /// remain readable on a fresh <c>DbContext</c>; events stamp
-/// <c>workflowrunid</c> always plus <c>projectid</c>/<c>issueid</c>/
-/// <c>issue</c> when the run's metadata annotations carry them; stage,
+/// <c>workflowrunid</c> always plus <c>projectid</c>/<c>issue</c> when the
+/// run's metadata annotations carry them; stage,
 /// task, check, and feedback-requested events additionally stamp
 /// <c>stage</c> from structural inspection of the union variant (D2);
 /// every emitted envelope satisfies the catalog's declared required
@@ -35,7 +35,6 @@ namespace Mohist.Server.SpecTests.Specs.Events;
 public class TransactionalEventAppendSpecs : IAsyncLifetime
 {
     private const string ProjectId = "proj_txn";
-    private const string IssueId = "issue_txn_1";
     private static readonly DateTimeOffset FixedTime = new(2026, 7, 15, 0, 0, 0, TimeSpan.Zero);
 
     private readonly SqliteConnection _keeper;
@@ -157,10 +156,10 @@ public class TransactionalEventAppendSpecs : IAsyncLifetime
     }
 
     [Fact]
-    public async Task SaveAsync_RunBoundToIssue_StampsProjectIdIssueIdIssueAndWorkflowRunIdOnExtensions()
+    public async Task SaveAsync_RunBoundToIssue_StampsProjectIdIssueAndWorkflowRunIdOnExtensions()
     {
         // Identity stamping at write time: the run's
-        // Annotations["projectId"] / ["issueId"] / ["issueNumber"] flow onto
+        // Annotations["projectId"] / ["issueNumber"] flow onto
         // every emitted WorkflowRun event's extensions, alongside the
         // always-stamped workflowrunid (the run itself is the producer).
         // A consumer can read issue lineage directly from extensions without
@@ -180,21 +179,19 @@ public class TransactionalEventAppendSpecs : IAsyncLifetime
         {
             Assert.True(entry.Envelope.Extensions.TryGetValue("projectid", out var stampedProjectId));
             Assert.Equal(ProjectId, stampedProjectId);
-            Assert.True(entry.Envelope.Extensions.TryGetValue("issueid", out var stampedIssueId));
-            Assert.Equal(IssueId, stampedIssueId);
             Assert.True(entry.Envelope.Extensions.TryGetValue("issue", out var stampedIssue));
             Assert.Equal("1", stampedIssue);
             Assert.True(entry.Envelope.Extensions.TryGetValue("workflowrunid", out var stampedRunId));
             Assert.Equal("wr_txn_identity", stampedRunId);
-            Assert.False(entry.Envelope.Extensions.ContainsKey("epicid"));
+            Assert.False(entry.Envelope.Extensions.ContainsKey("epic"));
         }
     }
 
     [Fact]
-    public async Task SaveAsync_EpicAffiliatedRun_StampsEpicIdOnRunStageTaskAndCheckEvents()
+    public async Task SaveAsync_EpicAffiliatedRun_StampsEpicOnRunStageTaskAndCheckEvents()
     {
         var store = new WorkflowRunStore(_dbFactory, _eventStore, _grainFactory, NullLogger<WorkflowRunStore>.Instance);
-        var run = BuildRun("wr_txn_epic", includeAnnotations: true, epicId: "epic_txn_1");
+        var run = BuildRun("wr_txn_epic", includeAnnotations: true, epicNumber: 1);
 
         await store.SaveAsync(run, [
             new WorkflowRunStarted(),
@@ -205,7 +202,7 @@ public class TransactionalEventAppendSpecs : IAsyncLifetime
 
         var stored = await _eventStore.ListAsync("wr_txn_epic");
         Assert.Equal(4, stored.Count);
-        Assert.All(stored, entry => Assert.Equal("epic_txn_1", entry.Envelope.Extensions["epicid"]));
+        Assert.All(stored, entry => Assert.Equal("1", entry.Envelope.Extensions["epic"]));
     }
 
     [Fact]
@@ -213,7 +210,7 @@ public class TransactionalEventAppendSpecs : IAsyncLifetime
     {
         // A WorkflowRun that is not bound to an issue (e.g. a workflow
         // started by an ad-hoc API call without an issue context) must
-        // NOT stamp phantom issueid/issue keys — those extensions are
+        // NOT stamp a phantom issue key — that extension is
         // conditional on the annotations being present. Project identity
         // and the always-stamped workflowrunid remain on the envelope
         // so routing on the run itself still works.
@@ -238,7 +235,7 @@ public class TransactionalEventAppendSpecs : IAsyncLifetime
         Assert.Equal(ProjectId, stampedProjectId);
         Assert.True(stored.Envelope.Extensions.TryGetValue("workflowrunid", out var stampedRunId));
         Assert.Equal("wr_txn_unbound", stampedRunId);
-        Assert.False(stored.Envelope.Extensions.ContainsKey("issueid"));
+        Assert.False(stored.Envelope.Extensions.ContainsKey("issue"));
         Assert.False(stored.Envelope.Extensions.ContainsKey("issue"));
     }
 
@@ -250,7 +247,7 @@ public class TransactionalEventAppendSpecs : IAsyncLifetime
         // NOT by the bus-type prefix. Stages, stage approvals, feedback
         // requested, tasks, and checks all carry the stage name onto
         // the envelope, alongside the workflow.* lineage (workflowrunid
-        // + the conditionally-present projectid/issueid/issue).
+        // + the conditionally-present projectid/issue).
         var store = new WorkflowRunStore(_dbFactory, _eventStore, _grainFactory, NullLogger<WorkflowRunStore>.Instance);
         var run = BuildRun("wr_txn_stage", includeAnnotations: true);
 
@@ -319,7 +316,7 @@ public class TransactionalEventAppendSpecs : IAsyncLifetime
     {
         // A run that has no metadata at all (defensive) still has a
         // workflowrunid stamp because the run itself IS the producer,
-        // but conditional affiliations (projectid/issueid/issue/stage)
+        // but conditional affiliations (projectid/issue/stage)
         // are absent rather than empty strings.
         var store = new WorkflowRunStore(_dbFactory, _eventStore, _grainFactory, NullLogger<WorkflowRunStore>.Instance);
         var run = new WorkflowRun
@@ -435,7 +432,7 @@ public class TransactionalEventAppendSpecs : IAsyncLifetime
         Assert.Empty(await _eventStore.ListAsync("wr_txn_state_only"));
     }
 
-    private static WorkflowRun BuildRun(string id, bool includeAnnotations, string? epicId = null)
+    private static WorkflowRun BuildRun(string id, bool includeAnnotations, int? epicNumber = null)
     {
         Dictionary<string, string>? annotations = null;
         if (includeAnnotations)
@@ -443,10 +440,10 @@ public class TransactionalEventAppendSpecs : IAsyncLifetime
             annotations = new Dictionary<string, string>(StringComparer.Ordinal)
             {
                 ["projectId"] = ProjectId,
-                ["issueId"] = IssueId,
                 ["issueNumber"] = "1",
-                ["epicId"] = epicId ?? string.Empty,
             };
+            if (epicNumber is > 0)
+                annotations["epicNumber"] = epicNumber.Value.ToString();
         }
         return new WorkflowRun
         {
