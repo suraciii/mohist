@@ -39,6 +39,10 @@ mo issue create "server: 加订阅 API" --repo server
 mo issue create "web: 订阅管理页" --parent 42 --repo web
 ```
 
+不指定 `--workflow-profile` 时，Issue 继承 Project 的默认 Profile。可以在启动前或后续
+更新 Issue 的选择；已经开始的 Workflow 继续使用启动时确定的 Profile，新选择从下一次
+运行开始生效。清除显式选择后，Issue 重新继承 Project 默认值。
+
 ### 目标仓库与子 issue
 
 - 每个 issue 有一个**目标仓库**，workflow 全程（分支、diff、Integrate）都发生在那里；启动后不可更改。详见 [仓库](repositories.md)。

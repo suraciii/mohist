@@ -1,15 +1,50 @@
 # Workflow Profile
 
-Workflow Profile 定义"Issue 怎么从 Draft 走到 Done"，包括阶段、任务、检查、恢复和审批点。当前 Mohist 自带 `mohist/local` 和 `mohist/github-pr`。只有当 profile 的描述和实际执行定义一致时，系统才会把它暴露给用户选择。
+Workflow Profile 定义一个 Issue 怎样从 Draft 走到 Done，包括阶段、任务、检查、恢复和
+审批点。Profile 是 Project 内的资源：一个 Project 可以拥有多个 Profile，并指定其中
+一个作为默认 Profile。
 
-## 默认 Profile
+Variables 和 Prompts 是独立资源，不属于 Workflow Profile。Profile 只通过
+`${{ vars.* }}` 和 `${{ prompts.* }}` 使用它们。
 
-`mohist/local` 的结构（简化）：
+## 选择 Profile
+
+创建或更新 Issue 时可以显式选择同一 Project 中的 Profile。没有显式选择时，Issue 使用
+Project 的默认 Profile；清除显式选择后，也会重新继承 Project 默认值。
+
+Issue 启动 Workflow 时确定本次运行使用的 Profile。之后更换 Issue 的 Profile 或 Project
+默认值，只影响下一次运行，不会改变已经开始的运行。
+
+Mohist 默认提供：
+
+- `mohist/local`：本地合并，适合不依赖代码托管平台的项目；默认使用。
+- `mohist/github-pr`：通过一个 GitHub PR 完成交付。
+
+`mohist/*` Profile 随 Mohist 版本更新，不能直接编辑或删除。版本更新只影响之后启动的
+Workflow；已经开始的 Workflow 继续使用启动时的 definition。需要修改内置流程时，创建
+一个新的 Project Profile。
+
+## Profile 包含什么
+
+Profile 包含：
+
+- 名称与适用场景说明；
+- stages 和各阶段的 tasks；
+- stage checks 与 task completion expectations；
+- approval points；
+- failure recovery；
+- Action Input，以及对 Variables 和 Prompts 的引用。
+
+Profile 不包含：
+
+- Project、Issue 或 Run 的 Variables 值；
+- Prompt 正文；
+- Issue 身份、仓库状态等运行上下文；
+- 某次 Workflow 的执行状态和 task output。
+
+`mohist/local` 的结构可以简化表示为：
 
 ```yaml
-variables:
-  agent: {}
-
 stages:
   - stage: plan
     requiresApproval: true
@@ -33,12 +68,12 @@ stages:
       - id: self-review
         # ...
     checks:
-      - name: plan-artifacts     # 验证 proposal.md / specs / design.md / tasks.json 全部就位
+      - name: plan-artifacts
         with:
           changeDir: ${{ openspecChangeDir }}
 
   - stage: build
-    requiresApproval: false      # 默认 build 不等待审批
+    requiresApproval: false
     tasks:
       # 按 tasks.json 执行
 
@@ -55,93 +90,59 @@ stages:
         # 合并到 base branch
 ```
 
-## GitHub PR Profile
-
-`mohist/github-pr` 适合希望每个 issue 都以一个可审阅、可追溯的 GitHub PR 交付的团队。阶段骨架与 `mohist/local` 完全一致（Plan → Build → Check → Integrate，审批点同样在 Plan 和 Check 之后），区别只在交付方式：`mohist/local` 把工作分支直接合入 base branch，`mohist/github-pr` 全程通过一个 GitHub PR 走完。
-
-流程上的差别：
-
-- **Plan 通过自审后打开 draft PR。**PR 的标题和正文取自 issue 的标题和描述。从这一刻起，这个 issue 的所有后续改动都汇聚在同一个 PR 上，团队随时可以在 GitHub 上跟进。
-- **Check 阶段把 PR 变为 ready。**AI review 通过、最新改动推上 PR 之后，PR 从 draft 变为 ready for review，然后进入审批点等待决策。
-- **Integrate 阶段合并 PR。**等 PR 上的检查全部通过后 squash 合并，并确认 PR 确实已合入才算集成完成。
-
-集成失败时的自动恢复：
-
-- base branch 在等待合并期间前进了 → 自动 rebase 到最新 base 后重试合并；出现冲突时由 Inline Agent 解决。
-- PR 上的检查失败 → Inline Agent 自动修复、更新 PR，再重试合并。
-- 自动恢复超出预算仍失败时，issue 停在失败状态；你可以在 Web UI 或 CLI 里查看失败原因，处理后重试。重试会拿回完整的自动恢复预算，循环从头开始。
-
-使用要求：Runner 所在机器需要安装 GitHub CLI 并已登录目标仓库。
-
 ## 关键字段
 
-### stage
+### definition 语法
 
-阶段名。默认 5 个：`plan`、`build`、`check`、`integrate`、`done`。
+definition 的完整语法——stage、task、expect、artifacts、setVars、recovery、check 和
+模板表达式——见 [Workflow Definition 参考](workflow-definition.md)。
 
-### requiresApproval
+内置 Profile 的执行阶段是 `plan`、`build`、`check`、`integrate`；`done` 是 Workflow
+完成后的终态，不是需要配置 task 的阶段。默认 Plan 和 Check 完成后等待审批，Build 和
+Integrate 自动推进。
 
-`true` = 阶段完成后进入审批点，等待 approve / reject 决策。
-`false` = 阶段完成后自动进入下一阶段。
+### vars references
 
-默认：
-- Plan: `true`（等待审批）
-- Build: `false`（自动跑）
-- Check: `true`（等待审批）
-- Integrate: `false`（自动合并）
+Profile 可以用 `${{ vars.agent }}` 等表达式读取 Variables，但不在 Profile 中声明值。
 
-`requiresApproval` 的含义是阶段完成后需要审批；审批者可以是谁、决策怎么给出，见 [核心概念的 Approval 节](concepts.md#approval审批)。
+Variables 按 Project → Issue → Run 的顺序合并；同名值由后面的 scope 覆盖。Project 和
+Issue 都可以设置 workflow-wide 或 per-stage 值。task 的 `setVars` 写入本次 Run 的
+workflow-wide Variables，供后续 task 使用。
 
-### tasks
+变量只有显式绑定到 Action Input、expect、check 或其他支持表达式的位置后才会影响执行。
 
-阶段里要执行的任务序列。每个 task：
+### prompts references
 
-- `id`：唯一标识
-- `title`：人读的名字
-- `uses`：用哪个 action（如 `mohist/opencode`、`core/artifact-exists`）
-- `with`：传给 action 的参数；`mohist/opencode` 只使用 `prompt`、`session`、`options`
-- `expect`：Workflow 对本次 task 的完成要求，不属于 Action Input
-- `artifacts`：声明产出哪些文件
+Profile 使用 `${{ prompts.proposal }}` 等 key 引用 Project Prompt。Prompt 正文只在
+Project 中配置；Issue 不提供 Prompt override。Project 没有配置某个内置 key 时，Mohist
+使用 builtin Prompt。
 
-### checks
+## GitHub PR Profile
 
-阶段完成前的验证。比如"proposal.md 文件存在"。Check 不过 → task 视为失败。
+`mohist/github-pr` 与 `mohist/local` 使用相同的 Plan → Build → Check → Integrate 主干和
+审批点，但交付方式不同：
 
-### variables
+- Plan 自审通过后创建或复用 draft PR；
+- Check 通过后把 PR 标记为 ready；
+- Integrate 等待 PR checks，通过后 squash merge；
+- base branch 前进时自动 rebase，PR checks 失败时按 Profile 声明执行恢复；
+- 自动恢复耗尽后停止并暴露失败原因，由用户处理后 retry。
 
-可复用变量。最常见的是 `agent`：这是现有变量名，值中的 `model` 和 `variant` 会作为
-`mohist/opencode` 的 `options`，不表示 Agent 身份。
-变量只有通过 `options: ${{ vars.agent }}` 绑定到 task 后才会影响执行。
+Runner 所在机器需要安装 GitHub CLI，并登录目标仓库。
 
-### prompts
+## 常见定制
 
-引用 prompt 模板（来自 Settings → Templates）。模板支持变量插值。
+### 让 Build 等待审批
 
-## 改 Workflow Profile
+把 Build 的 `requiresApproval` 改为 `true`。
 
-### 通过 Web UI
+### 去掉 Check
 
-Settings → Workflows → 选 profile → 编辑 yaml。
+删除 Check stage。这样会缩短流程，但也失去 Integrate 前的独立 review。
 
-### 通过文件（开发场景）
+### 增加 Deploy
 
-直接改 `mohist-local.workflow.yaml`，重启 server 生效。
-
-## 常见定制场景
-
-### 1. 让 Build 也等待审批
-
-把 build stage 的 `requiresApproval` 改为 `true`。适合你需要在实现后、审查前增加一个审批点的场景。
-
-### 2. 去掉 Check 阶段
-
-适合简单项目不想多一层审查。直接删掉 check stage 的整段。
-
-注意：去掉 check 意味着你信任 build 的产出，没有 Inline Agent 二次 review。
-
-### 3. 加 deploy 阶段
-
-在 integrate 后加：
+在 Integrate 后增加 stage：
 
 ```yaml
 - stage: deploy
@@ -153,9 +154,9 @@ Settings → Workflows → 选 profile → 编辑 yaml。
         command: ./scripts/deploy.sh
 ```
 
-### 4. 改 AI 模型 per-stage
+### 为某个 task 固定模型
 
-每个 task 的 `with.options` 可以指定不同模型：
+只属于一个 task 的固定值可以直接写在 Action Input 中：
 
 ```yaml
 - id: proposal
@@ -168,61 +169,28 @@ Settings → Workflows → 选 profile → 编辑 yaml。
       variant: high
 ```
 
-也可以把同一个 `options` 对象放进 project、issue 或 stage variables，再用
-`options: ${{ vars.agent }}` 绑定。Workflow 不限制变量由哪一层提供。
+需要让 Project 或 Issue 调整时，再改为 `options: ${{ vars.agent }}` 并在独立的 Variables
+设置中提供值。
 
-## 创建新 Profile
+## 管理 Profile
 
-当前版本不支持通过 UI 创建新 profile（roadmap）。临时方案：
+在 Settings → Workflows 中管理当前 Project 的 Profile collection、编辑自定义 Profile
+的 definition，并指定 Project 默认 Profile。Issue 详情页只负责选择或更换 Profile，不
+直接编辑 Profile definition。
 
-1. 复制 `mohist-local.workflow.yaml` 为 `<your-name>.workflow.yaml`
-2. 放在 WorkflowProfiles 目录下
-3. 修改内容
-4. 重启 server
+CLI 命令见 [CLI 参考](cli-reference.md#workflow-profile)。Profile ID 只需在所属 Project
+内唯一；内置 Profile 使用 `mohist/<name>`，自定义 Profile 使用能稳定表达用途的 ID。
 
-之后 `mo issue create --workflow-profile <your-name>` 就能用。
+## 实装差距
 
-## Inline Agent 实装差距
-
-本文按目标接口使用 `mohist/opencode` 和 `options: ${{ vars.agent }}`。
-当前内置 profile 仍使用 `mohist/acp-agent` 和旧的 `agent` input；在
-[`mohist/opencode` Action](actions/opencode.md) 所述替换完成前，自定义现有 profile 时仍需
-以当前可用 action 为准。当前 schema 还把 `expect` 放在 `with` 中；目标实现会把它
-提升为 Workflow task 的完成契约，使 OpenCode Action Input 保持最小。
-
-## Profile ID 约定
-
-- `mohist/local` → 官方默认
-- `mohist/<name>` → 官方提供的其他 profile；只有实现了独立执行定义后才会暴露
-- `<your-org>/<name>` → 你自定义的
-
-## 当前的限制
-
-Roadmap（已知不足）：
-
-- Profile 目前只有 `description` 描述性元数据；更结构化的 `risk_level`、`suitable_for` 等字段未提供
-- quick-fix、experiment 这类轻量 profile 尚未内置，避免展示与实际执行不一致的假选项
-- 没有"按 issue 内容自动推荐 profile"机制
-- 不能 import/export profile
-- 没有 profile 调试模式（dry run）
-
-这些都在 roadmap 里。如果你需要这些能力，欢迎贡献或提 issue。
-
-## 进阶：prompt 模板
-
-Workflow 里的 `prompts.proposal` 等模板可以在 Settings → Templates 里编辑。
-
-模板支持变量：
-
-- `${{ issue.number }}` / `${{ issue.id }}`
-- `${{ project.id }}` / `${{ project.name }}`
-- `${{ repository.baseBranch }}`
-- `${{ openspecChangeDir }}`
-- `${{ vars.agent }}`
-- 等等
-
-完整 issue 内容由 Inline Agent 通过 CLI 获取，例如：
-
-```bash
-mo issue show ${{ issue.number }} --project-id ${{ project.id }}
-```
+- 当前 Settings 仍把默认 template、Variables 和 Prompts 组合成一份 workflow config；
+  目标界面会把三个资源分开。
+- 当前自定义 Workflow Definition 仍以 project template 或 Issue inline template 存在；
+  目标模型会统一为 Project 的 Workflow Profile collection。
+- 当前有活动 Workflow 时还不能更换 Issue 的 Profile；目标行为允许提前选择下一次运行
+  使用的 Profile，同时保持当前运行不变。
+- 当前 Issue 仍支持 Prompt override；目标模型只保留 Project Prompt。
+- 当前进行中的 Workflow 还没有完整保存启动时的 Workflow Definition；目标行为是
+  Definition snapshot 固定，运行时仍可产生新的任务，Variables 和 Prompts 继续按各自
+  时机解析。
+- 当前部分内置 task 仍使用旧 Action Input；目标接口以 Action 文档为准。

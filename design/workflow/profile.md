@@ -1,144 +1,148 @@
+---
+status: wip
+---
+
 # Workflow Profile
 
-Profile = **template**（选择哪个 `WorkflowDefinition`）+ **variables**（`VariableBundle`）。
+`WorkflowProfile` 是 Project-scoped 资源，定义一个 Issue 如何从 Draft 走到 Done。
+一个 Project 可以拥有多个 Profile，并指定其中一个作为默认 Profile。Issue 可以继承默认
+Profile，也可以显式选择同一 Project 中的其他 Profile。
 
-Prompt 不属于 Profile，见 [`../prompt-management.md`](../prompt-management.md)。Action
-输入输出见 [`actions.md`](actions.md)，内置 Workflow 见 [`builtin-workflows.md`](builtin-workflows.md)。
+Profile 只包含 Workflow 的结构和行为，不包含 Variables 或 Prompts。变量解析见
+[`variables.md`](variables.md)，Prompt 解析见
+[`../prompt-management.md`](../prompt-management.md)，Action 契约见
+[`actions.md`](actions.md)。
 
-## 架构
+## Model
 
-```text
-Issue -> Workflow（单向依赖）
-WorkflowGrain -> IWorkflowProfileProvider（port，只使用 Workflow 类型）
-                    ^
-            WorkflowProfileProvider（adapter，实时读取配置）
-                    |
-    global / project / issue / run profiles / project templates
+```plantuml
+@startuml
+skinparam shadowing false
+
+class Project {
+  defaultWorkflowProfileId
+}
+
+class WorkflowProfile {
+  id
+  name
+  description
+  definition
+}
+
+class Issue {
+  workflowProfileId?
+}
+
+class WorkflowRun {
+  workflowProfileId
+  workflowDefinition
+}
+
+Project "1" *-- "1..*" WorkflowProfile : owns
+Project --> WorkflowProfile : default
+Issue --> Project : belongs to
+Issue --> WorkflowProfile : selects
+WorkflowRun --> WorkflowProfile : selected at start
+
+note right of WorkflowProfile
+  Project-scoped.
+  Does not own Variables or Prompts.
+end note
+
+note right of WorkflowRun
+  Definition is fixed for this run.
+  Runtime tasks may still be added.
+end note
+@enduml
 ```
 
-- Workflow 不依赖 Issue。解析发生在 adapter，并实时读取，不保存 snapshot。
-- `WorkflowRun` 保存执行状态与 Profile 身份，不保存 Profile body，也没有
-  `RuntimeVariables`。
-- `TaskRun.Output` = `JsonElement?`，与 `WithInput` 对齐。
+`WorkflowProfile` 的最小模型是：
 
-## 与 Issue 的依赖方向
-
-`Issue → Workflow` 是静态依赖方向。Workflow 不引用 Issue 聚合或领域行为，只操作抽象的
-run、`WorkflowDefinition` 与 variables；WorkflowRun 为关联和事件 stamping 保存的
-`ProjectId`、`IssueNumber`、`EpicNumber?` 属于 Published Language 运行上下文。
-
-| 概念 | 归属 |
+| Field | Meaning |
 |---|---|
-| `WorkflowDefinition`（type + engine） | Workflow（`Workflow/Domain/Definition/`） |
-| workflow profile（template + variables） | Issue / Project（它们的配置） |
-| prompts | Project Space（见 [`../prompt-management.md`](../prompt-management.md)） |
-| 默认 `WorkflowDefinition` 内容（yaml） | application config（composition root） |
-| projection（attention 等） | Issue（只读消费） |
+| `id` | Profile 在 Project 内的稳定标识 |
+| `name` | 面向使用者的名称 |
+| `description` | 适用场景的简短说明 |
+| `definition` | stages、初始 tasks、checks、approval，以及产生后续 task 的 recovery 等规则 |
 
-## VariableBundle
+`mohist/*` ID 保留给随 Mohist 版本更新的内置 Profile。这些 Profile 在每个 Project 的同一
+collection 中可见、可选，也可以作为默认 Profile，但不能修改或删除。其他 ID 的 Profile
+由 Project 管理。
 
-形状为 `{ vars, stages: { "plan": { vars } } }`。Set 表示替换，Patch 表示 deep merge。
+Profile 可以通过 `${{ vars.* }}` 和 `${{ prompts.* }}` 引用外部值，但不声明或保存这些
+值。固定且只属于某个 task 的 Action Input 应直接写在 `definition` 中。
 
-## Profile 层次
+## Selection
 
-```text
-project_workflow_profile    ProjectId, DefaultTemplateId, Variables
-issue_workflow_profile      ProjectId + IssueNumber, SourceTemplateId, Template, Variables
-workflow_run_profile        WorkflowRunId, Variables
-```
-
-Run Profile 优先级最高，保存 `vars.change.id` 等运行事实。它不属于 `WorkflowRun`
-aggregate，只通过 `WorkflowRunId` 关联，由 Profile service 读写。
-
-## 合并
-
-合并分三步：Template lane 只做 fallback 选择，不 deep merge；Variable lane 分层 deep
-merge；最后叠加 Stage variables。
+Issue 启动 WorkflowRun 时只做一次选择：
 
 ```text
-Template lane（fallback，不 deep merge）：
-  issue custom template? -> issue source template? -> project default? -> system default
-  -> CurrentTemplateVariables
-
-Variable lane（分层 deep merge）：
-  global -> project -> issue -> run
-  -> ProfileVariables
-
-Effective:
-  deepMerge(CurrentTemplateVariables, ProfileVariables) -> WorkflowEffectiveVariables
-
-Stage:
-  deepMerge(WorkflowEffectiveVariables.vars, WorkflowEffectiveVariables.stages[stage].vars)
-  -> WorkflowStageEffectiveVariables
+selectedProfileId =
+  issue.workflowProfileId ?? project.defaultWorkflowProfileId
 ```
 
-Deep merge 递归合并 object，后者覆盖冲突字段。存储层的 `null` 被忽略，不提供
-null-overwrite 语义。
+- Project 默认值必须引用该 Project 拥有的 Profile。
+- Issue 显式选择也必须引用同一 Project 中的 Profile。
+- 清除 Issue 的显式选择后，Issue 重新继承 Project 默认值。
+- Profile 之间不继承、不 merge；选择结果始终是一个完整 Profile。
+- WorkflowRun 保存启动时选中的 Profile ID 和 Workflow Definition snapshot。之后修改
+  Issue 的选择或 Project 默认值，只影响未来的 WorkflowRun。
 
-## ExpandTaskWith
+Workflow Definition snapshot 对单个 WorkflowRun 固定，但它不是完整的执行计划，也不固定
+`StageRun` 中最终产生的 `TaskRun` 序列。运行时 task 的产生与插入见
+[`definition.md`](definition.md)。Variables 在每次 task dispatch 前重新解析，Prompt 在
+执行时按 key 读取。
+
+## Ownership
+
+`WorkflowProfile` 属于 Workflow 核心域，但以 `ProjectId` 作为 tenancy boundary。Project
+持有默认 Profile 引用，Issue 持有可选的显式 Profile 引用；两者都不复制 Profile body。
 
 ```text
-for (k,v) in taskWith:
-  "${{...}}" 占据整个字符串 -> 替换为 vars 值，否则保留给 Runner 展开
-  object && k in vars -> deepMerge（vars 覆盖）
-  其他 -> 原样保留
+Issue -> Workflow
+
+WorkflowRun creation -> IWorkflowProfileProvider
+                             ^
+                     ProjectWorkflowProfileProvider
 ```
 
-整值展开保留解析后的 JSON 类型。现有 `vars.agent` 因此可以选择 OpenCode 模型选项，
-而不需要第二条配置通路。该变量名在此 Action 契约中不携带 Agent 身份：
+`IWorkflowProfileProvider` 只在 WorkflowRun 创建时按 Project 与 Profile ID 提供经过校验
+的 `WorkflowDefinition`。WorkflowRun 保存 Definition snapshot 后不再读取 Provider。
+Provider 不读取 Variables 或 Prompts，也不负责 Profile 选择。
 
-```yaml
-variables:
-  agent:
-    model: anthropic/claude-sonnet-4
-    variant: high
+## API
 
-tasks:
-  - uses: mohist/opencode
-    with:
-      prompt: ${{ prompts.proposal }}
-      options: ${{ vars.agent }}
-```
-
-展开后，Action Input 中的 `options` 仍是 object。Action 不能再次读取 effective
-variables，也不能重新 merge `vars.agent`。
-
-Task-level `expect` 使用相同的 template lookup 规则，但单独展开；它不会 deep merge
-进 `with`，也不会成为 Action Input。
-
-## Runtime 写入：setVars
-
-Task 成功后，通过 `setVars` 把 Action output 投影到 Run Profile。投影规则（path
-语义、只能修改 `vars.*`、失败即 task 失败）以 [`actions.md`](actions.md) 为准。
-Profile 侧事实：
-
-- 只 patch `workflow_run_profile.Variables`，不修改 Project / Issue Profile，也不修改
-  `WorkflowRun` 执行状态。
-- Runner 先从 output 提取值，再调用
-  `PATCH /api/workflow-runs/{id}/workflow-profile/variables`，最后报告 task complete。
-
-## 读取 API
+Profile collection 是 Project 的子资源：
 
 ```text
-GET /workflow-runs/:id/variables/effective           -> WorkflowEffectiveVariables.vars
-GET /workflow-runs/:id/variables/effective?stage=X   -> WorkflowStageEffectiveVariables
-GET /workflow-runs/:id/variables/effective/:keyPath  -> keyPath 对应的值
+GET    /api/projects/{projectRef}/workflow-profiles
+POST   /api/projects/{projectRef}/workflow-profiles
+GET    /api/projects/{projectRef}/workflow-profiles/{*profileId}
+PUT    /api/projects/{projectRef}/workflow-profiles/{*profileId}
+DELETE /api/projects/{projectRef}/workflow-profiles/{*profileId}
 ```
 
-## 写入 API
+Project 的 `defaultWorkflowProfileId` 与 Issue 的 `workflowProfileId` 是对该 collection 的
+引用，分别通过 Project 和 Issue resource 修改。删除或替换 Profile 时必须保护仍被默认值
+或 Issue 引用的关系；已启动的 WorkflowRun 使用自己的 definition snapshot。
 
-```text
-system templates    GET /workflow-templates/system
-project templates   /projects/:p/workflow-templates
-project profile     /projects/:p/workflow-profile
-issue profile       /projects/:p/issues/:n/workflow-profile
-run profile         /workflow-runs/:id/workflow-profile
-effective           /workflow-runs/:id (/yaml, /variables/effective)
-```
+`profileId` 是 terminal catch-all，因此可以无损寻址 `mohist/local` 这类 ID。Variables 与
+Prompts 使用独立 API，不挂在 `/workflow-profiles/{*profileId}` 下。
 
-## 实装差距
+`GET` 和 collection list 同时返回内置与 Project 管理的 Profile。`POST` 不接受
+`mohist/*` ID；对内置 Profile 调用 `PUT` 或 `DELETE` 必须返回领域错误。
 
-默认 `WorkflowDefinition` 内容应归属 application config 层：
-`mohist-local.workflow.yaml` 已移至 `Workflow/Services/Profiles/`，但 Issue 侧仍留有
-`MohistWorkflow` 薄封装（`Issue/Services/WorkflowProfiles/MohistWorkflow.cs`），待收编
-以消除跨 context 反向依赖。
+## Status
+
+与当前实现的差距：
+
+- 当前实现把 system profile、project template 和 Project 的单例 workflow config 分成
+  三套概念；目标模型统一为 Project-scoped `WorkflowProfile` collection。
+- 当前 `ProjectWorkflowProfile`、`IssueWorkflowProfile` 和 `WorkflowRunProfile` 记录还
+  混合保存 Variables 或 Prompt overrides；目标模型将这些资源完全分开。
+- 当前 Issue 还可以保存 inline template；目标模型只允许选择 Project 中已有的 Profile。
+- 当前有活动 WorkflowRun 时，Issue 的 Profile 选择会被锁定；目标模型允许记录新选择，
+  但只对下一次新建的 WorkflowRun 生效。
+- 当前 WorkflowRun 主要保存 Profile 身份并实时读取 definition；目标模型要求启动时固定
+  definition，使 Profile 编辑不改变进行中的 WorkflowRun。

@@ -75,7 +75,11 @@ Draft → Plan → Build → Check → Integrate → Done
 
 ### Workflow Profile
 
-Workflow 不是写死的。产品模型支持多个 **Workflow Profile**，每个 issue 可以选一个用。
+Workflow 不是写死的。每个 Project 可以拥有多个 **Workflow Profile**，并指定一个默认
+Profile。Issue 可以继承默认值，也可以选择同一 Project 中的其他 Profile。
+
+Profile 定义 stages、tasks、checks、recovery 和 approval，不保存 Variables 或 Prompt
+正文。Project / Issue / Run Variables 按 scope 合并；Prompt 只在 Project 中配置。
 
 当前内置 profile：
 - `mohist/local` — 完整 5 阶段流程，本地合并（默认）

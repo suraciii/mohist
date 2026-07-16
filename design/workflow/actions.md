@@ -11,7 +11,7 @@ Action 是 Workflow task 的执行接口。`uses` 选择 Action，`with` 传入�
 - Engine 不解释 Action output 的业务语义。
 
 Engine 只负责：展开 task input 和由 Workflow 拥有的完成声明，保存 task output，通过
-`setVars` 把 output 投影到 Workflow variables，按 `when` 匹配 recovery，
+`setVars` 把 output 投影到 Run Variables，按 `when` 匹配 recovery，
 以及机械地插入 recovery task。
 
 ## 输入
@@ -44,7 +44,7 @@ Workflow 负责展开模板，不解释 `baseBranch`、`remote` 的业务含义�
 
 ## setVars
 
-把 Action output 字段投影到 Workflow runtime profile：
+把 Action output 字段投影到 Run Variables：
 
 ```yaml
 setVars:
@@ -56,6 +56,8 @@ setVars:
 - Runner 在报告 task complete 前执行 `setVars`；投影失败则 task 失败。
 - 只能修改 `vars.*`，不能修改 `workflow`、`stage`、`work`、`issue`、`workspace`。
 - Recovery task 可以覆盖相同的 `vars.*`。
+- Runner 使用与其他调用方相同的 Run Variables PATCH API，但生成的 body 只包含
+  `vars`，不包含 `stages`。完整语义见 [`variables.md`](variables.md)。
 
 ## `artifacts`
 
@@ -71,7 +73,8 @@ artifacts:
 
 `expect` 是由 Workflow 拥有的 task 完成契约，与 Action Input 分离。Runner 的
 Workflow task executor 同时接收展开后的 Action Input 和 `expect`，在 Action 执行后
-应用完成判断；Action 与 Runtime 模块都不解释它。只有 `expect` 失败才让 task 失败。
+应用完成判断；Action 与 Runtime 模块都不解释它。Action 执行失败会让 task 失败；Action
+成功后，`expect` 不满足也会让 task 失败。
 
 ```yaml
 expect:

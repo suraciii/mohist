@@ -17,14 +17,18 @@ Agent、AgentJob 和 AgentSession 的总体关系见 [Agent 与 AgentSession](..
     prompt: ${{ prompts.proposal }}
 ```
 
-需要复用上下文或选择 OpenCode 配置时，显式传入 `session` 和 `options`：
+需要让 Project 或 Issue 调整 OpenCode 配置时，先在独立的 Variables 中设置：
 
 ```yaml
-variables:
+vars:
   agent:
     model: anthropic/claude-sonnet-4
     variant: high
+```
 
+再由 Workflow Profile 显式绑定 `session` 和 `options`：
+
+```yaml
 stages:
   - stage: plan
     tasks:
@@ -37,8 +41,8 @@ stages:
 ```
 
 `${{ vars.agent }}` 占据整个 `options` 值时，展开结果仍是一个对象。用户可以把
-同一对象放在 template、project、issue 或其他变量层，也可以直接内联到 task；
-Mohist 不规定配置必须来自哪一层。
+同一对象放在 Project、Issue 或 Run Variables，也可以直接内联到 task。Issue 的值覆盖
+Project，Run 的值覆盖 Issue；Workflow Profile 只引用变量，不保存变量值。
 
 `agent` 是现有 Workflow 变量名；在这个 Action 中，它只提供 `model` 和 `variant`，
 不表示 Mohist Agent 身份，也不会选择 OpenCode agent。

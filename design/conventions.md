@@ -105,12 +105,8 @@ WorkflowRun.Metadata
 handler 重新读取 Issue 当前状态，再把完整上下文交给 WorkflowRun；旧事件因此不会把旧
 归属重新写回。
 
-## Runtime context vs profile
+## Dispatch namespaces
 
-| | Runtime context | Profile variables |
-|---|---|---|
-| question | what facts does this dispatch need? | how is this run parameterized? |
-| content | title, repo, prompt inputs, run facts snapshot | template < project < issue < dispatch injection |
-| owner | run-start snapshot | WorkflowProfileManager |
-
-Runtime context is not identity. Not profile config. Lifecycles are separate.
+Runtime context、Workflow Variables、Project Prompts 和 Project Repository resources 具有
+不同所有者和生命周期，不合并成一个 config 或 Variables document。各命名空间的解析时机
+以 [`workflow/task-dispatch.md`](workflow/task-dispatch.md) 为准。

@@ -19,7 +19,7 @@
 - One word = one domain meaning. No overloaded terms.
 
 `mo workflow` = WorkflowRun (aggregate root).
-`mo project workflow profile` = WorkflowProfile (project-owned config).
+`mo project workflow profile` = WorkflowProfile (project-scoped collection).
 
 ## Verb consistency
 

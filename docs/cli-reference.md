@@ -110,35 +110,67 @@ mo info         CLI 本地诊断（受控例外：跨资源只读，不归任一
 
 环境变量优先于配置文件。默认凭据文件由本机服务首次启动时创建；托管部署可通过配置文件指定共享路径，无需再为 CLI 配置第二份覆盖值。
 
-## Workflow Profile（工作流运行配置）
+## Workflow Profile
 
-工作流运行配置 = 模板 + 变量 + 提示词覆盖。挂在 project 下（配置是项目拥有的）。统一到 `mo project workflow profile` 一个资源组，含启用/禁用入口。
-
-```
-mo project workflow profile list [--described]      列出 profile（含名称与描述）
-mo project workflow profile get                     查看 profile 全貌（默认模板/变量/提示词）
-mo project workflow profile set [flags]             复合写入（默认模板/变量/提示词）
-mo project workflow profile clear [flags]           复合清除
-mo project workflow profile preview <键>            预览渲染后的提示词
-mo project workflow profile enable <profile-id>     启用 profile
-mo project workflow profile disable <profile-id>    禁用 profile
-```
-
-> **路径迁移**：旧 `mo workflow list`（WorkflowProfile）已下沉到 `mo project workflow profile list`。原路径不再可用——profile 归 `mo project workflow`，与 template / config 同层。
-
-`profile list` 支持 `-o table|json` 和 `--described`；同其他项目作用域命令一样，支持 `--project` / `--project-id`。无 project flag 但有 active project 时使用 active project；无可解析 project 时回退到未过滤列表并打印降级 stderr 提示。`--project` 与 `--project-id` 冲突时本地失败、不发请求。完整 flag 见 `mo project workflow profile list --help`。
-
-## Workflow Template（工作流模板）
-
-YAML 定义的模板，project 下管理。
+Workflow Profile 是 Project-scoped collection。Profile 只管理 Workflow Definition；
+Variables 和 Prompts 有各自独立的命令组。
 
 ```
-mo project workflow template list                  列出模板
-mo project workflow template create --yaml <yaml|@file>
-mo project workflow template get <模板id>
-mo project workflow template update <模板id> --yaml <yaml|@file>
-mo project workflow template delete <模板id>
+mo project workflow profile list [--described]                 列出 Project 的 Profiles
+mo project workflow profile get <profile-id>                   查看一个 Profile
+mo project workflow profile create <profile-id> --yaml @<file> 创建 Profile
+mo project workflow profile update <profile-id> --yaml @<file> 替换 Profile Definition
+mo project workflow profile delete <profile-id>                删除 Profile
+mo project workflow profile set-default <profile-id>           设置 Project 默认 Profile
 ```
+
+`get/create/update/delete/set-default` 必须解析一个 Project；`list` 也只列当前或显式指定
+Project 的资源，不降级为跨 Project 列表。默认 Profile 和仍被 Issue 显式选择的 Profile
+不能直接删除。`mohist/*` Profile 随 Mohist 版本更新；可以选择或设为默认值，但不能
+`update` 或 `delete`。
+
+Issue 使用 `mo issue create/update --workflow-profile <profile-id>` 选择 Profile。传空值或
+`default` 清除显式选择，重新继承 Project 默认值。
+
+## Workflow Variables
+
+Variables 与 Profile 分开管理。Project 和 Issue 都可以设置 workflow-wide 与 per-stage
+值；Run 的 `setVars` 由 Workflow task 写入。
+
+```
+mo project variables get
+mo project variables set --var <key>=<value>
+mo project variables set --stage-var <stage>.<key>=<value>
+mo project variables clear --var <key>
+mo project variables clear --stage-var <stage>.<key>
+
+mo issue variables get <number>
+mo issue variables set <number> --var <key>=<value>
+mo issue variables set <number> --stage-var <stage>.<key>=<value>
+mo issue variables clear <number> --var <key>
+mo issue variables clear <number> --stage-var <stage>.<key>
+```
+
+`set` 可以重复传入 `--var` 和 `--stage-var`，一次提交所有修改。`clear` 删除当前 scope
+中的值，使其重新继承前一个 scope；它不会删除其他 scope 保存的值。
+
+`mo workflow variables <runId> [--stage <stage>] [--key <path>]` 继续只读本次 Run 的
+Effective Variables。
+
+## Project Prompt
+
+Prompt 只在 Project 中配置，不提供 Issue Prompt 命令。
+
+```
+mo project prompt list
+mo project prompt get <key>
+mo project prompt set <key> --body <text>
+mo project prompt set <key> --body-file <path>
+mo project prompt delete <key>
+mo project prompt preview <key>
+```
+
+删除 Project Prompt 后，该 key 恢复使用 builtin Prompt；没有 builtin 时读取失败。
 
 ## Project（项目）
 
@@ -149,7 +181,9 @@ mo project get <名或id>
 mo project use <名或id>            设置当前项目
 mo project delete <名或id>
 mo project status                  当前项目聚合状态
-mo project workflow ...            工作流配置（template / profile，见上）
+mo project workflow ...            Workflow Profile 管理（见上）
+mo project variables ...           Project Variables
+mo project prompt ...              Project Prompts
 ```
 
 ## Repository（仓库）
@@ -173,6 +207,9 @@ mo issue create <标题> [--parent <编号>] [options]
 mo issue list [--parent <编号>] [options]
 mo issue get <编号>
 mo issue update <编号> [options]
+mo issue variables get <编号>
+mo issue variables set <编号> [--var <键>=<值>] [--stage-var <阶段>.<键>=<值>]
+mo issue variables clear <编号> [--var <键>] [--stage-var <阶段>.<键>]
 mo issue start <编号>
 mo issue approve <编号>
 mo issue reject <编号> --message <理由>
@@ -366,6 +403,10 @@ mo update runner                    仅升级执行器
 
 ## 实装差距
 
+- 当前 `mo project workflow template` 与 `mo project workflow config` 仍把 Profile、
+  Variables 和 Prompts 分成旧 template/config 结构；目标命令面以本文三个独立资源组为准。
+- 当前 `mo issue workflow config` 仍支持 inline template 和 Issue Prompt；目标命令面只
+  保留 Profile 选择与 Issue Variables。
 - **查单条动词未收敛**：本文的目标动词是 `get`，当前实装中 issue / project / epic / agent 等主要资源用的是 `show`（`get` 已用于 skills、template、config 等）。操作类文档（快速上手、Issue 管理等）按当前实装写 `show`，保证示例可直接运行；动词收敛到 `get` 随各命令组改进 issue 推进。
 - `mo agent session compact/reset` 尚未交付；当前只有 Workflow 来源的 Session 提供
 对应 CLI 入口。两种来源会随统一 AgentSession 模型和 `mohist/opencode` 替换一起

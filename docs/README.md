@@ -18,6 +18,7 @@
 
 - [工作流详解](the-workflow.md) —— Draft → Plan → Build → Check → Integrate 每个阶段做什么
 - [Workflow Profile](workflow-profiles.md) —— 自定义阶段、任务、检查、审批策略
+- [Workflow Definition 参考](workflow-definition.md) —— 编写 definition 的完整语法：stage、task、expect、recovery、模板表达式
 
 ## 板块 3：工作管理
 

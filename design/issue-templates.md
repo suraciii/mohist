@@ -1,6 +1,10 @@
 # Issue Templates
 
-issue template 定义"一个 issue 的 body 长什么样"，与 issue workflow profile（"怎么执行"）正交——前者是写什么，后者是怎么跑。per-section 写作指令（写什么 / 禁什么 / 可选段删除条件）的内容真源是资产文件 `packages/server/src/Mohist.Server/Issue/Services/IssueTemplates/templates/{feature,bug,refactor}.md`；本文只讲设计依据，不复制其内容。
+issue template 定义"一个 issue 的 body 长什么样"，与 Issue 选择的 WorkflowProfile
+（"怎么执行"）正交——前者是写什么，后者是怎么跑。per-section 写作指令（写什么 /
+禁什么 / 可选段删除条件）的内容真源是资产文件
+`packages/server/src/Mohist.Server/Issue/Services/IssueTemplates/templates/{feature,bug,refactor}.md`；
+本文只讲设计依据，不复制其内容。
 
 ## Metadata：只有 name 与 description
 
