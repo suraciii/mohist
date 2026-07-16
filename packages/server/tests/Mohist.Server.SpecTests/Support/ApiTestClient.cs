@@ -132,6 +132,20 @@ public static class ApiTestClient
         string expectedStatus,
         TimeSpan? timeout = null,
         TimeSpan? pollInterval = null)
+        => await client.WaitForAsync<T>(
+            path,
+            resource => string.Equals(statusSelector(resource), expectedStatus, StringComparison.Ordinal),
+            $"status '{expectedStatus}'",
+            timeout,
+            pollInterval);
+
+    public static async Task<T> WaitForAsync<T>(
+        this HttpClient client,
+        string path,
+        Func<T, bool> predicate,
+        string expected,
+        TimeSpan? timeout = null,
+        TimeSpan? pollInterval = null)
     {
         var budget = timeout ?? TimeSpan.FromSeconds(10);
         var interval = pollInterval ?? TimeSpan.FromMilliseconds(50);
@@ -144,7 +158,7 @@ public static class ApiTestClient
             try
             {
                 latest = await client.GetDataAsync<T>(path);
-                if (string.Equals(statusSelector(latest), expectedStatus, StringComparison.Ordinal))
+                if (predicate(latest))
                     return latest;
             }
             catch
@@ -153,8 +167,7 @@ public static class ApiTestClient
         }
 
         throw new TimeoutException(
-            $"Resource at '{path}' did not reach status '{expectedStatus}' after " +
-            $"{attempts} probes (last seen: '{statusSelector(latest!)}').");
+            $"Resource at '{path}' did not reach {expected} after {attempts} probes.");
     }
 
     private static async Task EnsureSuccessWithBodyAsync(HttpResponseMessage response)

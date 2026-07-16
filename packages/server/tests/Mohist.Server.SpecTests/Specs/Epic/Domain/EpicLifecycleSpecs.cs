@@ -29,18 +29,22 @@ public class EpicLifecycleSpecs
     [Fact]
     public async Task MarkDone_WhenOpenLinkedIssuesRemain_Returns4xxAndLeavesStatusUnchanged()
     {
-        // First link (delivered / Done) auto-marks the epic done via
-        // the link-time recompute. Second link (pending / open) wakes
-        // the done epic back to running and autopilot starts the
-        // pending issue. The /done POST still returns 409 because the
-        // pending issue remains open, and the final status is running.
         var project = await CreateProjectAsync();
         var delivered = await CreateIssueAsync(project.Id, "Delivered");
         await CompleteIssueAsync(project.Id, delivered);
         var pending = await CreateIssueAsync(project.Id, "Pending");
         var epic = await CreateEpicAsync(project.Id, "Lifecycle rejection");
         await LinkIssueAsync(project.Id, epic.Number, delivered.Number);
+        await _client.WaitForStatusAsync<EpicDto>(
+            $"/api/projects/{project.Id}/epics/{epic.Number}",
+            dto => dto.Status,
+            "done");
         await LinkIssueAsync(project.Id, epic.Number, pending.Number);
+
+        await _client.WaitForStatusAsync<EpicDto>(
+            $"/api/projects/{project.Id}/epics/{epic.Number}",
+            dto => dto.Status,
+            "running");
 
         using var response = await _client.PostAsync($"/api/projects/{project.Id}/epics/{epic.Number}/done", null);
 
@@ -366,20 +370,16 @@ public class EpicLifecycleSpecs
     [Fact]
     public async Task MarkDone_AllDelivered_LinkTimeRecomputeAutoTransitionsToDone()
     {
-        // The poll-driven sweep that used to drive auto-mark-done for
-        // an idle epic with all-delivered links was removed in #363.
-        // The link-time recompute introduced in its place observes the
-        // same condition: every linked issue is delivered at link time
-        // → the epic auto-transitions to done in the same commit. The
-        // readiness detail (ReadyToMarkDone / counts) still matches
-        // the post-transition state.
         var project = await CreateProjectAsync();
         var issue = await CreateIssueAsync(project.Id, "Delivered");
         await CompleteIssueAsync(project.Id, issue);
         var epic = await CreateEpicAsync(project.Id, "Auto complete on link");
         await LinkIssueAsync(project.Id, epic.Number, issue.Number);
 
-        var afterLink = await _client.GetDataAsync<EpicDto>($"/api/projects/{project.Id}/epics/{epic.Number}");
+        var afterLink = await _client.WaitForStatusAsync<EpicDto>(
+            $"/api/projects/{project.Id}/epics/{epic.Number}",
+            dto => dto.Status,
+            "done");
         Assert.Equal("done", afterLink.Status);
 
         var detail = await _client.GetDataAsync<EpicDetailDto>($"/api/projects/{project.Id}/epics/{epic.Number}");
@@ -463,11 +463,6 @@ public class EpicLifecycleSpecs
     [Fact]
     public async Task EpicDetail_ProgressOutputsAreUnchangedByPrerequisiteData()
     {
-        // First link (delivered) auto-marks the epic done; second link
-        // (open, prereq satisfied by first) wakes the epic back to
-        // running and autopilot starts the second issue immediately.
-        // The progress detail therefore reports second as an active
-        // (in_progress) issue and no NextIssue candidate.
         var project = await CreateProjectAsync();
         var first = await CreateIssueAsync(project.Id, "First");
         await CompleteIssueAsync(project.Id, first);
@@ -477,9 +472,17 @@ public class EpicLifecycleSpecs
 
         var epic = await CreateEpicAsync(project.Id, "Progress additivity");
         await LinkIssueAsync(project.Id, epic.Number, first.Number);
+        await _client.WaitForStatusAsync<EpicDto>(
+            $"/api/projects/{project.Id}/epics/{epic.Number}",
+            dto => dto.Status,
+            "done");
         await LinkIssueAsync(project.Id, epic.Number, second.Number);
 
-        var detail = await _client.GetDataAsync<EpicDetailDto>($"/api/projects/{project.Id}/epics/{epic.Number}");
+        var detail = await _client.WaitForAsync<EpicDetailDto>(
+            $"/api/projects/{project.Id}/epics/{epic.Number}",
+            dto => dto.Status == "running"
+                   && dto.Progress.ActiveIssues.Any(issue => issue.Number == second.Number),
+            $"running epic with issue #{second.Number} active");
 
         Assert.Equal(1, detail.Progress.DeliveredCount);
         Assert.Equal(2, detail.Progress.TotalIssueCount);
