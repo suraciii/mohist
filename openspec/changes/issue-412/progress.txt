@@ -297,7 +297,7 @@ server cutover in T-004.
   storage fixtures to scoped numbers. Full SpecTests compile diagnostics have reduced from 710 to
   183 before the T-006 protocol cutover. Its removal exposed 205 stale fixtures that still invoke
   binding/revision APIs; recovery, workflow storage/scheduling, concurrency, and Issue metrics
-  fixtures now use scoped numbers, reducing the current SpecTests compile backlog to 89 without
+  fixtures now use scoped numbers, reducing the current SpecTests compile backlog to 83 without
   restoring random identity aliases.
 - T-004 is not complete until the current-state server contracts and all affected specs compile
   without legacy identity aliases.
