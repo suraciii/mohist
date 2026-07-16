@@ -58,9 +58,9 @@ public class EventCatalogTests
     {
         var expected = new[] { EventCatalog.Lineage.ProjectId, EventCatalog.Lineage.WorkflowRunId };
 
-        Assert.Equal(expected, EventCatalog.RequiredAttributes(EventCatalog.ReverseDns.WorkflowRunStarted));
-        Assert.Equal(expected, EventCatalog.RequiredAttributes(EventCatalog.ReverseDns.WorkflowRunCompleted));
-        Assert.Equal(expected, EventCatalog.RequiredAttributes(EventCatalog.ReverseDns.WorkflowRunFailed));
+        Assert.Equal(expected, EventCatalog.RequiredAttributes(EventCatalog.ReverseDns.WorkflowRunStarted).ToArray());
+        Assert.Equal(expected, EventCatalog.RequiredAttributes(EventCatalog.ReverseDns.WorkflowRunCompleted).ToArray());
+        Assert.Equal(expected, EventCatalog.RequiredAttributes(EventCatalog.ReverseDns.WorkflowRunFailed).ToArray());
     }
 
     [Fact]
@@ -73,36 +73,35 @@ public class EventCatalogTests
             EventCatalog.Lineage.Stage,
         };
 
-        Assert.Equal(expected, EventCatalog.RequiredAttributes(EventCatalog.ReverseDns.StageStarted));
-        Assert.Equal(expected, EventCatalog.RequiredAttributes(EventCatalog.ReverseDns.StageApprovalRequested));
-        Assert.Equal(expected, EventCatalog.RequiredAttributes(EventCatalog.ReverseDns.FeedbackRequested));
-        Assert.Equal(expected, EventCatalog.RequiredAttributes(EventCatalog.ReverseDns.TaskCompleted));
-        Assert.Equal(expected, EventCatalog.RequiredAttributes(EventCatalog.ReverseDns.CheckPassed));
+        Assert.Equal(expected, EventCatalog.RequiredAttributes(EventCatalog.ReverseDns.StageStarted).ToArray());
+        Assert.Equal(expected, EventCatalog.RequiredAttributes(EventCatalog.ReverseDns.StageApprovalRequested).ToArray());
+        Assert.Equal(expected, EventCatalog.RequiredAttributes(EventCatalog.ReverseDns.FeedbackRequested).ToArray());
+        Assert.Equal(expected, EventCatalog.RequiredAttributes(EventCatalog.ReverseDns.TaskCompleted).ToArray());
+        Assert.Equal(expected, EventCatalog.RequiredAttributes(EventCatalog.ReverseDns.CheckPassed).ToArray());
     }
 
     [Fact]
-    public void RequiredAttributes_IssueTypes_CarryProjectIssueIdAndIssueNumber()
+    public void RequiredAttributes_IssueTypes_CarryProjectIdAndIssueNumber()
     {
         var expected = new[]
         {
             EventCatalog.Lineage.ProjectId,
-            EventCatalog.Lineage.IssueId,
             EventCatalog.Lineage.Issue,
         };
 
-        Assert.Equal(expected, EventCatalog.RequiredAttributes(EventCatalog.ReverseDns.IssueCreated));
-        Assert.Equal(expected, EventCatalog.RequiredAttributes(EventCatalog.ReverseDns.IssueCompleted));
-        Assert.Equal(expected, EventCatalog.RequiredAttributes(EventCatalog.ReverseDns.IssueArchived));
+        Assert.Equal(expected, EventCatalog.RequiredAttributes(EventCatalog.ReverseDns.IssueCreated).ToArray());
+        Assert.Equal(expected, EventCatalog.RequiredAttributes(EventCatalog.ReverseDns.IssueCompleted).ToArray());
+        Assert.Equal(expected, EventCatalog.RequiredAttributes(EventCatalog.ReverseDns.IssueArchived).ToArray());
     }
 
     [Fact]
-    public void RequiredAttributes_EpicTypes_CarryProjectIdAndEpicId()
+    public void RequiredAttributes_EpicTypes_CarryProjectIdAndEpicNumber()
     {
-        var expected = new[] { EventCatalog.Lineage.ProjectId, EventCatalog.Lineage.EpicId };
+        var expected = new[] { EventCatalog.Lineage.ProjectId, EventCatalog.Lineage.Epic };
 
-        Assert.Equal(expected, EventCatalog.RequiredAttributes(EventCatalog.ReverseDns.EpicCreated));
-        Assert.Equal(expected, EventCatalog.RequiredAttributes(EventCatalog.ReverseDns.EpicIssueLinked));
-        Assert.Equal(expected, EventCatalog.RequiredAttributes(EventCatalog.ReverseDns.EpicClosed));
+        Assert.Equal(expected, EventCatalog.RequiredAttributes(EventCatalog.ReverseDns.EpicCreated).ToArray());
+        Assert.Equal(expected, EventCatalog.RequiredAttributes(EventCatalog.ReverseDns.EpicIssueLinked).ToArray());
+        Assert.Equal(expected, EventCatalog.RequiredAttributes(EventCatalog.ReverseDns.EpicClosed).ToArray());
     }
 
     [Fact]
@@ -110,8 +109,8 @@ public class EventCatalogTests
     {
         var expected = new[] { EventCatalog.Lineage.ProjectId, EventCatalog.Lineage.SessionId };
 
-        Assert.Equal(expected, EventCatalog.RequiredAttributes(EventCatalog.ReverseDns.AgentSessionRuntimeBound));
-        Assert.Equal(expected, EventCatalog.RequiredAttributes(EventCatalog.ReverseDns.AgentSessionUsageRecorded));
+        Assert.Equal(expected, EventCatalog.RequiredAttributes(EventCatalog.ReverseDns.AgentSessionRuntimeBound).ToArray());
+        Assert.Equal(expected, EventCatalog.RequiredAttributes(EventCatalog.ReverseDns.AgentSessionUsageRecorded).ToArray());
     }
 
     [Fact]
@@ -119,20 +118,19 @@ public class EventCatalogTests
     {
         var expected = new[] { EventCatalog.Lineage.RunnerId };
 
-        Assert.Equal(expected, EventCatalog.RequiredAttributes(EventCatalog.ReverseDns.RunnerDisconnected));
+        Assert.Equal(expected, EventCatalog.RequiredAttributes(EventCatalog.ReverseDns.RunnerDisconnected).ToArray());
     }
 
     [Fact]
-    public void RequiredAttributes_InboxItemPersisted_CarriesProjectIssueIdAndIssueNumber()
+    public void RequiredAttributes_InboxItemPersisted_CarriesProjectIdAndIssueNumber()
     {
         var expected = new[]
         {
             EventCatalog.Lineage.ProjectId,
-            EventCatalog.Lineage.IssueId,
             EventCatalog.Lineage.Issue,
         };
 
-        Assert.Equal(expected, EventCatalog.RequiredAttributes(EventCatalog.ReverseDns.InboxItemPersisted));
+        Assert.Equal(expected, EventCatalog.RequiredAttributes(EventCatalog.ReverseDns.InboxItemPersisted).ToArray());
     }
 
     [Fact]
@@ -141,7 +139,7 @@ public class EventCatalogTests
         Assert.True(EventCatalog.HasLineageDeclaration(EventCatalog.ReverseDns.RepairScheduled));
         Assert.Equal(
             new[] { EventCatalog.Lineage.ProjectId, EventCatalog.Lineage.WorkflowRunId },
-            EventCatalog.RequiredAttributes(EventCatalog.ReverseDns.RepairScheduled));
+            EventCatalog.RequiredAttributes(EventCatalog.ReverseDns.RepairScheduled).ToArray());
     }
 
     [Fact]
@@ -197,7 +195,7 @@ public class EnvelopeConformanceTests
 
         return new CloudEvent(
             id: "evt_1",
-            source: new Uri("/mohist/issues/issue_1", UriKind.Relative),
+            source: new Uri("/mohist/projects/proj_1/issues/42", UriKind.Relative),
             type: type,
             time: new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero),
             data: JsonDocument.Parse("{}").RootElement,
@@ -221,9 +219,8 @@ public class EnvelopeConformanceTests
         var envelope = NewEnvelope(
             EventCatalog.ReverseDns.IssueCreated,
             (EventCatalog.Lineage.ProjectId, "proj_1"),
-            (EventCatalog.Lineage.IssueId, "issue_1"),
             (EventCatalog.Lineage.Issue, "42"),
-            (EventCatalog.Lineage.EpicId, "epic_1"));
+            (EventCatalog.Lineage.Epic, "7"));
 
         EnvelopeConformance.AssertRequired(envelope);
     }
