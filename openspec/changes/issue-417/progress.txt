@@ -1,0 +1,26 @@
+# issue-417 progress
+
+## Codebase Patterns
+
+- 既有 `design/architecture.md` 的「聚合与事务」节已经把跨聚合推进固化为「本聚合提交
+  → durable handler → 目标聚合幂等命令」。T-001 在该节下追加 `### 持久化应用协调者`
+  子节，明确协调者 grain 是该模式的窄化特例而不是新权威。
+- 既有上下文映射表（`design/domain-analysis.md`）使用 DDD 关系代号（`C/S`、`C`、
+  `OHS+PL`、`SK`、`PL`），并对每个 leaf domain 给出唯一约束。T-001 在表尾追加两行
+  `Conformist` 关系（#14、#15），并在「Dependency invariants」加一条说明协调者不是
+  独立限界上下文、且不能被参与者反向引用。
+- 设计 spec 用中文写正文，保留英文术语（aggregate、handler、participant interface 等），
+  协调者 grain 的命名沿用设计 D2 的 `IssueRepositoryCoordinator` / `IIssueRepositoryCoordinatorGrain`。
+- 设计文档与 OpenSpec `design.md`/`tasks.json` 同步指代：两者都引用同一个
+  `IssueRepositoryCoordinatorGrain` 名称，未来 T-005 的实现与命名要继续保持一致。
+
+## Notes
+
+- 协调者 grain 在 architecture 文档里被定位为「Project-scoped 应用层 process manager」，
+  不加入「Subdomains」表（它不是业务问题域），只在「Bounded contexts and relationships」
+  与「Dependency invariants」两处出现；这样读文档的人能从模型层面理解它不是新领域。
+- 适用范围一节明确写「当前唯一」是 issue 417 的绑定协调者，避免之后被泛化滥用；「不
+  适用范围」一节把已有交互（参与者内部校验、UI 推送、session 绑定）排除出去。
+- T-001 没有改任何生产代码、没有跑测试（设计阶段任务）。后续 T-002 起的迁移 / 编码
+  任务如果要把协调者 grain 真正落出来，需要遵守本节五条约束，并由 T-005 的 ArchTest
+  兜底「仅协调者依赖窄 participant 接口」。
