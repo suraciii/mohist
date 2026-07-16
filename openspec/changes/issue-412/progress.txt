@@ -112,9 +112,8 @@ membership authority each have a separately enforceable boundary. Do not reuse t
 
 - `IssueKey` and `EpicKey` are `readonly record struct`s that validate in the primary
   constructor. Blank ProjectId and ProjectId containing the `:` separator throw
-  `ArgumentException`. Non-positive numbers throw `ArgumentOutOfRangeException`. Default-like
-  values cannot enter runtime use through the public surface; default values via the
-  `default` keyword are visible but no caller route can construct them.
+  `ArgumentException`. Non-positive numbers throw `ArgumentOutOfRangeException`. The language
+  can produce default values, but `GrainKey` and the codec reject them during encoding.
 - `ScopedGrainKeyCodec` formats the exact canonical length for `(ProjectId, Number)`: number
   digits are computed up front and the destination span is allocated to that size, so the
   output never contains padding or NUL characters. Number text is invariant-culture
@@ -130,7 +129,7 @@ membership authority each have a separately enforceable boundary. Do not reuse t
 - The one necessary comment lives on the `internal` legacy overload and explains only its
   reason and removal task (T-004). Names explain normal behavior.
 
-### Test coverage (41 new tests)
+### Test coverage (46 new tests)
 
 - Round-trip (Format → TryParse → Format yields the original).
 - Exact output length: `projectId.Length + 1 + NumberDigits(number)`.
@@ -141,10 +140,12 @@ membership authority each have a separately enforceable boundary. Do not reuse t
 - Construction rejects: blank ProjectId, separator-containing ProjectId, non-positive
   number (`0`, `-1`).
 - TryParse rejects: `null`, empty, `:`, `proj_a`, `proj_a:`, `:1`, `proj_a:notanumber`,
-  `proj_a:0`, `proj_a:-1`, `proj_a:1:2` (separator ambiguity), `proj::a:1`,
+  `proj_a:0`, `proj_a:-1`, `proj_a:+1`, `proj_a:01`, `proj_a:007`,
+  `proj_a:1:2` (separator ambiguity), `proj::a:1`,
   `proj_a:1 ` (trailing whitespace), `proj_a: 1` (leading whitespace), `proj_a:1\0` (NUL).
 - Cross-Project same-number isolation: `proj_a:42 != proj_b:42` and the typed keys are
   unequal.
+- Default `IssueKey` and `EpicKey` values are rejected by `GrainKey` through the shared codec.
 - Reflection surface test proves the public GrainKey Issue / Epic surface has no
   `(string, int)` shortcut.
 - Reflection surface test proves the random-id `Issue(string)` overload is non-public.
@@ -152,7 +153,7 @@ membership authority each have a separately enforceable boundary. Do not reuse t
 ### Test results
 
 - `dotnet test packages/server/tests/Mohist.Server.UnitTests/Mohist.Server.UnitTests.csproj`
-  — **1453 passed / 0 failed / 0 skipped** (was 1422; +31 new tests).
+  — **1458 passed / 0 failed / 0 skipped** (baseline 1412; +46 new tests).
 - `dotnet test packages/server/tests/Mohist.Server.ArchTests/Mohist.Server.ArchTests.csproj`
   — **22/22 pass**.
 - Server build clean with `TreatWarningsAsErrors=true`.
@@ -353,3 +354,14 @@ server cutover in T-004.
 - Every task references an existing delta spec requirement.
 - The plan contains no accepted path that shares a database transaction across aggregates.
 - Every ambiguous cross-aggregate failure window has a specified idempotent/redelivery outcome.
+
+## T-001 verification follow-up (2026-07-17)
+
+- The typed identity and codec implementation from `a75479051` is already an ancestor of the
+  workflow branch. Re-checked the current source and production call sites against the scoped
+  identity requirement; only the internal random-id `Issue(string)` transition seam remains.
+- Canonical grain keys now reject NUL characters in `ProjectId` at typed-key construction,
+  formatting, and parsing. This keeps the no-NUL output invariant true even for malformed input,
+  rather than relying only on the exact-length formatter for ordinary project ids.
+- Focused Orleans identity tests pass (**28 passed / 0 failed**), architecture tests pass
+  (**27 passed / 0 failed**), and the server build passes with zero warnings/errors.

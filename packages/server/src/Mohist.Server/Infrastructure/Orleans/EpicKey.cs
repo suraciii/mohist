@@ -13,6 +13,8 @@ public readonly record struct EpicKey
             throw new ArgumentException(
                 $"ProjectId must not contain the scoped grain-key separator '{ScopedGrainKeyCodec.Separator}'.",
                 nameof(projectId));
+        if (projectId.Contains('\0'))
+            throw new ArgumentException("ProjectId must not contain NUL characters.", nameof(projectId));
         if (epicNumber <= 0)
             throw new ArgumentOutOfRangeException(nameof(epicNumber), epicNumber,
                 "EpicNumber must be strictly positive.");

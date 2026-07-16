@@ -75,6 +75,12 @@ public class ScopedGrainKeyCodecTests
     }
 
     [Fact]
+    public void Format_RejectsProjectIdContainingNul()
+    {
+        Assert.Throws<ArgumentException>(() => ScopedGrainKeyCodec.Format("proj\0a", 1));
+    }
+
+    [Fact]
     public void Format_RejectsNonPositiveNumber()
     {
         Assert.Throws<ArgumentOutOfRangeException>(() => ScopedGrainKeyCodec.Format("proj", 0));
@@ -98,6 +104,7 @@ public class ScopedGrainKeyCodecTests
     [InlineData("proj::a:1")]
     [InlineData("proj_a:1 ")]
     [InlineData("proj_a: 1")]
+    [InlineData("proj\0a:1")]
     [InlineData("proj_a:1\0")]
     public void TryParse_RejectsMalformedOrAmbiguousInput(string? grainKey)
     {
@@ -143,6 +150,12 @@ public class IssueKeyTests
         Assert.Throws<ArgumentException>(() => new IssueKey("proj:a", 1));
         Assert.Throws<ArgumentException>(() => new IssueKey(":a", 1));
         Assert.Throws<ArgumentException>(() => new IssueKey("a:", 1));
+    }
+
+    [Fact]
+    public void Construction_RejectsProjectIdContainingNul()
+    {
+        Assert.Throws<ArgumentException>(() => new IssueKey("proj\0a", 1));
     }
 
     [Fact]
@@ -209,6 +222,12 @@ public class EpicKeyTests
         Assert.Throws<ArgumentException>(() => new EpicKey("proj:a", 1));
         Assert.Throws<ArgumentException>(() => new EpicKey(":a", 1));
         Assert.Throws<ArgumentException>(() => new EpicKey("a:", 1));
+    }
+
+    [Fact]
+    public void Construction_RejectsProjectIdContainingNul()
+    {
+        Assert.Throws<ArgumentException>(() => new EpicKey("proj\0a", 1));
     }
 
     [Fact]

@@ -40,7 +40,9 @@ public static class ScopedGrainKeyCodec
             return false;
 
         var projectIdValue = grainKey[..separatorIndex];
-        if (string.IsNullOrWhiteSpace(projectIdValue) || projectIdValue.Contains(Separator))
+        if (string.IsNullOrWhiteSpace(projectIdValue)
+            || projectIdValue.Contains(Separator)
+            || projectIdValue.Contains('\0'))
             return false;
 
         var numberSpan = grainKey.AsSpan()[(separatorIndex + 1)..];
@@ -90,6 +92,8 @@ public static class ScopedGrainKeyCodec
             throw new ArgumentException(
                 $"ProjectId must not contain the scoped grain-key separator '{Separator}'.",
                 nameof(projectId));
+        if (projectId.Contains('\0'))
+            throw new ArgumentException("ProjectId must not contain NUL characters.", nameof(projectId));
     }
 
     private static void ValidateNumber(int number)
