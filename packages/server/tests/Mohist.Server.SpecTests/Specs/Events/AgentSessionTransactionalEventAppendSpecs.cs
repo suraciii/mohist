@@ -1,6 +1,4 @@
-using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Logging.Abstractions;
 using Mohist.Server.Events.Grains;
 using Mohist.Server.Infrastructure.Data.Db;
@@ -37,24 +35,15 @@ namespace Mohist.Server.SpecTests.Specs.Events;
 public class AgentSessionTransactionalEventAppendSpecs : IAsyncLifetime
 {
     private static readonly DateTime FixedTime = new(2026, 7, 15, 0, 0, 0, DateTimeKind.Utc);
-    private readonly SqliteConnection _keeper;
-    private readonly DbContextOptions<MohistDbContext> _options;
+    private readonly TestSqliteDatabase _database;
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly NullDispatchGrainFactory _grainFactory = new();
     private EventStore _eventStore = null!;
 
     public AgentSessionTransactionalEventAppendSpecs()
     {
-        var connectionString = $"Data Source=agent-session-transactional-event-append-{Guid.NewGuid():N};Mode=Memory;Cache=Shared";
-        _keeper = new SqliteConnection(connectionString);
-        _keeper.Open();
-        _options = new DbContextOptionsBuilder<MohistDbContext>()
-            .UseSqlite(connectionString)
-            .ConfigureWarnings(w => w.Ignore(RelationalEventId.PendingModelChangesWarning))
-            .Options;
-        _dbFactory = new Factory(_options);
-
-        MigratedSqliteTemplate.CopyTo(_keeper);
+        _database = TestSqliteDatabase.CreateMigrated();
+        _dbFactory = new TestDbContextFactory(_database.Options);
         _eventStore = new EventStore(_dbFactory, NullLogger<EventStore>.Instance);
     }
 
@@ -62,7 +51,7 @@ public class AgentSessionTransactionalEventAppendSpecs : IAsyncLifetime
 
     public Task DisposeAsync()
     {
-        _keeper.Dispose();
+        _database.Dispose();
         return Task.CompletedTask;
     }
 
@@ -100,7 +89,7 @@ public class AgentSessionTransactionalEventAppendSpecs : IAsyncLifetime
             ]));
         Assert.Contains("event write failed", ex.Message);
 
-        await using var verify = new MohistDbContext(_options);
+        await using var verify = new MohistDbContext(_database.Options);
         Assert.Empty(await verify.AgentSessions.AsNoTracking().ToListAsync());
         Assert.Empty(await verify.AgentSessionEvents.AsNoTracking().ToListAsync());
     }
@@ -113,7 +102,7 @@ public class AgentSessionTransactionalEventAppendSpecs : IAsyncLifetime
 
         await store.SaveAsync(session.Id, session, [new AgentSessionRuntimeBound("acp-1", null)]);
 
-        await using var freshDb = new MohistDbContext(_options);
+        await using var freshDb = new MohistDbContext(_database.Options);
         var rows = await freshDb.AgentSessionEvents.AsNoTracking()
             .Where(r => r.Source == "/mohist/agent-session/agent_txn_crash")
             .ToListAsync();
@@ -460,15 +449,6 @@ public class AgentSessionTransactionalEventAppendSpecs : IAsyncLifetime
             IssueNumber: issueNumber,
             EpicNumber: epicNumber,
             Stage: stage));
-
-    private sealed class Factory : IDbContextFactory<MohistDbContext>
-    {
-        private readonly DbContextOptions<MohistDbContext> _options;
-
-        public Factory(DbContextOptions<MohistDbContext> options) => _options = options;
-
-        public MohistDbContext CreateDbContext() => new(_options);
-    }
 
     /// <summary>
     /// Minimal <see cref="IGrainFactory"/> stand-in for transactional

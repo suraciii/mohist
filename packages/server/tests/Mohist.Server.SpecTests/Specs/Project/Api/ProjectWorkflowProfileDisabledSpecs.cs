@@ -1,4 +1,3 @@
-using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Workflow.Domain;
@@ -11,28 +10,20 @@ namespace Mohist.Server.SpecTests.Specs.Project.Api;
 
 public class ProjectWorkflowProfileDisabledSpecs : IAsyncLifetime
 {
-    private readonly DbContextOptions<MohistDbContext> _options;
+    private readonly TestSqliteDatabase _database;
     private readonly ProjectWorkflowProfileManager _manager;
-    private readonly SqliteConnection _keeper;
 
     public ProjectWorkflowProfileDisabledSpecs()
     {
-        var connectionString = $"Data Source=proj-disabled-{Guid.NewGuid():N};Mode=Memory;Cache=Shared";
-        _keeper = new SqliteConnection(connectionString);
-        _keeper.Open();
-        _options = new DbContextOptionsBuilder<MohistDbContext>()
-            .UseSqlite(connectionString)
-            .Options;
-        _manager = new ProjectWorkflowProfileManager(new Factory(_options), new StubPromptLoader(), new PromptTemplateEngine());
-
-        MigratedSqliteTemplate.CopyModelSchemaTo(_keeper);
+        _database = TestSqliteDatabase.CreateModelSchema();
+        _manager = new ProjectWorkflowProfileManager(new TestDbContextFactory(_database.Options), new StubPromptLoader(), new PromptTemplateEngine());
     }
 
     public Task InitializeAsync() => Task.CompletedTask;
 
     public Task DisposeAsync()
     {
-        _keeper.Dispose();
+        _database.Dispose();
         return Task.CompletedTask;
     }
 
@@ -130,13 +121,6 @@ public class ProjectWorkflowProfileDisabledSpecs : IAsyncLifetime
         var disabled = await _manager.GetDisabledWorkflowProfileIdsAsync("proj-local");
         Assert.Contains("mohist/local", disabled);
         Assert.Single(disabled);
-    }
-
-    private class Factory : IDbContextFactory<MohistDbContext>
-    {
-        private readonly DbContextOptions<MohistDbContext> _options;
-        public Factory(DbContextOptions<MohistDbContext> options) => _options = options;
-        public MohistDbContext CreateDbContext() => new(_options);
     }
 
     private sealed class StubPromptLoader : IPromptLoader

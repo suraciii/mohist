@@ -1,4 +1,3 @@
-using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
@@ -45,7 +44,7 @@ public class IssueWorkflowCompletionHandlerSpecs
         await SeedIssueAsync(database, projectId: "project_1", issueNumber: 1,
             status: IssueStatus.InProgress, workflowRunId: "wr_completed");
 
-        var querier = NewIssueQuerier(database.Factory);
+        var querier = NewIssueQuerier(new TestDbContextFactory(database.Options));
 
         var issue = await querier.GetIssueForWorkflowRunAsync("wr_completed");
 
@@ -62,7 +61,7 @@ public class IssueWorkflowCompletionHandlerSpecs
         await SeedIssueAsync(database, projectId: "project_1", issueNumber: 1,
             status: IssueStatus.Done, workflowRunId: "wr_completed");
 
-        var querier = NewIssueQuerier(database.Factory);
+        var querier = NewIssueQuerier(new TestDbContextFactory(database.Options));
 
         var issue = await querier.GetIssueForWorkflowRunAsync("wr_completed");
 
@@ -83,7 +82,7 @@ public class IssueWorkflowCompletionHandlerSpecs
         await SeedIssueAsync(database, projectId: "project_1", issueNumber: 4,
             status: IssueStatus.InProgress, workflowRunId: "wr_other");
 
-        var querier = NewIssueQuerier(database.Factory);
+        var querier = NewIssueQuerier(new TestDbContextFactory(database.Options));
 
         var issue = await querier.GetIssueForWorkflowRunAsync("wr_completed");
 
@@ -97,7 +96,7 @@ public class IssueWorkflowCompletionHandlerSpecs
         await SeedIssueAsync(database, projectId: "project_1", issueNumber: 1,
             status: IssueStatus.InProgress, workflowRunId: "wr_other");
 
-        var querier = NewIssueQuerier(database.Factory);
+        var querier = NewIssueQuerier(new TestDbContextFactory(database.Options));
 
         var issue = await querier.GetIssueForWorkflowRunAsync("wr_completed");
 
@@ -109,7 +108,7 @@ public class IssueWorkflowCompletionHandlerSpecs
     {
         await using var database = CreateDatabase();
 
-        var querier = NewIssueQuerier(database.Factory);
+        var querier = NewIssueQuerier(new TestDbContextFactory(database.Options));
 
         Assert.Null(await querier.GetIssueForWorkflowRunAsync(null!));
         Assert.Null(await querier.GetIssueForWorkflowRunAsync(""));
@@ -123,7 +122,7 @@ public class IssueWorkflowCompletionHandlerSpecs
         await SeedIssueAsync(database, projectId: "project_1", issueNumber: 1,
             status: IssueStatus.InProgress, workflowRunId: "wr_completed");
 
-        var grains = new RecordingIssueGrainFactory(database.Factory, new FakeTimeProvider(FixedNow));
+        var grains = new RecordingIssueGrainFactory(new TestDbContextFactory(database.Options), new FakeTimeProvider(FixedNow));
         var handler = new IssueWorkflowCompletionHandler(grains,
             NullLogger<IssueWorkflowCompletionHandler>.Instance);
 
@@ -134,7 +133,7 @@ public class IssueWorkflowCompletionHandlerSpecs
         Assert.Equal(new IssueWorkflowRef("project_1", 1), call.Issue);
         Assert.Equal("wr_completed", call.WorkflowRunId);
 
-        await using var verify = database.CreateDbContext();
+        await using var verify = database.CreateContext();
         var stored = await verify.Issues.AsNoTracking().FirstAsync();
         // After the handler ran, the in-progress issue has been
         // transitioned to Done (driven entirely by the event
@@ -147,7 +146,7 @@ public class IssueWorkflowCompletionHandlerSpecs
     public async Task HandleAsync_EmptySource_NoOpsAndDoesNotInvokeGrain()
     {
         await using var database = CreateDatabase();
-        var grains = new RecordingIssueGrainFactory(database.Factory, new FakeTimeProvider(FixedNow));
+        var grains = new RecordingIssueGrainFactory(new TestDbContextFactory(database.Options), new FakeTimeProvider(FixedNow));
         var handler = new IssueWorkflowCompletionHandler(grains,
             NullLogger<IssueWorkflowCompletionHandler>.Instance);
 
@@ -169,7 +168,7 @@ public class IssueWorkflowCompletionHandlerSpecs
         // A completion event without the project-scoped issue reference
         // cannot identify an aggregate and must not invoke a grain.
         await using var database = CreateDatabase();
-        var grains = new RecordingIssueGrainFactory(database.Factory, new FakeTimeProvider(FixedNow));
+        var grains = new RecordingIssueGrainFactory(new TestDbContextFactory(database.Options), new FakeTimeProvider(FixedNow));
         var handler = new IssueWorkflowCompletionHandler(grains,
             NullLogger<IssueWorkflowCompletionHandler>.Instance);
 
@@ -197,7 +196,7 @@ public class IssueWorkflowCompletionHandlerSpecs
         await SeedIssueAsync(database, projectId: "project_1", issueNumber: 1,
             status: IssueStatus.InProgress, workflowRunId: "wr_completed");
 
-        var grains = new RecordingIssueGrainFactory(database.Factory, new FakeTimeProvider(FixedNow));
+        var grains = new RecordingIssueGrainFactory(new TestDbContextFactory(database.Options), new FakeTimeProvider(FixedNow));
         var handler = new IssueWorkflowCompletionHandler(grains,
             NullLogger<IssueWorkflowCompletionHandler>.Instance);
 
@@ -213,7 +212,7 @@ public class IssueWorkflowCompletionHandlerSpecs
             Assert.Equal("wr_completed", c.WorkflowRunId);
         });
 
-        await using var verify = database.CreateDbContext();
+        await using var verify = database.CreateContext();
         var stored = await verify.Issues.AsNoTracking().FirstAsync();
         Assert.Equal(IssueStatus.Done, IssueStore.Deserialize(stored.State)!.Status);
     }
@@ -232,7 +231,7 @@ public class IssueWorkflowCompletionHandlerSpecs
         await SeedIssueAsync(database, projectId: "project_1", issueNumber: 1,
             status: IssueStatus.InProgress, workflowRunId: "wr_completed");
 
-        var grains = new RecordingIssueGrainFactory(database.Factory, new FakeTimeProvider(FixedNow));
+        var grains = new RecordingIssueGrainFactory(new TestDbContextFactory(database.Options), new FakeTimeProvider(FixedNow));
         var handler = new IssueWorkflowCompletionHandler(grains,
             NullLogger<IssueWorkflowCompletionHandler>.Instance);
 
@@ -270,7 +269,7 @@ public class IssueWorkflowCompletionHandlerSpecs
         var stillOneCall = Assert.Single(grains.Calls);
         Assert.Equal("wr_mismatch", stillOneCall.WorkflowRunId);
 
-        await using var verify = database.CreateDbContext();
+        await using var verify = database.CreateContext();
         var stored = await verify.Issues.AsNoTracking().FirstAsync();
         var final = IssueStore.Deserialize(stored.State)!;
         Assert.Equal(IssueStatus.Done, final.Status);
@@ -297,7 +296,7 @@ public class IssueWorkflowCompletionHandlerSpecs
     public async Task Filter_FailedTerminalEvent_ReturnsFalse()
     {
         await using var database = CreateDatabase();
-        var grains = new RecordingIssueGrainFactory(database.Factory, new FakeTimeProvider(FixedNow));
+        var grains = new RecordingIssueGrainFactory(new TestDbContextFactory(database.Options), new FakeTimeProvider(FixedNow));
         var handler = new IssueWorkflowCompletionHandler(grains,
             NullLogger<IssueWorkflowCompletionHandler>.Instance);
 
@@ -315,7 +314,7 @@ public class IssueWorkflowCompletionHandlerSpecs
     public async Task Filter_StoppedTerminalEvent_ReturnsFalse()
     {
         await using var database = CreateDatabase();
-        var grains = new RecordingIssueGrainFactory(database.Factory, new FakeTimeProvider(FixedNow));
+        var grains = new RecordingIssueGrainFactory(new TestDbContextFactory(database.Options), new FakeTimeProvider(FixedNow));
         var handler = new IssueWorkflowCompletionHandler(grains,
             NullLogger<IssueWorkflowCompletionHandler>.Instance);
 
@@ -333,7 +332,7 @@ public class IssueWorkflowCompletionHandlerSpecs
     public async Task Filter_CompletedEvent_ReturnsTrue()
     {
         await using var database = CreateDatabase();
-        var grains = new RecordingIssueGrainFactory(database.Factory, new FakeTimeProvider(FixedNow));
+        var grains = new RecordingIssueGrainFactory(new TestDbContextFactory(database.Options), new FakeTimeProvider(FixedNow));
         var handler = new IssueWorkflowCompletionHandler(grains,
             NullLogger<IssueWorkflowCompletionHandler>.Instance);
 
@@ -351,7 +350,7 @@ public class IssueWorkflowCompletionHandlerSpecs
         await SeedIssueAsync(database, projectId: "project_1", issueNumber: 1,
             status: IssueStatus.InProgress, workflowRunId: "wr_completed");
 
-        var grains = new RecordingIssueGrainFactory(database.Factory, new FakeTimeProvider(FixedNow));
+        var grains = new RecordingIssueGrainFactory(new TestDbContextFactory(database.Options), new FakeTimeProvider(FixedNow));
         var handler = new IssueWorkflowCompletionHandler(grains,
             NullLogger<IssueWorkflowCompletionHandler>.Instance);
 
@@ -363,7 +362,7 @@ public class IssueWorkflowCompletionHandlerSpecs
         Assert.Equal(new IssueWorkflowRef("project_1", 1), call.Issue);
         Assert.Equal("wr_completed", call.WorkflowRunId);
 
-        await using var verify = database.CreateDbContext();
+        await using var verify = database.CreateContext();
         var stored = await verify.Issues.AsNoTracking().FirstAsync();
         Assert.Equal(IssueStatus.Done, IssueStore.Deserialize(stored.State)!.Status);
     }
@@ -404,7 +403,7 @@ public class IssueWorkflowCompletionHandlerSpecs
                 });
 
     private static async Task SeedIssueAsync(
-        TestDatabase database,
+        TestSqliteDatabase database,
         string projectId,
         int issueNumber,
         IssueStatus status,
@@ -421,7 +420,7 @@ public class IssueWorkflowCompletionHandlerSpecs
             ArchivedAt = archivedAt,
         };
         var json = IssueStore.Serialize(issue);
-        await using var db = database.CreateDbContext();
+        await using var db = database.CreateContext();
         db.Issues.Add(new IssueRow
         {
             ProjectId = projectId,
@@ -448,46 +447,7 @@ public class IssueWorkflowCompletionHandlerSpecs
             projectProfileManager: null!,
             loader: null!);
 
-    private static TestDatabase CreateDatabase()
-    {
-        var connection = new SqliteConnection("Data Source=:memory:");
-        connection.Open();
-        var options = new DbContextOptionsBuilder<MohistDbContext>()
-            .UseSqlite(connection)
-            .Options;
-        var factory = new TestDbContextFactory(options);
-        MigratedSqliteTemplate.CopyTo(connection);
-        return new TestDatabase(connection, factory);
-    }
-
-    private sealed class TestDatabase : IAsyncDisposable
-    {
-        private readonly SqliteConnection _connection;
-
-        public TestDatabase(SqliteConnection connection, TestDbContextFactory factory)
-        {
-            _connection = connection;
-            Factory = factory;
-        }
-
-        public TestDbContextFactory Factory { get; }
-
-        public MohistDbContext CreateDbContext() => Factory.CreateDbContext();
-
-        public async ValueTask DisposeAsync() => await _connection.DisposeAsync();
-    }
-
-    private sealed class TestDbContextFactory : IDbContextFactory<MohistDbContext>
-    {
-        public TestDbContextFactory(DbContextOptions<MohistDbContext> options)
-        {
-            Options = options;
-        }
-
-        public DbContextOptions<MohistDbContext> Options { get; }
-
-        public MohistDbContext CreateDbContext() => new(Options);
-    }
+    private static TestSqliteDatabase CreateDatabase() => TestSqliteDatabase.CreateMigrated();
 
     private sealed class RecordingIssueGrainFactory : IGrainFactory
     {

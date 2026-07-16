@@ -1,5 +1,4 @@
 using System.Text.Json;
-using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Infrastructure;
@@ -29,22 +28,16 @@ namespace Mohist.Server.SpecTests.Specs.Runner.Services;
 /// </summary>
 public class WorkflowItemTranslatorSpecs : IAsyncLifetime
 {
-    private readonly DbContextOptions<MohistDbContext> _options;
+    private readonly TestSqliteDatabase _database;
     private readonly WorkflowProfileManager _profileManager;
     private readonly WorkflowItemTranslator _translator;
     private readonly IWorkflowArtifactBindService _bindService;
-    private readonly SqliteConnection _keeper;
 
     public WorkflowItemTranslatorSpecs()
     {
-        var connectionString = $"Data Source=translator-specs-{Guid.NewGuid():N};Mode=Memory;Cache=Shared";
-        _keeper = new SqliteConnection(connectionString);
-        _keeper.Open();
-        _options = new DbContextOptionsBuilder<MohistDbContext>()
-            .UseSqlite(connectionString)
-            .Options;
+        _database = TestSqliteDatabase.CreateMigrated();
 
-        var factory = new TestDbContextFactory(_options);
+        var factory = new TestDbContextFactory(_database.Options);
         var runProfileManager = new WorkflowRunProfileManager(factory);
         var promptLoader = new EmptyPromptLoader();
         _profileManager = new WorkflowProfileManager(
@@ -53,8 +46,6 @@ public class WorkflowItemTranslatorSpecs : IAsyncLifetime
         _bindService = new WorkflowArtifactBindService(
             factory, BindNullLogger, new FakeTimeProvider(TestTime.UtcNow));
         _translator = new WorkflowItemTranslator(_profileManager, _bindService, TranslatorNullLogger);
-
-        MigratedSqliteTemplate.CopyTo(_keeper);
     }
 
     private static Microsoft.Extensions.Logging.ILogger<WorkflowItemTranslator> TranslatorNullLogger =>
@@ -80,7 +71,7 @@ public class WorkflowItemTranslatorSpecs : IAsyncLifetime
 
     public Task DisposeAsync()
     {
-        _keeper.Dispose();
+        _database.Dispose();
         return Task.CompletedTask;
     }
 
@@ -109,7 +100,7 @@ public class WorkflowItemTranslatorSpecs : IAsyncLifetime
 
     private async Task SeedProfileAsync(string projectId, string workflowRunId, WorkflowRun run)
     {
-        await using var db = new MohistDbContext(_options);
+        await using var db = new MohistDbContext(_database.Options);
         var definitionJson = JsonSerializer.Serialize(
             new WorkflowDefinition("spec/workflow",
             [
@@ -296,7 +287,7 @@ public class WorkflowItemTranslatorSpecs : IAsyncLifetime
 
         // Seed a pending upload the bind service can locate.
         var uploadId = $"up-{Guid.NewGuid():N}";
-        await using (var db = new MohistDbContext(_options))
+        await using (var db = new MohistDbContext(_database.Options))
         {
             db.WorkflowArtifactPendingUploads.Add(new WorkflowArtifactPendingUploadRow
             {
@@ -481,13 +472,6 @@ public class WorkflowItemTranslatorSpecs : IAsyncLifetime
 
     private static Dictionary<string, JsonElement?> With(string json) =>
         JsonSerializer.Deserialize<Dictionary<string, JsonElement?>>(json) ?? new();
-
-    private sealed class TestDbContextFactory : IDbContextFactory<MohistDbContext>
-    {
-        private readonly DbContextOptions<MohistDbContext> _options;
-        public TestDbContextFactory(DbContextOptions<MohistDbContext> options) => _options = options;
-        public MohistDbContext CreateDbContext() => new(_options);
-    }
 
     private sealed class NullLogger<T> : Microsoft.Extensions.Logging.ILogger<T>
     {

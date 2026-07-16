@@ -1,5 +1,4 @@
 using System.Text.Json;
-using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
@@ -14,22 +13,15 @@ namespace Mohist.Server.SpecTests.Specs.Issue.Profile;
 public class IssueWorkflowProfileManagerSpecs : IAsyncLifetime
 {
     private const string ProjectId = "proj_profile";
-    private readonly DbContextOptions<MohistDbContext> _options;
+    private readonly TestSqliteDatabase _database;
     private readonly IssueWorkflowProfileManager _manager;
-    private readonly SqliteConnection _keeper;
 
     public IssueWorkflowProfileManagerSpecs()
     {
-        var connectionString = $"Data Source=issue-profile-{Guid.NewGuid():N};Mode=Memory;Cache=Shared";
-        _keeper = new SqliteConnection(connectionString);
-        _keeper.Open();
-        _options = new DbContextOptionsBuilder<MohistDbContext>()
-            .UseSqlite(connectionString)
-            .Options;
-        _manager = new IssueWorkflowProfileManager(new Factory(_options));
+        _database = TestSqliteDatabase.CreateModelSchema();
+        _manager = new IssueWorkflowProfileManager(new TestDbContextFactory(_database.Options));
 
-        MigratedSqliteTemplate.CopyModelSchemaTo(_keeper);
-        using var db = new MohistDbContext(_options);
+        using var db = new MohistDbContext(_database.Options);
         var issueNumbers = new[] { 1, 2, 4, 5, 6, 7, 8, 9 };
         foreach (var issueNumber in issueNumbers)
         {
@@ -49,7 +41,7 @@ public class IssueWorkflowProfileManagerSpecs : IAsyncLifetime
 
     public Task DisposeAsync()
     {
-        _keeper.Dispose();
+        _database.Dispose();
         return Task.CompletedTask;
     }
 
@@ -237,7 +229,7 @@ public class IssueWorkflowProfileManagerSpecs : IAsyncLifetime
 
         await _manager.SetVariablesAsync(ProjectId, 9, bundle);
 
-        await using (var db = new MohistDbContext(_options))
+        await using (var db = new MohistDbContext(_database.Options))
         {
             var conn = db.Database.GetDbConnection();
             await conn.OpenAsync();
@@ -270,12 +262,4 @@ public class IssueWorkflowProfileManagerSpecs : IAsyncLifetime
         Assert.Contains("\"stageName\":\"构建\"", raw);
     }
 
-    // ===================== helpers =====================
-
-    private class Factory : IDbContextFactory<MohistDbContext>
-    {
-        private readonly DbContextOptions<MohistDbContext> _options;
-        public Factory(DbContextOptions<MohistDbContext> options) => _options = options;
-        public MohistDbContext CreateDbContext() => new(_options);
-    }
 }

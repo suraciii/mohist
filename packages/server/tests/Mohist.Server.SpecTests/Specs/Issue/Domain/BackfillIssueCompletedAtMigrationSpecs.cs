@@ -1,4 +1,3 @@
-using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Issue;
@@ -15,7 +14,7 @@ public class BackfillIssueCompletedAtMigrationSpecs
     public async Task Up_BackfillsDoneIssue_FromWorkCompletedEvent()
     {
         await using var database = CreateModelSchemaDatabase();
-        await using (var setup = database.CreateDbContext())
+        await using (var setup = CreateContext(database))
         {
             await SeedIssueAsync(setup, "issue_done_1", "done",
                 """
@@ -27,7 +26,7 @@ public class BackfillIssueCompletedAtMigrationSpecs
 
         await RunMigrationUpAsync(database);
 
-        await using var verify = database.CreateDbContext();
+        await using var verify = CreateContext(database);
         var state = await ReadStateAsync(verify, "issue_done_1");
         Assert.Contains("\"completedAt\"", state);
         Assert.Contains("2026-06-28T12:00:00", state);
@@ -37,7 +36,7 @@ public class BackfillIssueCompletedAtMigrationSpecs
     public async Task Up_BackfillsCancelledIssue_FromClosedEvent()
     {
         await using var database = CreateModelSchemaDatabase();
-        await using (var setup = database.CreateDbContext())
+        await using (var setup = CreateContext(database))
         {
             await SeedIssueAsync(setup, "issue_cancelled_1", "cancelled",
                 """
@@ -49,7 +48,7 @@ public class BackfillIssueCompletedAtMigrationSpecs
 
         await RunMigrationUpAsync(database);
 
-        await using var verify = database.CreateDbContext();
+        await using var verify = CreateContext(database);
         var state = await ReadStateAsync(verify, "issue_cancelled_1");
         Assert.Contains("\"completedAt\"", state);
         Assert.Contains("2026-06-27T14:00:00", state);
@@ -59,7 +58,7 @@ public class BackfillIssueCompletedAtMigrationSpecs
     public async Task Up_SecondRun_IsIdempotent()
     {
         await using var database = CreateModelSchemaDatabase();
-        await using (var setup = database.CreateDbContext())
+        await using (var setup = CreateContext(database))
         {
             await SeedIssueAsync(setup, "issue_done_2", "done",
                 """
@@ -72,14 +71,14 @@ public class BackfillIssueCompletedAtMigrationSpecs
         await RunMigrationUpAsync(database);
 
         string firstState;
-        await using (var firstRead = database.CreateDbContext())
+        await using (var firstRead = CreateContext(database))
         {
             firstState = await ReadStateAsync(firstRead, "issue_done_2");
         }
 
         await RunMigrationUpAsync(database);
 
-        await using var verify = database.CreateDbContext();
+        await using var verify = CreateContext(database);
         var secondState = await ReadStateAsync(verify, "issue_done_2");
         Assert.Equal(firstState, secondState);
     }
@@ -88,7 +87,7 @@ public class BackfillIssueCompletedAtMigrationSpecs
     public async Task Up_DoesNotClobber_AlreadySetCompletedAt()
     {
         await using var database = CreateModelSchemaDatabase();
-        await using (var setup = database.CreateDbContext())
+        await using (var setup = CreateContext(database))
         {
             var existingCompletedAt = "2026-06-26T09:00:00Z";
             await SeedIssueAsync(setup, "issue_done_3", "done",
@@ -101,7 +100,7 @@ public class BackfillIssueCompletedAtMigrationSpecs
 
         await RunMigrationUpAsync(database);
 
-        await using var verify = database.CreateDbContext();
+        await using var verify = CreateContext(database);
         var state = await ReadStateAsync(verify, "issue_done_3");
         Assert.Contains("\"completedAt\":\"2026-06-26T09:00:00Z\"", state);
         Assert.DoesNotContain("2026-06-28T12:00:00", state);
@@ -111,7 +110,7 @@ public class BackfillIssueCompletedAtMigrationSpecs
     public async Task Up_RoundTripsBackfilledValue_ThroughIssueStore()
     {
         await using var database = CreateModelSchemaDatabase();
-        await using (var setup = database.CreateDbContext())
+        await using (var setup = CreateContext(database))
         {
             await SeedIssueAsync(setup, "issue_rt_1", "done",
                 """
@@ -124,7 +123,7 @@ public class BackfillIssueCompletedAtMigrationSpecs
         await RunMigrationUpAsync(database);
 
         string state;
-        await using (var reader = database.CreateDbContext())
+        await using (var reader = CreateContext(database))
         {
             state = await ReadStateAsync(reader, "issue_rt_1");
         }
@@ -139,7 +138,7 @@ public class BackfillIssueCompletedAtMigrationSpecs
     public async Task Up_NonTerminalIssue_RemainsNull()
     {
         await using var database = CreateModelSchemaDatabase();
-        await using (var setup = database.CreateDbContext())
+        await using (var setup = CreateContext(database))
         {
             await SeedIssueAsync(setup, "issue_backlog_1", "backlog",
                 """
@@ -149,7 +148,7 @@ public class BackfillIssueCompletedAtMigrationSpecs
 
         await RunMigrationUpAsync(database);
 
-        await using var verify = database.CreateDbContext();
+        await using var verify = CreateContext(database);
         var state = await ReadStateAsync(verify, "issue_backlog_1");
         Assert.DoesNotContain("\"completedAt\"", state);
     }
@@ -158,16 +157,16 @@ public class BackfillIssueCompletedAtMigrationSpecs
     public async Task DatabaseMigrate_IncludesBackfillIssueCompletedAtMigration()
     {
         await using var database = CreateDatabase();
-        await using var ctx = database.CreateDbContext();
+        await using var ctx = CreateContext(database);
         await ctx.Database.MigrateAsync();
 
         var applied = await ctx.Database.GetAppliedMigrationsAsync();
         Assert.Contains(applied, m => m == MigrationId);
     }
 
-    private static async Task RunMigrationUpAsync(TestDatabase database)
+    private static async Task RunMigrationUpAsync(TestSqliteDatabase database)
     {
-        await using var ctx = database.CreateDbContext();
+        await using var ctx = CreateContext(database);
         await ctx.Database.ExecuteSqlRawAsync(
             """
             UPDATE Issues
@@ -260,55 +259,10 @@ public class BackfillIssueCompletedAtMigrationSpecs
         return (result as string)!;
     }
 
-    private static TestDatabase CreateDatabase()
-    {
-        var connection = new SqliteConnection("Data Source=:memory:");
-        connection.Open();
-        var options = new DbContextOptionsBuilder<MohistDbContext>()
-            .UseSqlite(connection)
-            .Options;
-        var factory = new TestDbContextFactory(options);
-        return new TestDatabase(connection, factory);
-    }
+    private static TestSqliteDatabase CreateDatabase() => TestSqliteDatabase.CreateEmpty();
 
-    private static TestDatabase CreateModelSchemaDatabase()
-    {
-        var connection = new SqliteConnection("Data Source=:memory:");
-        connection.Open();
-        MigratedSqliteTemplate.CopyModelSchemaTo(connection);
-        var options = new DbContextOptionsBuilder<MohistDbContext>()
-            .UseSqlite(connection)
-            .Options;
-        var factory = new TestDbContextFactory(options);
-        return new TestDatabase(connection, factory);
-    }
+    private static MohistDbContext CreateContext(TestSqliteDatabase database) =>
+        new(new DbContextOptionsBuilder<MohistDbContext>().UseSqlite(database.Keeper).Options);
 
-    private sealed class TestDatabase : IAsyncDisposable
-    {
-        private readonly SqliteConnection _connection;
-
-        public TestDatabase(SqliteConnection connection, TestDbContextFactory factory)
-        {
-            _connection = connection;
-            Factory = factory;
-        }
-
-        public TestDbContextFactory Factory { get; }
-
-        public MohistDbContext CreateDbContext() => Factory.CreateDbContext();
-
-        public async ValueTask DisposeAsync() => await _connection.DisposeAsync();
-    }
-
-    private sealed class TestDbContextFactory : IDbContextFactory<MohistDbContext>
-    {
-        public TestDbContextFactory(DbContextOptions<MohistDbContext> options)
-        {
-            Options = options;
-        }
-
-        public DbContextOptions<MohistDbContext> Options { get; }
-
-        public MohistDbContext CreateDbContext() => new(Options);
-    }
+    private static TestSqliteDatabase CreateModelSchemaDatabase() => TestSqliteDatabase.CreateModelSchema();
 }

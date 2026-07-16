@@ -199,8 +199,8 @@ public class InboxProjectionHandlerSpecs
             title: "Issue 1");
 
         var handler = InboxProjectionTestSupport.CreateHandler(database);
-        var eventStore = new EventStore(database.Factory, NullLogger<EventStore>.Instance);
-        var runStore = new WorkflowRunStore(database.Factory, eventStore, new NullDispatchGrainFactory(), NullLogger<WorkflowRunStore>.Instance);
+        var eventStore = new EventStore(new TestDbContextFactory(database.Options), NullLogger<EventStore>.Instance);
+        var runStore = new WorkflowRunStore(new TestDbContextFactory(database.Options), eventStore, new NullDispatchGrainFactory(), NullLogger<WorkflowRunStore>.Instance);
         var run = InboxProjectionTestSupport.BuildWorkflowRun(
             workflowRunId: "wf_store_replay",
             projectId: "proj_a",
@@ -627,7 +627,7 @@ public class InboxProjectionHandlerSpecs
 
         // After projection, mutate the issue title to prove the snapshot
         // is durable and the projection does not re-read on every query.
-        await using (var db = database.CreateDbContext())
+        await using (var db = database.CreateContext())
         {
             var row = await db.Issues.FirstAsync(r => r.ProjectId == "proj_a" && r.Number == 1);
             // The Issue.Title is init-only — patch the JSON state directly

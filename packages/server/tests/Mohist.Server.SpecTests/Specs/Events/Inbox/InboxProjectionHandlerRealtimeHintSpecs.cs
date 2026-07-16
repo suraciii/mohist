@@ -104,7 +104,7 @@ public class InboxProjectionHandlerRealtimeHintSpecs
                 var existing = services.Single(d => d.ServiceType == typeof(IDbContextFactory<MohistDbContext>));
                 services.Remove(existing);
                 services.AddSingleton<IDbContextFactory<MohistDbContext>>(
-                    new FailOnSecondAsyncContextFactory(database.Factory));
+                    new FailOnSecondAsyncContextFactory(new TestDbContextFactory(database.Options)));
             });
         var evt = InboxProjectionTestSupport.BuildIssueEvent(
             type: EventCatalog.ReverseDns.IssueWorkStarted,
@@ -400,7 +400,7 @@ public class InboxProjectionHandlerRealtimeHintSpecs
             issueNumber: 7,
             title: "Atomic hint");
 
-        var eventStore = new EventStore(database.Factory, NullLogger<EventStore>.Instance);
+        var eventStore = new EventStore(new TestDbContextFactory(database.Options), NullLogger<EventStore>.Instance);
         var handler = InboxProjectionTestSupport.CreateHandler(
             database,
             new InboxProjectionTestSupport.NoopEventPublisher(),
@@ -416,7 +416,7 @@ public class InboxProjectionHandlerRealtimeHintSpecs
             issueNumber: 7,
             eventId: "evt-atomic-hint");
 
-        await using (var db = database.CreateDbContext())
+        await using (var db = database.CreateContext())
         {
             await db.Database.ExecuteSqlRawAsync("""
                 CREATE TRIGGER "FailInboxHintInsert"
@@ -433,7 +433,7 @@ public class InboxProjectionHandlerRealtimeHintSpecs
 
         await AssertPersistedCountsAsync(database, inbox: 0, hints: 0);
 
-        await using (var db = database.CreateDbContext())
+        await using (var db = database.CreateContext())
         {
             await db.Database.ExecuteSqlRawAsync("DROP TRIGGER \"FailInboxHintInsert\"");
         }
@@ -543,11 +543,11 @@ public class InboxProjectionHandlerRealtimeHintSpecs
     }
 
     private static async Task AssertPersistedCountsAsync(
-        InboxProjectionTestSupport.TestDatabase database,
+        TestSqliteDatabase database,
         int inbox,
         int hints)
     {
-        await using var db = database.CreateDbContext();
+        await using var db = database.CreateContext();
         Assert.Equal(inbox, await db.InboxItems.CountAsync(item => item.ProjectId == "proj_atomic"));
         Assert.Equal(hints, await db.WorkflowRunEvents.CountAsync(evt =>
             evt.Source == HintSource && evt.Type == HintType));

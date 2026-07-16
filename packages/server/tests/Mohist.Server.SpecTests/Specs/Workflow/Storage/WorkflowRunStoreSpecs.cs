@@ -1,6 +1,5 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Mohist.Server.Events.Grains;
@@ -26,28 +25,6 @@ namespace Mohist.Server.SpecTests.Specs.Workflow.Storage;
 /// the same EF Core transaction as the run state, and lets an event-row
 /// write failure roll back the state transaction instead of swallowing it.
 /// </summary>
-public sealed class FakeWorkflowRunStoreDbContextFactory : IDbContextFactory<MohistDbContext>, IDisposable
-{
-    private readonly SqliteConnection _connection;
-
-    public FakeWorkflowRunStoreDbContextFactory()
-    {
-        _connection = new SqliteConnection("Data Source=:memory:");
-        _connection.Open();
-        MigratedSqliteTemplate.CopyTo(_connection);
-    }
-
-    public MohistDbContext CreateDbContext()
-    {
-        var options = new DbContextOptionsBuilder<MohistDbContext>()
-            .UseSqlite(_connection)
-            .Options;
-        return new MohistDbContext(options);
-    }
-
-    public void Dispose() => _connection.Dispose();
-}
-
 public class WorkflowRunStoreSpecs
 {
     private const string ProjectId = "proj_workflow_store";
@@ -58,7 +35,8 @@ public class WorkflowRunStoreSpecs
     [Fact]
     public async Task SaveAsync_WithProjectAnnotation_StampsProjectIdOnPersistedEventExtensions()
     {
-        using var factory = new FakeWorkflowRunStoreDbContextFactory();
+        using var database = TestSqliteDatabase.CreateMigrated();
+        var factory = new TestDbContextFactory(database.Options);
         var eventStore = new EventStore(factory, NullLogger<EventStore>.Instance);
         var store = new WorkflowRunStore(factory, eventStore, new NullDispatchGrainFactory(), NullLogger<WorkflowRunStore>.Instance);
 
@@ -93,7 +71,8 @@ public class WorkflowRunStoreSpecs
     [Fact]
     public async Task SaveAsync_UsesTheWorkflowOwnedLineageSnapshot()
     {
-        using var factory = new FakeWorkflowRunStoreDbContextFactory();
+        using var database = TestSqliteDatabase.CreateMigrated();
+        var factory = new TestDbContextFactory(database.Options);
         var eventStore = new EventStore(factory, NullLogger<EventStore>.Instance);
         var store = new WorkflowRunStore(factory, eventStore, new NullDispatchGrainFactory(), NullLogger<WorkflowRunStore>.Instance);
 
@@ -107,7 +86,8 @@ public class WorkflowRunStoreSpecs
     [Fact]
     public async Task SaveAsync_WithIssueContext_StampsIssueNumberOnPersistedEventExtensions()
     {
-        using var factory = new FakeWorkflowRunStoreDbContextFactory();
+        using var database = TestSqliteDatabase.CreateMigrated();
+        var factory = new TestDbContextFactory(database.Options);
         var eventStore = new EventStore(factory, NullLogger<EventStore>.Instance);
         var store = new WorkflowRunStore(factory, eventStore, new NullDispatchGrainFactory(), NullLogger<WorkflowRunStore>.Instance);
 
@@ -134,7 +114,8 @@ public class WorkflowRunStoreSpecs
     [Fact]
     public async Task SaveAsync_WithoutProjectAnnotation_FailsBecauseProjectOwnershipIsRequired()
     {
-        using var factory = new FakeWorkflowRunStoreDbContextFactory();
+        using var database = TestSqliteDatabase.CreateMigrated();
+        var factory = new TestDbContextFactory(database.Options);
         var eventStore = new EventStore(factory, NullLogger<EventStore>.Instance);
         var store = new WorkflowRunStore(factory, eventStore, new NullDispatchGrainFactory(), NullLogger<WorkflowRunStore>.Instance);
 
@@ -157,7 +138,8 @@ public class WorkflowRunStoreSpecs
     [Fact]
     public async Task SaveAsync_WithEvents_PersistsStateAndEventRowsInSameTransaction()
     {
-        using var factory = new FakeWorkflowRunStoreDbContextFactory();
+        using var database = TestSqliteDatabase.CreateMigrated();
+        var factory = new TestDbContextFactory(database.Options);
         var eventStore = new EventStore(factory, NullLogger<EventStore>.Instance);
         var store = new WorkflowRunStore(factory, eventStore, new NullDispatchGrainFactory(), NullLogger<WorkflowRunStore>.Instance);
 
@@ -193,7 +175,8 @@ public class WorkflowRunStoreSpecs
     [Fact]
     public async Task SaveAsync_UsesCurrentEpicSnapshotAfterLinkAndUnlink()
     {
-        using var factory = new FakeWorkflowRunStoreDbContextFactory();
+        using var database = TestSqliteDatabase.CreateMigrated();
+        var factory = new TestDbContextFactory(database.Options);
         var eventStore = new EventStore(factory, NullLogger<EventStore>.Instance);
         var store = new WorkflowRunStore(factory, eventStore, new NullDispatchGrainFactory(), NullLogger<WorkflowRunStore>.Instance);
         var run = new WorkflowRun
@@ -227,7 +210,8 @@ public class WorkflowRunStoreSpecs
     [Fact]
     public async Task LoadAsync_LegacyExhaustedRecovery_RetryPersistsFreshRecoveryRound()
     {
-        using var factory = new FakeWorkflowRunStoreDbContextFactory();
+        using var database = TestSqliteDatabase.CreateMigrated();
+        var factory = new TestDbContextFactory(database.Options);
         var eventStore = new EventStore(factory, NullLogger<EventStore>.Instance);
         var store = new WorkflowRunStore(factory, eventStore, new NullDispatchGrainFactory(), NullLogger<WorkflowRunStore>.Instance);
         var run = CreateLegacyExhaustedRecoveryRun();
@@ -269,7 +253,8 @@ public class WorkflowRunStoreSpecs
     [Fact]
     public async Task LoadAsync_LegacySameDefinitionAcrossStages_PreservesIndependentRecoveryRounds()
     {
-        using var factory = new FakeWorkflowRunStoreDbContextFactory();
+        using var database = TestSqliteDatabase.CreateMigrated();
+        var factory = new TestDbContextFactory(database.Options);
         var eventStore = new EventStore(factory, NullLogger<EventStore>.Instance);
         var store = new WorkflowRunStore(factory, eventStore, new NullDispatchGrainFactory(), NullLogger<WorkflowRunStore>.Instance);
         var run = CreateLegacySameDefinitionAcrossStagesRun();

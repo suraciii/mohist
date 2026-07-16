@@ -1,4 +1,3 @@
-using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Issue;
@@ -11,24 +10,18 @@ namespace Mohist.Server.SpecTests.Specs.Issue.IssueTemplate;
 
 public sealed class FakeDbContextFactory : IDbContextFactory<MohistDbContext>
 {
-    private readonly SqliteConnection _connection;
+    private readonly TestSqliteDatabase _database;
 
     public FakeDbContextFactory(Action<MohistDbContext>? seed = null)
     {
-        _connection = new SqliteConnection("Data Source=:memory:");
-        _connection.Open();
-        MigratedSqliteTemplate.CopyTo(_connection);
+        _database = TestSqliteDatabase.CreateMigrated();
         using var db = CreateDbContext();
         seed?.Invoke(db);
     }
 
-    public MohistDbContext CreateDbContext()
-    {
-        var options = new DbContextOptionsBuilder<MohistDbContext>().UseSqlite(_connection).Options;
-        return new MohistDbContext(options);
-    }
+    public MohistDbContext CreateDbContext() => _database.CreateContext();
 
-    public void Dispose() => _connection.Dispose();
+    public void Dispose() => _database.Dispose();
 }
 
 public class IssueTemplateRegistrySpecs

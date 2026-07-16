@@ -1,4 +1,3 @@
-using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
@@ -21,34 +20,26 @@ namespace Mohist.Server.SpecTests.Specs.Runner.Services;
 public class TaskLogServicePersistThenPublishSpecs : IAsyncLifetime
 {
     private static readonly DateTimeOffset FixedNow = new(2026, 6, 30, 0, 0, 0, TimeSpan.Zero);
-    private readonly DbContextOptions<MohistDbContext> _options;
+    private readonly TestSqliteDatabase _database;
     private readonly FakeTimeProvider _timeProvider = new(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero));
     private readonly TaskLogStore _store;
     private readonly RunnerWorkStore _runnerWorks;
     private readonly WorkflowRunQuerier _runQuerier;
-    private readonly SqliteConnection _keeper;
 
     public TaskLogServicePersistThenPublishSpecs()
     {
-        var connectionString = $"Data Source=task-log-ptp-{Guid.NewGuid():N};Mode=Memory;Cache=Shared";
-        _keeper = new SqliteConnection(connectionString);
-        _keeper.Open();
-        _options = new DbContextOptionsBuilder<MohistDbContext>()
-            .UseSqlite(connectionString)
-            .Options;
-        var factory = new Factory(_options);
+        _database = TestSqliteDatabase.CreateMigrated();
+        var factory = new TestDbContextFactory(_database.Options);
         _store = new TaskLogStore(factory, _timeProvider);
         _runnerWorks = new RunnerWorkStore(factory);
         _runQuerier = new WorkflowRunQuerier(factory);
-
-        MigratedSqliteTemplate.CopyTo(_keeper);
     }
 
     public Task InitializeAsync() => Task.CompletedTask;
 
     public Task DisposeAsync()
     {
-        _keeper.Dispose();
+        _database.Dispose();
         return Task.CompletedTask;
     }
 
@@ -333,7 +324,7 @@ public class TaskLogServicePersistThenPublishSpecs : IAsyncLifetime
             },
         };
 
-        await using var db = new MohistDbContext(_options);
+        await using var db = new MohistDbContext(_database.Options);
         var row = await db.WorkflowRuns.FirstOrDefaultAsync(r => r.WorkflowRunId == workflowRunId);
         if (row is null)
         {
@@ -356,14 +347,6 @@ public class TaskLogServicePersistThenPublishSpecs : IAsyncLifetime
         return Enumerable.Range(0, count)
             .Select(i => new TaskLogLine(startSeq + i, now.AddMilliseconds(i), "stdout", $"line-{startSeq + i}"))
             .ToList();
-    }
-
-    private sealed class Factory : IDbContextFactory<MohistDbContext>
-    {
-        private readonly DbContextOptions<MohistDbContext> _options;
-        public Factory(DbContextOptions<MohistDbContext> options) => _options = options;
-
-        public MohistDbContext CreateDbContext() => new(_options);
     }
 
     private sealed class RecordingPublisher : ITaskLogDeltaPublisher

@@ -1,5 +1,4 @@
 using System.Text.Json.Nodes;
-using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Mohist.Server.Events.Grains;
@@ -15,30 +14,22 @@ namespace Mohist.Server.SpecTests.Specs.Sessions;
 
 public class AgentSessionStoreSpecs : IAsyncLifetime
 {
-    private readonly DbContextOptions<MohistDbContext> _options;
+    private readonly TestSqliteDatabase _database;
     private readonly AgentSessionStore _store;
     private readonly AgentSessionTranscriptStore _transcriptStore;
-    private readonly SqliteConnection _keeper;
 
     public AgentSessionStoreSpecs()
     {
-        var connectionString = $"Data Source=agent-session-store-{Guid.NewGuid():N};Mode=Memory;Cache=Shared";
-        _keeper = new SqliteConnection(connectionString);
-        _keeper.Open();
-        _options = new DbContextOptionsBuilder<MohistDbContext>()
-            .UseSqlite(connectionString)
-            .Options;
-        _store = new AgentSessionStore(new Factory(_options), new NoopEventStore(), new NullDispatchGrainFactory(), NullLogger<AgentSessionStore>.Instance);
-        _transcriptStore = new AgentSessionTranscriptStore(new Factory(_options));
-
-        MigratedSqliteTemplate.CopyTo(_keeper);
+        _database = TestSqliteDatabase.CreateMigrated();
+        _store = new AgentSessionStore(new TestDbContextFactory(_database.Options), new NoopEventStore(), new NullDispatchGrainFactory(), NullLogger<AgentSessionStore>.Instance);
+        _transcriptStore = new AgentSessionTranscriptStore(new TestDbContextFactory(_database.Options));
     }
 
     public Task InitializeAsync() => Task.CompletedTask;
 
     public Task DisposeAsync()
     {
-        _keeper.Dispose();
+        _database.Dispose();
         return Task.CompletedTask;
     }
 
@@ -93,7 +84,7 @@ public class AgentSessionStoreSpecs : IAsyncLifetime
         await _store.SaveAsync(session.Id, session);
 
         string legacyState;
-        await using (var db = new MohistDbContext(_options))
+        await using (var db = new MohistDbContext(_database.Options))
         {
             var row = await db.AgentSessions.SingleAsync(candidate => candidate.Id == session.Id);
             var state = JsonNode.Parse(row.State)!.AsObject();
@@ -115,7 +106,7 @@ public class AgentSessionStoreSpecs : IAsyncLifetime
         Assert.Equal("legacy-runtime-session", rehydrated!.Status.AgentRuntimeSessionId);
         Assert.Null(rehydrated.Runtime.Runtime);
         Assert.Null(Assert.Single(rehydrated.Status.RuntimeSessionLineage!).Runtime);
-        await using var verificationDb = new MohistDbContext(_options);
+        await using var verificationDb = new MohistDbContext(_database.Options);
         var persistedState = await verificationDb.AgentSessions
             .Where(candidate => candidate.Id == session.Id)
             .Select(candidate => candidate.State)
@@ -142,7 +133,7 @@ public class AgentSessionStoreSpecs : IAsyncLifetime
         };
         await _transcriptStore.SaveAsync(new AgentSessionTranscriptFlush(false, turn, retryParts));
 
-        await using var db = new MohistDbContext(_options);
+        await using var db = new MohistDbContext(_database.Options);
         var partRows = await db.AgentSessionTranscriptParts.ToListAsync();
         var part = Assert.Single(partRows);
         Assert.Equal("hello world", part.Text);
@@ -173,20 +164,11 @@ public class AgentSessionStoreSpecs : IAsyncLifetime
         };
         await _transcriptStore.SaveAsync(new AgentSessionTranscriptFlush(false, turn, secondParts));
 
-        await using var db = new MohistDbContext(_options);
+        await using var db = new MohistDbContext(_database.Options);
         var partRows = await db.AgentSessionTranscriptParts.OrderBy(p => p.Sequence).ToListAsync();
         Assert.Equal(2, partRows.Count);
         Assert.Equal("msg-1", partRows[0].CorrelationKey);
         Assert.Equal("msg-2", partRows[1].CorrelationKey);
-    }
-
-    private sealed class Factory : IDbContextFactory<MohistDbContext>
-    {
-        private readonly DbContextOptions<MohistDbContext> _options;
-
-        public Factory(DbContextOptions<MohistDbContext> options) => _options = options;
-
-        public MohistDbContext CreateDbContext() => new(_options);
     }
 
     /// <summary>

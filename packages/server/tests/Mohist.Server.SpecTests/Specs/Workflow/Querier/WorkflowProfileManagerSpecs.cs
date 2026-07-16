@@ -1,5 +1,4 @@
 using System.Text.Json;
-using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
@@ -17,20 +16,14 @@ namespace Mohist.Server.SpecTests.Specs.Workflow.Querier;
 
 public class WorkflowProfileManagerSpecs : IAsyncLifetime
 {
-    private readonly DbContextOptions<MohistDbContext> _options;
+    private readonly TestSqliteDatabase _database;
     private readonly WorkflowProfileManager _manager;
-    private readonly SqliteConnection _keeper;
 
     public WorkflowProfileManagerSpecs()
     {
-        var connectionString = $"Data Source=profile-specs-{Guid.NewGuid():N};Mode=Memory;Cache=Shared";
-        _keeper = new SqliteConnection(connectionString);
-        _keeper.Open();
-        _options = new DbContextOptionsBuilder<MohistDbContext>()
-            .UseSqlite(connectionString)
-            .Options;
+        _database = TestSqliteDatabase.CreateMigrated();
 
-        var factory = new TestDbContextFactory(_options);
+        var factory = new TestDbContextFactory(_database.Options);
         var runProfileManager = new WorkflowRunProfileManager(factory);
         var promptLoader = new Mohist.Server.Workflow.Services.Prompts.FilePromptLoader();
         _manager = new WorkflowProfileManager(
@@ -40,14 +33,13 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
             WorkflowGrainTestHelpers.CreateEmptyConfigService(),
             runProfileManager);
 
-        MigratedSqliteTemplate.CopyTo(_keeper);
     }
 
     public Task InitializeAsync() => Task.CompletedTask;
 
     public Task DisposeAsync()
     {
-        _keeper.Dispose();
+        _database.Dispose();
         return Task.CompletedTask;
     }
 
@@ -341,7 +333,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
 
         await SeedAllLayersAsync("proj_snap", 1, runId, proj, issue);
 
-        await using (var db = new MohistDbContext(_options))
+        await using (var db = new MohistDbContext(_database.Options))
         {
             var row = db.ProjectWorkflowProfiles.Single(x => x.ProjectId == "proj_snap");
             row.Variables = new VariableBundle(
@@ -867,7 +859,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
             }, Array.Empty<CheckDefinition>(), requiresApproval: true));
 
         // Seed only the project profile — no WorkflowRun row exists yet.
-        await using (var db = new MohistDbContext(_options))
+        await using (var db = new MohistDbContext(_database.Options))
         {
             db.ProjectWorkflowProfiles.Add(new ProjectWorkflowProfile
             {
@@ -956,9 +948,9 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
             disabledWorkflowProfileIds: ["mohist/local", "mohist/github-pr"]);
         await ReplaceRunStateAsync(runId, "proj-existing-disabled-query", 1, "mohist/local");
         var querier = new WorkflowQuerier(
-            new TestDbContextFactory(_options),
+            new TestDbContextFactory(_database.Options),
             _manager,
-            new Mohist.Server.Workflow.Services.Artifacts.WorkflowArtifactQuerier(new TestDbContextFactory(_options)));
+            new Mohist.Server.Workflow.Services.Artifacts.WorkflowArtifactQuerier(new TestDbContextFactory(_database.Options)));
 
         var yaml = await querier.GetDefinitionYamlAsync(runId);
         var status = await querier.GetStatusAsync(runId);
@@ -1000,9 +992,9 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
             }
             """);
         var querier = new WorkflowQuerier(
-            new TestDbContextFactory(_options),
+            new TestDbContextFactory(_database.Options),
             _manager,
-            new Mohist.Server.Workflow.Services.Artifacts.WorkflowArtifactQuerier(new TestDbContextFactory(_options)));
+            new Mohist.Server.Workflow.Services.Artifacts.WorkflowArtifactQuerier(new TestDbContextFactory(_database.Options)));
 
         var status = await querier.GetStatusAsync(runId);
 
@@ -1120,7 +1112,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
 
     private async Task SeedProjectTemplateAsync(string projectId, string runId, string templateId, string templateJson)
     {
-        await using var db = new MohistDbContext(_options);
+        await using var db = new MohistDbContext(_database.Options);
         SeedRunContext(db, projectId, 1, runId);
 
         db.ProjectWorkflowProfiles.Add(new ProjectWorkflowProfile
@@ -1147,7 +1139,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
 
     private async Task UpdateProjectTemplateAsync(string projectId, string templateId, string templateJson)
     {
-        await using var db = new MohistDbContext(_options);
+        await using var db = new MohistDbContext(_database.Options);
         var existing = await db.ProjectWorkflowTemplates.FindAsync(projectId, templateId);
         Assert.NotNull(existing);
         existing!.Template = templateJson;
@@ -1163,7 +1155,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         string projectDefaultTemplateId,
         string projectTemplateJson)
     {
-        await using var db = new MohistDbContext(_options);
+        await using var db = new MohistDbContext(_database.Options);
         SeedRunContext(db, projectId, issueNumber, runId);
 
         db.ProjectWorkflowProfiles.Add(new ProjectWorkflowProfile
@@ -1198,7 +1190,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         string? issueWorkflowProfileId = null,
         string[]? disabledWorkflowProfileIds = null)
     {
-        await using var db = new MohistDbContext(_options);
+        await using var db = new MohistDbContext(_database.Options);
         SeedRunContext(db, projectId, issueNumber, runId, issueWorkflowProfileId);
 
         db.ProjectWorkflowProfiles.Add(new ProjectWorkflowProfile
@@ -1248,7 +1240,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         string? projectTemplateJson = null,
         string[]? disabledWorkflowProfileIds = null)
     {
-        await using var db = new MohistDbContext(_options);
+        await using var db = new MohistDbContext(_database.Options);
 
         db.ProjectWorkflowProfiles.Add(new ProjectWorkflowProfile
         {
@@ -1291,7 +1283,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
 
     private async Task ReplaceRunStateAsync(string runId, string projectId, int issueNumber, string systemProfileId)
     {
-        await using var db = new MohistDbContext(_options);
+        await using var db = new MohistDbContext(_database.Options);
         var row = await db.WorkflowRuns.FirstAsync(x => x.WorkflowRunId == runId);
         var definition = ProjectWorkflowProfileManager.GetSystemTemplateDefinition(systemProfileId)
             ?? throw new InvalidOperationException($"Unknown system profile '{systemProfileId}'");
@@ -1313,7 +1305,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
 
     private async Task ReplaceRunStateJsonAsync(string runId, string stateJson)
     {
-        await using var db = new MohistDbContext(_options);
+        await using var db = new MohistDbContext(_database.Options);
         var row = await db.WorkflowRuns.FirstAsync(x => x.WorkflowRunId == runId);
         row.State = stateJson;
         await db.SaveChangesAsync();
@@ -1322,7 +1314,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
     private async Task SeedRunOnlyAsync(
         string projectId, int issueNumber, string runId)
     {
-        await using var db = new MohistDbContext(_options);
+        await using var db = new MohistDbContext(_database.Options);
         SeedRunContext(db, projectId, issueNumber, runId);
 
         db.ProjectWorkflowProfiles.Add(new ProjectWorkflowProfile
@@ -1347,7 +1339,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         string? issueTemplateJson = null,
         VariableBundle? runtime = null)
     {
-        await using var db = new MohistDbContext(_options);
+        await using var db = new MohistDbContext(_database.Options);
         SeedRunContext(db, projectId, issueNumber, runId);
 
         db.ProjectWorkflowProfiles.Add(new ProjectWorkflowProfile
@@ -1377,7 +1369,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
     private async Task SeedIssueOnlyAsync(
         string projectId, int issueNumber, string runId, VariableBundle issue)
     {
-        await using var db = new MohistDbContext(_options);
+        await using var db = new MohistDbContext(_database.Options);
         SeedRunContext(db, projectId, issueNumber, runId);
 
         db.IssueWorkflowProfiles.Add(new IssueWorkflowProfile
@@ -1432,10 +1424,4 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         });
     }
 
-    private class TestDbContextFactory : IDbContextFactory<MohistDbContext>
-    {
-        private readonly DbContextOptions<MohistDbContext> _options;
-        public TestDbContextFactory(DbContextOptions<MohistDbContext> options) => _options = options;
-        public MohistDbContext CreateDbContext() => new(_options);
-    }
 }

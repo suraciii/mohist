@@ -1,4 +1,3 @@
-using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Inbox;
 using Mohist.Server.Infrastructure.Data.Db;
@@ -16,11 +15,11 @@ public class InboxQuerierSpecs
     public async Task ListAsync_ReturnsNonArchivedItemsMostRecentFirst()
     {
         await using var database = CreateDatabase();
-        var store = new InboxStore(database.Factory);
+        var store = new InboxStore(new TestDbContextFactory(database.Options));
         await SeedAsync(store, "proj_a", "evt-1", FixedNow.AddMinutes(-30), 1, "Issue 1");
         await SeedAsync(store, "proj_a", "evt-2", FixedNow.AddMinutes(-10), 2, "Issue 2");
         await SeedAsync(store, "proj_a", "evt-3", FixedNow.AddMinutes(-20), 3, "Issue 3");
-        var querier = new InboxQuerier(database.Factory);
+        var querier = new InboxQuerier(new TestDbContextFactory(database.Options));
 
         var items = await querier.ListAsync("proj_a");
 
@@ -38,11 +37,11 @@ public class InboxQuerierSpecs
     public async Task ListAsync_ExcludesArchivedItems()
     {
         await using var database = CreateDatabase();
-        var store = new InboxStore(database.Factory);
+        var store = new InboxStore(new TestDbContextFactory(database.Options));
         var keep = await SeedAsync(store, "proj_a", "evt-keep", FixedNow, 1, "Keep me");
         var drop = await SeedAsync(store, "proj_a", "evt-drop", FixedNow, 2, "Drop me");
         await store.ArchiveAsync("proj_a", drop.Id);
-        var querier = new InboxQuerier(database.Factory);
+        var querier = new InboxQuerier(new TestDbContextFactory(database.Options));
 
         var items = await querier.ListAsync("proj_a");
 
@@ -55,11 +54,11 @@ public class InboxQuerierSpecs
     public async Task ListAsync_OnlyReturnsItemsInRequestedProject()
     {
         await using var database = CreateDatabase();
-        var store = new InboxStore(database.Factory);
+        var store = new InboxStore(new TestDbContextFactory(database.Options));
         await SeedAsync(store, "proj_a", "evt-a-1", FixedNow, 1, "A1");
         await SeedAsync(store, "proj_a", "evt-a-2", FixedNow, 2, "A2");
         await SeedAsync(store, "proj_b", "evt-b-1", FixedNow, 1, "B1");
-        var querier = new InboxQuerier(database.Factory);
+        var querier = new InboxQuerier(new TestDbContextFactory(database.Options));
 
         var aItems = await querier.ListAsync("proj_a");
         var bItems = await querier.ListAsync("proj_b");
@@ -74,9 +73,9 @@ public class InboxQuerierSpecs
     public async Task ListAsync_ReturnsEmptyForUnknownProject()
     {
         await using var database = CreateDatabase();
-        var store = new InboxStore(database.Factory);
+        var store = new InboxStore(new TestDbContextFactory(database.Options));
         await SeedAsync(store, "proj_a", "evt-1", FixedNow, 1, "A1");
-        var querier = new InboxQuerier(database.Factory);
+        var querier = new InboxQuerier(new TestDbContextFactory(database.Options));
 
         var items = await querier.ListAsync("proj_zzz");
 
@@ -87,11 +86,11 @@ public class InboxQuerierSpecs
     public async Task ListAsync_ReflectsReadStateFromStore()
     {
         await using var database = CreateDatabase();
-        var store = new InboxStore(database.Factory);
+        var store = new InboxStore(new TestDbContextFactory(database.Options));
         var read = await SeedAsync(store, "proj_a", "evt-read", FixedNow, 1, "Read");
         await store.MarkReadAsync("proj_a", read.Id);
         await SeedAsync(store, "proj_a", "evt-unread", FixedNow.AddMinutes(1), 2, "Unread");
-        var querier = new InboxQuerier(database.Factory);
+        var querier = new InboxQuerier(new TestDbContextFactory(database.Options));
 
         var items = await querier.ListAsync("proj_a");
 
@@ -109,7 +108,7 @@ public class InboxQuerierSpecs
         // The querier returns the structured fields the Web client
         // templates from. No pre-rendered text is stored.
         await using var database = CreateDatabase();
-        var store = new InboxStore(database.Factory);
+        var store = new InboxStore(new TestDbContextFactory(database.Options));
         await store.InsertAsync(new InboxItemDraft(
             ProjectId: "proj_a",
             IssueNumber: 42,
@@ -117,7 +116,7 @@ public class InboxQuerierSpecs
             NotificationKind: NotificationKinds.ApprovalRequested,
             SourceEventSource: "/mohist/issues/issue_42",
             SourceEventId: "evt-1"));
-        var querier = new InboxQuerier(database.Factory);
+        var querier = new InboxQuerier(new TestDbContextFactory(database.Options));
 
         var items = await querier.ListAsync("proj_a");
 
@@ -135,7 +134,7 @@ public class InboxQuerierSpecs
         // CreatedAt to exercise the secondary sort key.
         var same = FixedNow;
         await using var database = CreateDatabase();
-        await using (var db = database.CreateDbContext())
+        await using (var db = database.CreateContext())
         {
             db.InboxItems.Add(new InboxItemRow
             {
@@ -161,7 +160,7 @@ public class InboxQuerierSpecs
             });
             await db.SaveChangesAsync();
         }
-        var querier = new InboxQuerier(database.Factory);
+        var querier = new InboxQuerier(new TestDbContextFactory(database.Options));
 
         var items = await querier.ListAsync("proj_a");
 
@@ -190,41 +189,5 @@ public class InboxQuerierSpecs
             CreatedAt: createdAt));
     }
 
-    private static TestDatabase CreateDatabase()
-    {
-        var connection = new SqliteConnection("Data Source=:memory:");
-        connection.Open();
-        var options = new DbContextOptionsBuilder<MohistDbContext>()
-            .UseSqlite(connection)
-            .Options;
-        var factory = new TestDbContextFactory(options);
-        MigratedSqliteTemplate.CopyTo(connection);
-        return new TestDatabase(connection, factory);
-    }
-
-    private sealed class TestDatabase : IAsyncDisposable
-    {
-        private readonly SqliteConnection _connection;
-
-        public TestDatabase(SqliteConnection connection, TestDbContextFactory factory)
-        {
-            _connection = connection;
-            Factory = factory;
-        }
-
-        public TestDbContextFactory Factory { get; }
-
-        public MohistDbContext CreateDbContext() => Factory.CreateDbContext();
-
-        public async ValueTask DisposeAsync() => await _connection.DisposeAsync();
-    }
-
-    private sealed class TestDbContextFactory : IDbContextFactory<MohistDbContext>
-    {
-        public TestDbContextFactory(DbContextOptions<MohistDbContext> options) => Options = options;
-
-        public DbContextOptions<MohistDbContext> Options { get; }
-
-        public MohistDbContext CreateDbContext() => new(Options);
-    }
+    private static TestSqliteDatabase CreateDatabase() => TestSqliteDatabase.CreateMigrated();
 }

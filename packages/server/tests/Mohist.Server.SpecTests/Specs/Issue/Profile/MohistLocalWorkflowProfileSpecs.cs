@@ -1,7 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
-using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Data.Db;
@@ -37,13 +36,11 @@ public class FakePromptLoader : IPromptLoader
 
 public sealed class FakeDbContextFactory : IDbContextFactory<MohistDbContext>
 {
-    private readonly SqliteConnection _connection;
+    private readonly TestSqliteDatabase _database;
 
     public FakeDbContextFactory(Dictionary<string, string>? projectPrompts = null, string? projectId = null)
     {
-        _connection = new SqliteConnection("Data Source=:memory:");
-        _connection.Open();
-        MigratedSqliteTemplate.CopyTo(_connection);
+        _database = TestSqliteDatabase.CreateMigrated();
         using var db = CreateDbContext();
         if (projectPrompts is { Count: > 0 } && projectId is not null)
         {
@@ -56,13 +53,9 @@ public sealed class FakeDbContextFactory : IDbContextFactory<MohistDbContext>
         }
     }
 
-    public MohistDbContext CreateDbContext()
-    {
-        var options = new DbContextOptionsBuilder<MohistDbContext>().UseSqlite(_connection).Options;
-        return new MohistDbContext(options);
-    }
+    public MohistDbContext CreateDbContext() => _database.CreateContext();
 
-    public void Dispose() => _connection.Dispose();
+    public void Dispose() => _database.Dispose();
 }
 
 public class MohistLocalWorkflowProfileSpecs

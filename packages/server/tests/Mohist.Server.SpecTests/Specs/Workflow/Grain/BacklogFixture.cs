@@ -1,4 +1,3 @@
-using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
@@ -14,22 +13,17 @@ public class BacklogFixture : IAsyncLifetime
 {
     public InProcessTestCluster Cluster { get; private set; } = null!;
     public IGrainFactory Grains => Cluster.Client;
-    public string ConnectionString => _keeper.ConnectionString;
+    public string ConnectionString => _database.ConnectionString;
 
-    private SqliteConnection _keeper = null!;
+    private TestSqliteDatabase _database = null!;
 
     public Task InitializeAsync()
     {
-        var dbName = $"mohist-backlog-test-{Guid.NewGuid():N}";
-        var connectionString = $"Data Source={dbName};Mode=Memory;Cache=Shared";
-        _keeper = new SqliteConnection(connectionString);
-        _keeper.Open();
-
-        MigratedSqliteTemplate.CopyTo(_keeper);
+        _database = TestSqliteDatabase.CreateMigrated();
 
         var builder = new InProcessTestClusterBuilder();
         builder.Options.InitialSilosCount = 1;
-        ConfigureCluster(builder, connectionString);
+        ConfigureCluster(builder, _database.ConnectionString);
         Cluster = builder.Build();
         return Cluster.DeployAsync();
     }
@@ -37,7 +31,7 @@ public class BacklogFixture : IAsyncLifetime
     public Task DisposeAsync()
     {
         Cluster?.Dispose();
-        _keeper?.Dispose();
+        _database?.Dispose();
         return Task.CompletedTask;
     }
 

@@ -1,5 +1,4 @@
 using System.Text.Json;
-using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Workflow;
@@ -11,25 +10,20 @@ namespace Mohist.Server.SpecTests.Specs.Issue.Profile;
 
 public class IssueWorkflowProfileStorageIntegritySpecs : IAsyncLifetime
 {
-    private readonly DbContextOptions<MohistDbContext> _options;
-    private readonly TestFactory _factory;
-    private readonly SqliteConnection _keeper;
+    private readonly TestSqliteDatabase _database;
+    private readonly TestDbContextFactory _factory;
 
     public IssueWorkflowProfileStorageIntegritySpecs()
     {
-        var connectionString = $"Data Source=issue-profile-integrity-{Guid.NewGuid():N};Mode=Memory;Cache=Shared";
-        _keeper = new SqliteConnection(connectionString);
-        _keeper.Open();
-        _options = new DbContextOptionsBuilder<MohistDbContext>().UseSqlite(connectionString).Options;
-        _factory = new TestFactory(_options);
-        MigratedSqliteTemplate.CopyTo(_keeper);
+        _database = TestSqliteDatabase.CreateMigrated();
+        _factory = new TestDbContextFactory(_database.Options);
     }
 
     public Task InitializeAsync() => Task.CompletedTask;
 
     public Task DisposeAsync()
     {
-        _keeper.Dispose();
+        _database.Dispose();
         return Task.CompletedTask;
     }
 
@@ -78,7 +72,7 @@ public class IssueWorkflowProfileStorageIntegritySpecs : IAsyncLifetime
                 ["build"] = new() { ["model"] = "gpt-5-mini" },
             });
 
-        await using var db = new MohistDbContext(_options);
+        await using var db = new MohistDbContext(_database.Options);
         var row = await db.IssueWorkflowProfiles.SingleAsync(profile =>
             profile.ProjectId == "project_1" && profile.IssueNumber == 7);
         using var document = JsonDocument.Parse(row.Variables);
@@ -100,7 +94,7 @@ public class IssueWorkflowProfileStorageIntegritySpecs : IAsyncLifetime
 
     private async Task SeedProfileAsync(string projectId, int issueNumber, string variables)
     {
-        await using var db = new MohistDbContext(_options);
+        await using var db = new MohistDbContext(_database.Options);
         db.IssueWorkflowProfiles.Add(new IssueWorkflowProfile
         {
             ProjectId = projectId,
@@ -111,8 +105,4 @@ public class IssueWorkflowProfileStorageIntegritySpecs : IAsyncLifetime
         await db.SaveChangesAsync();
     }
 
-    private sealed class TestFactory(DbContextOptions<MohistDbContext> options) : IDbContextFactory<MohistDbContext>
-    {
-        public MohistDbContext CreateDbContext() => new(options);
-    }
 }

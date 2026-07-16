@@ -1,4 +1,3 @@
-using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Agent.Domain;
@@ -392,13 +391,13 @@ public class AgentSubscriptionStoreSpecs
         };
 
     private static AgentSubscriptionStore NewStore(
-        TestDatabase database,
+        TestSqliteDatabase database,
         FakeTimeProvider? timeProvider = null) =>
-        new(database.Factory, timeProvider ?? new FakeTimeProvider(StartTime));
+        new(new TestDbContextFactory(database.Options), timeProvider ?? new FakeTimeProvider(StartTime));
 
-    private static async Task SeedProjectAsync(TestDatabase database, string projectId)
+    private static async Task SeedProjectAsync(TestSqliteDatabase database, string projectId)
     {
-        await using var db = database.CreateDbContext();
+        await using var db = database.CreateContext();
         db.Projects.Add(new ProjectRow
         {
             Id = projectId,
@@ -410,60 +409,24 @@ public class AgentSubscriptionStoreSpecs
         await db.SaveChangesAsync();
     }
 
-    private static async Task<AgentSubscriptionRow> ReadRowAsync(TestDatabase database, string id)
+    private static async Task<AgentSubscriptionRow> ReadRowAsync(TestSqliteDatabase database, string id)
     {
         var row = await ReadOptionalRowAsync(database, id);
         Assert.NotNull(row);
         return row!;
     }
 
-    private static async Task<AgentSubscriptionRow?> ReadOptionalRowAsync(TestDatabase database, string id)
+    private static async Task<AgentSubscriptionRow?> ReadOptionalRowAsync(TestSqliteDatabase database, string id)
     {
-        await using var db = database.CreateDbContext();
+        await using var db = database.CreateContext();
         return await db.AgentSubscriptions.AsNoTracking().FirstOrDefaultAsync(r => r.Id == id);
     }
 
-    private static async Task<List<AgentSubscriptionRow>> ReadAllRowsAsync(TestDatabase database)
+    private static async Task<List<AgentSubscriptionRow>> ReadAllRowsAsync(TestSqliteDatabase database)
     {
-        await using var db = database.CreateDbContext();
+        await using var db = database.CreateContext();
         return await db.AgentSubscriptions.AsNoTracking().ToListAsync();
     }
 
-    private static TestDatabase CreateDatabase()
-    {
-        var connection = new SqliteConnection("Data Source=:memory:");
-        connection.Open();
-        var options = new DbContextOptionsBuilder<MohistDbContext>()
-            .UseSqlite(connection)
-            .Options;
-        var factory = new TestDbContextFactory(options);
-        MigratedSqliteTemplate.CopyTo(connection);
-        return new TestDatabase(connection, factory);
-    }
-
-    private sealed class TestDatabase : IAsyncDisposable
-    {
-        private readonly SqliteConnection _connection;
-
-        public TestDatabase(SqliteConnection connection, TestDbContextFactory factory)
-        {
-            _connection = connection;
-            Factory = factory;
-        }
-
-        public TestDbContextFactory Factory { get; }
-
-        public MohistDbContext CreateDbContext() => Factory.CreateDbContext();
-
-        public async ValueTask DisposeAsync() => await _connection.DisposeAsync();
-    }
-
-    private sealed class TestDbContextFactory : IDbContextFactory<MohistDbContext>
-    {
-        public TestDbContextFactory(DbContextOptions<MohistDbContext> options) => Options = options;
-
-        public DbContextOptions<MohistDbContext> Options { get; }
-
-        public MohistDbContext CreateDbContext() => new(Options);
-    }
+    private static TestSqliteDatabase CreateDatabase() => TestSqliteDatabase.CreateMigrated();
 }

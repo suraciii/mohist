@@ -15,7 +15,7 @@ public class BackfillIssueEventsTerminalTypeRenameMigrationSpecs
     public async Task Up_RewritesLegacyClosedRows_ToCancelled()
     {
         await using var database = CreateModelSchemaDatabase();
-        await using (var setup = database.CreateDbContext())
+        await using (var setup = database.CreateContext())
         {
             await SeedIssueEventAsync(setup, "/mohist/issues/issue_a", 1,
                 "com.mohist.issue.closed", "2026-06-20T10:00:00Z");
@@ -23,7 +23,7 @@ public class BackfillIssueEventsTerminalTypeRenameMigrationSpecs
 
         await RunMigrationUpAsync(database);
 
-        await using var verify = database.CreateDbContext();
+        await using var verify = database.CreateContext();
         Assert.Equal("com.mohist.issue.cancelled",
             await ReadTypeAsync(verify, "/mohist/issues/issue_a", 1));
     }
@@ -32,7 +32,7 @@ public class BackfillIssueEventsTerminalTypeRenameMigrationSpecs
     public async Task Up_RewritesLegacyWorkCompletedRows_ToCompleted()
     {
         await using var database = CreateModelSchemaDatabase();
-        await using (var setup = database.CreateDbContext())
+        await using (var setup = database.CreateContext())
         {
             await SeedIssueEventAsync(setup, "/mohist/issues/issue_b", 1,
                 "com.mohist.issue.work-completed", "2026-06-20T10:00:00Z");
@@ -40,7 +40,7 @@ public class BackfillIssueEventsTerminalTypeRenameMigrationSpecs
 
         await RunMigrationUpAsync(database);
 
-        await using var verify = database.CreateDbContext();
+        await using var verify = database.CreateContext();
         Assert.Equal("com.mohist.issue.completed",
             await ReadTypeAsync(verify, "/mohist/issues/issue_b", 1));
     }
@@ -49,7 +49,7 @@ public class BackfillIssueEventsTerminalTypeRenameMigrationSpecs
     public async Task Up_RewritesBothLegacyTerminalTypes_InSingleRun()
     {
         await using var database = CreateModelSchemaDatabase();
-        await using (var setup = database.CreateDbContext())
+        await using (var setup = database.CreateContext())
         {
             await SeedIssueEventAsync(setup, "/mohist/issues/issue_c", 1,
                 "com.mohist.issue.closed", "2026-06-20T10:00:00Z");
@@ -62,7 +62,7 @@ public class BackfillIssueEventsTerminalTypeRenameMigrationSpecs
 
         await RunMigrationUpAsync(database);
 
-        await using var verify = database.CreateDbContext();
+        await using var verify = database.CreateContext();
         Assert.Equal("com.mohist.issue.cancelled",
             await ReadTypeAsync(verify, "/mohist/issues/issue_c", 1));
         Assert.Equal("com.mohist.issue.completed",
@@ -75,7 +75,7 @@ public class BackfillIssueEventsTerminalTypeRenameMigrationSpecs
     public async Task Up_SecondRun_IsIdempotent()
     {
         await using var database = CreateModelSchemaDatabase();
-        await using (var setup = database.CreateDbContext())
+        await using (var setup = database.CreateContext())
         {
             await SeedIssueEventAsync(setup, "/mohist/issues/issue_f", 1,
                 "com.mohist.issue.closed", "2026-06-20T10:00:00Z");
@@ -89,7 +89,7 @@ public class BackfillIssueEventsTerminalTypeRenameMigrationSpecs
         // canonical ids untouched.
         await RunMigrationUpAsync(database);
 
-        await using var verify = database.CreateDbContext();
+        await using var verify = database.CreateContext();
         Assert.Equal("com.mohist.issue.cancelled",
             await ReadTypeAsync(verify, "/mohist/issues/issue_f", 1));
         Assert.Equal("com.mohist.issue.completed",
@@ -100,7 +100,7 @@ public class BackfillIssueEventsTerminalTypeRenameMigrationSpecs
     public async Task Up_DoesNotTouchCanonicalRows_WrittenAfterRename()
     {
         await using var database = CreateModelSchemaDatabase();
-        await using (var setup = database.CreateDbContext())
+        await using (var setup = database.CreateContext())
         {
             // Rows that already carry the canonical ids (e.g. live-written
             // post-rename on a fresh DB) must not be modified by Up.
@@ -112,7 +112,7 @@ public class BackfillIssueEventsTerminalTypeRenameMigrationSpecs
 
         await RunMigrationUpAsync(database);
 
-        await using var verify = database.CreateDbContext();
+        await using var verify = database.CreateContext();
         Assert.Equal("com.mohist.issue.cancelled",
             await ReadTypeAsync(verify, "/mohist/issues/issue_h", 1));
         Assert.Equal("com.mohist.issue.completed",
@@ -126,7 +126,7 @@ public class BackfillIssueEventsTerminalTypeRenameMigrationSpecs
 
         await RunMigrationUpAsync(database);
 
-        await using var verify = database.CreateDbContext();
+        await using var verify = database.CreateContext();
         var count = await CountRowsAsync(verify, "IssueEvents");
         Assert.Equal(0, count);
     }
@@ -135,7 +135,7 @@ public class BackfillIssueEventsTerminalTypeRenameMigrationSpecs
     public async Task Down_RewritesCanonicalRows_BackToLegacy()
     {
         await using var database = CreateModelSchemaDatabase();
-        await using (var setup = database.CreateDbContext())
+        await using (var setup = database.CreateContext())
         {
             await SeedIssueEventAsync(setup, "/mohist/issues/issue_j", 1,
                 "com.mohist.issue.cancelled", "2026-06-20T10:00:00Z");
@@ -145,7 +145,7 @@ public class BackfillIssueEventsTerminalTypeRenameMigrationSpecs
 
         await RunMigrationDownAsync(database);
 
-        await using var verify = database.CreateDbContext();
+        await using var verify = database.CreateContext();
         Assert.Equal("com.mohist.issue.closed",
             await ReadTypeAsync(verify, "/mohist/issues/issue_j", 1));
         Assert.Equal("com.mohist.issue.work-completed",
@@ -156,7 +156,7 @@ public class BackfillIssueEventsTerminalTypeRenameMigrationSpecs
     public async Task Down_SecondRun_IsIdempotent()
     {
         await using var database = CreateModelSchemaDatabase();
-        await using (var setup = database.CreateDbContext())
+        await using (var setup = database.CreateContext())
         {
             await SeedIssueEventAsync(setup, "/mohist/issues/issue_l", 1,
                 "com.mohist.issue.cancelled", "2026-06-20T10:00:00Z");
@@ -165,7 +165,7 @@ public class BackfillIssueEventsTerminalTypeRenameMigrationSpecs
         await RunMigrationDownAsync(database);
         await RunMigrationDownAsync(database);
 
-        await using var verify = database.CreateDbContext();
+        await using var verify = database.CreateContext();
         Assert.Equal("com.mohist.issue.closed",
             await ReadTypeAsync(verify, "/mohist/issues/issue_l", 1));
     }
@@ -174,7 +174,7 @@ public class BackfillIssueEventsTerminalTypeRenameMigrationSpecs
     public async Task UpThenDown_RoundTripsTerminalTypes_AcrossEras()
     {
         await using var database = CreateModelSchemaDatabase();
-        await using (var setup = database.CreateDbContext())
+        await using (var setup = database.CreateContext())
         {
             // Pre-rename terminal rows.
             await SeedIssueEventAsync(setup, "/mohist/issues/issue_m", 1,
@@ -191,7 +191,7 @@ public class BackfillIssueEventsTerminalTypeRenameMigrationSpecs
         await RunMigrationUpAsync(database);
 
         // After Up: pre-rename rows are canonical; canonical rows are unchanged.
-        await using (var afterUp = database.CreateDbContext())
+        await using (var afterUp = database.CreateContext())
         {
             Assert.Equal("com.mohist.issue.cancelled",
                 await ReadTypeAsync(afterUp, "/mohist/issues/issue_m", 1));
@@ -209,7 +209,7 @@ public class BackfillIssueEventsTerminalTypeRenameMigrationSpecs
         // pre-rename rows return to legacy; Down also rewrites the
         // post-rename canonical rows back to legacy, matching the
         // symmetric-revert posture).
-        await using var afterDown = database.CreateDbContext();
+        await using var afterDown = database.CreateContext();
         Assert.Equal("com.mohist.issue.closed",
             await ReadTypeAsync(afterDown, "/mohist/issues/issue_m", 1));
         Assert.Equal("com.mohist.issue.work-completed",
@@ -224,7 +224,7 @@ public class BackfillIssueEventsTerminalTypeRenameMigrationSpecs
     public async Task Up_DoesNotAlterIssueState_OrStatus()
     {
         await using var database = CreateModelSchemaDatabase();
-        await using (var setup = database.CreateDbContext())
+        await using (var setup = database.CreateContext())
         {
             await SeedIssueAsync(setup, "issue_q",
                 """
@@ -235,14 +235,14 @@ public class BackfillIssueEventsTerminalTypeRenameMigrationSpecs
         }
 
         string stateBefore;
-        await using (var readBefore = database.CreateDbContext())
+        await using (var readBefore = database.CreateContext())
         {
             stateBefore = await ReadStateAsync(readBefore, "issue_q");
         }
 
         await RunMigrationUpAsync(database);
 
-        await using var readAfter = database.CreateDbContext();
+        await using var readAfter = database.CreateContext();
         var stateAfter = await ReadStateAsync(readAfter, "issue_q");
         Assert.Equal(stateBefore, stateAfter);
     }
@@ -251,7 +251,7 @@ public class BackfillIssueEventsTerminalTypeRenameMigrationSpecs
     public async Task Up_PreRenameAndPostRename_TerminalRowsClassifyIdentically()
     {
         await using var database = CreateModelSchemaDatabase();
-        await using (var setup = database.CreateDbContext())
+        await using (var setup = database.CreateContext())
         {
             // Pre-rename persisted terminal row.
             await SeedIssueEventAsync(setup, "/mohist/issues/issue_r", 1,
@@ -263,7 +263,7 @@ public class BackfillIssueEventsTerminalTypeRenameMigrationSpecs
 
         await RunMigrationUpAsync(database);
 
-        await using var verify = database.CreateDbContext();
+        await using var verify = database.CreateContext();
         var pre = await ReadTypeAsync(verify, "/mohist/issues/issue_r", 1);
         var post = await ReadTypeAsync(verify, "/mohist/issues/issue_s", 1);
         // Pre-rename and post-rename rows share one vocabulary, so a
@@ -277,7 +277,7 @@ public class BackfillIssueEventsTerminalTypeRenameMigrationSpecs
     public async Task DatabaseMigrate_IncludesBackfillIssueEventsTerminalTypeRenameMigration()
     {
         await using var database = CreateDatabase();
-        await using var ctx = database.CreateDbContext();
+        await using var ctx = database.CreateContext();
         await ctx.Database.MigrateAsync();
 
         var applied = await ctx.Database.GetAppliedMigrationsAsync();
@@ -306,9 +306,9 @@ public class BackfillIssueEventsTerminalTypeRenameMigrationSpecs
         Assert.Equal(typeof(Microsoft.EntityFrameworkCore.Migrations.Migration), method!.DeclaringType);
     }
 
-    private static async Task RunMigrationUpAsync(TestDatabase database)
+    private static async Task RunMigrationUpAsync(TestSqliteDatabase database)
     {
-        await using var ctx = database.CreateDbContext();
+        await using var ctx = database.CreateContext();
         await ctx.Database.ExecuteSqlRawAsync(
             """
             UPDATE IssueEvents
@@ -323,9 +323,9 @@ public class BackfillIssueEventsTerminalTypeRenameMigrationSpecs
             """);
     }
 
-    private static async Task RunMigrationDownAsync(TestDatabase database)
+    private static async Task RunMigrationDownAsync(TestSqliteDatabase database)
     {
-        await using var ctx = database.CreateDbContext();
+        await using var ctx = database.CreateContext();
         await ctx.Database.ExecuteSqlRawAsync(
             """
             UPDATE IssueEvents
@@ -431,55 +431,7 @@ public class BackfillIssueEventsTerminalTypeRenameMigrationSpecs
         return Convert.ToInt64(result);
     }
 
-    private static TestDatabase CreateDatabase()
-    {
-        var connection = new SqliteConnection("Data Source=:memory:");
-        connection.Open();
-        var options = new DbContextOptionsBuilder<MohistDbContext>()
-            .UseSqlite(connection)
-            .Options;
-        var factory = new TestDbContextFactory(options);
-        return new TestDatabase(connection, factory);
-    }
+    private static TestSqliteDatabase CreateDatabase() => TestSqliteDatabase.CreateEmpty();
 
-    private static TestDatabase CreateModelSchemaDatabase()
-    {
-        var connection = new SqliteConnection("Data Source=:memory:");
-        connection.Open();
-        MigratedSqliteTemplate.CopyModelSchemaTo(connection);
-        var options = new DbContextOptionsBuilder<MohistDbContext>()
-            .UseSqlite(connection)
-            .Options;
-        var factory = new TestDbContextFactory(options);
-        return new TestDatabase(connection, factory);
-    }
-
-    private sealed class TestDatabase : IAsyncDisposable
-    {
-        private readonly SqliteConnection _connection;
-
-        public TestDatabase(SqliteConnection connection, TestDbContextFactory factory)
-        {
-            _connection = connection;
-            Factory = factory;
-        }
-
-        public TestDbContextFactory Factory { get; }
-
-        public MohistDbContext CreateDbContext() => Factory.CreateDbContext();
-
-        public async ValueTask DisposeAsync() => await _connection.DisposeAsync();
-    }
-
-    private sealed class TestDbContextFactory : IDbContextFactory<MohistDbContext>
-    {
-        public TestDbContextFactory(DbContextOptions<MohistDbContext> options)
-        {
-            Options = options;
-        }
-
-        public DbContextOptions<MohistDbContext> Options { get; }
-
-        public MohistDbContext CreateDbContext() => new(Options);
-    }
+    private static TestSqliteDatabase CreateModelSchemaDatabase() => TestSqliteDatabase.CreateModelSchema();
 }
