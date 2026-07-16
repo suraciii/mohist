@@ -397,7 +397,7 @@ public class EpicAutoDoneSpecs
 
         var ex = await Assert.ThrowsAsync<EpicNotReadyToMarkDoneException>(
             () => grain.SetStatusAsync("done"));
-        Assert.Equal("epic_1", ex.EpicId);
+        Assert.Equal(1, ex.EpicNumber);
         Assert.Equal(1, ex.OpenLinkedCount);
 
         await using var verify = database.CreateDbContext();

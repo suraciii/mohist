@@ -64,10 +64,9 @@ public class TransactionalEventAppendSpecs : IAsyncLifetime
         await using var db = await _dbFactory.CreateDbContextAsync();
         db.Epics.Add(new EpicRow
         {
-            Id = "epic_txn_1",
             ProjectId = ProjectId,
             Number = 1,
-            Title = "epic_txn_1",
+            Title = "Epic 1",
             Description = "",
             Priority = "p2",
             Status = "running",
