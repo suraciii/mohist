@@ -74,13 +74,14 @@ describe("ServerConnection.report", () => {
 })
 
 describe("ServerConnection.poll recovery state", () => {
-  it("preserves explicit null and keeps an absent state absent", async () => {
+  it("preserves explicit null and numeric state while keeping an absent state absent", async () => {
     fetchMock.mockResolvedValueOnce(mockResponse({
       status: 200,
       body: JSON.stringify({
         dispatches: [
           { workflowRunId: "wf-1", workId: "work-1", workType: "task", recoveryRemaining: null },
-          { workflowRunId: "wf-1", workId: "work-2", workType: "task" },
+          { workflowRunId: "wf-1", workId: "work-2", workType: "task", recoveryRemaining: 1 },
+          { workflowRunId: "wf-1", workId: "work-3", workType: "task" },
         ],
       }),
     }))
@@ -89,7 +90,10 @@ describe("ServerConnection.poll recovery state", () => {
     const works = await connection.poll(new AbortController().signal)
 
     expect(works[0]?.recoveryRemaining).toBeNull()
-    expect(Object.prototype.hasOwnProperty.call(works[1], "recoveryRemaining")).toBe(false)
+    expect(Object.prototype.hasOwnProperty.call(works[0], "recoveryRemaining")).toBe(true)
+    expect(works[1]?.recoveryRemaining).toBe(1)
+    expect(Object.prototype.hasOwnProperty.call(works[1], "recoveryRemaining")).toBe(true)
+    expect(Object.prototype.hasOwnProperty.call(works[2], "recoveryRemaining")).toBe(false)
   })
 })
 

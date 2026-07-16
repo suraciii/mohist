@@ -37,6 +37,7 @@ internal sealed class WorkflowWorkLifecycle
                     if (t.RecoveryRemaining is null)
                         throw new InvalidOperationException(
                             $"Recovery follow-up task '{t.Id}' must carry an explicit numeric recoveryRemaining");
+                    TaskRun.ValidateContinuation(definition, t.RecoveryRemaining.Value);
                     return (Definition: definition, RecoveryRemaining: t.RecoveryRemaining);
                 }
 

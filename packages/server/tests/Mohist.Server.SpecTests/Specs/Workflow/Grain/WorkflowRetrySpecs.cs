@@ -218,7 +218,7 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
         var recovery = new RecoveryDefinition(
             2,
             [new RecoveryHandlerDefinition("errorCode=base-moved", [], RetrySelf: false)]);
-        var workflow = await StartWorkflowAsync(SingleStage(
+        await StartWorkflowAsync(SingleStage(
             tasks: [new TaskDefinition("merge-pr", "Merge PR", "spec/task", Recovery: recovery)],
             checks: []));
         var (task, runnerId) = await PollWorkAnyAsync();
@@ -230,6 +230,70 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
 
         var persisted = await LoadRunAsync(_workflowId!);
         Assert.Equal(TaskRunStatus.Running, persisted.CurrentStage().Tasks.Single().Status);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Theory]
+    [InlineData(-1)]
+    [InlineData(3)]
+    public async Task RecoveryFollowUpOutsideDeclaredBudget_IsRejectedWithoutMutatingActiveTask(int recoveryRemaining)
+    {
+        var recovery = new RecoveryDefinition(
+            2,
+            [new RecoveryHandlerDefinition("errorCode=base-moved", [], RetrySelf: false)]);
+        await StartWorkflowAsync(SingleStage(
+            tasks: [new TaskDefinition("merge-pr", "Merge PR", "spec/task", Recovery: recovery)],
+            checks: []));
+        var (task, runnerId) = await PollWorkAnyAsync();
+
+        await Assert.ThrowsAnyAsync<Exception>(() => ReportAsync(runnerId, task.WorkId, new WorkResult(
+            "completed",
+            Output: "{}",
+            AddTasks: [new RuntimeTaskInput("recover", "Recover", "spec/task", Recovery: recovery, RecoveryRemaining: recoveryRemaining)])));
+
+        var unchanged = await LoadRunAsync(_workflowId!);
+        Assert.Equal(TaskRunStatus.Running, Assert.Single(unchanged.CurrentStage().Tasks).Status);
+
+        await ReportAsync(runnerId, task.WorkId, "failed", "retryable report");
+
+        var failed = await LoadRunAsync(_workflowId!);
+        Assert.Equal(TaskRunStatus.Failed, Assert.Single(failed.CurrentStage().Tasks).Status);
+        Assert.Equal(WorkflowRunStatus.Failed, failed.Status);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public async Task RecoveryFollowUpBatchWithInvalidContinuation_IsRejectedWithoutInsertingEarlierTasks()
+    {
+        var recovery = new RecoveryDefinition(
+            2,
+            [new RecoveryHandlerDefinition("errorCode=base-moved", [], RetrySelf: false)]);
+        await StartWorkflowAsync(SingleStage(
+            tasks: [new TaskDefinition("merge-pr", "Merge PR", "spec/task", Recovery: recovery)],
+            checks: []));
+        var (task, runnerId) = await PollWorkAnyAsync();
+
+        await Assert.ThrowsAnyAsync<Exception>(() => ReportAsync(runnerId, task.WorkId, new WorkResult(
+            "completed",
+            Output: "{}",
+            AddTasks:
+            [
+                new RuntimeTaskInput("fix", "Fix", "spec/fix"),
+                new RuntimeTaskInput("merge-pr", "Merge PR", "spec/task", Recovery: recovery, RecoveryRemaining: 3),
+            ])));
+
+        var unchanged = await LoadRunAsync(_workflowId!);
+        var active = Assert.Single(unchanged.CurrentStage().Tasks);
+        Assert.Equal("merge-pr.1", active.Id);
+        Assert.Equal(TaskRunStatus.Running, active.Status);
+
+        await ReportAsync(runnerId, task.WorkId, "failed", "retryable report");
+
+        var failed = await LoadRunAsync(_workflowId!);
+        Assert.Equal(TaskRunStatus.Failed, Assert.Single(failed.CurrentStage().Tasks).Status);
+        Assert.Equal(WorkflowRunStatus.Failed, failed.Status);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]

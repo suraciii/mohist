@@ -151,13 +151,18 @@ public static class TaskRunExtensions
             string? causedByFeedbackId = null,
             string? causedByFailedTaskId = null)
         {
+            ValidateContinuation(input, recoveryRemaining);
+
+            return MakeTask(existing, input, recoveryRemaining, causedByFeedbackId, causedByFailedTaskId);
+        }
+
+        internal static void ValidateContinuation(TaskDefinition input, int recoveryRemaining)
+        {
             if (input.Recovery is null)
                 throw new InvalidOperationException("A continuation task requires a recovery declaration");
             if (recoveryRemaining < 0 || recoveryRemaining > Math.Max(0, input.Recovery.Budget))
                 throw new InvalidOperationException(
                     $"Recovery remaining value {recoveryRemaining} is outside the declared budget {input.Recovery.Budget}");
-
-            return MakeTask(existing, input, recoveryRemaining, causedByFeedbackId, causedByFailedTaskId);
         }
 
         private static TaskRun MakeTask(
