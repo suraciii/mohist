@@ -139,7 +139,7 @@ describe('RunnerDetailPage', () => {
             workType: 'workflow',
             stage: 'build',
             title: 'Add dark mode',
-            issue: { projectId: 'proj-1', issueId: 'issue-42', issueNumber: 42 },
+            issue: { projectId: 'proj-1', issueNumber: 42 },
           },
         ],
       })
@@ -179,7 +179,7 @@ describe('RunnerDetailPage', () => {
             workType: 'workflow',
             stage: 'plan',
             title: 'Work A',
-            issue: { projectId: 'proj-1', issueId: 'issue-1', issueNumber: 1 },
+            issue: { projectId: 'proj-1', issueNumber: 1 },
           },
           {
             workId: 'w2',
@@ -188,7 +188,7 @@ describe('RunnerDetailPage', () => {
             workType: 'workflow',
             stage: 'build',
             title: 'Work B',
-            issue: { projectId: 'proj-1', issueId: 'issue-2', issueNumber: 2 },
+            issue: { projectId: 'proj-1', issueNumber: 2 },
           },
           {
             workId: 'w3',
@@ -225,7 +225,7 @@ describe('RunnerDetailPage', () => {
             ownerId: 'wf-1',
             workType: 'workflow',
             title: 'Add dark mode',
-            issue: { projectId: 'proj-1', issueId: 'issue-42', issueNumber: 42 },
+            issue: { projectId: 'proj-1', issueNumber: 42 },
           },
         ],
       })
