@@ -27,11 +27,15 @@ public class ProjectApiSpecs
     [Fact]
     public async Task PostProject_WithoutRepository_ReturnsBadRequest()
     {
-        using var response = await _client.PostAsJsonAsync("/api/projects", new { name = "no-default-repo" });
+        var name = $"no-default-repo-{Guid.NewGuid():N}";
+        using var response = await _client.PostAsJsonAsync("/api/projects", new { name });
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         var json = await response.Content.ReadFromJsonAsync<JsonElement>();
         Assert.False(json.GetProperty("success").GetBoolean());
         Assert.Contains("repository", json.GetProperty("error").GetString()!, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(
+            await _client.GetDataAsync<List<ProjectInfo>>("/api/projects"),
+            project => project.Name == name);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -39,14 +43,18 @@ public class ProjectApiSpecs
     [Fact]
     public async Task PostProject_WithoutRepositoryGitUrl_ReturnsBadRequest()
     {
+        var name = $"no-giturl-{Guid.NewGuid():N}";
         using var response = await _client.PostAsJsonAsync("/api/projects", new
         {
-            name = "no-giturl",
+            name,
             repository = new { name = "main", gitUrl = "" },
         });
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         var json = await response.Content.ReadFromJsonAsync<JsonElement>();
         Assert.False(json.GetProperty("success").GetBoolean());
+        Assert.DoesNotContain(
+            await _client.GetDataAsync<List<ProjectInfo>>("/api/projects"),
+            project => project.Name == name);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -102,10 +110,15 @@ public class ProjectApiSpecs
     [InlineData("""{"name":"set-initial-default","repository":{"name":"main","gitUrl":"git@example.com:main.git","setDefault":true}}""")]
     public async Task PostProject_WithForbiddenInitialRepositoryControl_ReturnsBadRequest(string payload)
     {
+        using var document = JsonDocument.Parse(payload);
+        var name = document.RootElement.GetProperty("name").GetString()!;
         using var content = new StringContent(payload, Encoding.UTF8, "application/json");
         using var response = await _client.PostAsync("/api/projects", content);
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.DoesNotContain(
+            await _client.GetDataAsync<List<ProjectInfo>>("/api/projects"),
+            project => project.Name == name);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]

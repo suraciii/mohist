@@ -64,7 +64,9 @@ internal static class ProjectRepositoryBootstrap
         if (originUrl.ExitCode != 0 || string.IsNullOrWhiteSpace(originUrl.Stdout.Trim()))
             return new Outcome.Failure($"--path '{root}' has no 'origin' remote with a Git URL.");
 
-        var gitUrl = originUrl.Stdout.Trim();
+        if (!TryResolveGitUrl(originUrl.Stdout.Trim(), root, out var gitUrl, out var gitUrlError))
+            return new Outcome.Failure(gitUrlError);
+
         var baseBranch = await TryResolveBaseBranchAsync(root, commandExecutor, cancellationToken);
         if (baseBranch is null)
             return new Outcome.Failure($"--path '{root}' has no resolvable base branch (no origin/HEAD and no checked-out branch).");
@@ -137,6 +139,37 @@ internal static class ProjectRepositoryBootstrap
             return false;
         }
     }
+
+    private static bool TryResolveGitUrl(
+        string origin,
+        string workTreeRoot,
+        out string gitUrl,
+        out string error)
+    {
+        if (!IsRelativeLocalPath(origin))
+        {
+            gitUrl = origin;
+            error = string.Empty;
+            return true;
+        }
+
+        try
+        {
+            gitUrl = Path.GetFullPath(origin, workTreeRoot);
+            error = string.Empty;
+            return true;
+        }
+        catch (Exception exception)
+        {
+            gitUrl = string.Empty;
+            error = $"origin remote '{origin}' could not be canonicalized: {exception.Message}";
+            return false;
+        }
+    }
+
+    private static bool IsRelativeLocalPath(string origin) =>
+        !Path.IsPathRooted(origin)
+        && !origin.Contains(':');
 
     private static string TrimLineEnding(string value) => value.TrimEnd('\r', '\n');
 

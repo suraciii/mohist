@@ -131,13 +131,13 @@ public class ProjectRepositoryBootstrapTests
     }
 
     [Theory]
-    [InlineData("../remote.git")]
-    [InlineData("/srv/remote.git")]
-    [InlineData("file:///srv/remote.git")]
-    [InlineData("ssh://localhost/remote.git")]
-    [InlineData("https://127.0.0.1/remote.git")]
-    [InlineData("git@localhost:remote.git")]
-    public async Task TryResolveAsync_OriginUrl_IsPreservedForRunnerValidation(string origin)
+    [InlineData("../remote.git", "/work/remote.git")]
+    [InlineData("/srv/remote.git", "/srv/remote.git")]
+    [InlineData("file:///srv/remote.git", "file:///srv/remote.git")]
+    [InlineData("ssh://localhost/remote.git", "ssh://localhost/remote.git")]
+    [InlineData("https://127.0.0.1/remote.git", "https://127.0.0.1/remote.git")]
+    [InlineData("git@localhost:remote.git", "git@localhost:remote.git")]
+    public async Task TryResolveAsync_OriginUrl_IsUsableFromRunnerWorkingDirectory(string origin, string expectedGitUrl)
     {
         var fs = new FakeFileSystem();
         fs.CreateDirectory(WorkTreeRoot);
@@ -150,7 +150,7 @@ public class ProjectRepositoryBootstrapTests
         var outcome = await ProjectRepositoryBootstrap.TryResolveAsync(WorkTreeRoot, fs, executor);
 
         var success = Assert.IsType<ProjectRepositoryBootstrap.Outcome.Success>(outcome);
-        Assert.Equal(origin, success.Result.GitUrl);
+        Assert.Equal(expectedGitUrl, success.Result.GitUrl);
         Assert.Equal("main", success.Result.BaseBranch);
         executor.AssertExpectedCommandsExecuted();
     }

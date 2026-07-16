@@ -1,6 +1,7 @@
 using System.Net.Http.Json;
 using System.Text.Json;
 using Mohist.Server.Infrastructure.Workspace;
+using Mohist.Server.Project.Services;
 using Mohist.Server.SpecTests.Support;
 using Xunit;
 
@@ -17,6 +18,13 @@ public class PathContractRegressionSpecs
         _fixture = fixture;
         _client = fixture.Client;
     }
+
+    public static TheoryData<string, string> ForbiddenLocalRepositoryFields => new()
+    {
+        { "path", "/runner/worktree" },
+        { "remote", "origin" },
+        { "resolvedPath", "/runner/resolved-worktree" },
+    };
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Api)]
@@ -130,6 +138,35 @@ public class PathContractRegressionSpecs
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Api)]
+    [Theory]
+    [MemberData(nameof(ForbiddenLocalRepositoryFields))]
+    public async Task ProjectCreate_WithForbiddenLocalRepositoryField_ReturnsBadRequestAndDoesNotCreateProject(
+        string field,
+        string value)
+    {
+        var name = $"contract-local-create-{Guid.NewGuid():N}";
+        var payload = JsonSerializer.Serialize(new
+        {
+            name,
+            repository = new Dictionary<string, string>
+            {
+                ["name"] = "primary",
+                ["gitUrl"] = "git@example.com:primary.git",
+                ["baseBranch"] = "main",
+                [field] = value,
+            },
+        });
+        using var content = new StringContent(payload, System.Text.Encoding.UTF8, "application/json");
+        using var response = await _client.PostAsync("/api/projects", content);
+
+        Assert.Equal(System.Net.HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.DoesNotContain(
+            await _client.GetDataAsync<List<ProjectInfo>>("/api/projects"),
+            project => project.Name == name);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task RepositoryAdd_WithoutGitUrl_Returns400AndDoesNotMutateState()
     {
@@ -160,6 +197,41 @@ public class PathContractRegressionSpecs
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Api)]
+    [Theory]
+    [MemberData(nameof(ForbiddenLocalRepositoryFields))]
+    public async Task RepositoryAdd_WithForbiddenLocalRepositoryField_ReturnsBadRequestAndDoesNotMutateState(
+        string field,
+        string value)
+    {
+        var project = await (await _client.PostAsJsonAsync("/api/projects", new
+        {
+            name = $"contract-local-add-{Guid.NewGuid():N}",
+            repository = new { name = "primary", gitUrl = "git@example.com:primary.git", baseBranch = "main" },
+        }))
+            .Content.ReadFromJsonAsync<JsonElement>();
+        var projectId = project.GetProperty("data").GetProperty("id").GetString()!;
+
+        var payload = JsonSerializer.Serialize(new Dictionary<string, string>
+        {
+            ["name"] = "secondary",
+            ["gitUrl"] = "git@example.com:secondary.git",
+            ["baseBranch"] = "develop",
+            [field] = value,
+        });
+        using var content = new StringContent(payload, System.Text.Encoding.UTF8, "application/json");
+        using var response = await _client.PostAsync($"/api/projects/{projectId}/repositories", content);
+
+        Assert.Equal(System.Net.HttpStatusCode.BadRequest, response.StatusCode);
+        using var after = await _client.GetAsync($"/api/projects/{projectId}/repositories");
+        var repositories = (await after.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data").EnumerateArray().ToList();
+        var repository = Assert.Single(repositories);
+        Assert.Equal("primary", repository.GetProperty("name").GetString());
+        Assert.Equal("git@example.com:primary.git", repository.GetProperty("gitUrl").GetString());
+        Assert.Equal("main", repository.GetProperty("baseBranch").GetString());
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task RepositoryAdd_WithGitUrl_ReturnsRepositoryWithoutLocalPathFields()
     {
@@ -184,6 +256,38 @@ public class PathContractRegressionSpecs
         AssertRepositoryHasNoLocalPathFields(repo);
         Assert.Equal("git@example.com:web.git", repo.GetProperty("gitUrl").GetString());
         Assert.Equal("develop", repo.GetProperty("baseBranch").GetString());
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
+    [Theory]
+    [MemberData(nameof(ForbiddenLocalRepositoryFields))]
+    public async Task RepositoryUpdate_WithForbiddenLocalRepositoryField_ReturnsBadRequestAndDoesNotMutateState(
+        string field,
+        string value)
+    {
+        var project = await (await _client.PostAsJsonAsync("/api/projects", new
+        {
+            name = $"contract-local-update-{Guid.NewGuid():N}",
+            repository = new { name = "primary", gitUrl = "git@example.com:primary.git", baseBranch = "main" },
+        }))
+            .Content.ReadFromJsonAsync<JsonElement>();
+        var projectId = project.GetProperty("data").GetProperty("id").GetString()!;
+
+        var payload = JsonSerializer.Serialize(new Dictionary<string, string>
+        {
+            ["gitUrl"] = "git@example.com:changed.git",
+            ["baseBranch"] = "develop",
+            [field] = value,
+        });
+        using var content = new StringContent(payload, System.Text.Encoding.UTF8, "application/json");
+        using var response = await _client.PatchAsync($"/api/projects/{projectId}/repositories/primary", content);
+
+        Assert.Equal(System.Net.HttpStatusCode.BadRequest, response.StatusCode);
+        using var after = await _client.GetAsync($"/api/projects/{projectId}/repositories");
+        var repository = Assert.Single((await after.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data").EnumerateArray());
+        Assert.Equal("git@example.com:primary.git", repository.GetProperty("gitUrl").GetString());
+        Assert.Equal("main", repository.GetProperty("baseBranch").GetString());
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]

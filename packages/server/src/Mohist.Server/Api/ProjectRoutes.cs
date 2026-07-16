@@ -33,6 +33,17 @@ public static class ProjectRoutes
             if (req.Repository is null)
                 return ApiResults.BadRequest("repository is required", "repository_required");
 
+            if (TryGetForbiddenLocalRepositoryField(
+                    req.Repository.Path,
+                    req.Repository.Remote,
+                    req.Repository.ResolvedPath,
+                    out var forbiddenField))
+            {
+                return ApiResults.BadRequest(
+                    $"repository.{forbiddenField} is not accepted; repositories declare Git addresses only",
+                    "repository_local_field_forbidden");
+            }
+
             if (IsSupplied(req.Repository.IsDefault))
                 return ApiResults.BadRequest("repository.isDefault is derived by the server", "repository_initial_default_forbidden");
 
@@ -118,6 +129,13 @@ public static class ProjectRoutes
 
         byRef.MapPost("/repositories", async (HttpContext context, AddRepositoryRequest req, IGrainFactory grains) =>
         {
+            if (TryGetForbiddenLocalRepositoryField(req.Path, req.Remote, req.ResolvedPath, out var forbiddenField))
+            {
+                return ApiResults.BadRequest(
+                    $"{forbiddenField} is not accepted; repositories declare Git addresses only",
+                    "repository_local_field_forbidden");
+            }
+
             if (IsSupplied(req.IsDefault))
                 return ApiResults.BadRequest("isDefault is derived by the server; use setDefault instead", "repository_default_forbidden");
 
@@ -158,6 +176,13 @@ public static class ProjectRoutes
         {
             var project = context.GetResolvedProject();
             var projectGrain = grains.GetGrain<IProjectGrain>(project.Id);
+
+            if (TryGetForbiddenLocalRepositoryField(req.Path, req.Remote, req.ResolvedPath, out var forbiddenField))
+            {
+                return ApiResults.BadRequest(
+                    $"{forbiddenField} is not accepted; repositories declare Git addresses only",
+                    "repository_local_field_forbidden");
+            }
 
             if (IsSupplied(req.NewName))
                 return ApiResults.BadRequest("Repository names are immutable", "repository_name_immutable");
@@ -538,6 +563,34 @@ public static class ProjectRoutes
 
     private static bool IsSupplied(JsonElement value) =>
         value.ValueKind != JsonValueKind.Undefined;
+
+    private static bool TryGetForbiddenLocalRepositoryField(
+        JsonElement path,
+        JsonElement remote,
+        JsonElement resolvedPath,
+        out string? field)
+    {
+        if (IsSupplied(path))
+        {
+            field = "path";
+            return true;
+        }
+
+        if (IsSupplied(remote))
+        {
+            field = "remote";
+            return true;
+        }
+
+        if (IsSupplied(resolvedPath))
+        {
+            field = "resolvedPath";
+            return true;
+        }
+
+        field = null;
+        return false;
+    }
 }
 
 public sealed record PromptUpsertRequest(string? Body);
@@ -557,20 +610,29 @@ public record CreateProjectRepositoryRequest(
     string? GitUrl,
     string? BaseBranch,
     JsonElement IsDefault = default,
-    JsonElement SetDefault = default);
+    JsonElement SetDefault = default,
+    JsonElement Path = default,
+    JsonElement Remote = default,
+    JsonElement ResolvedPath = default);
 public record UpdateProjectRequest();
 public record AddRepositoryRequest(
     string Name,
     string GitUrl,
     string? BaseBranch = null,
     JsonElement SetDefault = default,
-    JsonElement IsDefault = default);
+    JsonElement IsDefault = default,
+    JsonElement Path = default,
+    JsonElement Remote = default,
+    JsonElement ResolvedPath = default);
 public record UpdateRepositoryRequest(
     JsonElement SetDefault = default,
     string? GitUrl = null,
     string? BaseBranch = null,
     JsonElement NewName = default,
-    JsonElement IsDefault = default);
+    JsonElement IsDefault = default,
+    JsonElement Path = default,
+    JsonElement Remote = default,
+    JsonElement ResolvedPath = default);
 public record CreateProjectTemplateRequest(string Yaml);
 public record UpdateProjectTemplateRequest(string Yaml);
 public record SetDefaultTemplateRequest(string TemplateId);

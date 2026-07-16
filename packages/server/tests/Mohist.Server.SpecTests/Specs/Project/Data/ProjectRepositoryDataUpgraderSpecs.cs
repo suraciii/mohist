@@ -1,6 +1,5 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Diagnostics;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Project;
@@ -138,14 +137,41 @@ public class ProjectRepositoryDataUpgraderSpecs
             await SeedProjectJsonAsync(seed, "proj_second", "second", secondJson);
         }
 
-        await using (var failing = CreateContext(connection, new ThrowOnSaveChangesInterceptor()))
+        var normalizedFirstJson = JSON.Serialize(new[] { Repository("server", "git@example.com:server.git", "main", true) });
+        var triggerName = $"fail_second_project_upgrade_{Guid.NewGuid():N}";
+        await using (var createTrigger = connection.CreateCommand())
         {
-            await Assert.ThrowsAsync<InvalidOperationException>(() => ProjectRepositoryDataUpgrader.UpgradeAsync(failing));
+            createTrigger.CommandText = $"""
+                CREATE TRIGGER {triggerName}
+                BEFORE UPDATE ON Projects
+                WHEN NEW.Id = 'proj_second'
+                    AND (SELECT RepositoriesJson FROM Projects WHERE Id = 'proj_first') = '{normalizedFirstJson}'
+                BEGIN
+                    SELECT RAISE(ABORT, 'injected second project upgrade failure');
+                END;
+                """;
+            await createTrigger.ExecuteNonQueryAsync();
+        }
+
+        try
+        {
+            await using var failing = CreateContext(connection);
+            await Assert.ThrowsAsync<DbUpdateException>(() => ProjectRepositoryDataUpgrader.UpgradeAsync(failing));
+        }
+        finally
+        {
+            await using var dropTrigger = connection.CreateCommand();
+            dropTrigger.CommandText = $"DROP TRIGGER IF EXISTS {triggerName}";
+            await dropTrigger.ExecuteNonQueryAsync();
         }
 
         await using var verify = CreateContext(connection);
-        Assert.Equal(firstJson, (await LoadProjectAsync(verify, "proj_first")).RepositoriesJson);
-        Assert.Equal(secondJson, (await LoadProjectAsync(verify, "proj_second")).RepositoriesJson);
+        var first = await LoadProjectAsync(verify, "proj_first");
+        var second = await LoadProjectAsync(verify, "proj_second");
+        Assert.Equal(firstJson, first.RepositoriesJson);
+        Assert.Equal(UpdatedAt, first.UpdatedAt);
+        Assert.Equal(secondJson, second.RepositoriesJson);
+        Assert.Equal(UpdatedAt, second.UpdatedAt);
     }
 
     private static async Task<SqliteConnection> OpenDatabaseAsync()
@@ -156,15 +182,12 @@ public class ProjectRepositoryDataUpgraderSpecs
         return connection;
     }
 
-    private static MohistDbContext CreateContext(
-        SqliteConnection connection,
-        params IInterceptor[] interceptors)
+    private static MohistDbContext CreateContext(SqliteConnection connection)
     {
         var options = new DbContextOptionsBuilder<MohistDbContext>()
-            .UseSqlite(connection);
-        if (interceptors.Length > 0)
-            options.AddInterceptors(interceptors);
-        return new MohistDbContext(options.Options);
+            .UseSqlite(connection)
+            .Options;
+        return new MohistDbContext(options);
     }
 
     private static RepositoryInfo Repository(
@@ -224,12 +247,4 @@ public class ProjectRepositoryDataUpgraderSpecs
         }
     }
 
-    private sealed class ThrowOnSaveChangesInterceptor : SaveChangesInterceptor
-    {
-        public override ValueTask<InterceptionResult<int>> SavingChangesAsync(
-            DbContextEventData eventData,
-            InterceptionResult<int> result,
-            CancellationToken cancellationToken = default) =>
-            throw new InvalidOperationException("Injected persistence failure");
-    }
 }

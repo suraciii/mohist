@@ -449,7 +449,8 @@ public class ProjectGrainSpecs : IClassFixture<WorkflowGrainFixture>
     [Fact]
     public async Task SetDefaultRepository_OnCurrentDefault_IsIdempotent()
     {
-        var grain = NewProjectGrain();
+        var id = $"proj_{Guid.NewGuid():N}";
+        var grain = NewProjectGrain(id);
         await grain.CreateAsync(
             "idempotent-default",
             new RepositoryInfo
@@ -462,9 +463,23 @@ public class ProjectGrainSpecs : IClassFixture<WorkflowGrainFixture>
         var before = await grain.GetAsync();
         await grain.SetDefaultRepositoryAsync("server");
 
-        var after = await grain.GetAsync();
+        var activeAfter = await grain.GetAsync();
+        await grain.AsReference<IGrainManagementExtension>().DeactivateOnIdle();
+        var reactivated = NewProjectGrain(id);
+        await reactivated.SetDefaultRepositoryAsync("server");
+        var after = await reactivated.GetAsync();
+
+        Assert.NotNull(before);
+        Assert.NotNull(activeAfter);
         Assert.NotNull(after);
-        Assert.Single(after!.Repositories, r => r.IsDefault);
+        Assert.Equal(before!.UpdatedAt, activeAfter!.UpdatedAt);
+        Assert.Equal(DateTimeOffset.Parse(before.UpdatedAt), DateTimeOffset.Parse(after!.UpdatedAt));
+        Assert.Equal(
+            before.Repositories.Select(repository => (repository.Name, repository.GitUrl, repository.BaseBranch, repository.IsDefault)),
+            activeAfter.Repositories.Select(repository => (repository.Name, repository.GitUrl, repository.BaseBranch, repository.IsDefault)));
+        Assert.Equal(
+            before.Repositories.Select(repository => (repository.Name, repository.GitUrl, repository.BaseBranch, repository.IsDefault)),
+            after.Repositories.Select(repository => (repository.Name, repository.GitUrl, repository.BaseBranch, repository.IsDefault)));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
