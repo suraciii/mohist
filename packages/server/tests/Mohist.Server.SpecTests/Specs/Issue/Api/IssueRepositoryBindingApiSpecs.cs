@@ -93,6 +93,11 @@ public class IssueRepositoryBindingApiSpecs
         var created = await CreateIssueAsync(projectId, new { title = "Orphan", repositoryName = "secondary" });
         Assert.Equal("secondary", created.Data!.RepositoryName);
 
+        // Drive the issue to a terminal status so the deletion guard
+        // (issue-417 T-004) lets the repository be removed.
+        var grain = _fixture.Grains.GetGrain<Mohist.Server.Issue.Grains.IIssueGrain>(created.Data!.Id);
+        await grain.CancelAsync();
+
         await _fixture.Grains.GetGrain<IProjectGrain>(projectId).RemoveRepositoryAsync("secondary");
 
         var fetched = await GetIssueAsync(projectId, created.Data.Number);

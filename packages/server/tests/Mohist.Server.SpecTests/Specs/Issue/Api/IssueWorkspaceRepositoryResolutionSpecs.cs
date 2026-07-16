@@ -64,6 +64,10 @@ public class IssueWorkspaceRepositoryResolutionSpecs : IAsyncLifetime
         var issue = await CreateIssueAsync(projectId, "Repo path drifts", "secondary");
         await StartIssueAndAssignmentRunnerAsync(projectId, issue.Number);
 
+        // Round-trip the issue through cancelled to satisfy the
+        // repository deletion guard (issue-417 T-004) for the swap.
+        await DriveIssueToTerminalAsync(projectId, issue);
+
         var projectGrain = _fixture.Grains.GetGrain<IProjectGrain>(projectId);
         await projectGrain.RemoveRepositoryAsync("secondary");
         await projectGrain.AddRepositoryAsync("secondary", "git@secondary.example:repo-new.git", "release");
@@ -92,6 +96,10 @@ public class IssueWorkspaceRepositoryResolutionSpecs : IAsyncLifetime
         _fixture.Git.BranchExists = true;
         var projectId = await CreateProjectWithSecondaryRepositoryAsync("/proj/secondary", "develop");
         var issue = await CreateIssueAsync(projectId, "Repo gets removed", "secondary");
+
+        // Drive the backlog issue to terminal so the deletion guard
+        // (issue-417 T-004) lets the repository be removed.
+        await _client.PostOkAsync($"/api/projects/{projectId}/issues/{issue.Number}/close");
 
         var projectGrain = _fixture.Grains.GetGrain<IProjectGrain>(projectId);
         await projectGrain.RemoveRepositoryAsync("secondary");
@@ -130,6 +138,8 @@ public class IssueWorkspaceRepositoryResolutionSpecs : IAsyncLifetime
         var issue = await CreateIssueAsync(projectId, "Base branch drifts", "secondary");
         await StartIssueAndAssignmentRunnerAsync(projectId, issue.Number);
 
+        await DriveIssueToTerminalAsync(projectId, issue);
+
         var projectGrain = _fixture.Grains.GetGrain<IProjectGrain>(projectId);
         await projectGrain.RemoveRepositoryAsync("secondary");
         await projectGrain.AddRepositoryAsync("secondary", "git@secondary.example:repo.git", "release");
@@ -154,6 +164,8 @@ public class IssueWorkspaceRepositoryResolutionSpecs : IAsyncLifetime
         var issue = await CreateIssueAsync(projectId, "Rebase orphan", "secondary");
         await StartIssueAndAssignmentRunnerAsync(projectId, issue.Number);
 
+        await DriveIssueToTerminalAsync(projectId, issue);
+
         var projectGrain = _fixture.Grains.GetGrain<IProjectGrain>(projectId);
         await projectGrain.RemoveRepositoryAsync("secondary");
 
@@ -176,6 +188,8 @@ public class IssueWorkspaceRepositoryResolutionSpecs : IAsyncLifetime
         // Given an issue bound to a project repository whose configuration is later removed.
         var projectId = await CreateProjectWithSecondaryRepositoryAsync("/proj/secondary", "develop");
         var issue = await CreateIssueAsync(projectId, "Archive orphan", "secondary");
+
+        await _client.PostOkAsync($"/api/projects/{projectId}/issues/{issue.Number}/close");
 
         var projectGrain = _fixture.Grains.GetGrain<IProjectGrain>(projectId);
         await projectGrain.RemoveRepositoryAsync("secondary");
@@ -250,6 +264,12 @@ public class IssueWorkspaceRepositoryResolutionSpecs : IAsyncLifetime
     private async Task DispatchEventsAsync()
     {
         await _fixture.Grains.GetGrain<IEventDispatcherGrain>(EventDispatcherGrain.Global).DispatchNowAsync();
+    }
+
+    private async Task DriveIssueToTerminalAsync(string projectId, IssueDto issue)
+    {
+        await _client.PostOkAsync($"/api/projects/{projectId}/issues/{issue.Number}/stop");
+        await _client.PostOkAsync($"/api/projects/{projectId}/issues/{issue.Number}/close");
     }
 
     private sealed record IssueDto(int Number);

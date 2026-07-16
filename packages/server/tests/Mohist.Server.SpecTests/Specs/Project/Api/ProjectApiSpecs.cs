@@ -271,6 +271,109 @@ public class ProjectApiSpecs
     }
 
     [Fact]
+    public async Task PostRepository_AliasRemote_ReturnsAliasConflict()
+    {
+        var created = await _client.PostDataAsync<ProjectInfo>(
+            "/api/projects",
+            new
+            {
+                name = "alias-repo-add",
+                repository = new
+                {
+                    name = "server",
+                    gitUrl = "git@example.com:owner/server.git",
+                    baseBranch = "main",
+                },
+            });
+
+        using var response = await _client.PostAsJsonAsync(
+            $"/api/projects/{created.Id}/repositories",
+            new { name = "web", gitUrl = "git@example.com:owner/server.git", baseBranch = "main" });
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        var json = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.False(json.GetProperty("success").GetBoolean());
+        Assert.Equal("repository_alias_conflict", json.GetProperty("code").GetString());
+
+        var repos = await _client.GetDataAsync<List<RepositoryInfoDto>>($"/api/projects/{created.Id}/repositories");
+        Assert.Single(repos);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
+    [Fact]
+    public async Task PatchRepository_AliasRemote_ReturnsAliasConflict()
+    {
+        var created = await _client.PostDataAsync<ProjectInfo>(
+            "/api/projects",
+            new
+            {
+                name = "alias-repo-patch",
+                repository = new
+                {
+                    name = "server",
+                    gitUrl = "git@example.com:owner/server.git",
+                    baseBranch = "main",
+                },
+            });
+        await _client.PostAsJsonAsync(
+            $"/api/projects/{created.Id}/repositories",
+            new { name = "web", gitUrl = "git@example.com:owner/web.git", baseBranch = "main" });
+
+        using var response = await _client.PatchAsJsonAsync(
+            $"/api/projects/{created.Id}/repositories/web",
+            new { gitUrl = "git@example.com:owner/server.git" });
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        var json = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.False(json.GetProperty("success").GetBoolean());
+        Assert.Equal("repository_alias_conflict", json.GetProperty("code").GetString());
+
+        var repos = await _client.GetDataAsync<List<RepositoryInfoDto>>($"/api/projects/{created.Id}/repositories");
+        var web = repos.Single(r => r.Name == "web");
+        Assert.Equal("git@example.com:owner/web.git", web.GitUrl);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
+    [Fact]
+    public async Task DeleteRepository_BlockedByNonTerminalIssue_ReturnsInUseConflict()
+    {
+        var created = await _client.PostDataAsync<ProjectInfo>(
+            "/api/projects",
+            new
+            {
+                name = $"alias-repo-blocked-{Guid.NewGuid():N}",
+                repository = new
+                {
+                    name = "server",
+                    gitUrl = "git@example.com:server.git",
+                    baseBranch = "main",
+                },
+            });
+        await _client.PostAsJsonAsync(
+            $"/api/projects/{created.Id}/repositories",
+            new { name = "web", gitUrl = "git@example.com:web.git", baseBranch = "main" });
+        using var issueResponse = await _client.PostAsJsonAsync(
+            $"/api/projects/{created.Id}/issues",
+            new { title = "Blocker", repositoryName = "web" });
+        issueResponse.EnsureSuccessStatusCode();
+        var issueJson = await issueResponse.Content.ReadFromJsonAsync<JsonElement>();
+        var issueNumber = issueJson.GetProperty("data").GetProperty("number").GetInt32();
+
+        using var delete = await _client.DeleteAsync($"/api/projects/{created.Id}/repositories/web");
+        Assert.Equal(HttpStatusCode.Conflict, delete.StatusCode);
+        var payload = await delete.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.False(payload.GetProperty("success").GetBoolean());
+        Assert.Equal("repository_in_use", payload.GetProperty("code").GetString());
+
+        var repos = await _client.GetDataAsync<List<RepositoryInfoDto>>($"/api/projects/{created.Id}/repositories");
+        Assert.Contains(repos, r => r.Name == "web");
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
+    [Fact]
     public async Task PostRepository_WithoutGitUrl_ReturnsBadRequestAndDoesNotMutate()
     {
         var created = await _client.PostDataAsync<ProjectInfo>(

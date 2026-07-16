@@ -470,4 +470,158 @@ public class RepositoryPolicyTests
         Assert.Equal("main", RepositoryPolicy.ResolveBaseBranch("   "));
         Assert.Equal("develop", RepositoryPolicy.ResolveBaseBranch("develop"));
     }
+
+    [Fact]
+    public void BuildAdd_AliasOfExistingRemote_RejectedAsAliasConflict()
+    {
+        var current = RepositoryPolicy.Normalize(
+            [new("server", "git@example.com:server.git", "main", true)]);
+
+        var build = RepositoryPolicy.BuildAdd(
+            new RepositoryPolicy.TransitionInput(
+                Name: "web",
+                GitUrl: "git@example.com:server.git",
+                BaseBranch: "main"),
+            current);
+
+        Assert.False(build.IsSuccess);
+        var error = Assert.Single(build.Errors);
+        Assert.Equal("repository_alias_conflict", error.Code);
+        Assert.Contains("shares its Git remote", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("'server'", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void BuildAdd_AliasWithEquivalentSshForm_RejectedAsAliasConflict()
+    {
+        var current = RepositoryPolicy.Normalize(
+            [new("server", "git@example.com:server.git", "main", true)]);
+
+        var build = RepositoryPolicy.BuildAdd(
+            new RepositoryPolicy.TransitionInput(
+                Name: "web",
+                GitUrl: "ssh://git@example.com/server.git",
+                BaseBranch: "main"),
+            current);
+
+        Assert.False(build.IsSuccess);
+        var error = Assert.Single(build.Errors);
+        Assert.Equal("repository_alias_conflict", error.Code);
+    }
+
+    [Fact]
+    public void BuildAdd_DistinctRemote_Succeeds()
+    {
+        var current = RepositoryPolicy.Normalize(
+            [new("server", "git@example.com:server.git", "main", true)]);
+
+        var build = RepositoryPolicy.BuildAdd(
+            new RepositoryPolicy.TransitionInput(
+                Name: "web",
+                GitUrl: "git@example.com:web.git",
+                BaseBranch: "main"),
+            current);
+
+        Assert.True(build.IsSuccess);
+    }
+
+    [Fact]
+    public void BuildAdd_DuplicateNameCheck_RunsBeforeAliasCheck()
+    {
+        var current = RepositoryPolicy.Normalize(
+            [new("server", "git@example.com:server.git", "main", true)]);
+
+        var build = RepositoryPolicy.BuildAdd(
+            new RepositoryPolicy.TransitionInput(
+                Name: "server",
+                GitUrl: "git@example.com:server.git",
+                BaseBranch: "main"),
+            current);
+
+        Assert.False(build.IsSuccess);
+        Assert.Contains(build.Errors, e => e.Code == "name");
+    }
+
+    [Fact]
+    public void BuildUpdate_AliasOfAnotherRepository_RejectedAsAliasConflict()
+    {
+        var current = RepositoryPolicy.Normalize(
+            [
+                new("server", "git@example.com:server.git", "main", true),
+                new("web", "git@example.com:web.git", "main", false),
+            ]);
+
+        var build = RepositoryPolicy.BuildUpdate(
+            "web",
+            new RepositoryPolicy.TransitionInput(
+                Name: "web",
+                GitUrl: "git@example.com:server.git",
+                BaseBranch: null),
+            current);
+
+        Assert.False(build.IsSuccess);
+        var error = Assert.Single(build.Errors);
+        Assert.Equal("repository_alias_conflict", error.Code);
+        Assert.Contains("'server'", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void BuildUpdate_SameRemoteAsItself_DoesNotTriggerAliasCheck()
+    {
+        var current = RepositoryPolicy.Normalize(
+            [new("web", "git@example.com:web.git", "main", true)]);
+
+        var build = RepositoryPolicy.BuildUpdate(
+            "web",
+            new RepositoryPolicy.TransitionInput(
+                Name: "web",
+                GitUrl: "git@example.com:web.git",
+                BaseBranch: null),
+            current);
+
+        Assert.True(build.IsSuccess);
+    }
+
+    [Fact]
+    public void BuildUpdate_OnlyBaseBranchChange_SkipsAliasCheck()
+    {
+        var current = RepositoryPolicy.Normalize(
+            [
+                new("server", "git@example.com:server.git", "main", true),
+                new("web", "git@example.com:web.git", "main", false),
+            ]);
+
+        var build = RepositoryPolicy.BuildUpdate(
+            "web",
+            new RepositoryPolicy.TransitionInput(
+                Name: "web",
+                GitUrl: null,
+                BaseBranch: "develop"),
+            current);
+
+        Assert.True(build.IsSuccess);
+        Assert.Equal("develop", build.Value.Next.BaseBranch);
+    }
+
+    [Fact]
+    public void BuildUpdate_AliasWithEquivalentSshForm_RejectedAsAliasConflict()
+    {
+        var current = RepositoryPolicy.Normalize(
+            [
+                new("server", "git@example.com:owner/server.git", "main", true),
+                new("web", "git@example.com:owner/web.git", "main", false),
+            ]);
+
+        var build = RepositoryPolicy.BuildUpdate(
+            "web",
+            new RepositoryPolicy.TransitionInput(
+                Name: "web",
+                GitUrl: "ssh://git@example.com/owner/server.git",
+                BaseBranch: null),
+            current);
+
+        Assert.False(build.IsSuccess);
+        var error = Assert.Single(build.Errors);
+        Assert.Equal("repository_alias_conflict", error.Code);
+    }
 }

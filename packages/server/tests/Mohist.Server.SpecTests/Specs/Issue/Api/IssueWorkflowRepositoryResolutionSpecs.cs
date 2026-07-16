@@ -71,11 +71,17 @@ public class IssueWorkflowRepositoryResolutionSpecs
         var issueGrain = _grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(projectId, number)));
         await issueGrain.CreateAsync(projectId, number, "Repo metadata drifts", body: null, labels: null, priority: null, "secondary");
 
+        // The repository deletion guard (issue-417 T-004) refuses to
+        // remove a repository bound by a non-terminal issue, so we
+        // round-trip the issue through cancelled→backlog to make the
+        // binding terminal for the swap and then revive it.
+        await issueGrain.CancelAsync();
         await projectGrain.RemoveRepositoryAsync("secondary");
         await projectGrain.AddRepositoryAsync(
             "secondary",
             "git@secondary.example:repo-new.git",
             "release");
+        await issueGrain.ReopenWithTargetCheckAsync();
 
         var wrId = await issueGrain.StartWorkAsync();
 
@@ -105,6 +111,12 @@ public class IssueWorkflowRepositoryResolutionSpecs
         var issueGrain = _grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(projectId, number)));
         await issueGrain.CreateAsync(projectId, number, "Repo gets removed", body: null, labels: null, priority: null, "secondary");
 
+        // The repository deletion guard (issue-417 T-004) requires the
+        // issue to be terminal before removing the bound repository;
+        // this test cares about the read-side consequence once the
+        // repository is gone, so we round-trip the issue through the
+        // terminal state to satisfy the guard.
+        await issueGrain.CancelAsync();
         await projectGrain.RemoveRepositoryAsync("secondary");
 
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => issueGrain.StartWorkAsync());

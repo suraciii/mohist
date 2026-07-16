@@ -168,6 +168,8 @@ public static class ProjectRoutes
             {
                 if (TryGetRepositoryNameError(ex, req.Name, out var conflictMessage))
                     return ApiResults.Conflict(conflictMessage!, "repository_name_conflict");
+                if (TryGetRepositoryAliasError(ex, out var aliasMessage))
+                    return ApiResults.Conflict(aliasMessage!, "repository_alias_conflict");
                 return ApiResults.BadRequest(ex.Message);
             }
         });
@@ -240,6 +242,8 @@ public static class ProjectRoutes
             }
             catch (ArgumentException ex)
             {
+                if (TryGetRepositoryAliasError(ex, out var aliasMessage))
+                    return ApiResults.Conflict(aliasMessage!, "repository_alias_conflict");
                 return ApiResults.BadRequest(ex.Message);
             }
         });
@@ -257,6 +261,8 @@ public static class ProjectRoutes
             }
             catch (InvalidOperationException ex)
             {
+                if (ex is RepositoryInUseException)
+                    return ApiResults.Conflict(ex.Message, "repository_in_use");
                 return ApiResults.Conflict(ex.Message, "repository_default_deletion_conflict");
             }
             catch (ArgumentException ex)
@@ -559,6 +565,14 @@ public static class ProjectRoutes
     {
         message = exception.Message;
         return message.Contains("already exists", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool TryGetRepositoryAliasError(
+        ArgumentException exception,
+        out string? message)
+    {
+        message = exception.Message;
+        return message.Contains("shares its Git remote", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool IsSupplied(JsonElement value) =>

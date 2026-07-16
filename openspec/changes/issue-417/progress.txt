@@ -131,3 +131,69 @@
   911 CLI + 1423 unit + 27 arch + 2802 spec（其中包含我新加的
   30 个 issue binding / normalizer / event serializer / api spec
   case）+ 1016 runner，0 warning 0 error。
+## T-004 notes (Repository deletion protection)
+
+- `RepositoryPolicy` 多了 `TryFindAlias` 工具方法：拿候选
+  `(name, gitUrl)` 算 fingerprint，再去 `current` 列表里比对。
+  fingerprint 复用 T-003 的 `GitRemoteUrlNormalizer`，所以
+  scp-like / ssh:// / default-port / case 折叠全部继承：
+  - `BuildAdd`：候选 fingerprint 命中 `current` 里另一个名字就报
+    `repository_alias_conflict`（错误码与"name already exists"区分，
+    后者保持 409 + `repository_name_conflict`）；
+  - `BuildUpdate`：只有当 `gitUrl` 真正发生变化时才走 alias 检查
+    （`hasGitUrl && !string.Equals(...)`），base-branch-only 修改
+    不会无意义触发；自己 fingerprint 等于自己的情况也会跳过。
+- `RepositoryInUseException` 故意 `继承 InvalidOperationException`
+  而非 `Exception`——这样既能在 grain 内沿用 `throw new InvalidOperationException`
+  路径（保持原有 `repository_default_deletion_conflict` 的 envelope
+  分发），又能在 route catch 里用 `if (ex is RepositoryInUseException)`
+  单独映射出 `repository_in_use` 409。
+- Blocker query 写在 `RepositoryDeletionBlockerQuery : IScopedService`，
+  依赖 `IDbContextFactory<MohistDbContext>` 直接读 `Issues` 表
+  (`AsNoTracking` + Index 命中)，跟 `IssueQuerier` / Issue read model
+  解耦——刻意不消费 enriched read model，避免 workflow health / 投影
+  staleness 影响删除保护判定。状态过滤使用 VIRTUAL computed column
+  的实际值 (`backlog` / `inProgress`)，因为该 column 直接
+  `json_extract(State, '$.status')`，共享 `JsonStringEnumConverter`
+  + CamelCase 的序列化结果。
+- LINQ Where 里 `BlockingStatuses.Contains(r.Status)` 这种闭包
+  在 EF SQLite provider 下翻译可疑，所以最终展开为显式 OR。另一处
+  教训：`BlockingStatuses` 用 `IReadOnlyCollection<string>` 静态字段
+  在 Scoped 服务上没问题，但 `Contains` 真的会被 SQL 翻译成
+  `WHERE Status IN (@__BlockingStatuses_0, @__BlockingStatuses_1)`
+  而不是预期的 `OR`，加上后面要兼容 `in_progress` fallback 时
+  显式 OR 才是真正的"两个分支"。
+- `ProjectGrain.RemoveRepositoryWithReceiptAsync` 排序很关键：
+  receipt 匹配必须在 `BuildRemove` 之前。原因：D2 设计文档强调
+  "even a successful no-op reassignment records a receipt"，所以
+  同一 commandId 重放必须返回 `AlreadyApplied` 而不能再走
+  not-found/default 检查。`spec` 里的 `DuplicateReplay_...` 测试
+  就是盯这个不变量的。
+- 既有 `RemoveRepositoryAsync` (non-idempotent path) 行为严格
+  保留：not-found → null；default → `InvalidOperationException`
+  + 默认消息；其它 → 检查 blocker → RepositoryInUseException。
+  Coordinator (T-005) 调用 idempotent 路径，API 路由直接调用
+  既有路径，两条互不干扰。
+- 测试 fixture 必须显式注册 `RepositoryDeletionBlockerQuery`：
+  `WorkflowGrainFixture` 走 `GrainTestConfig.ConfigureSilo`，
+  `MohistIntegrationFixture` 走 `ConfigureMohistServices` 的
+  `AddMohistConventionalServices` 扫 `IScopedService` 自动注册。
+  `RepositoryDeletionProtectionSpecs` 切到 `MohistIntegrationFixture`
+  是因为它需要 `IIssueStore` / `WorkflowQuerier` 等 IssueGrain 启动
+  全套服务（`StartWorkAsync`），`WorkflowGrainFixture` 走的是轻量
+  Project grain silo。
+- 既有 spec 测试 (`IssueRepositoryApiSpecs` / `IssueWorkspaceRepositoryResolutionSpecs`
+  / `IssueRepositoryBindingApiSpecs`) 隐式假设「移除仓库时被绑定 issue
+  不会阻拦」。T-004 把这条不变成 false，于是这些"测试 read side after
+  repo swap"的测试需要先把 issue 推到 terminal：HTTP `/close` 对
+  backlog issue 直接 OK，对 in_progress issue 必须先 `/stop` 再
+  `/close`。补了一个 `DriveIssueToTerminalAsync` helper。
+- HTTP envelope 改动：`ProjectRoutes` 的 `MapPost /repositories`
+  catch 多了 `repository_alias_conflict` 分支（与既有
+  `repository_name_conflict` 并列），`MapDelete /repositories/{name}`
+  多了 `repository_in_use` 分支。
+- `dotnet test Mohist.sln -p:SkipWebBuild=true --no-build` 全绿：
+  911 CLI + 1431 unit（含 8 个新增 RepositoryPolicy alias 用例）
+  + 27 arch + 2823 spec（含 18 个新增 RepositoryDeletionProtectionSpecs
+  + 3 个新增 ProjectApiSpecs alias / in-use case）+ 1016 runner，
+  0 warning 0 error。

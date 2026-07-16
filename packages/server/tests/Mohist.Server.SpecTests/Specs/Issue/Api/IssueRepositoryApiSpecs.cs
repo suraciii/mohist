@@ -111,6 +111,13 @@ public class IssueRepositoryApiSpecs
         Assert.Equal("git@secondary.example:repo.git", created.Data!.Repository!.GitUrl);
         Assert.Equal("develop", created.Data.Repository.BaseBranch);
 
+        // Drive the issue to terminal so the repository deletion guard
+        // (issue-417 T-004) does not block the remove-and-re-add
+        // exercise.
+        await _fixture.Grains
+            .GetGrain<Mohist.Server.Issue.Grains.IIssueGrain>(created.Data!.Id)
+            .CancelAsync();
+
         var projectGrain = _fixture.Grains.GetGrain<IProjectGrain>(projectId);
         await projectGrain.RemoveRepositoryAsync("secondary");
         await projectGrain.AddRepositoryAsync(
@@ -132,6 +139,10 @@ public class IssueRepositoryApiSpecs
     {
         var (projectId, _) = await SetupProjectWithRepositoriesAsync();
         var created = await CreateIssueAsync(projectId, new { title = "Listed repository", repositoryName = "secondary" });
+
+        await _fixture.Grains
+            .GetGrain<Mohist.Server.Issue.Grains.IIssueGrain>(created.Data!.Id)
+            .CancelAsync();
 
         var projectGrain = _fixture.Grains.GetGrain<IProjectGrain>(projectId);
         await projectGrain.RemoveRepositoryAsync("secondary");
@@ -157,6 +168,9 @@ public class IssueRepositoryApiSpecs
         var created = await CreateIssueAsync(projectId, new { title = "Orphaned by repo removal", repositoryName = "secondary" });
         Assert.Equal("secondary", created.Data!.Repository!.Name);
 
+        await _fixture.Grains
+            .GetGrain<Mohist.Server.Issue.Grains.IIssueGrain>(created.Data!.Id)
+            .CancelAsync();
         await _fixture.Grains.GetGrain<IProjectGrain>(projectId).RemoveRepositoryAsync("secondary");
 
         var fetched = await GetIssueAsync(projectId, created.Data.Number);
