@@ -181,7 +181,7 @@ public class WorkflowSessionSpecs
         await _client.PostOkAsync(RunnerAgentSessionAttachPath(_runnerId, project.Id, workflowRunId, sessionName), new
         {
             agentSessionId = sessionId,
-            workDir = project.Path,
+            workDir = $"/workspaces/{project.Id}",
             processPid = 1234
         });
         await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(_runnerId, project.Id, workflowRunId, sessionName), new
@@ -337,7 +337,7 @@ public class WorkflowSessionSpecs
     private sealed record WorkflowSessionUsageDto(long? TotalTokens);
     private sealed record WorkflowSessionDetailDto(WorkflowSessionDto Session, IssueSessionTranscriptTestResponse Transcript);
     private sealed record SessionEventDto(long Sequence, string Type, string? WorkId);
-    private sealed record ProjectDto(string Id, string Name, string Path, string BaseBranch);
+    private sealed record ProjectDto(string Id, string Name);
     private sealed record IssueDto(
         string Id,
         int Number,

@@ -170,12 +170,20 @@ public class PathContractRegressionSpecs
             repository = new { name = "primary", gitUrl = "git@example.com:primary.git", baseBranch = "main" },
         }))
             .Content.ReadFromJsonAsync<JsonElement>();
-        var data = project.GetProperty("data");
+        var projectId = project.GetProperty("data").GetProperty("id").GetString()!;
 
-        var firstRepo = data.GetProperty("repositories").EnumerateArray().First();
-        AssertRepositoryHasNoLocalPathFields(firstRepo);
-        Assert.Equal("git@example.com:primary.git", firstRepo.GetProperty("gitUrl").GetString());
-        Assert.Equal("main", firstRepo.GetProperty("baseBranch").GetString());
+        using var response = await _client.PostAsJsonAsync(
+            $"/api/projects/{projectId}/repositories",
+            new { name = "web", gitUrl = "git@example.com:web.git", baseBranch = "develop" });
+
+        Assert.Equal(System.Net.HttpStatusCode.Created, response.StatusCode);
+        var data = (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
+
+        var repo = data.GetProperty("repositories").EnumerateArray()
+            .Single(repository => repository.GetProperty("name").GetString() == "web");
+        AssertRepositoryHasNoLocalPathFields(repo);
+        Assert.Equal("git@example.com:web.git", repo.GetProperty("gitUrl").GetString());
+        Assert.Equal("develop", repo.GetProperty("baseBranch").GetString());
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]

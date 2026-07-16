@@ -457,6 +457,7 @@ public class ProjectApiSpecs
     [Theory]
     [InlineData("""{"newName":null,"baseBranch":"release"}""")]
     [InlineData("""{"isDefault":null,"baseBranch":"release"}""")]
+    [InlineData("""{"setDefault":null,"baseBranch":"release"}""")]
     public async Task PatchRepository_WithNullForbiddenControl_ReturnsBadRequestAndDoesNotMutate(string payload)
     {
         var created = await CreateRepositoryUpdateProjectAsync();
@@ -525,6 +526,21 @@ public class ProjectApiSpecs
         Assert.Equal(2, repos.Count);
         Assert.False(repos.Single(r => r.GetProperty("name").GetString() == "server").GetProperty("isDefault").GetBoolean());
         Assert.True(repos.Single(r => r.GetProperty("name").GetString() == "web").GetProperty("isDefault").GetBoolean());
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
+    [Fact]
+    public async Task PatchRepository_SetDefaultWithBlankName_ReturnsBadRequestAndDoesNotMutate()
+    {
+        var created = await CreateRepositoryUpdateProjectAsync();
+
+        using var response = await _client.PatchAsJsonAsync(
+            $"/api/projects/{created.Id}/repositories/%20",
+            new { setDefault = true });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        await AssertRepositoryUnchangedAsync(created.Id);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]

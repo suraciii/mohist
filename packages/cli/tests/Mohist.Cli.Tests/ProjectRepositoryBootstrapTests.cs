@@ -130,28 +130,14 @@ public class ProjectRepositoryBootstrapTests
         executor.AssertExpectedCommandsExecuted();
     }
 
-    [Fact]
-    public async Task TryResolveAsync_RelativeOriginUrl_ReportsRunnerInaccessibleOrigin()
-    {
-        var fs = new FakeFileSystem();
-        fs.CreateDirectory(WorkTreeRoot);
-        var executor = new FakeCommandExecutor();
-        QueueGit(executor, WorkTreeRoot, ["rev-parse", "--show-toplevel"], 0, WorkTreeRoot + "\n");
-        QueueGit(executor, WorkTreeRoot, ["rev-parse", "HEAD"], 0, "abc123\n");
-        QueueGit(executor, WorkTreeRoot, ["remote", "get-url", "origin"], 0, "../remote.git\n");
-
-        var outcome = await ProjectRepositoryBootstrap.TryResolveAsync(WorkTreeRoot, fs, executor);
-
-        var failure = Assert.IsType<ProjectRepositoryBootstrap.Outcome.Failure>(outcome);
-        Assert.Contains("Runner", failure.Message, StringComparison.OrdinalIgnoreCase);
-        executor.AssertExpectedCommandsExecuted();
-    }
-
     [Theory]
+    [InlineData("../remote.git")]
+    [InlineData("/srv/remote.git")]
+    [InlineData("file:///srv/remote.git")]
     [InlineData("ssh://localhost/remote.git")]
     [InlineData("https://127.0.0.1/remote.git")]
     [InlineData("git@localhost:remote.git")]
-    public async Task TryResolveAsync_LoopbackOriginUrl_ReportsRunnerInaccessibleOrigin(string origin)
+    public async Task TryResolveAsync_OriginUrl_IsPreservedForRunnerValidation(string origin)
     {
         var fs = new FakeFileSystem();
         fs.CreateDirectory(WorkTreeRoot);
@@ -159,11 +145,13 @@ public class ProjectRepositoryBootstrapTests
         QueueGit(executor, WorkTreeRoot, ["rev-parse", "--show-toplevel"], 0, WorkTreeRoot + "\n");
         QueueGit(executor, WorkTreeRoot, ["rev-parse", "HEAD"], 0, "abc123\n");
         QueueGit(executor, WorkTreeRoot, ["remote", "get-url", "origin"], 0, origin + "\n");
+        QueueGit(executor, WorkTreeRoot, ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"], 0, "origin/main\n");
 
         var outcome = await ProjectRepositoryBootstrap.TryResolveAsync(WorkTreeRoot, fs, executor);
 
-        var failure = Assert.IsType<ProjectRepositoryBootstrap.Outcome.Failure>(outcome);
-        Assert.Contains("Runner", failure.Message, StringComparison.OrdinalIgnoreCase);
+        var success = Assert.IsType<ProjectRepositoryBootstrap.Outcome.Success>(outcome);
+        Assert.Equal(origin, success.Result.GitUrl);
+        Assert.Equal("main", success.Result.BaseBranch);
         executor.AssertExpectedCommandsExecuted();
     }
 

@@ -456,6 +456,6 @@ public class WorkflowRetrySessionHealthGuardSpecs
 
     private sealed record WorkDispatchInfo(string WorkId, string Stage, string? Title);
 
-    private sealed record ProjectDto(string Id, string Name, string Path, string BaseBranch);
+    private sealed record ProjectDto(string Id, string Name);
     private sealed record IssueDto(string Id, int Number, string Title);
 }

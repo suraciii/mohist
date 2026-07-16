@@ -766,7 +766,7 @@ public class AgentCostRollupApiSpecs
         await db.SaveChangesAsync();
     }
 
-    private sealed record ProjectDto(string Id, string Name, string Path, string BaseBranch);
+    private sealed record ProjectDto(string Id, string Name);
 
     private sealed record AgentCostMetricResponseDto(double? Amount, string? Currency, int SampleCount);
 

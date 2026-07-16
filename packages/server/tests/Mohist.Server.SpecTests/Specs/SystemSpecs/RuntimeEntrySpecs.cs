@@ -352,7 +352,7 @@ public class RuntimeEntrySpecs
     private sealed record AgentStatusDto(bool Running, bool RunnerAvailable, bool EmbeddedRunnerEnabled, string? RunnerMessage, RunnerDto[] Runners, AgentCapacityDto Capacity, System.Text.Json.JsonElement? ActiveAgents = null);
     private sealed record AgentCapacityDto(int Active, int Max);
     private sealed record RunnerDto(string Id, string? Kind = null, int Active = 0, int Max = 0);
-    private sealed record ProjectDto(string Id, string Name, string Path, string BaseBranch);
+    private sealed record ProjectDto(string Id, string Name);
     private sealed record IssueDto(int Number, string Title);
     private sealed record ApiErrorDto(bool Success, string? Error);
 

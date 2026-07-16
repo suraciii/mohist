@@ -645,7 +645,7 @@ public class GenericAgentSessionTranscriptAxisSpecs : IAsyncLifetime
             baseBranch = "main",
             setDefault = true,
         });
-        return new ProjectRef(project.Id, project.Path);
+        return new ProjectRef(project.Id);
     }
 
     private async Task<AgentRef> CreateAgentAsync(string projectId, string agentName)
@@ -683,7 +683,7 @@ public class GenericAgentSessionTranscriptAxisSpecs : IAsyncLifetime
         string Stage,
         IReadOnlyList<string> EventTypes);
 
-    private sealed record ProjectDto(string Id, string Name, string Path, string BaseBranch);
-    private sealed record ProjectRef(string Id, string Path);
+    private sealed record ProjectDto(string Id, string Name);
+    private sealed record ProjectRef(string Id);
     private sealed record AgentRef(string Id, string Name);
 }

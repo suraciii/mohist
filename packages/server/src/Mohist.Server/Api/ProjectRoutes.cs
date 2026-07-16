@@ -158,13 +158,13 @@ public static class ProjectRoutes
             if (IsSupplied(req.IsDefault))
                 return ApiResults.BadRequest("isDefault is derived by the server; use setDefault instead", "repository_default_forbidden");
 
-            if (req.SetDefault == false)
+            if (IsSupplied(req.SetDefault) && req.SetDefault.ValueKind != JsonValueKind.True)
                 return ApiResults.BadRequest("setDefault must be true when supplied", "repository_default_selection_invalid");
 
             if (req.GitUrl is not null && string.IsNullOrWhiteSpace(req.GitUrl))
                 return ApiResults.BadRequest("gitUrl must be a non-empty string", "repository_giturl_required");
 
-            var setDefault = req.SetDefault == true;
+            var setDefault = req.SetDefault.ValueKind == JsonValueKind.True;
             var hasMetadataUpdate = req.GitUrl is not null || req.BaseBranch is not null;
 
             if (setDefault && hasMetadataUpdate)
@@ -174,10 +174,17 @@ public static class ProjectRoutes
 
             if (setDefault)
             {
-                var updated = await projectGrain.SetDefaultRepositoryAsync(repoName);
-                return updated is not null
-                    ? ApiResults.Ok(updated)
-                    : ApiResults.NotFound($"Repository '{repoName}' not found in project '{project.Id}'");
+                try
+                {
+                    var updated = await projectGrain.SetDefaultRepositoryAsync(repoName);
+                    return updated is not null
+                        ? ApiResults.Ok(updated)
+                        : ApiResults.NotFound($"Repository '{repoName}' not found in project '{project.Id}'");
+                }
+                catch (ArgumentException ex)
+                {
+                    return ApiResults.BadRequest(ex.Message);
+                }
             }
 
             if (!hasMetadataUpdate)
@@ -552,7 +559,7 @@ public record AddRepositoryRequest(
     bool? SetDefault = null,
     JsonElement IsDefault = default);
 public record UpdateRepositoryRequest(
-    bool? SetDefault = null,
+    JsonElement SetDefault = default,
     string? GitUrl = null,
     string? BaseBranch = null,
     JsonElement NewName = default,

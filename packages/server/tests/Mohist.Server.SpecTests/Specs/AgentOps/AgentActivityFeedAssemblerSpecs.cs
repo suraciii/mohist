@@ -271,5 +271,5 @@ public class AgentActivityFeedAssemblerSpecs
         await db.SaveChangesAsync();
     }
 
-    private sealed record ProjectDto(string Id, string Name, string Path, string BaseBranch);
+    private sealed record ProjectDto(string Id, string Name);
 }

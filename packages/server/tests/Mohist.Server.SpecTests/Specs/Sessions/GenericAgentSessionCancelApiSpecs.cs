@@ -359,7 +359,7 @@ public class GenericAgentSessionCancelApiSpecs : IAsyncLifetime
             new
             {
                 agentSessionId = sessionId,
-                workDir = project.Path,
+                workDir = $"/workspaces/{project.Id}",
                 processPid = 1234,
             });
 
@@ -380,7 +380,7 @@ public class GenericAgentSessionCancelApiSpecs : IAsyncLifetime
             baseBranch = "main",
             setDefault = true,
         });
-        return new ProjectRef(project.Id, project.Path);
+        return new ProjectRef(project.Id);
     }
 
     private async Task<AgentRef> CreateAgentAsync(string projectId, string agentName)
@@ -401,7 +401,7 @@ public class GenericAgentSessionCancelApiSpecs : IAsyncLifetime
         return new AgentRef(body.GetProperty("data").GetProperty("id").GetString()!, agentName);
     }
 
-    private sealed record ProjectRef(string Id, string Path);
+    private sealed record ProjectRef(string Id);
     private sealed record AgentRef(string Id, string Name);
-    private sealed record ProjectDto(string Id, string Name, string Path, string BaseBranch);
+    private sealed record ProjectDto(string Id, string Name);
 }

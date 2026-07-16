@@ -31,9 +31,9 @@ public class EnsureCliWrapperTests
     {
         var fs = new FakeFileSystem();
         var executor = new FakeCommandExecutor();
-        executor.QueueForFile("chmod", 0);
-        var ops = BuildOperations(out var output, out _, fs: fs, executor: executor, home: "/home/test");
         var wrapperPath = UpdateOperations.ResolveCliWrapperPath("/home/test");
+        executor.QueueExpected("chmod", ["+x", $"{wrapperPath}.tmp"], null, 0);
+        var ops = BuildOperations(out var output, out _, fs: fs, executor: executor, home: "/home/test");
 
         var exit = await ops.EnsureCliWrapperAsync("/managed/mo", "/home/test");
 
@@ -41,6 +41,7 @@ public class EnsureCliWrapperTests
         Assert.Contains("Installed CLI wrapper", output.ToString());
         Assert.True(fs.Exists(wrapperPath));
         Assert.Contains("/managed/mo", fs.ReadAllText(wrapperPath));
+        executor.AssertExpectedCommandsExecuted();
     }
 
     [Fact]
@@ -53,7 +54,7 @@ public class EnsureCliWrapperTests
         fs.AddFile(wrapperPath, "#!/bin/sh\nold-content\n");
 
         var executor = new FakeCommandExecutor();
-        executor.QueueForFile("chmod", 0);
+        executor.QueueExpected("chmod", ["+x", $"{wrapperPath}.tmp"], null, 0);
         var ops = BuildOperations(out _, out _, fs: fs, executor: executor, home: "/home/test");
 
         var exit = await ops.EnsureCliWrapperAsync("/managed/mo", "/home/test");
@@ -62,6 +63,7 @@ public class EnsureCliWrapperTests
         var content = fs.ReadAllText(wrapperPath);
         Assert.Contains("/managed/mo", content);
         Assert.DoesNotContain("old-content", content);
+        executor.AssertExpectedCommandsExecuted();
     }
 
     [Fact]
@@ -96,7 +98,7 @@ public class EnsureCliWrapperTests
         fs.CreateDirectory(wrapperDir);
 
         var executor = new FakeCommandExecutor();
-        executor.QueueForFile("chmod", 0);
+        executor.QueueExpected("chmod", ["+x", $"{wrapperPath}.tmp"], null, 0);
         var ops = BuildOperations(out _, out _, fs: fs, executor: executor, home: "/home/test");
 
         var exit = await ops.EnsureCliWrapperAsync("/managed/mo", "/home/test");
@@ -104,5 +106,6 @@ public class EnsureCliWrapperTests
         Assert.Equal(0, exit);
         Assert.True(fs.Exists(wrapperPath));
         Assert.False(fs.Exists($"{wrapperPath}.tmp"));
+        executor.AssertExpectedCommandsExecuted();
     }
 }

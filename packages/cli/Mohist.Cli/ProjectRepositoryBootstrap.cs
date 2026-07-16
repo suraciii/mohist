@@ -62,12 +62,9 @@ internal static class ProjectRepositoryBootstrap
             cancellationToken);
 
         if (originUrl.ExitCode != 0 || string.IsNullOrWhiteSpace(originUrl.Stdout.Trim()))
-            return new Outcome.Failure($"--path '{root}' has no 'origin' remote with a usable Git URL.");
+            return new Outcome.Failure($"--path '{root}' has no 'origin' remote with a Git URL.");
 
         var gitUrl = originUrl.Stdout.Trim();
-        if (!IsRunnerUsableGitUrl(gitUrl))
-            return new Outcome.Failure($"--path '{root}' has an 'origin' remote that is not usable by a Runner.");
-
         var baseBranch = await TryResolveBaseBranchAsync(root, commandExecutor, cancellationToken);
         if (baseBranch is null)
             return new Outcome.Failure($"--path '{root}' has no resolvable base branch (no origin/HEAD and no checked-out branch).");
@@ -142,31 +139,6 @@ internal static class ProjectRepositoryBootstrap
     }
 
     private static string TrimLineEnding(string value) => value.TrimEnd('\r', '\n');
-
-    private static bool IsRunnerUsableGitUrl(string gitUrl)
-    {
-        if (Uri.TryCreate(gitUrl, UriKind.Absolute, out var uri))
-            return !uri.Scheme.Equals(Uri.UriSchemeFile, StringComparison.OrdinalIgnoreCase)
-                && IsRunnerAccessibleHost(uri.Host);
-
-        var separator = gitUrl.IndexOf(':');
-        if (separator <= 0)
-            return false;
-
-        var host = gitUrl[..separator];
-        return !host.Contains('/')
-            && !host.Contains('\\')
-            && IsRunnerAccessibleHost(host[(host.LastIndexOf('@') + 1)..].Trim('[', ']'));
-    }
-
-    private static bool IsRunnerAccessibleHost(string host)
-    {
-        if (string.IsNullOrWhiteSpace(host) || host.Equals("localhost", StringComparison.OrdinalIgnoreCase))
-            return false;
-
-        return !System.Net.IPAddress.TryParse(host, out var address)
-            || !System.Net.IPAddress.IsLoopback(address);
-    }
 
     private static async Task<(int ExitCode, string Stdout, string Stderr)> TryRunGitAsync(
         ICommandExecutor commandExecutor,

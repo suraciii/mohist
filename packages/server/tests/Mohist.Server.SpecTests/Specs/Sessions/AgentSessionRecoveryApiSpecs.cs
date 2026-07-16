@@ -214,7 +214,7 @@ public class AgentSessionRecoveryApiSpecs
 
         if (attachAndStart)
         {
-            await _client.PostOkAsync(RunnerAgentSessionAttachPath(currentSession), new { agentSessionId = currentSession.Id, workDir = project.Path, processPid = 1234 });
+            await _client.PostOkAsync(RunnerAgentSessionAttachPath(currentSession), new { agentSessionId = currentSession.Id, workDir = $"/workspaces/{project.Id}", processPid = 1234 });
         }
 
         return (project, issue, work, currentSession);
@@ -263,7 +263,7 @@ var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/i
     private string RunnerSessionPath(CreatedSession session) =>
         $"/api/runner/{_runnerId}/sessions/{Uri.EscapeDataString(session.ProjectId)}/{Uri.EscapeDataString(session.WorkflowRunId)}/{Uri.EscapeDataString(session.SessionName)}";
 
-    private sealed record ProjectDto(string Id, string Name, string Path, string BaseBranch);
+    private sealed record ProjectDto(string Id, string Name);
     private sealed record IssueDto(string Id, int Number, string Title);
     private sealed record CreatedSession(
         string ProjectId,

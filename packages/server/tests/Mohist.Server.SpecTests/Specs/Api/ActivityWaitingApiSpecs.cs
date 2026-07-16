@@ -212,7 +212,7 @@ public class ActivityWaitingApiSpecs
         DateTimeOffset approvalRequestedAt) =>
         await InsertIssueWithApprovalGateAsync(projectId, number, title, approvalRequestedAt);
 
-    private sealed record ProjectDto(string Id, string Name, string Path, string BaseBranch);
+    private sealed record ProjectDto(string Id, string Name);
     private sealed record ProjectIssueDto(string Id, int Number);
     private sealed record ActivityWaitingEntryDto(string IssueId, int IssueNumber, string IssueTitle, string? Stage, string Label, string? RequestedAt, string? Preview);
     private sealed record ActivitySummaryDto(int Active, int Waiting, int Completed, int Failed);

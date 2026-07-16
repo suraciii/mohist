@@ -590,7 +590,7 @@ var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/i
             .ToArray();
     }
 
-    private sealed record ProjectDto(string Id, string Name, string Path, string BaseBranch);
+    private sealed record ProjectDto(string Id, string Name);
     private sealed record ProjectVariablesDto(JsonElement? Vars, Dictionary<string, ProjectStageVariablesDto?>? Stages);
     private sealed record ProjectStageVariablesDto(JsonElement? Vars);
     private sealed record IssueDto(
