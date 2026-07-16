@@ -32,6 +32,13 @@ public abstract class AgentSessionGrainPersistenceSpecsBase : IClassFixture<Agen
         "runner-1",
         runtime,
         Metadata: WorkflowAgentSessionMetadata.Metadata(new WorkflowAgentSessionContext("project-1", "workflow-1", "build")));
+
+    protected async Task DeactivateAsync(IAgentSessionGrain grain)
+    {
+        var management = grain.AsReference<IGrainManagementExtension>();
+        await management.DeactivateOnIdle();
+        await grain.GetAsync();
+    }
 }
 
 [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
@@ -167,39 +174,52 @@ public class AgentSessionGrainRecoveryTranscriptFailureSpecs : AgentSessionGrain
     public AgentSessionGrainRecoveryTranscriptFailureSpecs(AgentSessionGrainFixture fixture) : base(fixture) { }
 
     [Fact]
-    public async Task CompactAsync_TranscriptSaveFailure_CommitsRecoveryOnceAndDoesNotRetry()
+    public async Task CompactAsync_TranscriptSaveFailure_SchedulesTranscriptOnlyRetry()
     {
-        // Recovery (Compact/Reset) state/event transaction and transcript
-        // evidence share the FlushAsync split: when state/events commit but
-        // transcript save fails, the recovery domain fact is durable and the
-        // command must succeed so a client retry does not re-append duplicate
-        // recovery events. The transcript flush stays pending for the next
-        // flush cycle.
+        // When the recovery state/event transaction commits but the transcript
+        // save fails, the recovery domain fact is durable and the command
+        // succeeds. The pending transcript must still reach durable storage:
+        // PersistRecoveryAsync schedules the persistence timer so a
+        // transcript-only retry fires even on an idle session, and that retry
+        // must NOT re-append the committed recovery domain event.
         var grain = NewGrain();
         var opened = await grain.OpenAsync(Open("opencode"));
         await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand("runtime-before-compact"));
         Fixture.TimeProvider.Advance(TimeSpan.FromMinutes(6));
         var openedSaveCount = Fixture.StateStore.SaveCount;
+        var attachEventCount = Fixture.StateStore.Events.Count;
 
         Fixture.TranscriptStore.NextException = new InvalidOperationException("transcript store down");
 
         var result = await grain.CompactAsync(
             new CompactAgentSessionCommand(Summary: "s"));
 
-        // The recovery command succeeds even though the transcript failed:
-        // the compaction domain event committed atomically without replacing
-        // the physical runtime session or logical AgentSession identity.
+        // The recovery command succeeds; the compaction domain event committed.
         Assert.Equal(opened.Id, result.Id);
         Assert.True(result.WasCompacted);
 
-        // Exactly one recovery save happened (the event-aware commit). A
-        // duplicate would require a second recovery save, which does not
-        // occur because the command did not throw.
+        // Exactly one recovery save so far (the event-aware commit); the
+        // transcript flush failed and is pending retry.
         Assert.Equal(openedSaveCount + 1, Fixture.StateStore.SaveCount);
-
+        Assert.Empty(Fixture.TranscriptStore.Flushes);
         var transcriptError = Assert.Single(Fixture.Logger.Entries, e => e.Level == LogLevel.Error);
         Assert.Contains("recovery transcript", transcriptError.Message);
         Assert.Contains("transcript store down", transcriptError.Exception?.Message ?? string.Empty);
+
+        // The pending recovery transcript must reach durable storage even on
+        // an idle session. The scheduled persistence timer (PersistTimerDueTime
+        // = 200ms) fires a transcript-only retry, and deactivation flushes any
+        // remaining pending transcript. Either way the recovery evidence is
+        // durable. The core data-safety invariant: the committed recovery
+        // domain event was appended exactly once, never re-appended by the
+        // transcript retry.
+        await DeactivateAsync(grain);
+
+        Assert.NotEmpty(Fixture.TranscriptStore.Flushes);
+        var recoveryEvents = Fixture.StateStore.Events
+            .Count(e => e is AgentSessionContextCompacted);
+        Assert.Equal(1, recoveryEvents);
+        Assert.Equal(attachEventCount + 1, Fixture.StateStore.Events.Count);
     }
 
 }
@@ -263,12 +283,5 @@ public class AgentSessionGrainDeactivationSpecs : AgentSessionGrainPersistenceSp
         Assert.Contains(grain.GetPrimaryKeyString(), transcriptError.Message);
         Assert.Contains("1", transcriptError.Message);
         Assert.Contains("transcript store down", transcriptError.Exception?.Message ?? string.Empty);
-    }
-
-    private async Task DeactivateAsync(IAgentSessionGrain grain)
-    {
-        var management = grain.AsReference<IGrainManagementExtension>();
-        await management.DeactivateOnIdle();
-        await grain.GetAsync();
     }
 }

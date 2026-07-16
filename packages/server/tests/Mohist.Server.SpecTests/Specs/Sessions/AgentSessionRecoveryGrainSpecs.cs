@@ -228,6 +228,49 @@ public sealed class AgentSessionRecoveryGrainSpecs : IClassFixture<AgentSessionG
         Assert.Equal("runtime-active", Assert.Single(_fixture.StateStore.State.Status.RuntimeSessionLineage!).AgentRuntimeSessionId);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
+    public async Task Compact_AfterFollowupPromptRejected_ClearsLeaseViaFollowupFailedEvent()
+    {
+        // An idle follow-up reserves a lease (PendingFollowup) that blocks
+        // Compact/Reset until the follow-up turn reaches a terminal outcome.
+        // When the runner's prompt rejects, it emits session.followup_failed;
+        // the grain must clear the lease so recovery is not permanently blocked
+        // as session_active.
+        var (grain, sessionId) = await CreateAttachedSessionAsync("runtime-followup");
+
+        var reservation = await grain.BeginFollowupAsync();
+        Assert.NotNull(reservation.OperationId);
+        await grain.ConfirmFollowupAsync(reservation.OperationId!);
+
+        // The accepted lease blocks Compact while the follow-up turn is in flight.
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            grain.CompactAsync(new CompactAgentSessionCommand(Summary: "summary")));
+
+        // The runner reports the prompt rejection via the established runtime
+        // event path on the bound runtime session.
+        await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
+            new[]
+            {
+                new AgentSessionRuntimeEventInput(
+                    "session.followup_failed",
+                    "{\"runtimeSessionId\":\"runtime-followup\",\"source\":\"followup\"}"),
+            },
+            "runtime-followup"));
+
+        // The lease is cleared. Advance past the active-runtime-event window so
+        // the session is idle again, then Compact proceeds.
+        _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(6));
+        var state = Assert.IsType<AgentSession>(_fixture.StateStore.State);
+        Assert.Null(state.Status.PendingFollowup);
+        var now = _fixture.TimeProvider.GetUtcNow().UtcDateTime;
+        Assert.Equal("inactive", AgentSessionJsonHelper.StatusName(state, now));
+        var result = await grain.CompactAsync(new CompactAgentSessionCommand(Summary: "summary"));
+        Assert.Equal(sessionId, result.Id);
+        Assert.True(result.WasCompacted);
+    }
+
     private async Task<(IAgentSessionGrain Grain, string SessionId)> CreateAttachedSessionAsync(string runtimeSessionId)
     {
         var sessionId = $"recovery-grain-{Guid.NewGuid():N}";

@@ -520,9 +520,19 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             }
             catch (Exception ex)
             {
+                // The recovery domain event is already durable (the state/event
+                // transaction above committed). Only the transcript evidence is
+                // still pending in _transcript. Schedule the persistence timer so
+                // a transcript-only retry fires even if no further runtime event
+                // arrives before deactivation; without it an idle session could
+                // lose the compaction/replacement transcript. The retry path
+                // (FlushAsync) re-saves the transcript without re-appending the
+                // committed recovery event because PersistRecoveryAsync never
+                // touches _pendingDomainEvents / _stateDirty.
                 _log.LogError(ex,
                     "AgentSessionGrain failed to save recovery transcript for {SessionId}; parts={PartCount}",
                     SessionId, transcript.Parts.Count);
+                EnsurePersistenceTimer();
             }
         }
 
@@ -577,7 +587,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         if (requireCurrentRuntimeBinding
             && session.Status.PendingFollowup is { } pendingFollowup
             && string.Equals(runtimeSessionId, pendingFollowup.RuntimeSessionId, StringComparison.Ordinal)
-            && runtimeEvents.Any(e => string.Equals(e.Type, RuntimeEventTypes.SessionClosed, StringComparison.Ordinal)))
+            && runtimeEvents.Any(e => TerminatesFollowupLease(e.Type)))
         {
             session.Status = session.Status with { PendingFollowup = null };
         }
@@ -831,6 +841,17 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             PersistTimerDueTime,
             PersistTimerDueTime);
     }
+
+    // A follow-up lease blocks Compact/Reset while an idle follow-up turn is in
+    // flight. It clears when the turn reaches a terminal outcome on the bound
+    // runtime: session.closed (the task path ends the session) or
+    // session.followup_failed (the follow-up's prompt rejected without
+    // producing a turn). Without the latter an idle session whose follow-up
+    // prompt rejected stays PendingFollowup forever and Compact/Reset are
+    // permanently rejected as session_active.
+    private static bool TerminatesFollowupLease(string? type) =>
+        string.Equals(type, RuntimeEventTypes.SessionClosed, StringComparison.Ordinal)
+        || string.Equals(type, RuntimeEventTypes.SessionFollowupFailed, StringComparison.Ordinal);
 
     private async Task PersistCallback()
     {

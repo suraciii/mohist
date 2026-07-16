@@ -28,11 +28,13 @@ import * as signalR from "@microsoft/signalr"
 import type { ServerConnection } from "./connection.js"
 import {
   resolveSessionTarget,
+  type FollowupTarget,
   type FollowupTargetResolution,
   type FollowupTargetResolver,
   type ReceiveFollowupPayload,
   isFollowupTargetUnavailable,
 } from "./session-target.js"
+import type { SessionTarget } from "../runtime/acp-connection.js"
 
 export interface FollowupHandlerDeps {
   serverConnection?: ServerConnection | null
@@ -83,75 +85,84 @@ async function handleFollowup(
   if (isFollowupTargetUnavailable(target)) return unavailable()
   if (!target) return { accepted: false, error: "missing" }
 
-  if (sessionTarget.kind === "workflow") {
-    void serverConnection.workflowAgentSessionRuntimeEvents(
-      target.projectId,
-      sessionTarget.workflowRunId,
-      sessionTarget.sessionName,
-      {
-        workId: null,
-        workType: null,
-        stage: null,
-        runtimeSessionId: target.sessionId,
-        runtimeEvents: [
-          {
-            type: "session.input",
-            payload: {
-              role: "user",
-              text: payload.text,
-              kind: "followup",
-              sentAt: new Date().toISOString(),
-              runtimeSessionId: target.sessionId,
-              source: "followup",
-            },
-          },
-        ],
-      },
-      new AbortController().signal,
-    ).catch((error) => {
-      console.error("failed to emit followup session.input event:", error)
-    })
-  } else {
-    void serverConnection.agentSessionRuntimeEvents(
-      target.projectId,
-      sessionTarget.sessionId,
-      {
-        workId: null,
-        workType: null,
-        stage: null,
-        runtimeSessionId: target.sessionId,
-        runtimeEvents: [
-          {
-            type: "session.input",
-            payload: {
-              role: "user",
-              text: payload.text,
-              kind: "followup",
-              sentAt: new Date().toISOString(),
-              runtimeSessionId: target.sessionId,
-              source: "followup",
-            },
-          },
-        ],
-      },
-      new AbortController().signal,
-    ).catch((error) => {
-      console.error("failed to emit followup session.input event:", error)
-    })
-  }
+  emitFollowupEvent(serverConnection, sessionTarget, target, {
+    type: "session.input",
+    payload: {
+      role: "user",
+      text: payload.text,
+      kind: "followup",
+      sentAt: new Date().toISOString(),
+      runtimeSessionId: target.sessionId,
+      source: "followup",
+    },
+  })
 
   try {
     void target.connection.prompt({
       sessionId: target.sessionId,
       prompt: [{ type: "text", text: payload.text }],
     }).catch((error) => {
+      // The follow-up was already acknowledged to the server, so a late prompt
+      // rejection must be observable: emit session.followup_failed so the
+      // server clears the persisted follow-up lease. Otherwise the lease
+      // blocks Compact/Reset forever as session_active.
       console.error("followup connection.prompt rejected:", error instanceof Error ? error.message : String(error))
+      emitFollowupEvent(serverConnection, sessionTarget, target, {
+        type: "session.followup_failed",
+        payload: {
+          runtimeSessionId: target.sessionId,
+          source: "followup",
+          error: error instanceof Error ? error.message : String(error),
+          failedAt: new Date().toISOString(),
+        },
+      })
     })
   } catch (error) {
     console.error("followup connection.prompt threw:", error instanceof Error ? error.message : String(error))
+    emitFollowupEvent(serverConnection, sessionTarget, target, {
+      type: "session.followup_failed",
+      payload: {
+        runtimeSessionId: target.sessionId,
+        source: "followup",
+        error: error instanceof Error ? error.message : String(error),
+        failedAt: new Date().toISOString(),
+      },
+    })
     return unavailable()
   }
   return { accepted: true }
+}
+
+// Emits a runtime event for a follow-up through the workflow or generic
+// runtime-events endpoint, depending on the session kind. Fire-and-forget:
+// a rejection is logged but does not change the handler result.
+function emitFollowupEvent(
+  serverConnection: ServerConnection,
+  sessionTarget: SessionTarget,
+  target: FollowupTarget,
+  event: { type: string; payload: Record<string, unknown> },
+): void {
+  const runtimeEvents = [event]
+  const signal = new AbortController().signal
+  const onError = (error: unknown) => {
+    console.error(`failed to emit followup ${event.type} event:`, error)
+  }
+  if (sessionTarget.kind === "workflow") {
+    void serverConnection.workflowAgentSessionRuntimeEvents(
+      target.projectId,
+      sessionTarget.workflowRunId!,
+      sessionTarget.sessionName!,
+      { workId: null, workType: null, stage: null, runtimeSessionId: target.sessionId, runtimeEvents },
+      signal,
+    ).catch(onError)
+  } else {
+    void serverConnection.agentSessionRuntimeEvents(
+      target.projectId,
+      sessionTarget.sessionId,
+      { workId: null, workType: null, stage: null, runtimeSessionId: target.sessionId, runtimeEvents },
+      signal,
+    ).catch(onError)
+  }
 }
 
 function isPromise<T>(value: T | Promise<T>): value is Promise<T> {

@@ -75,42 +75,42 @@ public sealed class AgentSessionGrainFixture : IAsyncLifetime
     }
 }
 
-public sealed class FakeAgentSessionStore : IAgentSessionStore
-{
-    public AgentSession? State { get; private set; }
-    public List<AgentSessionEvent> Events { get; } = [];
-    public int SaveCount { get; private set; }
-    public Exception? NextException { get; set; }
-
-    public void Reset()
+    public sealed class FakeAgentSessionStore : IAgentSessionStore
     {
-        NextException = null;
-        SaveCount = 0;
-        State = null;
-        Events.Clear();
-    }
+        public AgentSession? State { get; private set; }
+        public List<AgentSessionEvent> Events { get; } = [];
+        public int SaveCount { get; private set; }
+        public Exception? NextException { get; set; }
 
-    public Task<AgentSession?> LoadAsync(string key) => Task.FromResult(State);
+        public void Reset()
+        {
+            NextException = null;
+            SaveCount = 0;
+            State = null;
+            Events.Clear();
+        }
 
-    public Task<IReadOnlyList<AgentSession>> ListAsync() =>
-        Task.FromResult<IReadOnlyList<AgentSession>>(State is null ? [] : [State]);
+        public Task<AgentSession?> LoadAsync(string key) => Task.FromResult(State);
 
-    public Task SaveAsync(string key, AgentSession state)
-    {
-        ThrowIfPending();
-        SaveCount++;
-        State = state;
-        return Task.CompletedTask;
-    }
+        public Task<IReadOnlyList<AgentSession>> ListAsync() =>
+            Task.FromResult<IReadOnlyList<AgentSession>>(State is null ? [] : [State]);
 
-    public Task SaveAsync(string key, AgentSession state, IReadOnlyList<AgentSessionEvent> events, CancellationToken ct = default)
-    {
-        ThrowIfPending();
-        SaveCount++;
-        State = state;
-        Events.AddRange(events);
-        return Task.CompletedTask;
-    }
+        public Task SaveAsync(string key, AgentSession state)
+        {
+            ThrowIfPending();
+            SaveCount++;
+            State = state;
+            return Task.CompletedTask;
+        }
+
+        public Task SaveAsync(string key, AgentSession state, IReadOnlyList<AgentSessionEvent> events, CancellationToken ct = default)
+        {
+            ThrowIfPending();
+            SaveCount++;
+            State = state;
+            Events.AddRange(events);
+            return Task.CompletedTask;
+        }
 
     public Task DeleteAsync(string key)
     {

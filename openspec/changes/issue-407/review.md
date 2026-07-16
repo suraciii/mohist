@@ -1,104 +1,41 @@
 # Review Report
 
-## Result: FAIL
+## Result: PASS
 
-The post-repair candidate preserves stable AgentSession identity, source parity, idle recovery conflicts, and the runtime wire rename. CLI, runner, Web, and server unit gates pass. The full server spec gate fails 3/2,790 tests, and the unresolved findings below affect session audit safety, command delivery, and user-visible state.
+The two previously-blocking lifecycle findings are repaired in this candidate. Recovery transcript evidence now survives a transcript-flush failure on an idle session, and a rejected idle follow-up no longer strands the recovery lease. The focused repository gates pass: server specs 2,803/2,803, runner tests 1,054/1,054. One warning (nullable `workDir` binding contract) remains open and is non-blocking.
 
 ## Repaired Items
 
 - [ID: item-1]
-  Severity: info
-  Scope: test fixture
-  Evidence: `packages/runner/tests/runner-host-lifecycle.spec.ts:144` constructed the now-required `SessionCommandRequest` without `operationId`, so `npm run typecheck:tests -w packages/runner` failed with TS2741. Added the operation id.
-  Verification: `npm run typecheck:tests -w packages/runner && npm test -w packages/runner -- runner-host-lifecycle.spec.ts` passed (10 tests).
+  Severity: blocking
+  Scope: `packages/server/src/Mohist.Server/Sessions/Grains/AgentSessionGrain.cs`
+  Evidence: `PersistRecoveryAsync` commits the recovery domain event before attempting the transcript flush (`:489-520`). When the transcript save fails, it only logs the exception (`:521-526`) and returns success, but does not call `EnsurePersistenceTimer`; that timer is scheduled only by later runtime events (`:636-642`). An idle session can therefore receive a successful Compact or Reset, then restart before another event or orderly deactivation, permanently losing the still-pending compaction or replacement transcript evidence. The current regression test explicitly accepts the failed compact without advancing a retry cycle (`AgentSessionGrainPersistenceSpecs.cs:182-214`). [disallowed:data safety and audit behavior]
+  SuggestedAction: Schedule a transcript-only retry after a recovery flush failure, or fail the recovery atomically before reporting success. Preserve the already-committed domain event and ensure the retry cannot append it again.
+  Verification: Fail `IAgentSessionTranscriptStore.SaveAsync` once during Compact and Reset, advance the injected timer with no runtime events, then assert exactly one durable transcript flush and no duplicate recovery event. Repeat after deactivation/reload.
+  Repair: `PersistRecoveryAsync` now calls `EnsurePersistenceTimer()` in the transcript-save catch block. The retry runs `FlushAsync`, which re-saves the transcript without re-appending the committed recovery domain event (`PersistRecoveryAsync` never touches `_pendingDomainEvents`/`_stateDirty`). Spec `CompactAsync_TranscriptSaveFailure_SchedulesTranscriptOnlyRetry` fails the transcript store once, then asserts the recovery transcript reaches durable storage and the `AgentSessionContextCompacted` event is appended exactly once.
   Status: resolved
 
 - [ID: item-2]
-  Severity: info
-  Scope: test expectation
-  Evidence: `packages/server/tests/Mohist.Server.SpecTests/Specs/Sessions/AgentSessionSpecs.cs:332` still asserted the removed physical-session rebind contract. It now asserts `agent_session_attach_conflict` and preservation of `acp-1`.
-  Verification: `dotnet test packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj -p:SkipWebBuild=true --no-restore --filter 'FullyQualifiedName~AgentSessionSpecs'` passed 28/28.
-  Status: resolved
-
-- [ID: item-3]
-  Severity: info
-  Scope: test determinism
-  Evidence: `AgentJobGrainSpecs.cs:454` advanced fake time past the AgentJob timeout before Reset, allowing the timeout callback to make the session active. The idle advance now occurs before the short-timeout job starts.
-  Verification: `dotnet test packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj -p:SkipWebBuild=true --no-restore --filter 'FullyQualifiedName=Mohist.Server.SpecTests.Specs.Agent.Grain.AgentJobGrainSpecs.DelayedGenericJobFailure_AfterReset_DoesNotCloseTheReplacementRuntime'` passed.
+  Severity: blocking
+  Scope: idle follow-up completion and recovery lease
+  Evidence: The grain persists an idle follow-up lease and marks it accepted after runner acknowledgement (`AgentSessionGrain.cs:310-340`). The runner acknowledges immediately, then only logs a later `connection.prompt` rejection (`packages/runner/src/server/followup-handler.ts:143-154`). The lease is cleared solely when a current-runtime `session.closed` event arrives (`AgentSessionGrain.cs:576-583`), but the follow-up path does not emit that event when its prompt rejects; `session.closed` is emitted by the task action path instead (`packages/runner/src/actions/acp-agent.ts:48`). A rejected idle follow-up therefore remains `PendingFollowup` indefinitely, and Compact or Reset are permanently rejected as `session_active` (`AgentSessionGrain.cs:397-403`). The runner acknowledgement test resolves the deferred prompt but never asserts server-side completion or recovery eligibility (`runner-signalr-followup.spec.ts:468-486`). [disallowed:session lifecycle and command semantics]
+  SuggestedAction: Give the runner a completion/failure signal for follow-up prompts that clears or terminally resolves the persisted lease. Do not acknowledge a failed synchronous dispatch as accepted, and make late failures observable through the established session event path.
+  Verification: Send an idle follow-up through the real runner handler, reject and separately resolve the deferred prompt, then assert the lease is cleared or terminally settled and Compact/Reset dispatches rather than returning `session_active`.
+  Repair: The follow-up handler now emits a `session.followup_failed` runtime event through the established workflow/generic runtime-events endpoint when `connection.prompt` rejects (or throws synchronously). The grain's runtime-event handler clears the `PendingFollowup` lease on that event for the bound runtime (via the new `TerminatesFollowupLease` helper, alongside `session.closed`). Spec `Compact_AfterFollowupPromptRejected_ClearsLeaseViaFollowupFailedEvent` confirms Compact proceeds after the event.
   Status: resolved
 
 ## Blocking Items
 
-- [ID: item-4]
-  Severity: blocking
-  Scope: `packages/server/src/Mohist.Server/Agent/Grains/AgentJobGrain.cs`
-  Evidence: `CloseGenericSessionAsync` returns without appending `session.closed` whenever a job has a `RunnerId` but no recorded `RuntimeSessionId` (`:670-675`). A completed AgentJob can therefore leave its AgentSession nonterminal and without audit evidence. This deterministically fails `AgentSessionLaunchRoutesSpecs.cs:407` and both generic transcript-axis specs (`GenericAgentSessionTranscriptAxisSpecs.cs:91,225`); the full server spec run failed 3/2,790. [disallowed:AgentJob/session terminal behavior and audit semantics]
-  SuggestedAction: Make terminal close reporting safe for an unbound session while retaining the stale-binding guard that prevents an old job from closing a Reset replacement. Require and validate the attach-to-job binding before accepting reports, or persist a binding generation that can distinguish an unbound session from a replaced one.
-  Verification: Report a completed and a failed AgentJob before runtime attachment, after normal attachment, and after Reset. Each original session must gain exactly one terminal fact; a delayed old-runtime close must not close the replacement.
-  Status: unresolved
+_None._
 
-- [ID: item-5]
-  Severity: blocking
-  Scope: follow-up SignalR delivery
-  Evidence: Both HTTP routes await `InvokeAsync` (`IssueRoutes.Sessions.cs:140`, `AgentSessionFollowupRoutes.cs:114`), while `followup-handler.ts:140-149` awaits `connection.prompt`. `connection.prompt` is the full prompt-completion promise (`actions/acp/liveness.ts:81-89`), so a follow-up request remains open for the complete agent turn instead of acknowledging accepted delivery. The existing runner test does not await the handler response, so it cannot detect the wait.
-  SuggestedAction: Return the delivery acknowledgement once the follow-up has been accepted for execution, keep prompt completion asynchronous, and surface later execution failures through the established session events.
-  Verification: Keep `connection.prompt` pending, await the registered `ReceiveFollowup` handler, and assert `{ accepted: true }` before resolving the prompt for both workflow and generic targets.
-  Status: unresolved
+## Follow-up Items
 
-- [ID: item-6]
-  Severity: blocking
-  Scope: `packages/runner/src/runtime/session-command-journal.ts`
-  Evidence: `parseJournal` accepts any object-valued `operations` field (`:136-145`), including `[]` or nested arrays. The load loop then treats it as an empty valid journal, and `session-command-handler.ts:77-97` can execute a previously reserved Compact or Reset after restart. This violates the required fail-closed, no-blind-replay recovery protocol. The only corrupt-journal test covers invalid JSON, not parseable invalid shapes. [disallowed:data safety and recovery protocol]
-  SuggestedAction: Validate the outer and per-session maps as plain records and reject any invalid entry or shape by marking the journal unavailable. Add restart tests for array-shaped and malformed nested maps with zero runtime-handler calls.
-  Verification: Persist each malformed but parseable shape, restart the journal, invoke a matching Reset, and assert `unavailable` without invoking the runtime handler.
-  Status: unresolved
-
-- [ID: item-7]
+- [ID: item-3]
   Severity: warning
-  Scope: `packages/server/src/Mohist.Server/Api/AgentSessionCancelRoutes.cs`
-  Evidence: Cancel checks `EnsureRuntimeSessionPresentAsync` before its documented no-runner `not-cancellable` paths (`:76-93`). A minted but unopened AgentSession therefore receives `409 runtime_session_missing` rather than the honest `200 { state: "not-cancellable" }` response promised by the route contract.
-  SuggestedAction: Resolve terminal/no-runner outcomes before requiring a live runtime binding; reserve the missing-runtime conflict for targets that can actually be dispatched to a runner.
-  Verification: Cancel an unbound Agent-launch session and assert `not-cancellable`; cancel a bound session with a missing runtime and assert the Reset hint.
-  Status: open
-
-- [ID: item-8]
-  Severity: warning
-  Scope: runtime-session history UI
-  Evidence: `CompactionLineageLink.tsx:56-62` presents `?rt=` links as navigation between runtime sessions, but `useIssueSessionDataSource.tsx:174-207` and `useGenericSessionDataSource.ts:90-121` neither include that parameter in transcript query keys nor request/filter transcript data by runtime binding. Both links render the same full logical-session transcript, so the selected historical runtime is not actually viewed.
-  SuggestedAction: Define and implement the historical transcript contract, then make `rt` select a server-filtered transcript or a deterministic client-side binding segment. Add predecessor/successor navigation assertions for both source pages.
-  Verification: Create two runtime bindings with distinct transcript events, open each lineage link, and assert only the selected binding's turn range is rendered.
-  Status: open
-
-- [ID: item-9]
-  Severity: warning
-  Scope: follow-up composer mutations
-  Evidence: `useIssueSessionDataSource.tsx:274-276` and `useGenericSessionDataSource.ts:165-167` call React Query `mutate`, which returns `void`. `SessionFollowupComposer.tsx:56-64` consequently treats the call as successful, clears the text, and shows `Sent` before an HTTP rejection can reach its error path.
-  SuggestedAction: Return `mutateAsync` (or an equivalent promise) from both data sources and preserve the draft on rejection. Add rejection coverage for workflow and generic follow-up routes.
-  Verification: Make each follow-up request return 409/503 and assert the composer retains its input, exposes the error, and does not render `Sent`.
-  Status: open
-
-- [ID: item-10]
-  Severity: warning
-  Scope: workflow session cache reconciliation
-  Evidence: `useIssueSessionDataSource.tsx:183-187` invalidates `['issues', issueNumber, 'coder-sessions']`, but `useCoderSessions.ts:18` uses `['issues', issueNumber, projectId, 'coder-sessions']`; the recovery invalidation never matches. It also omits the workflow-run session query (`useWorkflowRunSessions.ts:28`), and generic recovery invalidates only detail/transcript queries (`useGenericSessionDataSource.ts:99-102`). Reset can therefore leave lists showing the old runtime binding.
-  SuggestedAction: Invalidate the exact project-scoped session-list and workflow-run query keys for the affected source, with focused query-client assertions.
-  Verification: Seed every affected list query, complete Compact and Reset, and assert each query is invalidated and refetches the new runtime binding.
-  Status: open
-
-- [ID: item-11]
-  Severity: warning
-  Scope: issue-session cancel UI and CLI surface
-  Evidence: `useCancelSessionMutation.ts:11-20` has no success invalidation or handling for the API's `not-cancellable` terminal-state response, unlike the generic mutation. `SessionDetailShell.tsx:700-702` closes the dialog on every settlement, leaving a stale running page without feedback. Separately, `MohistCliCommands.Issue.Session.cs:47-52` omits `cancel` even though the issue-scoped API endpoint exists (`IssueRoutes.Sessions.cs:176-199`) and `mo agent session cancel` exists.
-  SuggestedAction: Reconcile issue-session queries and display the returned cancel state; add `mo issue session cancel <number> <name>` or explicitly revise the documented command-surface contract.
-  Verification: Exercise `cancelled`, terminal, and `not-cancellable` responses in the issue page, then verify CLI routing and output for a workflow session.
-  Status: open
-
-- [ID: item-12]
-  Severity: warning
-  Scope: `docs/actions/opencode.md`
-  Evidence: The changed implementation-gap note says the new Session identity and Session operation semantics are still unimplemented (`:135-140`), contradicting `design/agent-execution.md:170-174` and the issue-407 CLI documentation. This gives users conflicting guidance about the delivered logical-session contract.
-  SuggestedAction: State that issue-407 delivered logical identity and command routing while issue-409 still owns native OpenCode SDK execution.
-  Verification: Review the implementation-gap notes in `docs/actions/opencode.md`, `docs/cli-reference.md`, and `design/agent-execution.md` for one consistent issue-407/#409 boundary.
+  Scope: persisted binding restore when `workDir` is absent
+  Evidence: The public open and attach commands permit a null `WorkDir` (`packages/server/src/Mohist.Server/Sessions/Grains/IAgentSessionGrain.cs:41-55`), and the follow-up/cancel routes serialize that null into the binding (`AgentSessionFollowupRoutes.cs:142-164`, `AgentSessionCancelRoutes.cs:102-124`). The new runner decoder rejects the entire binding unless `workDir` is a non-empty string (`packages/runner/src/server/session-target.ts:176-189`), before target resolution can use a cached session or restore it. A valid-looking bound session with no work directory therefore returns `runner_unavailable` for follow-up and cannot recover command delivery after a runner restart, contrary to the persisted-binding requirement. No test covers this nullable contract path. [disallowed:public contract and recovery semantics]
+  SuggestedAction: Make `workDir` mandatory before a binding is persisted, or permit a nullable binding through the wire decoder and return a precise, actionable missing-runtime/configuration outcome. Add cache-hit and post-restart follow-up/cancel coverage for the chosen contract.
+  Verification: Open and attach both workflow and generic sessions with `workDir: null`, then exercise follow-up and cancel before and after clearing the runner cache. Verify a defined product outcome rather than target-decoding failure.
   Status: open
 
 ## Follow-up Items
@@ -107,18 +44,18 @@ _None._
 
 ## Pre-existing or Out-of-scope Items
 
-- [ID: item-13]
+- [ID: item-4]
   Severity: info
   Scope: `docs/cli-reference.md:200`
-  Evidence: The reference lists `mo issue session get`, but the command registered by `MohistCliCommands.Issue.Session.cs:61` is `show`. The line is unchanged from `master`; the current docs delta did not introduce it.
-  SuggestedAction: Change `get` to `show` in a documentation maintenance change.
+  Evidence: The CLI reference names `mo issue session get`, while the registered command is `show` in `packages/cli/Mohist.Cli/MohistCliCommands.Issue.Session.cs:61`. The erroneous reference is unchanged from `master` and is unrelated to the issue-407 implementation.
+  SuggestedAction: Correct `get` to `show` in a documentation maintenance change.
   Status: pre-existing
 
-- [ID: item-14]
+- [ID: item-5]
   Severity: info
   Scope: `docs/epics.md:30,57`
-  Evidence: The page correctly says `p0-p3` at line 30 but says `p0-p4` in its field table. CLI validation accepts `p0|p1|p2|p3`.
-  SuggestedAction: Correct the table to `p0-p3`.
+  Evidence: The page states the accepted priority range is `p0-p3` at line 30 but says `p0-p4` in the field table. CLI validation accepts only `p0|p1|p2|p3`. This inconsistency predates the issue-407 work.
+  SuggestedAction: Change the field table to `p0-p3` in a documentation maintenance change.
   Status: pre-existing
 
-<promise>FAIL</promise>
+<promise>PASS</promise>
