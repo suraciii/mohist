@@ -172,7 +172,7 @@
     {
       "id": "T-008",
       "title": "Align Issue and Repo CLI with --repo and in-use deletion surfacing",
-      "spec": "specs/repository-cli-commands/spec.md",
+      "spec": "specs/repository-cli-commands/spec.md, specs/issue-repository-binding/spec.md#the-issue-cli-uses---repo",
       "description": "Replace --repository with --repo on mo issue create and add --repo to mo issue update and mo issue list. Send repositoryName in create/update bodies and list queries. Render the stored target name in list and show tables even when metadata is unresolved. Ensure mo repo delete surfaces the server's in-use failure through existing envelope handling with non-zero exit and no success output. Reject --repository on all Issue commands.",
       "acceptanceCriteria": [
         "mo issue create accepts --repo <name>; omitting it uses the default",
