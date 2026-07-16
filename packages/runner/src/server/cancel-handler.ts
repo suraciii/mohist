@@ -24,8 +24,9 @@ import {
   sessionTargetFromWireTarget,
   type CancelAgentSessionPayload,
   type CancelAgentSessionReply,
-  type FollowupTarget,
+  type FollowupTargetResolution,
   type FollowupTargetResolver,
+  isFollowupTargetUnavailable,
 } from "./session-target.js"
 
 export interface CancelHandlerDeps {
@@ -79,13 +80,15 @@ async function handleCancel(
     return { state: "not-cancellable" }
   }
 
-  let resolved: FollowupTarget | null
+  let resolved: FollowupTargetResolution
   try {
     resolved = await resolver(sessionTarget)
   } catch (error) {
     console.error("cancel target resolver threw:", error)
     return { state: "not-cancellable" }
   }
+
+  if (isFollowupTargetUnavailable(resolved)) return { state: "unavailable" }
 
   if (!resolved) {
     // No live ACP session entry for this target. There is nothing to

@@ -42,6 +42,7 @@ internal sealed class TranscriptAccumulator
     {
         foreach (var row in rows)
         {
+            CaptureRuntime(row);
             var textType = ToTextPartType(row.Type);
             if (textType is not null)
             {
@@ -172,6 +173,12 @@ internal sealed class TranscriptAccumulator
         _inputCreatedAt = row.CreatedAt;
     }
 
+    private void CaptureRuntime(RuntimeEventEnvelope row)
+    {
+        if (_runtimeSessionId is null && !string.IsNullOrWhiteSpace(row.AgentSessionId))
+            _runtimeSessionId = row.AgentSessionId;
+    }
+
     private void CaptureRecoveryRuntime(RuntimeEventEnvelope row)
     {
         if (_promptText is not null || string.IsNullOrWhiteSpace(row.AgentSessionId))
@@ -208,7 +215,7 @@ internal sealed class TranscriptAccumulator
 
         return new AgentSessionTranscriptTurnUpsert(
             session.Id,
-            Sequence: _inputCreatedAt.HasValue ? 1 : 0,
+            Sequence: 0,
             promptText,
             AgentSessionJsonHelper.NormalizePromptKind(promptKind),
             _inputCreatedAt ?? session.Status.CreatedAt,

@@ -210,7 +210,7 @@ describe('useSessionTranscript live parity and convergence', () => {
     const { result } = renderLiveTranscript()
     expect(result.current.isFinalizing).toBe(false)
     act(() => {
-      dispatchAgentEvent('session.closed', { runtimeSessionId: 'acp-123', status: 'completed' })
+      dispatchAgentEvent('session.closed', { sessionId: 'session-123', runtimeSessionId: 'acp-123', status: 'completed' })
     })
     await waitFor(() => expect(result.current.isFinalizing).toBe(true))
   })
@@ -218,7 +218,7 @@ describe('useSessionTranscript live parity and convergence', () => {
   it('appends one recovery part for a single live recovery event', async () => {
     const { result } = renderLiveTranscript()
     act(() => {
-      dispatchAgentEvent('coder_recovery_status', { issueId: '123', projectId: 'project-1', executionId: 'exec-123', runtimeSessionId: 'acp-123', status: 'recovering', attempt: 1 })
+      dispatchAgentEvent('coder_recovery_status', { issueId: '123', projectId: 'project-1', executionId: 'exec-123', sessionId: 'session-123', runtimeSessionId: 'acp-123', status: 'recovering', attempt: 1 })
     })
     await waitFor(() => {
       const recoveryParts = result.current.turns.at(-1)?.assistant.filter((part) => part.type === 'error' && part.kind === 'recovery')
@@ -230,6 +230,7 @@ describe('useSessionTranscript live parity and convergence', () => {
     const { result } = renderLiveTranscript()
     act(() => {
       dispatchAgentEvent('session.liveness', {
+        sessionId: 'session-123',
         runtimeSessionId: 'acp-123',
         status: 'probing',
         lastDataAt: '2024-01-01T00:00:00.000Z',
@@ -239,6 +240,7 @@ describe('useSessionTranscript live parity and convergence', () => {
         activeProbeVersion: 4,
       })
       dispatchAgentEvent('session.liveness', {
+        sessionId: 'session-123',
         runtimeSessionId: 'acp-123',
         status: 'running',
         lastDataAt: '2024-01-01T00:00:02.000Z',
@@ -415,7 +417,7 @@ describe('useSessionTranscript live parity and convergence', () => {
   it('appends recovery/terminal errors as dedicated parts', async () => {
     const { result } = renderLiveTranscript()
     act(() => {
-      dispatchAgentEvent('session.closed', { runtimeSessionId: 'acp-123', status: 'failed', failureReason: 'Out of memory' })
+      dispatchAgentEvent('session.closed', { sessionId: 'session-123', runtimeSessionId: 'acp-123', status: 'failed', failureReason: 'Out of memory' })
     })
     await waitFor(() => {
       const errorParts = result.current.turns.at(-1)?.assistant.filter((part): part is ErrorPart => part.type === 'error' && part.kind === 'failed')

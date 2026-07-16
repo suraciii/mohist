@@ -547,6 +547,16 @@ public class GenericAgentSessionFollowupApiSpecs : IAsyncLifetime
     public async Task CanonicalFollowupRoute_WorkflowSession_UsesWorkflowTarget()
     {
         var (project, _, workflowRunId, sessionName, sessionId) = await CreateWorkflowSessionAsync("canonical-workflow-shape");
+        await using (var scope = _fixture.Services.CreateAsyncScope())
+        {
+            var querier = scope.ServiceProvider.GetRequiredService<AgentSessionQuerier>();
+            var persisted = await querier.ResolveCanonicalFollowupTargetAsync(project.Id, sessionId);
+            Assert.NotNull(persisted);
+            Assert.Equal("opencode", persisted!.Runtime);
+            Assert.Equal(WorkDirFor(project.Id), persisted.WorkDir);
+            Assert.Equal(sessionId, persisted.RuntimeSessionId);
+            Assert.Equal(_runnerId, persisted.RunnerId);
+        }
         var tracker = _fixture.Services.GetRequiredService<RunnerConnectionTracker>();
         var runnerHub = _fixture.Services.GetRequiredService<IHubContext<RunnerHub>>() as RecordingRunnerHubContext
             ?? throw new InvalidOperationException("Recording runner hub context was not registered.");
@@ -567,7 +577,44 @@ public class GenericAgentSessionFollowupApiSpecs : IAsyncLifetime
             Assert.Equal("workflow", target.GetProperty("kind").GetString());
             Assert.Equal(workflowRunId, target.GetProperty("workflowRunId").GetString());
             Assert.Equal(sessionName, target.GetProperty("sessionName").GetString());
-            Assert.Equal(sessionId, target.GetProperty("binding").GetProperty("runtimeSessionId").GetString());
+            var binding = target.GetProperty("binding");
+            Assert.True(binding.ValueKind == JsonValueKind.Object, payload.GetRawText());
+            Assert.Equal(sessionId, binding.GetProperty("runtimeSessionId").GetString());
+        }
+        finally
+        {
+            tracker.Unregister(_runnerId);
+        }
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
+    public async Task Followup_AfterReset_IgnoresTerminalStateFromPredecessorRuntime()
+    {
+        var (project, sessionId, firstRuntimeSessionId) = await CreateIdleGenericSessionAsync("followup-reset-terminal");
+        var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
+        await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(new[]
+        {
+            new AgentSessionRuntimeEventInput(RuntimeEventTypes.SessionClosed, """{"status":"completed"}"""),
+        }, firstRuntimeSessionId));
+        await grain.FlushForTestAsync();
+        _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(6));
+        await grain.ResetAsync(new ResetAgentSessionCommand(firstRuntimeSessionId, "runtime-replacement"));
+
+        var tracker = _fixture.Services.GetRequiredService<RunnerConnectionTracker>();
+        var runnerHub = _fixture.Services.GetRequiredService<IHubContext<RunnerHub>>() as RecordingRunnerHubContext
+            ?? throw new InvalidOperationException("Recording runner hub context was not registered.");
+        runnerHub.Clear();
+        runnerHub.SetInvocationResponse("ReceiveFollowup", new RunnerFollowupDeliveryResult(true));
+        tracker.Register(_runnerId, "conn-followup-reset-terminal");
+        try
+        {
+            using var response = await PostGenericFollowupAsync(project.Id, sessionId, new { text = "continue on the replacement" });
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var payload = JsonSerializer.SerializeToElement(Assert.Single(runnerHub.Invocations).Arguments.Single());
+            Assert.Equal("runtime-replacement", payload.GetProperty("target").GetProperty("binding").GetProperty("runtimeSessionId").GetString());
         }
         finally
         {
@@ -799,12 +846,15 @@ public class GenericAgentSessionFollowupApiSpecs : IAsyncLifetime
             .Select(s => s.Id)
             .SingleAsync();
         var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
-        await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand(
+        var attached = await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand(
             AgentSessionId: sessionId,
             Model: null,
             WorkDir: WorkDirFor(project.Id),
             ChangeDir: null,
-            ProcessPid: 1234));
+             ProcessPid: 1234,
+             Runtime: "opencode"));
+        Assert.Equal(WorkDirFor(project.Id), attached.WorkDir);
+        Assert.Equal("opencode", attached.Runtime);
 
         return (project, new IssueRef(issue.Id, issue.Number), workflowRunId, sessionName, sessionId);
     }

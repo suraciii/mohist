@@ -163,6 +163,7 @@ describe('Terminal session events trigger refetch', () => {
 
     act(() => {
       dispatchAgentEvent('session.closed', {
+        sessionId: 'session-123',
         runtimeSessionId: 'acp-123',
         status: 'completed',
       })
@@ -186,6 +187,7 @@ describe('Terminal session events trigger refetch', () => {
 
     act(() => {
       dispatchAgentEvent('session.closed', {
+        sessionId: 'session-123',
         runtimeSessionId: 'acp-123',
         status: 'failed',
         failureReason: 'Out of memory',
@@ -215,6 +217,7 @@ describe('Terminal session events trigger refetch', () => {
 
     act(() => {
       dispatchAgentEvent('session.closed', {
+        sessionId: 'session-123',
         runtimeSessionId: 'acp-123',
         status: 'cancelled',
         failureReason: 'User cancelled',
@@ -247,6 +250,7 @@ describe('Terminal session events trigger refetch', () => {
         issueId: '123',
         projectId: 'project-1',
         executionId: 'exec-123',
+        sessionId: 'session-123',
         runtimeSessionId: 'acp-123',
         status: 'recovered',
         attempt: 1,
@@ -271,6 +275,7 @@ describe('Terminal session events trigger refetch', () => {
 
     act(() => {
       dispatchAgentEvent('session.liveness', {
+        sessionId: 'session-123',
         runtimeSessionId: 'acp-123',
         status: 'failed',
         lastDataAt: '2024-01-01T00:00:02.000Z',

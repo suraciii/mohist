@@ -13,9 +13,13 @@ interface LiveSessionState {
 
 function matchesCurrentBinding(
   session: WorkflowRunSession,
-  event: { runtimeSessionId?: string | null },
+  event: { sessionId?: string | null; runtimeSessionId?: string | null; runtime?: string | null },
 ) {
-  return event.runtimeSessionId != null && event.runtimeSessionId === session.runtimeSessionId
+  return session.runtime != null
+    && session.runtimeSessionId != null
+    && event.sessionId === session.id
+    && event.runtime === session.runtime
+    && event.runtimeSessionId === session.runtimeSessionId
 }
 
 export type WorkflowRunSessionsFetcher = typeof getWorkflowRunSessions

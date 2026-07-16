@@ -33,7 +33,8 @@ public static partial class AgentSessionExtensions
             string? workDir,
             string? changeDir,
             int? processPid,
-            DateTime now)
+            DateTime now,
+            string? runtime = null)
         {
             _ = changeDir;
             _ = processPid;
@@ -49,7 +50,8 @@ public static partial class AgentSessionExtensions
 
             session.Runtime = session.Runtime with
             {
-                WorkDir = session.Runtime.WorkDir ?? workDir
+                WorkDir = string.IsNullOrWhiteSpace(session.Runtime.WorkDir) ? workDir : session.Runtime.WorkDir,
+                Runtime = string.IsNullOrWhiteSpace(session.Runtime.Runtime) ? NormalizeRuntime(runtime) : session.Runtime.Runtime,
             };
             session.Settings = session.Settings with { Model = model ?? session.Settings.Model };
             session.Status = session.Status with

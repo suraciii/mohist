@@ -15,6 +15,7 @@ function session(overrides: Partial<WorkflowRunSession>): WorkflowRunSession {
     workflowRunId: overrides.workflowRunId ?? 'wr-1',
     sessionName: overrides.sessionName ?? 'plan',
     runtimeSessionId: overrides.runtimeSessionId ?? 'runtime-1',
+    runtime: overrides.runtime ?? 'opencode',
     projectId: overrides.projectId ?? 'project-1',
     issueNumber: overrides.issueNumber ?? 42,
     runnerId: overrides.runnerId ?? 'runner-1',
@@ -59,7 +60,7 @@ describe('useWorkflowRunSessions context health', () => {
 
     act(() => {
       dispatchAgentEvent('context_health_update', {
-        sessionId: 'sess-1', runtimeSessionId: 'runtime-1', healthStatus: 'red',
+        sessionId: 'sess-1', runtime: 'opencode', runtimeSessionId: 'runtime-1', healthStatus: 'red',
         contextUsagePercent: 91, contextWindowUsed: 182000, contextWindowSize: 200000,
       })
     })
@@ -69,7 +70,7 @@ describe('useWorkflowRunSessions context health', () => {
     }))
   })
 
-  it('updates a session matched only by runtimeSessionId', async () => {
+  it('ignores context health updates without the complete runtime binding', async () => {
     sessions = [session({})]
     const hook = renderSessions()
     await waitFor(() => expect(hook.result.current.sessions).toHaveLength(1))
@@ -81,9 +82,7 @@ describe('useWorkflowRunSessions context health', () => {
       })
     })
 
-    await waitFor(() => expect(hook.result.current.sessions[0].usage).toMatchObject({
-      healthStatus: 'yellow', contextUsagePercent: 65,
-    }))
+    expect(hook.result.current.sessions[0].usage).toBeUndefined()
   })
 
   it('ignores context health updates for another session', async () => {
@@ -93,7 +92,7 @@ describe('useWorkflowRunSessions context health', () => {
 
     act(() => {
       dispatchAgentEvent('context_health_update', {
-        sessionId: 'sess-other', runtimeSessionId: 'runtime-other', healthStatus: 'red',
+        sessionId: 'sess-other', runtime: 'opencode', runtimeSessionId: 'runtime-other', healthStatus: 'red',
         contextUsagePercent: 95, contextWindowUsed: 190000, contextWindowSize: 200000,
       })
     })

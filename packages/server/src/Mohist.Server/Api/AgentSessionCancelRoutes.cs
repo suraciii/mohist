@@ -92,17 +92,20 @@ public static class AgentSessionCancelRoutes
                 new { sessionId = ex.SessionId, hint = "reset" });
         }
 
-        object? binding = !string.IsNullOrWhiteSpace(target.Runtime)
-            && !string.IsNullOrWhiteSpace(target.RuntimeSessionId)
-            && !string.IsNullOrWhiteSpace(target.WorkDir)
-            ? new
-            {
-                runtime = target.Runtime,
-                runtimeSessionId = target.RuntimeSessionId,
-                runnerId = target.RunnerId,
-                workDir = target.WorkDir,
-            }
-            : null;
+        if (string.IsNullOrWhiteSpace(target.Runtime)
+            || string.IsNullOrWhiteSpace(target.RuntimeSessionId))
+        {
+            var missing = new RuntimeSessionMissingException(target.SessionId, target.RuntimeSessionId, target.Runtime);
+            return ApiResults.Conflict(missing.Message, "runtime_session_missing", new { sessionId = missing.SessionId, hint = "reset" });
+        }
+
+        object binding = new
+        {
+            runtime = target.Runtime,
+            runtimeSessionId = target.RuntimeSessionId,
+            runnerId = target.RunnerId,
+            workDir = target.WorkDir,
+        };
         object wireTarget = string.Equals(target.SourceKind, "workflow", StringComparison.Ordinal)
             ? new
             {

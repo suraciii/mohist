@@ -100,6 +100,7 @@ function setupRunningIssueMocks() {
       sessionName: 'session-1',
       workflowRunId: 'wr-1',
       runtimeSessionId: 'acp-1',
+      runtime: 'opencode',
       projectId: 'proj-1',
       issueNumber: 123,
       runnerId: 'runner-1',
@@ -131,7 +132,7 @@ function setupRunningIssueMocks() {
   }
 }
 
-async function renderIssueSessionPage() {
+async function renderIssueSessionPage(initialEntry = '/issues/123/workflow/sessions/session-1') {
   const queryClient = createQueryClient()
   const result = render(
     <QueryClientProvider client={queryClient}>
@@ -142,7 +143,7 @@ async function renderIssueSessionPage() {
         updatedAt: '2026-01-01T00:00:00Z',
         repositories: [],
       }]}>
-        <MemoryRouter initialEntries={['/issues/123/workflow/sessions/session-1']}>
+        <MemoryRouter initialEntries={[initialEntry]}>
           <Routes>
             <Route
               path="/issues/:number/workflow/sessions/:sessionName"
@@ -166,6 +167,7 @@ function baseRunningMetadata(overrides: Partial<AgentSessionMetadata> = {}): Age
     id: 'agent-session-1',
     sessionName: 'session-1',
     runtimeSessionId: 'acp-1',
+    runtime: 'opencode',
     title: 'Test session',
     status: 'active',
     statusKind: 'live',
@@ -256,5 +258,19 @@ describe('SessionPage workflow cancel control', () => {
       expect(container.querySelector('[data-testid="session-followup-composer"]')).toHaveAttribute('data-disabled', 'true')
     })
     expect(container.querySelector('[data-testid="session-recovery-actions"]')).not.toBeNull()
+  })
+
+  it('makes a historical runtime view read-only for followup and cancel', async () => {
+    _metadataData = baseRunningMetadata({
+      runtimeSessionLineage: [
+        { runtimeSessionId: 'acp-old', runtime: 'opencode', boundAt: '2026-06-15T09:00:00.000Z' },
+        { runtimeSessionId: 'acp-1', runtime: 'opencode', boundAt: '2026-06-15T10:00:00.000Z' },
+      ],
+    })
+
+    const { container } = await renderIssueSessionPage('/issues/123/workflow/sessions/session-1?rt=acp-old')
+
+    expect(container.querySelector('[data-testid="session-followup-composer"]')).toHaveAttribute('data-disabled', 'true')
+    expect(container.querySelector('[data-testid="session-cancel-trigger"]')).toBeNull()
   })
 })

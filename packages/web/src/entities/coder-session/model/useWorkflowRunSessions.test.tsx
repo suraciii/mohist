@@ -23,6 +23,7 @@ function session(overrides: Partial<WorkflowRunSession>): WorkflowRunSession {
     workflowRunId: overrides.workflowRunId ?? 'wr-1',
     sessionName: overrides.sessionName ?? 'plan',
     runtimeSessionId: overrides.runtimeSessionId ?? null,
+    runtime: overrides.runtime ?? 'opencode',
     projectId: overrides.projectId ?? 'project-1',
     issueNumber: overrides.issueNumber ?? 42,
     runnerId: overrides.runnerId ?? 'runner-1',
@@ -107,6 +108,7 @@ describe('useWorkflowRunSessions', () => {
         ;(dispatchAgentEvent as any)('usage.updated', {
           sessionId: 'sess-1',
           runtimeSessionId: 'acp-1',
+          runtime: 'opencode',
           contextUsagePercent: 72,
           healthStatus: 'yellow',
         })
@@ -171,6 +173,7 @@ describe('useWorkflowRunSessions', () => {
       act(() => {
         ;(dispatchAgentEvent as any)('usage.updated', {
           sessionId: 'sess-1',
+          runtime: 'opencode',
           contextUsagePercent: 72,
           healthStatus: 'yellow',
         })
@@ -198,7 +201,9 @@ describe('useWorkflowRunSessions', () => {
       await waitFor(() => expect(result.current.sessions).toHaveLength(1))
       act(() => {
         dispatchAgentEvent('session.closed', {
+          sessionId: 'sess-1',
           runtimeSessionId: 'acp-1',
+          runtime: 'opencode',
           status: 'completed',
         })
       })
@@ -224,7 +229,9 @@ describe('useWorkflowRunSessions', () => {
       await waitFor(() => expect(result.current.sessions).toHaveLength(1))
       act(() => {
         dispatchAgentEvent('session.closed', {
+          sessionId: 'sess-1',
           runtimeSessionId: 'acp-old',
+          runtime: 'opencode',
           status: 'completed',
         })
       })
@@ -253,11 +260,41 @@ describe('useWorkflowRunSessions', () => {
         ;(dispatchAgentEvent as any)('usage.updated', {
           sessionId: 'sess-1',
           runtimeSessionId: 'acp-old',
+          runtime: 'opencode',
           contextUsagePercent: 99,
         })
       })
 
       expect(result.current.sessions[0].usage?.contextUsagePercent).toBe(30)
+    })
+
+    it('updates only the session with the matching logical id and runtime binding', async () => {
+      _sessionsData = [
+        session({ id: 'sess-opencode', runtime: 'opencode', runtimeSessionId: 'shared-runtime-id', usage: { contextUsagePercent: 20 } }),
+        session({ id: 'sess-other', runtime: 'other-runtime', runtimeSessionId: 'shared-runtime-id', usage: { contextUsagePercent: 30 } }),
+      ]
+
+      const queryClient = createQueryClient()
+      const wrapper = ({ children }: { children: ReactNode }) => (
+        <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+      )
+      const { result } = renderHook(
+        () => useWorkflowRunSessions('wr-1', workflowRunSessionsFetcher),
+        { wrapper },
+      )
+
+      await waitFor(() => expect(result.current.sessions).toHaveLength(2))
+      act(() => {
+        ;(dispatchAgentEvent as any)('usage.updated', {
+          sessionId: 'sess-other',
+          runtime: 'other-runtime',
+          runtimeSessionId: 'shared-runtime-id',
+          contextUsagePercent: 75,
+        })
+      })
+
+      expect(result.current.sessions[0].usage?.contextUsagePercent).toBe(20)
+      expect(result.current.sessions[1].usage?.contextUsagePercent).toBe(75)
     })
 
   })

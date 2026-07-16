@@ -87,10 +87,20 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             // already-bound RunnerId is left untouched so workflow
             // sessions remain sticky across reopens (the existing
             // semantics the runner-side retry flow relies on).
-            if (string.IsNullOrWhiteSpace(_session.Runtime.RunnerId)
+            if ((string.IsNullOrWhiteSpace(_session.Runtime.RunnerId)
                 && !string.IsNullOrWhiteSpace(command.RunnerId))
+                || (string.IsNullOrWhiteSpace(_session.Runtime.WorkDir)
+                    && !string.IsNullOrWhiteSpace(command.WorkDir)))
             {
-                _session.Runtime = _session.Runtime with { RunnerId = command.RunnerId };
+                _session.Runtime = _session.Runtime with
+                {
+                    RunnerId = string.IsNullOrWhiteSpace(_session.Runtime.RunnerId)
+                        ? command.RunnerId
+                        : _session.Runtime.RunnerId,
+                    WorkDir = string.IsNullOrWhiteSpace(_session.Runtime.WorkDir)
+                        ? command.WorkDir
+                        : _session.Runtime.WorkDir,
+                };
             }
         }
 
@@ -122,7 +132,8 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             command.WorkDir,
             command.ChangeDir,
             command.ProcessPid,
-            now);
+            now,
+            command.Runtime);
         if (events.Count == 0)
         {
             await _stateStore.SaveAsync(SessionId, session);

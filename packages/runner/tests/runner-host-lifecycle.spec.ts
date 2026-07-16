@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { RunnerHost } from "../src/runtime/host.js"
 import type { SessionTarget } from "../src/runtime/acp-connection.js"
 import type { SessionCommandRequest } from "../src/server/session-command-handler.js"
+import type { FollowupTargetResolution } from "../src/server/session-target.js"
 import { deferred } from "./support/deferred.js"
 
 const POLL_INTERVAL_MS = 10
@@ -15,6 +16,8 @@ const mocks = vi.hoisted(() => ({
   report: vi.fn(),
   uploadTaskLog: vi.fn(),
   fetchConfig: vi.fn(async () => null),
+  workflowAgentSessionRuntimeEvents: vi.fn(),
+  agentSessionRuntimeEvents: vi.fn(),
   startSignalR: vi.fn(),
   stopSignalR: vi.fn(),
   getConnectionId: vi.fn(() => "conn-1"),
@@ -36,6 +39,8 @@ const {
   report,
   uploadTaskLog,
   fetchConfig,
+  workflowAgentSessionRuntimeEvents,
+  agentSessionRuntimeEvents,
   startSignalR,
   stopSignalR,
   getConnectionId,
@@ -50,7 +55,7 @@ const {
 } = mocks
 
 let capturedOnReconnected: ((connectionId: string) => void) | null = null
-let capturedFollowupTargetResolver: ((target: SessionTarget) => { connection: unknown; sessionId: string; projectId: string } | null) | null = null
+let capturedFollowupTargetResolver: ((target: SessionTarget) => FollowupTargetResolution | Promise<FollowupTargetResolution>) | null = null
 let capturedSessionCommandHandler: ((request: SessionCommandRequest) => unknown) | null = null
 
 vi.mock("../src/server/connection.js", () => ({
@@ -62,6 +67,8 @@ vi.mock("../src/server/connection.js", () => ({
     report = report
     uploadTaskLog = uploadTaskLog
     fetchConfig = fetchConfig
+    workflowAgentSessionRuntimeEvents = workflowAgentSessionRuntimeEvents
+    agentSessionRuntimeEvents = agentSessionRuntimeEvents
   },
 }))
 
@@ -498,6 +505,31 @@ describe("RunnerHost", () => {
     expect(resolved).toEqual({ connection, sessionId: "acp-1", projectId: "project-from-payload" })
   })
 
+  it("GenericFollowupResolver_StartupBeforeSharedAcpInitialization_IsTemporarilyUnavailable", () => {
+    new RunnerHost({
+      serverUrl: "http://localhost:3456",
+      runnerId: "runner-test",
+      runnerRoot: "/tmp/mohist-runner-test",
+      pollIntervalMs: 1,
+      heartbeatIntervalMs: 60_000,
+      dispatchLivenessProbeIntervalMs: 60_000,
+    })
+
+    const resolved = capturedFollowupTargetResolver?.({
+      kind: "generic",
+      projectId: "project-1",
+      sessionId: "gen-1",
+      binding: {
+        runtime: "opencode",
+        runtimeSessionId: "runtime-1",
+        runnerId: "runner-test",
+        workDir: "/tmp/work",
+      },
+    })
+
+    expect(resolved).toEqual({ unavailable: true })
+  })
+
   it("GenericFollowupResolver_CacheMissResumesPersistedBindingOnce", async () => {
     vi.clearAllMocks()
     const resumeSession = vi.fn(async () => undefined)
@@ -510,7 +542,13 @@ describe("RunnerHost", () => {
       dispatchLivenessProbeIntervalMs: 60_000,
     }) as unknown as { sharedAcpConnection: unknown }
     const connection = { prompt: vi.fn(), cancel: vi.fn(), resumeSession }
-    host.sharedAcpConnection = { connection }
+    host.sharedAcpConnection = {
+      connection,
+      processPid: null,
+      setSessionHandlers: vi.fn(),
+      clearSessionHandlers: vi.fn(),
+      shutdown: vi.fn(async () => undefined),
+    }
     const target: SessionTarget = {
       kind: "generic",
       projectId: "project-1",
@@ -532,6 +570,125 @@ describe("RunnerHost", () => {
     ])
     expect(resumeSession).toHaveBeenCalledTimes(1)
     expect(resumeSession).toHaveBeenCalledWith({ sessionId: "runtime-1", cwd: "/tmp/work", mcpServers: [] })
+  })
+
+  it("GenericFollowupResolver_RestoredSessionRoutesRuntimeUpdatesAndPermissions", async () => {
+    vi.clearAllMocks()
+    const updateHandlers = new Map<string, (notification: unknown) => Promise<void>>()
+    const permissionHandlers = new Map<string, (params: unknown) => Promise<unknown>>()
+    const resumeSession = vi.fn(async () => undefined)
+    const host = new RunnerHost({
+      serverUrl: "http://localhost:3456",
+      runnerId: "runner-test",
+      runnerRoot: "/tmp/mohist-runner-test",
+      pollIntervalMs: 1,
+      heartbeatIntervalMs: 60_000,
+      dispatchLivenessProbeIntervalMs: 60_000,
+    }) as unknown as { sharedAcpConnection: unknown }
+    const connection = { prompt: vi.fn(), cancel: vi.fn(), resumeSession }
+    host.sharedAcpConnection = {
+      connection,
+      processPid: null,
+      setSessionHandlers(sessionId: string, update: (notification: unknown) => Promise<void>, permission: (params: unknown) => Promise<unknown>) {
+        updateHandlers.set(sessionId, update)
+        permissionHandlers.set(sessionId, permission)
+      },
+      clearSessionHandlers: vi.fn(),
+      shutdown: vi.fn(async () => undefined),
+    }
+    const target: SessionTarget = {
+      kind: "generic",
+      projectId: "project-1",
+      sessionId: "gen-1",
+      binding: {
+        runtime: "opencode",
+        runtimeSessionId: "runtime-1",
+        runnerId: "runner-test",
+        workDir: "/tmp/work",
+      },
+    }
+
+    await expect(Promise.resolve(capturedFollowupTargetResolver?.(target))).resolves.toEqual({
+      connection,
+      sessionId: "runtime-1",
+      projectId: "project-1",
+    })
+    const update = updateHandlers.get("runtime-1")
+    const permission = permissionHandlers.get("runtime-1")
+    if (!update || !permission) throw new Error("restored session handlers were not registered")
+
+    await update({
+      sessionId: "runtime-1",
+      update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "restored reply" } },
+    })
+    await update({
+      sessionId: "runtime-1",
+      update: { sessionUpdate: "tool_call", toolCall: { toolName: "bash", status: "in_progress" } },
+    })
+
+    expect(agentSessionRuntimeEvents).toHaveBeenNthCalledWith(
+      1,
+      "project-1",
+      "gen-1",
+      expect.objectContaining({
+        runtimeSessionId: "runtime-1",
+        runtimeEvents: [expect.objectContaining({
+          type: "message.delta",
+          payload: expect.objectContaining({ sessionUpdate: "agent_message_chunk" }),
+        })],
+      }),
+      expect.any(AbortSignal),
+    )
+    expect(agentSessionRuntimeEvents).toHaveBeenNthCalledWith(
+      2,
+      "project-1",
+      "gen-1",
+      expect.objectContaining({
+        runtimeEvents: [expect.objectContaining({ type: "tool_call.started" })],
+      }),
+      expect.any(AbortSignal),
+    )
+    await expect(permission({
+      options: [{ kind: "allow_once", optionId: "allow" }],
+    })).resolves.toEqual({ outcome: { outcome: "selected", optionId: "allow" } })
+  })
+
+  it("GenericFollowupResolver_StalledRestore_IsTemporarilyUnavailable", async () => {
+    vi.clearAllMocks()
+    const resumeSession = vi.fn(() => new Promise<never>(() => {}))
+    const setSessionHandlers = vi.fn()
+    const host = new RunnerHost({
+      serverUrl: "http://localhost:3456",
+      runnerId: "runner-test",
+      runnerRoot: "/tmp/mohist-runner-test",
+      pollIntervalMs: 1,
+      heartbeatIntervalMs: 60_000,
+      dispatchLivenessProbeIntervalMs: 60_000,
+    }) as unknown as { sharedAcpConnection: unknown }
+    host.sharedAcpConnection = {
+      connection: { prompt: vi.fn(), cancel: vi.fn(), resumeSession },
+      processPid: null,
+      setSessionHandlers,
+      clearSessionHandlers: vi.fn(),
+      shutdown: vi.fn(async () => undefined),
+    }
+    const target: SessionTarget = {
+      kind: "generic",
+      projectId: "project-1",
+      sessionId: "gen-1",
+      binding: {
+        runtime: "opencode",
+        runtimeSessionId: "runtime-1",
+        runnerId: "runner-test",
+        workDir: "/tmp/work",
+      },
+    }
+
+    const resolution = capturedFollowupTargetResolver?.(target)
+    await vi.advanceTimersByTimeAsync(30_000)
+
+    await expect(Promise.resolve(resolution)).resolves.toEqual({ unavailable: true })
+    expect(setSessionHandlers).not.toHaveBeenCalled()
   })
 
   it("GenericFollowupResolver_ResumeFailureReturnsMissingTarget", async () => {

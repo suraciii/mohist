@@ -306,7 +306,7 @@ public static class RunnerRoutes
             try
             {
                 var session = await sessions.GetGrain(sessionId).AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand(
-                    req.RuntimeSessionId, req.Model, req.WorkDir, req.ChangeDir, req.ProcessPid));
+                    req.RuntimeSessionId, req.Model, req.WorkDir, req.ChangeDir, req.ProcessPid, Runtime: "opencode"));
                 return Results.Ok(ToRunnerAgentSession(projectId, workflowRunId, sessionName, session));
             }
             catch (InvalidOperationException ex)
@@ -391,7 +391,7 @@ public static class RunnerRoutes
             try
             {
                 var session = await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand(
-                    req.RuntimeSessionId, req.Model, req.WorkDir, req.ChangeDir, req.ProcessPid));
+                    req.RuntimeSessionId, req.Model, req.WorkDir, req.ChangeDir, req.ProcessPid, Runtime: "opencode"));
                 if (!string.IsNullOrWhiteSpace(req.AgentJobId)
                     && !string.IsNullOrWhiteSpace(req.WorkId))
                 {

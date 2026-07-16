@@ -568,6 +568,7 @@ public class CliIssueSessionSpecs
     [InlineData("compact", new string[] { })]
     [InlineData("reset", new string[] { })]
     [InlineData("followup", new string[] { "--text", "x" })]
+    [InlineData("cancel", new string[] { })]
     public async Task SessionSubcommand_ProjectIdOverride_UsesProjectIdArgument(string verb, string[] extraArgs)
     {
         var (http, handler, output, error, fileSystem, executor) = SetupEnv((req, _) =>
@@ -594,6 +595,7 @@ public class CliIssueSessionSpecs
     [InlineData("compact", new string[] { })]
     [InlineData("reset", new string[] { })]
     [InlineData("followup", new string[] { "--text", "x" })]
+    [InlineData("cancel", new string[] { })]
     public async Task SessionSubcommand_ProjectOverride_UsesProjectArgument(string verb, string[] extraArgs)
     {
         var (http, handler, output, error, fileSystem, executor) = SetupEnv((req, _) =>
@@ -620,6 +622,7 @@ public class CliIssueSessionSpecs
     [InlineData("compact")]
     [InlineData("reset")]
     [InlineData("followup")]
+    [InlineData("cancel")]
     public async Task SessionSubcommand_InvalidOutput_FailsWithoutCallingApi(string verb)
     {
         var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>

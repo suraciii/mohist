@@ -44,7 +44,7 @@ export function registerSessionCommandHandler(
   conn: signalR.HubConnection,
   deps: SessionCommandHandlerDeps,
 ): void {
-  const inFlight = new Map<string, Promise<SessionCommandResult>>()
+  const inFlight = new Map<string, { request: SessionCommandRequest; operation: Promise<SessionCommandResult> }>()
   conn.on("SessionCommand", async (request: SessionCommandRequest | null | undefined) => {
     const handler = deps.handler
     const journal = deps.journal
@@ -54,16 +54,19 @@ export function registerSessionCommandHandler(
 
     const key = JSON.stringify([request.sessionId, request.operationId])
     const existing = inFlight.get(key)
-    if (existing) return await existing
+    if (existing) {
+      if (!sameRequest(existing.request, request)) return unavailable()
+      return await existing.operation
+    }
 
     const operation = handleCommand(request, handler, journal, deps.reconcileStarted)
-    inFlight.set(key, operation)
+    inFlight.set(key, { request, operation })
     try {
       return await operation
     } catch {
       return { ok: false, error: "unavailable" } satisfies SessionCommandResult
     } finally {
-      inFlight.delete(key)
+      if (inFlight.get(key)?.operation === operation) inFlight.delete(key)
     }
   })
 }

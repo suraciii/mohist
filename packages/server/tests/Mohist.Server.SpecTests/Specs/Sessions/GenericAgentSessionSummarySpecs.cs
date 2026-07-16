@@ -271,7 +271,7 @@ public class GenericAgentSessionSummarySpecs
         {
             id = sessionId,
             metadata = new { labels },
-            runtime = new { runnerId = $"runner-{sessionId}", workDir = (string?)null },
+            runtime = new { runnerId = $"runner-{sessionId}", workDir = (string?)null, runtime = "opencode" },
             settings = new { model = "gpt-4o" },
             status = new
             {
@@ -297,6 +297,7 @@ public class GenericAgentSessionSummarySpecs
             var turn = new AgentSessionTranscriptTurnRow
             {
                 SessionId = sessionId,
+                RuntimeSessionId = "acp-" + sessionId,
                 Sequence = 1,
                 StartedAt = CreatedAt,
                 UpdatedAt = CreatedAt.AddMinutes(5),
@@ -365,6 +366,7 @@ public class GenericAgentSessionSummarySpecs
         var turn = new AgentSessionTranscriptTurnRow
         {
             SessionId = sessionId,
+            RuntimeSessionId = "acp-" + sessionId,
             Sequence = 1,
             StartedAt = CreatedAt,
             UpdatedAt = CreatedAt.AddMinutes(5),

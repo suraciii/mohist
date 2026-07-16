@@ -57,12 +57,14 @@ describe('LiveTaskProvider transcript routing', () => {
       type: 'reasoning.delta',
       sessionId: 'session-84',
       runtimeSessionId: 'runtime-84',
+      runtime: 'opencode',
       payload: { text: 'thinking' },
     })
 
     expect(unwrapped?.detail).toMatchObject({
       runtimeSessionId: 'runtime-84',
       sessionId: 'session-84',
+      runtime: 'opencode',
       text: 'thinking',
     })
   })
@@ -72,12 +74,14 @@ describe('LiveTaskProvider transcript routing', () => {
       type: 'message.delta',
       sessionId: 'session-84',
       runtimeSessionId: 'runtime-84',
+      runtime: 'opencode',
       payload: { text: 'working' },
     })
 
     expect(unwrapped?.detail).toMatchObject({
       runtimeSessionId: 'runtime-84',
       sessionId: 'session-84',
+      runtime: 'opencode',
       text: 'working',
     })
     expect(unwrapped?.detail).not.toHaveProperty('acpSessionId')

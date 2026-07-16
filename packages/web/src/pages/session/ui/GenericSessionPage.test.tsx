@@ -290,6 +290,23 @@ describe('GenericSessionPage', () => {
         expect(_useGenericSessionTranscript).toHaveBeenCalledWith('sess-abc', 'rt-old')
       })
     })
+
+    it('makes a historical runtime view read-only for followup and cancel', async () => {
+      _summaryData = baseSummary({
+        status: 'running',
+        runtimeSessionLineage: [
+          { runtimeSessionId: 'rt-old', runtime: 'opencode', boundAt: '2026-06-15T10:00:00.000Z' },
+          { runtimeSessionId: 'rt-abc', runtime: 'opencode', boundAt: '2026-06-15T10:10:00.000Z' },
+        ],
+      })
+      mocks.transcriptTurns = [makeTurn()]
+      renderPage('/agent-sessions/sess-abc?rt=rt-old')
+
+      await waitFor(() => {
+        expect(screen.getByTestId('session-followup-composer')).toHaveAttribute('data-disabled', 'true')
+      })
+      expect(screen.queryByTestId('session-cancel-trigger')).not.toBeInTheDocument()
+    })
   })
 
   describe('cancel control', () => {

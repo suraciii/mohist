@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import * as signalR from "@microsoft/signalr"
 import { RunnerSignalRClient, type CancelAgentSessionPayload, setRunnerSignalRExistsCheckerForTest, setRunnerSignalRGitRunnerForTest } from "../src/server/runner-signalr.js"
 import type { SessionTarget } from "../src/runtime/acp-connection.js"
+import { FOLLOWUP_TARGET_UNAVAILABLE } from "../src/server/session-target.js"
 
 
 interface CapturedBuilder {
@@ -174,6 +175,13 @@ describe("RunnerSignalRClient CancelAgentSession handler", () => {
 
     expect(reply).toEqual({ state: "not-cancellable" })
     expect(cancel).not.toHaveBeenCalled()
+  })
+
+  it("RuntimeInitializing_ResolverReturnsUnavailable_RepliesUnavailable", async () => {
+    buildClient({ resolver: () => FOLLOWUP_TARGET_UNAVAILABLE, serverConnection: null })
+
+    await expect(emitCancel(lastBuilder(), genericCancelPayload("gen-session-1")))
+      .resolves.toEqual({ state: "unavailable" })
   })
 
   it("NoResolverRegistered_RepliesNotCancellableAndDoesNotCallCancel", async () => {

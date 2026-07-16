@@ -28,9 +28,10 @@ import * as signalR from "@microsoft/signalr"
 import type { ServerConnection } from "./connection.js"
 import {
   resolveSessionTarget,
-  type FollowupTarget,
+  type FollowupTargetResolution,
   type FollowupTargetResolver,
   type ReceiveFollowupPayload,
+  isFollowupTargetUnavailable,
 } from "./session-target.js"
 
 export interface FollowupHandlerDeps {
@@ -71,7 +72,7 @@ async function handleFollowup(
   const sessionTarget = resolveSessionTarget(payload)
   if (!sessionTarget) return unavailable()
 
-  let target: FollowupTarget | null
+  let target: FollowupTargetResolution
   try {
     const resolved = resolver(sessionTarget)
     target = isPromise(resolved) ? await resolved : resolved
@@ -79,6 +80,7 @@ async function handleFollowup(
     console.error("followup target resolver threw:", error)
     return unavailable()
   }
+  if (isFollowupTargetUnavailable(target)) return unavailable()
   if (!target) return { accepted: false, error: "missing" }
 
   if (sessionTarget.kind === "workflow") {

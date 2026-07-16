@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import * as signalR from "@microsoft/signalr"
 import { resolveSessionTarget, RunnerSignalRClient, type ReceiveFollowupPayload, setRunnerSignalRExistsCheckerForTest, setRunnerSignalRGitRunnerForTest } from "../src/server/runner-signalr.js"
 import type { SessionTarget } from "../src/runtime/acp-connection.js"
+import { FOLLOWUP_TARGET_UNAVAILABLE } from "../src/server/session-target.js"
 
 
 interface CapturedBuilder {
@@ -293,6 +294,14 @@ describe("RunnerSignalRClient ReceiveFollowup handler", () => {
     await expect(invokeFollowup(lastBuilder(), {
       workflowRunId: "wr-1", sessionName: "work-1", text: "resume",
     })).resolves.toEqual({ accepted: false, error: "missing" })
+  })
+
+  it("Followup_ReturnsUnavailableWhileTheRuntimeIsInitializing", async () => {
+    buildClient({ resolver: () => FOLLOWUP_TARGET_UNAVAILABLE })
+
+    await expect(invokeFollowup(lastBuilder(), {
+      workflowRunId: "wr-1", sessionName: "work-1", text: "resume",
+    })).resolves.toEqual({ accepted: false, error: "unavailable" })
   })
 
   it("Followup_DropsWhenResolverThrows", async () => {

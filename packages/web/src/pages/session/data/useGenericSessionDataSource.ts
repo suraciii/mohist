@@ -83,7 +83,10 @@ export function useGenericSessionDataSource(
   const apiStatusKind = meta?.statusKind
   const isRunning = (rawStatus === 'active' || rawStatus === 'running' || rawStatus === 'probing') && apiStatusKind !== 'completed' && apiStatusKind !== 'failed'
   const terminal = rawStatus === 'completed' || rawStatus === 'failed' || rawStatus === 'stopped' || rawStatus === 'cancelled'
-  const canFollowup = !terminal && !!summary?.runtimeSessionId && !!summary.runtime
+  const runtimeLineage = summary?.runtimeSessionLineage ?? null
+  const viewedRuntimeSessionId = requestedRuntimeSessionId ?? summary?.runtimeSessionId ?? null
+  const isCurrentRuntimeView = viewedRuntimeSessionId === summary?.runtimeSessionId
+  const canFollowup = !terminal && isCurrentRuntimeView && !!summary?.runtimeSessionId && !!summary.runtime
 
   const statusKind: StatusKind = meta
     ? (meta.statusKind ?? getSessionStatusKind(rawStatus, meta.lastActivityAt, isRunning))
@@ -117,6 +120,7 @@ export function useGenericSessionDataSource(
     issueNumber: 0,
     sessionId,
     runtimeSessionId: requestedRuntimeSessionId ?? summary?.runtimeSessionId ?? '',
+    runtime: summary?.runtime ?? null,
     initialTurns: initialTurns.length > 0 ? initialTurns : undefined,
     sessionQueryKeys: [metadataQueryKey, transcriptQueryKey],
     isRunning,
@@ -133,8 +137,6 @@ export function useGenericSessionDataSource(
   // agent profile (and never fabricate issue/workflow links for sessions
   // without an issue binding).
   const fromActivity = searchParams.get('from') === 'activity'
-  const runtimeLineage = summary?.runtimeSessionLineage ?? null
-  const viewedRuntimeSessionId = requestedRuntimeSessionId ?? summary?.runtimeSessionId ?? null
   const buildLineageTargetPath = runtimeLineage && runtimeLineage.length >= 2
     ? (runtimeId: string) => {
         const base = toProjectPath(`/agent-sessions/${encodeURIComponent(sessionId)}`)
@@ -179,8 +181,10 @@ export function useGenericSessionDataSource(
   }, [cancelGeneric, sessionId, summary?.agentId])
 
   const cancel = useMemo(
-    () => ({ mutate: cancelSession, isPending: cancelGeneric.isPending }),
-    [cancelSession, cancelGeneric.isPending],
+    () => isRunning && isCurrentRuntimeView && !!summary?.runtimeSessionId && !!summary.runtime
+      ? { mutate: cancelSession, isPending: cancelGeneric.isPending }
+      : null,
+    [cancelSession, cancelGeneric.isPending, isCurrentRuntimeView, isRunning, summary?.runtime, summary?.runtimeSessionId],
   )
 
   return {

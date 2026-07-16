@@ -16,6 +16,7 @@ function Wrapper({
     issueNumber: 84,
     sessionId: 'session-84',
     runtimeSessionId: 'acp-84',
+    runtime: 'opencode',
     initialTurns: events,
     isRunning,
   })
@@ -77,7 +78,9 @@ describe('useSessionTranscript', () => {
 
     act(() => {
       dispatchAgentEvent('message.delta', {
+        sessionId: 'session-84',
         runtimeSessionId: 'acp-84',
+        runtime: 'opencode',
         text: ' live',
       })
     })
@@ -96,6 +99,7 @@ describe('useSessionTranscript', () => {
       dispatchAgentEvent('message.delta', {
         sessionId: 'session-84',
         runtimeSessionId: 'acp-old',
+        runtime: 'opencode',
         text: ' stale',
       })
     })
@@ -116,13 +120,30 @@ describe('useSessionTranscript', () => {
     expect(screen.getByTestId('transcript').textContent).toBe('persisted')
   })
 
+  it('ignores events from another runtime with the same physical session id', () => {
+    renderSessionTranscript([persistedEvent('persisted')])
+
+    act(() => {
+      dispatchAgentEvent('message.delta', {
+        sessionId: 'session-84',
+        runtimeSessionId: 'acp-84',
+        runtime: 'other-runtime',
+        text: ' stale',
+      })
+    })
+
+    expect(screen.getByTestId('transcript').textContent).toBe('persisted')
+  })
+
   it('accepts persisted transcript once the session is no longer running', () => {
     const initial = [persistedEvent('persisted')]
     const { rerenderWith } = renderSessionTranscript(initial)
 
     act(() => {
       dispatchAgentEvent('message.delta', {
+        sessionId: 'session-84',
         runtimeSessionId: 'acp-84',
+        runtime: 'opencode',
         text: ' live',
       })
     })

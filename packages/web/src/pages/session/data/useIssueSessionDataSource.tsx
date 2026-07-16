@@ -261,6 +261,7 @@ export function useIssueSessionDataSource(
     issueNumber,
     sessionId: detail?.id ?? decodedSessionId ?? decodedSessionName ?? '',
     runtimeSessionId: searchParams.get('rt') ?? runtimeSessionId,
+    runtime: detail?.runtime ?? null,
     initialTurns: initialTurns.length > 0 ? initialTurns : undefined,
     sessionQueryKeys: [metadataQueryKey, transcriptQueryKey],
     isRunning,
@@ -274,7 +275,10 @@ export function useIssueSessionDataSource(
   const followup = useFollowup()
   const cancelMutation = useCancel()
   const isTerminal = rawStatus === 'completed' || rawStatus === 'failed' || rawStatus === 'cancelled' || rawStatus === 'stopped'
-  const canFollowup = !isTerminal && !!runtimeSessionId && !!detail?.runtime && !!recoverySessionName
+  const runtimeLineage = metadata?.runtimeSessionLineage ?? null
+  const viewedRuntimeSessionId = searchParams.get('rt') ?? metadata?.runtimeSessionId ?? null
+  const isCurrentRuntimeView = viewedRuntimeSessionId === runtimeSessionId
+  const canFollowup = !isTerminal && isCurrentRuntimeView && !!runtimeSessionId && !!detail?.runtime && !!recoverySessionName
   const sendFollowup = useCallback(async (text: string) => {
     await followup.mutateAsync({ issueNumber, sessionName: recoverySessionName, text })
   }, [followup, issueNumber, recoverySessionName])
@@ -285,15 +289,13 @@ export function useIssueSessionDataSource(
     )
   }, [cancelMutation, issueNumber, recoverySessionName])
   const cancel = useMemo(
-    () => isRunning && runtimeSessionId && recoverySessionName
+    () => isRunning && isCurrentRuntimeView && runtimeSessionId && detail?.runtime && recoverySessionName
       ? { mutate: cancelSession, isPending: cancelMutation.isPending }
       : null,
-    [cancelMutation.isPending, cancelSession, isRunning, recoverySessionName, runtimeSessionId],
+    [cancelMutation.isPending, cancelSession, detail?.runtime, isCurrentRuntimeView, isRunning, recoverySessionName, runtimeSessionId],
   )
 
   const fromActivity = searchParams.get('from') === 'activity'
-  const runtimeLineage = metadata?.runtimeSessionLineage ?? null
-  const viewedRuntimeSessionId = searchParams.get('rt') ?? metadata?.runtimeSessionId ?? null
 
   const buildLineageTargetPath = runtimeLineage && runtimeLineage.length >= 2
     ? (runtimeId: string) => {

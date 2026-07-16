@@ -35,6 +35,12 @@ export interface FollowupTarget {
   readonly projectId: string
 }
 
+export interface FollowupTargetUnavailable {
+  readonly unavailable: true
+}
+
+export const FOLLOWUP_TARGET_UNAVAILABLE: FollowupTargetUnavailable = { unavailable: true }
+
 /**
  * The runner-side resolver turns a discriminated `SessionTarget`
  * (issue-129 T-004) into a live `FollowupTarget`, or `null` when no
@@ -42,7 +48,13 @@ export interface FollowupTarget {
  * `CancelAgentSession` call into this resolver; a single registration
  * keeps the wire-decoding logic in one place.
  */
-export type FollowupTargetResolver = (target: SessionTarget) => FollowupTarget | null | Promise<FollowupTarget | null>
+export type FollowupTargetResolution = FollowupTarget | FollowupTargetUnavailable | null
+
+export type FollowupTargetResolver = (target: SessionTarget) => FollowupTargetResolution | Promise<FollowupTargetResolution>
+
+export function isFollowupTargetUnavailable(value: FollowupTargetResolution): value is FollowupTargetUnavailable {
+  return value !== null && "unavailable" in value
+}
 
 /**
  * Discriminated session target carried in the unified

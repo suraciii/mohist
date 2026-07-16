@@ -86,6 +86,7 @@ function makeMockMetadata(overrides: Partial<AgentSessionMetadata> = {}): AgentS
     id: 'agent-session-12345678',
     sessionName: 'build',
     runtimeSessionId: 'acp-1',
+    runtime: 'opencode',
     status: 'active',
     statusKind: 'live',
     model: 'minimax/MiniMax-M3',

@@ -77,6 +77,8 @@ public class GenericAgentSessionCancelApiSpecs : IAsyncLifetime
             Assert.Equal("generic", target.GetProperty("kind").GetString());
             Assert.Equal(project.Id, target.GetProperty("projectId").GetString());
             Assert.Equal(sessionId, target.GetProperty("sessionId").GetString());
+            Assert.Equal("opencode", target.GetProperty("binding").GetProperty("runtime").GetString());
+            Assert.Equal(sessionId, target.GetProperty("binding").GetProperty("runtimeSessionId").GetString());
         }
         finally
         {
@@ -235,6 +237,41 @@ public class GenericAgentSessionCancelApiSpecs : IAsyncLifetime
             // cancellation.
             Assert.Equal("completed", doc.RootElement.GetProperty("data").GetProperty("state").GetString());
             Assert.Empty(runnerHub.Invocations);
+        }
+        finally
+        {
+            tracker.Unregister(_runnerId);
+        }
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
+    public async Task Cancel_AfterReset_IgnoresTerminalStateFromPredecessorRuntime()
+    {
+        var (project, _, sessionId, _) = await LaunchAndOpenGenericSessionAsync("gen-cancel-reset-terminal");
+        var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
+        await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(new[]
+        {
+            new AgentSessionRuntimeEventInput(RuntimeEventTypes.SessionClosed, """{"status":"completed"}"""),
+        }, sessionId));
+        await grain.FlushForTestAsync();
+        _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(6));
+        await grain.ResetAsync(new ResetAgentSessionCommand(sessionId, "runtime-replacement"));
+
+        var tracker = _fixture.Services.GetRequiredService<RunnerConnectionTracker>();
+        var runnerHub = _fixture.Services.GetRequiredService<IHubContext<RunnerHub>>() as RecordingRunnerHubContext
+            ?? throw new InvalidOperationException("Recording runner hub context was not registered.");
+        runnerHub.Clear();
+        runnerHub.SetInvocationResponse("CancelAgentSession", new AgentSessionCancelReply("cancelled"));
+        tracker.Register(_runnerId, "conn-cancel-reset-terminal");
+        try
+        {
+            using var response = await PostGenericCancelAsync(project.Id, sessionId);
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var payload = JsonSerializer.SerializeToElement(Assert.Single(runnerHub.Invocations).Arguments.Single());
+            Assert.Equal("runtime-replacement", payload.GetProperty("target").GetProperty("binding").GetProperty("runtimeSessionId").GetString());
         }
         finally
         {

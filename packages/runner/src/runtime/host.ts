@@ -1,4 +1,4 @@
-import type { RunnerOptions, RunnerRegistration } from "../core/types.js"
+import type { JsonObject, RunnerOptions, RunnerRegistration } from "../core/types.js"
 import { ServerConnection } from "../server/connection.js"
 import {
   RunnerSignalRClient,
@@ -19,7 +19,12 @@ import { AcpSessionManager, createSharedAcpConnection, type SessionTarget, type 
 import { loadBuildInfo } from "./build-info.js"
 import type { RenderedWorkItem } from "../core/types.js"
 import type { WorkItemResult } from "../core/types.js"
-import type { ClientSideConnection } from "@agentclientprotocol/sdk"
+import { ToolCallIdGenerator, genericSessionEventType, normalizeSessionUpdate } from "../actions/acp/session-events.js"
+import {
+  FOLLOWUP_TARGET_UNAVAILABLE,
+  type FollowupTargetResolution,
+} from "../server/session-target.js"
+import type { RequestPermissionRequest, RequestPermissionResponse, SessionNotification } from "@agentclientprotocol/sdk"
 
 export interface ReportResult {
   workflowRunId?: string | null
@@ -50,6 +55,9 @@ interface AwaitingAckEntry {
   /** Earliest wall-clock time for the next bounded report attempt. */
   retryAt: number | null
 }
+
+type RestoredSessionTarget = { sessionId: string; workDir: string }
+type RestoreResult = RestoredSessionTarget | null | "unavailable"
 
 /**
  * Builds the work key used to dedupe in-flight / awaiting-ack tracking.
@@ -99,7 +107,7 @@ export class RunnerHost {
   private sessionManager: AcpSessionManager = new AcpSessionManager()
   private sharedAcpConnection: SharedAcpConnection | null = null
   private workExecutor: WorkExecutor | null = null
-  private readonly sessionRestorations = new Map<string, Promise<{ sessionId: string; workDir: string } | null>>()
+  private readonly sessionRestorations = new Map<string, Promise<RestoreResult>>()
 
   // Process-lifetime reported set (see workKey/InFlightEntry doc above).
   // These Maps outlive poll exceptions and reconnects: a work enters
@@ -170,9 +178,9 @@ export class RunnerHost {
   // `workflow:` prefix; generic keys use the `generic:` prefix (T-002).
   // On a cache miss, a current persisted binding lets the runner restore
   // the ACP session before delivering a followup or cancellation.
-  private resolveFollowupTarget(target: SessionTarget): { connection: ClientSideConnection; sessionId: string; projectId: string } | null | Promise<{ connection: ClientSideConnection; sessionId: string; projectId: string } | null> {
+  private resolveFollowupTarget(target: SessionTarget): FollowupTargetResolution | Promise<FollowupTargetResolution> {
     const sharedConnection = this.sharedAcpConnection
-    if (!sharedConnection) return null
+    if (!sharedConnection) return FOLLOWUP_TARGET_UNAVAILABLE
     const key = target.kind === "workflow"
       ? this.sessionManager.workflowKey(target.workflowRunId, target.sessionName)
       : this.sessionManager.genericKey(target.sessionId)
@@ -185,26 +193,29 @@ export class RunnerHost {
     }
     if (!target.binding) return null
 
-    return this.restoreSessionTarget(key, target.binding, sharedConnection)
-      .then((entry) => entry
-        ? { connection: sharedConnection.connection, sessionId: entry.sessionId, projectId: target.projectId }
-        : null)
+    return this.restoreSessionTarget(key, target, target.binding, sharedConnection)
+      .then((entry) => entry === "unavailable"
+        ? FOLLOWUP_TARGET_UNAVAILABLE
+        : entry
+          ? { connection: sharedConnection.connection, sessionId: entry.sessionId, projectId: target.projectId }
+          : null)
   }
 
   private async restoreSessionTarget(
     key: string,
+    target: SessionTarget,
     binding: NonNullable<SessionTarget["binding"]>,
     sharedConnection: SharedAcpConnection,
-  ): Promise<{ sessionId: string; workDir: string } | null> {
+  ): Promise<RestoreResult> {
     if (binding.runtime.toLowerCase() !== "opencode" || binding.runnerId !== this.options.runnerId) return null
 
     const existing = this.sessionRestorations.get(key)
     if (existing) {
       const entry = await existing
-      return entry?.sessionId === binding.runtimeSessionId ? entry : null
+      return entry === "unavailable" || entry?.sessionId === binding.runtimeSessionId ? entry : null
     }
 
-    const restoration = this.resumeSessionTarget(key, binding, sharedConnection)
+    const restoration = this.resumeSessionTarget(key, target, binding, sharedConnection)
     this.sessionRestorations.set(key, restoration)
     try {
       return await restoration
@@ -215,21 +226,78 @@ export class RunnerHost {
 
   private async resumeSessionTarget(
     key: string,
+    target: SessionTarget,
     binding: NonNullable<SessionTarget["binding"]>,
     sharedConnection: SharedAcpConnection,
-  ): Promise<{ sessionId: string; workDir: string } | null> {
+  ): Promise<RestoreResult> {
+    const previous = this.sessionManager.get(key)
+    if (previous && previous.sessionId !== binding.runtimeSessionId) {
+      this.sessionManager.delete(key)
+      sharedConnection.clearSessionHandlers(previous.sessionId)
+    }
+
     try {
-      await sharedConnection.connection.resumeSession({
+      const outcome = await resumeWithin(
+        sharedConnection.connection.resumeSession({
         sessionId: binding.runtimeSessionId,
         cwd: binding.workDir,
         mcpServers: [],
-      })
+        }),
+        RESTORED_SESSION_RESUME_TIMEOUT_MS,
+      )
+      if (outcome === "timeout") return "unavailable"
+      if (outcome === "failed") return null
+
       const entry = { sessionId: binding.runtimeSessionId, workDir: binding.workDir }
+      this.installRestoredSessionHandlers(target, binding, sharedConnection)
       this.sessionManager.set(key, entry)
       return entry
     } catch {
+      sharedConnection.clearSessionHandlers(binding.runtimeSessionId)
+      this.sessionManager.delete(key)
       return null
     }
+  }
+
+  private installRestoredSessionHandlers(
+    target: SessionTarget,
+    binding: NonNullable<SessionTarget["binding"]>,
+    sharedConnection: SharedAcpConnection,
+  ): void {
+    const toolIds = new ToolCallIdGenerator()
+    sharedConnection.setSessionHandlers(
+      binding.runtimeSessionId,
+      async (notification: SessionNotification) => {
+        const update = normalizeSessionUpdate(
+          notification.update as unknown as JsonObject,
+          binding.runtimeSessionId,
+          toolIds,
+        )
+        const body = {
+          workId: null,
+          workType: null,
+          stage: null,
+          runtimeSessionId: binding.runtimeSessionId,
+          runtimeEvents: [{ type: genericSessionEventType(notification.update.sessionUpdate, update), payload: update }],
+        }
+        const signal = new AbortController().signal
+        if (target.kind === "workflow") {
+          await this.connection.workflowAgentSessionRuntimeEvents(
+            target.projectId,
+            target.workflowRunId,
+            target.sessionName,
+            body,
+            signal,
+          )
+          return
+        }
+        await this.connection.agentSessionRuntimeEvents(target.projectId, target.sessionId, body, signal)
+      },
+      async (params: RequestPermissionRequest): Promise<RequestPermissionResponse> => {
+        const allow = params.options.find((option) => option.kind === "allow_once" || option.kind === "allow_always")
+        return allow ? { outcome: { outcome: "selected", optionId: allow.optionId } } : { outcome: { outcome: "cancelled" } }
+      },
+    )
   }
 
   async run(signal: AbortSignal) {
@@ -761,6 +829,8 @@ export class RunnerHost {
  */
 const REPORT_TIMEOUT_MS = 10_000
 
+const RESTORED_SESSION_RESUME_TIMEOUT_MS = 30_000
+
 /** Maximum time a single poll request may wait before the loop retries. */
 const POLL_TIMEOUT_MS = 10_000
 
@@ -795,6 +865,21 @@ const TASK_LOG_FLUSH_INTERVAL_MS = 1_500
  * interval to see its tail in the web view (design D1).
  */
 const TASK_LOG_FLUSH_LINE_THRESHOLD = 200
+
+function resumeWithin(promise: Promise<unknown>, timeoutMs: number): Promise<"resumed" | "failed" | "timeout"> {
+  return new Promise((resolve) => {
+    let settled = false
+    const complete = (outcome: "resumed" | "failed" | "timeout") => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      resolve(outcome)
+    }
+    const timer = setTimeout(() => complete("timeout"), timeoutMs)
+    timer.unref?.()
+    promise.then(() => complete("resumed"), () => complete("failed"))
+  })
+}
 
 /**
  * Create an incremental flush trigger. The returned handle exposes

@@ -107,6 +107,30 @@ describe("SessionCommand contract", () => {
     expect(fakeHandler).toHaveBeenCalledTimes(1)
   })
 
+  it("rejects a mismatched command that reuses an in-flight operation id", async () => {
+    let release!: () => void
+    const deferred = new Promise<void>((resolve) => { release = resolve })
+    const handler = vi.fn(async (): Promise<SessionCommandResult> => {
+      await deferred
+      return { ok: true }
+    })
+    const invoke = register(handler)
+    const compact = request("compact", "operation-1")
+    const reset = {
+      ...request("reset", "operation-1"),
+      runtimeSessionId: "runtime-2",
+      expectedRuntimeSessionId: "runtime-2",
+    }
+
+    const inFlightCompact = invoke(compact)
+    await expect(invoke(reset)).resolves.toEqual({ ok: false, error: "unavailable" })
+    release()
+
+    await expect(inFlightCompact).resolves.toEqual({ ok: true })
+    expect(handler).toHaveBeenCalledTimes(1)
+    expect(handler).toHaveBeenCalledWith(compact)
+  })
+
   it.each(["compact", "reset"] as const)("replays a completed %s after handler restart", async (command) => {
     const journal = new MemoryJournal()
     const commandRequest = request(command)

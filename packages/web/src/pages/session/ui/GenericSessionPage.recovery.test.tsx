@@ -24,7 +24,9 @@ const dependencies: GenericSessionPageDependencies = {
   },
   shellComponents: {
     SessionTranscriptLayout: () => <div data-testid="session-transcript-layout" />,
-    SessionFollowupComposer: () => <div data-testid="session-followup-composer" />,
+    SessionFollowupComposer: ({ disabled }: { disabled?: boolean }) => (
+      <div data-testid="session-followup-composer" data-disabled={disabled ? 'true' : 'false'} />
+    ),
     ContextHealthBar: () => <div data-testid="context-health-bar" />,
     CompactionLineageLink: () => null,
     SessionRecoveryActions: (props) => (
@@ -36,13 +38,17 @@ const dependencies: GenericSessionPageDependencies = {
   },
 }
 
-function makeSummary(recoveryAvailable: boolean, usage: unknown = null) {
+function makeSummary(
+  recoveryAvailable: boolean,
+  usage: unknown = null,
+  overrides: Record<string, unknown> = {},
+) {
   return {
     sessionId: 'sess-abc', agentId: 'agent-1', agentName: 'Test Agent',
     runtimeSessionId: 'rt-abc', runtime: 'opencode', status: 'running',
     createdAt: '2026-06-15T10:00:00.000Z', lastActivityAt: '2026-06-15T10:30:00.000Z',
     resolvedModel: 'gpt-4', failureCategory: null, toolCallCount: 0, toolErrorCount: 0,
-    contextRefs: null, usage, runtimeSessionLineage: null, recoveryAvailable,
+    contextRefs: null, usage, runtimeSessionLineage: null, recoveryAvailable, ...overrides,
   }
 }
 
@@ -105,5 +111,14 @@ describe('GenericSessionPage recovery', () => {
     fireEvent.click(screen.getByTestId('session-recovery-reset'))
     expect(compact).not.toHaveBeenCalled()
     expect(reset).not.toHaveBeenCalled()
+  })
+
+  it('keeps Reset available when a runtime binding is missing and followup is disabled', async () => {
+    summary = makeSummary(true, null, { runtimeSessionId: null, runtime: null })
+    renderPage()
+
+    expect(screen.queryByTestId('session-followup-composer')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('session-cancel-trigger')).not.toBeInTheDocument()
+    expect(screen.getByTestId('session-recovery-reset')).not.toBeDisabled()
   })
 })

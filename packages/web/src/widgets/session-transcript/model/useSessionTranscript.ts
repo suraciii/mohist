@@ -30,6 +30,7 @@ interface UseSessionTranscriptOptions {
   issueNumber: number
   sessionId: string
   runtimeSessionId: string
+  runtime?: string | null
   initialTurns?: SessionTurn[]
   sessionQueryKeys?: readonly (readonly unknown[])[]
   isRunning: boolean
@@ -53,6 +54,7 @@ export function useSessionTranscript({
   issueNumber,
   sessionId,
   runtimeSessionId,
+  runtime,
   initialTurns,
   sessionQueryKeys,
   isRunning,
@@ -166,9 +168,14 @@ export function useSessionTranscript({
 
     mountedRef.current = true
     const unsubs: Array<() => void> = []
-    const isCurrentSessionEvent = (detail: { runtimeSessionId?: string | null }) => {
+    const isCurrentSessionEvent = (detail: {
+      sessionId?: string | null
+      runtimeSessionId?: string | null
+      runtime?: string | null
+    }) => {
       if (!mountedRef.current) return false
-      return detail.runtimeSessionId != null && detail.runtimeSessionId === runtimeSessionId
+      if (detail.sessionId !== sessionId || detail.runtimeSessionId !== runtimeSessionId) return false
+      return runtime == null || detail.runtime === runtime
     }
     const handleToolDetail = (detail: AgentDetailEventMap['tool_call.started']) => {
       if (!isCurrentSessionEvent(detail)) return
@@ -508,7 +515,7 @@ export function useSessionTranscript({
       }
       for (const unsub of unsubs) unsub()
     }
-  }, [issueId, sessionId, runtimeSessionId, issueNumber, isRunning, queryClient, invalidateAndRefetch])
+  }, [issueId, sessionId, runtimeSessionId, runtime, issueNumber, isRunning, queryClient, invalidateAndRefetch])
 
   return {
     turns,

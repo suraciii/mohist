@@ -51,7 +51,8 @@ public sealed record AttachPhysicalSessionCommand(
     [property: Id(1)] string? Model = null,
     [property: Id(2)] string? WorkDir = null,
     [property: Id(3)] string? ChangeDir = null,
-    [property: Id(4)] int? ProcessPid = null);
+    [property: Id(4)] int? ProcessPid = null,
+    [property: Id(5)] string? Runtime = null);
 
 [GenerateSerializer]
 public sealed record AppendAgentSessionRuntimeEventsCommand(
