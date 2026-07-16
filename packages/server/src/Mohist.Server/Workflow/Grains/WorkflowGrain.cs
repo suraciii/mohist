@@ -111,7 +111,7 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
         RejectIfRunReloadRequired();
         if (_run is not null)
         {
-            RequireIssueContext(context);
+            await RefreshIssueContextAsync(context);
             return;
         }
 

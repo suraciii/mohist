@@ -485,3 +485,20 @@ ArchTests pass (**27**), and the server build has zero errors. A full SpecTests 
 - Focused Issue domain tests: **19 passed / 0 failed**.
 - Focused membership, progression, affiliation-lineage, migration, and Issue transactional specs: **38 passed / 0 failed**.
 - The pre-edit focused membership/progression/migration suite was **30 passed / 0 failed**; the new migration regression exposed the State JSON gap before the fix.
+
+## T-006 verification follow-up
+
+- The durable handoff implementation is present on the branch: Issue start persists only the Issue state and `IssueWorkStarted`; `IssueWorkflowStartHandler` re-reads current Issue state before calling `WorkflowRun.EnsureStartedAsync`; Workflow creation/start is persisted by the WorkflowRun store; completion still passes the expected `WorkflowRunId` into `Issue.Complete`.
+- `EnsureStartedAsync` now routes an already-existing nonterminal run through `RefreshIssueContextAsync`. A duplicate or late start delivery therefore refreshes the current `EpicNumber` without emitting another `WorkflowRunStarted`; terminal runs remain a no-op and project/issue identity mismatches still reject.
+- Removed the remaining runtime special handling for the deleted binding state: the server control guard and runtime projection no longer recognize `awaiting-binding`; the Web `WorkflowRunStatus` and status pill no longer model it; runner status contracts and cleanup/signal tests no longer enumerate `AwaitingBinding`.
+- Renamed `IssueWorkflowBindingHandler` to `IssueWorkflowStartHandler` and removed obsolete `EnsureWorkflowBindingAsync` members from server test doubles. Artifact/session uses of the word "binding" are unrelated resource/session terminology and remain unchanged.
+- Historical EF migration files still mention `LineageVersion` because they are the applied-schema history used by the canonical identity cutover; no live entity, store, API, runner, Web contract, or test fake retains the revision field/protocol.
+
+### T-006 validation
+
+- Focused pre-edit suites: **45 Server SpecTests**, **15 Web tests**, and **46 Runner tests** passed.
+- Focused post-edit suites: **45 Server SpecTests**, **13 Web tests**, and **44 Runner tests** passed.
+- Server build: clean with zero warnings/errors.
+- Server UnitTests: **1454 passed**; Server SpecTests: **2743 passed**; Server ArchTests: **27 passed**; CLI: **911 passed**.
+- Web typecheck and suite: **4678 passed**; Runner typecheck and suite: **1028 passed**.
+- Full `npm test` passed, including FSD and test-boundary checks.

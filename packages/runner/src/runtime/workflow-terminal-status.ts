@@ -35,7 +35,6 @@
 
 export type WorkflowRunStatusName =
   | "Created"
-  | "AwaitingBinding"
   | "Pending"
   | "Ready"
   | "Running"

@@ -117,15 +117,6 @@ describe('WorkflowRunStatusPill', () => {
     expect(pill).toHaveTextContent(/created/i)
   })
 
-  it('renders awaiting binding as starting', () => {
-    renderPill('awaiting-binding')
-
-    const pill = screen.getByTestId('workflow-run-status-awaiting-binding')
-    expect(pill).toBeInTheDocument()
-    expect(pill.dataset.status).toBe('awaiting-binding')
-    expect(pill).toHaveTextContent(/starting/i)
-  })
-
   it('renders completed as a distinct presentation', () => {
     renderPill('completed')
 

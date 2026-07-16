@@ -97,15 +97,6 @@ const CREATED_PRESENTATION: StatusPresentation = {
   testId: 'workflow-run-status-created',
 }
 
-const AWAITING_BINDING_PRESENTATION: StatusPresentation = {
-  label: 'Starting',
-  bg: 'bg-gray-100',
-  text: 'text-gray-700',
-  dot: 'bg-gray-500',
-  icon: ClockIcon,
-  testId: 'workflow-run-status-awaiting-binding',
-}
-
 const UNKNOWN_PRESENTATION: StatusPresentation = {
   label: 'Unknown',
   bg: 'bg-gray-100',
@@ -117,7 +108,6 @@ const UNKNOWN_PRESENTATION: StatusPresentation = {
 
 const PRESENTATION_BY_STATUS: Record<WorkflowRunStatus, StatusPresentation> = {
   created: CREATED_PRESENTATION,
-  'awaiting-binding': AWAITING_BINDING_PRESENTATION,
   pending: PENDING_PRESENTATION,
   ready: READY_PRESENTATION,
   running: RUNNING_PRESENTATION,

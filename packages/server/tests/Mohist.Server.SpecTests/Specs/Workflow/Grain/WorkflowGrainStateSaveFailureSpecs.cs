@@ -30,7 +30,7 @@ public sealed class WorkflowGrainStateSaveFailureSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public async Task EnsureStarted_DuplicateDeliveryCreatesOneStartedRun()
+    public async Task EnsureStarted_DuplicateDeliveryRefreshesCurrentContextWithoutRestarting()
     {
         const string workflowRunId = "wr-ensure-started-duplicate";
         const string projectId = "proj-ensure-started-duplicate";
@@ -44,13 +44,14 @@ public sealed class WorkflowGrainStateSaveFailureSpecs
         await grain.OnActivateAsync(CancellationToken.None);
 
         await grain.EnsureStartedAsync(context);
-        await grain.EnsureStartedAsync(context);
+        await grain.EnsureStartedAsync(context with { EpicNumber = 2 });
 
         var run = await store.LoadAsync(workflowRunId);
         Assert.NotNull(run);
         Assert.Equal(WorkflowRunStatus.Pending, run!.Status);
         Assert.Equal(projectId, run.Metadata.Annotations!["projectId"]);
         Assert.Equal("1", run.Metadata.Annotations["issueNumber"]);
+        Assert.Equal("2", run.Metadata.Annotations["epicNumber"]);
         Assert.Single(await events.ListAsync(workflowRunId), entry =>
             entry.Envelope.Type == EventCatalog.ReverseDns.WorkflowRunStarted);
     }

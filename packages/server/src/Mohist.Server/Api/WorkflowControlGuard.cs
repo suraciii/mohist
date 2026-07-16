@@ -15,7 +15,6 @@ public static class WorkflowControlGuard
         {
             "stopped" or "completed" => false,
             "failed" => action == WorkflowControlAction.RetryOrRerun,
-            "awaiting-binding" => action != WorkflowControlAction.RetryOrRerun,
             null => false,
             _ => true,
         };

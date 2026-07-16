@@ -70,7 +70,6 @@ internal sealed class RecordingIssueGrain : IIssueGrain
 
     public Task<int> CreateAsync(string projectId, int number, string title, string? body, IReadOnlyDictionary<string, string>? labels, string? priority, string? repositoryRef = null, string? risk = null, bool isDraft = false, string[]? attachmentIds = null, string? workflowProfileId = null, int[]? prerequisiteNumbers = null) => throw new NotSupportedException();
     public Task<string> StartWorkAsync(WorkflowProjectContext? project = null) => throw new NotSupportedException();
-    public Task EnsureWorkflowBindingAsync(string workflowRunId) => throw new NotSupportedException();
     public Task CompleteWorkAsync(string workflowRunId) => throw new NotSupportedException();
     public Task CancelAsync() => throw new NotSupportedException();
     public Task UpdateAsync(string title, string? body) => throw new NotSupportedException();
@@ -132,7 +131,6 @@ internal sealed class ThrowingIssueGrain : IIssueGrain
 {
     public Task<int> CreateAsync(string projectId, int number, string title, string? body, IReadOnlyDictionary<string, string>? labels, string? priority, string? repositoryRef = null, string? risk = null, bool isDraft = false, string[]? attachmentIds = null, string? workflowProfileId = null, int[]? prerequisiteNumbers = null) => throw new NotSupportedException();
     public Task<string> StartWorkAsync(WorkflowProjectContext? project = null) => throw new NotSupportedException();
-    public Task EnsureWorkflowBindingAsync(string workflowRunId) => throw new NotSupportedException();
     public Task CompleteWorkAsync(string workflowRunId) => throw new NotSupportedException();
     public Task CancelAsync() => throw new NotSupportedException();
     public Task UpdateAsync(string title, string? body) => throw new NotSupportedException();
