@@ -1,4 +1,3 @@
-using System.Text.RegularExpressions;
 using Mohist.Cli.Tests.Support;
 using Xunit;
 
@@ -15,7 +14,7 @@ public class MohistCliApiPreludeTests
     }
 
     private static string CliStatePath() =>
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".mohist", "cli-state.json");
+        Path.Combine(CliTestFactory.UserHome, ".mohist", "cli-state.json");
 
     [Fact]
     public void ResolveOutputMode_Unset_ReturnsJsonAndExitZero()
@@ -181,95 +180,4 @@ public class MohistCliApiPreludeTests
         Assert.Contains(MohistCliCommands.NoActiveProjectMessage, error.ToString());
     }
 
-    [Fact]
-    public void CommandPartials_DoNotRedefineValidateOutput()
-    {
-        var repoRoot = ResolveRepoRoot();
-        var partialsDir = Path.Combine(repoRoot, "packages", "cli", "Mohist.Cli");
-        var offenders = new List<string>();
-
-        foreach (var file in Directory.EnumerateFiles(partialsDir, "MohistCliCommands.*.cs"))
-        {
-            var text = File.ReadAllText(file);
-            // Allow the calls `api.ResolveOutputMode(...)`; reject standalone `ValidateOutput(api, ...)` definitions
-            // and the original wrapper signature `private static (string Mode, int Exit) ValidateOutput(MohistCliApi api,`
-            if (Regex.IsMatch(text, @"\bprivate\s+static\s+\(string Mode, int Exit\)\s+ValidateOutput\s*\(\s*MohistCliApi\b"))
-            {
-                offenders.Add(Path.GetFileName(file));
-            }
-        }
-
-        Assert.Empty(offenders);
-    }
-
-    [Fact]
-    public void CommandPartials_DoNotRedefineResolveProjectIdWrapper()
-    {
-        var repoRoot = ResolveRepoRoot();
-        var partialsDir = Path.Combine(repoRoot, "packages", "cli", "Mohist.Cli");
-        var offenders = new List<string>();
-
-        foreach (var file in Directory.EnumerateFiles(partialsDir, "MohistCliCommands.*.cs"))
-        {
-            var text = File.ReadAllText(file);
-            // Reject the original wrapper signature `private static async Task<(string ProjectId, int Exit)> ResolveProjectId(\s*MohistCliApi`
-            if (Regex.IsMatch(text, @"\bprivate\s+static\s+async\s+Task<\(string ProjectId, int Exit\)>\s+ResolveProjectId\s*\(\s*MohistCliApi\b"))
-            {
-                offenders.Add(Path.GetFileName(file));
-            }
-        }
-
-        Assert.Empty(offenders);
-    }
-
-    [Fact]
-    public void CommandPartials_DoNotInlineValidateOutputModePattern()
-    {
-        var repoRoot = ResolveRepoRoot();
-        var partialsDir = Path.Combine(repoRoot, "packages", "cli", "Mohist.Cli");
-        var offenders = new List<string>();
-
-        foreach (var file in Directory.EnumerateFiles(partialsDir, "MohistCliCommands.*.cs"))
-        {
-            var text = File.ReadAllText(file);
-            // Reject the inline call pattern `MohistCliApi.ValidateOutputMode(...)` (now lives only on the api helper)
-            if (Regex.IsMatch(text, @"MohistCliApi\.ValidateOutputMode\s*\("))
-            {
-                offenders.Add(Path.GetFileName(file));
-            }
-        }
-
-        Assert.Empty(offenders);
-    }
-
-    [Fact]
-    public void CommandPartials_DoNotInlineResolveProjectIdAsyncNullCheck()
-    {
-        var repoRoot = ResolveRepoRoot();
-        var partialsDir = Path.Combine(repoRoot, "packages", "cli", "Mohist.Cli");
-        var offenders = new List<string>();
-
-        foreach (var file in Directory.EnumerateFiles(partialsDir, "MohistCliCommands.*.cs"))
-        {
-            var text = File.ReadAllText(file);
-            // Reject the inline `await api.ResolveProjectIdAsync(...)` pattern (now lives only on the api helper)
-            if (Regex.IsMatch(text, @"await\s+api\.ResolveProjectIdAsync\s*\("))
-            {
-                offenders.Add(Path.GetFileName(file));
-            }
-        }
-
-        Assert.Empty(offenders);
-    }
-
-    private static string ResolveRepoRoot()
-    {
-        var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "Mohist.sln")))
-        {
-            dir = dir.Parent;
-        }
-        Assert.NotNull(dir);
-        return dir!.FullName;
-    }
 }

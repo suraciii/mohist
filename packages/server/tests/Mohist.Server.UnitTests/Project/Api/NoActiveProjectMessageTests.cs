@@ -69,7 +69,7 @@ public class NoActiveProjectMessageTests
     {
         var files = new FakeFileSystem();
         var statePath = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            "/mohist-tests/user",
             ".mohist",
             "cli-state.json");
         files.AddDirectory(Path.GetDirectoryName(statePath)!);
@@ -92,7 +92,7 @@ public class NoActiveProjectMessageTests
     {
         var files = new FakeFileSystem();
         var statePath = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            "/mohist-tests/user",
             ".mohist",
             "cli-state.json");
         files.AddDirectory(Path.GetDirectoryName(statePath)!);
@@ -124,7 +124,8 @@ public class NoActiveProjectMessageTests
             output,
             error,
             files,
-            new NoopCommandExecutor());
+            new NoopCommandExecutor(),
+            getUserHome: () => "/mohist-tests/user");
 
         Assert.Equal(1, exitCode);
         var err = error.ToString().TrimEnd('\r', '\n');
@@ -146,7 +147,8 @@ public class NoActiveProjectMessageTests
             output,
             error,
             files,
-            new NoopCommandExecutor());
+            new NoopCommandExecutor(),
+            getUserHome: () => "/mohist-tests/user");
 
         Assert.Equal(1, exitCode);
         var err = error.ToString().TrimEnd('\r', '\n');
@@ -168,7 +170,8 @@ public class NoActiveProjectMessageTests
             output,
             error,
             files,
-            new NoopCommandExecutor());
+            new NoopCommandExecutor(),
+            getUserHome: () => "/mohist-tests/user");
 
         Assert.Equal(1, exitCode);
         var err = error.ToString().TrimEnd('\r', '\n');
@@ -182,7 +185,8 @@ public class NoActiveProjectMessageTests
             output,
             error,
             files,
-            new NoopCommandExecutor());
+            new NoopCommandExecutor(),
+            getUserHome: () => "/mohist-tests/user");
 
     private sealed class NoopCommandExecutor : ICommandExecutor
     {

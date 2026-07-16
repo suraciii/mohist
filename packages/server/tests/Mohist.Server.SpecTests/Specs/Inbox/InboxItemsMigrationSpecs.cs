@@ -95,7 +95,7 @@ public class InboxItemsMigrationSpecs
             NotificationKind = "unsupported",
             SourceEventSource = "/mohist/issues/issue_1",
             SourceEventId = "evt_invalid",
-            CreatedAt = DateTimeOffset.UtcNow,
+            CreatedAt = TestTime.UtcNow,
         });
 
         await Assert.ThrowsAsync<DbUpdateException>(() => context.SaveChangesAsync());

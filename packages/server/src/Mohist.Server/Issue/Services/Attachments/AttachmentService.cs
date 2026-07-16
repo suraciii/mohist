@@ -271,7 +271,7 @@ public sealed class AttachmentService : IScopedService
                 nameof(UpdateIssueData.Body),
                 nameof(UpdateIssueData.AttachmentIds),
             }));
-        DeleteStoredContent(row.StoragePath);
+        await _storage.DeleteAsync(row.StoragePath, cancellationToken).ConfigureAwait(false);
         db.Attachments.Remove(row);
         await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
         return AttachmentRemovalResult.Removed;
@@ -300,7 +300,7 @@ public sealed class AttachmentService : IScopedService
 
         var storedComment = await db.IssueComments.FirstAsync(c => c.Id == comment.Id, cancellationToken).ConfigureAwait(false);
         storedComment.Body = StripReferences(storedComment.Body, attachmentId) ?? string.Empty;
-        DeleteStoredContent(row.StoragePath);
+        await _storage.DeleteAsync(row.StoragePath, cancellationToken).ConfigureAwait(false);
         db.Attachments.Remove(row);
         await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
         return AttachmentRemovalResult.Removed;
@@ -319,7 +319,7 @@ public sealed class AttachmentService : IScopedService
 
         foreach (var row in expired)
         {
-            DeleteStoredContent(row.StoragePath);
+            await _storage.DeleteAsync(row.StoragePath, cancellationToken).ConfigureAwait(false);
             db.Attachments.Remove(row);
         }
 
@@ -437,14 +437,6 @@ public sealed class AttachmentService : IScopedService
 
     private static bool IsIssueEditable(Domain.Issue issue) =>
         issue.ArchivedAt is null && issue.Status is not IssueStatus.Done and not IssueStatus.Cancelled;
-
-    private void DeleteStoredContent(string storagePath)
-    {
-        var absolute = _storage.ResolveAbsolutePath(storagePath);
-        var directory = Path.GetDirectoryName(absolute);
-        if (!string.IsNullOrWhiteSpace(directory) && Directory.Exists(directory))
-            Directory.Delete(directory, recursive: true);
-    }
 
     private static string? StripReferences(string? body, string attachmentId)
     {

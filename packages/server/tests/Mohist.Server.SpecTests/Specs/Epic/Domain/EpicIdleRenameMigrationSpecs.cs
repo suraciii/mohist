@@ -31,8 +31,8 @@ public class EpicIdleRenameMigrationSpecs
                 Priority = "p2",
                 Status = "active",
                 PauseReason = null,
-                CreatedAt = DateTimeOffset.UtcNow,
-                UpdatedAt = DateTimeOffset.UtcNow,
+                CreatedAt = TestTime.UtcNow,
+                UpdatedAt = TestTime.UtcNow,
             });
             await setup.SaveChangesAsync();
         }
@@ -81,8 +81,8 @@ public class EpicIdleRenameMigrationSpecs
                 Priority = "p2",
                 Status = "active",
                 PauseReason = null,
-                CreatedAt = DateTimeOffset.UtcNow,
-                UpdatedAt = DateTimeOffset.UtcNow,
+                CreatedAt = TestTime.UtcNow,
+                UpdatedAt = TestTime.UtcNow,
             });
             await setup.SaveChangesAsync();
         }

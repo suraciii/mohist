@@ -658,8 +658,8 @@ public class EpicBatchMembershipSpecs
             Priority = "p2",
             Status = status,
             PauseReason = pauseReason,
-            CreatedAt = DateTimeOffset.UtcNow,
-            UpdatedAt = DateTimeOffset.UtcNow,
+            CreatedAt = TestTime.UtcNow,
+            UpdatedAt = TestTime.UtcNow,
         });
         await db.SaveChangesAsync();
     }

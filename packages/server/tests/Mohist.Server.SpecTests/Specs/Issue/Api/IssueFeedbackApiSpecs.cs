@@ -122,7 +122,7 @@ public class IssueFeedbackApiSpecs
         // distinct createdAt timestamps. The DB is the source of truth for the
         // list query, so this avoids needing to drive the workflow grain back to
         // approval multiple times.
-        var baseTime = DateTimeOffset.UtcNow.AddMinutes(-2);
+        var baseTime = TestTime.UtcNow.AddMinutes(-2);
         var run = await LoadWorkflowRunAsync(wrId);
         Assert.NotNull(run);
         run!.Feedback.Add(new ApprovalFeedback(
@@ -222,9 +222,9 @@ public class IssueFeedbackApiSpecs
             Stage: "plan",
             Body: "live server shape",
             Status: ApprovalFeedbackStatus.Resolved,
-            CreatedAt: DateTimeOffset.UtcNow.AddMinutes(-5),
+            CreatedAt: TestTime.UtcNow.AddMinutes(-5),
             ResolutionTaskId: "apply-feedback.1",
-            ResolvedAt: DateTimeOffset.UtcNow.AddMinutes(-1),
+            ResolvedAt: TestTime.UtcNow.AddMinutes(-1),
             ResolutionSummary: "Addressed live"));
         await SaveWorkflowRunAsync(wrId, run);
 
@@ -340,7 +340,7 @@ public class IssueFeedbackApiSpecs
     public async Task IssueDetail_FeedbackArrayOrderedByCreatedAtDesc()
     {
         var (project, issueNumber, _, wrId) = await SeedAwaitingApprovalIssueAsync();
-        var baseTime = DateTimeOffset.UtcNow.AddMinutes(-10);
+        var baseTime = TestTime.UtcNow.AddMinutes(-10);
 
         var run = await LoadWorkflowRunAsync(wrId);
         Assert.NotNull(run);
@@ -393,9 +393,9 @@ public class IssueFeedbackApiSpecs
             Stage: "plan",
             Body: "old feedback",
             Status: ApprovalFeedbackStatus.Resolved,
-            CreatedAt: DateTimeOffset.UtcNow.AddMinutes(-5),
+            CreatedAt: TestTime.UtcNow.AddMinutes(-5),
             ResolutionTaskId: "apply-feedback.1",
-            ResolvedAt: DateTimeOffset.UtcNow,
+            ResolvedAt: TestTime.UtcNow,
             ResolutionSummary: "Addressed"));
         await SaveWorkflowRunAsync(wrId, run);
 
@@ -425,14 +425,14 @@ public class IssueFeedbackApiSpecs
             Stage: "plan",
             Body: "plan feedback",
             Status: ApprovalFeedbackStatus.Open,
-            CreatedAt: DateTimeOffset.UtcNow.AddMinutes(-2)));
+            CreatedAt: TestTime.UtcNow.AddMinutes(-2)));
         run.Feedback.Add(new ApprovalFeedback(
             Id: $"fb_{Guid.NewGuid():N}",
             WorkflowRunId: wrId,
             Stage: "check",
             Body: "check feedback",
             Status: ApprovalFeedbackStatus.Open,
-            CreatedAt: DateTimeOffset.UtcNow.AddMinutes(-1)));
+            CreatedAt: TestTime.UtcNow.AddMinutes(-1)));
         await SaveWorkflowRunAsync(wrId, run);
         await _grains.GetGrain<IIssueGrain>(issueId).DeactivateForTestAsync();
 
@@ -464,16 +464,16 @@ public class IssueFeedbackApiSpecs
             Stage: "plan",
             Body: "still needs work",
             Status: ApprovalFeedbackStatus.Open,
-            CreatedAt: DateTimeOffset.UtcNow.AddMinutes(-3)));
+            CreatedAt: TestTime.UtcNow.AddMinutes(-3)));
         run.Feedback.Add(new ApprovalFeedback(
             Id: resolvedId,
             WorkflowRunId: wrId,
             Stage: "plan",
             Body: "completed feedback",
             Status: ApprovalFeedbackStatus.Resolved,
-            CreatedAt: DateTimeOffset.UtcNow.AddMinutes(-5),
+            CreatedAt: TestTime.UtcNow.AddMinutes(-5),
             ResolutionTaskId: "apply-feedback.1",
-            ResolvedAt: DateTimeOffset.UtcNow.AddMinutes(-1),
+            ResolvedAt: TestTime.UtcNow.AddMinutes(-1),
             ResolutionSummary: "Done"));
         await SaveWorkflowRunAsync(wrId, run);
         await _grains.GetGrain<IIssueGrain>(issueId).DeactivateForTestAsync();
@@ -596,7 +596,7 @@ public class IssueFeedbackApiSpecs
             ? new
             {
                 result = (string?)null,
-                requestedAt = DateTimeOffset.UtcNow.ToString("o"),
+                requestedAt = TestTime.UtcNow.ToString("o"),
                 respondedAt = (string?)null,
             }
             : null;
@@ -609,7 +609,7 @@ public class IssueFeedbackApiSpecs
             metadata = new
             {
                 name = "test-run",
-                createdAt = DateTimeOffset.UtcNow.ToString("o"),
+                createdAt = TestTime.UtcNow.ToString("o"),
                 labels = new Dictionary<string, string>(),
                 annotations = new Dictionary<string, string>
                 {

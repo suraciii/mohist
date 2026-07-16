@@ -37,14 +37,14 @@ public static class StatusRoutes
         var byRef = app.MapGroup("/api/projects/{projectRef}")
             .AddEndpointFilter<ProjectResolutionEndpointFilter>();
 
-        byRef.MapGet("/status", async (HttpContext context, IssueQuerier issuesQuery, IEnvironmentVariableProvider environment) =>
+        byRef.MapGet("/status", async (HttpContext context, IssueQuerier issuesQuery, IRuntimeBuildInfo runtimeBuildInfo, IRuntimeSourceIdentity sourceIdentity) =>
         {
             var current = context.GetResolvedProject();
 
             var allIssues = await issuesQuery.ListAsync(current.Id, current, all: true);
             var active = allIssues.Where(i => i.Health == "active").ToList();
 
-            var versionInfo = GetVersionInfo(environment);
+            var sourceHead = sourceIdentity.GitHead;
 
             var result = new
             {
@@ -58,10 +58,12 @@ public static class StatusRoutes
                     ["done"] = allIssues.Count(i => i.Status == "done"),
                     ["cancelled"] = allIssues.Count(i => i.Status == "cancelled"),
                 },
-                version = versionInfo.Version,
-                gitHash = versionInfo.GitHash,
-                sourceHead = versionInfo.SourceHead,
-                upToDate = versionInfo.UpToDate,
+                version = runtimeBuildInfo.Version,
+                gitHash = runtimeBuildInfo.GitHash,
+                sourceHead,
+                upToDate = runtimeBuildInfo.GitHash != null
+                    && sourceHead != null
+                    && runtimeBuildInfo.GitHash == sourceHead,
             };
 
             return ApiResults.Ok(result);
@@ -70,43 +72,4 @@ public static class StatusRoutes
         return app;
     }
 
-    private static (string? Version, string? GitHash, string? SourceHead, bool UpToDate) GetVersionInfo(IEnvironmentVariableProvider environment)
-    {
-        var version = typeof(StatusRoutes).Assembly.GetName().Version?.ToString();
-        var gitHash = environment.GetEnvironmentVariable(RuntimeBuildInfo.GitHashEnvironmentVariable);
-        var sourceHead = GetGitHead();
-        var upToDate = gitHash != null && sourceHead != null && gitHash == sourceHead;
-        return (version, gitHash, sourceHead, upToDate);
-    }
-
-    private static string? GetGitHead()
-    {
-        try
-        {
-            var root = AppContext.BaseDirectory;
-            while (root != null && !Directory.Exists(Path.Combine(root, ".git")))
-            {
-                root = Directory.GetParent(root)?.FullName;
-            }
-            if (root == null) return null;
-
-            var headFile = Path.Combine(root, ".git", "HEAD");
-            if (!File.Exists(headFile)) return null;
-
-            var head = File.ReadAllText(headFile).Trim();
-            if (head.StartsWith("ref: "))
-            {
-                var refPath = head[5..];
-                var refFile = Path.Combine(root, ".git", refPath);
-                if (File.Exists(refFile))
-                    return File.ReadAllText(refFile).Trim();
-            }
-            else
-            {
-                return head;
-            }
-        }
-        catch { }
-        return null;
-    }
 }

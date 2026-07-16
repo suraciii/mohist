@@ -48,7 +48,7 @@ internal static class InboxProjectionTestSupport
             id: eventId,
             source: new Uri($"/mohist/issues/{issueId}", UriKind.Relative),
             type: type,
-            time: DateTimeOffset.UtcNow,
+            time: TestTime.UtcNow,
             data: null,
             extensions: new Dictionary<string, string>
             {
@@ -62,7 +62,7 @@ internal static class InboxProjectionTestSupport
             id: eventId,
             source: new Uri($"/mohist/workflow-runs/{workflowRunId}", UriKind.Relative),
             type: type,
-            time: DateTimeOffset.UtcNow,
+            time: TestTime.UtcNow,
             data: null);
 
     public static async Task<List<InboxItemView>> GetInboxAsync(TestDatabase database, string projectId)
@@ -129,8 +129,8 @@ internal static class InboxProjectionTestSupport
             Id = projectId,
             Name = ProjectNameFromId(projectId),
             RepositoriesJson = "[]",
-            CreatedAt = DateTimeOffset.UtcNow,
-            UpdatedAt = DateTimeOffset.UtcNow,
+            CreatedAt = TestTime.UtcNow,
+            UpdatedAt = TestTime.UtcNow,
         });
         await db.SaveChangesAsync();
     }
@@ -195,7 +195,7 @@ internal static class InboxProjectionTestSupport
             Id = workflowRunId,
             Metadata = new WorkflowRunMetadata(
                 Name: null,
-                CreatedAt: DateTimeOffset.UtcNow,
+                CreatedAt: TestTime.UtcNow,
                 Annotations: annotations),
             Stages = new List<StageRun>(),
         };

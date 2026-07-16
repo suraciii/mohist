@@ -1,5 +1,7 @@
+using Mohist.Server.UnitTests.Support;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Cli;
+using EnvironmentAbstractions.TestHelpers;
 using Xunit;
 
 namespace Mohist.Server.UnitTests.Skills;
@@ -33,20 +35,66 @@ public sealed class SkillsCommandRegistrationTests
 
     private static global::System.CommandLine.RootCommand BuildRootCommand()
     {
+        var files = new FakeFileSystem();
+        var environment =
+            new MockEnvironmentVariableProvider();
+        EmbeddedSkillData.Populate(files);
+        var resolver = new SkillAssetRootResolver(
+            files,
+            environment,
+            getOverrideAssetRoot:
+                () => EmbeddedSkillData.VirtualRoot,
+            getManagedAssetRoot: null,
+            getUserHome:
+                () => "/mohist-tests/user");
+        var assets = new SkillAssetService(
+            files,
+            environment,
+            resolver);
+        var commands = new NoopCommandExecutor();
         var services = new ServiceCollection();
-        services.AddSingleton(new MohistCliApi(new HttpClient(), TextWriter.Null, TextWriter.Null, RealFileSystem.Instance, new SystemCommandExecutor()));
+        services.AddSingleton(new MohistCliApi(
+            RejectingHttpMessageHandler.CreateClient(),
+            TextWriter.Null,
+            TextWriter.Null,
+            files,
+            commands));
         services.AddSingleton<TextWriter>(TextWriter.Null);
-        services.AddSingleton<IFileSystem>(RealFileSystem.Instance);
-        services.AddSingleton<ICommandExecutor>(new SystemCommandExecutor());
-        services.AddSingleton<IEnvironmentVariableProvider>(SystemEnvironmentVariableProvider.Instance);
-        services.AddSingleton<IServiceInstaller>(sp => new SystemdServiceInstaller(TextWriter.Null, TextWriter.Null, RealFileSystem.Instance, sp.GetRequiredService<ICommandExecutor>()));
-        services.AddSingleton(sp => new UpdateOperations(TextWriter.Null, TextWriter.Null, sp.GetRequiredService<IServiceInstaller>(), sp.GetRequiredService<ICommandExecutor>(), RealFileSystem.Instance, sp.GetRequiredService<IEnvironmentVariableProvider>()));
-        services.AddSingleton(new RuntimeConsistencyValidator(new HttpClient(), new SystemCommandExecutor(), RealFileSystem.Instance, SystemEnvironmentVariableProvider.Instance, TextWriter.Null));
-        services.AddSingleton(new ServiceReadinessProbe(new HttpClient(), TextWriter.Null));
-        services.AddSingleton(new RunnerRefreshVerifier(new HttpClient(), new SystemCommandExecutor(), RealFileSystem.Instance));
-        services.AddSingleton(new UpdateOutcomeReporter(new HttpClient(), TextWriter.Null));
+        services.AddSingleton<IFileSystem>(files);
+        services.AddSingleton<ICommandExecutor>(commands);
+        services.AddSingleton<IEnvironmentVariableProvider>(
+            environment);
+        services.AddSingleton<IServiceInstaller>(sp =>
+            new SystemdServiceInstaller(
+                TextWriter.Null,
+                TextWriter.Null,
+                files,
+                sp.GetRequiredService<ICommandExecutor>()));
+        services.AddSingleton(sp => new UpdateOperations(
+            TextWriter.Null,
+            TextWriter.Null,
+            sp.GetRequiredService<IServiceInstaller>(),
+            sp.GetRequiredService<ICommandExecutor>(),
+            files,
+            environment));
+        services.AddSingleton(new RuntimeConsistencyValidator(
+            RejectingHttpMessageHandler.CreateClient(),
+            commands,
+            files,
+            environment,
+            TextWriter.Null));
+        services.AddSingleton(new ServiceReadinessProbe(
+            RejectingHttpMessageHandler.CreateClient(),
+            TextWriter.Null));
+        services.AddSingleton(new RunnerRefreshVerifier(
+            RejectingHttpMessageHandler.CreateClient(),
+            commands,
+            files));
+        services.AddSingleton(new UpdateOutcomeReporter(
+            RejectingHttpMessageHandler.CreateClient(),
+            TextWriter.Null));
         services.AddSingleton<SourceCodeUpdater>();
-        services.AddSingleton<SkillAssetService>();
+        services.AddSingleton(assets);
         services.AddSingleton<SkillInstallService>();
         services.AddSingleton<InfoVerboseCollector>();
         services.AddSingleton<InfoCollector>();

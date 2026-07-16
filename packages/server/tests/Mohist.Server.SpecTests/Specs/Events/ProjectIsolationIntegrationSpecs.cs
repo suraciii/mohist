@@ -233,7 +233,7 @@ public class ProjectIsolationIntegrationSpecs
             id: Guid.NewGuid().ToString(),
             source: new Uri(source, UriKind.RelativeOrAbsolute),
             type: type,
-            time: DateTimeOffset.UtcNow,
+            time: TestTime.UtcNow,
             data: null,
             extensions: extensions is null ? null : new Dictionary<string, string>(extensions, StringComparer.Ordinal));
 

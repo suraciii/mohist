@@ -14,32 +14,14 @@ using Xunit;
 namespace Mohist.Server.SpecTests.Specs.Workflow.Artifacts;
 
 [Collection("MohistDb")]
-public class WorkflowArtifactUploadServiceSpecs : IDisposable
+public class WorkflowArtifactUploadServiceSpecs
 {
     private readonly MohistDbFixture _fixture;
-    private readonly string _storageRoot;
-    private readonly FileSystemWorkflowArtifactStorage _storage;
+    private readonly InMemoryWorkflowArtifactStorage _storage = new();
 
     public WorkflowArtifactUploadServiceSpecs(MohistDbFixture fixture)
     {
         _fixture = fixture;
-        _storageRoot = Path.Combine(Path.GetTempPath(), $"mohist-artifacts-{Guid.NewGuid():N}");
-        _storage = new FileSystemWorkflowArtifactStorage(
-            _storageRoot,
-            NullLogger<FileSystemWorkflowArtifactStorage>.Instance);
-    }
-
-    public void Dispose()
-    {
-        try
-        {
-            if (Directory.Exists(_storageRoot))
-                Directory.Delete(_storageRoot, recursive: true);
-        }
-        catch
-        {
-            // best-effort cleanup
-        }
     }
 
     private WorkflowArtifactUploadService BuildService(StubWorkContextResolver? resolver = null)
@@ -103,10 +85,10 @@ public class WorkflowArtifactUploadServiceSpecs : IDisposable
         Assert.Equal(taskRunId, row.TaskRunId);
         Assert.Equal("review.md", row.Path);
 
-        var storedAbsolute = _storage.ResolveAbsolutePath(row.StoragePath);
-        Assert.True(File.Exists(storedAbsolute));
-        var readBack = await File.ReadAllBytesAsync(storedAbsolute);
-        Assert.Equal(payload, readBack);
+        await using var stored = _storage.OpenFileContent(row.StoragePath);
+        await using var buffer = new MemoryStream();
+        await stored.CopyToAsync(buffer);
+        Assert.Equal(payload, buffer.ToArray());
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]
@@ -200,14 +182,15 @@ public class WorkflowArtifactUploadServiceSpecs : IDisposable
         Assert.Equal("sha256:aaa", second.Conflict.ExistingContentHash);
         Assert.Equal("sha256:bbb", second.Conflict.IncomingContentHash);
 
-        // Original content is preserved.
         using var scope = _fixture.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
         var row = await db.WorkflowArtifactPendingUploads
             .AsNoTracking()
             .FirstAsync(p => p.WorkflowRunId == workflowRunId);
-        var stored = await File.ReadAllBytesAsync(_storage.ResolveAbsolutePath(row.StoragePath));
-        Assert.Equal(firstPayload, stored);
+        await using var stored = _storage.OpenFileContent(row.StoragePath);
+        await using var buffer = new MemoryStream();
+        await stored.CopyToAsync(buffer);
+        Assert.Equal(firstPayload, buffer.ToArray());
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]
@@ -392,17 +375,16 @@ public class WorkflowArtifactUploadServiceSpecs : IDisposable
         Assert.EndsWith("/files", row.StoragePath);
         Assert.DoesNotContain("specs", row.StoragePath);
 
-        // The contained files must be on disk under {storagePath}/{relativePath}.
-        var filesRoot = _storage.ResolveAbsolutePath(row.StoragePath);
-        Assert.True(Directory.Exists(filesRoot));
-        var aPath = Path.Combine(filesRoot, "a.md");
-        var bPath = Path.Combine(filesRoot, "sub", "b.md");
-        Assert.True(File.Exists(aPath));
-        Assert.True(File.Exists(bPath));
-        Assert.Equal(fileA, await File.ReadAllBytesAsync(aPath));
-        Assert.Equal(fileB, await File.ReadAllBytesAsync(bPath));
+        await using var aContent = _storage.OpenDirectoryEntry(row.StoragePath, "a.md");
+        await using var aBuffer = new MemoryStream();
+        await aContent.CopyToAsync(aBuffer);
+        Assert.Equal(fileA, aBuffer.ToArray());
 
-        // The metadata file describes the directory kind.
+        await using var bContent = _storage.OpenDirectoryEntry(row.StoragePath, "sub/b.md");
+        await using var bBuffer = new MemoryStream();
+        await bContent.CopyToAsync(bBuffer);
+        Assert.Equal(fileB, bBuffer.ToArray());
+
         var metadata = await _storage.ReadMetadataAsync(row.StoragePath);
         Assert.NotNull(metadata);
         Assert.Equal("directory", metadata!.Kind);
@@ -589,6 +571,34 @@ public class WorkflowArtifactUploadServiceSpecs : IDisposable
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
+    public async Task UploadAsync_WhenRequestIsCancelledDuringRollback_CleanupUsesIndependentToken()
+    {
+        var workflowRunId = $"wr_{Guid.NewGuid():N}";
+        var workId = $"task-1.1_{Guid.NewGuid():N}";
+        var resolver = new StubWorkContextResolver();
+        resolver.Register(workflowRunId, workId, "task-1.1");
+        var service = BuildService(resolver);
+        using var cancellation = new CancellationTokenSource();
+        _storage.BeforeDelete = cancellation.Cancel;
+
+        var result = await service.UploadAsync(new WorkflowArtifactUploadRequest
+        {
+            WorkflowRunId = workflowRunId,
+            WorkId = workId,
+            Path = "specs",
+            ContentType = "application/x-mohist-artifact-directory",
+            ContentHash = "sha256:bad",
+            Size = 1,
+            OpenContent = () => new MemoryStream(Bytes("{"), writable: false),
+        }, cancellation.Token);
+
+        Assert.Equal(WorkflowArtifactUploadResultKind.Invalid, result.Kind);
+        Assert.Equal(CancellationToken.None, _storage.LastDeleteCancellationToken);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
     public async Task BindAsync_DirectoryPendingUpload_BindsAsDirectoryKind()
     {
         // End-to-end: drive a real runner upload through the upload
@@ -646,8 +656,6 @@ public class WorkflowArtifactUploadServiceSpecs : IDisposable
         Assert.EndsWith("/files", bound.ArtifactStoragePath);
         Assert.Equal(fileA.LongLength + fileB.LongLength, bound.Size);
 
-        // The contained files must be present on disk and reachable
-        // through the storage service's directory browsing APIs.
         var aStream = _storage.OpenDirectoryEntry(bound.ArtifactStoragePath, "a.md");
         var aBytes = await new StreamReader(aStream).ReadToEndAsync();
         Assert.Equal("alpha content", Encoding.UTF8.GetString(fileA));

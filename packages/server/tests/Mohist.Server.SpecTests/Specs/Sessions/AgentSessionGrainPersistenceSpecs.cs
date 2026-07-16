@@ -19,16 +19,20 @@ public abstract class AgentSessionGrainPersistenceSpecsBase : IClassFixture<Agen
 
     protected IAgentSessionGrain NewGrain() => Fixture.Grains.GetGrain<IAgentSessionGrain>($"agent-session-spec-{Guid.NewGuid():N}");
 
-    protected Task WaitUntilAsync(Func<bool> condition, string description, int timeoutMs = 5000)
+    protected Task WaitUntilAsync(
+        IAgentSessionGrain grain,
+        Func<bool> condition,
+        string description,
+        int timeoutMs = 5000)
         => TestWait.ForAsync(
             condition,
             TimeSpan.FromMilliseconds(timeoutMs),
             TimeSpan.FromMilliseconds(25),
             description,
-            () =>
+            async () =>
             {
                 Fixture.TimeProvider.Advance(TimeSpan.FromMilliseconds(250));
-                return Task.CompletedTask;
+                await grain.GetAsync();
             });
 }
 
@@ -52,6 +56,7 @@ public class AgentSessionGrainPersistSuccessSpecs : AgentSessionGrainPersistence
             }));
 
         await WaitUntilAsync(
+            grain,
             () => Fixture.StateStore.SaveCount >= 2 && Fixture.TranscriptStore.Flushes.Count >= 1,
             "initial agent session persistence");
 
@@ -67,6 +72,7 @@ public class AgentSessionGrainPersistSuccessSpecs : AgentSessionGrainPersistence
             }));
 
         await WaitUntilAsync(
+            grain,
             () => Fixture.StateStore.SaveCount >= 3 && Fixture.TranscriptStore.Flushes.Count >= 2,
             "subsequent agent session persistence");
 

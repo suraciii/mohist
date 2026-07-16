@@ -463,22 +463,14 @@ public class InfoCollectorJsonTests
     public void InfoCommand_Help_DescribesJsonOption()
     {
         var services = new ServiceCollection();
-        var api = new MohistCliApi(new HttpClient(), TextWriter.Null, TextWriter.Null, new FakeFileSystem(), new NoopCommandExecutor());
+        var api = new MohistCliApi(RejectingHttpMessageHandler.CreateClient(), TextWriter.Null, TextWriter.Null, new FakeFileSystem(), new NoopCommandExecutor());
         services.AddSingleton(api);
         services.AddSingleton(TextWriter.Null);
         services.AddSingleton<IFileSystem>(new FakeFileSystem());
         services.AddSingleton<ICommandExecutor>(new NoopCommandExecutor());
         services.AddSingleton<IEnvironmentVariableProvider>(new MockEnvironmentVariableProvider());
         services.AddSingleton<IServiceInstaller>(sp => new SystemdServiceInstaller(TextWriter.Null, TextWriter.Null, new FakeFileSystem(), sp.GetRequiredService<ICommandExecutor>()));
-        services.AddSingleton<HttpClient>(sp =>
-{
-    var env = sp.GetRequiredService<IEnvironmentVariableProvider>();
-    return new HttpClient
-    {
-        BaseAddress = new Uri(env.GetEnvironmentVariable(SourceCodeUpdater.ServerUrlEnvironmentVariable) ?? "http://127.0.0.1:3456"),
-        Timeout = TimeSpan.FromSeconds(5),
-    };
-});
+        services.AddSingleton(RejectingHttpMessageHandler.CreateClient());
         services.AddSingleton<RuntimeConsistencyValidator>(sp => new RuntimeConsistencyValidator(
             sp.GetRequiredService<HttpClient>(),
             sp.GetRequiredService<ICommandExecutor>(),
@@ -512,7 +504,7 @@ public class InfoCollectorJsonTests
     private static (InfoCollector collector, InfoRenderer renderer) BuildCollector()
     {
         var api = new MohistCliApi(
-            new HttpClient(),
+            RejectingHttpMessageHandler.CreateClient(),
             TextWriter.Null,
             TextWriter.Null,
             new FakeFileSystem(),

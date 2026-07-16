@@ -16,30 +16,12 @@ using Xunit;
 namespace Mohist.Server.SpecTests.Specs.Workflow.Grain;
 
 [Collection("WorkflowGrain")]
-public class WorkflowCheckLoopArtifactSpecs : WorkflowGrainSpecs, IDisposable
+public class WorkflowCheckLoopArtifactSpecs : WorkflowGrainSpecs
 {
-    private readonly string _storageRoot;
-    private readonly FileSystemWorkflowArtifactStorage _storage;
+    private readonly InMemoryWorkflowArtifactStorage _storage = new();
 
     public WorkflowCheckLoopArtifactSpecs(WorkflowGrainFixture fixture) : base(fixture)
     {
-        _storageRoot = Path.Combine(Path.GetTempPath(), $"mohist-check-loop-{Guid.NewGuid():N}");
-        _storage = new FileSystemWorkflowArtifactStorage(
-            _storageRoot,
-            NullLogger<FileSystemWorkflowArtifactStorage>.Instance);
-    }
-
-    public void Dispose()
-    {
-        try
-        {
-            if (Directory.Exists(_storageRoot))
-                Directory.Delete(_storageRoot, recursive: true);
-        }
-        catch
-        {
-            // best-effort cleanup
-        }
     }
 
     private static RecoveryDefinition ReviewRecovery() =>
@@ -255,7 +237,7 @@ public class WorkflowCheckLoopArtifactSpecs : WorkflowGrainSpecs, IDisposable
                 ContentType = "text/markdown",
                 ContentHash = $"sha256:{Guid.NewGuid():N}",
             },
-            DateTimeOffset.UtcNow);
+            TestTime.UtcNow);
 
         await using var db = CreateDb();
         db.WorkflowArtifactPendingUploads.Add(new WorkflowArtifactPendingUploadRow
@@ -269,8 +251,8 @@ public class WorkflowCheckLoopArtifactSpecs : WorkflowGrainSpecs, IDisposable
             ContentHash = $"sha256:{Guid.NewGuid():N}",
             Size = bytes.Length,
             StoragePath = storagePath,
-            CreatedAt = DateTimeOffset.UtcNow,
-            ExpiresAt = DateTimeOffset.UtcNow.AddDays(1),
+            CreatedAt = TestTime.UtcNow,
+            ExpiresAt = TestTime.UtcNow.AddDays(1),
         });
         await db.SaveChangesAsync();
         return uploadId;

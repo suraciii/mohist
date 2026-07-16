@@ -476,8 +476,8 @@ public class EpicEventPublishSpecs
             Priority = priority,
             Status = status,
             PauseReason = null,
-            CreatedAt = DateTimeOffset.UtcNow,
-            UpdatedAt = DateTimeOffset.UtcNow,
+            CreatedAt = TestTime.UtcNow,
+            UpdatedAt = TestTime.UtcNow,
         });
         await db.SaveChangesAsync();
     }
@@ -519,7 +519,7 @@ public class EpicEventPublishSpecs
             ProjectId = ProjectId,
             IssueId = issueId,
             IssueNumber = issueNumber,
-            CreatedAt = DateTimeOffset.UtcNow,
+            CreatedAt = TestTime.UtcNow,
         });
         await db.SaveChangesAsync();
     }

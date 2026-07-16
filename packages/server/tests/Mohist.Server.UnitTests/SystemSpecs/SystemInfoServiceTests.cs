@@ -332,7 +332,7 @@ public class SystemInfoServiceTests
         {
             Version = version;
             GitHash = gitHash;
-            StartedAt = DateTimeOffset.UtcNow;
+            StartedAt = TestTime.UtcNow;
         }
     }
 
@@ -381,11 +381,11 @@ public class SystemInfoServiceTests
 
         public void Write(string path, string contents)
         {
-            _files[Path.GetFullPath(path)] = contents;
+            _files[Path.GetFullPath(path, "/")] = contents;
         }
 
-        public bool Exists(string path) => _files.ContainsKey(Path.GetFullPath(path));
+        public bool Exists(string path) => _files.ContainsKey(Path.GetFullPath(path, "/"));
 
-        public string ReadAllText(string path) => _files[Path.GetFullPath(path)];
+        public string ReadAllText(string path) => _files[Path.GetFullPath(path, "/")];
     }
 }

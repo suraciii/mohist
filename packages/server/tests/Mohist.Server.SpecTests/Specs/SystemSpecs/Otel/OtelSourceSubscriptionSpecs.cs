@@ -85,8 +85,7 @@ public class OtelSourceSubscriptionSpecs
         await db.Database.ExecuteSqlRawAsync("CREATE TABLE Probe (Id INTEGER PRIMARY KEY);");
 
         await host.Recorder.WaitForAsync(
-            activities => activities.Any(a => a.Source?.Name == "OpenTelemetry.Instrumentation.EntityFrameworkCore"),
-            TimeSpan.FromSeconds(5));
+            activities => activities.Any(a => a.Source?.Name == "OpenTelemetry.Instrumentation.EntityFrameworkCore"));
 
         Assert.Contains(host.Recorder.EndedActivities,
             a => a.Source?.Name == "OpenTelemetry.Instrumentation.EntityFrameworkCore");

@@ -22,7 +22,7 @@ public class TraceQuerierSpecs : IDisposable
         (_db, _keeper) = InMemoryOtelDb.Create();
         _ingester = new TraceIngester(_db, NullLogger<TraceIngester>.Instance);
         _status = new OtelCollectorStatus();
-        _querier = new TraceQuerier(_db, _status, new PassthroughFileSystem());
+        _querier = new TraceQuerier(_db, _status, new InMemoryServerFileSystem());
     }
 
     public void Dispose()
@@ -345,12 +345,5 @@ public class TraceQuerierSpecs : IDisposable
         cmd.Parameters.AddWithValue("$start_time", startTime);
         cmd.Parameters.AddWithValue("$end_time", endTime);
         cmd.ExecuteNonQuery();
-    }
-
-    private sealed class PassthroughFileSystem : IFileSystem
-    {
-        public bool Exists(string path) => File.Exists(path) || Directory.Exists(path);
-
-        public string ReadAllText(string path) => File.ReadAllText(path);
     }
 }

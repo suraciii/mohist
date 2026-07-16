@@ -278,7 +278,7 @@ public class WorkflowRetrySessionHealthGuardSpecs
         var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new
         {
             name = projectId,
-            path = Directory.GetCurrentDirectory(),
+            path = "/mohist-tests/projects/retry-session-health-guard",
             baseBranch = "main",
         });
 

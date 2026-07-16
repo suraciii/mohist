@@ -250,9 +250,6 @@ public class IssueWorkspaceRepositoryResolutionSpecs : IAsyncLifetime
         var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
         await runner.PollAsync(_fixture.Services);
 
-        var project = await _fixture.Grains.GetGrain<IProjectGrain>(projectId).GetAsync();
-        var path = Mohist.Server.Infrastructure.Workspace.MohistWorkspaceLayout.IssueWorkspacePath(_fixture.RunnerRoot, project!.Name, number);
-        Directory.CreateDirectory(path);
     }
 
     private sealed record IssueDto(string Id, int Number);

@@ -149,7 +149,7 @@ public class RunnerPollSchedulingSpecs : Mohist.Server.SpecTests.Specs.Workflow.
         });
         run.CurrentStageId = "build";
         run.Status = Enum.Parse<WorkflowRunStatus>(status);
-        run.Assignment = new WorkflowAssignment(runnerId, DateTimeOffset.UtcNow);
+        run.Assignment = new WorkflowAssignment(runnerId, TestTime.UtcNow);
 
         db.WorkflowRuns.Add(new WorkflowRunRow
         {

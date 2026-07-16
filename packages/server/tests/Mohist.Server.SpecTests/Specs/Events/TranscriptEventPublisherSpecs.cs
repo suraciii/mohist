@@ -167,7 +167,7 @@ public class TranscriptEventPublisherSpecs
             Sequence: 1,
             Type: type,
             Payload: payload,
-            CreatedAt: DateTime.UtcNow.ToString("o"));
+            CreatedAt: TestTime.UtcDateTime.ToString("o"));
     }
 
     private sealed class RecordingHubContext : IHubContext<MohistHub, IEventsClient>

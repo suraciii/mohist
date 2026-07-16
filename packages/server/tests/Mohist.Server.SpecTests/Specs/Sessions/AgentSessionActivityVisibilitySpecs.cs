@@ -171,7 +171,7 @@ public class AgentSessionActivityVisibilitySpecs
             Runtime = new AgentSessionRuntime("test-runner", null),
             Settings = new AgentSessionSettings("test-model"),
             Status = new AgentSessionStatusSnapshot(
-                CreatedAt: DateTime.UtcNow,
+                CreatedAt: TestTime.UtcDateTime,
                 AgentRuntimeSessionId: sessionId),
             Metadata = new AgentSessionMetadata(labels),
         };
@@ -182,7 +182,7 @@ public class AgentSessionActivityVisibilitySpecs
         {
             Id = session.Id,
             State = JsonSerializer.Serialize(session, AgentSessionJson.JsonOptions),
-            CreatedAt = DateTime.UtcNow,
+            CreatedAt = TestTime.UtcDateTime,
             Status = "opened",
             AgentSessionId = sessionId,
             RunnerId = "test-runner",
@@ -197,7 +197,7 @@ public class AgentSessionActivityVisibilitySpecs
         string agentName,
         string runnerId)
     {
-        var startedAt = DateTime.UtcNow.AddMinutes(-5);
+        var startedAt = TestTime.UtcDateTime.AddMinutes(-5);
 
         var session = new AgentSession
         {
@@ -207,7 +207,7 @@ public class AgentSessionActivityVisibilitySpecs
             Status = new AgentSessionStatusSnapshot(
                 CreatedAt: startedAt,
                 BoundAt: startedAt.AddSeconds(1),
-                LastDataAt: DateTime.UtcNow,
+                LastDataAt: TestTime.UtcDateTime,
                 AgentRuntimeSessionId: sessionId),
             Metadata = new AgentSessionMetadata(new Dictionary<string, string>(StringComparer.Ordinal)
             {
@@ -237,7 +237,7 @@ public class AgentSessionActivityVisibilitySpecs
         string sessionId,
         string runnerId)
     {
-        var startedAt = DateTime.UtcNow.AddMinutes(-10);
+        var startedAt = TestTime.UtcDateTime.AddMinutes(-10);
         var workflowRunId = $"wf-{Guid.NewGuid():N}";
         var workId = $"work-{Guid.NewGuid():N}";
 
@@ -249,7 +249,7 @@ public class AgentSessionActivityVisibilitySpecs
             Status = new AgentSessionStatusSnapshot(
                 CreatedAt: startedAt,
                 BoundAt: startedAt.AddSeconds(1),
-                LastDataAt: DateTime.UtcNow,
+                LastDataAt: TestTime.UtcDateTime,
                 AgentRuntimeSessionId: sessionId),
             Metadata = new AgentSessionMetadata(new Dictionary<string, string>(StringComparer.Ordinal)
             {

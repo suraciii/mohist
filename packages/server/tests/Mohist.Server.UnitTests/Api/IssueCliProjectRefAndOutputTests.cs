@@ -400,11 +400,11 @@ public class IssueCliProjectRefAndOutputTests
     private static string RenderHelp(string[] args)
     {
         var services = new ServiceCollection();
-        services.AddSingleton(new MohistCliApi(new HttpClient(), TextWriter.Null, TextWriter.Null, RealFileSystem.Instance, new SystemCommandExecutor()));
+        services.AddSingleton(new MohistCliApi(RejectingHttpMessageHandler.CreateClient(), TextWriter.Null, TextWriter.Null, new FakeFileSystem(), new NoopCommandExecutor()));
         services.AddSingleton<TextWriter>(TextWriter.Null);
-        services.AddSingleton<IFileSystem>(RealFileSystem.Instance);
-        services.AddSingleton<ICommandExecutor>(new SystemCommandExecutor());
-        services.AddSingleton<IServiceInstaller>(new SystemdServiceInstaller(TextWriter.Null, TextWriter.Null, RealFileSystem.Instance, new SystemCommandExecutor()));
+        services.AddSingleton<IFileSystem>(new FakeFileSystem());
+        services.AddSingleton<ICommandExecutor>(new NoopCommandExecutor());
+        services.AddSingleton<IServiceInstaller>(new SystemdServiceInstaller(TextWriter.Null, TextWriter.Null, new FakeFileSystem(), new NoopCommandExecutor()));
         services.AddSingleton<SourceCodeUpdater>();
         services.AddSingleton<SkillAssetService>();
         services.AddSingleton<SkillInstallService>();

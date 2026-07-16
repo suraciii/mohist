@@ -19,18 +19,18 @@ namespace Mohist.Server.Logging;
 internal sealed class FileLogger : ILogger
 {
     private readonly string _categoryName;
-    private readonly FileLoggerProvider _provider;
+    private readonly ILogRecordSink _sink;
 
-    public FileLogger(string categoryName, FileLoggerProvider provider)
+    public FileLogger(string categoryName, ILogRecordSink sink)
     {
         _categoryName = categoryName;
-        _provider = provider;
+        _sink = sink;
     }
 
     public IDisposable BeginScope<TState>(TState state) where TState : notnull
         => NullScope.Instance;
 
-    public bool IsEnabled(LogLevel logLevel) => _provider.IsEnabled(logLevel);
+    public bool IsEnabled(LogLevel logLevel) => _sink.IsEnabled(logLevel);
 
     public void Log<TState>(
         LogLevel logLevel,
@@ -47,12 +47,12 @@ internal sealed class FileLogger : ILogger
         var message = formatter(state, exception);
         var record = new LogRecord(
             Level: NormalizeLevel(logLevel),
-            Time: _provider.TimeProvider.GetUtcNow(),
+            Time: _sink.TimeProvider.GetUtcNow(),
             Service: ProjectService(_categoryName),
             Message: message,
             Exception: exception?.ToString());
 
-        _provider.WriteRecord(record);
+        _sink.WriteRecord(record);
     }
 
     private static string NormalizeLevel(LogLevel level) => level switch

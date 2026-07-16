@@ -2523,8 +2523,8 @@ public class IssueMetricsQuerierSpecs
             Labels = new Dictionary<string, string>(StringComparer.Ordinal),
             Priority = "p2",
             Status = status ?? Mohist.Server.Issue.Domain.IssueStatus.Backlog,
-            CreatedAt = updatedAt?.UtcDateTime ?? DateTime.UtcNow,
-            UpdatedAt = updatedAt?.UtcDateTime ?? DateTime.UtcNow,
+            CreatedAt = updatedAt?.UtcDateTime ?? TestTime.UtcDateTime,
+            UpdatedAt = updatedAt?.UtcDateTime ?? TestTime.UtcDateTime,
             WorkflowRunId = workflowRunId,
         };
         db.Issues.Add(new IssueRow
@@ -2711,7 +2711,7 @@ public class IssueMetricsQuerierSpecs
         string workflowRunId,
         (string Stage, (string Name, string Title, int ReworkCount)[]? Checks)[] stages)
     {
-        var now = DateTimeOffset.UtcNow;
+        var now = TestTime.UtcNow;
         var stageObjects = stages.Select(s =>
         {
             var initialized = s.Checks is not null;

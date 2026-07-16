@@ -19,6 +19,7 @@ internal sealed class SkillAssetRootResolver
     private readonly Func<string?>? _getOverrideAssetRoot;
     private readonly Func<string?>? _getManagedAssetRoot;
     private readonly Func<string?>? _getUserHome;
+    private readonly Func<string> _getSiblingAssetRoot;
 
     public static SkillAssetRootResolver CreateDefault(IFileSystem fileSystem, IEnvironmentVariableProvider environment) =>
         new(fileSystem, environment,
@@ -31,13 +32,15 @@ internal sealed class SkillAssetRootResolver
         IEnvironmentVariableProvider environment,
         Func<string?>? getOverrideAssetRoot = null,
         Func<string?>? getManagedAssetRoot = null,
-        Func<string?>? getUserHome = null)
+        Func<string?>? getUserHome = null,
+        Func<string>? getSiblingAssetRoot = null)
     {
         _fileSystem = fileSystem ?? throw new ArgumentNullException(nameof(fileSystem));
         _environment = environment ?? throw new ArgumentNullException(nameof(environment));
         _getOverrideAssetRoot = getOverrideAssetRoot ?? (() => _environment.GetEnvironmentVariable(OverrideEnvironmentVariable));
         _getManagedAssetRoot = getManagedAssetRoot;
         _getUserHome = getUserHome ?? (() => DefaultUserHome(_environment));
+        _getSiblingAssetRoot = getSiblingAssetRoot ?? (() => Path.Combine(AppContext.BaseDirectory, "skill-data"));
     }
 
     public string DefaultManagedAssetRoot()
@@ -81,7 +84,7 @@ internal sealed class SkillAssetRootResolver
                 return SkillAssetRootResolution.Selected(normalized, SkillAssetRootSource.ManagedCache);
         }
 
-        var siblingRoot = NormalizeRoot(Path.Combine(AppContext.BaseDirectory, "skill-data"));
+        var siblingRoot = NormalizeRoot(_getSiblingAssetRoot());
         if (_fileSystem.DirectoryExists(siblingRoot))
             return SkillAssetRootResolution.Selected(siblingRoot, SkillAssetRootSource.SiblingFallback);
 

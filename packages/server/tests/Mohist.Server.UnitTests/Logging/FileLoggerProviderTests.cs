@@ -1,234 +1,112 @@
-using System.Text;
 using System.Text.Json;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Logging;
 using Xunit;
-using EnvironmentAbstractions.TestHelpers;
 
 namespace Mohist.Server.UnitTests.Logging;
 
-public class FileLoggerProviderTests
+public class FileLoggerTests
 {
+    private static readonly DateTimeOffset FixedNow =
+        new(2026, 6, 30, 12, 34, 56, TimeSpan.Zero);
+
     [Fact]
-    public void WriteRecord_AppendsJsonObjectWithLevelTimeServiceMessageToFile()
+    public void Log_RecordsLevelTimeServiceAndMessage()
     {
-        var dir = Path.Combine(Path.GetTempPath(), $"mohist-logger-{Guid.NewGuid():N}");
-        var now = new DateTimeOffset(2026, 6, 30, 12, 34, 56, TimeSpan.Zero);
-        var time = new FakeTimeProvider(now);
+        var sink = new RecordingLogRecordSink(new FakeTimeProvider(FixedNow));
+        var logger = new FileLogger("Mohist.Server.Workflow.Grains", sink);
 
-        try
-        {
-            using var provider = CreateProvider(dir, time, out _);
-            var logger = provider.CreateLogger("Mohist.Server.Workflow.Grains");
-            logger.LogInformation("hello world");
+        logger.LogInformation("hello world");
 
-            var lines = ReadAllLines(provider.LogFilePath);
-            Assert.Single(lines);
-
-            using var doc = JsonDocument.Parse(lines[0]);
-            var root = doc.RootElement;
-
-            Assert.Equal("INFO", root.GetProperty("level").GetString());
-            Assert.Equal("Mohist.Server", root.GetProperty("service").GetString());
-            Assert.Equal("hello world", root.GetProperty("message").GetString());
-
-            var parsedTime = root.GetProperty("time").GetDateTimeOffset();
-            Assert.Equal(now.UtcDateTime, parsedTime.UtcDateTime);
-        }
-        finally
-        {
-            Cleanup(dir);
-        }
+        var record = Assert.Single(sink.Records);
+        Assert.Equal("INFO", record.Level);
+        Assert.Equal("Mohist.Server", record.Service);
+        Assert.Equal("hello world", record.Message);
+        Assert.Equal(FixedNow, record.Time);
     }
 
     [Fact]
-    public void WriteRecord_WhenDirectoryMissing_CreatesDirectoryBeforeFirstRecord()
+    public void Log_AppendsAcrossWrites()
     {
-        var dir = Path.Combine(Path.GetTempPath(), $"mohist-logger-{Guid.NewGuid():N}");
-        var nested = Path.Combine(dir, "logs");
-        Assert.False(Directory.Exists(nested));
+        var sink = new RecordingLogRecordSink(new FakeTimeProvider(FixedNow));
+        var logger = new FileLogger("Mohist.Server", sink);
 
-        try
-        {
-            using var provider = CreateProvider(nested, out _);
-            var logger = provider.CreateLogger("Mohist.Server");
-            logger.LogWarning("started up");
+        logger.LogInformation("first");
+        logger.LogInformation("second");
 
-            Assert.True(Directory.Exists(nested));
-            Assert.True(File.Exists(provider.LogFilePath));
-
-            var lines = ReadAllLines(provider.LogFilePath);
-            Assert.Single(lines);
-        }
-        finally
-        {
-            Cleanup(dir);
-        }
+        Assert.Equal(["first", "second"], sink.Records.Select(record => record.Message));
     }
 
     [Fact]
-    public void WriteRecord_AppendsAcrossWrites_AndFileRemainsConcurrentlyReadable()
+    public void Log_IncludesExceptionWhenProvided()
     {
-        var dir = Path.Combine(Path.GetTempPath(), $"mohist-logger-{Guid.NewGuid():N}");
-        try
-        {
-            using var provider = CreateProvider(dir, out _);
-            var logger = provider.CreateLogger("Mohist.Server");
+        var sink = new RecordingLogRecordSink(new FakeTimeProvider(FixedNow));
+        var logger = new FileLogger("Mohist.Server", sink);
 
-            logger.LogInformation("first");
-            using (var reader = new FileStream(provider.LogFilePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
-            using (var sr = new StreamReader(reader))
-            {
-                var seen = sr.ReadToEnd();
-                Assert.Contains("first", seen);
-            }
+        logger.LogError(new InvalidOperationException("boom"), "operation failed");
 
-            logger.LogInformation("second");
-            using (var reader = new FileStream(provider.LogFilePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
-            using (var sr = new StreamReader(reader))
-            {
-                var seen = sr.ReadToEnd();
-                Assert.Contains("first", seen);
-                Assert.Contains("second", seen);
-            }
+        var record = Assert.Single(sink.Records);
+        Assert.Equal("ERROR", record.Level);
+        Assert.Equal("operation failed", record.Message);
+        Assert.Contains("boom", record.Exception);
+    }
 
-            var lines = ReadAllLines(provider.LogFilePath);
-            Assert.Equal(2, lines.Length);
-        }
-        finally
-        {
-            Cleanup(dir);
-        }
+    [Theory]
+    [InlineData("Mohist.Server.Workflow.Services.Runner", "Mohist.Server")]
+    [InlineData("Microsoft.AspNetCore.Hosting", "Microsoft.AspNetCore")]
+    [InlineData("Mohist.Server", "Mohist.Server")]
+    [InlineData("Mohist", "Mohist")]
+    public void Log_ProjectsStableServiceName(string category, string expectedService)
+    {
+        var sink = new RecordingLogRecordSink(new FakeTimeProvider(FixedNow));
+        var logger = new FileLogger(category, sink);
+
+        logger.LogInformation("x");
+
+        Assert.Equal(expectedService, Assert.Single(sink.Records).Service);
     }
 
     [Fact]
-    public void WriteRecord_IncludesExceptionWhenProvided()
+    public void IsEnabled_UsesSinkPolicy()
     {
-        var dir = Path.Combine(Path.GetTempPath(), $"mohist-logger-{Guid.NewGuid():N}");
-        try
-        {
-            using var provider = CreateProvider(dir, out _);
-            var logger = provider.CreateLogger("Mohist.Server");
+        var sink = new RecordingLogRecordSink(new FakeTimeProvider(FixedNow), LogLevel.Warning);
+        var logger = new FileLogger("Mohist.Server", sink);
 
-            var ex = new InvalidOperationException("boom");
-            logger.LogError(ex, "operation failed");
-
-            var lines = ReadAllLines(provider.LogFilePath);
-            Assert.Single(lines);
-
-            using var doc = JsonDocument.Parse(lines[0]);
-            var root = doc.RootElement;
-
-            Assert.Equal("ERROR", root.GetProperty("level").GetString());
-            Assert.Equal("operation failed", root.GetProperty("message").GetString());
-            Assert.Contains("boom", root.GetProperty("exception").GetString()!);
-        }
-        finally
-        {
-            Cleanup(dir);
-        }
+        Assert.False(logger.IsEnabled(LogLevel.Information));
+        Assert.True(logger.IsEnabled(LogLevel.Warning));
+        Assert.False(logger.IsEnabled(LogLevel.None));
     }
 
     [Fact]
-    public void WriteRecord_UsesLoggerCategoryTopSegmentAsService()
+    public void LogRecord_FormatMatchesSharedJsonOptions()
     {
-        var dir = Path.Combine(Path.GetTempPath(), $"mohist-logger-{Guid.NewGuid():N}");
-        try
-        {
-            using var provider = CreateProvider(dir, out _);
-            var logger = provider.CreateLogger("Mohist.Server.Workflow.Services.Runner");
-            logger.LogInformation("x");
+        var sink = new RecordingLogRecordSink(new FakeTimeProvider(FixedNow));
+        var logger = new FileLogger("Mohist.Server.Workflow", sink);
+        logger.LogInformation("hello {name}", "world");
 
-            var lines = ReadAllLines(provider.LogFilePath);
-            using var doc = JsonDocument.Parse(lines[0]);
-            Assert.Equal("Mohist.Server", doc.RootElement.GetProperty("service").GetString());
-        }
-        finally
-        {
-            Cleanup(dir);
-        }
+        var line = JsonSerializer.Serialize(Assert.Single(sink.Records), JSON.Options);
+        var record = JsonSerializer.Deserialize<LogRecord>(line, JSON.Options);
+
+        Assert.NotNull(record);
+        Assert.Equal("INFO", record!.Level);
+        Assert.Equal("Mohist.Server", record.Service);
+        Assert.Equal("hello world", record.Message);
     }
 
-    [Fact]
-    public void IsEnabled_DisablesLogLevelNone()
+    private sealed class RecordingLogRecordSink(
+        TimeProvider timeProvider,
+        LogLevel minimumLevel = LogLevel.Information)
+        : ILogRecordSink
     {
-        var dir = Path.Combine(Path.GetTempPath(), $"mohist-logger-{Guid.NewGuid():N}");
-        try
-        {
-            using var provider = CreateProvider(dir, out _);
+        public List<LogRecord> Records { get; } = [];
 
-            Assert.False(provider.IsEnabled(LogLevel.None));
-        }
-        finally
-        {
-            Cleanup(dir);
-        }
-    }
+        public TimeProvider TimeProvider => timeProvider;
 
-    [Fact]
-    public void WriteRecord_FormatMatchesJsonOptions_SoApiPipelineSerializesItIdentically()
-    {
-        var dir = Path.Combine(Path.GetTempPath(), $"mohist-logger-{Guid.NewGuid():N}");
-        try
-        {
-            using var provider = CreateProvider(dir, out _);
-            var logger = provider.CreateLogger("Mohist.Server.Workflow");
-            logger.LogInformation("hello {name}", "world");
+        public bool IsEnabled(LogLevel logLevel) =>
+            logLevel != LogLevel.None && logLevel >= minimumLevel;
 
-            var lines = ReadAllLines(provider.LogFilePath);
-            Assert.Single(lines);
-
-            var record = JsonSerializer.Deserialize<LogRecord>(lines[0], JSON.Options);
-            Assert.NotNull(record);
-            Assert.Equal("INFO", record!.Level);
-            Assert.Equal("Mohist.Server", record.Service);
-            Assert.Equal("hello world", record.Message);
-        }
-        finally
-        {
-            Cleanup(dir);
-        }
-    }
-
-    private static FileLoggerProvider CreateProvider(string dir, out ILogPathResolver resolver)
-    {
-        return CreateProvider(dir, new FakeTimeProvider(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero)), out resolver);
-    }
-
-    private static FileLoggerProvider CreateProvider(string dir, TimeProvider time, out ILogPathResolver resolver)
-    {
-        var configuration = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>
-            {
-                [LogPathResolver.ConfigurationKey] = dir,
-            })
-            .Build();
-        resolver = new LogPathResolver(configuration, new MockEnvironmentVariableProvider());
-        return new FileLoggerProvider(resolver, time);
-    }
-
-    private static ILogPathResolver CreateResolver(string dir)
-    {
-        var configuration = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>
-            {
-                [LogPathResolver.ConfigurationKey] = dir,
-            })
-            .Build();
-        return new LogPathResolver(configuration, new MockEnvironmentVariableProvider());
-    }
-
-    private static string[] ReadAllLines(string path)
-        => File.ReadAllLines(path, Encoding.UTF8);
-
-    private static void Cleanup(string dir)
-    {
-        if (Directory.Exists(dir))
-        {
-            Directory.Delete(dir, recursive: true);
-        }
+        public void WriteRecord(LogRecord record) => Records.Add(record);
     }
 }

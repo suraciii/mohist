@@ -85,7 +85,7 @@ public class BacklogSpecs : IClassFixture<BacklogFixture>
     {
         return new WorkflowStartInput(Metadata: new WorkflowRunMetadata(
             Name: null,
-            CreatedAt: DateTimeOffset.UtcNow,
+            CreatedAt: TestTime.UtcNow,
             Annotations: new Dictionary<string, string>(StringComparer.Ordinal)
             {
                 ["projectId"] = projectId,
@@ -126,7 +126,7 @@ public class BacklogSpecs : IClassFixture<BacklogFixture>
         else
         {
             template.Template = templateJson;
-            template.UpdatedAt = DateTimeOffset.UtcNow;
+            template.UpdatedAt = TestTime.UtcNow;
         }
 
         var profile = await db.ProjectWorkflowProfiles.FindAsync(projectId);
@@ -141,7 +141,7 @@ public class BacklogSpecs : IClassFixture<BacklogFixture>
         else
         {
             profile.DefaultTemplateId = definition.Id;
-            profile.UpdatedAt = DateTimeOffset.UtcNow;
+            profile.UpdatedAt = TestTime.UtcNow;
         }
 
         await db.SaveChangesAsync();

@@ -149,7 +149,7 @@ public class AgentLaunchLabelComputedColumnsMigrationSpecs
             },
             runtime = new { runnerId = "r-bf", workDir = (string?)null },
             settings = new { },
-            status = new { createdAt = DateTime.UtcNow },
+            status = new { createdAt = TestTime.UtcDateTime },
         }, Mohist.Server.Infrastructure.JSON.Options);
 
         // Insert via raw SQL so the row can be added against the schema that
@@ -157,7 +157,7 @@ public class AgentLaunchLabelComputedColumnsMigrationSpecs
         // newer trigger-label columns added in issue-391 T-003.
         await ctx.Database.ExecuteSqlRawAsync(
             "INSERT INTO AgentSessions (Id, State, Status, CreatedAt) VALUES ({0}, {1}, {2}, {3})",
-            "s_no_backfill", stateJson, "opened", DateTime.UtcNow);
+            "s_no_backfill", stateJson, "opened", TestTime.UtcDateTime);
 
         await using var read = database.CreateDbContext();
         var row = await read.AgentSessions.AsNoTracking().SingleAsync(r => r.Id == "s_no_backfill");

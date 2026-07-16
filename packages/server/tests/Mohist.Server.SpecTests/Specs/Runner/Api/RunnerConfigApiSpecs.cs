@@ -378,9 +378,7 @@ public class RunnerConfigFixture : IAsyncLifetime
 {
     private SqliteConnection _keeper = null!;
     private ConfigWebApplicationFactory _factory = null!;
-    private string _runnerRoot = null!;
     private readonly List<string> _registeredRunnerIds = [];
-    private string _systemUpdateStatePath = null!;
     // Allocates distinct silo/gateway ports so the fixture can run in
     // parallel with other integration collections without fighting over
     // 11111 / 30000.
@@ -397,14 +395,17 @@ public class RunnerConfigFixture : IAsyncLifetime
         var connectionString = $"Data Source={dbName};Mode=Memory;Cache=Shared";
         _keeper = new SqliteConnection(connectionString);
         await _keeper.OpenAsync();
-        _runnerRoot = Path.Combine(Path.GetTempPath(), $"mohist-runner-config-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(_runnerRoot);
-        _systemUpdateStatePath = Path.Combine(Path.GetTempPath(), $"mohist-sys-config-{Guid.NewGuid():N}.json");
 
         _portAllocator = new TestClusterPortAllocator();
         var (siloPort, gatewayPort) = _portAllocator.AllocateConsecutivePortPairs(1);
         _factory = new ConfigWebApplicationFactory(
-            connectionString, _runnerRoot, _systemUpdateStatePath, Policy, TimeProvider, siloPort, gatewayPort);
+            connectionString,
+            "/mohist-tests/runner-config/runner",
+            "/mohist-tests/runner-config/system-update.json",
+            Policy,
+            TimeProvider,
+            siloPort,
+            gatewayPort);
         Client = _factory.CreateClient();
         await _factory.EnsureSchemaAsync();
     }
@@ -479,14 +480,6 @@ public class RunnerConfigFixture : IAsyncLifetime
         _factory?.Dispose();
         await _keeper.DisposeAsync();
         _portAllocator?.Dispose();
-        if (Directory.Exists(_runnerRoot))
-            Directory.Delete(_runnerRoot, recursive: true);
-        if (File.Exists(_systemUpdateStatePath))
-            File.Delete(_systemUpdateStatePath);
-        if (!string.IsNullOrWhiteSpace(_factory?.ArtifactStorageRoot) && Directory.Exists(_factory.ArtifactStorageRoot))
-            Directory.Delete(_factory.ArtifactStorageRoot, recursive: true);
-        if (!string.IsNullOrWhiteSpace(_factory?.LogsPath) && Directory.Exists(_factory.LogsPath))
-            Directory.Delete(_factory.LogsPath, recursive: true);
     }
 
     /// <summary>

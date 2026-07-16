@@ -18,18 +18,18 @@ public sealed class RuntimeBuildInfo : IRuntimeBuildInfo, ISingletonService
     public string? GitHash { get; }
     public DateTimeOffset StartedAt { get; }
 
-    public RuntimeBuildInfo()
-        : this(SystemEnvironmentVariableProvider.Instance)
+    public RuntimeBuildInfo(
+        IEnvironmentVariableProvider environment,
+        IRuntimeSourceIdentity sourceIdentity,
+        TimeProvider timeProvider)
     {
+        StartedAt = timeProvider.GetUtcNow();
+        (Version, GitHash) = ResolveIdentity(environment, sourceIdentity);
     }
 
-    public RuntimeBuildInfo(IEnvironmentVariableProvider environment)
-    {
-        StartedAt = DateTimeOffset.UtcNow;
-        (Version, GitHash) = ResolveIdentity(environment);
-    }
-
-    private static (string? Version, string? GitHash) ResolveIdentity(IEnvironmentVariableProvider environment)
+    private static (string? Version, string? GitHash) ResolveIdentity(
+        IEnvironmentVariableProvider environment,
+        IRuntimeSourceIdentity sourceIdentity)
     {
         var assembly = typeof(RuntimeBuildInfo).Assembly;
         var informationalVersion = assembly
@@ -39,8 +39,9 @@ public sealed class RuntimeBuildInfo : IRuntimeBuildInfo, ISingletonService
         return ResolveIdentity(
             informationalVersion,
             versionFromAssembly,
-            () => environment.GetEnvironmentVariable(GitHashEnvironmentVariable),
-            TryReadGitHeadFromSource);
+            () => environment.GetEnvironmentVariable(
+                GitHashEnvironmentVariable),
+            () => sourceIdentity.GitHead);
     }
 
     internal static (string? Version, string? GitHash) ResolveIdentity(
@@ -75,55 +76,4 @@ public sealed class RuntimeBuildInfo : IRuntimeBuildInfo, ISingletonService
         return (version, string.IsNullOrWhiteSpace(gitHash) ? null : gitHash);
     }
 
-    private static string? TryReadGitHeadFromSource()
-    {
-        try
-        {
-            var assemblyLocation = typeof(RuntimeBuildInfo).Assembly.Location;
-            var assemblyDir = Path.GetDirectoryName(assemblyLocation);
-            if (string.IsNullOrWhiteSpace(assemblyDir))
-                return null;
-
-            var root = assemblyDir;
-            while (root != null && !Directory.Exists(Path.Combine(root, ".git")))
-            {
-                root = Directory.GetParent(root)?.FullName;
-            }
-
-            if (root == null)
-                return null;
-
-            return TryReadGitHeadFile(root);
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
-    internal static string? TryReadGitHeadFile(string repoRoot)
-    {
-        try
-        {
-            var headFile = Path.Combine(repoRoot, ".git", "HEAD");
-            if (!File.Exists(headFile))
-                return null;
-
-            var head = File.ReadAllText(headFile).Trim();
-            if (head.StartsWith("ref: ", StringComparison.Ordinal))
-            {
-                var refPath = head[5..];
-                var refFile = Path.Combine(repoRoot, ".git", refPath);
-                if (File.Exists(refFile))
-                    return File.ReadAllText(refFile).Trim();
-                return null;
-            }
-
-            return head;
-        }
-        catch
-        {
-            return null;
-        }
-    }
 }

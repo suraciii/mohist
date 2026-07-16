@@ -17,9 +17,12 @@ using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Infrastructure.Workspace;
+using Mohist.Server.Logging;
 using Mohist.Server.Otel;
 using Mohist.Server.Runner.Services.SignalR;
 using Mohist.Server.SystemInfo;
+using Mohist.Server.Workflow.Storage;
+using Mohist.Server.Workflow.Services.Prompts;
 using Orleans.Configuration;
 using Orleans.TestingHost;
 using Xunit;
@@ -30,11 +33,11 @@ namespace Mohist.Server.SpecTests.Support;
 public class MohistIntegrationFixture : IAsyncLifetime
 {
     public const string OperatorToken = "test-operator-token-0123456789abcdef";
+    private const string VirtualRunnerRoot = "/mohist-tests/runner";
+    private const string VirtualSystemUpdateStatePath = "/mohist-tests/system-update.json";
+    private const string VirtualLogsPath = "/mohist-tests/logs";
     private SqliteConnection _keeper = null!;
     private MohistWebApplicationFactory _factory = null!;
-    private string? _runnerRoot;
-    private string? _systemUpdateStatePath;
-    private string? _logsPath;
     // Allocates distinct silo/gateway ports per fixture so multiple integration
     // collections can run in parallel without fighting over 11111 / 30000.
     // Pattern from dotnet/orleans test/Orleans.Runtime.Tests/LocalhostSiloTests.cs.
@@ -49,8 +52,8 @@ public class MohistIntegrationFixture : IAsyncLifetime
     public AgentJobDispatchProbe AgentJobDispatches => _factory.Services.GetRequiredService<AgentJobDispatchProbe>();
     public FakeTimeProvider TimeProvider { get; } = new(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero));
     public string ConnectionString { get; private set; } = null!;
-    public string RunnerRoot => _runnerRoot ?? throw new InvalidOperationException("Fixture is not initialized");
-    public string LogsPath => _logsPath ?? throw new InvalidOperationException("Fixture is not initialized");
+    public string RunnerRoot => VirtualRunnerRoot;
+    public string LogsPath => VirtualLogsPath;
 
     public async Task InitializeAsync()
     {
@@ -58,15 +61,18 @@ public class MohistIntegrationFixture : IAsyncLifetime
         ConnectionString = $"Data Source={dbName};Mode=Memory;Cache=Shared";
         _keeper = new SqliteConnection(ConnectionString);
         await _keeper.OpenAsync();
-        _runnerRoot = Path.Combine(Path.GetTempPath(), $"mohist-runner-root-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(_runnerRoot);
-        _systemUpdateStatePath = Path.Combine(Path.GetTempPath(), $"mohist-system-update-{Guid.NewGuid():N}.json");
-        _logsPath = Path.Combine(Path.GetTempPath(), $"mohist-logs-{Guid.NewGuid():N}");
 
         _portAllocator = new TestClusterPortAllocator();
         var (siloPort, gatewayPort) = _portAllocator.AllocateConsecutivePortPairs(1);
 
-        _factory = new MohistWebApplicationFactory(ConnectionString, _runnerRoot, _systemUpdateStatePath, _logsPath, TimeProvider, siloPort, gatewayPort);
+        _factory = new MohistWebApplicationFactory(
+            ConnectionString,
+            VirtualRunnerRoot,
+            VirtualSystemUpdateStatePath,
+            VirtualLogsPath,
+            TimeProvider,
+            siloPort,
+            gatewayPort);
         Client = _factory.CreateClient();
         Client.DefaultRequestHeaders.Add(Mohist.Server.Infrastructure.Security.OperatorCredential.HeaderName, OperatorToken);
         await _factory.EnsureSchemaAsync();
@@ -78,14 +84,6 @@ public class MohistIntegrationFixture : IAsyncLifetime
         _factory?.Dispose();
         if (_keeper is not null)
             await _keeper.DisposeAsync();
-        if (!string.IsNullOrWhiteSpace(_runnerRoot) && Directory.Exists(_runnerRoot))
-            Directory.Delete(_runnerRoot, recursive: true);
-        if (!string.IsNullOrWhiteSpace(_systemUpdateStatePath) && File.Exists(_systemUpdateStatePath))
-            File.Delete(_systemUpdateStatePath);
-        if (!string.IsNullOrWhiteSpace(_factory?.ArtifactStorageRoot) && Directory.Exists(_factory.ArtifactStorageRoot))
-            Directory.Delete(_factory.ArtifactStorageRoot, recursive: true);
-        if (!string.IsNullOrWhiteSpace(_logsPath) && Directory.Exists(_logsPath))
-            Directory.Delete(_logsPath, recursive: true);
         _portAllocator?.Dispose();
     }
 }
@@ -97,15 +95,12 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
     private readonly string _systemUpdateStatePath;
     private readonly string _logsPath;
     private readonly FakeTimeProvider _timeProvider;
-    private readonly string _configPath;
-    private readonly string _artifactStorageRoot;
     private readonly int _siloPort;
     private readonly int _gatewayPort;
-    private string? _webRoot;
     // Keeper for the in-memory OtelDb override; disposed with the factory.
     private SqliteConnection? _otelKeeper;
 
-    public string ArtifactStorageRoot => _artifactStorageRoot;
+    public string ArtifactStorageRoot => "/mohist-tests/artifacts";
     public string LogsPath => _logsPath;
 
     public MohistWebApplicationFactory(
@@ -119,7 +114,7 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
             connectionString,
             runnerRoot,
             systemUpdateStatePath,
-            Path.Combine(Path.GetTempPath(), $"mohist-logs-{Guid.NewGuid():N}"),
+            "/mohist-tests/logs",
             timeProvider,
             siloPort,
             gatewayPort)
@@ -140,9 +135,6 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
         _systemUpdateStatePath = systemUpdateStatePath;
         _logsPath = logsPath;
         _timeProvider = timeProvider ?? new FakeTimeProvider(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero));
-        _configPath = Path.Combine(Path.GetTempPath(), $"mohist-config-{Guid.NewGuid():N}.jsonc");
-        _artifactStorageRoot = Path.Combine(Path.GetTempPath(), $"mohist-artifacts-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(_artifactStorageRoot);
         _siloPort = siloPort ?? EndpointOptions.DEFAULT_SILO_PORT;
         _gatewayPort = gatewayPort ?? EndpointOptions.DEFAULT_GATEWAY_PORT;
     }
@@ -150,12 +142,10 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment(MohistHostEnvironment.Testing);
-        _webRoot ??= CreateWebRoot();
         builder.UseSetting("Mohist:SqliteConnectionString", _connectionString);
-        builder.UseSetting("Mohist:WebRoot", _webRoot);
         builder.UseSetting("Mohist:RunnerRoot", _runnerRoot);
         builder.UseSetting("Mohist:SystemUpdate:StatePath", _systemUpdateStatePath);
-        builder.UseSetting("Mohist:ArtifactStorage:Root", _artifactStorageRoot);
+        builder.UseSetting("Mohist:ArtifactStorage:Root", ArtifactStorageRoot);
         builder.UseSetting("Mohist:LogsPath", _logsPath);
         builder.UseSetting("Mohist:Silo:SiloPort", _siloPort.ToString(System.Globalization.CultureInfo.InvariantCulture));
         builder.UseSetting("Mohist:Silo:GatewayPort", _gatewayPort.ToString(System.Globalization.CultureInfo.InvariantCulture));
@@ -165,10 +155,9 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
             config.AddInMemoryCollection(new Dictionary<string, string?>
             {
                 ["Mohist:SqliteConnectionString"] = _connectionString,
-                ["Mohist:WebRoot"] = _webRoot,
                 ["Mohist:RunnerRoot"] = _runnerRoot,
                 ["Mohist:SystemUpdate:StatePath"] = _systemUpdateStatePath,
-                ["Mohist:ArtifactStorage:Root"] = _artifactStorageRoot,
+                ["Mohist:ArtifactStorage:Root"] = ArtifactStorageRoot,
                 ["Mohist:LogsPath"] = _logsPath,
                 ["Mohist:Silo:SiloPort"] = _siloPort.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 ["Mohist:Silo:GatewayPort"] = _gatewayPort.ToString(System.Globalization.CultureInfo.InvariantCulture),
@@ -184,6 +173,32 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
         builder.ConfigureTestServices(services =>
         {
             services.RemoveAll<IGitService>();
+            for (var index = services.Count - 1; index >= 0; index--)
+            {
+                if (services[index].ServiceType == typeof(ILoggerProvider))
+                    services.RemoveAt(index);
+            }
+            services.AddSingleton<ILoggerProvider, InMemoryLoggerProvider>();
+            services.RemoveAll<ILogTailSource>();
+            services.AddSingleton<InMemoryLogTailSource>();
+            services.AddSingleton<ILogTailSource>(provider => provider.GetRequiredService<InMemoryLogTailSource>());
+            services.RemoveAll<Mohist.Server.SystemInfo.IFileSystem>();
+            services.AddSingleton<Mohist.Server.SystemInfo.IFileSystem, InMemoryServerFileSystem>();
+            services.RemoveAll<ISystemUpdateStore>();
+            services.AddSingleton<InMemorySystemUpdateStore>();
+            services.AddSingleton<ISystemUpdateStore>(provider => provider.GetRequiredService<InMemorySystemUpdateStore>());
+            services.RemoveAll<IManagedAssetCatalog>();
+            services.AddSingleton<IManagedAssetCatalog, InMemoryManagedAssetCatalog>();
+            services.RemoveAll<IAttachmentStorage>();
+            services.AddSingleton<InMemoryAttachmentStorage>();
+            services.AddSingleton<IAttachmentStorage>(provider => provider.GetRequiredService<InMemoryAttachmentStorage>());
+            services.RemoveAll<IWorkflowArtifactStorage>();
+            services.AddSingleton<InMemoryWorkflowArtifactStorage>();
+            services.AddSingleton<IWorkflowArtifactStorage>(provider => provider.GetRequiredService<InMemoryWorkflowArtifactStorage>());
+            services.RemoveAll<IWebContentProvider>();
+            services.AddSingleton<IWebContentProvider, InMemoryWebContentProvider>();
+            services.RemoveAll<IPromptLoader>();
+            services.AddSingleton<IPromptLoader>(_ => new InMemoryPromptLoader());
             services.AddSingleton<IStartupFilter, LoopbackTestConnectionStartupFilter>();
             services.AddSingleton<FakeGitService>();
             services.AddSingleton<IGitService>(provider => provider.GetRequiredService<FakeGitService>());
@@ -199,6 +214,9 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
             services.AddSingleton<RecordingRunnerHubContext>();
             services.AddSingleton<IHubContext<RunnerHub>>(provider => provider.GetRequiredService<RecordingRunnerHubContext>());
             services.RemoveAll<ConfigService>();
+            services.RemoveAll<IConfigDocumentStore>();
+            services.AddSingleton<InMemoryConfigDocumentStore>();
+            services.AddSingleton<IConfigDocumentStore>(provider => provider.GetRequiredService<InMemoryConfigDocumentStore>());
             services.RemoveAll<IEnvironmentVariableProvider>();
             services.AddSingleton<IEnvironmentVariableProvider>(_ =>
             {
@@ -210,7 +228,7 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
                 provider.GetRequiredService<IConfiguration>(),
                 provider.GetRequiredService<IEnvironmentVariableProvider>(),
                 provider.GetRequiredService<ILogger<ConfigService>>(),
-                _configPath));
+                provider.GetRequiredService<IConfigDocumentStore>()));
 
             services.RemoveAll<IDbContextFactory<MohistDbContext>>();
             services.AddDbContextFactory<MohistDbContext>(options =>
@@ -281,13 +299,6 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
         GrainTestConfig.ApplyWorkflowRunsStatusSchemaFix(db);
     }
 
-    private static string CreateWebRoot()
-    {
-        var root = Path.Combine(Path.GetTempPath(), $"mohist-web-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(root);
-        File.WriteAllText(Path.Combine(root, "index.html"), "<html><body>Mohist Test Web</body></html>");
-        return root;
-    }
 }
 
 public sealed class LoopbackTestConnectionStartupFilter : IStartupFilter

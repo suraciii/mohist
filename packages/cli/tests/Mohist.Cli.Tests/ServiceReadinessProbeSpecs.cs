@@ -76,14 +76,16 @@ public class ServiceReadinessProbeSpecs
     public async Task WaitForServerReadyAsync_TimeoutWithNeverReady_ReportsNotReady()
     {
         var time = new FakeTimeProvider(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
-        var http = BuildHttp(_ => new HttpResponseMessage(HttpStatusCode.ServiceUnavailable));
+        var handler = new RecordingHttpHandler((_, _) =>
+            Task.FromResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)));
+        var http = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:0") };
 
         var probe = BuildProbe(http, timeProvider: time);
 
         var wait = probe.WaitForServerReadyAsync(
             TimeSpan.FromSeconds(2),
             CancellationToken.None);
-        await Task.Yield();
+        await handler.WaitForRequestCountAsync(1);
         Assert.False(wait.IsCompleted);
 
         time.Advance(TimeSpan.FromSeconds(2));
@@ -114,8 +116,7 @@ public class ServiceReadinessProbeSpecs
         var probe = BuildProbe(http, timeProvider: time);
 
         var wait = probe.WaitForServerReadyAsync(TimeSpan.FromMilliseconds(1), CancellationToken.None);
-        await Task.Yield();
-        Assert.True(firstRequestStarted.Task.IsCompleted);
+        await firstRequestStarted.Task;
 
         time.Advance(TimeSpan.FromMilliseconds(1));
         var result = await wait;
@@ -129,28 +130,28 @@ public class ServiceReadinessProbeSpecs
     {
         var time = new FakeTimeProvider(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
         var pollCount = 0;
-        var http = BuildHttp(req =>
+        var handler = new RecordingHttpHandler((req, _) =>
         {
             var path = req.RequestUri!.AbsolutePath;
-            if (path == "/api/health" && Interlocked.CompareExchange(ref pollCount, 1, 0) == 0)
-            {
-                return new HttpResponseMessage(HttpStatusCode.ServiceUnavailable);
-            }
-            return path switch
-            {
-                "/api/health" => HealthOk(),
-                "/" => IndexHtml("<html><head><script src=\"/assets/index-abc.js\"></script></head></html>"),
-                _ when path.StartsWith("/assets/") => AssetOk(),
-                _ => new HttpResponseMessage(HttpStatusCode.NotFound),
-            };
+            var response = path == "/api/health" && Interlocked.CompareExchange(ref pollCount, 1, 0) == 0
+                ? new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)
+                : path switch
+                {
+                    "/api/health" => HealthOk(),
+                    "/" => IndexHtml("<html><head><script src=\"/assets/index-abc.js\"></script></head></html>"),
+                    _ when path.StartsWith("/assets/") => AssetOk(),
+                    _ => new HttpResponseMessage(HttpStatusCode.NotFound),
+                };
+            return Task.FromResult(response);
         });
+        var http = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:0") };
 
         var probe = BuildProbe(http, timeProvider: time);
 
         var wait = probe.WaitForServerReadyAsync(
             TimeSpan.FromSeconds(3),
             CancellationToken.None);
-        await Task.Yield();
+        await handler.WaitForRequestCountAsync(1);
         Assert.False(wait.IsCompleted);
 
         time.Advance(TimeSpan.FromMilliseconds(500));

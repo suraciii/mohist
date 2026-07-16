@@ -640,7 +640,7 @@ public class GenericAgentSessionTranscriptAxisSpecs : IAsyncLifetime
         var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new
         {
             name = projectName,
-            path = Directory.GetCurrentDirectory(),
+            path = "/mohist-tests/projects/generic-transcript",
             baseBranch = "main",
         });
         await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new

@@ -12,7 +12,7 @@ public class ConfigService : ISingletonService
     private readonly IConfiguration _configuration;
     private readonly IEnvironmentVariableProvider _environment;
     private readonly ILogger<ConfigService> _log;
-    private readonly string _configPath;
+    private readonly IConfigDocumentStore _documents;
 
     private readonly Dictionary<string, (string type, object? defaultValue)> _schema = new()
     {
@@ -29,15 +29,16 @@ public class ConfigService : ISingletonService
         ["logLevel"] = ("string", "INFO"),
     };
 
-    public ConfigService(IConfiguration configuration, IEnvironmentVariableProvider environment, ILogger<ConfigService> log, string? configPath = null)
+    public ConfigService(
+        IConfiguration configuration,
+        IEnvironmentVariableProvider environment,
+        ILogger<ConfigService> log,
+        IConfigDocumentStore documents)
     {
         _configuration = configuration;
         _environment = environment;
         _log = log;
-        _configPath = configPath ?? Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            ".mohist",
-            "config.jsonc");
+        _documents = documents;
     }
 
     public Task<Dictionary<string, string>> GetAllAsync()
@@ -90,7 +91,7 @@ public class ConfigService : ISingletonService
         };
 
         await WriteConfigFileAsync(key, strValue);
-        _log.LogInformation("Config {Key} updated in {Path}", key, _configPath);
+        _log.LogInformation("Config {Key} updated in {Path}", key, _documents.Location);
     }
 
     private static string ToComparableString(object value) => value switch
@@ -109,7 +110,7 @@ public class ConfigService : ISingletonService
             throw new InvalidOperationException($"Unknown config key: {key}");
 
         await WriteConfigFileAsync(key, null);
-        _log.LogInformation("Config {Key} cleared from {Path}", key, _configPath);
+        _log.LogInformation("Config {Key} cleared from {Path}", key, _documents.Location);
     }
 
     /// <summary>
@@ -234,12 +235,11 @@ public class ConfigService : ISingletonService
     /// </summary>
     private Dictionary<string, JsonNode?> ReadConfigFile()
     {
-        if (!File.Exists(_configPath))
-            return new Dictionary<string, JsonNode?>();
-
         try
         {
-            var json = File.ReadAllText(_configPath);
+            var json = _documents.Read();
+            if (json is null)
+                return new Dictionary<string, JsonNode?>();
             var doc = JsonDocument.Parse(json, JsoncDocumentOptions);
             var result = new Dictionary<string, JsonNode?>();
             FlattenJson(doc.RootElement, "", result);
@@ -247,21 +247,17 @@ public class ConfigService : ISingletonService
         }
         catch (Exception ex)
         {
-            _log.LogWarning(ex, "Failed to read config file {Path}", _configPath);
+            _log.LogWarning(ex, "Failed to read config file {Path}", _documents.Location);
             return new Dictionary<string, JsonNode?>();
         }
     }
 
     private async Task WriteConfigFileAsync(string key, string? value)
     {
-        var dir = Path.GetDirectoryName(_configPath);
-        if (!string.IsNullOrWhiteSpace(dir))
-            Directory.CreateDirectory(dir);
-
         JsonObject? root;
-        if (File.Exists(_configPath))
+        var json = _documents.Read();
+        if (json is not null)
         {
-            var json = await File.ReadAllTextAsync(_configPath);
             try
             {
                 root = JsonNode.Parse(json, documentOptions: JsoncDocumentOptions)?.AsObject();
@@ -295,7 +291,7 @@ public class ConfigService : ISingletonService
         SetNestedValue(root, path, nodeValue);
 
         var options = JSON.Indented;
-        await File.WriteAllTextAsync(_configPath, root.ToJsonString(options));
+        await _documents.WriteAsync(root.ToJsonString(options)).ConfigureAwait(false);
     }
 
     private static void SetNestedValue(JsonObject root, string[] path, JsonNode? value)

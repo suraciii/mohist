@@ -132,7 +132,7 @@ public abstract class WorkflowGrainSpecs
         };
         return new WorkflowStartInput(Metadata: new WorkflowRunMetadata(
             Name: null,
-            CreatedAt: DateTimeOffset.UtcNow,
+            CreatedAt: TestTime.UtcNow,
             Annotations: annotations));
     }
 
@@ -360,7 +360,7 @@ public abstract class WorkflowGrainSpecs
         else
         {
             existingTemplate.Template = templateJson;
-            existingTemplate.UpdatedAt = DateTimeOffset.UtcNow;
+            existingTemplate.UpdatedAt = TestTime.UtcNow;
         }
 
         var projectProfile = await db.ProjectWorkflowProfiles.FindAsync(projectId);
@@ -375,7 +375,7 @@ public abstract class WorkflowGrainSpecs
         else
         {
             projectProfile.DefaultTemplateId = templateId;
-            projectProfile.UpdatedAt = DateTimeOffset.UtcNow;
+            projectProfile.UpdatedAt = TestTime.UtcNow;
         }
 
         await db.SaveChangesAsync();
