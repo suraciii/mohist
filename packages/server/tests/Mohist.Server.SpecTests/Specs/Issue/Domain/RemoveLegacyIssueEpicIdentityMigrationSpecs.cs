@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.SpecTests.Support;
 using Xunit;
 
@@ -53,7 +54,12 @@ public sealed class RemoveLegacyIssueEpicIdentityMigrationSpecs
         {
             Assert.DoesNotContain("\"id\"", state, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("\"epicId\"", state, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("\"epicNumber\":7", state, StringComparison.Ordinal);
+            Assert.DoesNotContain("\"EpicNumber\"", state, StringComparison.Ordinal);
         });
+
+        var issues = await verify.Issues.AsNoTracking().OrderBy(row => row.ProjectId).ToListAsync();
+        Assert.All(issues, row => Assert.Equal(7, IssueStore.Deserialize(row.State)!.EpicNumber));
 
         var runStates = await ReadStringsAsync(verify, "SELECT \"State\" AS \"Value\" FROM \"WorkflowRuns\" ORDER BY \"WorkflowRunId\"");
         Assert.All(runStates, state =>

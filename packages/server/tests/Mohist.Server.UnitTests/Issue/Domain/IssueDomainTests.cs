@@ -266,6 +266,20 @@ public class IssueDomainTests
     }
 
     [Fact]
+    public void AssignEpic_MovesDirectlyBetweenEpicsWithOneChangeEvent()
+    {
+        var issue = Mohist.Server.Issue.Domain.Issue.Create("project-1", 1, "Feature");
+        issue.AssignEpic(7);
+        issue.ClearPendingEvents();
+
+        Assert.True(issue.AssignEpic(9));
+
+        Assert.Equal(9, issue.EpicNumber);
+        Assert.Single(issue.PendingEvents);
+        Assert.Equal(new IssueEpicChanged(7, 9), issue.PendingEvents[0]);
+    }
+
+    [Fact]
     public void State_RoundTripsEpicNumber()
     {
         var issue = Mohist.Server.Issue.Domain.Issue.Create("project-1", 1, "Feature");

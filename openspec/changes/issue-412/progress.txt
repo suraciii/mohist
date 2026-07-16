@@ -470,3 +470,18 @@ ArchTests pass (**27**), and the server build has zero errors. A full SpecTests 
 - The final `RemoveLegacyIssueEpicIdentity` migration now removes legacy identity properties from current Issue and WorkflowRun JSON after canonical columns are established. Historical event rows remain untouched; the migration does not rewrite event source, payload, or extension JSON.
 - The cutover spec applies the real migration from `20260716180000_RemoveWorkflowBindingState`, preserves Issue/Epic/WorkflowRun rows for `proj_alpha/#42` and `proj_beta/#42`, asserts the old current-state columns are absent, checks both JSON shapes lose `id`/`issueId`/`epicId`, and reruns the target migration to prove convergence.
 - Event-store per-source sequence helpers are named `NextIssueSequenceAsync` and `NextEpicSequenceAsync`; their numeric row sequence remains independent from Issue/Epic identity.
+
+## T-005 migration and transaction verification follow-up (2026-07-17)
+
+- The existing runtime cutover correctly uses `Issue.EpicNumber` as the sole affiliation fact: `AssignEpic` replaces the current number and raises `IssueEpicChanged`, `RemoveEpic` requires the expected number, Epic queries `Issues.EpicNumber`, and `TryStartFromEpic` revalidates the target Issue before starting.
+- Found and fixed a migration gap: T-003 populated the `Issues.EpicNumber` column, but the final `RemoveLegacyIssueEpicIdentity` migration removed legacy `epicId` from `Issue.State` without writing canonical `epicNumber`. `IssueStore.LoadAsync` deserializes `State`, so the column-only value was not enough for a live Issue grain.
+- Added `20260716165000_MigrateEpicAffiliationToIssues`. It materializes the preferred current affiliation from canonical T-003 membership input (active row first, then newest retained row), rejects a conflicting pre-existing Issue affiliation, writes both the Issue column and canonical JSON state, and runs before `20260716170000_DropEpicMembershipTables`.
+- Hardened `20260716190000_RemoveLegacyIssueEpicIdentity` to preserve/canonicalize `epicNumber` from the row or existing JSON before removing legacy identity fields. It also removes the PascalCase `EpicNumber` duplicate so current JSON has one canonical property.
+- `DropEpicMembershipTablesMigrationSpecs` now seeds active and retained memberships for two Projects sharing Epic 7, verifies active precedence, retained fallback, Project isolation, materialized Issue affiliation, and removal of both legacy tables.
+- Added a direct-move unit assertion (`IssueDomainTests`) and an Issue-store transaction spec (`IssueTransactionalEventAppendSpecs`) proving A-to-B produces one `IssueEpicChanged` and persists Issue state/event without Epic or Workflow rows participating.
+
+## T-005 verification follow-up
+
+- Focused Issue domain tests: **19 passed / 0 failed**.
+- Focused membership, progression, affiliation-lineage, migration, and Issue transactional specs: **38 passed / 0 failed**.
+- The pre-edit focused membership/progression/migration suite was **30 passed / 0 failed**; the new migration regression exposed the State JSON gap before the fix.

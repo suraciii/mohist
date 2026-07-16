@@ -53,6 +53,52 @@ public class DropEpicMembershipTablesMigrationSpecs
         Assert.Equal(7, materialized!.EpicNumber);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task Migration_MovesActiveAndRetainedAffiliationIntoIssueStateBeforeDroppingTables()
+    {
+        await using var database = CreateDatabase(PreviousMigration);
+        await using (var seed = database.CreateDbContext())
+        {
+            await seed.Database.ExecuteSqlRawAsync("""
+                INSERT INTO "Epics" ("ProjectId", "Number", "Title", "Description", "Priority", "Status", "CreatedAt", "UpdatedAt")
+                VALUES ('proj_alpha', 7, 'Alpha 7', '', 'p2', 'idle', '2026-07-17 00:00:00+00:00', '2026-07-17 00:00:00+00:00'),
+                       ('proj_alpha', 9, 'Alpha 9', '', 'p2', 'idle', '2026-07-17 00:00:00+00:00', '2026-07-17 00:00:00+00:00'),
+                       ('proj_beta', 7, 'Beta 7', '', 'p2', 'idle', '2026-07-17 00:00:00+00:00', '2026-07-17 00:00:00+00:00');
+
+                INSERT INTO "Issues" ("IssueId", "State", "EpicId", "EpicNumber")
+                VALUES ('issue_alpha_42', '{{"projectId":"proj_alpha","number":42,"title":"Alpha 42","status":"backlog","priority":"p2"}}', NULL, NULL),
+                       ('issue_alpha_43', '{{"projectId":"proj_alpha","number":43,"title":"Alpha 43","status":"backlog","priority":"p2"}}', NULL, NULL),
+                       ('issue_beta_42', '{{"projectId":"proj_beta","number":42,"title":"Beta 42","status":"backlog","priority":"p2"}}', NULL, NULL);
+
+                INSERT INTO "EpicIssues" ("EpicId", "IssueId", "ProjectId", "IssueNumber", "EpicNumber", "CreatedAt")
+                VALUES ('epic_alpha_7', 'issue_alpha_42', 'proj_alpha', 42, 7, '2026-07-16 00:00:00+00:00'),
+                       ('epic_alpha_7', 'issue_alpha_43', 'proj_alpha', 43, 7, '2026-07-16 00:00:00+00:00'),
+                       ('epic_beta_7', 'issue_beta_42', 'proj_beta', 42, 7, '2026-07-16 00:00:00+00:00');
+
+                INSERT INTO "EpicActiveIssues" ("ProjectId", "IssueId", "EpicId", "IssueNumber", "EpicNumber", "CreatedAt")
+                VALUES ('proj_alpha', 'issue_alpha_42', 'epic_alpha_9', 42, 9, '2026-07-17 00:00:00+00:00'),
+                       ('proj_beta', 'issue_beta_42', 'epic_beta_7', 42, 7, '2026-07-17 00:00:00+00:00');
+                """);
+
+            await seed.GetService<IMigrator>().MigrateAsync(TargetMigration);
+        }
+
+        await using var verify = database.CreateDbContext();
+        Assert.False(await TableExistsAsync(verify, "EpicIssues"));
+        Assert.False(await TableExistsAsync(verify, "EpicActiveIssues"));
+
+        var rows = await verify.Issues.AsNoTracking().OrderBy(row => row.ProjectId).ThenBy(row => row.Number).ToListAsync();
+        Assert.Equal(
+            ["proj_alpha:42:9", "proj_alpha:43:7", "proj_beta:42:7"],
+            rows.Select(row => $"{row.ProjectId}:{row.Number}:{row.EpicNumber}").ToArray());
+
+        Assert.Equal(9, IssueStore.Deserialize(rows[0].State)!.EpicNumber);
+        Assert.Equal(7, IssueStore.Deserialize(rows[1].State)!.EpicNumber);
+        Assert.Equal(7, IssueStore.Deserialize(rows[2].State)!.EpicNumber);
+    }
+
     private static async Task<bool> TableExistsAsync(MohistDbContext context, string tableName)
     {
         var connection = context.Database.GetDbConnection();

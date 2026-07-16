@@ -96,7 +96,20 @@ public partial class RemoveLegacyIssueEpicIdentity : Migration
         migrationBuilder.Sql("""
             UPDATE "Issues"
             SET "State" = json_remove(
-                "State",
+                CASE
+                    WHEN COALESCE(
+                        "EpicNumber",
+                        json_extract("State", '$.epicNumber'),
+                        json_extract("State", '$.EpicNumber')) IS NULL
+                    THEN "State"
+                    ELSE json_set(
+                        "State",
+                        '$.epicNumber',
+                        COALESCE(
+                            "EpicNumber",
+                            json_extract("State", '$.epicNumber'),
+                            json_extract("State", '$.EpicNumber')))
+                END,
                 '$.id',
                 '$.Id',
                 '$.issueId',
@@ -104,7 +117,8 @@ public partial class RemoveLegacyIssueEpicIdentity : Migration
                 '$.issueid',
                 '$.epicId',
                 '$.EpicId',
-                '$.epicid')
+                '$.epicid',
+                '$.EpicNumber')
             WHERE json_type("State", '$') = 'object';
             """);
     }

@@ -122,6 +122,29 @@ public class IssueTransactionalEventAppendSpecs : IAsyncLifetime
     }
 
     [Fact]
+    public async Task SaveAsync_AffiliationChangePersistsIssueStateAndOwnEventTogether()
+    {
+        var store = CreateStore(_eventStore);
+        var issue = BuildIssue(7, epicNumber: 7);
+        issue.AssignEpic(9);
+        var events = issue.PendingEvents.ToList();
+
+        await store.SaveAsync(Key(7), issue, events);
+
+        var loaded = await store.LoadAsync(Key(7));
+        Assert.NotNull(loaded);
+        Assert.Equal(9, loaded!.EpicNumber);
+
+        var stored = Assert.Single(await _eventStore.ListIssueEventsAsync(ProjectId, 7));
+        Assert.Equal(EventCatalog.ReverseDns.IssueEpicChanged, stored.Envelope.Type);
+        Assert.Equal("9", stored.Envelope.Extensions[EventCatalog.Lineage.Epic]);
+
+        await using var verify = new MohistDbContext(_options);
+        Assert.Empty(await verify.Epics.AsNoTracking().ToListAsync());
+        Assert.Empty(await verify.WorkflowRuns.AsNoTracking().ToListAsync());
+    }
+
+    [Fact]
     public void IssueLineage_OmitsEpicWhenIssueHasNoEpicNumber()
     {
         var extensions = IssueLineage.BuildExtensions(BuildIssue(5));
