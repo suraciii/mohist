@@ -49,4 +49,7 @@ public class WorkflowRunRow
     /// </summary>
     [DatabaseGenerated(DatabaseGeneratedOption.Computed)]
     public string? Status { get; set; }
+
+    [DatabaseGenerated(DatabaseGeneratedOption.Computed)]
+    public int? IssueNumber { get; set; }
 }

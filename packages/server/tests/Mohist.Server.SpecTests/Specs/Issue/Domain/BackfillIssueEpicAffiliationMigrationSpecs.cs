@@ -161,9 +161,9 @@ public class BackfillIssueEpicAffiliationMigrationSpecs
         context.ChangeTracker.Clear();
 
         var persistedIssue = await context.Issues.SingleAsync(row => row.IssueId == issue.IssueId);
-        var persistedWorkflow = await context.WorkflowRuns.SingleAsync(row => row.WorkflowRunId == workflow.Id);
+        var persistedWorkflow = await LoadWorkflowAsync(context, workflow.Id);
         Assert.Equal("epic_snapshot", persistedIssue.EpicId);
-        Assert.Equal("epic_snapshot", persistedWorkflow.EpicId);
+        Assert.Equal("epic_snapshot", persistedWorkflow.Metadata.Annotations!["epicId"]);
     }
 
     [Fact]
@@ -201,8 +201,8 @@ public class BackfillIssueEpicAffiliationMigrationSpecs
         await migrator.MigrateAsync(AtomicSnapshotMigration);
         context.ChangeTracker.Clear();
 
-        var persistedWorkflow = await context.WorkflowRuns.SingleAsync(row => row.WorkflowRunId == workflow.Id);
-        Assert.Equal("epic_linked", persistedWorkflow.EpicId);
+        var persistedWorkflow = await LoadWorkflowAsync(context, workflow.Id);
+        Assert.Equal("epic_linked", persistedWorkflow.Metadata.Annotations!["epicId"]);
     }
 
     [Fact]
@@ -228,13 +228,12 @@ public class BackfillIssueEpicAffiliationMigrationSpecs
         await migrator.MigrateAsync(AtomicSnapshotMigration);
         context.ChangeTracker.Clear();
 
-        Assert.Equal("epic_current", (await context.WorkflowRuns.SingleAsync(row => row.WorkflowRunId == "wr_current_link")).EpicId);
-        Assert.Null((await context.WorkflowRuns.SingleAsync(row => row.WorkflowRunId == "wr_current_none")).EpicId);
-        Assert.Equal("epic_annotation", (await context.WorkflowRuns.SingleAsync(row => row.WorkflowRunId == "wr_unmatched_issue")).EpicId);
-
-        var querier = new WorkflowRunQuerier(database.Factory);
-        Assert.Equal("epic_current", (await querier.LoadAsync("wr_current_link"))!.Metadata.Annotations!["epicId"]);
-        Assert.False((await querier.LoadAsync("wr_current_none"))!.Metadata.Annotations!.ContainsKey("epicId"));
+        var linkedWorkflow = await LoadWorkflowAsync(context, "wr_current_link");
+        var unlinkedWorkflow = await LoadWorkflowAsync(context, "wr_current_none");
+        var unmatchedWorkflow = await LoadWorkflowAsync(context, "wr_unmatched_issue");
+        Assert.Equal("epic_current", linkedWorkflow.Metadata.Annotations!["epicId"]);
+        Assert.False(unlinkedWorkflow.Metadata.Annotations!.ContainsKey("epicId"));
+        Assert.Equal("epic_annotation", unmatchedWorkflow.Metadata.Annotations!["epicId"]);
     }
 
     private static Task SeedWorkflowAsync(MohistDbContext context, string workflowId, string issueId, string epicId)
@@ -257,6 +256,25 @@ public class BackfillIssueEpicAffiliationMigrationSpecs
             INSERT INTO "WorkflowRuns" ("WorkflowRunId", "State", "ETag")
             VALUES ({workflow.Id}, {JSON.Serialize(workflow)}, 1)
             """);
+    }
+
+    private static async Task<Mohist.Server.Workflow.Domain.Run.WorkflowRun> LoadWorkflowAsync(
+        MohistDbContext context,
+        string workflowId)
+    {
+        await using var command = context.Database.GetDbConnection().CreateCommand();
+        command.CommandText = "SELECT State, EpicId FROM WorkflowRuns WHERE WorkflowRunId = $workflowRunId";
+        var parameter = command.CreateParameter();
+        parameter.ParameterName = "$workflowRunId";
+        parameter.Value = workflowId;
+        command.Parameters.Add(parameter);
+        await using var reader = await command.ExecuteReaderAsync();
+        if (!await reader.ReadAsync())
+            throw new InvalidOperationException($"Workflow run '{workflowId}' was not found");
+
+        var run = JSON.Deserialize<Mohist.Server.Workflow.Domain.Run.WorkflowRun>(reader.GetString(0))!;
+        WorkflowRunLineage.ApplyEpicAffiliation(run, reader.IsDBNull(1) ? null : reader.GetString(1));
+        return run;
     }
 
     private static IssueRow NewIssue(string issueId, int number)

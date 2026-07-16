@@ -7,7 +7,9 @@ using Mohist.Server.Issue.Services.WorkflowProfiles;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Infrastructure.Data;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Infrastructure.Serialization;
+using Mohist.Server.Issue.Services;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Domain.Definition;
@@ -25,6 +27,7 @@ using Orleans;
 using System.Text.Json;
 using Mohist.Server.SpecTests.Specs.Workflow;
 using Mohist.Server.SpecTests.Specs.Issue.Profile;
+using DomainIssue = Mohist.Server.Issue.Domain.Issue;
 
 namespace Mohist.Server.SpecTests.Specs.Workflow;
 
@@ -396,6 +399,26 @@ public abstract class WorkflowGrainSpecs
         var options = new DbContextOptionsBuilder<MohistDbContext>()
             .UseSqlite(_fixture.ConnectionString)
             .Options;
+        await using (var db = new MohistDbContext(options))
+        {
+            if (!await db.Issues.AnyAsync(row => row.IssueId == issueId))
+            {
+                var projectId = TestProjectId(_workflowId!);
+                db.Issues.Add(new IssueRow
+                {
+                    IssueId = issueId,
+                    State = IssueStore.Serialize(new DomainIssue
+                    {
+                        Id = issueId,
+                        ProjectId = projectId,
+                        Number = 1,
+                        Title = issueId,
+                        Priority = "p2",
+                    }),
+                });
+                await db.SaveChangesAsync();
+            }
+        }
         var factory = new PooledDbContextFactory<MohistDbContext>(options);
         var manager = new IssueWorkflowProfileManager(factory);
         await manager.PatchVariablesAsync(issueId, patch);

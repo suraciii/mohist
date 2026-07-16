@@ -580,7 +580,7 @@ public class IssueGrain : Grain, IIssueGrain
         }
         else if (hasAttachments)
         {
-            await _attachmentService.ReplaceIssueAsync(_issue.ProjectId, _issue.Id, data.AttachmentIds!);
+            await _attachmentService.ReplaceIssueAsync(_issue.ProjectId, _issue.Id, _issue.Number, data.AttachmentIds!);
         }
     }
 
@@ -672,7 +672,7 @@ public class IssueGrain : Grain, IIssueGrain
         }
 
         await SaveIssueAsync();
-        await _attachmentService.BindIssueAsync(projectId, issue.Id, attachmentIds);
+        await _attachmentService.BindIssueAsync(projectId, issue.Id, issue.Number, attachmentIds);
         return issue.Id;
     }
 

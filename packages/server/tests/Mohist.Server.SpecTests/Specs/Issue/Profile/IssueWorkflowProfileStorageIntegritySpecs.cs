@@ -2,13 +2,17 @@ using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Infrastructure.Data.Workflow;
+using Mohist.Server.Issue.Services;
 using Mohist.Server.Issue.Services.WorkflowProfiles;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.Workflow.Domain;
 using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Issue.Profile;
+
+using DomainIssue = Mohist.Server.Issue.Domain.Issue;
 
 /// <summary>
 /// Storage-integrity verification for <c>IssueWorkflowProfile</c> rows.
@@ -25,6 +29,7 @@ public class IssueWorkflowProfileStorageIntegritySpecs : IAsyncLifetime
     private readonly DbContextOptions<MohistDbContext> _options;
     private readonly TestFactory _factory;
     private readonly SqliteConnection _keeper;
+    private int _nextIssueNumber;
 
     public IssueWorkflowProfileStorageIntegritySpecs()
     {
@@ -462,8 +467,24 @@ public class IssueWorkflowProfileStorageIntegritySpecs : IAsyncLifetime
     private async Task SeedRowAsync(string issueId, string variablesJson)
     {
         await using var db = new MohistDbContext(_options);
+        var issueNumber = ++_nextIssueNumber;
+        const string projectId = "profile-integrity";
+        db.Issues.Add(new IssueRow
+        {
+            IssueId = issueId,
+            State = IssueStore.Serialize(new DomainIssue
+            {
+                Id = issueId,
+                ProjectId = projectId,
+                Number = issueNumber,
+                Title = issueId,
+                Priority = "p2",
+            }),
+        });
         db.IssueWorkflowProfiles.Add(new IssueWorkflowProfile
         {
+            ProjectId = projectId,
+            IssueNumber = issueNumber,
             IssueId = issueId,
             Variables = variablesJson,
             UpdatedAt = TestTime.UtcNow,

@@ -91,14 +91,11 @@ public class IssueWorkflowProfileManager : IScopedService
 
         if (row is null)
         {
-            row = new IssueWorkflowProfile
-            {
-                IssueId = issueId,
-                SourceTemplateId = request.ProjectTemplateId,
-                Template = parsed is null ? null : SerializeDefinition(parsed),
-                Variables = VariableBundle.Empty.ToJson(),
-                UpdatedAt = DateTimeOffset.UtcNow,
-            };
+            row = await CreateProfileAsync(db, issueId);
+            row.SourceTemplateId = request.ProjectTemplateId;
+            row.Template = parsed is null ? null : SerializeDefinition(parsed);
+            row.Variables = VariableBundle.Empty.ToJson();
+            row.UpdatedAt = DateTimeOffset.UtcNow;
             db.IssueWorkflowProfiles.Add(row);
         }
         else
@@ -131,12 +128,9 @@ public class IssueWorkflowProfileManager : IScopedService
 
         if (row is null)
         {
-            row = new IssueWorkflowProfile
-            {
-                IssueId = issueId,
-                Variables = bundle.ToJson(),
-                UpdatedAt = DateTimeOffset.UtcNow,
-            };
+            row = await CreateProfileAsync(db, issueId);
+            row.Variables = bundle.ToJson();
+            row.UpdatedAt = DateTimeOffset.UtcNow;
             db.IssueWorkflowProfiles.Add(row);
         }
         else
@@ -178,13 +172,10 @@ public class IssueWorkflowProfileManager : IScopedService
 
         if (profile is null)
         {
-            profile = new IssueWorkflowProfile
-            {
-                IssueId = issueId,
-                Variables = VariableBundle.Empty.ToJson(),
-                Prompts = new Dictionary<string, string>(StringComparer.Ordinal) { [key] = body },
-                UpdatedAt = DateTimeOffset.UtcNow,
-            };
+            profile = await CreateProfileAsync(db, issueId);
+            profile.Variables = VariableBundle.Empty.ToJson();
+            profile.Prompts = new Dictionary<string, string>(StringComparer.Ordinal) { [key] = body };
+            profile.UpdatedAt = DateTimeOffset.UtcNow;
             db.IssueWorkflowProfiles.Add(profile);
         }
         else
@@ -224,6 +215,26 @@ public class IssueWorkflowProfileManager : IScopedService
         string issueId) =>
         await db.IssueWorkflowProfiles.AsNoTracking()
             .FirstOrDefaultAsync(x => x.IssueId == issueId);
+
+    private static async Task<IssueWorkflowProfile> CreateProfileAsync(
+        MohistDbContext db,
+        string issueId)
+    {
+        var owner = await db.Issues.AsNoTracking()
+            .Where(issue => issue.IssueId == issueId)
+            .Select(issue => new { issue.ProjectId, issue.Number })
+            .SingleOrDefaultAsync();
+
+        if (string.IsNullOrWhiteSpace(owner?.ProjectId) || owner.Number is null or <= 0)
+            throw new InvalidOperationException($"Issue '{issueId}' has no canonical Project/number identity");
+
+        return new IssueWorkflowProfile
+        {
+            IssueId = issueId,
+            ProjectId = owner.ProjectId,
+            IssueNumber = owner.Number.Value,
+        };
+    }
 
     private static WorkflowDefinition? DeserializeDefinition(string json)
     {

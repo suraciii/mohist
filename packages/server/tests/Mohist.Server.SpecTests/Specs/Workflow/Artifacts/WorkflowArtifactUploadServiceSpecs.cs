@@ -640,7 +640,14 @@ public class WorkflowArtifactUploadServiceSpecs
             NullLogger<WorkflowArtifactBindService>.Instance,
             new FixedTimeProvider(new DateTimeOffset(2026, 6, 11, 12, 0, 0, TimeSpan.Zero)));
         var bindResult = await bindService.BindAsync(
-            workflowRunId, workId, taskRunId, [uploaded.Pending!.UploadId], declaredArtifacts: null);
+            workflowRunId,
+            workId,
+            taskRunId,
+            [uploaded.Pending!.UploadId],
+            declaredArtifacts: null,
+            projectId: "proj_bind",
+            issueId: "issue_bind",
+            issueNumber: 42);
         Assert.True(bindResult.IsSuccess, bindResult.Error);
         Assert.Single(bindResult.ArtifactRecordedEvents);
 
@@ -653,6 +660,9 @@ public class WorkflowArtifactUploadServiceSpecs
         Assert.Equal("directory", bound.Kind);
         Assert.Equal("specs", bound.Path);
         Assert.Equal(taskRunId, bound.TaskRunId);
+        Assert.Equal("proj_bind", bound.ProjectId);
+        Assert.Equal("issue_bind", bound.IssueId);
+        Assert.Equal(42, bound.IssueNumber);
         Assert.EndsWith("/files", bound.ArtifactStoragePath);
         Assert.Equal(fileA.LongLength + fileB.LongLength, bound.Size);
 

@@ -62,6 +62,8 @@ public class IssueModelVariantRoundTripSpecs
 
         db.IssueWorkflowProfiles.Add(new IssueWorkflowProfile
         {
+            ProjectId = issue.ProjectId,
+            IssueNumber = issue.Number,
             IssueId = issue.Id,
             Variables = patched.ToJson(),
         });
@@ -120,6 +122,8 @@ public class IssueModelVariantRoundTripSpecs
 
         db.IssueWorkflowProfiles.Add(new IssueWorkflowProfile
         {
+            ProjectId = issue.ProjectId,
+            IssueNumber = issue.Number,
             IssueId = issue.Id,
             Variables = patched.ToJson(),
         });
@@ -185,6 +189,8 @@ public class IssueModelVariantRoundTripSpecs
         """;
         db.IssueWorkflowProfiles.Add(new IssueWorkflowProfile
         {
+            ProjectId = issue.ProjectId,
+            IssueNumber = issue.Number,
             IssueId = issue.Id,
             Variables = rawJson,
         });
@@ -242,6 +248,8 @@ public class IssueModelVariantRoundTripSpecs
         """;
         db.IssueWorkflowProfiles.Add(new IssueWorkflowProfile
         {
+            ProjectId = issue.ProjectId,
+            IssueNumber = issue.Number,
             IssueId = issue.Id,
             Variables = rawJson,
         });

@@ -729,6 +729,9 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasMaxLength(16)
                         .HasColumnType("TEXT");
 
+                    b.Property<int?>("OwnerIssueNumber")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("ProjectId")
                         .IsRequired()
                         .HasMaxLength(256)
@@ -749,6 +752,9 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
 
                     b.HasIndex("ProjectId", "OwnerKind", "OwnerId")
                         .HasDatabaseName("IX_Attachments_ProjectId_Owner");
+
+                    b.HasIndex("ProjectId", "OwnerKind", "OwnerIssueNumber")
+                        .HasDatabaseName("IX_Attachments_ProjectId_OwnerIssueNumber");
 
                     b.ToTable("Attachments", (string)null);
                 });
@@ -1266,6 +1272,12 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.HasIndex("LabelProjectId", "CreatedAt")
                         .HasDatabaseName("IX_AgentSessions_LabelProjectId_CreatedAt");
 
+                    b.HasIndex("LabelProjectId", "LabelAgentLaunchIssueNumber", "CreatedAt")
+                        .HasDatabaseName("IX_AgentSessions_LabelProjectId_LabelAgentLaunchIssueNumber_CreatedAt");
+
+                    b.HasIndex("LabelProjectId", "LabelIssueNumber", "CreatedAt")
+                        .HasDatabaseName("IX_AgentSessions_LabelProjectId_LabelIssueNumber_CreatedAt");
+
                     b.HasIndex("LabelSourceId", "LabelSessionName")
                         .HasDatabaseName("IX_AgentSessions_LabelSourceId_LabelSessionName");
 
@@ -1385,7 +1397,16 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
             modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Workflow.IssueWorkflowProfile", b =>
                 {
                     b.Property<string>("IssueId")
+                        .IsRequired()
                         .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("IssueNumber")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ProjectId")
+                        .IsRequired()
+                        .HasMaxLength(256)
                         .HasColumnType("TEXT");
 
                     b.Property<string>("Prompts")
@@ -1409,6 +1430,9 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasColumnType("TEXT");
 
                     b.HasKey("IssueId");
+
+                    b.HasIndex("ProjectId", "IssueNumber")
+                        .IsUnique();
 
                     b.ToTable("IssueWorkflowProfiles", (string)null);
                 });
@@ -1618,6 +1642,9 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasMaxLength(256)
                         .HasColumnType("TEXT");
 
+                    b.Property<int?>("IssueNumber")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("Kind")
                         .IsRequired()
                         .ValueGeneratedOnAdd()
@@ -1654,6 +1681,9 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
 
                     b.HasIndex("IssueId", "RecordedAt")
                         .HasDatabaseName("IX_WorkflowArtifacts_IssueId_RecordedAt");
+
+                    b.HasIndex("ProjectId", "IssueNumber", "RecordedAt")
+                        .HasDatabaseName("IX_WorkflowArtifacts_ProjectId_IssueNumber_RecordedAt");
 
                     b.HasIndex("WorkflowRunId", "Path", "RecordedAt")
                         .HasDatabaseName("IX_WorkflowArtifacts_WorkflowRunId_Path_RecordedAt");
@@ -1706,6 +1736,11 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("TEXT");
 
+                    b.Property<int?>("IssueNumber")
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("INTEGER")
+                        .HasComputedColumnSql("CAST(COALESCE(json_extract(State, '$.metadata.annotations.issueNumber'), json_extract(State, '$.Metadata.Annotations.issueNumber'), json_extract(State, '$.Metadata.Annotations.IssueNumber')) AS INTEGER)", true);
+
                     b.Property<string>("MetadataProjectId")
                         .ValueGeneratedOnAddOrUpdate()
                         .HasColumnType("TEXT")
@@ -1735,6 +1770,9 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasDatabaseName("IX_WorkflowRuns_Status");
 
                     b.HasIndex("MetadataProjectId", "AssignedWorkerId", "CreatedAt");
+
+                    b.HasIndex("MetadataProjectId", "IssueNumber")
+                        .HasDatabaseName("IX_WorkflowRuns_ProjectId_IssueNumber");
 
                     b.HasIndex("Status", "AssignedWorkerId", "ReadySince")
                         .HasDatabaseName("IX_WorkflowRuns_Status_ReadySince");

@@ -81,6 +81,8 @@ public class WorkflowArtifactRow
     [MaxLength(256)]
     public string? ProjectId { get; set; }
 
+    public int? IssueNumber { get; set; }
+
     /// <summary>
     /// Carried on the row for issue-scoped query optimization only.
     /// Not part of the domain artifact fact.

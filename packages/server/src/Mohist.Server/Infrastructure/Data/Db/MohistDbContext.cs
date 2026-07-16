@@ -187,6 +187,8 @@ public class MohistDbContext : DbContext
             entity.HasIndex(e => new { e.LabelProjectId, e.CreatedAt }).HasDatabaseName("IX_AgentSessions_LabelProjectId_CreatedAt");
             entity.HasIndex(e => e.LabelSourceId).HasDatabaseName("IX_AgentSessions_LabelSourceId");
             entity.HasIndex(e => new { e.LabelSourceId, e.LabelSessionName }).HasDatabaseName("IX_AgentSessions_LabelSourceId_LabelSessionName");
+            entity.HasIndex(e => new { e.LabelProjectId, e.LabelIssueNumber, e.CreatedAt })
+                .HasDatabaseName("IX_AgentSessions_LabelProjectId_LabelIssueNumber_CreatedAt");
 
             // issued-130 T-001: composite index for the agent-scoped recency
             // list, plus single-column indexes on the two context-ref number
@@ -195,6 +197,8 @@ public class MohistDbContext : DbContext
                 .HasDatabaseName("IX_AgentSessions_LabelAgentId_LabelProjectId_CreatedAt");
             entity.HasIndex(e => e.LabelAgentLaunchIssueNumber)
                 .HasDatabaseName("IX_AgentSessions_LabelAgentLaunchIssueNumber");
+            entity.HasIndex(e => new { e.LabelProjectId, e.LabelAgentLaunchIssueNumber, e.CreatedAt })
+                .HasDatabaseName("IX_AgentSessions_LabelProjectId_LabelAgentLaunchIssueNumber_CreatedAt");
             entity.HasIndex(e => e.LabelAgentLaunchEpicNumber)
                 .HasDatabaseName("IX_AgentSessions_LabelAgentLaunchEpicNumber");
         });
@@ -246,12 +250,15 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.ProjectId).HasMaxLength(256).IsRequired();
             entity.Property(e => e.OwnerKind).HasMaxLength(16);
             entity.Property(e => e.OwnerId).HasMaxLength(256);
+            entity.Property(e => e.OwnerIssueNumber);
             entity.Property(e => e.OriginalFileName).HasMaxLength(512).IsRequired();
             entity.Property(e => e.ContentType).HasMaxLength(128);
             entity.Property(e => e.StoragePath).HasMaxLength(1024).IsRequired();
             entity.Property(e => e.CreatedAt).IsRequired();
             entity.HasIndex(e => new { e.ProjectId, e.OwnerKind, e.OwnerId })
                 .HasDatabaseName("IX_Attachments_ProjectId_Owner");
+            entity.HasIndex(e => new { e.ProjectId, e.OwnerKind, e.OwnerIssueNumber })
+                .HasDatabaseName("IX_Attachments_ProjectId_OwnerIssueNumber");
             entity.HasIndex(e => e.ExpiresAt)
                 .HasDatabaseName("IX_Attachments_ExpiresAt");
         });
@@ -600,9 +607,15 @@ public class MohistDbContext : DbContext
             // T-002 declares the model-side projection only.
             entity.Property(e => e.Status)
                 .HasComputedColumnSql("LOWER(COALESCE(json_extract(State, '$.status'), json_extract(State, '$.Status')))", stored: true);
+            entity.Property(e => e.IssueNumber)
+                .HasComputedColumnSql(
+                    "CAST(COALESCE(json_extract(State, '$.metadata.annotations.issueNumber'), json_extract(State, '$.Metadata.Annotations.issueNumber'), json_extract(State, '$.Metadata.Annotations.IssueNumber')) AS INTEGER)",
+                    stored: true);
             entity.HasIndex(e => e.MetadataProjectId);
             entity.HasIndex(e => e.AssignedWorkerId);
             entity.HasIndex(e => new { e.MetadataProjectId, e.AssignedWorkerId, e.CreatedAt });
+            entity.HasIndex(e => new { e.MetadataProjectId, e.IssueNumber })
+                .HasDatabaseName("IX_WorkflowRuns_ProjectId_IssueNumber");
             // Issue-318 D3: covering index for the two scheduler queries
             // (FindAssignableAsync -> status == pending, FindAssignedToAsync
             // -> status == ready AND assigned == worker). The composite
@@ -688,6 +701,8 @@ public class MohistDbContext : DbContext
             entity.ToTable("IssueWorkflowProfiles");
             entity.HasKey(e => e.IssueId);
             entity.Property(e => e.IssueId).HasMaxLength(512);
+            entity.Property(e => e.ProjectId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.IssueNumber).IsRequired();
             entity.Property(e => e.SourceTemplateId).HasMaxLength(256);
             entity.Property(e => e.Variables).IsRequired();
             entity.Property(e => e.Prompts)
@@ -697,6 +712,7 @@ public class MohistDbContext : DbContext
                 .IsRequired()
                 .HasDefaultValue(new Dictionary<string, string>());
             entity.Property(e => e.Prompts).Metadata.SetValueComparer(DictionaryStringComparer);
+            entity.HasIndex(e => new { e.ProjectId, e.IssueNumber }).IsUnique();
         });
 
         modelBuilder.Entity<WorkflowRunProfileRow>(entity =>
@@ -740,6 +756,7 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.ContentType).HasMaxLength(128);
             entity.Property(e => e.ContentHash).HasMaxLength(128);
             entity.Property(e => e.ProjectId).HasMaxLength(256);
+            entity.Property(e => e.IssueNumber);
             entity.Property(e => e.IssueId).HasMaxLength(256);
             entity.Property(e => e.DisplayName).HasMaxLength(512);
 
@@ -752,6 +769,8 @@ public class MohistDbContext : DbContext
             // Issue-scoped latest projection support.
             entity.HasIndex(e => new { e.IssueId, e.RecordedAt })
                 .HasDatabaseName("IX_WorkflowArtifacts_IssueId_RecordedAt");
+            entity.HasIndex(e => new { e.ProjectId, e.IssueNumber, e.RecordedAt })
+                .HasDatabaseName("IX_WorkflowArtifacts_ProjectId_IssueNumber_RecordedAt");
         });
 
         modelBuilder.Entity<WorkflowArtifactPendingUploadRow>(entity =>

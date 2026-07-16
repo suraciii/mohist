@@ -113,9 +113,10 @@ public sealed class AttachmentService : IScopedService
     public async Task BindIssueAsync(
         string projectId,
         string issueId,
+        int issueNumber,
         IReadOnlyCollection<string>? attachmentIds,
         CancellationToken cancellationToken = default) =>
-        await BindAsync(projectId, OwnerKindIssue, issueId, attachmentIds, cancellationToken).ConfigureAwait(false);
+        await BindAsync(projectId, OwnerKindIssue, issueId, issueNumber, attachmentIds, cancellationToken).ConfigureAwait(false);
 
     /// <summary>
     /// Unbinds every attachment currently owned by the given issue. Used by
@@ -140,6 +141,7 @@ public sealed class AttachmentService : IScopedService
         {
             row.OwnerKind = null;
             row.OwnerId = null;
+            row.OwnerIssueNumber = null;
             row.ExpiresAt = _time.GetUtcNow().Add(PendingTtl);
         }
         await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
@@ -155,6 +157,7 @@ public sealed class AttachmentService : IScopedService
     public async Task ReplaceIssueAsync(
         string projectId,
         string issueId,
+        int issueNumber,
         IReadOnlyCollection<string> attachmentIds,
         CancellationToken cancellationToken = default)
     {
@@ -171,6 +174,7 @@ public sealed class AttachmentService : IScopedService
             {
                 row.OwnerKind = OwnerKindIssue;
                 row.OwnerId = issueId;
+                row.OwnerIssueNumber = issueNumber;
                 row.ExpiresAt = null;
             }
         }
@@ -193,6 +197,7 @@ public sealed class AttachmentService : IScopedService
             {
                 row.OwnerKind = null;
                 row.OwnerId = null;
+                row.OwnerIssueNumber = null;
                 row.ExpiresAt = pendingExpiry;
             }
         }
@@ -212,7 +217,7 @@ public sealed class AttachmentService : IScopedService
         string commentId,
         IReadOnlyCollection<string>? attachmentIds,
         CancellationToken cancellationToken = default) =>
-        await BindAsync(projectId, OwnerKindComment, commentId, attachmentIds, cancellationToken).ConfigureAwait(false);
+        await BindAsync(projectId, OwnerKindComment, commentId, null, attachmentIds, cancellationToken).ConfigureAwait(false);
 
     public async Task ValidateCommentBindAsync(
         string projectId,
@@ -331,6 +336,7 @@ public sealed class AttachmentService : IScopedService
         string projectId,
         string ownerKind,
         string ownerId,
+        int? ownerIssueNumber,
         IReadOnlyCollection<string>? attachmentIds,
         CancellationToken cancellationToken)
     {
@@ -346,6 +352,7 @@ public sealed class AttachmentService : IScopedService
         {
             row.OwnerKind = ownerKind;
             row.OwnerId = ownerId;
+            row.OwnerIssueNumber = ownerIssueNumber;
             row.ExpiresAt = null;
         }
 

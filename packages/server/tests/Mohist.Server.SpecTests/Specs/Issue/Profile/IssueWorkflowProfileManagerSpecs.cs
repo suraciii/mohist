@@ -1,7 +1,9 @@
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Services;
 using Xunit;
@@ -26,6 +28,27 @@ public class IssueWorkflowProfileManagerSpecs : IAsyncLifetime
         _manager = new IssueWorkflowProfileManager(new Factory(_options));
 
         MigratedSqliteTemplate.CopyModelSchemaTo(_keeper);
+        using var db = new MohistDbContext(_options);
+        var issueIds = new[]
+        {
+            "issue_1", "issue_2", "issue_4", "issue_5",
+            "issue_s", "issue_p", "issue_isolate", "issue_zh",
+        };
+        for (var index = 0; index < issueIds.Length; index++)
+        {
+            var issueId = issueIds[index];
+            db.Issues.Add(new IssueRow
+            {
+                IssueId = issueId,
+                State = JSON.Serialize(new
+                {
+                    id = issueId,
+                    projectId = "proj_profile",
+                    number = index + 1,
+                }),
+            });
+        }
+        db.SaveChanges();
     }
 
     public Task InitializeAsync() => Task.CompletedTask;
@@ -58,6 +81,10 @@ public class IssueWorkflowProfileManagerSpecs : IAsyncLifetime
         Assert.Equal("issue_1", row.IssueId);
         Assert.Equal("some-template", row.SourceTemplateId);
         Assert.Null(row.Template);
+
+        var stored = await _manager.GetProfileAsync("issue_1");
+        Assert.Equal("proj_profile", stored!.ProjectId);
+        Assert.Equal(1, stored.IssueNumber);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]

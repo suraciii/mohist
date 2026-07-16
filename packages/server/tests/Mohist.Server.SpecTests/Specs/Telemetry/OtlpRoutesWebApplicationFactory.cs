@@ -182,26 +182,6 @@ public class OtlpRoutesWebApplicationFactory : WebApplicationFactory<Program>
         }
     }
 
-    public async Task EnsureSchemaAsync()
-    {
-        await using var scope = Services.CreateAsyncScope();
-        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-        await db.Database.ExecuteSqlRawAsync("""
-            CREATE TABLE IF NOT EXISTS "Attachments" (
-                "Id" TEXT NOT NULL CONSTRAINT "PK_Attachments" PRIMARY KEY,
-                "ProjectId" TEXT NOT NULL,
-                "OwnerKind" TEXT NULL,
-                "OwnerId" TEXT NULL,
-                "OriginalFileName" TEXT NOT NULL,
-                "ContentType" TEXT NULL,
-                "Size" INTEGER NOT NULL,
-                "StoragePath" TEXT NOT NULL,
-                "CreatedAt" TEXT NOT NULL,
-                "ExpiresAt" TEXT NULL
-            );
-            """);
-        await db.Database.ExecuteSqlRawAsync("CREATE INDEX IF NOT EXISTS \"IX_Attachments_ExpiresAt\" ON \"Attachments\" (\"ExpiresAt\");");
-        await db.Database.ExecuteSqlRawAsync("CREATE INDEX IF NOT EXISTS \"IX_Attachments_ProjectId_Owner\" ON \"Attachments\" (\"ProjectId\", \"OwnerKind\", \"OwnerId\");");
-    }
+    public Task EnsureSchemaAsync() => Task.CompletedTask;
 
 }

@@ -195,6 +195,7 @@ public class AttachmentApiSpecs
         var row = await db.Attachments.AsNoTracking().SingleAsync(a => a.Id == upload.Id);
         Assert.Equal("issue", row.OwnerKind);
         Assert.Equal(issue.GetProperty("id").GetString(), row.OwnerId);
+        Assert.Equal(issue.GetProperty("number").GetInt32(), row.OwnerIssueNumber);
         Assert.Null(row.ExpiresAt);
     }
 

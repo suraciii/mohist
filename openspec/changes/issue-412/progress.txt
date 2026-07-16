@@ -64,7 +64,7 @@ membership authority each have a separately enforceable boundary. Do not reuse t
 | Task | State |
 |---|---|
 | T-001 typed scoped identities and codec | done — strict IssueKey/EpicKey, exact canonical codec, typed-only GrainKey access |
-| T-002 canonical Issue reference migration | pending |
+| T-002 canonical Issue reference migration | done - every current-state owner classified; missing scoped columns, reconciliation, writer coverage and migration regressions landed |
 | T-003 canonical Epic reference migration | pending |
 | T-004 number-only server model/APIs | pending |
 | T-005 Issue-owned membership and Epic progression | pending |
@@ -149,6 +149,76 @@ membership authority each have a separately enforceable boundary. Do not reuse t
   filename must not be recreated. Owner migrations for Issue/Epic live in T-002 and T-003.
 - Runtime cutover of existing random-id IssueGrain call sites: T-004.
 - Issue/Epic membership authority and lineage: T-005..T-008.
+
+## T-002 delivered
+
+### Current-state Issue owner inventory
+
+- `Issues` is the aggregate root. Its legacy `IssueId` primary key remains only as the T-004
+  transition lookup; stored `State` already derives the unique canonical (`ProjectId`, `Number`)
+  pair and is the source used by this migration.
+- `IssueWorkflowProfiles` now persists required `ProjectId` + `IssueNumber` with a unique scoped
+  index. Legacy rows are backfilled through their owning Issue; every production create path reads
+  the canonical pair from that Issue before inserting a profile.
+- Issue-bound `WorkflowArtifacts` now persist `IssueNumber` beside their existing `ProjectId`.
+  `WorkflowItemTranslator` carries the run's positive canonical number into the final artifact row.
+  Pending uploads are owned by WorkflowRun/work item until bind and therefore are not a second
+  Issue-reference owner.
+- `Attachments` with `OwnerKind = issue` now persist `OwnerIssueNumber`; issue bind/replace writers
+  set it and unbind clears it. Comment-owned and unbound attachments keep it null.
+- `WorkflowRuns` store canonical Issue context in metadata. Legacy `issueId` annotations are
+  reconciled to `projectId` + `issueNumber`; a stored computed `IssueNumber` and scoped index expose
+  that context without another owner lookup. `WorkIssueRef` is a run-derived dispatch/read shape,
+  not an independently persisted owner.
+- `IssueComments`, `InboxItems`, `EpicIssues`, and `EpicActiveIssues` already persist
+  `ProjectId` + `IssueNumber`. Reconciliation verifies those values against their referenced Issue
+  and fails on missing or cross-Project rows instead of rewriting from the canonical side backward.
+- `IssuePrerequisites` already owns the canonical (`ProjectId`, `IssueNumber`,
+  `PrerequisiteNumber`) relation. Reconciliation verifies that both scoped Issues exist.
+- Workflow-origin and direct Agent-launch `AgentSessions` already persist Issue context as computed
+  Project/number labels. Reconciliation validates both label families and adds Project-scoped
+  recency indexes.
+
+Managers, queriers, storage-integrity helpers and API projections are access paths over the owners
+above, not additional persisted owners. `WorkflowRunId`, `SessionId`, `AgentId`, `RunnerId`,
+attachment id and event id remain independent identities.
+
+### Historical and later-removal references
+
+- Existing `IssueEvents` sources, payloads and extension JSON are immutable historical envelopes;
+  the migration proves them byte-for-byte unchanged. Historical migration/designer files likewise
+  remain historical evidence rather than current owners.
+- Legacy `IssueId` on `IssueRow`, profiles, artifacts, comments, inbox, Epic relation rows,
+  `WorkIssueRef`, run annotations and server APIs remains only until the T-004 number-only runtime
+  and schema cutover.
+- Legacy event lineage aliases and their current consumers remain explicitly assigned to T-007 and
+  T-008. T-002 does not make historical envelopes conform to the future lineage shape.
+
+### Migration and convergence
+
+- `20260716130000_AddCanonicalIssueReferenceColumns` adds nullable transition columns from the
+  immediate previous schema. `20260716140000_BackfillCanonicalIssueReferences` executes the shared
+  guarded reconciliation, makes profile scope required, and creates the scoped indexes.
+- The shared reconciliation is null-safe and idempotent: missing canonical values are filled from
+  the owning Issue, already matching values remain unchanged, and present conflicts or unresolved
+  owners fail with an owner-specific SQLite constraint name. No owner row is deleted.
+- Migration specs seed both `proj_alpha/#42` and `proj_beta/#42`, every discovered owner family,
+  a missing Workflow project scope, and an immutable historical event. They apply the actual target
+  migration through `IMigrator`, preserve row counts and Project isolation, and run the shared
+  convergence operation twice to prove the second pass is a no-op.
+- The pre-existing `20260618112000_AddAttachments` migration lacked `DbContext` metadata, so EF
+  never discovered it and tests/runtime had been creating the table out of band. It is now a real,
+  idempotent migration. Regressions prove both a fresh migration chain and adoption of an existing
+  out-of-band table without data loss; fixture-side schema patches were removed.
+
+### T-002 validation
+
+- Canonical Issue migration specs: **9 passed / 0 failed**.
+- Affected profile/artifact/attachment/workflow/session/history specs: **33 passed / 0 failed**.
+- Server UnitTests: **1458 passed / 0 failed / 0 skipped**.
+- Server ArchTests: **22 passed / 0 failed / 0 skipped**.
+- Server SpecTests full suite: **2833 passed / 0 failed / 0 skipped**.
+- EF pending-model snapshot check and `git diff --check` pass; server builds with zero warnings.
 
 ## Validation of planning artifacts
 
