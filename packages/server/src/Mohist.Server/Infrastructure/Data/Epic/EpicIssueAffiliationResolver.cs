@@ -5,33 +5,33 @@ namespace Mohist.Server.Infrastructure.Data.Epic;
 
 public static class EpicIssueAffiliationResolver
 {
-    public static async Task<string?> ResolveAsync(
+    public static async Task<int?> ResolveAsync(
         MohistDbContext db,
         string projectId,
-        string issueId,
-        string? excludedEpicId = null,
+        int issueNumber,
+        int? excludedEpicNumber = null,
         CancellationToken ct = default)
     {
-        var activeEpicId = await db.EpicActiveIssues.AsNoTracking()
+        var activeEpicNumber = await db.EpicActiveIssues.AsNoTracking()
             .Where(row => row.ProjectId == projectId
-                && row.IssueId == issueId
-                && (excludedEpicId == null || row.EpicId != excludedEpicId))
-            .OrderBy(row => row.EpicId)
-            .Select(row => row.EpicId)
+                && row.IssueNumber == issueNumber
+                && (excludedEpicNumber == null || row.EpicNumber != excludedEpicNumber))
+            .OrderBy(row => row.EpicNumber)
+            .Select(row => (int?)row.EpicNumber)
             .FirstOrDefaultAsync(ct);
-        if (!string.IsNullOrWhiteSpace(activeEpicId))
-            return activeEpicId;
+        if (activeEpicNumber.HasValue)
+            return activeEpicNumber;
 
         var retainedLinks = await db.EpicIssues.AsNoTracking()
             .Where(row => row.ProjectId == projectId
-                && row.IssueId == issueId
-                && (excludedEpicId == null || row.EpicId != excludedEpicId))
-            .Select(row => new { row.EpicId, row.CreatedAt })
+                && row.IssueNumber == issueNumber
+                && (excludedEpicNumber == null || row.EpicNumber != excludedEpicNumber))
+            .Select(row => new { row.EpicNumber, row.CreatedAt })
             .ToListAsync(ct);
         return retainedLinks
             .OrderByDescending(row => row.CreatedAt)
-            .ThenBy(row => row.EpicId, StringComparer.Ordinal)
-            .Select(row => row.EpicId)
+            .ThenBy(row => row.EpicNumber)
+            .Select(row => (int?)row.EpicNumber)
             .FirstOrDefault();
     }
 }

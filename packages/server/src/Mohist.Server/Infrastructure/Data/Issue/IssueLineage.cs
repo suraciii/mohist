@@ -14,8 +14,7 @@ namespace Mohist.Server.Infrastructure.Data.Issue;
 /// stay in sync with <c>design/event-protocol.md</c>. The user-visible
 /// issue number is stamped under the protocol name <c>issue</c> (replacing
 /// the legacy <c>issueno</c> key, D3). <c>epicid</c> is stamped when the
-/// issue's own state carries an <c>EpicId</c> (set by the Epic domain at
-/// link/unlink time, T-004) — when <c>EpicId</c> is null, the key is
+/// issue's own state carries an <c>EpicNumber</c>; when it is null, the key is
 /// omitted entirely.
 /// </remarks>
 public static class IssueLineage
@@ -34,12 +33,11 @@ public static class IssueLineage
         var extensions = new Dictionary<string, string>(StringComparer.Ordinal)
         {
             [EventCatalog.Lineage.ProjectId] = state.ProjectId,
-            [EventCatalog.Lineage.IssueId] = state.Id,
             [EventCatalog.Lineage.Issue] = state.Number.ToString(),
         };
-        if (!string.IsNullOrWhiteSpace(state.EpicId))
+        if (state.EpicNumber is > 0)
         {
-            extensions[EventCatalog.Lineage.EpicId] = state.EpicId!;
+            extensions[EventCatalog.Lineage.Epic] = state.EpicNumber.Value.ToString();
         }
 
         return extensions;

@@ -20,30 +20,31 @@ namespace Mohist.Server.Infrastructure.Data.Workflow;
 /// </remarks>
 public static class WorkflowRunLineage
 {
-    internal static void ApplyEpicAffiliation(WorkflowRun run, string? epicId)
+    internal static void ApplyEpicAffiliation(WorkflowRun run, int? epicNumber)
     {
         var annotations = run.Metadata.Annotations is null
             ? new Dictionary<string, string>(StringComparer.Ordinal)
             : new Dictionary<string, string>(run.Metadata.Annotations, StringComparer.Ordinal);
 
-        if (string.IsNullOrWhiteSpace(epicId))
-            annotations.Remove("epicId");
+        if (epicNumber is not > 0)
+            annotations.Remove("epicNumber");
         else
-            annotations["epicId"] = epicId;
+            annotations["epicNumber"] = epicNumber.Value.ToString();
 
         run.Metadata = run.Metadata with { Annotations = annotations };
     }
 
-    internal static string? EpicAffiliationOf(WorkflowRun run) =>
-        run.Metadata.Annotations?.GetValueOrDefault("epicId") is { } epicId
-        && !string.IsNullOrWhiteSpace(epicId)
-            ? epicId
+    internal static int? EpicAffiliationOf(WorkflowRun run) =>
+        run.Metadata.Annotations?.GetValueOrDefault("epicNumber") is { } epicNumber
+        && int.TryParse(epicNumber, out var parsed)
+        && parsed > 0
+            ? parsed
             : null;
 
     /// <summary>
     /// Build the <c>extensions</c> dictionary for the given workflow event.
     /// <c>workflowrunid</c> is always stamped (the run is the producer);
-    /// <c>projectid</c>, <c>issueid</c>, and <c>issue</c> are stamped only
+    /// <c>projectid</c>, <c>issue</c>, and <c>epic</c> are stamped only
     /// when their value is present on the run's metadata annotations (absent
     /// affiliations are omitted, never empty). <c>stage</c> is stamped when
     /// the variant exposes a <c>Stage</c> member — see <see cref="StageOf"/>.
@@ -54,9 +55,8 @@ public static class WorkflowRunLineage
 
         var annotations = run.Metadata?.Annotations;
         var projectId = RequiredAnnotation(annotations, "projectId", run.Id);
-        var issueId = annotations?.GetValueOrDefault("issueId");
         var issueNumber = annotations?.GetValueOrDefault("issueNumber");
-        var epicId = annotations?.GetValueOrDefault("epicId");
+        var epicNumber = annotations?.GetValueOrDefault("epicNumber");
         var stage = StageOf(evt);
 
         var extensions = new Dictionary<string, string>(StringComparer.Ordinal)
@@ -64,12 +64,10 @@ public static class WorkflowRunLineage
             [EventCatalog.Lineage.WorkflowRunId] = run.Id,
             [EventCatalog.Lineage.ProjectId] = projectId,
         };
-        if (!string.IsNullOrWhiteSpace(issueId))
-            extensions[EventCatalog.Lineage.IssueId] = issueId;
         if (!string.IsNullOrWhiteSpace(issueNumber))
             extensions[EventCatalog.Lineage.Issue] = issueNumber;
-        if (!string.IsNullOrWhiteSpace(epicId))
-            extensions[EventCatalog.Lineage.EpicId] = epicId;
+        if (!string.IsNullOrWhiteSpace(epicNumber))
+            extensions[EventCatalog.Lineage.Epic] = epicNumber;
         if (!string.IsNullOrWhiteSpace(stage))
             extensions[EventCatalog.Lineage.Stage] = stage!;
 

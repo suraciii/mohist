@@ -5,7 +5,6 @@ namespace Mohist.Server.Issue.Domain;
 public sealed partial class Issue
 {
     public static Issue Create(
-        string id,
         string projectId,
         int number,
         string title,
@@ -21,7 +20,6 @@ public sealed partial class Issue
         var createdAt = now ?? DateTime.UtcNow;
         var issue = new Issue
         {
-            Id = id,
             ProjectId = projectId,
             Number = number,
             Title = title,
@@ -184,16 +182,11 @@ public sealed partial class Issue
         return true;
     }
 
-    /// <summary>
-    /// Applies the Issue aggregate's local affiliation snapshot. The Epic
-    /// membership remains authoritative; durable Epic event reactions send
-    /// this idempotent command after the Epic transaction commits.
-    /// </summary>
-    public void SetEpicId(string? epicId, DateTime? now = null)
+    public void SetEpicNumber(int? epicNumber, DateTime? now = null)
     {
-        var next = NormalizeOptional(epicId);
-        if (string.Equals(_epicId, next, StringComparison.Ordinal)) return;
-        _epicId = next;
+        var next = epicNumber is > 0 ? epicNumber : null;
+        if (_epicNumber == next) return;
+        _epicNumber = next;
         Touch(now);
     }
 

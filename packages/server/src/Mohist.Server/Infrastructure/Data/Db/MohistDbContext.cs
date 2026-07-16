@@ -239,7 +239,6 @@ public class MohistDbContext : DbContext
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Id).HasMaxLength(64);
             entity.Property(e => e.ProjectId).HasMaxLength(256).IsRequired();
-            entity.Property(e => e.IssueId).HasMaxLength(256).IsRequired();
             entity.Property(e => e.Body).IsRequired();
             entity.HasIndex(e => new { e.ProjectId, e.IssueNumber, e.CreatedAt });
         });
@@ -273,8 +272,7 @@ public class MohistDbContext : DbContext
 
         modelBuilder.Entity<EpicRow>(entity =>
         {
-            entity.HasKey(e => e.Id);
-            entity.Property(e => e.Id).HasMaxLength(64);
+            entity.HasKey(e => new { e.ProjectId, e.Number });
             entity.Property(e => e.ProjectId).HasMaxLength(256).IsRequired();
             entity.Property(e => e.Title).HasMaxLength(512).IsRequired();
             entity.Property(e => e.Priority).HasMaxLength(16).IsRequired();
@@ -286,39 +284,31 @@ public class MohistDbContext : DbContext
 
         modelBuilder.Entity<EpicIssueRow>(entity =>
         {
-            entity.HasKey(e => new { e.EpicId, e.IssueId });
-            entity.Property(e => e.EpicId).HasMaxLength(64);
+            entity.HasKey(e => new { e.ProjectId, e.EpicNumber, e.IssueNumber });
             entity.Property(e => e.ProjectId).HasMaxLength(256).IsRequired();
-            entity.Property(e => e.IssueId).HasMaxLength(256).IsRequired();
             // Issue-179: relax uniqueness - an issue may hold a terminal-epic
             // membership (done/closed) AND a non-terminal membership
             // (idle/running/paused) concurrently so it can be re-homed from a
             // finished epic into a new active one. The active-membership slot
             // table below enforces the "at most one non-terminal epic per issue"
             // invariant at the database boundary.
-            entity.HasIndex(e => new { e.ProjectId, e.IssueId });
             entity.HasIndex(e => new { e.ProjectId, e.IssueNumber });
             entity.HasIndex(e => new { e.ProjectId, e.EpicNumber, e.IssueNumber });
         });
 
         modelBuilder.Entity<EpicActiveIssueRow>(entity =>
         {
-            entity.HasKey(e => new { e.ProjectId, e.IssueId });
+            entity.HasKey(e => new { e.ProjectId, e.IssueNumber });
             entity.Property(e => e.ProjectId).HasMaxLength(256).IsRequired();
-            entity.Property(e => e.IssueId).HasMaxLength(256).IsRequired();
-            entity.Property(e => e.EpicId).HasMaxLength(64).IsRequired();
-            entity.HasIndex(e => new { e.ProjectId, e.EpicId });
             entity.HasIndex(e => new { e.ProjectId, e.EpicNumber, e.IssueNumber });
         });
 
         modelBuilder.Entity<IssueRow>(entity =>
         {
             entity.ToTable("Issues");
-            entity.HasKey(e => e.IssueId);
-            entity.Property(e => e.IssueId).HasMaxLength(256);
+            entity.HasKey(e => new { e.ProjectId, e.Number });
             entity.Property(e => e.State).IsRequired();
             entity.Property(e => e.Risk).HasMaxLength(16);
-            entity.Property(e => e.EpicId).HasMaxLength(64);
             entity.Property(e => e.LineageVersion).HasDefaultValue(1L).IsConcurrencyToken();
             entity.Property(e => e.ProjectId)
                 .HasComputedColumnSql("COALESCE(json_extract(State, '$.projectId'), json_extract(State, '$.ProjectId'))", stored: true);
@@ -588,7 +578,6 @@ public class MohistDbContext : DbContext
             entity.HasKey(e => e.WorkflowRunId);
             entity.Property(e => e.WorkflowRunId).HasMaxLength(50);
             entity.Property(e => e.State).IsRequired();
-            entity.Property(e => e.EpicId).HasMaxLength(64);
             entity.Property<long>("ETag").IsConcurrencyToken();
             entity.Property(e => e.MetadataProjectId)
                 .HasComputedColumnSql("COALESCE(json_extract(State, '$.metadata.annotations.projectId'), json_extract(State, '$.Metadata.Annotations.projectId'), json_extract(State, '$.Metadata.Annotations.ProjectId'))", stored: true);
@@ -706,8 +695,7 @@ public class MohistDbContext : DbContext
         modelBuilder.Entity<IssueWorkflowProfile>(entity =>
         {
             entity.ToTable("IssueWorkflowProfiles");
-            entity.HasKey(e => e.IssueId);
-            entity.Property(e => e.IssueId).HasMaxLength(512);
+            entity.HasKey(e => new { e.ProjectId, e.IssueNumber });
             entity.Property(e => e.ProjectId).HasMaxLength(256).IsRequired();
             entity.Property(e => e.IssueNumber).IsRequired();
             entity.Property(e => e.SourceTemplateId).HasMaxLength(256);
@@ -764,7 +752,6 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.ContentHash).HasMaxLength(128);
             entity.Property(e => e.ProjectId).HasMaxLength(256);
             entity.Property(e => e.IssueNumber);
-            entity.Property(e => e.IssueId).HasMaxLength(256);
             entity.Property(e => e.DisplayName).HasMaxLength(512);
 
             // Latest per path within a workflow run, plus history scans.
@@ -774,8 +761,6 @@ public class MohistDbContext : DbContext
             entity.HasIndex(e => new { e.WorkflowRunId, e.TaskRunId, e.RecordedAt })
                 .HasDatabaseName("IX_WorkflowArtifacts_WorkflowRunId_TaskRunId_RecordedAt");
             // Issue-scoped latest projection support.
-            entity.HasIndex(e => new { e.IssueId, e.RecordedAt })
-                .HasDatabaseName("IX_WorkflowArtifacts_IssueId_RecordedAt");
             entity.HasIndex(e => new { e.ProjectId, e.IssueNumber, e.RecordedAt })
                 .HasDatabaseName("IX_WorkflowArtifacts_ProjectId_IssueNumber_RecordedAt");
         });
@@ -891,7 +876,6 @@ public class MohistDbContext : DbContext
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Id).HasMaxLength(64).IsRequired();
             entity.Property(e => e.ProjectId).HasMaxLength(256).IsRequired();
-            entity.Property(e => e.IssueId).HasMaxLength(256).IsRequired();
             entity.Property(e => e.IssueTitle).HasMaxLength(512);
             entity.Property(e => e.NotificationKind).HasMaxLength(32).IsRequired();
             entity.Property(e => e.SourceEventSource).HasMaxLength(512).IsRequired();

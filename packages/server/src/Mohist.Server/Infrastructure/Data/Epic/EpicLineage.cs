@@ -31,7 +31,7 @@ public static class EpicLineage
         return new Dictionary<string, string>(StringComparer.Ordinal)
         {
             [EventCatalog.Lineage.ProjectId] = state.ProjectId,
-            [EventCatalog.Lineage.EpicId] = state.Id,
+            [EventCatalog.Lineage.Epic] = state.Number.ToString(),
         };
     }
 }

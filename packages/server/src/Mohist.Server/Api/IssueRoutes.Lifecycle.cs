@@ -18,12 +18,11 @@ public static partial class IssueRoutes
             string projectRef,
             int number,
             IGrainFactory grains,
-            IssueIdentityResolver issueIdentityResolver,
             IssueQuerier issuesQuery) =>
         {
             var project = GetRequiredProject(ctx);
 
-            var grain = await GetIssueGrainAsync(grains, issueIdentityResolver, project.Id, number);
+            var grain = await GetIssueGrainAsync(grains, issuesQuery, project.Id, number);
             if (grain is null) return ApiResults.NotFound($"Issue #{number} not found");
             try
             {
@@ -65,12 +64,11 @@ public static partial class IssueRoutes
             int number,
             AddCommentRequest req,
             IGrainFactory grains,
-            IssueIdentityResolver issueIdentityResolver,
             IssueQuerier issuesQuery) =>
         {
             var project = GetRequiredProject(ctx);
 
-            var grain = await GetIssueGrainAsync(grains, issueIdentityResolver, project.Id, number);
+            var grain = await GetIssueGrainAsync(grains, issuesQuery, project.Id, number);
             if (grain is null) return ApiResults.NotFound($"Issue #{number} not found");
             IssueCommentResult comment;
             try
@@ -93,12 +91,11 @@ public static partial class IssueRoutes
             string projectRef,
             int number,
             IGrainFactory grains,
-            IssueIdentityResolver issueIdentityResolver,
             IssueQuerier issuesQuery) =>
         {
             var project = GetRequiredProject(ctx);
 
-            var grain = await GetIssueGrainAsync(grains, issueIdentityResolver, project.Id, number);
+            var grain = await GetIssueGrainAsync(grains, issuesQuery, project.Id, number);
             if (grain is null) return ApiResults.NotFound($"Issue #{number} not found");
             await grain.CancelAsync();
             return ApiResults.Ok();
@@ -109,12 +106,11 @@ public static partial class IssueRoutes
             string projectRef,
             int number,
             IGrainFactory grains,
-            IssueIdentityResolver issueIdentityResolver,
             IssueQuerier issuesQuery) =>
         {
             var project = GetRequiredProject(ctx);
 
-            var grain = await GetIssueGrainAsync(grains, issueIdentityResolver, project.Id, number);
+            var grain = await GetIssueGrainAsync(grains, issuesQuery, project.Id, number);
             if (grain is null) return ApiResults.NotFound($"Issue #{number} not found");
             try
             {
@@ -132,7 +128,6 @@ public static partial class IssueRoutes
             string projectRef,
             int number,
             IGrainFactory grains,
-            IssueIdentityResolver issueIdentityResolver,
             IssueQuerier issuesQuery) =>
         {
             var project = GetRequiredProject(ctx);
@@ -141,7 +136,7 @@ public static partial class IssueRoutes
             if (issue is null) return ApiResults.NotFound("Issue not found");
             if (IssueRepositoryResolutionHelpers.CheckRepositoryConfigured(issue) is { } repoError) return repoError;
 
-            var grain = await GetIssueGrainAsync(grains, issueIdentityResolver, project.Id, number);
+            var grain = await GetIssueGrainAsync(grains, issuesQuery, project.Id, number);
             if (grain is null) return ApiResults.NotFound($"Issue #{number} not found");
             try
             {
@@ -162,12 +157,11 @@ public static partial class IssueRoutes
             string projectRef,
             int number,
             IGrainFactory grains,
-            IssueIdentityResolver issueIdentityResolver,
             IssueQuerier issuesQuery) =>
         {
             var project = GetRequiredProject(ctx);
 
-            var grain = await GetIssueGrainAsync(grains, issueIdentityResolver, project.Id, number);
+            var grain = await GetIssueGrainAsync(grains, issuesQuery, project.Id, number);
             if (grain is null) return ApiResults.NotFound($"Issue #{number} not found");
             await grain.UnarchiveAsync();
             return ApiResults.Ok();
@@ -187,7 +181,7 @@ public static partial class IssueRoutes
 
             foreach (var issue in completed)
             {
-                var grain = grains.GetGrain<IIssueGrain>(GrainKey.Issue(issue.Id));
+                var grain = grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(project.Id, issue.Number)));
                 try
                 {
                     if (IssueRepositoryResolutionHelpers.CheckRepositoryConfigured(issue) is not null)

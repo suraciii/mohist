@@ -30,7 +30,7 @@ public sealed class WorkflowRunQuerier
         if (row is null) return null;
         var run = JSON.Deserialize<WorkflowRun>(WorkflowRunStore.MigrateLegacyWorkflowRunJson(row.State));
         if (run is not null)
-            WorkflowRunLineage.ApplyEpicAffiliation(run, row.EpicId);
+            WorkflowRunLineage.ApplyEpicAffiliation(run, row.EpicNumber);
         return run;
     }
 

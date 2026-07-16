@@ -2,7 +2,6 @@ namespace Mohist.Server.Infrastructure.Data.Issue;
 
 public class IssueRow
 {
-    public string IssueId { get; set; } = string.Empty;
     public string State { get; set; } = "{}";
     public string? ProjectId { get; set; }
     public int? Number { get; set; }
@@ -14,7 +13,6 @@ public class IssueRow
     public bool? IsDraft { get; set; }
     public string? PrerequisiteNumbersJson { get; set; }
     public string? Risk { get; set; }
-    public string? EpicId { get; set; }
     public int? EpicNumber { get; set; }
     public long LineageVersion { get; set; } = 1;
 }

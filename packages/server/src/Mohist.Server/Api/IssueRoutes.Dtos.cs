@@ -200,7 +200,6 @@ public record IssueTemplateRequest(string? ProjectTemplateId = null, string? Yam
 public sealed record IssueWorkflowProfileResponse(
     int IssueNumber,
     string ProjectId,
-    string IssueId,
     string? SourceTemplateId,
     bool HasCustomTemplate,
     string? Yaml,
@@ -438,4 +437,3 @@ public sealed record StageDurationStageDto(
 public sealed record StageDurationWaitBreakoutDto(
     double? AverageApprovalGateWaitSeconds,
     double? AverageInactiveGapSeconds);
-

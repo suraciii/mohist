@@ -22,7 +22,7 @@ namespace Mohist.Server.Infrastructure.Data.Workflow;
 ///     transport/storage details for content retrieval.
 ///   </description></item>
 ///   <item><description>
-///     <c>IssueId</c> / <c>ProjectId</c> — issue-scoped query
+    ///     <c>IssueNumber</c> / <c>ProjectId</c> — issue-scoped query
 ///     optimization; carried on the row, not in the workflow JSON.
 ///   </description></item>
 ///   <item><description>
@@ -87,9 +87,6 @@ public class WorkflowArtifactRow
     /// Carried on the row for issue-scoped query optimization only.
     /// Not part of the domain artifact fact.
     /// </summary>
-    [MaxLength(256)]
-    public string? IssueId { get; set; }
-
     /// <summary>
     /// UI display name derived from <see cref="Path"/>. Not part of
     /// artifact identity.

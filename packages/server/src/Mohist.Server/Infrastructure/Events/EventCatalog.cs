@@ -114,16 +114,14 @@ public static class EventCatalog
     };
 
     // === Lineage attribute names ===
-    // Naming convention: short user-visible name is `issue`; internal ids carry
-    // the `id` suffix. The matrix below pins the protocol names — keep them in
+    // The matrix below pins the protocol names — keep them in
     // sync with `design/event-protocol.md`.
     public static class Lineage
     {
         public const string ProjectId = "projectid";
         public const string WorkflowRunId = "workflowrunid";
-        public const string IssueId = "issueid";
         public const string Issue = "issue";
-        public const string EpicId = "epicid";
+        public const string Epic = "epic";
         public const string Stage = "stage";
         public const string AgentId = "agentid";
         public const string SessionId = "sessionid";
@@ -172,30 +170,30 @@ public static class EventCatalog
         [ReverseDns.RepairScheduled] = WorkflowBase,
 
         // === issue.* ===
-        [ReverseDns.IssueCompleted] = [Lineage.ProjectId, Lineage.IssueId, Lineage.Issue],
-        [ReverseDns.IssueCancelled] = [Lineage.ProjectId, Lineage.IssueId, Lineage.Issue],
-        [ReverseDns.IssueWorkStarted] = [Lineage.ProjectId, Lineage.IssueId, Lineage.Issue],
-        [ReverseDns.IssueCreated] = [Lineage.ProjectId, Lineage.IssueId, Lineage.Issue],
-        [ReverseDns.IssueLabelsChanged] = [Lineage.ProjectId, Lineage.IssueId, Lineage.Issue],
-        [ReverseDns.IssuePriorityChanged] = [Lineage.ProjectId, Lineage.IssueId, Lineage.Issue],
-        [ReverseDns.IssueDraftChanged] = [Lineage.ProjectId, Lineage.IssueId, Lineage.Issue],
-        [ReverseDns.IssuePrerequisiteAdded] = [Lineage.ProjectId, Lineage.IssueId, Lineage.Issue],
-        [ReverseDns.IssuePrerequisiteRemoved] = [Lineage.ProjectId, Lineage.IssueId, Lineage.Issue],
-        [ReverseDns.IssueWorkflowProfileChanged] = [Lineage.ProjectId, Lineage.IssueId, Lineage.Issue],
-        [ReverseDns.IssueArchived] = [Lineage.ProjectId, Lineage.IssueId, Lineage.Issue],
-        [ReverseDns.IssueUnarchived] = [Lineage.ProjectId, Lineage.IssueId, Lineage.Issue],
-        [ReverseDns.IssueReopened] = [Lineage.ProjectId, Lineage.IssueId, Lineage.Issue],
+        [ReverseDns.IssueCompleted] = [Lineage.ProjectId, Lineage.Issue],
+        [ReverseDns.IssueCancelled] = [Lineage.ProjectId, Lineage.Issue],
+        [ReverseDns.IssueWorkStarted] = [Lineage.ProjectId, Lineage.Issue],
+        [ReverseDns.IssueCreated] = [Lineage.ProjectId, Lineage.Issue],
+        [ReverseDns.IssueLabelsChanged] = [Lineage.ProjectId, Lineage.Issue],
+        [ReverseDns.IssuePriorityChanged] = [Lineage.ProjectId, Lineage.Issue],
+        [ReverseDns.IssueDraftChanged] = [Lineage.ProjectId, Lineage.Issue],
+        [ReverseDns.IssuePrerequisiteAdded] = [Lineage.ProjectId, Lineage.Issue],
+        [ReverseDns.IssuePrerequisiteRemoved] = [Lineage.ProjectId, Lineage.Issue],
+        [ReverseDns.IssueWorkflowProfileChanged] = [Lineage.ProjectId, Lineage.Issue],
+        [ReverseDns.IssueArchived] = [Lineage.ProjectId, Lineage.Issue],
+        [ReverseDns.IssueUnarchived] = [Lineage.ProjectId, Lineage.Issue],
+        [ReverseDns.IssueReopened] = [Lineage.ProjectId, Lineage.Issue],
 
         // === epic.* ===
-        [ReverseDns.EpicCreated] = [Lineage.ProjectId, Lineage.EpicId],
-        [ReverseDns.EpicUpdated] = [Lineage.ProjectId, Lineage.EpicId],
-        [ReverseDns.EpicPriorityChanged] = [Lineage.ProjectId, Lineage.EpicId],
-        [ReverseDns.EpicIssueLinked] = [Lineage.ProjectId, Lineage.EpicId],
-        [ReverseDns.EpicIssueUnlinked] = [Lineage.ProjectId, Lineage.EpicId],
-        [ReverseDns.EpicStatusChanged] = [Lineage.ProjectId, Lineage.EpicId],
-        [ReverseDns.EpicClosed] = [Lineage.ProjectId, Lineage.EpicId],
-        [ReverseDns.EpicReopened] = [Lineage.ProjectId, Lineage.EpicId],
-        [ReverseDns.EpicStartAttemptFailed] = [Lineage.ProjectId, Lineage.EpicId],
+        [ReverseDns.EpicCreated] = [Lineage.ProjectId, Lineage.Epic],
+        [ReverseDns.EpicUpdated] = [Lineage.ProjectId, Lineage.Epic],
+        [ReverseDns.EpicPriorityChanged] = [Lineage.ProjectId, Lineage.Epic],
+        [ReverseDns.EpicIssueLinked] = [Lineage.ProjectId, Lineage.Epic],
+        [ReverseDns.EpicIssueUnlinked] = [Lineage.ProjectId, Lineage.Epic],
+        [ReverseDns.EpicStatusChanged] = [Lineage.ProjectId, Lineage.Epic],
+        [ReverseDns.EpicClosed] = [Lineage.ProjectId, Lineage.Epic],
+        [ReverseDns.EpicReopened] = [Lineage.ProjectId, Lineage.Epic],
+        [ReverseDns.EpicStartAttemptFailed] = [Lineage.ProjectId, Lineage.Epic],
 
         // === agent-session.* ===
         [ReverseDns.AgentSessionRuntimeBound] = [Lineage.ProjectId, Lineage.SessionId],
@@ -209,7 +207,7 @@ public static class EventCatalog
         [ReverseDns.RunnerDisconnected] = [Lineage.RunnerId],
 
         // === inbox-synthesized ===
-        [ReverseDns.InboxItemPersisted] = [Lineage.ProjectId, Lineage.IssueId, Lineage.Issue],
+        [ReverseDns.InboxItemPersisted] = [Lineage.ProjectId, Lineage.Issue],
     };
 
     static EventCatalog()

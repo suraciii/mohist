@@ -15,76 +15,76 @@ public class EpicAlreadyTerminalException : InvalidOperationException
 
 public class EpicNotTerminalException : InvalidOperationException
 {
-    public string EpicId { get; }
+    public int EpicNumber { get; }
     public string CurrentStatus { get; }
 
-    public EpicNotTerminalException(string epicId, string currentStatus)
-        : base($"Epic {epicId} is {currentStatus}; reopen requires a terminal state (done or closed).")
+    public EpicNotTerminalException(int epicNumber, string currentStatus)
+        : base($"Epic #{epicNumber} is {currentStatus}; reopen requires a terminal state (done or closed).")
     {
-        EpicId = epicId;
+        EpicNumber = epicNumber;
         CurrentStatus = currentStatus;
     }
 }
 
 public class EpicNotReadyToMarkDoneException : InvalidOperationException
 {
-    public string EpicId { get; }
+    public int EpicNumber { get; }
     public int OpenLinkedCount { get; }
 
-    public EpicNotReadyToMarkDoneException(string epicId, int openLinkedCount)
-        : base($"Epic {epicId} has {openLinkedCount} open linked issue(s); mark done is not allowed.")
+    public EpicNotReadyToMarkDoneException(int epicNumber, int openLinkedCount)
+        : base($"Epic #{epicNumber} has {openLinkedCount} open linked issue(s); mark done is not allowed.")
     {
-        EpicId = epicId;
+        EpicNumber = epicNumber;
         OpenLinkedCount = openLinkedCount;
     }
 }
 
 public class EpicPausedCannotMarkDoneException : InvalidOperationException
 {
-    public string EpicId { get; }
+    public int EpicNumber { get; }
 
-    public EpicPausedCannotMarkDoneException(string epicId)
-        : base($"Epic {epicId} is paused; resume to running before marking done.")
+    public EpicPausedCannotMarkDoneException(int epicNumber)
+        : base($"Epic #{epicNumber} is paused; resume to running before marking done.")
     {
-        EpicId = epicId;
+        EpicNumber = epicNumber;
     }
 }
 
 public class EpicPauseRequiresRunningException : InvalidOperationException
 {
-    public string EpicId { get; }
+    public int EpicNumber { get; }
     public string CurrentStatus { get; }
 
-    public EpicPauseRequiresRunningException(string epicId, string currentStatus)
-        : base($"Epic {epicId} is {currentStatus}; pause requires running.")
+    public EpicPauseRequiresRunningException(int epicNumber, string currentStatus)
+        : base($"Epic #{epicNumber} is {currentStatus}; pause requires running.")
     {
-        EpicId = epicId;
+        EpicNumber = epicNumber;
         CurrentStatus = currentStatus;
     }
 }
 
 public class EpicStartRequiresIdleException : InvalidOperationException
 {
-    public string EpicId { get; }
+    public int EpicNumber { get; }
     public string CurrentStatus { get; }
 
-    public EpicStartRequiresIdleException(string epicId, string currentStatus)
-        : base($"Epic {epicId} is {currentStatus}; start requires idle.")
+    public EpicStartRequiresIdleException(int epicNumber, string currentStatus)
+        : base($"Epic #{epicNumber} is {currentStatus}; start requires idle.")
     {
-        EpicId = epicId;
+        EpicNumber = epicNumber;
         CurrentStatus = currentStatus;
     }
 }
 
 public class EpicResumeRequiresPausedException : InvalidOperationException
 {
-    public string EpicId { get; }
+    public int EpicNumber { get; }
     public string CurrentStatus { get; }
 
-    public EpicResumeRequiresPausedException(string epicId, string currentStatus)
-        : base($"Epic {epicId} is {currentStatus}; resume requires paused.")
+    public EpicResumeRequiresPausedException(int epicNumber, string currentStatus)
+        : base($"Epic #{epicNumber} is {currentStatus}; resume requires paused.")
     {
-        EpicId = epicId;
+        EpicNumber = epicNumber;
         CurrentStatus = currentStatus;
     }
 }
@@ -102,11 +102,11 @@ public class EpicDuplicateLinkedIssueException : InvalidOperationException
 
 public class EpicClosedCannotLinkException : InvalidOperationException
 {
-    public string EpicId { get; }
+    public int EpicNumber { get; }
 
-    public EpicClosedCannotLinkException(string epicId)
-        : base($"Epic {epicId} is closed; reopen before linking issues.")
+    public EpicClosedCannotLinkException(int epicNumber)
+        : base($"Epic #{epicNumber} is closed; reopen before linking issues.")
     {
-        EpicId = epicId;
+        EpicNumber = epicNumber;
     }
 }

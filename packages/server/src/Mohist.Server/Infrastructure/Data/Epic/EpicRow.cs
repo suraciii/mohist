@@ -2,7 +2,6 @@ namespace Mohist.Server.Infrastructure.Data.Epic;
 
 public class EpicRow
 {
-    public string Id { get; set; } = null!;
     public string ProjectId { get; set; } = null!;
     public int Number { get; set; }
     public string Title { get; set; } = null!;

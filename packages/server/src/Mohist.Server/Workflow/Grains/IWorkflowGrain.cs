@@ -51,15 +51,17 @@ public sealed record WorkflowStartInput(
 
 [GenerateSerializer]
 public sealed record WorkflowIssueBinding(
-    [property: Id(0)] string IssueId,
-    [property: Id(1)] string? EpicId,
-    [property: Id(2)] long IssueLineageVersion);
+    [property: Id(0)] string ProjectId,
+    [property: Id(1)] int IssueNumber,
+    [property: Id(2)] int? EpicNumber,
+    [property: Id(3)] long IssueLineageVersion);
 
 [GenerateSerializer]
 public sealed record WorkflowIssueLineage(
-    [property: Id(0)] string IssueId,
-    [property: Id(1)] string? EpicId,
-    [property: Id(2)] long IssueLineageVersion);
+    [property: Id(0)] string ProjectId,
+    [property: Id(1)] int IssueNumber,
+    [property: Id(2)] int? EpicNumber,
+    [property: Id(3)] long IssueLineageVersion);
 
 [GenerateSerializer]
 public sealed record RuntimeTaskInput(
@@ -148,8 +150,7 @@ public sealed record WorkflowActiveWorkView(
     [property: Id(3)] string TaskRunId,
     [property: Id(4)] string? Title,
     [property: Id(5)] string? ProjectId = null,
-    [property: Id(6)] string? IssueId = null,
-    [property: Id(7)] int? IssueNumber = null);
+    [property: Id(6)] int? IssueNumber = null);
 
 [GenerateSerializer]
 public sealed record WorkflowFeedbackRecord(

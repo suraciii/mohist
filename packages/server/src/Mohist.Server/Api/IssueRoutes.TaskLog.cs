@@ -27,13 +27,12 @@ public static partial class IssueRoutes
             long? cursor,
             int? limit,
             IGrainFactory grains,
-            IssueIdentityResolver issueIdentityResolver,
             IssueQuerier issuesQuery,
             TaskLogService logService) =>
         {
             var project = GetRequiredProject(ctx);
 
-            var wrId = await ResolveWorkflowRunIdAsync(grains, issueIdentityResolver, issuesQuery, project.Id, number);
+            var wrId = await ResolveWorkflowRunIdAsync(grains, issuesQuery, project.Id, number);
             if (wrId is null)
                 return ApiResults.Ok(EmptyPage());
 

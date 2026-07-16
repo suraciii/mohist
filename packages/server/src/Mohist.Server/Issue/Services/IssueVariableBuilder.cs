@@ -232,7 +232,7 @@ public static class IssueVariableBuilder
             ["issue"] = JSON.SerializeToElement(
                 new
                 {
-                    id = issue.Id,
+                    projectId = issue.ProjectId,
                     number = issue.Number,
                     title = issue.Title,
                     body = issue.Body ?? string.Empty,

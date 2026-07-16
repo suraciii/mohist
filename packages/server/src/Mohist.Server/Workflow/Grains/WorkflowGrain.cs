@@ -66,8 +66,7 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
     Task IWorkflowGrainContext.ReleaseCurrentStageLocks(string reason) =>
         _stageLockCoordinator.ReleaseCurrentStageLocksAsync(reason);
     string IWorkflowGrainContext.GetProjectId() => GetProjectId();
-    string? IWorkflowGrainContext.GetIssueId() => GetIssueId();
-    string? IWorkflowGrainContext.GetIssueNumber() => GetIssueNumber();
+    int? IWorkflowGrainContext.GetIssueNumber() => GetIssueNumber();
 
     public override async Task OnActivateAsync(CancellationToken ct)
     {
@@ -117,8 +116,8 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
         }
 
         await EnsureCreatedRunAsync(input);
-        if (string.IsNullOrWhiteSpace(GetIssueId()))
-            throw new InvalidOperationException($"Workflow '{GrainKey}' cannot await binding without an issue id.");
+        if (GetIssueNumber() is not > 0)
+            throw new InvalidOperationException($"Workflow '{GrainKey}' cannot await binding without an issue number.");
         _run!.PrepareForIssueBinding();
         await SaveRunAsync();
     }
@@ -127,8 +126,8 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
     {
         ArgumentNullException.ThrowIfNull(binding);
         EnsureRun();
-        RequireIssueBinding(binding.IssueId);
-        if (!ApplyIssueLineage(binding.EpicId, binding.IssueLineageVersion)) return;
+        RequireIssueBinding(binding.ProjectId, binding.IssueNumber);
+        if (!ApplyIssueLineage(binding.EpicNumber, binding.IssueLineageVersion)) return;
 
         var events = _run!.ConfirmIssueBinding(Now());
         await CommitAsync(events);
@@ -138,33 +137,35 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
     {
         ArgumentNullException.ThrowIfNull(lineage);
         EnsureRun();
-        RequireIssueBinding(lineage.IssueId);
-        if (!ApplyIssueLineage(lineage.EpicId, lineage.IssueLineageVersion)) return;
+        RequireIssueBinding(lineage.ProjectId, lineage.IssueNumber);
+        if (!ApplyIssueLineage(lineage.EpicNumber, lineage.IssueLineageVersion)) return;
         await SaveRunAsync();
     }
 
-    private void RequireIssueBinding(string issueId)
+    private void RequireIssueBinding(string projectId, int issueNumber)
     {
-        var expectedIssueId = GetIssueId();
-        if (!string.Equals(expectedIssueId, issueId, StringComparison.Ordinal))
+        var expectedProjectId = GetProjectId();
+        var expectedIssueNumber = GetIssueNumber();
+        if (!string.Equals(expectedProjectId, projectId, StringComparison.Ordinal)
+            || expectedIssueNumber != issueNumber)
             throw new InvalidOperationException(
-                $"Workflow '{GrainKey}' belongs to issue '{expectedIssueId ?? "<none>"}', not '{issueId}'.");
+                $"Workflow '{GrainKey}' belongs to issue '{expectedProjectId}#{expectedIssueNumber}', not '{projectId}#{issueNumber}'.");
     }
 
-    private bool ApplyIssueLineage(string? epicId, long issueLineageVersion)
+    private bool ApplyIssueLineage(int? epicNumber, long issueLineageVersion)
     {
         if (issueLineageVersion < _run!.IssueLineageVersion) return false;
 
-        var currentEpicId = WorkflowRunLineage.EpicAffiliationOf(_run);
+        var currentEpicNumber = WorkflowRunLineage.EpicAffiliationOf(_run);
         if (issueLineageVersion == _run.IssueLineageVersion)
         {
-            if (!string.Equals(currentEpicId, epicId, StringComparison.Ordinal))
+            if (currentEpicNumber != epicNumber)
                 throw new InvalidOperationException(
                     $"Workflow '{GrainKey}' received conflicting issue lineage revision {issueLineageVersion}.");
             return _run.Status == WorkflowRunStatus.AwaitingBinding;
         }
 
-        WorkflowRunLineage.ApplyEpicAffiliation(_run, epicId);
+        WorkflowRunLineage.ApplyEpicAffiliation(_run, epicNumber);
         _run.IssueLineageVersion = issueLineageVersion;
         return true;
     }
@@ -175,8 +176,11 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
         var metadata = input?.Metadata ?? BuildRunMetadata(input);
         RequireProjectOwnership(metadata);
         var projectId = metadata?.Annotations?.GetValueOrDefault("projectId");
-        var issueId = metadata?.Annotations?.GetValueOrDefault("issueId");
-        var structure = await _profileManager.LoadStructureAsync(GrainKey, projectId, issueId);
+        var issueNumber = metadata?.Annotations?.GetValueOrDefault("issueNumber") is { } rawNumber
+            && int.TryParse(rawNumber, out var parsedNumber)
+            ? parsedNumber
+            : (int?)null;
+        var structure = await _profileManager.LoadStructureAsync(GrainKey, projectId, issueNumber);
         _run = WorkflowRun.Create(GrainKey, structure, Now(), metadata);
         _run.Workspace = input?.Workspace;
     }
@@ -569,11 +573,12 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
     internal string GetProjectId() =>
         _run?.Metadata?.Annotations?.TryGetValue("projectId", out var v) == true ? v : "";
 
-    internal string? GetIssueId() =>
-        _run?.Metadata?.Annotations?.TryGetValue("issueId", out var v) == true ? v : null;
-
-    internal string? GetIssueNumber() =>
-        _run?.Metadata?.Annotations?.TryGetValue("issueNumber", out var v) == true ? v : null;
+    internal int? GetIssueNumber() =>
+        _run?.Metadata?.Annotations?.TryGetValue("issueNumber", out var v) == true
+            && int.TryParse(v, out var number)
+            && number > 0
+            ? number
+            : null;
 
     private WorkflowRunMetadata? BuildRunMetadata(WorkflowStartInput? input)
     {

@@ -8,7 +8,6 @@ public class IssueWorkflowProfile
 {
     public string ProjectId { get; set; } = string.Empty;
     public int IssueNumber { get; set; }
-    public string IssueId { get; set; } = string.Empty;
 
     /// <summary>
     /// 引用的项目模板 ID (当用户为 issue 选择了特定项目模板时)。

@@ -8,7 +8,6 @@ namespace Mohist.Server.Issue.Services;
 
 public class IssueInfo
 {
-    public string Id { get; set; } = null!;
     public int Number { get; set; }
     public string Title { get; set; } = null!;
     public string? Body { get; set; }
@@ -49,17 +48,15 @@ public class IssueInfo
 [GenerateSerializer]
 public class IssuePrerequisiteSummary
 {
-    [Id(0)] public string IssueId { get; set; } = null!;
-    [Id(1)] public int Number { get; set; }
-    [Id(2)] public string Title { get; set; } = null!;
-    [Id(3)] public bool Completed { get; set; }
-    [Id(4)] public string Stage { get; set; } = null!;
-    [Id(5)] public string Status { get; set; } = null!;
-    [Id(6)] public string Health { get; set; } = null!;
+    [Id(0)] public int Number { get; set; }
+    [Id(1)] public string Title { get; set; } = null!;
+    [Id(2)] public bool Completed { get; set; }
+    [Id(3)] public string Stage { get; set; } = null!;
+    [Id(4)] public string Status { get; set; } = null!;
+    [Id(5)] public string Health { get; set; } = null!;
 
     public static IssuePrerequisiteSummary FromDomain(Domain.Issue issue) => new()
     {
-        IssueId = issue.Id,
         Number = issue.Number,
         Title = issue.Title,
         Completed = issue.Status == IssueStatus.Done,
@@ -70,7 +67,6 @@ public class IssuePrerequisiteSummary
 
     public static IssuePrerequisiteSummary FromReadModel(IssueReadModel issue) => new()
     {
-        IssueId = issue.Id,
         Number = issue.Number,
         Title = issue.Title,
         Completed = issue.Status == "done" || issue.Health is "done" or "completed",
@@ -165,9 +161,8 @@ public sealed record IssueStartReadiness(
 [GenerateSerializer]
 public class IssuePrimaryEpic
 {
-    [Id(0)] public string Id { get; set; } = null!;
-    [Id(1)] public int? Number { get; set; }
-    [Id(2)] public string Title { get; set; } = null!;
-    [Id(3)] public string Status { get; set; } = null!;
-    [Id(4)] public string Priority { get; set; } = null!;
+    [Id(0)] public int? Number { get; set; }
+    [Id(1)] public string Title { get; set; } = null!;
+    [Id(2)] public string Status { get; set; } = null!;
+    [Id(3)] public string Priority { get; set; } = null!;
 }

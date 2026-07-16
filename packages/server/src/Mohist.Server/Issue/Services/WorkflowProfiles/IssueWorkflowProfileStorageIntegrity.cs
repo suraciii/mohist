@@ -26,7 +26,7 @@ public static class IssueWorkflowProfileStorageIntegrity
     /// <summary>
     /// Result entry for a single scanned row.
     /// </summary>
-    public sealed record RowResult(string IssueId, bool Reachable, string? AgentPath);
+    public sealed record RowResult(string ProjectId, int IssueNumber, bool Reachable, string? AgentPath);
 
     /// <summary>
     /// Aggregate verification report.
@@ -34,9 +34,9 @@ public static class IssueWorkflowProfileStorageIntegrity
     public sealed record VerificationReport(
         int Scanned,
         IReadOnlyList<RowResult> Rows,
-        IReadOnlyList<string> UnreachableIssueIds)
+        IReadOnlyList<string> UnreachableIssues)
     {
-        public bool IsHealthy => UnreachableIssueIds.Count == 0;
+        public bool IsHealthy => UnreachableIssues.Count == 0;
     }
 
     /// <summary>
@@ -56,13 +56,13 @@ public static class IssueWorkflowProfileStorageIntegrity
 
         var snapshot = await db.IssueWorkflowProfiles
             .AsNoTracking()
-            .Select(x => new { x.IssueId, x.Variables })
+            .Select(x => new { x.ProjectId, x.IssueNumber, x.Variables })
             .ToListAsync(cancellationToken);
 
         foreach (var entry in snapshot)
-            rows.Add(InspectVariables(entry.IssueId, entry.Variables));
+            rows.Add(InspectVariables(entry.ProjectId, entry.IssueNumber, entry.Variables));
 
-        var unreachable = rows.Where(r => !r.Reachable).Select(r => r.IssueId).ToList();
+        var unreachable = rows.Where(r => !r.Reachable).Select(r => $"{r.ProjectId}#{r.IssueNumber}").ToList();
         return new VerificationReport(rows.Count, rows, unreachable);
     }
 
@@ -74,12 +74,13 @@ public static class IssueWorkflowProfileStorageIntegrity
     /// <c>vars.agent</c> or <c>stages.&lt;stage&gt;.vars.agent</c> is also
     /// reachable.
     /// </summary>
-    public static RowResult InspectVariables(string issueId, string variablesJson)
+    public static RowResult InspectVariables(string projectId, int issueNumber, string variablesJson)
     {
-        if (issueId is null) throw new ArgumentNullException(nameof(issueId));
+        if (string.IsNullOrWhiteSpace(projectId)) throw new ArgumentException("projectId is required", nameof(projectId));
+        if (issueNumber <= 0) throw new ArgumentOutOfRangeException(nameof(issueNumber));
 
         var bundle = VariableBundle.FromJson(variablesJson);
-        return new RowResult(issueId, Reachable: true, AgentPath: ResolveAgentPath(bundle));
+        return new RowResult(projectId, issueNumber, Reachable: true, AgentPath: ResolveAgentPath(bundle));
     }
 
     private static string? ResolveAgentPath(VariableBundle bundle)
@@ -127,13 +128,15 @@ public static class IssueWorkflowProfileStorageIntegrity
     /// </returns>
     public static async Task<VariableBundle?> DefensiveCopyVariablesAsync(
         IDbContextFactory<MohistDbContext> dbFactory,
-        string issueId,
+        string projectId,
+        int issueNumber,
         Dictionary<string, object?>? agentConfig,
         IReadOnlyDictionary<string, Dictionary<string, object?>>? stageAgentConfigs,
         CancellationToken cancellationToken = default)
     {
         if (dbFactory is null) throw new ArgumentNullException(nameof(dbFactory));
-        if (string.IsNullOrWhiteSpace(issueId)) throw new ArgumentException("issueId is required", nameof(issueId));
+        if (string.IsNullOrWhiteSpace(projectId)) throw new ArgumentException("projectId is required", nameof(projectId));
+        if (issueNumber <= 0) throw new ArgumentOutOfRangeException(nameof(issueNumber));
 
         if (agentConfig is null && (stageAgentConfigs is null || stageAgentConfigs.Count == 0))
             return null;
@@ -142,9 +145,9 @@ public static class IssueWorkflowProfileStorageIntegrity
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
 
         var row = await db.IssueWorkflowProfiles
-            .FirstOrDefaultAsync(x => x.IssueId == issueId, cancellationToken);
+            .FirstOrDefaultAsync(x => x.ProjectId == projectId && x.IssueNumber == issueNumber, cancellationToken);
         if (row is null)
-            throw new InvalidOperationException($"IssueWorkflowProfile not found for issue '{issueId}'");
+            throw new InvalidOperationException($"IssueWorkflowProfile not found for issue '{projectId}#{issueNumber}'");
 
         var originalVariables = row.Variables;
         var originalUpdatedAt = row.UpdatedAt;
@@ -156,7 +159,7 @@ public static class IssueWorkflowProfileStorageIntegrity
             var candidateJson = candidate.ToJson();
             if (!TryValidate(candidateJson, out var validationError))
                 throw new InvalidOperationException(
-                    $"Defensive copy validation failed for issue '{issueId}': {validationError}");
+                    $"Defensive copy validation failed for issue '{projectId}#{issueNumber}': {validationError}");
 
             row.Variables = candidateJson;
             row.UpdatedAt = DateTimeOffset.UtcNow;

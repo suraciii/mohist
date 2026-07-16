@@ -12,9 +12,6 @@ public class WorkflowRunRow
     [Required]
     public string State { get; set; } = "{}";
 
-    [MaxLength(64)]
-    public string? EpicId { get; set; }
-
     public int? EpicNumber { get; set; }
 
     [DatabaseGenerated(DatabaseGeneratedOption.Computed)]

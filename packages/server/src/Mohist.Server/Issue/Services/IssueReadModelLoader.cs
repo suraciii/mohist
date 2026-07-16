@@ -108,7 +108,6 @@ public class IssueReadModelLoader : IScopedService
         var resolution = new IssueRepositoryResolver().Resolve(project, issue.RepositoryRef);
         return new()
         {
-            Id = issue.Id,
             Number = issue.Number,
             Title = issue.Title,
             Body = issue.Body,
@@ -146,7 +145,6 @@ public class IssueReadModelLoader : IScopedService
 
     public static IssueReadModel ToReadModel(IssueInfo issue) => new()
     {
-        Id = issue.Id,
         Number = issue.Number,
         Title = issue.Title,
         Body = issue.Body,

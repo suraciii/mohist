@@ -6,7 +6,7 @@ namespace Mohist.Server.Issue.Grains;
 
 public interface IIssueGrain : IGrainWithStringKey
 {
-    Task<string> CreateAsync(string projectId, int number, string title, string? body, IReadOnlyDictionary<string, string>? labels, string? priority, string? repositoryRef = null, string? issueId = null, string? risk = null, bool isDraft = false, string[]? attachmentIds = null, string? workflowProfileId = null, int[]? prerequisiteNumbers = null);
+    Task<int> CreateAsync(string projectId, int number, string title, string? body, IReadOnlyDictionary<string, string>? labels, string? priority, string? repositoryRef = null, string? risk = null, bool isDraft = false, string[]? attachmentIds = null, string? workflowProfileId = null, int[]? prerequisiteNumbers = null);
     Task<string> StartWorkAsync(WorkflowProjectContext? project = null);
     Task EnsureWorkflowBindingAsync(string workflowRunId);
     Task CompleteWorkAsync(string workflowRunId);
@@ -28,12 +28,11 @@ public interface IIssueGrain : IGrainWithStringKey
     /// persists its own producer snapshot and propagates its revision to the
     /// current WorkflowRun in a separate aggregate command.
     /// </summary>
-    Task SetEpicAffiliationAsync(string? epicId);
+    Task SetEpicAffiliationAsync(int? epicNumber);
 }
 
 [GenerateSerializer]
 public sealed record IssueWorkflowStatus(
-    string IssueId,
     int IssueNumber,
     string Title,
     string Stage,

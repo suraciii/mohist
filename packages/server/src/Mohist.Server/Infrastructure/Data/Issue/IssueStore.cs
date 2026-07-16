@@ -6,6 +6,7 @@ using Mohist.Server.Infrastructure.Data;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Infrastructure.Events;
+using Mohist.Server.Infrastructure.Orleans;
 using Orleans;
 using DomainIssue = Mohist.Server.Issue.Domain.Issue;
 using DomainIssueEvent = Mohist.Server.Issue.Domain.Events.IssueEvent;
@@ -40,10 +41,10 @@ public class IssueStore : IIssueStore
 
     public async Task<DomainIssue?> LoadAsync(string key)
     {
+        var (projectId, issueNumber) = ParseKey(key);
         await using var db = await _dbFactory.CreateDbContextAsync();
-        var row = await db.Issues.FindAsync(key);
+        var row = await db.Issues.FindAsync(projectId, issueNumber);
         var issue = row is null ? null : Deserialize(row.State);
-        issue?.SetEpicId(row!.EpicId);
         issue?.SetLineageVersion(row!.LineageVersion);
         return issue;
     }
@@ -51,21 +52,19 @@ public class IssueStore : IIssueStore
     public async Task SaveAsync(string key, DomainIssue state)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
-        var epicNumber = await ResolveEpicNumberAsync(db, state, CancellationToken.None);
-        await StageIssueAsync(db, state, epicNumber, CancellationToken.None);
+        await StageIssueAsync(db, state, CancellationToken.None);
         await db.SaveChangesAsync();
     }
 
     public async Task SaveAsync(string key, DomainIssue state, IReadOnlyList<DomainIssueEvent> events, CancellationToken ct = default)
     {
-        var source = IssueEventPersistence.IssueSource(state.Id);
+        var source = IssueEventPersistence.IssueSource(state.ProjectId, state.Number);
         var subject = state.Number.ToString();
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var epicNumber = await ResolveEpicNumberAsync(db, state, ct);
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
         try
         {
-            await StageIssueAsync(db, state, epicNumber, ct);
+            await StageIssueAsync(db, state, ct);
             var extensions = IssueLineage.BuildExtensions(state);
             foreach (var evt in events)
             {
@@ -94,19 +93,16 @@ public class IssueStore : IIssueStore
     private static async Task StageIssueAsync(
         MohistDbContext db,
         DomainIssue state,
-        int? epicNumber,
         CancellationToken ct)
     {
-        var row = await db.Issues.FindAsync(new object[] { state.Id }, ct);
+        var row = await db.Issues.FindAsync(new object[] { state.ProjectId, state.Number }, ct);
         if (row is null)
         {
             db.Issues.Add(new IssueRow
             {
-                IssueId = state.Id,
                 State = Serialize(state),
                 Risk = state.Risk,
-                EpicId = NormalizeEpicId(state.EpicId),
-                EpicNumber = epicNumber,
+                EpicNumber = state.EpicNumber,
                 LineageVersion = 1,
             });
             state.SetLineageVersion(1);
@@ -116,35 +112,10 @@ public class IssueStore : IIssueStore
             state.SetLineageVersion(row.LineageVersion + 1);
             row.State = Serialize(state);
             row.Risk = state.Risk;
-            row.EpicId = NormalizeEpicId(state.EpicId);
-            row.EpicNumber = epicNumber;
+            row.EpicNumber = state.EpicNumber;
             row.LineageVersion++;
         }
     }
-
-    private static async Task<int?> ResolveEpicNumberAsync(
-        MohistDbContext db,
-        DomainIssue state,
-        CancellationToken ct)
-    {
-        var epicId = NormalizeEpicId(state.EpicId);
-        if (epicId is null) return null;
-
-        var epicNumber = await db.Epics.AsNoTracking()
-            .Where(epic => epic.ProjectId == state.ProjectId && epic.Id == epicId)
-            .Select(epic => (int?)epic.Number)
-            .SingleOrDefaultAsync(ct);
-        if (epicNumber is not > 0)
-        {
-            throw new InvalidOperationException(
-                $"Issue '{state.ProjectId}/#{state.Number}' references unresolved Epic '{epicId}'.");
-        }
-
-        return epicNumber;
-    }
-
-    private static string? NormalizeEpicId(string? epicId) =>
-        string.IsNullOrWhiteSpace(epicId) ? null : epicId;
 
     private static CloudEvent ToCloudEvent(DomainIssueEvent evt, string source, string subject, IReadOnlyDictionary<string, string> extensions)
     {
@@ -166,4 +137,10 @@ public class IssueStore : IIssueStore
 
     public static string Serialize(DomainIssue issue) =>
         JSON.Serialize(issue);
+
+    private static (string ProjectId, int IssueNumber) ParseKey(string key)
+    {
+        ScopedGrainKeyCodec.Parse(key, out var projectId, out var issueNumber);
+        return (projectId, issueNumber);
+    }
 }

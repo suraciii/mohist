@@ -49,13 +49,13 @@ public class WorkflowProfileManager : IScopedService
     public async Task<ResolvedTemplate> LoadTemplateAsync(
         string runId,
         string? projectId = null,
-        string? issueId = null)
+        int? issueNumber = null)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
         var resolvedContext = await ResolveRunContextAsync(db, runId);
         var context = new RunContext(
             string.IsNullOrWhiteSpace(projectId) ? resolvedContext.ProjectId : projectId,
-            string.IsNullOrWhiteSpace(issueId) ? resolvedContext.IssueId : issueId,
+            issueNumber ?? resolvedContext.IssueNumber,
             resolvedContext.RunExists);
 
         var profileContext = await ResolveEffectiveProfileContextAsync(db, context);
@@ -71,7 +71,7 @@ public class WorkflowProfileManager : IScopedService
         {
             var issueDef = DeserializeDefinition(issueProfile.Template);
             if (issueDef is not null && !string.IsNullOrWhiteSpace(issueDef.Id))
-                return ResolvedTemplate.FromDefinition($"issue-custom:{issueProfile.IssueId}", issueDef);
+                return ResolvedTemplate.FromDefinition($"issue-custom:{issueProfile.ProjectId}#{issueProfile.IssueNumber}", issueDef);
         }
 
         if (issueProfile is not null
@@ -127,9 +127,9 @@ public class WorkflowProfileManager : IScopedService
         string runId,
         string stageId,
         string? projectId = null,
-        string? issueId = null)
+        int? issueNumber = null)
     {
-        var template = await LoadTemplateAsync(runId, projectId, issueId);
+        var template = await LoadTemplateAsync(runId, projectId, issueNumber);
         var definition = template.Structure
             ?? throw new InvalidOperationException(
                 $"Workflow '{runId}' has no effective workflow template");
@@ -148,9 +148,9 @@ public class WorkflowProfileManager : IScopedService
     public async Task<WorkflowStructure> LoadStructureAsync(
         string runId,
         string? projectId = null,
-        string? issueId = null)
+        int? issueNumber = null)
     {
-        var template = await LoadTemplateAsync(runId, projectId, issueId);
+        var template = await LoadTemplateAsync(runId, projectId, issueNumber);
         var definition = template.Structure
             ?? throw new InvalidOperationException(
                 $"Workflow '{runId}' has no effective workflow template");
@@ -174,10 +174,10 @@ public class WorkflowProfileManager : IScopedService
     private async Task<EffectiveProfileContext> ResolveEffectiveProfileContextAsync(MohistDbContext db, RunContext context)
     {
         string? issueSelection = null;
-        if (!string.IsNullOrWhiteSpace(context.IssueId))
+        if (context.IssueNumber is > 0 && !string.IsNullOrWhiteSpace(context.ProjectId))
         {
             var row = await db.Issues.AsNoTracking()
-                .FirstOrDefaultAsync(r => r.IssueId == context.IssueId);
+                .FirstOrDefaultAsync(r => r.ProjectId == context.ProjectId && r.Number == context.IssueNumber);
             issueSelection = ReadWorkflowProfileId(row?.State);
         }
 
@@ -240,12 +240,10 @@ public class WorkflowProfileManager : IScopedService
             .FirstOrDefaultAsync(x => x.WorkflowRunId == runId);
 
         var projectId = workflowRun?.MetadataProjectId;
-        var issueId = TryReadAnnotation(workflowRun?.State, "issueId");
         var issue = await FindIssueForRunAsync(db, runId);
         projectId = string.IsNullOrWhiteSpace(projectId) ? issue?.ProjectId : projectId;
-        issueId = string.IsNullOrWhiteSpace(issueId) ? issue?.IssueId : issueId;
 
-        return new RunContext(projectId, issueId, workflowRun is not null);
+        return new RunContext(projectId, issue?.Number, workflowRun is not null);
     }
 
     private static string? TryReadAnnotation(string? stateJson, string key)
@@ -318,14 +316,11 @@ public class WorkflowProfileManager : IScopedService
             if (!root.TryGetProperty("projectId", out var projectIdEl)
                 || string.IsNullOrWhiteSpace(projectIdEl.GetString()))
                 return null;
-            if (!root.TryGetProperty("id", out var issueIdEl)
-                || string.IsNullOrWhiteSpace(issueIdEl.GetString()))
-                return null;
             if (!root.TryGetProperty("number", out var numberEl)
                 || !numberEl.TryGetInt32(out var number))
                 return null;
 
-            return new IssueRunRef(issueIdEl.GetString()!, projectIdEl.GetString()!, number);
+            return new IssueRunRef(projectIdEl.GetString()!, number);
         }
         catch
         {
@@ -351,10 +346,10 @@ public class WorkflowProfileManager : IScopedService
 
     private static async Task<IssueWorkflowProfile?> LoadIssueProfileAsync(MohistDbContext db, RunContext context)
     {
-        if (!string.IsNullOrWhiteSpace(context.IssueId))
+        if (context.IssueNumber is > 0 && !string.IsNullOrWhiteSpace(context.ProjectId))
         {
             var byId = await db.IssueWorkflowProfiles.AsNoTracking()
-                .FirstOrDefaultAsync(x => x.IssueId == context.IssueId);
+                .FirstOrDefaultAsync(x => x.ProjectId == context.ProjectId && x.IssueNumber == context.IssueNumber);
             if (byId is not null)
                 return byId;
         }
@@ -366,12 +361,12 @@ public class WorkflowProfileManager : IScopedService
     // Prompts
     // =======================================================================
 
-    public async Task<ResolvedPrompt?> LoadPromptAsync(string runId, string key, string? projectId = null, string? issueId = null)
+    public async Task<ResolvedPrompt?> LoadPromptAsync(string runId, string key, string? projectId = null, int? issueNumber = null)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
         var context = await ResolveRunContextAsync(db, runId);
         var pid = string.IsNullOrWhiteSpace(projectId) ? context.ProjectId : projectId;
-        var iid = string.IsNullOrWhiteSpace(issueId) ? context.IssueId : issueId;
+        var iid = issueNumber ?? context.IssueNumber;
 
         // 1. issue prompts
         var issueProfile = await LoadIssueProfileAsync(db, new RunContext(pid, iid, context.RunExists));
@@ -405,12 +400,12 @@ public class WorkflowProfileManager : IScopedService
         return null;
     }
 
-    public async Task<IReadOnlyList<ResolvedPrompt>> LoadPromptsAsync(string runId, string? stage = null, string? projectId = null, string? issueId = null)
+    public async Task<IReadOnlyList<ResolvedPrompt>> LoadPromptsAsync(string runId, string? stage = null, string? projectId = null, int? issueNumber = null)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
         var context = await ResolveRunContextAsync(db, runId);
         var pid = string.IsNullOrWhiteSpace(projectId) ? context.ProjectId : projectId;
-        var iid = string.IsNullOrWhiteSpace(issueId) ? context.IssueId : issueId;
+        var iid = issueNumber ?? context.IssueNumber;
 
         var systemTemplates = _promptLoader.LoadAllTemplates();
         Dictionary<string, string> projectPrompts;
@@ -514,6 +509,6 @@ public class WorkflowProfileManager : IScopedService
         }
     }
 
-    private sealed record RunContext(string? ProjectId, string? IssueId, bool RunExists = false);
-    private sealed record IssueRunRef(string IssueId, string ProjectId, int Number);
+    private sealed record RunContext(string? ProjectId, int? IssueNumber, bool RunExists = false);
+    private sealed record IssueRunRef(string ProjectId, int Number);
 }
