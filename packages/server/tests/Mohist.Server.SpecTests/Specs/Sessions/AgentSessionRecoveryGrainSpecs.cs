@@ -109,7 +109,7 @@ public sealed class AgentSessionRecoveryGrainSpecs : IClassFixture<AgentSessionG
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
-    public async Task Reset_ConcurrentBeginsReuseOneReservationAndPermitOneCompletion()
+    public async Task Reset_ConcurrentBeginsReuseOneReservationAndReturnOneCompletion()
     {
         var (grain, sessionId) = await CreateAttachedSessionAsync("runtime-before-reset");
 
@@ -126,8 +126,9 @@ public sealed class AgentSessionRecoveryGrainSpecs : IClassFixture<AgentSessionG
             "opencode"));
 
         Assert.Equal(sessionId, result.Id);
-        await Assert.ThrowsAsync<StaleRuntimeSessionBindingException>(() => grain.CompleteResetAsync(
-            new CompleteResetAgentSessionCommand(first.OperationId!, "unused-replacement", "opencode")));
+        var duplicateCompletion = await grain.CompleteResetAsync(
+            new CompleteResetAgentSessionCommand(first.OperationId!, "unused-replacement", "opencode"));
+        Assert.Equal(result, duplicateCompletion);
         Assert.Equal("runtime-after-reset", (await grain.GetAsync())?.AgentSessionId);
     }
 
@@ -181,6 +182,50 @@ public sealed class AgentSessionRecoveryGrainSpecs : IClassFixture<AgentSessionG
         Assert.Equal(reserved.OperationId, retry.OperationId);
 
         await reactivated.CompleteCompactAsync(new CompleteCompactAgentSessionCommand(retry.OperationId, Summary: "summary"));
+        Assert.Single(_fixture.StateStore.Events, e => e.Value is AgentSessionContextCompacted);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
+    public async Task CompletedCompact_DoesNotBlockTheNextReset()
+    {
+        var (grain, _) = await CreateAttachedSessionAsync("runtime-completed-compact");
+        var compact = await grain.PrepareSessionCommandAsync(SessionCommandKind.Compact);
+        await grain.CompleteCompactAsync(new CompleteCompactAgentSessionCommand(compact.OperationId, Summary: "summary"));
+        _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(6));
+
+        var reset = await grain.BeginResetAsync();
+
+        Assert.NotEqual(compact.OperationId, reset.OperationId);
+        Assert.Equal("runtime-completed-compact", reset.ExpectedRuntimeSessionId);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
+    public async Task Compact_PostCommitFailure_ReactivationReturnsPersistedCompletionWithoutAnotherCompaction()
+    {
+        var (grain, sessionId) = await CreateAttachedSessionAsync("runtime-post-commit");
+        var request = await grain.PrepareSessionCommandAsync(SessionCommandKind.Compact);
+        _fixture.StateStore.CommitThenThrowNext = true;
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => grain.CompleteCompactAsync(
+            new CompleteCompactAgentSessionCommand(request.OperationId, Summary: "summary")));
+
+        var management = grain.AsReference<IGrainManagementExtension>();
+        await management.DeactivateOnIdle();
+        var reactivated = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
+
+        var completed = await reactivated.GetCompletedRecoveryAsync(SessionCommandKind.Compact);
+        Assert.NotNull(completed);
+        Assert.Equal(sessionId, completed!.Id);
+        Assert.True(completed.WasCompacted);
+        Assert.Single(_fixture.StateStore.Events, e => e.Value is AgentSessionContextCompacted);
+
+        var replay = await reactivated.CompleteCompactAsync(
+            new CompleteCompactAgentSessionCommand(request.OperationId, Summary: "different summary"));
+        Assert.Equal(completed, replay);
         Assert.Single(_fixture.StateStore.Events, e => e.Value is AgentSessionContextCompacted);
     }
 
@@ -255,13 +300,12 @@ public sealed class AgentSessionRecoveryGrainSpecs : IClassFixture<AgentSessionG
             {
                 new AgentSessionRuntimeEventInput(
                     "session.followup_failed",
-                    "{\"runtimeSessionId\":\"runtime-followup\",\"source\":\"followup\"}"),
+                    $$"""{"runtimeSessionId":"runtime-followup","source":"followup","operationId":"{{reservation.OperationId}}","status":"failed"}"""),
             },
             "runtime-followup"));
 
-        // The lease is cleared. Advance past the active-runtime-event window so
-        // the session is idle again, then Compact proceeds.
-        _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(6));
+        // The rejection did not create a turn. Its matching lease is cleared
+        // without extending the activity window, so recovery is immediate.
         var state = Assert.IsType<AgentSession>(_fixture.StateStore.State);
         Assert.Null(state.Status.PendingFollowup);
         var now = _fixture.TimeProvider.GetUtcNow().UtcDateTime;
@@ -269,6 +313,39 @@ public sealed class AgentSessionRecoveryGrainSpecs : IClassFixture<AgentSessionG
         var result = await grain.CompactAsync(new CompactAgentSessionCommand(Summary: "summary"));
         Assert.Equal(sessionId, result.Id);
         Assert.True(result.WasCompacted);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
+    public async Task PendingIdleFollowup_RejectsDuplicateDeliveryUntilItsMatchingFailureArrives()
+    {
+        var (grain, _) = await CreateAttachedSessionAsync("runtime-followup-operations");
+        _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(6));
+        var first = await grain.BeginFollowupAsync();
+        await Assert.ThrowsAsync<FollowupOperationInProgressException>(() => grain.BeginFollowupAsync());
+        await grain.ConfirmFollowupAsync(first.OperationId!);
+        var second = await grain.BeginFollowupAsync();
+        await grain.ConfirmFollowupAsync(second.OperationId!);
+
+        await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
+            new[] { new AgentSessionRuntimeEventInput(
+                RuntimeEventTypes.SessionFollowupFailed,
+                $$"""{"operationId":"{{first.OperationId}}","status":"failed","failureReason":"first failed"}""") },
+            "runtime-followup-operations"));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => grain.CompactAsync(new CompactAgentSessionCommand(Summary: "still running")));
+
+        await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
+            new[] { new AgentSessionRuntimeEventInput(
+                RuntimeEventTypes.SessionFollowupCompleted,
+                $$"""{"operationId":"{{second.OperationId}}","status":"completed"}""") },
+            "runtime-followup-operations"));
+
+        var result = await grain.CompactAsync(new CompactAgentSessionCommand(Summary: "available"));
+        Assert.True(result.WasCompacted);
+        Assert.Equal(2, _fixture.TranscriptStore.Flushes.Count(flush =>
+            flush.Parts.Any(part => part.Type == TranscriptPartTypes.Status)));
     }
 
     private async Task<(IAgentSessionGrain Grain, string SessionId)> CreateAttachedSessionAsync(string runtimeSessionId)

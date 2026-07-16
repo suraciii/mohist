@@ -74,6 +74,8 @@ public static class AgentSessionRecoveryRoutes
         SessionCommandRequest? request = null;
         try
         {
+            if (await grain.GetCompletedRecoveryAsync(SessionCommandKind.Compact) is { } completed)
+                return ApiResults.Ok(completed);
             request = await grain.PrepareSessionCommandAsync(SessionCommandKind.Compact);
             var commandResult = await commands.DispatchAsync(request, ct);
             if (MapCommandResult(request, commandResult) is { } commandFailure)
@@ -114,6 +116,8 @@ public static class AgentSessionRecoveryRoutes
         SessionCommandRequest? request = null;
         try
         {
+            if (await grain.GetCompletedRecoveryAsync(SessionCommandKind.Reset) is { } completed)
+                return ApiResults.Ok(completed);
             request = await grain.BeginResetAsync();
             var commandResult = await commands.DispatchAsync(request, ct);
             if (MapCommandResult(request, commandResult) is { } commandFailure)

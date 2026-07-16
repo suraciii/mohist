@@ -122,6 +122,20 @@ public sealed class RecoveryOperationInProgressException : InvalidOperationExcep
     public string Operation { get; }
 }
 
+[Serializable]
+[GenerateSerializer]
+public sealed class FollowupOperationInProgressException : InvalidOperationException
+{
+    public FollowupOperationInProgressException(string sessionId)
+        : base($"AgentSession {sessionId} already has a follow-up delivery in progress.")
+    {
+        SessionId = sessionId;
+    }
+
+    [Id(0)]
+    public string SessionId { get; }
+}
+
 [GenerateSerializer]
 public sealed record AgentSessionMetadata(
     [property: Id(0)] IReadOnlyDictionary<string, string>? Labels = null,
@@ -247,7 +261,9 @@ public sealed record AgentSessionStatusSnapshot(
     IReadOnlyList<RuntimeSessionLineageEntry>? RuntimeSessionLineage = null,
     IReadOnlyList<ContextUsageHistoryEntry>? ContextUsageHistory = null,
     AgentSessionResetReservation? PendingReset = null,
-    AgentSessionFollowupLease? PendingFollowup = null)
+    AgentSessionFollowupLease? PendingFollowup = null,
+    IReadOnlyList<AgentSessionFollowupLease>? PendingFollowups = null,
+    IReadOnlyList<AgentSessionTranscriptEvidence>? PendingTranscriptEvidence = null)
 {
     public static AgentSessionStatusSnapshot Created(DateTime now) =>
         new(CreatedAt: now, UsageSummary: new AgentUsageSummary(), RuntimeSessionLineage: [], ContextUsageHistory: []);
@@ -281,10 +297,29 @@ public sealed record AgentSessionResetReservation(
     string? ExpectedRuntimeSessionId,
     string Runtime,
     DateTime StartedAt,
-    string Command = "reset");
+    string Command = "reset",
+    AgentSessionRecoveryOutcome? Outcome = null);
+
+public sealed record AgentSessionRecoveryOutcome(
+    string Id,
+    string Status,
+    long? ContextWindowSize,
+    long? ContextWindowUsed,
+    double? ContextUsagePercent,
+    long? ContextWindowUsedBefore,
+    string? Operation,
+    bool WasCompacted);
 
 [GenerateSerializer]
 public sealed record AgentSessionFollowupLease(
     [property: Id(0)] string OperationId,
     [property: Id(1)] string RuntimeSessionId,
     [property: Id(2)] bool Accepted = false);
+
+public sealed record AgentSessionTranscriptEvidence(
+    string Id,
+    string? RuntimeSessionId,
+    string Type,
+    string PayloadJson,
+    DateTime CreatedAt,
+    string PromptKind);

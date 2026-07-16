@@ -30,7 +30,8 @@ public sealed record AgentSessionTranscriptPartDelta(
     string PayloadJson,
     DateTime FirstSeenAt,
     DateTime LastSeenAt,
-    int RawEventCount);
+    int RawEventCount,
+    bool IsIdempotent = false);
 
 public sealed class AgentSessionTranscriptStore : IAgentSessionTranscriptStore
 {
@@ -123,6 +124,8 @@ public sealed class AgentSessionTranscriptStore : IAgentSessionTranscriptStore
             var partKey = PartKey(delta.Type, delta.CorrelationKey);
             if (existingByKey.TryGetValue(partKey, out var part))
             {
+                if (delta.IsIdempotent)
+                    continue;
                 part.CorrelationId = delta.CorrelationId ?? part.CorrelationId;
                 if (!string.IsNullOrEmpty(delta.TextDelta))
                     part.Text += delta.TextDelta;

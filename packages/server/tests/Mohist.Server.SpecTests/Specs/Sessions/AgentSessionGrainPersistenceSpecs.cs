@@ -31,6 +31,7 @@ public abstract class AgentSessionGrainPersistenceSpecsBase : IClassFixture<Agen
     protected OpenAgentSessionCommand Open(string runtime = "test") => new(
         "runner-1",
         runtime,
+        WorkDir: "/work",
         Metadata: WorkflowAgentSessionMetadata.Metadata(new WorkflowAgentSessionContext("project-1", "workflow-1", "build")));
 
     protected async Task DeactivateAsync(IAgentSessionGrain grain)
@@ -203,7 +204,7 @@ public class AgentSessionGrainRecoveryTranscriptFailureSpecs : AgentSessionGrain
         Assert.Equal(openedSaveCount + 1, Fixture.StateStore.SaveCount);
         Assert.Empty(Fixture.TranscriptStore.Flushes);
         var transcriptError = Assert.Single(Fixture.Logger.Entries, e => e.Level == LogLevel.Error);
-        Assert.Contains("recovery transcript", transcriptError.Message);
+        Assert.Contains("durable transcript evidence", transcriptError.Message);
         Assert.Contains("transcript store down", transcriptError.Exception?.Message ?? string.Empty);
 
         // The pending recovery transcript must reach durable storage even on
@@ -222,6 +223,29 @@ public class AgentSessionGrainRecoveryTranscriptFailureSpecs : AgentSessionGrain
         Assert.Equal(attachEventCount + 1, Fixture.StateStore.Events.Count);
     }
 
+    [Fact]
+    public async Task CompactAsync_RepeatedTranscriptFailure_PersistsEvidenceAcrossDeactivation()
+    {
+        var grain = NewGrain();
+        await grain.OpenAsync(Open("opencode"));
+        await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand("runtime-durable-evidence"));
+        Fixture.TimeProvider.Advance(TimeSpan.FromMinutes(6));
+
+        Fixture.TranscriptStore.NextException = new InvalidOperationException("first transcript failure");
+        await grain.CompactAsync(new CompactAgentSessionCommand(Summary: "durable"));
+
+        // The deactivation flush can fail too. The pending evidence must remain
+        // in persisted session state instead of relying on the disposed timer.
+        Fixture.TranscriptStore.NextException = new InvalidOperationException("second transcript failure");
+        await DeactivateAsync(grain);
+
+        await grain.FlushForTestAsync();
+
+        Assert.Equal(2, Fixture.TranscriptStore.Flushes.Count);
+        Assert.All(Fixture.TranscriptStore.Flushes, flush => Assert.Single(flush.Parts));
+        Assert.Single(Fixture.StateStore.Events, e => e.Value is AgentSessionContextCompacted);
+        Assert.Empty(Fixture.StateStore.State!.Status.PendingTranscriptEvidence!);
+    }
 }
 
 [Trait(Traits.Speed.Name, Traits.Speed.Grain)]

@@ -117,6 +117,10 @@ public static class AgentSessionFollowupRoutes
                 "recovery_in_progress",
                 new { sessionId = ex.SessionId, operation = ex.Operation });
         }
+        catch (FollowupOperationInProgressException ex)
+        {
+            return ApiResults.Conflict(ex.Message, "followup_in_progress", new { sessionId = ex.SessionId });
+        }
 
         if (string.IsNullOrWhiteSpace(target.RunnerId))
         {
@@ -163,8 +167,8 @@ public static class AgentSessionFollowupRoutes
                 binding,
             };
         object payload = string.Equals(target.SourceKind, "workflow", StringComparison.Ordinal)
-            ? new { workflowRunId = target.WorkflowRunId, sessionName = target.SessionName, target = wireTarget, text }
-            : new { target = wireTarget, text };
+            ? new { workflowRunId = target.WorkflowRunId, sessionName = target.SessionName, target = wireTarget, text, operationId = reservation.OperationId }
+            : new { target = wireTarget, text, operationId = reservation.OperationId };
 
         RunnerFollowupDeliveryResult? delivery;
         try

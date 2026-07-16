@@ -35,10 +35,12 @@ import {
   isFollowupTargetUnavailable,
 } from "./session-target.js"
 import type { SessionTarget } from "../runtime/acp-connection.js"
+import type { FollowupFailureOutboxStore } from "./followup-failure-outbox.js"
 
 export interface FollowupHandlerDeps {
   serverConnection?: ServerConnection | null
   followupTargetResolver?: FollowupTargetResolver | null
+  followupFailureOutbox?: FollowupFailureOutboxStore | null
 }
 
 export interface FollowupDeliveryResult {
@@ -92,6 +94,7 @@ async function handleFollowup(
       text: payload.text,
       kind: "followup",
       sentAt: new Date().toISOString(),
+      ...(payload.operationId ? { operationId: payload.operationId } : {}),
       runtimeSessionId: target.sessionId,
       source: "followup",
     },
@@ -101,36 +104,58 @@ async function handleFollowup(
     void target.connection.prompt({
       sessionId: target.sessionId,
       prompt: [{ type: "text", text: payload.text }],
-    }).catch((error) => {
-      // The follow-up was already acknowledged to the server, so a late prompt
-      // rejection must be observable: emit session.followup_failed so the
-      // server clears the persisted follow-up lease. Otherwise the lease
-      // blocks Compact/Reset forever as session_active.
-      console.error("followup connection.prompt rejected:", error instanceof Error ? error.message : String(error))
-      emitFollowupEvent(serverConnection, sessionTarget, target, {
-        type: "session.followup_failed",
-        payload: {
-          runtimeSessionId: target.sessionId,
-          source: "followup",
-          error: error instanceof Error ? error.message : String(error),
-          failedAt: new Date().toISOString(),
-        },
-      })
-    })
+    }).then(
+      () => recordFollowupTerminal(deps.followupFailureOutbox ?? null, serverConnection, sessionTarget, target, payload.operationId, "completed", null),
+      (error) => {
+        console.error("followup connection.prompt rejected:", error instanceof Error ? error.message : String(error))
+        recordFollowupTerminal(deps.followupFailureOutbox ?? null, serverConnection, sessionTarget, target, payload.operationId, "failed", error)
+      },
+    )
   } catch (error) {
     console.error("followup connection.prompt threw:", error instanceof Error ? error.message : String(error))
-    emitFollowupEvent(serverConnection, sessionTarget, target, {
-      type: "session.followup_failed",
-      payload: {
-        runtimeSessionId: target.sessionId,
-        source: "followup",
-        error: error instanceof Error ? error.message : String(error),
-        failedAt: new Date().toISOString(),
-      },
-    })
+    recordFollowupTerminal(deps.followupFailureOutbox ?? null, serverConnection, sessionTarget, target, payload.operationId, "failed", error)
     return unavailable()
   }
   return { accepted: true }
+}
+
+function recordFollowupTerminal(
+  outbox: FollowupFailureOutboxStore | null,
+  serverConnection: ServerConnection,
+  sessionTarget: SessionTarget,
+  target: FollowupTarget,
+  operationId: string | undefined,
+  status: "completed" | "failed",
+  error: unknown,
+): void {
+  const message = error === null ? null : error instanceof Error ? error.message : String(error)
+  const completedAt = new Date().toISOString()
+  if (!operationId) return
+  if (outbox) {
+    void outbox.record({
+      operationId,
+      target: sessionTarget,
+      runtimeSessionId: target.sessionId,
+      status,
+      error: message,
+      completedAt,
+    }, serverConnection).catch((outboxError) => {
+      console.error("failed to persist followup failure:", outboxError)
+    })
+    return
+  }
+
+  emitFollowupEvent(serverConnection, sessionTarget, target, {
+    type: status === "failed" ? "session.followup_failed" : "session.followup_completed",
+    payload: {
+      status,
+      ...(message ? { failureReason: message } : {}),
+      source: "followup",
+      operationId,
+      runtimeSessionId: target.sessionId,
+      completedAt,
+    },
+  })
 }
 
 // Emits a runtime event for a follow-up through the workflow or generic

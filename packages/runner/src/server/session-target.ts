@@ -71,7 +71,7 @@ export interface ReceiveFollowupSessionTarget {
   workflowRunId?: string
   sessionName?: string
   sessionId?: string
-  binding?: RuntimeSessionBinding
+  binding?: Partial<RuntimeSessionBinding>
 }
 
 /**
@@ -87,6 +87,7 @@ export interface ReceiveFollowupPayload {
   sessionName?: string
   target?: ReceiveFollowupSessionTarget
   text: string
+  operationId?: string
 }
 
 // Payload delivered by the server-side `ReceiveWorkflowRunStatus` SignalR
@@ -179,12 +180,12 @@ function runtimeBindingFromWireTarget(value: unknown): RuntimeSessionBinding | n
   return typeof binding.runtime === "string" && binding.runtime.length > 0
     && typeof binding.runtimeSessionId === "string" && binding.runtimeSessionId.length > 0
     && typeof binding.runnerId === "string" && binding.runnerId.length > 0
-    && typeof binding.workDir === "string" && binding.workDir.length > 0
+    && (binding.workDir === undefined || binding.workDir === null || (typeof binding.workDir === "string" && binding.workDir.length > 0))
     ? {
         runtime: binding.runtime,
         runtimeSessionId: binding.runtimeSessionId,
         runnerId: binding.runnerId,
-        workDir: binding.workDir,
+        workDir: binding.workDir ?? null,
       }
     : null
 }

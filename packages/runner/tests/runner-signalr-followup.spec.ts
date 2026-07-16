@@ -107,6 +107,7 @@ interface MockConnection {
 function buildClient(opts: {
   resolver?: AnyFn | null
   serverConnection?: MockServerConnection | null
+  followupFailureOutbox?: { record: AnyFn } | null
 }) {
   builders.length = 0
   const defaultServerConnection: MockServerConnection = {
@@ -123,6 +124,7 @@ function buildClient(opts: {
     {
       serverConnection: serverConnection as never,
       followupTargetResolver: resolver as never,
+      followupFailureOutbox: opts.followupFailureOutbox as never,
     },
   )
   return client
@@ -343,6 +345,66 @@ describe("RunnerSignalRClient ReceiveFollowup handler", () => {
     errorSpy.mockRestore()
   })
 
+  it("Followup_PromptRejectionRecordsTheMatchingOperationForDurableDelivery", async () => {
+    const prompt = vi.fn(async () => { throw new Error("opencode crashed") })
+    const connection: MockConnection = { prompt }
+    const resolver = vi.fn(() => ({ connection: connection as never, sessionId: "acp-1", projectId: "proj-1" }))
+    const serverConnection: MockServerConnection = {
+      workflowAgentSessionRuntimeEvents: vi.fn(async () => undefined),
+      agentSessionRuntimeEvents: vi.fn(async () => undefined),
+    }
+    const outbox = { record: vi.fn(async () => undefined) }
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
+
+    buildClient({ resolver, serverConnection, followupFailureOutbox: outbox })
+    emitFollowup(lastBuilder(), {
+      target: { kind: "generic", projectId: "proj-1", sessionId: "session-1" },
+      text: "continue",
+      operationId: "followup-1",
+    })
+    await flush()
+    await flush()
+
+    expect(outbox.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operationId: "followup-1",
+        runtimeSessionId: "acp-1",
+        target: expect.objectContaining({ kind: "generic", sessionId: "session-1" }),
+      }),
+      serverConnection,
+    )
+    errorSpy.mockRestore()
+  })
+
+  it("Followup_PromptCompletionRecordsTheMatchingOperationForDurableDelivery", async () => {
+    const prompt = vi.fn(async () => undefined)
+    const connection: MockConnection = { prompt }
+    const resolver = vi.fn(() => ({ connection: connection as never, sessionId: "acp-1", projectId: "proj-1" }))
+    const serverConnection: MockServerConnection = {
+      workflowAgentSessionRuntimeEvents: vi.fn(async () => undefined),
+      agentSessionRuntimeEvents: vi.fn(async () => undefined),
+    }
+    const outbox = { record: vi.fn(async () => undefined) }
+
+    buildClient({ resolver, serverConnection, followupFailureOutbox: outbox })
+    emitFollowup(lastBuilder(), {
+      target: { kind: "generic", projectId: "proj-1", sessionId: "session-1" },
+      text: "continue",
+      operationId: "followup-1",
+    })
+    await flush()
+    await flush()
+
+    expect(outbox.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operationId: "followup-1",
+        status: "completed",
+        error: null,
+      }),
+      serverConnection,
+    )
+  })
+
   it("Followup_ContinuesToPromptEvenIfRuntimeEventsEmitFails", async () => {
     const prompt = vi.fn(async () => undefined)
     const connection: MockConnection = { prompt }
@@ -463,6 +525,45 @@ describe("RunnerSignalRClient routes follow-ups to generic sessions", () => {
     })
     expect(workflowRuntimeEvents).not.toHaveBeenCalled()
     expect(agentSessionRuntimeEvents).toHaveBeenCalledTimes(1)
+  })
+
+  it("GenericFollowup_OmittedLegacyWorkDir_StillUsesCachedRuntimeTarget", async () => {
+    const prompt = vi.fn(async () => undefined)
+    const connection: MockConnection = { prompt }
+    const resolver = vi.fn((target: SessionTarget) => {
+      expect(target.kind).toBe("generic")
+      expect(target.binding).toEqual({
+        runtime: "opencode",
+        runtimeSessionId: "runtime-1",
+        runnerId: "runner-1",
+        workDir: null,
+      })
+      return { connection: connection as never, sessionId: "runtime-1", projectId: "proj-1" }
+    })
+    const serverConnection: MockServerConnection = {
+      workflowAgentSessionRuntimeEvents: vi.fn(async () => undefined),
+      agentSessionRuntimeEvents: vi.fn(async () => undefined),
+    }
+
+    buildClient({ resolver, serverConnection })
+    await expect(invokeFollowup(lastBuilder(), {
+      target: {
+        kind: "generic",
+        projectId: "proj-1",
+        sessionId: "gen-session-1",
+        binding: {
+          runtime: "opencode",
+          runtimeSessionId: "runtime-1",
+          runnerId: "runner-1",
+        },
+      },
+      text: "continue",
+    })).resolves.toEqual({ accepted: true })
+
+    expect(prompt).toHaveBeenCalledWith({
+      sessionId: "runtime-1",
+      prompt: [{ type: "text", text: "continue" }],
+    })
   })
 
   it("GenericFollowup_AcknowledgesDeliveryBeforePromptResolution", async () => {

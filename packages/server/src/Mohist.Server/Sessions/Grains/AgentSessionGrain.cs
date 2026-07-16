@@ -53,6 +53,8 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
     {
         _sessionReloadRequired = false;
         _session = await _stateStore.LoadAsync(SessionId);
+        if (_session?.Status.PendingTranscriptEvidence?.Count > 0)
+            EnsurePersistenceTimer();
     }
 
     public override async Task OnDeactivateAsync(DeactivationReason reason, CancellationToken ct)
@@ -214,6 +216,17 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
     public Task<SessionCommandRequest> BeginResetAsync() =>
         BeginSessionCommandAsync(SessionCommandKind.Reset);
 
+    public async Task<AgentSessionRecoveryResult?> GetCompletedRecoveryAsync(SessionCommandKind command)
+    {
+        var session = await GetRequiredAsync();
+        var reservation = session.Status.PendingReset;
+        return reservation is not null
+            && string.Equals(reservation.Command, CommandName(command), StringComparison.Ordinal)
+            && reservation.Outcome is not null
+            ? ToRecoveryResult(reservation.Outcome)
+            : null;
+    }
+
     private async Task<SessionCommandRequest> BeginSessionCommandAsync(SessionCommandKind command)
     {
         var session = await GetRequiredAsync();
@@ -221,12 +234,20 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
 
         if (session.Status.PendingReset is { } pending)
         {
+            if (pending.Outcome is not null && !string.Equals(pending.Command, CommandName(command), StringComparison.Ordinal))
+            {
+                session.Status = session.Status with { PendingReset = null };
+                await CommitAsync(session, []);
+            }
+            else
+            {
             if (string.Equals(pending.Command, CommandName(command), StringComparison.Ordinal))
             {
                 return BuildSessionCommandRequest(session, command, pending);
             }
 
             throw new RecoveryOperationInProgressException(session.Id, pending.Command);
+            }
         }
 
         if (command == SessionCommandKind.Compact)
@@ -255,6 +276,8 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
     {
         var session = await GetRequiredAsync();
         var reservation = RequireReservation(session, command.OperationId, SessionCommandKind.Compact);
+        if (reservation.Outcome is not null)
+            return ToRecoveryResult(reservation.Outcome);
         EnsureRuntimeSessionPresent(session);
         EnsureSessionIdleForRecovery(session);
 
@@ -267,15 +290,18 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             : command.Summary!;
         var events = session.RecordCompaction(usedBefore, usedBefore, size, "summary", summary, now);
         var transcriptEntries = BuildCompactionTranscriptEntries(session, usedBefore, usedBefore, size, summary, now);
-        session.Status = session.Status with { PendingReset = null };
-        await PersistRecoveryAsync(session, events, transcriptEntries);
-        return BuildRecoveryResult(session, usedBefore, size, "compact", wasCompacted: true);
+        var result = BuildRecoveryResult(session, usedBefore, size, "compact", wasCompacted: true);
+        session.Status = session.Status with { PendingReset = reservation with { Outcome = ToRecoveryOutcome(result) } };
+        await PersistRecoveryAsync(session, events, transcriptEntries, reservation.OperationId);
+        return result;
     }
 
     public async Task<AgentSessionRecoveryResult> CompleteResetAsync(CompleteResetAgentSessionCommand command)
     {
         var session = await GetRequiredAsync();
         var reservation = RequireReservation(session, command.OperationId, SessionCommandKind.Reset);
+        if (reservation.Outcome is not null)
+            return ToRecoveryResult(reservation.Outcome);
         if (!string.Equals(reservation.Runtime, command.ReplacementRuntime, StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException($"Reset replacement runtime for AgentSession {session.Id} does not match its reservation.");
 
@@ -292,15 +318,17 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             size,
             now,
             command.ReplacementRuntime);
-        session.Status = session.Status with { PendingReset = null };
-        await PersistRecoveryAsync(session, events, []);
-        return BuildRecoveryResult(session, usedBefore, size, "reset", wasCompacted: false);
+        var result = BuildRecoveryResult(session, usedBefore, size, "reset", wasCompacted: false);
+        session.Status = session.Status with { PendingReset = reservation with { Outcome = ToRecoveryOutcome(result) } };
+        await PersistRecoveryAsync(session, events, [], reservation.OperationId);
+        return result;
     }
 
     public async Task AbandonResetAsync(string operationId)
     {
         var session = await GetRequiredAsync();
-        if (!string.Equals(session.Status.PendingReset?.OperationId, operationId, StringComparison.Ordinal))
+        if (!string.Equals(session.Status.PendingReset?.OperationId, operationId, StringComparison.Ordinal)
+            || session.Status.PendingReset?.Outcome is not null)
             return;
 
         session.Status = session.Status with { PendingReset = null };
@@ -312,41 +340,47 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         var session = await GetRequiredAsync();
         EnsureRuntimeSessionPresent(session);
         if (session.Status.PendingReset is { } recovery)
-            throw new RecoveryOperationInProgressException(session.Id, recovery.Command);
+        {
+            if (recovery.Outcome is null)
+                throw new RecoveryOperationInProgressException(session.Id, recovery.Command);
+            session.Status = session.Status with { PendingReset = null };
+        }
 
-        if (session.Status.PendingFollowup is { } pending)
-            return new AgentSessionFollowupReservation(pending.OperationId);
-
-        if (AgentSessionJsonHelper.StatusName(session, Now()) == "active")
-            return new AgentSessionFollowupReservation(null);
+        var pending = GetPendingFollowups(session);
+        if (pending.Any(lease => !lease.Accepted))
+            throw new FollowupOperationInProgressException(session.Id);
 
         var lease = new AgentSessionFollowupLease(
             Guid.NewGuid().ToString("N"),
             session.Status.AgentRuntimeSessionId!);
-        session.Status = session.Status with { PendingFollowup = lease };
+        SetPendingFollowups(session, pending.Append(lease).ToArray());
         await CommitAsync(session, []);
-        return new AgentSessionFollowupReservation(lease.OperationId);
+        return new AgentSessionFollowupReservation(lease.OperationId, StartsIdleTurn: true);
     }
 
     public async Task ConfirmFollowupAsync(string operationId)
     {
         var session = await GetRequiredAsync();
-        var pending = session.Status.PendingFollowup;
-        if (pending is null || !string.Equals(pending.OperationId, operationId, StringComparison.Ordinal) || pending.Accepted)
+        var pending = GetPendingFollowups(session);
+        var index = pending.ToList().FindIndex(lease => string.Equals(lease.OperationId, operationId, StringComparison.Ordinal));
+        if (index < 0 || pending[index].Accepted)
             return;
 
-        session.Status = session.Status with { PendingFollowup = pending with { Accepted = true } };
+        var next = pending.ToArray();
+        next[index] = next[index] with { Accepted = true };
+        SetPendingFollowups(session, next);
         await CommitAsync(session, []);
     }
 
     public async Task AbandonFollowupAsync(string operationId)
     {
         var session = await GetRequiredAsync();
-        var pending = session.Status.PendingFollowup;
-        if (pending is null || !string.Equals(pending.OperationId, operationId, StringComparison.Ordinal) || pending.Accepted)
+        var pending = GetPendingFollowups(session);
+        var lease = pending.FirstOrDefault(candidate => string.Equals(candidate.OperationId, operationId, StringComparison.Ordinal));
+        if (lease is null || lease.Accepted)
             return;
 
-        session.Status = session.Status with { PendingFollowup = null };
+        SetPendingFollowups(session, pending.Where(candidate => !string.Equals(candidate.OperationId, operationId, StringComparison.Ordinal)).ToArray());
         await CommitAsync(session, []);
     }
 
@@ -364,6 +398,42 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             ExpectedRuntimeSessionId: command == SessionCommandKind.Reset ? reservation?.ExpectedRuntimeSessionId : null,
             OperationId: reservation?.OperationId
                 ?? throw new InvalidOperationException("Session command requires a persisted operation id."));
+
+    private static IReadOnlyList<AgentSessionFollowupLease> GetPendingFollowups(AgentSession session)
+    {
+        if (session.Status.PendingFollowups is { Count: > 0 } pending)
+            return pending;
+        return session.Status.PendingFollowup is null ? [] : [session.Status.PendingFollowup];
+    }
+
+    private static void SetPendingFollowups(AgentSession session, IReadOnlyList<AgentSessionFollowupLease> leases)
+    {
+        session.Status = session.Status with
+        {
+            PendingFollowup = null,
+            PendingFollowups = leases,
+        };
+    }
+
+    private static AgentSessionRecoveryOutcome ToRecoveryOutcome(AgentSessionRecoveryResult result) => new(
+        result.Id,
+        result.Status,
+        result.ContextWindowSize,
+        result.ContextWindowUsed,
+        result.ContextUsagePercent,
+        result.ContextWindowUsedBefore,
+        result.Operation,
+        result.WasCompacted);
+
+    private static AgentSessionRecoveryResult ToRecoveryResult(AgentSessionRecoveryOutcome outcome) => new(
+        outcome.Id,
+        outcome.Status,
+        outcome.ContextWindowSize,
+        outcome.ContextWindowUsed,
+        outcome.ContextUsagePercent,
+        outcome.ContextWindowUsedBefore,
+        outcome.Operation,
+        outcome.WasCompacted);
 
     private static AgentSessionResetReservation RequireReservation(
         AgentSession session,
@@ -396,7 +466,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
 
     private void EnsureSessionIdleForRecovery(AgentSession session)
     {
-        if (session.Status.PendingFollowup is not null
+        if (GetPendingFollowups(session).Count > 0
             || AgentSessionJsonHelper.StatusName(session, Now()) == "active")
             throw new InvalidOperationException(
                 $"AgentSession {session.Id} is currently active; Compact and Reset require an idle session.");
@@ -480,11 +550,22 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
     private async Task PersistRecoveryAsync(
         AgentSession session,
         IReadOnlyList<AgentSessionEvent> events,
-        IReadOnlyList<RuntimeEventEnvelope> transcriptEntries)
+        IReadOnlyList<RuntimeEventEnvelope> transcriptEntries,
+        string? operationId = null)
     {
-        var now = Now();
-        _transcript.Accept(session, transcriptEntries, now);
-        var transcript = _transcript.BuildFlush(session, now);
+        if (transcriptEntries.Count > 0)
+        {
+            var prefix = operationId ?? Guid.NewGuid().ToString("N");
+            var pendingEvidence = session.Status.PendingTranscriptEvidence?.ToList() ?? [];
+            pendingEvidence.AddRange(transcriptEntries.Select((entry, index) => new AgentSessionTranscriptEvidence(
+                $"recovery:{prefix}:{index}",
+                entry.AgentSessionId,
+                entry.Type,
+                entry.PayloadJson,
+                entry.CreatedAt,
+                "recovery")));
+            session.Status = session.Status with { PendingTranscriptEvidence = pendingEvidence };
+        }
 
         try
         {
@@ -502,42 +583,83 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             DeactivateOnIdle();
             throw;
         }
-        // The state/event transaction committed atomically. The recovery
-        // transition is durable; a later Compact/Reset retry must not
-        // re-append them. Treat the transcript like the normal flush path:
-        // if its save fails, the committed domain events stay committed and
-        // the un-committed transcript flush stays in _transcript for the next
-        // retry. The recovery command returns success because the domain
-        // fact (rebind or compaction) is persistent; only the transcript
-        // evidence is pending.
+        // The recovery state, domain event, terminal result, and transcript
+        // evidence are now durable together. A later retry can return the
+        // stored result without sending a second runtime command, while the
+        // evidence remains available after a restart until its own store
+        // accepts it.
         _session = session;
-        if (transcript is not null)
-        {
-            try
-            {
-                await _transcriptStore.SaveAsync(transcript);
-                _transcript.CommitFlush();
-            }
-            catch (Exception ex)
-            {
-                // The recovery domain event is already durable (the state/event
-                // transaction above committed). Only the transcript evidence is
-                // still pending in _transcript. Schedule the persistence timer so
-                // a transcript-only retry fires even if no further runtime event
-                // arrives before deactivation; without it an idle session could
-                // lose the compaction/replacement transcript. The retry path
-                // (FlushAsync) re-saves the transcript without re-appending the
-                // committed recovery event because PersistRecoveryAsync never
-                // touches _pendingDomainEvents / _stateDirty.
-                _log.LogError(ex,
-                    "AgentSessionGrain failed to save recovery transcript for {SessionId}; parts={PartCount}",
-                    SessionId, transcript.Parts.Count);
-                EnsurePersistenceTimer();
-            }
-        }
+        if (!await FlushPendingTranscriptEvidenceAsync(session, CancellationToken.None))
+            EnsurePersistenceTimer();
 
         await FanOutRealtimeAsync(session, transcriptEntries, events);
     }
+
+    private async Task<bool> FlushPendingTranscriptEvidenceAsync(AgentSession session, CancellationToken ct)
+    {
+        var evidence = session.Status.PendingTranscriptEvidence;
+        if (evidence is null || evidence.Count == 0)
+            return true;
+
+        foreach (var item in evidence.ToArray())
+        {
+            var flush = new AgentSessionTranscriptFlush(
+                StartNewTurn: false,
+                Turn: new AgentSessionTranscriptTurnUpsert(
+                    session.Id,
+                    Sequence: 0,
+                    PromptText: string.Empty,
+                    PromptKind: item.PromptKind,
+                    StartedAt: item.CreatedAt,
+                    UpdatedAt: item.CreatedAt,
+                    RuntimeSessionId: item.RuntimeSessionId),
+                Parts:
+                [
+                    new AgentSessionTranscriptPartDelta(
+                        ToTranscriptPartType(item.Type),
+                        item.Id,
+                        item.Id,
+                        TextDelta: null,
+                        PayloadJson: item.PayloadJson,
+                        FirstSeenAt: item.CreatedAt,
+                        LastSeenAt: item.CreatedAt,
+                        RawEventCount: 1,
+                        IsIdempotent: true),
+                ]);
+            try
+            {
+                await _transcriptStore.SaveAsync(flush, ct);
+            }
+            catch (Exception ex)
+            {
+                _log.LogError(ex,
+                    "AgentSessionGrain failed to save durable transcript evidence for {SessionId}; evidence={EvidenceId}",
+                    SessionId, item.Id);
+                return false;
+            }
+
+            session.Status = session.Status with
+            {
+                PendingTranscriptEvidence = session.Status.PendingTranscriptEvidence!
+                    .Where(candidate => !string.Equals(candidate.Id, item.Id, StringComparison.Ordinal))
+                    .ToArray(),
+            };
+            await CommitAsync(session, []);
+            _session = session;
+        }
+
+        return true;
+    }
+
+    private static string ToTranscriptPartType(string eventType) => eventType switch
+    {
+        RuntimeEventTypes.SessionFollowupFailed => TranscriptPartTypes.Status,
+        RuntimeEventTypes.SessionFollowupCompleted => TranscriptPartTypes.Status,
+        RuntimeEventTypes.SessionLiveness => TranscriptPartTypes.Status,
+        RuntimeEventTypes.SessionClosed => TranscriptPartTypes.SessionClosed,
+        RuntimeEventTypes.Compaction => TranscriptPartTypes.Compaction,
+        _ => eventType,
+    };
 
     private AgentSessionRecoveryResult BuildRecoveryResult(
         AgentSession session,
@@ -583,16 +705,29 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             return [];
         }
 
-        var now = Now();
-        if (requireCurrentRuntimeBinding
-            && session.Status.PendingFollowup is { } pendingFollowup
-            && string.Equals(runtimeSessionId, pendingFollowup.RuntimeSessionId, StringComparison.Ordinal)
-            && runtimeEvents.Any(e => TerminatesFollowupLease(e.Type)))
+        var followupTerminals = runtimeEvents
+            .Where(e => IsFollowupTerminal(e.Type))
+            .ToArray();
+        if (followupTerminals.Length > 0 && requireCurrentRuntimeBinding)
         {
-            session.Status = session.Status with { PendingFollowup = null };
+            var terminalEntries = await CompleteFollowupTerminalsAsync(session, runtimeSessionId!, followupTerminals);
+            runtimeEvents = runtimeEvents
+                .Where(e => !IsFollowupTerminal(e.Type))
+                .ToArray();
+            if (runtimeEvents.Count == 0)
+                return terminalEntries;
+        }
+
+        var now = Now();
+        if (requireCurrentRuntimeBinding && runtimeEvents.Any(e => TerminatesFollowupLease(e.Type)))
+        {
+            SetPendingFollowups(session, GetPendingFollowups(session)
+                .Where(lease => !string.Equals(lease.RuntimeSessionId, runtimeSessionId, StringComparison.Ordinal))
+                .ToArray());
         }
         var events = new List<AgentSessionEvent>();
-        events.AddRange(session.RecordActivity(now));
+        if (runtimeEvents.Any(ShouldRecordActivity))
+            events.AddRange(session.RecordActivity(now));
         _stateDirty = true;
 
         var previousHealth = _lastHealthStatus;
@@ -658,6 +793,85 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
 
         return entries.Select(e => ToEventInfo(e)).ToList();
     }
+
+    private async Task<IReadOnlyList<AgentSessionRuntimeEventInfo>> CompleteFollowupTerminalsAsync(
+        AgentSession session,
+        string runtimeSessionId,
+        IReadOnlyList<AgentSessionRuntimeEventInput> terminals)
+    {
+        var pending = GetPendingFollowups(session).ToList();
+        var entries = new List<RuntimeEventEnvelope>();
+        var evidence = session.Status.PendingTranscriptEvidence?.ToList() ?? [];
+        var now = Now();
+
+        foreach (var terminal in terminals)
+        {
+            var payload = JSON.DeserializeElement(terminal.PayloadJson);
+            var operationId = AgentSessionJsonHelper.GetStringProp(payload, "operationId");
+            if (string.IsNullOrWhiteSpace(operationId))
+                continue;
+
+            var index = pending.FindIndex(lease =>
+                string.Equals(lease.OperationId, operationId, StringComparison.Ordinal)
+                && string.Equals(lease.RuntimeSessionId, runtimeSessionId, StringComparison.Ordinal));
+            if (index < 0)
+                continue;
+
+            pending.RemoveAt(index);
+            var payloadJson = string.IsNullOrWhiteSpace(terminal.PayloadJson) ? "{}" : terminal.PayloadJson;
+            entries.Add(new RuntimeEventEnvelope
+            {
+                Id = -(_realtimeSequence + 1),
+                SessionId = session.Id,
+                AgentSessionId = runtimeSessionId,
+                Sequence = ++_realtimeSequence,
+                Type = terminal.Type,
+                PayloadJson = payloadJson,
+                CreatedAt = now,
+            });
+            evidence.Add(new AgentSessionTranscriptEvidence(
+                $"followup:{operationId}",
+                runtimeSessionId,
+                terminal.Type,
+                payloadJson,
+                now,
+                "followup"));
+        }
+
+        if (entries.Count == 0)
+            return [];
+
+        SetPendingFollowups(session, pending);
+        session.Status = session.Status with { PendingTranscriptEvidence = evidence };
+        await CommitAsync(session, []);
+        _session = session;
+        _cachedSummary = null;
+        if (!await FlushPendingTranscriptEvidenceAsync(session, CancellationToken.None))
+            EnsurePersistenceTimer();
+        await FanOutRealtimeAsync(session, entries, []);
+        return entries.Select(ToEventInfo).ToList();
+    }
+
+    private static bool ShouldRecordActivity(AgentSessionRuntimeEventInput runtimeEvent)
+    {
+        if (!string.Equals(runtimeEvent.Type, RuntimeEventTypes.SessionInput, StringComparison.Ordinal))
+            return true;
+
+        try
+        {
+            var payload = JSON.DeserializeElement(runtimeEvent.PayloadJson);
+            return !string.Equals(AgentSessionJsonHelper.GetStringProp(payload, "source"), "followup", StringComparison.Ordinal)
+                || string.IsNullOrWhiteSpace(AgentSessionJsonHelper.GetStringProp(payload, "operationId"));
+        }
+        catch
+        {
+            return true;
+        }
+    }
+
+    private static bool IsFollowupTerminal(string? type) =>
+        string.Equals(type, RuntimeEventTypes.SessionFollowupFailed, StringComparison.Ordinal)
+        || string.Equals(type, RuntimeEventTypes.SessionFollowupCompleted, StringComparison.Ordinal);
 
     private string? ClassifySessionClosedPayload(AgentSession session, string type, string payloadJson, DateTime now)
     {
@@ -855,7 +1069,9 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
 
     private async Task PersistCallback()
     {
-        if (_session is null || (!_stateDirty && !_transcript.HasPending))
+        if (_session is null || (!_stateDirty
+            && !_transcript.HasPending
+            && !(_session.Status.PendingTranscriptEvidence?.Count > 0)))
         {
             DisposePersistTimer();
             return;
@@ -873,6 +1089,9 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         // it; do not attempt another flush from the same dirty state.
         if (_sessionReloadRequired)
             throw new InvalidOperationException($"Agent session {SessionId} must reload after a failed event-aware save");
+
+        if (!await FlushPendingTranscriptEvidenceAsync(_session, ct))
+            return false;
 
         var now = Now();
         var transcript = _transcript.BuildFlush(_session, now);

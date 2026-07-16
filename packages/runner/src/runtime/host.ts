@@ -10,6 +10,7 @@ import "../core/prompt-registry.js"
 import { WorkspaceManager } from "./workspace.js"
 import { WorkspaceRegistry } from "./workspace-registry.js"
 import { SessionCommandJournal } from "./session-command-journal.js"
+import { FollowupFailureOutbox } from "../server/followup-failure-outbox.js"
 import { ConvergenceBackstop, ServerConnectionConvergenceAdapter } from "./cleanup-convergence.js"
 import { CleanupLoop, DefaultCleanupRunner } from "./cleanup-loop.js"
 import { WorkExecutor } from "./executor.js"
@@ -86,6 +87,7 @@ export class RunnerHost {
   private readonly workspace: WorkspaceManager
   private readonly workspaceRegistry: WorkspaceRegistry
   private readonly sessionCommandJournal: SessionCommandJournal
+  private readonly followupFailureOutbox: FollowupFailureOutbox
   private readonly convergence: ConvergenceBackstop
   private readonly cleanupLoop: CleanupLoop
   private readonly cleanupConvergenceIntervalMs: number
@@ -133,6 +135,7 @@ export class RunnerHost {
     // RemoveWorkspace entry-removal hook).
     this.workspaceRegistry = new WorkspaceRegistry(options.runnerRoot)
     this.sessionCommandJournal = new SessionCommandJournal(options.runnerRoot)
+    this.followupFailureOutbox = new FollowupFailureOutbox(options.runnerRoot)
     this.convergence = new ConvergenceBackstop(
       this.workspaceRegistry,
       new ServerConnectionConvergenceAdapter(this.connection),
@@ -152,6 +155,7 @@ export class RunnerHost {
         onReconnected: () => this.onDispatchReconnected(),
         serverConnection: this.connection,
         followupTargetResolver: (target) => this.resolveFollowupTarget(target),
+        followupFailureOutbox: this.followupFailureOutbox,
         sessionCommandHandler: (request) => this.handleSessionCommand(request),
         sessionCommandJournal: this.sessionCommandJournal,
         reconcileStartedSessionCommand: (request) => this.reconcileStartedSessionCommand(request),
@@ -230,6 +234,7 @@ export class RunnerHost {
     binding: NonNullable<SessionTarget["binding"]>,
     sharedConnection: SharedAcpConnection,
   ): Promise<RestoreResult> {
+    if (binding.workDir === null) return null
     const previous = this.sessionManager.get(key)
     if (previous && previous.sessionId !== binding.runtimeSessionId) {
       this.sessionManager.delete(key)

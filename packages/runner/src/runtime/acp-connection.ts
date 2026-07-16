@@ -10,7 +10,7 @@ export interface RuntimeSessionBinding {
   runtime: string
   runtimeSessionId: string
   runnerId: string
-  workDir: string
+  workDir: string | null
 }
 
 export type SessionTarget =
