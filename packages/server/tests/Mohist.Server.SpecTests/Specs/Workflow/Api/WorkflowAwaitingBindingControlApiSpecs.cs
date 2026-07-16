@@ -8,6 +8,7 @@ using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Issue.Grains;
+using Mohist.Server.Project.Domain;
 using Mohist.Server.Project.Grains;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.Workflow.Domain.Run;
@@ -73,8 +74,15 @@ public sealed class WorkflowAwaitingBindingControlApiSpecs
     {
         var projectId = $"proj-awaiting-binding-{Guid.NewGuid():N}";
         var project = _grains.GetGrain<IProjectGrain>(projectId);
-        await project.CreateAsync($"awaiting-binding-{Guid.NewGuid():N}");
-        await project.AddRepositoryAsync("origin", "git@example.com:awaiting-binding.git", "main");
+        await project.CreateAsync(
+            $"awaiting-binding-{Guid.NewGuid():N}",
+            new RepositoryInfo
+            {
+                Name = "origin",
+                GitUrl = "git@example.com:awaiting-binding.git",
+                BaseBranch = "main",
+                IsDefault = true,
+            });
 
         var issueNumber = await _grains.GetGrain<IIssueCounterGrain>(projectId).NextAsync();
         var issueId = $"issue-awaiting-binding-{Guid.NewGuid():N}";

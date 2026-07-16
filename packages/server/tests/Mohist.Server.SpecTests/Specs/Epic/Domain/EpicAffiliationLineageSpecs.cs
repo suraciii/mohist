@@ -116,19 +116,11 @@ public class EpicAffiliationLineageSpecs
 
     private async Task<ProjectDto> CreateProjectAsync()
     {
-        var project = await _client.PostDataAsync<ProjectDto>(
+        return await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>(
             "/api/projects",
-            new { name = $"lineage-{Guid.NewGuid():N}" });
-        await _client.PostOkAsync(
-            $"/api/projects/{project.Id}/repositories",
-            new
-            {
-                name = "main",
-                gitUrl = $"file://{Guid.NewGuid():N}",
-                baseBranch = "main",
-                isDefault = true,
-            });
-        return project;
+            $"lineage-{Guid.NewGuid():N}",
+            repoName: "main",
+            gitUrl: $"file://{Guid.NewGuid():N}");
     }
 
     private Task<IssueDto> CreateIssueAsync(string projectId) =>
