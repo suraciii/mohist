@@ -201,7 +201,7 @@ public class IssueStartReadinessDomainTests
     [Fact]
     public void Start_OnReadyUnblockedIssue_EntersPipeline()
     {
-        var issue = Mohist.Server.Issue.Domain.Issue.Create("issue_1", "project-1", 1, "Build the feature", isDraft: false);
+        var issue = Mohist.Server.Issue.Domain.Issue.Create("project-1", 1, "Build the feature", isDraft: false);
         var now = new DateTime(2026, 6, 5, 1, 10, 0, DateTimeKind.Utc);
 
         issue.Start("wr_1", null, now);
@@ -221,7 +221,7 @@ public class IssueStartReadinessDomainTests
     [Fact]
     public void Start_OnTerminalIssue_ThrowsInvalidOperation_AndDoesNotEnqueue()
     {
-        var issue = Mohist.Server.Issue.Domain.Issue.Create("issue_1", "project-1", 1, "Build the feature", isDraft: false);
+        var issue = Mohist.Server.Issue.Domain.Issue.Create("project-1", 1, "Build the feature", isDraft: false);
         issue.Start("wr_1", null);
         issue.Complete("wr_1");
 
@@ -235,7 +235,7 @@ public class IssueStartReadinessDomainTests
     [Fact]
     public void Start_OnAlreadyRunningIssue_ThrowsInvalidOperation()
     {
-        var issue = Mohist.Server.Issue.Domain.Issue.Create("issue_1", "project-1", 1, "Build the feature", isDraft: false);
+        var issue = Mohist.Server.Issue.Domain.Issue.Create("project-1", 1, "Build the feature", isDraft: false);
         issue.Start("wr_1", null);
 
         Assert.Throws<InvalidOperationException>(() => issue.Start("wr_2", null));
@@ -245,7 +245,7 @@ public class IssueStartReadinessDomainTests
     [Fact]
     public void State_RoundTripsIsDraftForNewIssue()
     {
-        var issue = Mohist.Server.Issue.Domain.Issue.Create("issue_1", "project-1", 1, "Build the feature");
+        var issue = Mohist.Server.Issue.Domain.Issue.Create("project-1", 1, "Build the feature");
 
         var json = IssueStore.Serialize(issue);
         using var document = JsonDocument.Parse(json);
@@ -262,7 +262,6 @@ public class IssueStartReadinessDomainTests
     {
         var legacyJson = """
         {
-          "id": "issue_legacy",
           "projectId": "project-1",
           "number": 42,
           "title": "Legacy issue",
@@ -289,7 +288,7 @@ public class IssueStartReadinessDomainTests
     [Fact]
     public void State_RoundTripsIsDraft_AfterSetDraft()
     {
-        var issue = Mohist.Server.Issue.Domain.Issue.Create("issue_1", "project-1", 1, "Build the feature");
+        var issue = Mohist.Server.Issue.Domain.Issue.Create("project-1", 1, "Build the feature");
         issue.SetDraft(false);
 
         var json = IssueStore.Serialize(issue);
@@ -302,7 +301,7 @@ public class IssueStartReadinessDomainTests
     [Fact]
     public void IsDraft_OrthogonalToStatus_AndMarkingReadyDoesNotChangeStatus()
     {
-        var issue = Mohist.Server.Issue.Domain.Issue.Create("issue_1", "project-1", 1, "Build the feature");
+        var issue = Mohist.Server.Issue.Domain.Issue.Create("project-1", 1, "Build the feature");
         Assert.Equal(Mohist.Server.Issue.Domain.IssueStatus.Backlog, issue.Status);
 
         issue.SetDraft(false);
