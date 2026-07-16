@@ -23,54 +23,58 @@ Agent 侧的消费面（路由表）见 [`event-routing.md`](event-routing.md)�
 
 ## type：事件分类法
 
-`com.mohist.<域>.<事件>`，注册于 `EventCatalog`。`EventCatalog` 从常量表升格为
-**协议注册表**：每个 type 除名字外，还声明它必须携带的 context 属性
-（见下文 conformance）。
+`com.mohist.<域>.<事件>`，注册于 `EventCatalog`。Catalog 只回答有哪些稳定事件 type；
+业务谱系要求由生产者所属的事件族和事件结构决定，不在每个 type 上重复登记一份属性表。
 
 ## source：发射实体
 
-`/mohist/<entity>/<id>`，如 `/mohist/workflow-runs/{runId}`、`/mohist/issues/{issueId}`。
-source 只表达「谁发出」，是实体自我身份；**不承载谱系**。谱系一律走 context 属性，
-不编码进 source 路径——路径强制单一层级和固定顺序，而 Mohist 的实体关系不是纯树
-（issue 的 epic 可选可变，AgentSession 的来源可能是 Workflow 或 Agent）。
+source 使用发射实体的领域身份：`/mohist/workflow-runs/{workflowRunId}`、
+`/mohist/projects/{projectId}/issues/{issueNumber}`、
+`/mohist/projects/{projectId}/epics/{epicNumber}`。Issue 与 Epic 的 Project 作用域是其
+身份的一部分；可变的 Epic 归属、Workflow 来源等业务谱系不编码进 source。
 
 ## context 属性：业务谱系 stamping
 
 ### 规则
 
-1. **生产时印全**：每个事件在产生的那一刻，由 store 层把当时已知的业务谱系印成
-   扁平扩展属性。谱系来自聚合自身状态或已有 annotations（如 run metadata 里的
-   issueId），**不允许生产端为 stamping 发起跨聚合查询**。
-2. **分发端 envelope-only**：matcher 与 handler 只读信封，永不反查业务域。
+1. **生产时印全**：每个事件在产生的那一刻，由 store 层把生产聚合当时持有的业务
+   谱系印成扁平扩展属性。Issue 从自己的 `EpicNumber?` 取值，WorkflowRun 从自己的
+   Issue 上下文取值；**不允许为 stamping 发起跨聚合查询**。
+2. **路由 envelope-only**：matcher 和分发器只读信封，永不反查业务域。领域 reaction
+   handler 可以在执行幂等命令前读取当前聚合状态，但不得改变路由是否命中的结果。
 3. **快照真相**：属性记录的是生产时刻的归属。issue 后来挪了 epic，历史事件不改写。
 4. **准入标准**：凡是值得作为路由维度的业务身份，就提升为信封属性；payload
    （`data`）永不参与路由。
 
 ### 命名
 
-CloudEvents 扩展属性名限小写字母数字。约定：
+CloudEvents 扩展属性名限小写字母数字。业务实体使用其唯一身份对应的最短准确名称：
 
-- **用户可见身份用短名**：`issue`（issue number）。用户写表达式永远用人话身份。
-- **内部 id 带 `id` 后缀**：`issueid`、`epicid`、`workflowrunid`、`agentid`、
-  `sessionid`、`runnerid`、`projectid`。
+- `projectid`：Project 的全局身份；
+- `issue`、`epic`：Project 内的 Issue / Epic 编号，也是它们的领域身份组成部分；
+- `workflowrunid`、`agentid`、`sessionid`、`runnerid`：各自的全局身份。
+
+不同时携带 `issue` + `issueid` 或 `epic` + `epicid`。Issue 与 Epic 没有第二套内部 id，
+因此也没有 `issueno` / `epicno` 别名。
 
 ### Stamping 矩阵
 
-| 事件族 | projectid | epicid | issue / issueid | workflowrunid | agentid | sessionid | runnerid |
+| 事件族 | projectid | epic | issue | workflowrunid | agentid | sessionid | runnerid |
 |---|---|---|---|---|---|---|---|
 | `workflow.*` | ✅ | 如有 | 如有 | ✅ | – | – | – |
 | `issue.*` | ✅ | 如有 | ✅ | – | – | – | – |
 | `epic.*` | ✅ | ✅ | – | – | – | – | – |
-| `agent-session.*` | ✅ | – | 如 Workflow 来源 | 如 Workflow 来源 | 如 Agent 来源 | ✅ | – |
+| `agent-session.*` | ✅ | 如 Workflow 来源且有 | 如 Workflow 来源 | 如 Workflow 来源 | 如 Agent 来源 | ✅ | – |
 | `runner.*` | 如有 | – | – | – | – | – | ✅ |
+| `inbox.item-persisted` | ✅ | 原事件如有 | ✅ | 原事件如有 | – | – | – |
 
 「如有」= 生产时该归属存在则必印，不存在则省略（不印空值）。
 
-`workflow.stage.*`、`workflow.task.*`、`workflow.check.*` 事件另印 `stage`
-（阶段名）——渲染占位符 `{{event.stage}}` 依赖它，不再从 `data` 解析。
+任何结构化携带 Stage 的 Workflow 事件都另印 `stage`（包括 `workflow.stage.*`、
+`workflow.task.*`、`workflow.check.*` 与 `workflow.feedback.requested`）——渲染占位符
+`{{event.stage}}` 依赖它，不再从 `data` 解析。
 
-`subject` 保留 CloudEvents 原义，不作为路由依据；issue 事件现有的
-`subject = issue number` 维持兼容，不再扩展。
+`subject` 保留 CloudEvents 原义，不作为路由依据。
 
 ## 匹配表达式（CEL 子集）
 
@@ -101,7 +105,7 @@ string     := 双引号字符串字面量
 event.type.startsWith("com.mohist.workflow.") && event.issue == "42"
 event.type == "com.mohist.workflow.run.failed" && event.stage != "plan"
 event.issue in ["42", "43"]
-event.type == "com.mohist.issue.completed" && has(event.epicid)
+event.type == "com.mohist.issue.completed" && has(event.epic)
 ```
 
 ### 语义
@@ -134,17 +138,22 @@ event.type == "com.mohist.issue.completed" && has(event.epicid)
 
 ## Conformance
 
-- `EventCatalog` 为每个 type 声明必印属性集合；
-- 一组 spec 测试遍历所有事件生产路径，断言实际信封满足声明——新增事件忘印谱系
-  时测试即红；
+- `EventCatalog` 只维护事件 type，不承担第二份谱系矩阵；
+- 生产规则按聚合事件族定义：WorkflowRun、Issue、Epic、AgentSession、Runner 各有一组
+  基础必填上下文；Inbox 派生事件继承原事件上下文；`stage` 由事件是否结构化携带 Stage
+  决定，而不是手列 type 名称；
+- 一组 spec 测试遍历每个实际事件生产路径，按生产者事件族和事件结构断言信封。新增
+  producer 或新增可发射事件忘印谱系时测试即红，不需要 `CatalogOnlyTypes` 例外名单；
 - 表达式求值器有独立 conformance 测试集（语法、缺失属性、正则超时、确定性）。
 
 ## 实装差距
 
-当前代码与本协议的差距，由事件路由 epic 推进：
+当前代码与本协议的差距由 issue #412 推进：
 
-- `projectid` 已普遍印制；`issueid` 仅 workflow / issue 事件有；`issue`（number）、
-  `epicid`、`workflowrunid` 等均未印。
+- Issue / Epic 仍同时维护随机 id 与 number，事件仍使用 `issueid`、`epicid`、
+  `issueno`、`epicno` 等旧属性；
+- Epic 关联关系尚未收敛到 Issue.`EpicNumber?`，WorkflowRun 也尚未使用精简的 Issue
+  上下文；
 - 订阅过滤为三个固定字段（Type 通配 + Source/Subject 精确），表达式未实装；
   `[Subscription]` 当前的 Type glob 语法见 [`eventbus.md`](eventbus.md) 的实装差距小节。
-- `EventCatalog` 仍是纯常量表，无必印属性声明与 conformance 测试。
+- 生产路径 conformance 测试尚未覆盖全部事件族。

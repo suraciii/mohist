@@ -146,8 +146,8 @@ Mohist 向 `WebhookUrl` POST JSON（camelCase，遵循 CloudEvents/web 惯例）
   "sourceEventId": "evt_123",
   "occurredAt": "2026-07-03T12:01:00+00:00",
   "projectId": "proj_123",
-  "issueId": "issue_123",
   "issueNumber": 42,
+  "epicNumber": 7,
   "issueTitle": "Add login rate limiting",
   "workflowRunId": "wr_123",
   "stage": "plan",
@@ -158,6 +158,7 @@ Mohist 向 `WebhookUrl` POST JSON（camelCase，遵循 CloudEvents/web 惯例）
 ```
 
 - `body` — 预渲染的消息文本（按通知种类措辞，使用 Mohist 配置的语言）。默认 Hermes `{body}` 模板消费的就是它；其余字段供自定义模板或未来渠道使用。
+- `epicNumber` — Issue 当前无 Epic 归属时省略。
 - `failureReason` — 只在 `workflow_failed` 时有值，只带简短原因，永不携带堆栈。
 - `suggestedAction` — 总是携带 issue 编号。
 
