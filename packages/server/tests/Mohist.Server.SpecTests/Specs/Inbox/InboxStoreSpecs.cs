@@ -19,7 +19,6 @@ public class InboxStoreSpecs
 
         var result = await store.InsertAsync(new InboxItemDraft(
             ProjectId: "proj_a",
-            IssueId: "issue_42",
             IssueNumber: 42,
             IssueTitle: "Hello",
             NotificationKind: NotificationKinds.WorkflowFailed,
@@ -34,7 +33,6 @@ public class InboxStoreSpecs
         var row = Assert.Single(db.InboxItems);
         Assert.Equal(result.Id, row.Id);
         Assert.Equal("proj_a", row.ProjectId);
-        Assert.Equal("issue_42", row.IssueId);
         Assert.Equal(42, row.IssueNumber);
         Assert.Equal("Hello", row.IssueTitle);
         Assert.Equal(NotificationKinds.WorkflowFailed, row.NotificationKind);
@@ -54,7 +52,6 @@ public class InboxStoreSpecs
 
         var first = await store.InsertAsync(new InboxItemDraft(
             ProjectId: "proj_a",
-            IssueId: "issue_42",
             IssueNumber: 42,
             IssueTitle: "Hello",
             NotificationKind: NotificationKinds.WorkflowFailed,
@@ -63,7 +60,6 @@ public class InboxStoreSpecs
 
         var second = await store.InsertAsync(new InboxItemDraft(
             ProjectId: "proj_a",
-            IssueId: "issue_42",
             IssueNumber: 42,
             IssueTitle: "Hello (replayed)",
             NotificationKind: NotificationKinds.WorkflowFailed,
@@ -90,7 +86,6 @@ public class InboxStoreSpecs
 
         var first = await store.InsertAsync(new InboxItemDraft(
             ProjectId: "proj_a",
-            IssueId: "issue_42",
             IssueNumber: 42,
             IssueTitle: "Hello",
             NotificationKind: NotificationKinds.WorkflowFailed,
@@ -99,7 +94,6 @@ public class InboxStoreSpecs
 
         var second = await store.InsertAsync(new InboxItemDraft(
             ProjectId: "proj_b",
-            IssueId: "issue_99",
             IssueNumber: 99,
             IssueTitle: "Other",
             NotificationKind: NotificationKinds.ApprovalRequested,
@@ -124,7 +118,6 @@ public class InboxStoreSpecs
 
         await Assert.ThrowsAsync<ArgumentException>(() => store.InsertAsync(new InboxItemDraft(
             ProjectId: "proj_a",
-            IssueId: "issue_42",
             IssueNumber: 42,
             IssueTitle: "Hello",
             NotificationKind: "workflow.paused",
@@ -315,7 +308,6 @@ public class InboxStoreSpecs
     private static InboxItemDraft Draft(string projectId, string issueId, int number, string sourceEventId) =>
         new(
             ProjectId: projectId,
-            IssueId: issueId,
             IssueNumber: number,
             IssueTitle: $"Issue {number}",
             NotificationKind: NotificationKinds.WorkflowFailed,

@@ -421,7 +421,6 @@ public class InboxApiSpecs
         var store = scope.ServiceProvider.GetRequiredService<InboxStore>();
         var result = await store.InsertAsync(new InboxItemDraft(
             ProjectId: projectId,
-            IssueId: issueId,
             IssueNumber: issueNumber,
             IssueTitle: title,
             NotificationKind: notificationKind,
