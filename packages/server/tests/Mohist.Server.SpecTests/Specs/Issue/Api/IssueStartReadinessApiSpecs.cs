@@ -285,16 +285,15 @@ public class IssueStartReadinessApiSpecs
     {
         using var response = await _client.PostAsJsonAsync(
             "/api/projects",
-            new { name = $"readiness-{Guid.NewGuid():N}" },
+            new
+            {
+                name = $"readiness-{Guid.NewGuid():N}",
+                repository = new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main" },
+            },
             JsonOptions);
         response.EnsureSuccessStatusCode();
         var envelope = await response.Content.ReadFromJsonAsync<ApiEnvelope<ProjectResponse>>(JsonOptions);
         var project = envelope!.Data!;
-        using var repoResponse = await _client.PostAsJsonAsync(
-            $"/api/projects/{project.Id}/repositories",
-            new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true },
-            JsonOptions);
-        repoResponse.EnsureSuccessStatusCode();
         return project;
     }
 

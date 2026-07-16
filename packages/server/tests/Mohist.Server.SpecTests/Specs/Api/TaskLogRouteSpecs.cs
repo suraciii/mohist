@@ -29,9 +29,9 @@ public class TaskLogRouteSpecs
 
     private async Task<string> CreateProjectAsync(string prefix)
     {
-        var project = await _fixture.Client.PostDataAsync<JsonElement>(
+        var project = await _fixture.Client.CreateProjectWithDefaultRepositoryAsync<JsonElement>(
             "/api/projects",
-            new { name = $"{prefix}-{Guid.NewGuid():N}" });
+            $"{prefix}-{Guid.NewGuid():N}");
         return project.GetProperty("id").GetString()!;
     }
 
@@ -44,7 +44,7 @@ public class TaskLogRouteSpecs
                 name = "main",
                 gitUrl = $"file://{Guid.NewGuid():N}",
                 baseBranch = "main",
-                isDefault = true,
+                setDefault = true,
             });
     }
 

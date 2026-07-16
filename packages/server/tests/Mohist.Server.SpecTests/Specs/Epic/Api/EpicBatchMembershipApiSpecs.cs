@@ -413,8 +413,8 @@ public class EpicBatchMembershipApiSpecs
 
     private async Task<ProjectDto> CreateProjectAsync()
     {
-        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"epic-batch-{Guid.NewGuid():N}" });
-        await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
+        var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", $"epic-batch-{Guid.NewGuid():N}");
+        await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", setDefault = true });
         return project;
     }
 

@@ -637,20 +637,15 @@ public class GenericAgentSessionTranscriptAxisSpecs : IAsyncLifetime
     {
         var projectName = $"generic-transcript-{Guid.NewGuid():N}";
         if (projectName.Length > 63) projectName = projectName[..63];
-        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new
-        {
-            name = projectName,
-            path = "/mohist-tests/projects/generic-transcript",
-            baseBranch = "main",
-        });
+        var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", projectName);
         await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new
         {
             name = "main",
             gitUrl = $"file://{Guid.NewGuid():N}",
             baseBranch = "main",
-            isDefault = true,
+            setDefault = true,
         });
-        return new ProjectRef(project.Id, project.Path);
+        return new ProjectRef(project.Id);
     }
 
     private async Task<AgentRef> CreateAgentAsync(string projectId, string agentName)
@@ -688,7 +683,7 @@ public class GenericAgentSessionTranscriptAxisSpecs : IAsyncLifetime
         string Stage,
         IReadOnlyList<string> EventTypes);
 
-    private sealed record ProjectDto(string Id, string Name, string Path, string BaseBranch);
-    private sealed record ProjectRef(string Id, string Path);
+    private sealed record ProjectDto(string Id, string Name);
+    private sealed record ProjectRef(string Id);
     private sealed record AgentRef(string Id, string Name);
 }

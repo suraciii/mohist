@@ -1580,25 +1580,16 @@ public class IssueMetricsApiSpecs
     private async Task<ProjectDto> CreateProjectAsync(string name)
     {
         using var response = await _client.PostAsJsonAsync(
-            "/api/projects", new { name }, JsonOptions);
+            "/api/projects",
+            new
+            {
+                name,
+                repository = new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "trunk" },
+            },
+            JsonOptions);
         response.EnsureSuccessStatusCode();
         var project = await ReadDataAsync<ProjectDto>(response);
 
-        // Projects have no default repository by default, but the
-        // issue create endpoint requires a resolvable repository.
-        // Add one with a unique git URL per test to keep tests
-        // independent of shared state.
-        using var repoResponse = await _client.PostAsJsonAsync(
-            $"/api/projects/{project.Id}/repositories",
-            new
-            {
-                name = "main",
-                gitUrl = $"file://{Guid.NewGuid():N}",
-                baseBranch = "trunk",
-                isDefault = true,
-            },
-            JsonOptions);
-        repoResponse.EnsureSuccessStatusCode();
         return project;
     }
 

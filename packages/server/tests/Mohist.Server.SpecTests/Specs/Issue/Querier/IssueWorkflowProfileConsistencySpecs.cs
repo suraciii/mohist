@@ -36,14 +36,8 @@ public class IssueWorkflowProfileConsistencySpecs
     {
         using var scope = _fixture.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-        var project = new ProjectInfo { Id = $"proj-wfp-default-{Guid.NewGuid():N}", Name = "Default Project" };
-        await db.Projects.AddAsync(new Mohist.Server.Infrastructure.Data.Project.ProjectRow
-        {
-            Id = project.Id,
-            Name = project.Name,
-            CreatedAt = TestTime.UtcDateTime,
-            UpdatedAt = TestTime.UtcDateTime,
-        });
+        var project = NewProject($"proj-wfp-default-{Guid.NewGuid():N}", "Default Project");
+        await db.Projects.AddAsync(NewProjectRow(project));
         var issue = new Mohist.Server.Issue.Domain.Issue
         {
             Id = $"issue_wfp_default_{Guid.NewGuid():N}",
@@ -76,14 +70,8 @@ public class IssueWorkflowProfileConsistencySpecs
     {
         using var scope = _fixture.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-        var project = new ProjectInfo { Id = $"proj-wfp-pr-{Guid.NewGuid():N}", Name = "PR Project" };
-        await db.Projects.AddAsync(new Mohist.Server.Infrastructure.Data.Project.ProjectRow
-        {
-            Id = project.Id,
-            Name = project.Name,
-            CreatedAt = TestTime.UtcDateTime,
-            UpdatedAt = TestTime.UtcDateTime,
-        });
+        var project = NewProject($"proj-wfp-pr-{Guid.NewGuid():N}", "PR Project");
+        await db.Projects.AddAsync(NewProjectRow(project));
         var issue = new Mohist.Server.Issue.Domain.Issue
         {
             Id = $"issue_wfp_pr_{Guid.NewGuid():N}",
@@ -117,14 +105,8 @@ public class IssueWorkflowProfileConsistencySpecs
     {
         using var scope = _fixture.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-        var project = new ProjectInfo { Id = $"proj-wfp-list-{Guid.NewGuid():N}", Name = "List Project" };
-        await db.Projects.AddAsync(new Mohist.Server.Infrastructure.Data.Project.ProjectRow
-        {
-            Id = project.Id,
-            Name = project.Name,
-            CreatedAt = TestTime.UtcDateTime,
-            UpdatedAt = TestTime.UtcDateTime,
-        });
+        var project = NewProject($"proj-wfp-list-{Guid.NewGuid():N}", "List Project");
+        await db.Projects.AddAsync(NewProjectRow(project));
         var issue = new Mohist.Server.Issue.Domain.Issue
         {
             Id = $"issue_wfp_list_{Guid.NewGuid():N}",
@@ -158,14 +140,8 @@ public class IssueWorkflowProfileConsistencySpecs
     {
         using var scope = _fixture.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-        var project = new ProjectInfo { Id = $"proj-wfp-agree-{Guid.NewGuid():N}", Name = "Agree Project" };
-        await db.Projects.AddAsync(new Mohist.Server.Infrastructure.Data.Project.ProjectRow
-        {
-            Id = project.Id,
-            Name = project.Name,
-            CreatedAt = TestTime.UtcDateTime,
-            UpdatedAt = TestTime.UtcDateTime,
-        });
+        var project = NewProject($"proj-wfp-agree-{Guid.NewGuid():N}", "Agree Project");
+        await db.Projects.AddAsync(NewProjectRow(project));
         var issue = new Mohist.Server.Issue.Domain.Issue
         {
             Id = $"issue_wfp_agree_{Guid.NewGuid():N}",
@@ -202,14 +178,8 @@ public class IssueWorkflowProfileConsistencySpecs
     {
         using var scope = _fixture.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-        var project = new ProjectInfo { Id = $"proj-wfp-unknown-{Guid.NewGuid():N}", Name = "Unknown Project" };
-        await db.Projects.AddAsync(new Mohist.Server.Infrastructure.Data.Project.ProjectRow
-        {
-            Id = project.Id,
-            Name = project.Name,
-            CreatedAt = TestTime.UtcDateTime,
-            UpdatedAt = TestTime.UtcDateTime,
-        });
+        var project = NewProject($"proj-wfp-unknown-{Guid.NewGuid():N}", "Unknown Project");
+        await db.Projects.AddAsync(NewProjectRow(project));
         // Manually craft state so we can simulate a legacy/corrupted row
         // pointing at an id that is not in the registry. The aggregate
         // setter normalizes whitespace but otherwise stores any string.
@@ -246,14 +216,8 @@ public class IssueWorkflowProfileConsistencySpecs
     {
         using var scope = _fixture.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-        var project = new ProjectInfo { Id = $"proj-wfp-none-{Guid.NewGuid():N}", Name = "No Enabled Project" };
-        await db.Projects.AddAsync(new ProjectRow
-        {
-            Id = project.Id,
-            Name = project.Name,
-            CreatedAt = TestTime.UtcDateTime,
-            UpdatedAt = TestTime.UtcDateTime,
-        });
+        var project = NewProject($"proj-wfp-none-{Guid.NewGuid():N}", "No Enabled Project");
+        await db.Projects.AddAsync(NewProjectRow(project));
         db.ProjectWorkflowProfiles.Add(new ProjectWorkflowProfile
         {
             ProjectId = project.Id,
@@ -290,4 +254,29 @@ public class IssueWorkflowProfileConsistencySpecs
         var item = Assert.Single(list);
         Assert.Null(item.WorkflowProfileId);
     }
+
+    private static ProjectInfo NewProject(string id, string name) => new()
+    {
+        Id = id,
+        Name = name,
+        Repositories =
+        [
+            new Mohist.Server.Project.Domain.RepositoryInfo
+            {
+                Name = "test-repo",
+                GitUrl = "git@example.com:test-repo.git",
+                BaseBranch = "main",
+                IsDefault = true,
+            },
+        ],
+    };
+
+    private static ProjectRow NewProjectRow(ProjectInfo project) => new()
+    {
+        Id = project.Id,
+        Name = project.Name,
+        RepositoriesJson = """[{"name":"test-repo","gitUrl":"git@example.com:test-repo.git","baseBranch":"main","isDefault":true}]""",
+        CreatedAt = TestTime.UtcDateTime,
+        UpdatedAt = TestTime.UtcDateTime,
+    };
 }

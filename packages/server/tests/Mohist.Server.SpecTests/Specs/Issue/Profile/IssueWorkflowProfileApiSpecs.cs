@@ -46,9 +46,9 @@ public class IssueWorkflowProfileApiSpecs : IAsyncLifetime
     [Fact]
     public async Task GetWorkflowProfileYaml_ReturnsNormalizedYaml_ForBacklogIssue()
     {
-        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"profile-get-{Guid.NewGuid():N}" });
+        var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", $"profile-get-{Guid.NewGuid():N}");
 
-        await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
+        await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", setDefault = true });
         var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Backlog issue for profile get", projectId = project.Id });
 
         var response = await _client.GetAsync($"/api/projects/{project.Id}/issues/{issue.Number}/workflow-profile");
@@ -66,9 +66,9 @@ public class IssueWorkflowProfileApiSpecs : IAsyncLifetime
     [Fact]
     public async Task GetWorkflowProfileYaml_ExposesTemplateSourceLabel_ForInheritedProjectAndCustomModes()
     {
-        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"profile-source-{Guid.NewGuid():N}" });
+        var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", $"profile-source-{Guid.NewGuid():N}");
 
-        await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
+        await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", setDefault = true });
         var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Backlog issue for template source", projectId = project.Id });
 
         var initial = await _client.GetAsync($"/api/projects/{project.Id}/issues/{issue.Number}/workflow-profile");
@@ -123,9 +123,9 @@ public class IssueWorkflowProfileApiSpecs : IAsyncLifetime
     [Fact]
     public async Task SaveWorkflowProfileYaml_UpdatesIssueProfile_WithoutMutatingProjectProfile()
     {
-        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"profile-save-{Guid.NewGuid():N}" });
+        var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", $"profile-save-{Guid.NewGuid():N}");
 
-        await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
+        await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", setDefault = true });
         var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Backlog issue for profile save", projectId = project.Id });
 
         var customYaml = """
@@ -175,9 +175,9 @@ public class IssueWorkflowProfileApiSpecs : IAsyncLifetime
     [Fact]
     public async Task SaveWorkflowProfileYaml_RejectsInvalidYamlSyntax()
     {
-        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"profile-yaml-err-{Guid.NewGuid():N}" });
+        var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", $"profile-yaml-err-{Guid.NewGuid():N}");
 
-        await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
+        await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", setDefault = true });
         var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Backlog issue for yaml error", projectId = project.Id });
 
         var invalidYaml = """
@@ -209,9 +209,9 @@ public class IssueWorkflowProfileApiSpecs : IAsyncLifetime
     [Fact]
     public async Task SaveWorkflowProfileYaml_RejectsInvalidWorkflowShape()
     {
-        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"profile-shape-err-{Guid.NewGuid():N}" });
+        var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", $"profile-shape-err-{Guid.NewGuid():N}");
 
-        await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
+        await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", setDefault = true });
         var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Backlog issue for shape error", projectId = project.Id });
 
         var invalidShapeYaml = """
@@ -236,9 +236,9 @@ public class IssueWorkflowProfileApiSpecs : IAsyncLifetime
     [Fact]
     public async Task SaveWorkflowProfileYaml_SynchronizesActiveRunProfile_AndPreservesInitializedStageWork()
     {
-        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"profile-sync-{Guid.NewGuid():N}" });
+        var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", $"profile-sync-{Guid.NewGuid():N}");
 
-        await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
+        await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", setDefault = true });
         await UseNoArtifactTemplateAsync(project.Id);
         var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Active run profile sync issue", projectId = project.Id, isDraft = false });
         await StartWorkflowWithRunnerAsync(project.Id, issue.Number, $"profile-sync-runner-{Guid.NewGuid():N}");

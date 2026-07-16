@@ -10,8 +10,9 @@ Server SHALL provide RESTful project management APIs. API handlers SHALL operate
 - **AND** each project response SHALL NOT include `path`, `effectivePath`, or local checkout fields
 
 #### Scenario: 创建项目
-- **WHEN** CLI 请求 `POST /api/projects` with `{ name }`
+- **WHEN** CLI 请求 `POST /api/projects` with `{ name, repository: { name, gitUrl, baseBranch } }`
 - **THEN** 通过 ProjectService 创建新项目
+- **AND** the API SHALL create the initial repository in the same operation and mark it as the default
 - **AND** the API SHALL NOT require `path`
 - **AND** the returned project SHALL NOT include `path`, `effectivePath`, or local checkout fields
 
@@ -64,13 +65,18 @@ Server SHALL provide RESTful project management APIs. API handlers SHALL operate
 ## ADDED Requirements
 
 ### Requirement: Repository APIs require Git URL
-Repository management APIs SHALL require `gitUrl` for repository create and update operations. Repository request and response contracts SHALL use `gitUrl`, `baseBranch`, `name`, and `isDefault`, and SHALL NOT accept or return `path`, `remote`, `resolvedPath`, or equivalent local checkout fields.
+Repository creation SHALL require `gitUrl`; repository metadata updates SHALL accept one or both of `gitUrl` and `baseBranch`. Creation requests SHALL use `setDefault: true` only when selecting the newly added repository. Repository responses SHALL expose the server-derived `isDefault` value, and clients SHALL NOT provide `isDefault`. Repository request and response contracts SHALL NOT accept or return `path`, `remote`, `resolvedPath`, or equivalent local checkout fields.
 
 #### Scenario: Create repository with Git URL
-- **WHEN** a client requests repository creation with `{ name, gitUrl, baseBranch, isDefault }`
+- **WHEN** a client requests repository creation with `{ name, gitUrl, baseBranch, setDefault? }`
 - **THEN** the API SHALL create the repository reference
 - **AND** the response SHALL include `gitUrl` and `baseBranch`
 - **AND** the response SHALL NOT include local path fields
+
+#### Scenario: Reject an invalid default-selection control
+- **WHEN** a client supplies `isDefault`, `setDefault: false`, or `setDefault: null` in a repository mutation request
+- **THEN** the API SHALL return a 400-class validation error
+- **AND** the repository declaration and default selection SHALL remain unchanged
 
 #### Scenario: Reject path-only repository request
 - **WHEN** a client requests repository creation or update with `path` and without `gitUrl`

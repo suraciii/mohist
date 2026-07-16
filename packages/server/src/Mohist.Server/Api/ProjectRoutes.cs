@@ -6,6 +6,7 @@ using Mohist.Server.Project.Domain;
 using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Services;
 using System.Text.Json;
+using RepositoryPolicy = Mohist.Server.Project.Domain.RepositoryPolicy;
 
 namespace Mohist.Server.Api;
 
@@ -29,19 +30,60 @@ public static class ProjectRoutes
             if (!ProjectName.TryNormalize(req.Name, out var projectName, out var nameError))
                 return ApiResults.BadRequest(nameError!, "invalid_project_name");
 
+            if (req.Repository is null)
+                return ApiResults.BadRequest("repository is required", "repository_required");
+
+            if (TryGetForbiddenLocalRepositoryField(
+                    req.Repository.Path,
+                    req.Repository.Remote,
+                    req.Repository.ResolvedPath,
+                    out var forbiddenField))
+            {
+                return ApiResults.BadRequest(
+                    $"repository.{forbiddenField} is not accepted; repositories declare Git addresses only",
+                    "repository_local_field_forbidden");
+            }
+
+            if (IsSupplied(req.Repository.IsDefault))
+                return ApiResults.BadRequest("repository.isDefault is derived by the server", "repository_initial_default_forbidden");
+
+            if (IsSupplied(req.Repository.SetDefault))
+                return ApiResults.BadRequest("repository.setDefault is not accepted during project creation", "repository_initial_default_forbidden");
+
+            if (string.IsNullOrWhiteSpace(req.Repository.Name))
+                return ApiResults.BadRequest("repository.name is required", "repository_name_required");
+
+            if (string.IsNullOrWhiteSpace(req.Repository.GitUrl))
+                return ApiResults.BadRequest("repository.gitUrl is required", "repository_giturl_required");
+
             if (await projectsQuery.ExistsAsync(projectName))
                 return ApiResults.Conflict($"Project '{projectName}' already exists");
 
             var id = $"proj_{Guid.NewGuid():N}";
             var projectGrain = grains.GetGrain<IProjectGrain>(id);
+
+            var initial = new RepositoryInfo
+            {
+                Name = req.Repository.Name,
+                GitUrl = req.Repository.GitUrl,
+                BaseBranch = string.IsNullOrWhiteSpace(req.Repository.BaseBranch)
+                    ? RepositoryPolicy.DefaultBaseBranch
+                    : req.Repository.BaseBranch,
+                IsDefault = true,
+            };
+
             try
             {
-                var project = await projectGrain.CreateAsync(projectName);
+                var project = await projectGrain.CreateAsync(projectName, initial);
                 return Results.Json(new { success = true, data = project }, statusCode: 201);
             }
             catch (InvalidOperationException ex)
             {
                 return ApiResults.Conflict(ex.Message);
+            }
+            catch (ArgumentException ex)
+            {
+                return ApiResults.BadRequest(ex.Message, "invalid_initial_repository");
             }
         });
 
@@ -87,8 +129,21 @@ public static class ProjectRoutes
 
         byRef.MapPost("/repositories", async (HttpContext context, AddRepositoryRequest req, IGrainFactory grains) =>
         {
+            if (TryGetForbiddenLocalRepositoryField(req.Path, req.Remote, req.ResolvedPath, out var forbiddenField))
+            {
+                return ApiResults.BadRequest(
+                    $"{forbiddenField} is not accepted; repositories declare Git addresses only",
+                    "repository_local_field_forbidden");
+            }
+
+            if (IsSupplied(req.IsDefault))
+                return ApiResults.BadRequest("isDefault is derived by the server; use setDefault instead", "repository_default_forbidden");
+
+            if (IsSupplied(req.SetDefault) && req.SetDefault.ValueKind != JsonValueKind.True)
+                return ApiResults.BadRequest("setDefault must be true when supplied", "repository_default_selection_invalid");
+
             if (string.IsNullOrWhiteSpace(req.Name))
-                return ApiResults.BadRequest("name is required");
+                return ApiResults.BadRequest("name is required", "repository_name_required");
             if (string.IsNullOrWhiteSpace(req.GitUrl))
                 return ApiResults.BadRequest("gitUrl is required", "repository_giturl_required");
 
@@ -96,7 +151,11 @@ public static class ProjectRoutes
             var projectGrain = grains.GetGrain<IProjectGrain>(project.Id);
             try
             {
-                var updated = await projectGrain.AddRepositoryAsync(req.Name, req.GitUrl, req.BaseBranch, req.IsDefault);
+                var updated = await projectGrain.AddRepositoryAsync(
+                    req.Name,
+                    req.GitUrl,
+                    req.BaseBranch,
+                    req.SetDefault.ValueKind == JsonValueKind.True);
                 return updated is not null
                     ? Results.Json(new { success = true, data = updated }, statusCode: 201)
                     : ApiResults.NotFound("Project not found");
@@ -105,6 +164,12 @@ public static class ProjectRoutes
             {
                 return ApiResults.Conflict(ex.Message);
             }
+            catch (ArgumentException ex)
+            {
+                if (TryGetRepositoryNameError(ex, req.Name, out var conflictMessage))
+                    return ApiResults.Conflict(conflictMessage!, "repository_name_conflict");
+                return ApiResults.BadRequest(ex.Message);
+            }
         });
 
         byRef.MapPatch("/repositories/{repoName}", async (HttpContext context, string repoName, UpdateRepositoryRequest req, IGrainFactory grains) =>
@@ -112,38 +177,70 @@ public static class ProjectRoutes
             var project = context.GetResolvedProject();
             var projectGrain = grains.GetGrain<IProjectGrain>(project.Id);
 
-            if (req.SetDefault == true)
+            if (TryGetForbiddenLocalRepositoryField(req.Path, req.Remote, req.ResolvedPath, out var forbiddenField))
             {
-                var updated = await projectGrain.SetDefaultRepositoryAsync(repoName);
-                return updated is not null ? ApiResults.Ok(updated) : ApiResults.NotFound("Project or repository not found");
+                return ApiResults.BadRequest(
+                    $"{forbiddenField} is not accepted; repositories declare Git addresses only",
+                    "repository_local_field_forbidden");
             }
 
-            var hasUpdateFields = !string.IsNullOrWhiteSpace(req.NewName)
-                || !string.IsNullOrWhiteSpace(req.GitUrl)
-                || req.BaseBranch is not null
-                || req.IsDefault is not null;
+            if (IsSupplied(req.NewName))
+                return ApiResults.BadRequest("Repository names are immutable", "repository_name_immutable");
 
-            if (!hasUpdateFields)
-                return ApiResults.BadRequest("No action specified");
+            if (IsSupplied(req.IsDefault))
+                return ApiResults.BadRequest("isDefault is derived by the server; use setDefault instead", "repository_default_forbidden");
 
-            if (req.IsDefault == false)
+            if (IsSupplied(req.SetDefault) && req.SetDefault.ValueKind != JsonValueKind.True)
+                return ApiResults.BadRequest("setDefault must be true when supplied", "repository_default_selection_invalid");
+
+            if (req.GitUrl is not null && string.IsNullOrWhiteSpace(req.GitUrl))
+                return ApiResults.BadRequest("gitUrl must be a non-empty string", "repository_giturl_required");
+
+            var setDefault = req.SetDefault.ValueKind == JsonValueKind.True;
+            var hasMetadataUpdate = req.GitUrl is not null || req.BaseBranch is not null;
+
+            if (setDefault && hasMetadataUpdate)
+                return ApiResults.BadRequest(
+                    "setDefault cannot be combined with repository metadata updates",
+                    "repository_patch_mixed_scope");
+
+            if (setDefault)
             {
-                return ApiResults.BadRequest("Use explicit default assignment; clearing default is not supported via this endpoint");
+                try
+                {
+                    var updated = await projectGrain.SetDefaultRepositoryAsync(repoName);
+                    return updated is not null
+                        ? ApiResults.Ok(updated)
+                        : ApiResults.NotFound($"Repository '{repoName}' not found in project '{project.Id}'");
+                }
+                catch (ArgumentException ex)
+                {
+                    return ApiResults.BadRequest(ex.Message);
+                }
             }
+
+            if (!hasMetadataUpdate)
+                return ApiResults.BadRequest(
+                    "Provide gitUrl and/or baseBranch to update repository metadata",
+                    "repository_update_empty");
 
             try
             {
                 var updated = await projectGrain.UpdateRepositoryAsync(
                     repoName,
-                    newName: req.NewName,
                     gitUrl: req.GitUrl,
-                    baseBranch: req.BaseBranch,
-                    isDefault: req.IsDefault);
-                return updated is not null ? ApiResults.Ok(updated) : ApiResults.NotFound("Project or repository not found");
+                    baseBranch: req.BaseBranch);
+                return updated is not null
+                    ? ApiResults.Ok(updated)
+                    : ApiResults.NotFound($"Repository '{repoName}' not found in project '{project.Id}'");
             }
             catch (InvalidOperationException ex)
             {
                 return ApiResults.Conflict(ex.Message);
+            }
+            catch (ArgumentException ex)
+            {
+                return ApiResults.BadRequest(ex.Message);
             }
         });
 
@@ -151,8 +248,21 @@ public static class ProjectRoutes
         {
             var project = context.GetResolvedProject();
             var projectGrain = grains.GetGrain<IProjectGrain>(project.Id);
-            var updated = await projectGrain.RemoveRepositoryAsync(repoName);
-            return updated is not null ? ApiResults.Ok(updated) : ApiResults.NotFound("Project or repository not found");
+            try
+            {
+                var updated = await projectGrain.RemoveRepositoryAsync(repoName);
+                return updated is not null
+                    ? ApiResults.Ok(updated)
+                    : ApiResults.NotFound($"Repository '{repoName}' not found in project '{project.Id}'");
+            }
+            catch (InvalidOperationException ex)
+            {
+                return ApiResults.Conflict(ex.Message, "repository_default_deletion_conflict");
+            }
+            catch (ArgumentException ex)
+            {
+                return ApiResults.BadRequest(ex.Message);
+            }
         });
 
         // =======================================================================
@@ -441,6 +551,46 @@ public static class ProjectRoutes
         prompt.Source == "project"
             ? prompt with { Source = "project-override" }
             : prompt;
+
+    private static bool TryGetRepositoryNameError(
+        ArgumentException exception,
+        string requestedName,
+        out string? message)
+    {
+        message = exception.Message;
+        return message.Contains("already exists", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsSupplied(JsonElement value) =>
+        value.ValueKind != JsonValueKind.Undefined;
+
+    private static bool TryGetForbiddenLocalRepositoryField(
+        JsonElement path,
+        JsonElement remote,
+        JsonElement resolvedPath,
+        out string? field)
+    {
+        if (IsSupplied(path))
+        {
+            field = "path";
+            return true;
+        }
+
+        if (IsSupplied(remote))
+        {
+            field = "remote";
+            return true;
+        }
+
+        if (IsSupplied(resolvedPath))
+        {
+            field = "resolvedPath";
+            return true;
+        }
+
+        field = null;
+        return false;
+    }
 }
 
 public sealed record PromptUpsertRequest(string? Body);
@@ -454,15 +604,35 @@ public sealed record ProjectPromptOverrideRequest(
 
 public sealed record PromptPreviewRequest(JsonElement? Variables);
 
-public record CreateProjectRequest(string Name);
+public record CreateProjectRequest(string Name, CreateProjectRepositoryRequest? Repository);
+public record CreateProjectRepositoryRequest(
+    string? Name,
+    string? GitUrl,
+    string? BaseBranch,
+    JsonElement IsDefault = default,
+    JsonElement SetDefault = default,
+    JsonElement Path = default,
+    JsonElement Remote = default,
+    JsonElement ResolvedPath = default);
 public record UpdateProjectRequest();
-public record AddRepositoryRequest(string Name, string GitUrl, string? BaseBranch = null, bool? IsDefault = null);
+public record AddRepositoryRequest(
+    string Name,
+    string GitUrl,
+    string? BaseBranch = null,
+    JsonElement SetDefault = default,
+    JsonElement IsDefault = default,
+    JsonElement Path = default,
+    JsonElement Remote = default,
+    JsonElement ResolvedPath = default);
 public record UpdateRepositoryRequest(
-    bool? SetDefault = null,
-    string? NewName = null,
+    JsonElement SetDefault = default,
     string? GitUrl = null,
     string? BaseBranch = null,
-    bool? IsDefault = null);
+    JsonElement NewName = default,
+    JsonElement IsDefault = default,
+    JsonElement Path = default,
+    JsonElement Remote = default,
+    JsonElement ResolvedPath = default);
 public record CreateProjectTemplateRequest(string Yaml);
 public record UpdateProjectTemplateRequest(string Yaml);
 public record SetDefaultTemplateRequest(string TemplateId);

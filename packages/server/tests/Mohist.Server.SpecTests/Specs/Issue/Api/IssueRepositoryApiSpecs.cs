@@ -222,8 +222,7 @@ public class IssueRepositoryApiSpecs
     {
         var projectId = $"proj_{Guid.NewGuid():N}";
         var grain = _fixture.Grains.GetGrain<IProjectGrain>(projectId);
-        var project = await grain.CreateAsync($"proj-{Guid.NewGuid():N}");
-        await grain.AddRepositoryAsync("main", "git@main.example:repo.git", "main");
+        var project = await grain.CreateAsync($"proj-{Guid.NewGuid():N}", new Mohist.Server.Project.Domain.RepositoryInfo { Name = "main", GitUrl = "git@main.example:repo.git", BaseBranch = "main", IsDefault = true });
         await grain.AddRepositoryAsync("secondary", "git@secondary.example:repo.git", "develop");
         return (projectId, project);
     }

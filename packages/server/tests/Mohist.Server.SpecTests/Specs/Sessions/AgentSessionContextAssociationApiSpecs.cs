@@ -209,7 +209,13 @@ public class AgentSessionContextAssociationApiSpecs
         var projectGrain = _fixture.Grains.GetGrain<IProjectGrain>(id);
         var raw = $"{prefix}-{Guid.NewGuid():N}".ToLowerInvariant();
         var name = raw.Length > 63 ? raw[..63] : raw;
-        var project = await projectGrain.CreateAsync(name);
+        var project = await projectGrain.CreateAsync(name, new Mohist.Server.Project.Domain.RepositoryInfo
+        {
+            Name = "placeholder",
+            GitUrl = "git@example.com:placeholder.git",
+            BaseBranch = "main",
+            IsDefault = true,
+        });
         await projectGrain.AddRepositoryAsync("main", $"file://{Guid.NewGuid():N}", "main");
         return project.Id;
     }

@@ -1,6 +1,8 @@
+using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Infrastructure.Workspace;
 using Mohist.Server.Runner.Services.SignalR;
 using Mohist.Server.SpecTests.Support;
+using Mohist.Server.Workflow.Services;
 using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Api;
@@ -334,9 +336,12 @@ public class WorkspaceSpecs
 
     private async Task<ProjectDto> CreateProjectWithRepositoryAsync(string baseBranch = "main")
     {
-        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"workspace-{Guid.NewGuid():N}" });
-        await _client.PostDataAsync<RepositoryDto>($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = "git@example.com:repo.git", baseBranch });
-        return project;
+        return await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>(
+            "/api/projects",
+            $"workspace-{Guid.NewGuid():N}",
+            repoName: "main",
+            gitUrl: "git@example.com:repo.git",
+            baseBranch: baseBranch);
     }
 
     private async Task<string> StartIssueAndCreateWorkspaceDirectoryAsync(ProjectDto project, int issueNumber)
@@ -344,7 +349,18 @@ public class WorkspaceSpecs
         await _client.PatchAsJsonAsync($"/api/projects/{project.Id}/issues/{issueNumber}", new { isDraft = false });
         await _client.PostOkAsync($"/api/projects/{project.Id}/issues/{issueNumber}/start");
         var issue = await _client.GetDataAsync<WorkflowStatusDto>($"/api/projects/{project.Id}/issues/{issueNumber}/workflow/status");
-        return issue.WorkflowRunId ?? throw new InvalidOperationException("Issue started but no workflow run id was returned");
+        var workflowRunId = issue.WorkflowRunId ?? throw new InvalidOperationException("Issue started but no workflow run id was returned");
+        var expectedRepository = Assert.Single(project.Repositories);
+        Assert.True(expectedRepository.IsDefault);
+
+        using var scope = _fixture.Services.CreateScope();
+        var workflowQuerier = scope.ServiceProvider.GetRequiredService<WorkflowQuerier>();
+        var variables = await workflowQuerier.GetEffectiveVariablesAsync(workflowRunId);
+        var repository = variables.GetProperty("repository");
+        Assert.Equal(expectedRepository.Name, repository.GetProperty("name").GetString());
+        Assert.Equal(expectedRepository.GitUrl, repository.GetProperty("gitUrl").GetString());
+        Assert.Equal(expectedRepository.BaseBranch, repository.GetProperty("baseBranch").GetString());
+        return workflowRunId;
     }
 
     private static WorkspaceStatus AvailableStatus(string runId, string baseBranch, int ahead = 0, int behind = 0) => new()
@@ -361,8 +377,8 @@ public class WorkspaceSpecs
     private sealed record WorkflowStatusDto(string? WorkflowRunId);
 
     private sealed record IssueDto(int Number);
-    private sealed record ProjectDto(string Id, string Name);
-    private sealed record RepositoryDto(string Name);
+    private sealed record ProjectDto(string Id, string Name, RepositoryDto[] Repositories);
+    private sealed record RepositoryDto(string Name, string GitUrl, string BaseBranch, bool IsDefault);
     private sealed record UnavailableDto(bool Available, string Reason, string Message);
     private sealed record CommitDiffUnavailableDto(bool Available, string Reason, string Message, string Hash, string Diff);
     private sealed record DiffDto(bool Available, string? Reason, string? Message, string Base, string Head, string MergeBase, int Ahead, int Behind, bool CanFastForward, string Comparison, SummaryDto Summary, DiffFileDto[] Files, PatchDto[] Patches);

@@ -539,7 +539,7 @@ public class IssueFeedbackApiSpecs
     {
         var id = $"proj_{Guid.NewGuid():N}";
         var projectGrain = _grains.GetGrain<IProjectGrain>(id);
-        return await projectGrain.CreateAsync($"proj-{Guid.NewGuid():N}");
+        return await projectGrain.CreateAsync($"proj-{Guid.NewGuid():N}", new Mohist.Server.Project.Domain.RepositoryInfo { Name = "placeholder", GitUrl = "git@example.com:placeholder.git", BaseBranch = "main", IsDefault = true });
     }
 
     private async Task<(string IssueId, int Number)> CreateIssueAsync(string projectId, string title)
@@ -690,7 +690,7 @@ public class IssueFeedbackApiSpecs
         await db.SaveChangesAsync();
     }
 
-    private sealed record ProjectDto(string Id, string Name, string Path, string BaseBranch);
+    private sealed record ProjectDto(string Id, string Name);
 
     private sealed record FeedbackEnvelopeDto(bool Success, FeedbackDto? Data, string? Error = null);
     private sealed record FeedbackDto(

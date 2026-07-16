@@ -2,7 +2,7 @@ export interface AddRepositoryInput {
   name: string
   gitUrl: string
   baseBranch?: string
-  isDefault?: boolean
+  setDefault?: boolean
 }
 
 export interface Repository {

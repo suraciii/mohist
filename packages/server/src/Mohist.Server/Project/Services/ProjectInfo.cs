@@ -12,14 +12,8 @@ public class ProjectInfo
     [Id(4)] public List<RepositoryInfo> Repositories { get; set; } = [];
     [Id(5)] public ProjectVariablesBag Variables { get; set; } = ProjectVariablesBag.Empty;
 
-    public RepositoryInfo? DefaultRepository
-    {
-        get
-        {
-            if (Repositories.Count == 0) return null;
-            return Repositories.FirstOrDefault(r => r.IsDefault) ?? Repositories[0];
-        }
-    }
+    public RepositoryInfo? DefaultRepository =>
+        Repositories.FirstOrDefault(r => r.IsDefault);
 
     public RepositoryInfo? GetRepository(string? name)
     {

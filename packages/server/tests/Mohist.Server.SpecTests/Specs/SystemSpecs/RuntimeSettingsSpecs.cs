@@ -20,9 +20,12 @@ public class RuntimeSettingsSpecs
     public async Task GivenUserChoosesDefaultAndStageModels_WhenSettingsPatchProjectVariables_ThenMohistUsesThoseRuntimePreferences()
     {
         var projectName = $"settings-{Guid.NewGuid():N}";
-        await _client.PostOkAsync("/api/projects", new { name = projectName });
+        await _client.PostOkAsync("/api/projects", new
+        {
+            name = projectName,
+            repository = new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main" },
+        });
         var projectId = (await _client.GetDataAsync<List<ProjectResponse>>("/api/projects")).Single(p => p.Name == projectName).Id;
-        await _client.PostOkAsync($"/api/projects/{projectId}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
 
         await _client.PatchDataAsync<ProjectVariablesDto>($"/api/projects/{projectName}/workflow-profile/variables", new
         {

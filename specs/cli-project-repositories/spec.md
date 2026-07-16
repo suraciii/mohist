@@ -17,11 +17,11 @@ The CLI SHALL expose project repository management through the top-level `mo rep
 
 #### Scenario: Repo add creates a repository
 - **WHEN** the user runs `mo repo add api --git-url git@example.com:api.git --set-default --project mohist-local`
-- **THEN** the CLI sends `POST /api/projects/mohist-local/repositories` with `name`, `gitUrl`, `baseBranch`, and `isDefault` fields
+- **THEN** the CLI sends `POST /api/projects/mohist-local/repositories` with `name`, `gitUrl`, `baseBranch`, and `setDefault` fields
 - **AND** the CLI SHALL NOT send legacy `path`, `remote`, or `resolvedPath` fields
 
 #### Scenario: Repo update patches supplied fields
-- **WHEN** the user runs `mo repo update api --new-name backend --git-url git@example.com:backend.git --project mohist-local`
+- **WHEN** the user runs `mo repo update api --git-url git@example.com:backend.git --project mohist-local`
 - **THEN** the CLI sends `PATCH /api/projects/mohist-local/repositories/api` with only the supplied fields
 
 #### Scenario: Repo set-default sets the default

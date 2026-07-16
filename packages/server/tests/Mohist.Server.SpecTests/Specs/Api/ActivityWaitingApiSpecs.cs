@@ -85,13 +85,13 @@ public class ActivityWaitingApiSpecs
     private async Task<ProjectDto> CreateProjectAsync()
     {
         var name = $"waiting-{Guid.NewGuid():N}";
-        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name });
+        var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", name);
         await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new
         {
             name = "main",
             gitUrl = $"file://{Guid.NewGuid():N}",
             baseBranch = "main",
-            isDefault = true,
+            setDefault = true,
         });
         return project;
     }
@@ -212,7 +212,7 @@ public class ActivityWaitingApiSpecs
         DateTimeOffset approvalRequestedAt) =>
         await InsertIssueWithApprovalGateAsync(projectId, number, title, approvalRequestedAt);
 
-    private sealed record ProjectDto(string Id, string Name, string Path, string BaseBranch);
+    private sealed record ProjectDto(string Id, string Name);
     private sealed record ProjectIssueDto(string Id, int Number);
     private sealed record ActivityWaitingEntryDto(string IssueId, int IssueNumber, string IssueTitle, string? Stage, string Label, string? RequestedAt, string? Preview);
     private sealed record ActivitySummaryDto(int Active, int Waiting, int Completed, int Failed);

@@ -514,7 +514,7 @@ public class GenericAgentSessionFollowupApiSpecs : IAsyncLifetime
             new
             {
                 agentSessionId = launched.SessionId,
-                workDir = launched.Project.Path,
+                workDir = WorkDirFor(launched.Project.Id),
                 processPid = 1234,
             });
 
@@ -581,7 +581,7 @@ public class GenericAgentSessionFollowupApiSpecs : IAsyncLifetime
         await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand(
             AgentSessionId: sessionId,
             Model: null,
-            WorkDir: project.Path,
+            WorkDir: WorkDirFor(project.Id),
             ChangeDir: null,
             ProcessPid: 1234));
 
@@ -592,20 +592,15 @@ public class GenericAgentSessionFollowupApiSpecs : IAsyncLifetime
     {
         var projectName = $"gen-followup-{Guid.NewGuid():N}";
         if (projectName.Length > 63) projectName = projectName[..63];
-        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new
-        {
-            name = projectName,
-            path = "/mohist-tests/projects/generic-session-followup",
-            baseBranch = "main",
-        });
+        var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", projectName);
         await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new
         {
             name = "main",
             gitUrl = $"file://{Guid.NewGuid():N}",
             baseBranch = "main",
-            isDefault = true,
+            setDefault = true,
         });
-        return new ProjectRef(project.Id, project.Path);
+        return new ProjectRef(project.Id);
     }
 
     private async Task<AgentRef> CreateAgentAsync(string projectId, string agentName)
@@ -626,9 +621,11 @@ public class GenericAgentSessionFollowupApiSpecs : IAsyncLifetime
         return new AgentRef(body.GetProperty("data").GetProperty("id").GetString()!, agentName);
     }
 
-    private sealed record ProjectRef(string Id, string Path);
+    private static string WorkDirFor(string projectId) => $"/workspaces/{projectId}";
+
+    private sealed record ProjectRef(string Id);
     private sealed record AgentRef(string Id, string Name);
     private sealed record IssueRef(string Id, int Number);
-    private sealed record ProjectDto(string Id, string Name, string Path, string BaseBranch);
+    private sealed record ProjectDto(string Id, string Name);
     private sealed record IssueDto(string Id, int Number, string Title);
 }
