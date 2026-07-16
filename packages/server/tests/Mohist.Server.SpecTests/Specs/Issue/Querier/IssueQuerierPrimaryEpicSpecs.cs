@@ -8,6 +8,7 @@ using Mohist.Server.Issue.Services;
 using Mohist.Server.Project.Services;
 using Mohist.Server.SpecTests.Support;
 using Xunit;
+using DomainIssue = Mohist.Server.Issue.Domain.Issue;
 
 namespace Mohist.Server.SpecTests.Specs.Issue.Querier;
 
@@ -88,7 +89,7 @@ public class IssueQuerierPrimaryEpicSpecs
 
     private static async Task SeedIssueAsync(MohistDbContext db, string projectId, int number, int? epicNumber)
     {
-        var issue = new Issue
+        var issue = new DomainIssue
         {
             ProjectId = projectId,
             Number = number,

@@ -3,9 +3,11 @@ using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Services;
+using Mohist.Server.Issue.Services.WorkflowProfiles;
 using Mohist.Server.Project.Services;
 using Mohist.Server.SpecTests.Support;
 using Xunit;
+using DomainIssue = Mohist.Server.Issue.Domain.Issue;
 
 namespace Mohist.Server.SpecTests.Specs.Issue.Querier;
 
@@ -92,7 +94,7 @@ public class IssueQuerierSpecs
             .GetIssueRefForWorkflowRunAsync("wr_17");
 
         Assert.NotNull(issue);
-        Assert.Equal((17, "Workflow issue"), (issue!.IssueNumber, issue.Title));
+        Assert.Equal((17, "Workflow issue"), (issue!.Number, issue.Title));
     }
 
     private static ProjectInfo NewProject(string name) => new()
@@ -111,7 +113,7 @@ public class IssueQuerierSpecs
         string[]? label = null,
         string? workflowRunId = null)
     {
-        var issue = new Issue
+        var issue = new DomainIssue
         {
             ProjectId = projectId,
             Number = number,

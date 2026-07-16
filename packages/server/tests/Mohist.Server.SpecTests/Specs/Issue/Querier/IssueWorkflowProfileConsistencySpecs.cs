@@ -7,6 +7,7 @@ using Mohist.Server.Issue.Services.WorkflowProfiles;
 using Mohist.Server.Project.Services;
 using Mohist.Server.SpecTests.Support;
 using Xunit;
+using DomainIssue = Mohist.Server.Issue.Domain.Issue;
 
 namespace Mohist.Server.SpecTests.Specs.Issue.Querier;
 
@@ -33,7 +34,7 @@ public class IssueWorkflowProfileConsistencySpecs
         };
         using var scope = _fixture.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-        var issue = new Issue
+        var issue = new DomainIssue
         {
             ProjectId = project.Id,
             Number = 42,
