@@ -704,7 +704,9 @@ public class IssueWorkflowCompletionHandlerSpecs
         public Task<IssueStartReadiness> GetStartReadinessAsync() => throw new NotSupportedException();
         public Task<IssueCommentResult> AddCommentAsync(string body, string[]? attachmentIds = null) => throw new NotSupportedException();
         public Task DeactivateForTestAsync() => throw new NotSupportedException();
-        public Task SetEpicAffiliationAsync(int? epicNumber) => throw new NotSupportedException();
+        public Task<bool> AssignEpicAsync(int epicNumber) => throw new NotSupportedException();
+        public Task<bool> RemoveEpicAsync(int expectedEpicNumber) => throw new NotSupportedException();
+        public Task<bool> TryStartFromEpicAsync(int expectedEpicNumber) => throw new NotSupportedException();
     }
 
     private sealed class ThrowingIssueGrainFactory : IGrainFactory
@@ -773,6 +775,8 @@ public class IssueWorkflowCompletionHandlerSpecs
         public Task<IssueStartReadiness> GetStartReadinessAsync() => throw new NotSupportedException();
         public Task<IssueCommentResult> AddCommentAsync(string body, string[]? attachmentIds = null) => throw new NotSupportedException();
         public Task DeactivateForTestAsync() => throw new NotSupportedException();
-        public Task SetEpicAffiliationAsync(int? epicNumber) => throw new NotSupportedException();
+        public Task<bool> AssignEpicAsync(int epicNumber) => throw new NotSupportedException();
+        public Task<bool> RemoveEpicAsync(int expectedEpicNumber) => throw new NotSupportedException();
+        public Task<bool> TryStartFromEpicAsync(int expectedEpicNumber) => throw new NotSupportedException();
     }
 }

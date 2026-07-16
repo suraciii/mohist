@@ -564,59 +564,6 @@ public class EpicAutoDoneHandlerSpecs
         Assert.Single(grains.Calls);
     }
 
-    // --- Fix B: EpicIssueLinkedHandler (durable convergence for link) ---
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
-    [Fact]
-    public async Task IssueLinkedHandler_HasSubscriptionAttributeOnLinkedType()
-    {
-        var attr = (SubscriptionAttribute?)Attribute.GetCustomAttribute(
-            typeof(EpicIssueLinkedHandler), typeof(SubscriptionAttribute));
-        Assert.NotNull(attr);
-        Assert.Equal(EventCatalog.ReverseDns.EpicIssueLinked, attr!.Type);
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
-    [Fact]
-    public async Task IssueLinkedHandler_LinkedEvent_InvokesRecomputeOnOwningEpic()
-    {
-        // Epic events carry projectid + epicid on the envelope (stamped by
-        // PersistEpicEventsAsync), so no reverse lookup is needed.
-        var database = CreateDatabase();
-        var grains = new TestEpicGrainFactory(database.Factory);
-        var handler = new EpicIssueLinkedHandler(grains, database.Factory, NullLogger<EpicIssueLinkedHandler>.Instance);
-
-        var evt = BuildEpicIssueLinkedEvent(projectId: "project_1", epicId: "epic_1", issueId: "issue_1", issueNumber: 1);
-        await handler.HandleAsync(evt, CancellationToken.None);
-
-        var call = Assert.Single(grains.Calls);
-        Assert.Equal("project_1:epic_1", call.GrainKey);
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
-    [Fact]
-    public async Task IssueLinkedHandler_MissingProjectIdExtension_NoOps()
-    {
-        var database = CreateDatabase();
-        var grains = new TestEpicGrainFactory(database.Factory);
-        var handler = new EpicIssueLinkedHandler(grains, database.Factory, NullLogger<EpicIssueLinkedHandler>.Instance);
-
-        var evt = new CloudEvent<EpicIssueLinked>(
-            id: Guid.NewGuid().ToString(),
-            source: new Uri("/mohist/epic/epic_1", UriKind.Relative),
-            type: EventCatalog.ReverseDns.EpicIssueLinked,
-            time: TestTime.UtcNow,
-            data: new EpicIssueLinked("issue_1", 1),
-            subject: "1",
-            extensions: new Dictionary<string, string> { ["epicid"] = "epic_1" });
-
-        await handler.HandleAsync(evt, CancellationToken.None);
-        Assert.Empty(grains.Calls);
-    }
-
     // --- Fix C-1: EpicDraftChangedHandler (undraft triggers recompute) ---
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
@@ -696,35 +643,6 @@ public class EpicAutoDoneHandlerSpecs
         var handler = new EpicPrerequisiteRemovedHandler(querier, grains, NullLogger<EpicPrerequisiteRemovedHandler>.Instance);
 
         var evt = BuildPrerequisiteRemovedEvent(projectId: "project_1", issueId: "issue_1", prereqNumber: 10);
-        await handler.HandleAsync(evt, CancellationToken.None);
-
-        var call = Assert.Single(grains.Calls);
-        Assert.Equal("project_1:epic_1", call.GrainKey);
-    }
-
-    // --- Fix: EpicIssueUnlinkedHandler + EpicIssueReopenedHandler ---
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
-    [Fact]
-    public async Task IssueUnlinkedHandler_HasSubscriptionAttribute()
-    {
-        var attr = (SubscriptionAttribute?)Attribute.GetCustomAttribute(
-            typeof(EpicIssueUnlinkedHandler), typeof(SubscriptionAttribute));
-        Assert.NotNull(attr);
-        Assert.Equal(EventCatalog.ReverseDns.EpicIssueUnlinked, attr!.Type);
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
-    [Fact]
-    public async Task IssueUnlinkedHandler_UnlinkedEvent_InvokesRecomputeOnOwningEpic()
-    {
-        var database = CreateDatabase();
-        var grains = new TestEpicGrainFactory(database.Factory);
-        var handler = new EpicIssueUnlinkedHandler(grains, database.Factory, NullLogger<EpicIssueUnlinkedHandler>.Instance);
-
-        var evt = BuildEpicIssueUnlinkedEvent(projectId: "project_1", epicId: "epic_1", issueId: "issue_1", issueNumber: 1);
         await handler.HandleAsync(evt, CancellationToken.None);
 
         var call = Assert.Single(grains.Calls);
@@ -1033,38 +951,6 @@ public class EpicAutoDoneHandlerSpecs
         var call = Assert.Single(grains.Calls);
         Assert.Equal("project_1:epic_1", call.GrainKey);
     }
-
-    private static CloudEvent<EpicIssueLinked> BuildEpicIssueLinkedEvent(
-        string projectId, string epicId, string issueId, int issueNumber) =>
-        new(
-            id: Guid.NewGuid().ToString(),
-            source: new Uri($"/mohist/epic/{epicId}", UriKind.Relative),
-            type: EventCatalog.ReverseDns.EpicIssueLinked,
-            time: EventTime,
-            data: new EpicIssueLinked(issueId, issueNumber),
-            subject: epicId,
-            extensions: new Dictionary<string, string>
-            {
-                ["projectid"] = projectId,
-                ["epicid"] = epicId,
-                ["epicno"] = "1",
-            });
-
-    private static CloudEvent<EpicIssueUnlinked> BuildEpicIssueUnlinkedEvent(
-        string projectId, string epicId, string issueId, int issueNumber) =>
-        new(
-            id: Guid.NewGuid().ToString(),
-            source: new Uri($"/mohist/epic/{epicId}", UriKind.Relative),
-            type: EventCatalog.ReverseDns.EpicIssueUnlinked,
-            time: EventTime,
-            data: new EpicIssueUnlinked(issueId, issueNumber),
-            subject: epicId,
-            extensions: new Dictionary<string, string>
-            {
-                ["projectid"] = projectId,
-                ["epicid"] = epicId,
-                ["epicno"] = "1",
-            });
 
     private static CloudEvent<IssueDraftChanged> BuildDraftChangedEvent(
         string projectId, string issueId, bool oldIsDraft, bool newIsDraft) =>
@@ -1394,7 +1280,9 @@ public class EpicAutoDoneHandlerSpecs
         public Task<IssueStartReadiness> GetStartReadinessAsync() => throw new NotSupportedException();
         public Task<IssueCommentResult> AddCommentAsync(string body, string[]? attachmentIds = null) => throw new NotSupportedException();
         public Task DeactivateForTestAsync() => throw new NotSupportedException();
-        public Task SetEpicAffiliationAsync(int? epicNumber) => Task.CompletedTask;
+        public Task<bool> AssignEpicAsync(int epicNumber) => Task.FromResult(true);
+        public Task<bool> RemoveEpicAsync(int expectedEpicNumber) => Task.FromResult(true);
+        public Task<bool> TryStartFromEpicAsync(int expectedEpicNumber) => Task.FromResult(true);
     }
 
     public sealed record RecordedGrainCall(string GrainKey);

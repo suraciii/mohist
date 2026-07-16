@@ -583,7 +583,9 @@ public class EpicWakeUpSpecs
         public Task<Mohist.Server.Issue.Services.IssueStartReadiness> GetStartReadinessAsync() => throw new NotSupportedException();
         public Task<Mohist.Server.Issue.Grains.IssueCommentResult> AddCommentAsync(string body, string[]? attachmentIds = null) => throw new NotSupportedException();
         public Task DeactivateForTestAsync() => throw new NotSupportedException();
-        public Task SetEpicAffiliationAsync(int? epicNumber) => throw new NotSupportedException();
+        public Task<bool> AssignEpicAsync(int epicNumber) => throw new NotSupportedException();
+        public Task<bool> RemoveEpicAsync(int expectedEpicNumber) => throw new NotSupportedException();
+        public Task<bool> TryStartFromEpicAsync(int expectedEpicNumber) => throw new NotSupportedException();
     }
 
     /// <summary>

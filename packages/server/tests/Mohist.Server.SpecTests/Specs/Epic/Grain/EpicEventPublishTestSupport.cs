@@ -85,11 +85,19 @@ internal sealed class RecordingIssueGrain : IIssueGrain
     public Task<IssueCommentResult> AddCommentAsync(string body, string[]? attachmentIds = null) => throw new NotSupportedException();
     public Task DeactivateForTestAsync() => throw new NotSupportedException();
 
-    public Task SetEpicAffiliationAsync(int? epicNumber)
+    public Task<bool> AssignEpicAsync(int epicNumber)
     {
         _owner.AffiliationCalls.Add(new AffiliationCall(IssueId, epicNumber, IsLink: epicNumber is not null));
-        return Task.CompletedTask;
+        return Task.FromResult(true);
     }
+
+    public Task<bool> RemoveEpicAsync(int expectedEpicNumber)
+    {
+        _owner.AffiliationCalls.Add(new AffiliationCall(IssueId, null, IsLink: false));
+        return Task.FromResult(true);
+    }
+
+    public Task<bool> TryStartFromEpicAsync(int expectedEpicNumber) => Task.FromResult(true);
 }
 
 internal sealed class ThrowingAffiliationGrainFactory : IGrainFactory
@@ -138,8 +146,12 @@ internal sealed class ThrowingIssueGrain : IIssueGrain
     public Task<IssueStartReadiness> GetStartReadinessAsync() => throw new NotSupportedException();
     public Task<IssueCommentResult> AddCommentAsync(string body, string[]? attachmentIds = null) => throw new NotSupportedException();
     public Task DeactivateForTestAsync() => throw new NotSupportedException();
-    public Task SetEpicAffiliationAsync(int? epicNumber) =>
-        throw new InvalidOperationException("simulated silo failure on D5 push");
+    public Task<bool> AssignEpicAsync(int epicNumber) =>
+        Task.FromException<bool>(new InvalidOperationException("simulated Issue command failure"));
+    public Task<bool> RemoveEpicAsync(int expectedEpicNumber) =>
+        Task.FromException<bool>(new InvalidOperationException("simulated Issue command failure"));
+    public Task<bool> TryStartFromEpicAsync(int expectedEpicNumber) =>
+        Task.FromException<bool>(new InvalidOperationException("simulated Issue command failure"));
 }
 
 internal static class EpicEventPublishTestSupport
@@ -172,9 +184,10 @@ internal static class EpicEventPublishTestSupport
         TestDbContextFactory factory,
         string grainKey,
         IEventStore eventStore,
-        FakeTimeProvider timeProvider) => new(
+        FakeTimeProvider timeProvider,
+        IGrainFactory? grains = null) => new(
             factory,
-            new StubGrainFactory(),
+            grains ?? new StubGrainFactory(),
             timeProvider,
             eventStore,
             NullLogger<EpicGrain>.Instance)
@@ -209,7 +222,8 @@ internal static class EpicEventPublishTestSupport
     public static async Task SeedIssueAsync(
         TestDatabase database,
         string projectId = "project_1",
-        int issueNumber = 1)
+        int issueNumber = 1,
+        int? epicNumber = null)
     {
         var issue = new DomainIssue
         {
@@ -219,12 +233,14 @@ internal static class EpicEventPublishTestSupport
             Status = Mohist.Server.Issue.Domain.IssueStatus.Backlog,
             Priority = "p2",
             IsDraft = false,
+            EpicNumber = epicNumber,
         };
         await using var db = database.CreateDbContext();
         db.Issues.Add(new IssueRow
         {
             ProjectId = projectId,
             Number = issueNumber,
+            EpicNumber = epicNumber,
             State = IssueStore.Serialize(issue),
         });
         await db.SaveChangesAsync();
@@ -233,13 +249,13 @@ internal static class EpicEventPublishTestSupport
     public static async Task SeedLinkAsync(TestDatabase database, int issueNumber)
     {
         await using var db = database.CreateDbContext();
-        db.EpicIssues.Add(new EpicIssueRow
-        {
-            EpicNumber = 1,
-            ProjectId = "project_1",
-            IssueNumber = issueNumber,
-            CreatedAt = new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero),
-        });
+        var row = await db.Issues.SingleAsync(issue =>
+            issue.ProjectId == "project_1" && issue.Number == issueNumber);
+        var issue = IssueStore.Deserialize(row.State);
+        issue.AssignEpic(1);
+        issue.ClearPendingEvents();
+        row.EpicNumber = issue.EpicNumber;
+        row.State = IssueStore.Serialize(issue);
         await db.SaveChangesAsync();
     }
 }
