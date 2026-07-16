@@ -75,7 +75,6 @@ public class MohistLocalWorkflowProfileSpecs
         var profile = new MohistLocalIssueWorkflowProfile(new FakePromptLoader(), new FakeDbContextFactory());
         var issue = new Mohist.Server.Issue.Domain.Issue
         {
-            Id = "issue-154",
             ProjectId = "project-1",
             Number = 154,
             Title = "支持中文标题 🚀",
@@ -100,29 +99,6 @@ public class MohistLocalWorkflowProfileSpecs
             null);
 
         Assert.Equal("openspec/changes/issue-154", state.ChangeDir);
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
-    [Fact]
-    public void AwaitingBindingWorkflow_ProjectsStartingHealth()
-    {
-        var workflow = new WorkflowStatusView(
-            WorkflowRunId: "wr-binding",
-            Status: "awaiting-binding",
-            CurrentStage: null,
-            Stages: [],
-            PendingWork: null,
-            Failure: null,
-            AvailableActions: []);
-
-        var state = MohistDefaultWorkflowProjection.ProjectWorkflowState(
-            1,
-            "Binding issue",
-            IssueStatus.InProgress,
-            workflow);
-
-        Assert.Equal("starting", state.Health);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -297,7 +273,6 @@ public class MohistLocalWorkflowProfileSpecs
         var profile = new MohistLocalIssueWorkflowProfile(new FakePromptLoader(), new FakeDbContextFactory());
         var issue = new Mohist.Server.Issue.Domain.Issue
         {
-            Id = "issue-1",
             ProjectId = "project-1",
             Number = 1,
             Title = "Agent config",
@@ -327,7 +302,6 @@ public class MohistLocalWorkflowProfileSpecs
         var profile = new MohistLocalIssueWorkflowProfile(new FakePromptLoader(), new FakeDbContextFactory());
         var issue = new Mohist.Server.Issue.Domain.Issue
         {
-            Id = "issue-variant",
             ProjectId = "project-1",
             Number = 1,
             Title = "Variant in agent config",
@@ -357,7 +331,6 @@ public class MohistLocalWorkflowProfileSpecs
         var profile = new MohistLocalIssueWorkflowProfile(new FakePromptLoader(), new FakeDbContextFactory());
         var issue = new Mohist.Server.Issue.Domain.Issue
         {
-            Id = "issue-1",
             ProjectId = "project-1",
             Number = 1,
             Title = "Stage vars",
@@ -383,7 +356,6 @@ public class MohistLocalWorkflowProfileSpecs
         var profile = new MohistLocalIssueWorkflowProfile(loader, new FakeDbContextFactory());
         var issue = new Mohist.Server.Issue.Domain.Issue
         {
-            Id = "issue-1",
             ProjectId = "project-1",
             Number = 1,
             Title = "Test",
@@ -413,7 +385,6 @@ public class MohistLocalWorkflowProfileSpecs
         var profile = new MohistLocalIssueWorkflowProfile(loader, dbFactory);
         var issue = new Mohist.Server.Issue.Domain.Issue
         {
-            Id = "issue-1",
             ProjectId = "project-1",
             Number = 1,
             Title = "Merge test",

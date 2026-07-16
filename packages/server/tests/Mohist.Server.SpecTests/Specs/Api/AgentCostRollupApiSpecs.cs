@@ -727,7 +727,6 @@ public class AgentCostRollupApiSpecs
     {
         var issue = new DomainIssue
         {
-            Id = $"issue_{Guid.NewGuid():N}",
             ProjectId = projectId,
             Number = number,
             Title = title,
@@ -736,7 +735,8 @@ public class AgentCostRollupApiSpecs
         await using var db = await _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>().CreateDbContextAsync();
         db.Issues.Add(new IssueRow
         {
-            IssueId = issue.Id,
+            ProjectId = projectId,
+            Number = number,
             State = IssueStore.Serialize(issue),
         });
         await db.SaveChangesAsync();
@@ -750,7 +750,6 @@ public class AgentCostRollupApiSpecs
     {
         var issue = new DomainIssue
         {
-            Id = $"issue_{Guid.NewGuid():N}",
             ProjectId = projectId,
             Number = number,
             Title = title,
@@ -760,7 +759,8 @@ public class AgentCostRollupApiSpecs
         await using var db = await _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>().CreateDbContextAsync();
         db.Issues.Add(new IssueRow
         {
-            IssueId = issue.Id,
+            ProjectId = projectId,
+            Number = number,
             State = IssueStore.Serialize(issue),
         });
         await db.SaveChangesAsync();
