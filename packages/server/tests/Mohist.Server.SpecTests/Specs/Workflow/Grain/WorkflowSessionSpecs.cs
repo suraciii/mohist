@@ -2,6 +2,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Mohist.Server.Events.Grains;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Infrastructure.Data.Workflow;
@@ -299,9 +300,13 @@ public class WorkflowSessionSpecs
 
         var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(project.Id, issue.Number)));
         await issueGrain.StartWorkAsync();
+        await DispatchEventsAsync();
         var workflowRunId = (await issueGrain.GetWorkflowStatusAsync())!.WorkflowRunId!;
         return (project, issue, workflowRunId);
     }
+
+    private Task DispatchEventsAsync() =>
+        _fixture.Grains.GetGrain<IEventDispatcherGrain>(EventDispatcherGrain.Global).DispatchNowAsync();
 
     private async Task<T> PostRawAsync<T>(string path, object body)
     {

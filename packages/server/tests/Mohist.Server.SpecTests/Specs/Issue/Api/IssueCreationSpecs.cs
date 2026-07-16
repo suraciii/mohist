@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
+using Mohist.Server.Events.Grains;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Domain;
@@ -217,6 +218,7 @@ public class IssueCreationSpecs
         var created = await CreateIssueAsync(project.Id, "Project template issue");
         var grain = IssueGrain(project.Id, created.Number);
         var wrId = await grain.StartWorkAsync();
+        await DispatchEventsAsync();
 
         var runnerId = $"runner-template-test-{Guid.NewGuid():N}";
         var runner = _grains.GetGrain<IRunnerGrain>(runnerId);
@@ -311,6 +313,7 @@ public class IssueCreationSpecs
 
         var grain = IssueGrain(project.Id, created.Number);
         var wrId = await grain.StartWorkAsync();
+        await DispatchEventsAsync();
 
         var wfGrain = _grains.GetGrain<IWorkflowGrain>(wrId);
         await wfGrain.StopAsync("test-stop");
@@ -1031,5 +1034,8 @@ public class IssueCreationSpecs
             $"Runner '{runnerId}' to receive work");
         return work!;
     }
+
+    private Task DispatchEventsAsync() =>
+        _grains.GetGrain<IEventDispatcherGrain>(EventDispatcherGrain.Global).DispatchNowAsync();
 
 }
