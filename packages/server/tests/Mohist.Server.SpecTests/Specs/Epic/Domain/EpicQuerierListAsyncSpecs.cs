@@ -22,9 +22,8 @@ public class EpicQuerierListAsyncSpecs
     public async Task ListAsync_DoesNotInvokeIssueQuerier()
     {
         await using var database = CreateDatabase();
-        await SeedEpicAsync(database, "proj_1", "epic_1", 1);
-        await SeedIssueAsync(database, "proj_1", "issue_1", 1, IssueStatus.Done);
-        await SeedLinkAsync(database, "epic_1", "issue_1", 1, "proj_1");
+        await SeedEpicAsync(database, "proj_1", 1);
+        await SeedIssueAsync(database, "proj_1", 1, IssueStatus.Done);
 
         var querier = new EpicQuerier(database.Factory, new ThrowingIssueQuerier());
 
@@ -44,15 +43,14 @@ public class EpicQuerierListAsyncSpecs
         var (database, commands) = CreateDatabaseWithCommandCounting();
         await using (database)
         {
-            await SeedEpicAsync(database, "proj_1", "epic_1", 1);
-            await SeedEpicAsync(database, "proj_1", "epic_2", 2);
-            await SeedEpicAsync(database, "proj_1", "epic_3", 3);
+            await SeedEpicAsync(database, "proj_1", 1);
+            await SeedEpicAsync(database, "proj_1", 2);
+            await SeedEpicAsync(database, "proj_1", 3);
             for (var i = 1; i <= 6; i++)
             {
                 var status = i % 2 == 0 ? IssueStatus.Done : IssueStatus.Backlog;
-                await SeedIssueAsync(database, "proj_1", $"issue_{i}", i, status);
-                var epicId = i <= 2 ? "epic_1" : i <= 4 ? "epic_2" : "epic_3";
-                await SeedLinkAsync(database, epicId, $"issue_{i}", i, "proj_1");
+                var epicNumber = i <= 2 ? 1 : i <= 4 ? 2 : 3;
+                await SeedIssueAsync(database, "proj_1", i, status, epicNumber: epicNumber);
             }
 
             var querier = new EpicQuerier(database.Factory, new ThrowingIssueQuerier());
@@ -67,7 +65,7 @@ public class EpicQuerierListAsyncSpecs
             Assert.DoesNotContain("\"Comments\"", only);
             Assert.DoesNotContain("\"Attachments\"", only);
             Assert.Contains("\"Epics\"", only);
-            Assert.Contains("\"EpicIssues\"", only);
+            Assert.DoesNotContain("\"EpicIssues\"", only);
             Assert.Contains("\"Issues\"", only);
         }
     }
@@ -78,13 +76,10 @@ public class EpicQuerierListAsyncSpecs
     public async Task ListAsync_ProgressCountsDoneAndExcludesCancelled()
     {
         await using var database = CreateDatabase();
-        await SeedEpicAsync(database, "proj_1", "epic_1", 1);
-        await SeedIssueAsync(database, "proj_1", "issue_done", 1, IssueStatus.Done);
-        await SeedIssueAsync(database, "proj_1", "issue_cancelled", 2, IssueStatus.Cancelled);
-        await SeedIssueAsync(database, "proj_1", "issue_backlog", 3, IssueStatus.Backlog);
-        await SeedLinkAsync(database, "epic_1", "issue_done", 1, "proj_1");
-        await SeedLinkAsync(database, "epic_1", "issue_cancelled", 2, "proj_1");
-        await SeedLinkAsync(database, "epic_1", "issue_backlog", 3, "proj_1");
+        await SeedEpicAsync(database, "proj_1", 1);
+        await SeedIssueAsync(database, "proj_1", 1, IssueStatus.Done);
+        await SeedIssueAsync(database, "proj_1", 2, IssueStatus.Cancelled);
+        await SeedIssueAsync(database, "proj_1", 3, IssueStatus.Backlog);
 
         var querier = new EpicQuerier(database.Factory, new ThrowingIssueQuerier());
         var result = await querier.ListAsync("proj_1");
@@ -105,11 +100,9 @@ public class EpicQuerierListAsyncSpecs
         // is ready to Mark Done. deliveredCount counts only the done
         // issue.
         await using var database = CreateDatabase();
-        await SeedEpicAsync(database, "proj_1", "epic_1", 1);
-        await SeedIssueAsync(database, "proj_1", "issue_done", 1, IssueStatus.Done);
-        await SeedIssueAsync(database, "proj_1", "issue_cancelled", 2, IssueStatus.Cancelled);
-        await SeedLinkAsync(database, "epic_1", "issue_done", 1, "proj_1");
-        await SeedLinkAsync(database, "epic_1", "issue_cancelled", 2, "proj_1");
+        await SeedEpicAsync(database, "proj_1", 1);
+        await SeedIssueAsync(database, "proj_1", 1, IssueStatus.Done);
+        await SeedIssueAsync(database, "proj_1", 2, IssueStatus.Cancelled);
 
         var querier = new EpicQuerier(database.Factory, new ThrowingIssueQuerier());
         var result = await querier.ListAsync("proj_1");
@@ -128,11 +121,9 @@ public class EpicQuerierListAsyncSpecs
         // No delivered, but every linked issue is terminal; readyToMarkDone
         // is true (the new terminal/open rule).
         await using var database = CreateDatabase();
-        await SeedEpicAsync(database, "proj_1", "epic_1", 1);
-        await SeedIssueAsync(database, "proj_1", "issue_cancelled_a", 1, IssueStatus.Cancelled);
-        await SeedIssueAsync(database, "proj_1", "issue_cancelled_b", 2, IssueStatus.Cancelled);
-        await SeedLinkAsync(database, "epic_1", "issue_cancelled_a", 1, "proj_1");
-        await SeedLinkAsync(database, "epic_1", "issue_cancelled_b", 2, "proj_1");
+        await SeedEpicAsync(database, "proj_1", 1);
+        await SeedIssueAsync(database, "proj_1", 1, IssueStatus.Cancelled);
+        await SeedIssueAsync(database, "proj_1", 2, IssueStatus.Cancelled);
 
         var querier = new EpicQuerier(database.Factory, new ThrowingIssueQuerier());
         var result = await querier.ListAsync("proj_1");
@@ -149,7 +140,7 @@ public class EpicQuerierListAsyncSpecs
     public async Task ListAsync_EmptyEpic_YieldsZeroCounts()
     {
         await using var database = CreateDatabase();
-        await SeedEpicAsync(database, "proj_1", "epic_1", 1);
+        await SeedEpicAsync(database, "proj_1", 1);
 
         var querier = new EpicQuerier(database.Factory, new ThrowingIssueQuerier());
         var result = await querier.ListAsync("proj_1");
@@ -166,9 +157,8 @@ public class EpicQuerierListAsyncSpecs
     public async Task ListAsync_AllArchivedLinkedIssues_YieldsZeroCounts()
     {
         await using var database = CreateDatabase();
-        await SeedEpicAsync(database, "proj_1", "epic_1", 1);
-        await SeedIssueAsync(database, "proj_1", "issue_1", 1, IssueStatus.Done, archivedAt: TestTime.UtcDateTime);
-        await SeedLinkAsync(database, "epic_1", "issue_1", 1, "proj_1");
+        await SeedEpicAsync(database, "proj_1", 1);
+        await SeedIssueAsync(database, "proj_1", 1, IssueStatus.Done, archivedAt: TestTime.UtcDateTime);
 
         var querier = new EpicQuerier(database.Factory, new ThrowingIssueQuerier());
         var result = await querier.ListAsync("proj_1");
@@ -185,11 +175,9 @@ public class EpicQuerierListAsyncSpecs
     public async Task ListAsync_NextIssue_SelectsHighestPriorityStartable()
     {
         await using var database = CreateDatabase();
-        await SeedEpicAsync(database, "proj_1", "epic_1", 1);
-        await SeedIssueAsync(database, "proj_1", "low_ready", 1, IssueStatus.Backlog, priority: "p2", isDraft: false);
-        await SeedIssueAsync(database, "proj_1", "high_ready", 2, IssueStatus.Backlog, priority: "p0", isDraft: false);
-        await SeedLinkAsync(database, "epic_1", "low_ready", 1, "proj_1");
-        await SeedLinkAsync(database, "epic_1", "high_ready", 2, "proj_1");
+        await SeedEpicAsync(database, "proj_1", 1);
+        await SeedIssueAsync(database, "proj_1", 1, IssueStatus.Backlog, priority: "p2", isDraft: false);
+        await SeedIssueAsync(database, "proj_1", 2, IssueStatus.Backlog, priority: "p0", isDraft: false);
 
         var querier = new EpicQuerier(database.Factory, new ThrowingIssueQuerier());
         var result = await querier.ListAsync("proj_1");
@@ -205,11 +193,9 @@ public class EpicQuerierListAsyncSpecs
     public async Task ListAsync_NextIssue_SerialSlotOccupiedByInProgress()
     {
         await using var database = CreateDatabase();
-        await SeedEpicAsync(database, "proj_1", "epic_1", 1);
-        await SeedIssueAsync(database, "proj_1", "in_progress", 3, IssueStatus.InProgress, priority: "p0", isDraft: false);
-        await SeedIssueAsync(database, "proj_1", "ready", 1, IssueStatus.Backlog, priority: "p0", isDraft: false);
-        await SeedLinkAsync(database, "epic_1", "in_progress", 3, "proj_1");
-        await SeedLinkAsync(database, "epic_1", "ready", 1, "proj_1");
+        await SeedEpicAsync(database, "proj_1", 1);
+        await SeedIssueAsync(database, "proj_1", 3, IssueStatus.InProgress, priority: "p0", isDraft: false);
+        await SeedIssueAsync(database, "proj_1", 1, IssueStatus.Backlog, priority: "p0", isDraft: false);
 
         var querier = new EpicQuerier(database.Factory, new ThrowingIssueQuerier());
         var result = await querier.ListAsync("proj_1");
@@ -225,11 +211,9 @@ public class EpicQuerierListAsyncSpecs
     public async Task ListAsync_UnmetPrerequisiteBlocksCanStart()
     {
         await using var database = CreateDatabase();
-        await SeedEpicAsync(database, "proj_1", "epic_1", 1);
-        await SeedIssueAsync(database, "proj_1", "prereq", 1, IssueStatus.Backlog, isDraft: false);
-        await SeedIssueAsync(database, "proj_1", "dependent", 2, IssueStatus.Backlog, isDraft: false, prerequisiteNumbers: [1]);
-        await SeedLinkAsync(database, "epic_1", "prereq", 1, "proj_1");
-        await SeedLinkAsync(database, "epic_1", "dependent", 2, "proj_1");
+        await SeedEpicAsync(database, "proj_1", 1);
+        await SeedIssueAsync(database, "proj_1", 1, IssueStatus.Backlog, isDraft: false);
+        await SeedIssueAsync(database, "proj_1", 2, IssueStatus.Backlog, isDraft: false, prerequisiteNumbers: [1]);
 
         var querier = new EpicQuerier(database.Factory, new ThrowingIssueQuerier());
         var result = await querier.ListAsync("proj_1");
@@ -245,11 +229,9 @@ public class EpicQuerierListAsyncSpecs
     public async Task ListAsync_DraftIssueIsNotStartable()
     {
         await using var database = CreateDatabase();
-        await SeedEpicAsync(database, "proj_1", "epic_1", 1);
-        await SeedIssueAsync(database, "proj_1", "draft", 1, IssueStatus.Backlog, isDraft: true);
-        await SeedIssueAsync(database, "proj_1", "ready", 2, IssueStatus.Backlog, isDraft: false);
-        await SeedLinkAsync(database, "epic_1", "draft", 1, "proj_1");
-        await SeedLinkAsync(database, "epic_1", "ready", 2, "proj_1");
+        await SeedEpicAsync(database, "proj_1", 1);
+        await SeedIssueAsync(database, "proj_1", 1, IssueStatus.Backlog, isDraft: true);
+        await SeedIssueAsync(database, "proj_1", 2, IssueStatus.Backlog, isDraft: false);
 
         var querier = new EpicQuerier(database.Factory, new ThrowingIssueQuerier());
         var result = await querier.ListAsync("proj_1");
@@ -265,9 +247,8 @@ public class EpicQuerierListAsyncSpecs
     public async Task ListAsync_BlockedInProgress_ReportedAsActive()
     {
         await using var database = CreateDatabase();
-        await SeedEpicAsync(database, "proj_1", "epic_1", 1);
-        await SeedIssueAsync(database, "proj_1", "blocked_in_progress", 1, IssueStatus.InProgress, isDraft: false);
-        await SeedLinkAsync(database, "epic_1", "blocked_in_progress", 1, "proj_1");
+        await SeedEpicAsync(database, "proj_1", 1);
+        await SeedIssueAsync(database, "proj_1", 1, IssueStatus.InProgress, isDraft: false);
 
         var querier = new EpicQuerier(database.Factory, new ThrowingIssueQuerier());
         var result = await querier.ListAsync("proj_1");
@@ -284,17 +265,17 @@ public class EpicQuerierListAsyncSpecs
     {
         await using var database = CreateDatabase();
         var now = new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero);
-        await SeedEpicAsync(database, "proj_1", "epic_p2_old", 1, priority: "p2", updatedAt: now);
-        await SeedEpicAsync(database, "proj_1", "epic_p2_new", 2, priority: "p2", updatedAt: now.AddMinutes(1));
-        await SeedEpicAsync(database, "proj_1", "epic_p0", 3, priority: "p0");
+        await SeedEpicAsync(database, "proj_1", 1, priority: "p2", updatedAt: now);
+        await SeedEpicAsync(database, "proj_1", 2, priority: "p2", updatedAt: now.AddMinutes(1));
+        await SeedEpicAsync(database, "proj_1", 3, priority: "p0");
 
         var querier = new EpicQuerier(database.Factory, new ThrowingIssueQuerier());
         var result = await querier.ListAsync("proj_1");
 
         Assert.Equal(3, result.Count);
-        Assert.Equal("epic_p0", result[0].Id);
-        Assert.Equal("epic_p2_new", result[1].Id);
-        Assert.Equal("epic_p2_old", result[2].Id);
+        Assert.Equal(3, result[0].Number);
+        Assert.Equal(2, result[1].Number);
+        Assert.Equal(1, result[2].Number);
     }
 
     private static TestDatabase CreateDatabase()
@@ -329,13 +310,12 @@ public class EpicQuerierListAsyncSpecs
         return (new TestDatabase(connection, factory), commands);
     }
 
-    private static async Task SeedEpicAsync(TestDatabase database, string projectId, string epicId, int number, string priority = "p2", DateTimeOffset? updatedAt = null)
+    private static async Task SeedEpicAsync(TestDatabase database, string projectId, int number, string priority = "p2", DateTimeOffset? updatedAt = null)
     {
         var now = updatedAt ?? TestTime.UtcNow;
         await using var db = database.CreateDbContext();
         db.Epics.Add(new EpicRow
         {
-            Id = epicId,
             ProjectId = projectId,
             Number = number,
             Title = $"Epic {number}",
@@ -351,17 +331,16 @@ public class EpicQuerierListAsyncSpecs
     private static async Task SeedIssueAsync(
         TestDatabase database,
         string projectId,
-        string issueId,
         int number,
         IssueStatus status,
         string priority = "p2",
         bool isDraft = false,
         int[]? prerequisiteNumbers = null,
-        DateTime? archivedAt = null)
+        DateTime? archivedAt = null,
+        int? epicNumber = 1)
     {
         var issue = new Mohist.Server.Issue.Domain.Issue
         {
-            Id = issueId,
             ProjectId = projectId,
             Number = number,
             Title = $"Issue {number}",
@@ -370,6 +349,7 @@ public class EpicQuerierListAsyncSpecs
             IsDraft = isDraft,
             PrerequisiteNumbers = prerequisiteNumbers ?? [],
             ArchivedAt = archivedAt,
+            EpicNumber = epicNumber,
             CreatedAt = TestTime.UtcDateTime,
             UpdatedAt = TestTime.UtcDateTime,
         };
@@ -377,22 +357,10 @@ public class EpicQuerierListAsyncSpecs
         await using var db = database.CreateDbContext();
         db.Issues.Add(new IssueRow
         {
-            IssueId = issueId,
-            State = json,
-        });
-        await db.SaveChangesAsync();
-    }
-
-    private static async Task SeedLinkAsync(TestDatabase database, string epicId, string issueId, int issueNumber, string projectId)
-    {
-        await using var db = database.CreateDbContext();
-        db.EpicIssues.Add(new EpicIssueRow
-        {
-            EpicId = epicId,
             ProjectId = projectId,
-            IssueId = issueId,
-            IssueNumber = issueNumber,
-            CreatedAt = TestTime.UtcNow,
+            Number = number,
+            EpicNumber = epicNumber,
+            State = json,
         });
         await db.SaveChangesAsync();
     }
