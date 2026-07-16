@@ -299,7 +299,7 @@ public class WorkflowRunDetailApiSpecs
             .FirstOrDefaultAsync();
         if (row is null) return;
 
-        var tracked = await db.Issues.FindAsync(row.IssueId);
+        var tracked = await db.Issues.FindAsync(row.ProjectId, row.Number);
         if (tracked is null) return;
         using var doc = JsonDocument.Parse(tracked.State);
         var state = doc.RootElement.Deserialize<Dictionary<string, JsonElement>>()!;
@@ -327,7 +327,7 @@ public class WorkflowRunDetailApiSpecs
             .FirstOrDefaultAsync();
         if (row is null) return;
 
-        var tracked = await db.Issues.FindAsync(row.IssueId);
+        var tracked = await db.Issues.FindAsync(row.ProjectId, row.Number);
         if (tracked is null) return;
         using var doc = JsonDocument.Parse(tracked.State);
         var state = doc.RootElement.Deserialize<Dictionary<string, JsonElement>>()!;

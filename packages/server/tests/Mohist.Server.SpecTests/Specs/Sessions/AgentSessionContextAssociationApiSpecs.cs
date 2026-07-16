@@ -223,10 +223,9 @@ public class AgentSessionContextAssociationApiSpecs
     private async Task<IssueInfo> CreateIssueAsync(string projectId, string title)
     {
         var number = await _fixture.Grains.GetGrain<IIssueCounterGrain>(projectId).NextAsync();
-        var issueId = $"issue_{Guid.NewGuid():N}";
-        var grain = _fixture.Grains.GetGrain<IIssueGrain>(issueId);
-        await grain.CreateAsync(projectId, number, title, body: null, labels: null, priority: null, repositoryRef: null, issueId, risk: null, isDraft: true);
-        return new IssueInfo(issueId, number);
+        var grain = _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(projectId, number)));
+        await grain.CreateAsync(projectId, number, title, body: null, labels: null, priority: null, repositoryRef: null, risk: null, isDraft: true);
+        return new IssueInfo(number);
     }
 
     private async Task<EpicDto> CreateEpicAsync(string projectId, string title)
@@ -242,7 +241,7 @@ public class AgentSessionContextAssociationApiSpecs
             data.TryGetProperty("number", out var n) ? n.GetInt32() : null);
     }
 
-    private sealed record IssueInfo(string Id, int Number);
+    private sealed record IssueInfo(int Number);
 
     private sealed record EpicDto(string Id, int? Number);
 }
