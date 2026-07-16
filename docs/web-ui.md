@@ -76,7 +76,7 @@ Web UI 是日常使用 Mohist 的主要入口。访问 `http://localhost:3456`�
 按从上到下：
 
 1. **Workflow 进度视图** — 当前 workflow stage 的进度和子任务
-2. **Workflow Profile 编辑器** — 修改这个 issue 的 workflow profile
+2. **Workflow Profile 选择器** — 为这个 issue 选择或更换 Project 中的 profile
 3. **Diff 概览** — base/head 分支、ahead/behind、文件改动数
 4. **分支状态栏** — 分支状态、rebase 可用性
 5. **Description** — issue body（markdown 渲染）
@@ -177,8 +177,8 @@ URL: `/settings/<section>`
 | **OpenCode** | 查看 OpenCode 模型与配置 |
 | **Runtime** | Runner 状态、并发容量 |
 | **Repositories** | 项目关联的 git 仓库 |
-| **Workflows** | Workflow profile 管理 |
-| **Templates** | Prompt 模板编辑 |
+| **Workflows** | Project 的 Workflow Profile collection 与默认 Profile |
+| **Prompts** | Project Prompt 编辑 |
 | **System** | 系统级配置 |
 
 详见 [Workflow Profile](workflow-profiles.md) 和 [Runner 指南](runner.md)。

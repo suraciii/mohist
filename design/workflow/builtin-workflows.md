@@ -1,6 +1,13 @@
 # 内置 Workflow
 
-内容真源是 `packages/server/src/Mohist.Server/Workflow/Services/Profiles/` 下的 `*.workflow.yaml`。本篇只记录设计取舍与不变量，不复述 yaml。
+内容真源是 `packages/server/src/Mohist.Server/Workflow/Services/Profiles/` 下的
+`*.workflow.yaml`。`mohist/*` Profile 出现在每个 Project 的 WorkflowProfile collection
+中，但 definition 由当前 Mohist 版本管理，不复制成 Project 可编辑的数据。升级 Mohist
+会更新这些 Profile，并只影响之后创建的 WorkflowRun；进行中的 Run 继续使用自己的
+Definition snapshot。
+
+内置 Profile 不允许修改或删除。需要定制时，创建新的 Project Profile。本篇只记录设计
+取舍与不变量，不复述 yaml。
 
 - `mohist/local` —— 本地 rebase --squash 后直接 push 到 base branch。默认。
 - `mohist/github-pr` —— draft PR → ready → squash merge，经 GitHub PR 交付。

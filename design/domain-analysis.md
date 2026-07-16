@@ -6,7 +6,9 @@ Where does a change belong? First: problem space (subdomains). Then: solution sp
 
 ### Core: Workflow
 
-Autonomous work pipeline. Advance, schedule, dispatch, approve, repair, resume. Interpret reports, decide next state. Workflow owns TaskRun and Action contracts. Direct use of a runtime-specific Action is an Inline Agent execution, not an Agent entity.
+Autonomous work pipeline. Advance, schedule, dispatch, approve, repair, resume. Interpret reports,
+decide next state. Workflow owns Project-scoped WorkflowProfile, WorkflowRun, TaskRun and Action
+contracts. Direct use of a runtime-specific Action is an Inline Agent execution, not an Agent entity.
 
 ### Supporting
 
@@ -24,7 +26,8 @@ Issue 与 Epic 是同一限界上下文中的两个聚合。Issue 持有自己�
 持有目标与推进策略，但不持有第二份权威成员集合。Epic 的成员、进度和候选 Issue 是
 对 Issue 当前状态的查询结果。
 Sub-issue/parent is also Issue-internal organization (work decomposition axis, orthogonal to Epic's goal/feeding axis); Workflow never sees it. See [`issue-breakdown.md`](issue-breakdown.md).
-Prompt belongs to Project Space (only configurable layer). Builtin .prompt is loader fallback.
+Prompt belongs to Project Space (Project is the only configurable scope). Builtin `.prompt` is
+loader fallback, not another Prompt resource.
 
 ### Agent and Session terms
 
@@ -49,9 +52,9 @@ DDD patterns: Customer/Supplier (C/S), Conformist (C), ACL, OHS, Published Langu
 
 | # | Upstream | Downstream | Pattern | What flows |
 |---|---|---|---|---|
-| 1 | Workflow | Issue | C/S | profile, run creation, verdict/output |
+| 1 | Workflow | Issue | C/S | WorkflowProfile, run creation, verdict/output |
 | 2 | Workflow | Runner | OHS+PL | task dispatch, fact report |
-| 3 | Project Space | Workflow | PL | project variables |
+| 3 | Project Space | Workflow | PL | default Profile ref, Repository resource, Project Variables, Prompt key/body |
 | 4 | Project Space | Issue | SK | ProjectId, repo ref |
 | 5 | Issue | Skill·Explore | OHS+PL | issue body/template |
 | 6 | Agent | runner process | C | AgentJob dispatch with Agent definition snapshot |
