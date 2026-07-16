@@ -9,6 +9,7 @@ using Mohist.Server.Infrastructure.Data;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Infrastructure.Data.Issue;
+using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Issue.Domain;
@@ -66,13 +67,13 @@ public class IssueWorkflowReadPathSpecs
         using var scope = _fixture.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
         var projectId = $"project_readpath_completed_{Guid.NewGuid():N}";
-        var issueId = $"issue_readpath_completed_{Guid.NewGuid():N}";
+        const int issueNumber = 1;
         var workflowRunId = $"wr_readpath_completed_{Guid.NewGuid():N}";
-        await SeedIssueAsync(db, projectId: projectId, issueId: issueId, issueNumber: 1,
+        await SeedIssueAsync(db, projectId, issueNumber,
             status: IssueStatus.InProgress, workflowRunId: workflowRunId);
         await SeedCompletedWorkflowRunAsync(db, workflowRunId, projectId: projectId);
 
-        var beforeRow = await db.Issues.AsNoTracking().FirstAsync(r => r.IssueId == issueId);
+        var beforeRow = await db.Issues.AsNoTracking().FirstAsync(r => r.ProjectId == projectId && r.Number == issueNumber);
 
         // Swap the state store for a recording one: any SaveAsync call
         // during the read path is a regression. The path is documented
@@ -81,7 +82,7 @@ public class IssueWorkflowReadPathSpecs
             scope.ServiceProvider.GetRequiredService<IDbContextFactory<MohistDbContext>>(),
             scope.ServiceProvider.GetRequiredService<IGrainFactory>(),
             scope.ServiceProvider.GetRequiredService<ILoggerFactory>().CreateLogger<IssueStore>());
-        var grain = CreateGrain(scope.ServiceProvider, stateStore, issueId);
+        var grain = CreateGrain(scope.ServiceProvider, stateStore, projectId, issueNumber);
 
         // Act
         await grain.OnActivateAsync(CancellationToken.None);
@@ -99,7 +100,7 @@ public class IssueWorkflowReadPathSpecs
 
         // Assert: the persisted issue row is byte-for-byte unchanged —
         // no state mutation leaked into the read path.
-        var afterRow = await db.Issues.AsNoTracking().FirstAsync(r => r.IssueId == issueId);
+        var afterRow = await db.Issues.AsNoTracking().FirstAsync(r => r.ProjectId == projectId && r.Number == issueNumber);
         Assert.Equal(beforeRow.State, afterRow.State);
         Assert.Equal(beforeRow.Status, afterRow.Status);
         Assert.Equal(beforeRow.WorkflowRunId, afterRow.WorkflowRunId);
@@ -121,9 +122,9 @@ public class IssueWorkflowReadPathSpecs
         using var scope = _fixture.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
         var projectId = $"project_readpath_repeated_{Guid.NewGuid():N}";
-        var issueId = $"issue_readpath_repeated_{Guid.NewGuid():N}";
+        const int issueNumber = 1;
         var workflowRunId = $"wr_readpath_repeated_{Guid.NewGuid():N}";
-        await SeedIssueAsync(db, projectId: projectId, issueId: issueId, issueNumber: 1,
+        await SeedIssueAsync(db, projectId, issueNumber,
             status: IssueStatus.InProgress, workflowRunId: workflowRunId);
         await SeedCompletedWorkflowRunAsync(db, workflowRunId, projectId: projectId);
 
@@ -131,10 +132,10 @@ public class IssueWorkflowReadPathSpecs
             scope.ServiceProvider.GetRequiredService<IDbContextFactory<MohistDbContext>>(),
             scope.ServiceProvider.GetRequiredService<IGrainFactory>(),
             scope.ServiceProvider.GetRequiredService<ILoggerFactory>().CreateLogger<IssueStore>());
-        var grain = CreateGrain(scope.ServiceProvider, stateStore, issueId);
+        var grain = CreateGrain(scope.ServiceProvider, stateStore, projectId, issueNumber);
         await grain.OnActivateAsync(CancellationToken.None);
 
-        var beforeRow = await db.Issues.AsNoTracking().FirstAsync(r => r.IssueId == issueId);
+        var beforeRow = await db.Issues.AsNoTracking().FirstAsync(r => r.ProjectId == projectId && r.Number == issueNumber);
 
         for (var i = 0; i < 5; i++)
         {
@@ -144,7 +145,7 @@ public class IssueWorkflowReadPathSpecs
             Assert.Equal("completed", status.Workflow!.Status);
         }
 
-        var afterRow = await db.Issues.AsNoTracking().FirstAsync(r => r.IssueId == issueId);
+        var afterRow = await db.Issues.AsNoTracking().FirstAsync(r => r.ProjectId == projectId && r.Number == issueNumber);
         Assert.Equal(beforeRow.State, afterRow.State);
         Assert.Equal(beforeRow.Status, afterRow.Status);
         Assert.Empty(stateStore.SaveCalls);
@@ -161,15 +162,15 @@ public class IssueWorkflowReadPathSpecs
         using var scope = _fixture.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
         var projectId = $"project_readpath_norun_{Guid.NewGuid():N}";
-        var issueId = $"issue_readpath_norun_{Guid.NewGuid():N}";
-        await SeedIssueAsync(db, projectId: projectId, issueId: issueId, issueNumber: 1,
+        const int issueNumber = 1;
+        await SeedIssueAsync(db, projectId, issueNumber,
             status: IssueStatus.Backlog, workflowRunId: null);
 
         var stateStore = new ReadOnlyTrackingStateStore(
             scope.ServiceProvider.GetRequiredService<IDbContextFactory<MohistDbContext>>(),
             scope.ServiceProvider.GetRequiredService<IGrainFactory>(),
             scope.ServiceProvider.GetRequiredService<ILoggerFactory>().CreateLogger<IssueStore>());
-        var grain = CreateGrain(scope.ServiceProvider, stateStore, issueId);
+        var grain = CreateGrain(scope.ServiceProvider, stateStore, projectId, issueNumber);
 
         await grain.OnActivateAsync(CancellationToken.None);
         var status = await grain.GetWorkflowStatusAsync();
@@ -181,7 +182,8 @@ public class IssueWorkflowReadPathSpecs
     private IssueGrain CreateGrain(
         IServiceProvider services,
         IIssueStore stateStore,
-        string grainKey)
+        string projectId,
+        int issueNumber)
     {
         return new IssueGrain(
             stateStore,
@@ -189,7 +191,6 @@ public class IssueWorkflowReadPathSpecs
             services.GetRequiredService<WorkflowQuerier>(),
             services.GetRequiredService<IDbContextFactory<MohistDbContext>>(),
             services.GetRequiredService<IssueRepositoryResolver>(),
-            services.GetRequiredService<IssueIdentityResolver>(),
             services.GetRequiredService<WorkflowProfileManager>(),
             services.GetRequiredService<ProjectWorkflowProfileManager>(),
             services.GetRequiredService<IssueWorkflowProfileManager>(),
@@ -198,21 +199,19 @@ public class IssueWorkflowReadPathSpecs
             services.GetRequiredService<IEnvironmentVariableProvider>(),
             services.GetRequiredService<ILogger<IssueGrain>>())
         {
-            GrainKeyForTest = grainKey,
+            GrainKeyForTest = GrainKey.Issue(new IssueKey(projectId, issueNumber)),
         };
     }
 
     private static async Task SeedIssueAsync(
         MohistDbContext db,
         string projectId,
-        string issueId,
         int issueNumber,
         IssueStatus status,
         string? workflowRunId)
     {
         var issue = new DomainIssue
         {
-            Id = issueId,
             ProjectId = projectId,
             Number = issueNumber,
             Title = $"Issue {issueNumber}",
@@ -222,7 +221,6 @@ public class IssueWorkflowReadPathSpecs
         var json = IssueStore.Serialize(issue);
         db.Issues.Add(new IssueRow
         {
-            IssueId = issueId,
             ProjectId = projectId,
             Number = issueNumber,
             WorkflowRunId = workflowRunId,
