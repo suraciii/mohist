@@ -44,6 +44,8 @@ export interface TaskWorkItem {
   with?: JsonObject | null
   artifacts?: TaskArtifactCapture | null
   setVars?: Record<string, string> | null
+  recovery?: JsonObject | null
+  recoveryRemaining?: number | null
 }
 
 export interface ChecksWorkItem {
@@ -92,6 +94,7 @@ export type WorkDispatchResponse = {
    */
   agentSessionId?: string | null
   recovery?: string | null
+  recoveryRemaining?: number | null
 }
 
 /**
@@ -157,6 +160,7 @@ export interface RenderedWorkItem {
    */
   agentSessionId?: string | null
   recovery?: JsonObject | null
+  recoveryRemaining?: number | null
 }
 
 export interface AddTaskInput {
@@ -167,6 +171,7 @@ export interface AddTaskInput {
   artifacts?: JsonObject | null
   setVars?: Record<string, string> | null
   recovery?: JsonObject | null
+  recoveryRemaining?: number | null
 }
 
 export interface WorkItemResult {

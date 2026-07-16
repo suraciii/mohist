@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
 using Orleans.Concurrency;
@@ -116,7 +117,8 @@ public record WorkDispatch(
     /// dispatches and for raw-prompt-only AgentJob validation
     /// dispatches. New field; older-field consumers ignore it.
     /// </summary>
-    [property: Id(16)] string? AgentSessionId = null)
+    [property: Id(16)] string? AgentSessionId = null,
+    [property: Id(17)] [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] int? RecoveryRemaining = null)
 {
     public WorkDispatch() : this(string.Empty, string.Empty) { }
 }

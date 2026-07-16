@@ -5,6 +5,7 @@ using Mohist.Server.AgentOps.Services;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Infrastructure.Data.Sessions;
+using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Runner.Services;
 using Mohist.Server.Sessions;
@@ -165,6 +166,79 @@ public class AgentActivityFeedAssemblerSpecs
         Assert.Equal($"issue_{project.Id}_42", card.IssueId);
         Assert.Null(card.AgentId);
         Assert.Null(card.AgentName);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
+    public async Task Reconcile_DropsActiveSessionWhenWorkflowStateIsInvalid()
+    {
+        var project = await CreateProjectAsync();
+        var sessionId = $"session-{Guid.NewGuid():N}";
+        var workflowRunId = $"wf-{Guid.NewGuid():N}";
+
+        await InsertWorkflowSessionAsync(project.Id, sessionId, workflowRunId, issueNumber: 42);
+        // Persist a run whose legacy recovery state is ambiguous: normalization
+        // throws, so the run is invalid rather than missing. The active session
+        // must be dropped (fail closed) instead of retained against untrusted state.
+        await InsertWorkflowRunRowAsync(workflowRunId, AmbiguousLegacyWorkflowRunState);
+
+        var assembler = ResolveAssembler();
+        var result = await assembler.GetActivityAsync(project.Id, limit: 10);
+
+        Assert.DoesNotContain(result.Sessions, c => c.SessionId == sessionId);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
+    public async Task Reconcile_RetainsActiveSessionWhenWorkflowRunIsNotYetRecorded()
+    {
+        var project = await CreateProjectAsync();
+        var sessionId = $"session-{Guid.NewGuid():N}";
+        var workflowRunId = $"wf-{Guid.NewGuid():N}";
+
+        // Active session references a workflow run that has no persisted row yet.
+        // This is distinct from an invalid row: the run may simply not be recorded,
+        // so the session is retained (prior behavior) rather than dropped.
+        await InsertWorkflowSessionAsync(project.Id, sessionId, workflowRunId, issueNumber: 42);
+
+        var assembler = ResolveAssembler();
+        var result = await assembler.GetActivityAsync(project.Id, limit: 10);
+
+        Assert.NotNull(result.Sessions.SingleOrDefault(c => c.SessionId == sessionId));
+    }
+
+    private const string AmbiguousLegacyWorkflowRunState = """
+        {
+          "id": "wf-ambiguous",
+          "status": "Running",
+          "currentStageId": "check",
+          "stages": [
+            {
+              "id": "check",
+              "status": "Running",
+              "attempt": 1,
+              "initialized": true,
+              "tasks": [
+                {"definitionId":"review","attempt":1,"recovery":{"budget":2,"handlers":[{"when":"errorCode=one","tasks":[],"retrySelf":true}]}},
+                {"definitionId":"review","attempt":2,"recovery":{"budget":1,"handlers":[{"when":"errorCode=two","tasks":[],"retrySelf":true}]}}
+              ]
+            }
+          ]
+        }
+        """;
+
+    private async Task InsertWorkflowRunRowAsync(string workflowRunId, string state)
+    {
+        await using var db = await _fixture.Services
+            .GetRequiredService<IDbContextFactory<MohistDbContext>>().CreateDbContextAsync();
+        db.WorkflowRuns.Add(new WorkflowRunRow
+        {
+            WorkflowRunId = workflowRunId,
+            State = state,
+        });
+        await db.SaveChangesAsync();
     }
 
     private async Task<ProjectDto> CreateProjectAsync()

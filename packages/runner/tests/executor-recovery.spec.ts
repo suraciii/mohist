@@ -3,9 +3,10 @@ import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { ActionRegistry } from "../src/actions/registry.js"
-import type { ActionResult, RenderedWorkItem } from "../src/core/types.js"
+import type { ActionResult, RenderedWorkItem, WorkItemResult } from "../src/core/types.js"
 import { setExecutorGitRunnerForTest } from "../src/runtime/git-probe.js"
 import { WorkExecutor } from "../src/runtime/executor.js"
+import { tryRecovery } from "../src/runtime/recovery.js"
 import { verifyOnlyWorkspaceManager } from "./support/workspace-mock.js"
 
 let workDir: string
@@ -48,7 +49,7 @@ function work(overrides: Partial<RenderedWorkItem> = {}): RenderedWorkItem {
 }
 
 describe("WorkExecutor recovery", () => {
-  it("schedules handler tasks and trimmed retry self with decremented budget", async () => {
+  it("schedules handler tasks and trimmed retry self with decremented remaining state", async () => {
     const executor = executorFor({
       status: "failure",
       message: "conflict",
@@ -66,6 +67,7 @@ describe("WorkExecutor recovery", () => {
           },
         ],
       },
+      recoveryRemaining: null,
     }), new AbortController().signal)
 
     expect(result).toMatchObject({
@@ -73,7 +75,7 @@ describe("WorkExecutor recovery", () => {
       message: "Rebase branch failed (errorCode=rebase-conflict); recovery scheduled",
       addTasks: [
         { id: "resolve-conflicts", title: "Resolve conflicts", uses: "mohist/acp-agent", with: { session: "integrate" } },
-        { id: "integrate:rebase", title: "Rebase branch", uses: "test/action", with: { baseBranch: "master" }, recovery: { budget: 1 } },
+        { id: "integrate:rebase", title: "Rebase branch", uses: "test/action", with: { baseBranch: "master" }, recovery: { budget: 2 }, recoveryRemaining: 1 },
       ],
     })
   })
@@ -90,9 +92,136 @@ describe("WorkExecutor recovery", () => {
         budget: 1,
         handlers: [{ when: "errorCode=rebase-conflict", tasks: [{ id: "resolve-conflicts", title: "Resolve conflicts" }], retrySelf: true }],
       },
+      recoveryRemaining: null,
     }), new AbortController().signal)
 
     expect(result).toMatchObject({ status: "failed", message: "network failed" })
     expect(result.addTasks).toBeUndefined()
+  })
+})
+
+function recoveryWork(recoveryRemaining: number | null | undefined): RenderedWorkItem {
+  return work({
+    recovery: {
+      budget: 2,
+      handlers: [
+        {
+          when: "errorCode=conflict",
+          tasks: [{ id: "fix", title: "Fix", uses: "test/fix" }],
+          retrySelf: true,
+        },
+      ],
+    },
+    ...(recoveryRemaining === undefined ? {} : { recoveryRemaining }),
+  })
+}
+
+function matchingResult(status = "failed"): WorkItemResult {
+  return { status, output: JSON.stringify({ errorCode: "conflict" }) }
+}
+
+describe("tryRecovery", () => {
+  it("initializes explicit null from the declaration and preserves immutable configuration", () => {
+    const workItem = recoveryWork(null)
+    const recovery = workItem.recovery
+
+    const result = tryRecovery(workItem, matchingResult())
+
+    expect(result?.addTasks).toMatchObject([
+      { id: "fix", title: "Fix", uses: "test/fix" },
+      {
+        id: "integrate:rebase",
+        title: "Rebase branch",
+        uses: "test/action",
+        with: { baseBranch: "master" },
+        artifacts: undefined,
+        setVars: null,
+        recovery,
+        recoveryRemaining: 1,
+      },
+    ])
+    expect(workItem.recovery).toBe(recovery)
+    expect(workItem.recovery).toEqual({
+      budget: 2,
+      handlers: [
+        { when: "errorCode=conflict", tasks: [{ id: "fix", title: "Fix", uses: "test/fix" }], retrySelf: true },
+      ],
+    })
+  })
+
+  it("consumes one allowance and stops at zero", () => {
+    const workItem = recoveryWork(1)
+    const first = tryRecovery(workItem, matchingResult())
+    expect(first?.addTasks?.at(-1)?.recoveryRemaining).toBe(0)
+
+    expect(tryRecovery(recoveryWork(0), matchingResult())).toBeNull()
+  })
+
+  it("fails closed when continuation state is absent", () => {
+    expect(tryRecovery(recoveryWork(undefined), matchingResult())).toBeNull()
+  })
+
+  it("clamps malformed remaining state without expanding a round", () => {
+    expect(tryRecovery(recoveryWork(-1), matchingResult())).toBeNull()
+    expect(tryRecovery(recoveryWork(99), matchingResult())?.addTasks?.at(-1)?.recoveryRemaining).toBe(1)
+  })
+
+  it("does not consume allowance for unmatched output", () => {
+    const result = tryRecovery(recoveryWork(2), { status: "failed", output: JSON.stringify({ errorCode: "other" }) })
+    expect(result).toBeNull()
+  })
+
+  it("selects the first handler for completed matching output", () => {
+    const result = tryRecovery(work({
+      recovery: {
+        budget: 1,
+        handlers: [
+          { when: "promise=FAIL", tasks: [{ id: "first", title: "First" }], retrySelf: false },
+          { when: "promise=FAIL", tasks: [{ id: "second", title: "Second" }], retrySelf: false },
+        ],
+      },
+      recoveryRemaining: 1,
+    }), { status: "completed", output: JSON.stringify({ promise: "FAIL" }) })
+
+    expect(result?.addTasks?.map((task) => task.id)).toEqual(["first"])
+  })
+
+  it("initializes nested recovery-enabled handler tasks with their own budget", () => {
+    const result = tryRecovery(work({
+      recovery: {
+        budget: 1,
+        handlers: [{
+          when: "errorCode=conflict",
+          tasks: [{
+            id: "nested",
+            title: "Nested",
+            recovery: { budget: 4, handlers: [] },
+          }],
+          retrySelf: false,
+        }],
+      },
+      recoveryRemaining: 1,
+    }), matchingResult())
+
+    expect(result?.addTasks).toMatchObject([{ id: "nested", title: "Nested", recovery: { budget: 4, handlers: [] }, recoveryRemaining: 4 }])
+  })
+
+  it("does not append self retry when retrySelf is false and keeps follow-up order", () => {
+    const result = tryRecovery(work({
+      recovery: {
+        budget: 1,
+        handlers: [{
+          when: "errorCode=conflict",
+          tasks: [
+            { id: "first", title: "First" },
+            { id: "second", title: "Second" },
+          ],
+          retrySelf: false,
+        }],
+      },
+      recoveryRemaining: 1,
+    }), matchingResult())
+
+    expect(result?.addTasks?.map((task) => task.id)).toEqual(["first", "second"])
   })
 })

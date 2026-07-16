@@ -19,13 +19,19 @@ export function tryRecovery(
   const recovery = readRecoveryConfig(work.recovery)
   if (!recovery) return null
 
+  if (!Object.prototype.hasOwnProperty.call(work, "recoveryRemaining")) return null
+  const rawRemaining = work.recoveryRemaining
+  if (rawRemaining !== null && (typeof rawRemaining !== "number" || !Number.isFinite(rawRemaining))) return null
+  const remaining = rawRemaining === null
+    ? recovery.budget
+    : clampRemaining(rawRemaining, recovery.budget)
+  if (remaining <= 0) return null
+
   const output = safeParseObject(result.output)
   if (!output) return null
 
   const handler = recovery.handlers.find((h) => matchesWhen(h.when, output))
   if (!handler) return null
-
-  if (recovery.budget <= 0) return null
 
   const addTasks: AddTaskInput[] = [...handler.tasks]
 
@@ -33,7 +39,6 @@ export function tryRecovery(
     const retryId = work.workId.includes(".")
       ? work.workId.substring(0, work.workId.lastIndexOf("."))
       : work.workId
-    const nextRecovery = decrementRecoveryBudget(work.recovery, recovery.budget)
     addTasks.push({
       id: retryId,
       title: work.title ?? work.workId,
@@ -41,7 +46,8 @@ export function tryRecovery(
       with: work.with,
       artifacts: work.artifacts,
       setVars: work.setVars ?? null,
-      recovery: nextRecovery,
+      recovery: work.recovery,
+      recoveryRemaining: remaining - 1,
     })
   }
 
@@ -65,7 +71,7 @@ export function matchesWhen(when: string, output: JsonObject): boolean {
 export function readRecoveryConfig(recovery: JsonObject | null | undefined): RecoveryConfig | null {
   if (!recovery) return null
   const rawBudget = recovery["budget"]
-  const budget = typeof rawBudget === "number" && Number.isFinite(rawBudget) ? Math.floor(rawBudget) : 0
+  const budget = typeof rawBudget === "number" && Number.isFinite(rawBudget) ? Math.max(0, Math.floor(rawBudget)) : 0
   const rawHandlers = recovery["handlers"]
   if (!Array.isArray(rawHandlers)) return null
   const handlers: RecoveryHandler[] = []
@@ -89,25 +95,25 @@ export function readAddTasks(raw: unknown): AddTaskInput[] {
     if (!isObject(entry)) continue
     const id = stringField(entry, "id")
     if (!id) continue
-    tasks.push({
+    const recovery = objectField(entry, "recovery")
+    const recoveryConfig = readRecoveryConfig(recovery)
+    const task: AddTaskInput = {
       id,
       title: stringField(entry, "title") ?? id,
       uses: stringField(entry, "uses"),
       with: objectField(entry, "with"),
       artifacts: objectField(entry, "artifacts"),
       setVars: recordField(entry, "setVars"),
-      recovery: objectField(entry, "recovery"),
-    })
+      recovery,
+    }
+    if (recoveryConfig) task.recoveryRemaining = recoveryConfig.budget
+    tasks.push(task)
   }
   return tasks
 }
 
-export function decrementRecoveryBudget(recovery: JsonObject | null | undefined, currentBudget: number): JsonObject | null {
-  if (!recovery) return null
-  return {
-    ...recovery,
-    budget: currentBudget - 1,
-  }
+function clampRemaining(value: number, budget: number): number {
+  return Math.min(budget, Math.max(0, Math.floor(value)))
 }
 
 function stringField(obj: JsonObject, key: string): string | null {

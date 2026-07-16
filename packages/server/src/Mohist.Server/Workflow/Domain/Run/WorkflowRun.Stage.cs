@@ -145,15 +145,7 @@ public static partial class WorkflowRunExtensions
             var failedTask = stage.Tasks.LastOrDefault(t => t.Id == taskRunId && t.Status == TaskRunStatus.Failed)
                 ?? throw new InvalidOperationException($"Failed task {taskRunId} not found or not in failed state");
 
-            var input = new TaskDefinition(
-                failedTask.DefinitionId,
-                failedTask.Title,
-                failedTask.Uses,
-                failedTask.WithInput,
-                failedTask.Artifacts,
-                failedTask.SetVars,
-                failedTask.Recovery);
-            var newTask = TaskRun.MakeTask(stage.Tasks, input);
+            var newTask = TaskRun.MakeTask(stage.Tasks, failedTask.ToDefinition());
             var failedTaskIndex = stage.Tasks.IndexOf(failedTask);
             stage.Tasks.Insert(failedTaskIndex + 1, newTask);
             stage.Failure = null;

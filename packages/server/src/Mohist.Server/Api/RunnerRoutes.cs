@@ -133,7 +133,8 @@ public static class RunnerRoutes
                     work.OwnerKind,
                     work.AgentJobId,
                     AgentSessionId: work.AgentSessionId,
-                    Recovery: work.Recovery)).ToList()));
+                    Recovery: work.Recovery,
+                    RecoveryRemaining: work.RecoveryRemaining)).ToList()));
         });
 
         // Dedicated runner config channel. Separate from /poll so runner-side
@@ -646,7 +647,8 @@ public record WorkDispatchResponse(
     /// raw-prompt-only AgentJob validation dispatches.
     /// </summary>
     string? AgentSessionId = null,
-    string? Recovery = null);
+    string? Recovery = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] int? RecoveryRemaining = null);
 
 /// <summary>
 /// Poll response carrying zero or more dispatches. Replaces the old single-

@@ -105,7 +105,8 @@ public sealed class WorkflowItemTranslator : IScopedService
             SetVars: item.SetVars is not null && item.SetVars.Count > 0 ? JSON.Serialize(item.SetVars) : null,
             OwnerKind: WorkDispatchOwnerKinds.Workflow,
             AgentJobId: null,
-            Recovery: item.Recovery is not null ? JSON.Serialize(item.Recovery) : null);
+            Recovery: item.Recovery is not null ? JSON.Serialize(item.Recovery) : null,
+            RecoveryRemaining: item.RecoveryRemaining);
     }
 
     private async Task<WorkDispatch> BuildChecksDispatchAsync(

@@ -57,19 +57,22 @@ public class IssueMetricsQuerier : IScopedService
     private readonly EffectiveWorkflowProfileResolver _effectiveProfileResolver;
     private readonly ProjectWorkflowProfileManager _projectProfileManager;
     private readonly IssueReadModelLoader _loader;
+    private readonly ILogger<IssueMetricsQuerier> _logger;
 
     public IssueMetricsQuerier(
         IDbContextFactory<MohistDbContext> dbFactory,
         IssueWorkflowProfileRegistry profiles,
         EffectiveWorkflowProfileResolver effectiveProfileResolver,
         ProjectWorkflowProfileManager projectProfileManager,
-        IssueReadModelLoader loader)
+        IssueReadModelLoader loader,
+        ILogger<IssueMetricsQuerier> logger)
     {
         _dbFactory = dbFactory;
         _profiles = profiles;
         _effectiveProfileResolver = effectiveProfileResolver;
         _projectProfileManager = projectProfileManager;
         _loader = loader;
+        _logger = logger;
     }
 
     /// <summary>
@@ -1392,7 +1395,7 @@ public class IssueMetricsQuerier : IScopedService
         var runs = new Dictionary<string, WorkflowRun>(StringComparer.Ordinal);
         foreach (var row in runRows)
         {
-            var run = DeserializeRun(row.State);
+            var run = DeserializeRun(row.WorkflowRunId, row.State);
             if (run is not null)
                 runs[row.WorkflowRunId] = run;
         }
@@ -1509,7 +1512,7 @@ public class IssueMetricsQuerier : IScopedService
         var workflows = new Dictionary<string, WorkflowStatusView>(StringComparer.Ordinal);
         foreach (var row in runRows)
         {
-            var run = DeserializeRun(row.State);
+            var run = DeserializeRun(row.WorkflowRunId, row.State);
             if (run is null) continue;
             var snapshot = WorkflowStatusMapper.BuildStatusView(run, definition: null);
             if (snapshot is not null)
@@ -1776,9 +1779,24 @@ public class IssueMetricsQuerier : IScopedService
         double ApprovalGateWaitSeconds,
         double SumStageSeconds);
 
-    private static WorkflowRun? DeserializeRun(string json)
+    private WorkflowRun? DeserializeRun(string workflowRunId, string json)
     {
-        try { return JsonSerializer.Deserialize<WorkflowRun>(json, JSON.Options); }
-        catch { return null; }
+        try
+        {
+            var run = JsonSerializer.Deserialize<WorkflowRun>(WorkflowRunStore.MigrateLegacyWorkflowRunJson(json), JSON.Options);
+            if (run is not null) return run;
+
+            _logger.LogError(
+                "Cannot include workflow run {WorkflowRunId} in issue metrics: persisted state deserialized to null. The run will be omitted from metrics until repaired.",
+                workflowRunId);
+            return null;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "Cannot include workflow run {WorkflowRunId} in issue metrics: persisted state is invalid. The run will be omitted from metrics until repaired.",
+                workflowRunId);
+            return null;
+        }
     }
 }

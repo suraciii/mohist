@@ -336,7 +336,7 @@ export interface WorkflowAgentSession {
 export type AgentSession = WorkflowAgentSession
 
 function toWorkItem(dispatch: WorkDispatchResponse): RenderedWorkItem {
-  return {
+  const work: RenderedWorkItem = {
     workflowRunId: dispatch.workflowRunId,
     workId: dispatch.workId,
     workType: dispatch.workType,
@@ -354,6 +354,9 @@ function toWorkItem(dispatch: WorkDispatchResponse): RenderedWorkItem {
     agentSessionId: dispatch.agentSessionId ?? undefined,
     recovery: parseObject(dispatch.recovery),
   }
+  if (Object.prototype.hasOwnProperty.call(dispatch, "recoveryRemaining"))
+    work.recoveryRemaining = dispatch.recoveryRemaining
+  return work
 }
 
 export interface ArtifactUploadRequest {

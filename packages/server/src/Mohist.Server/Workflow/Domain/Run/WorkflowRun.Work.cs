@@ -14,7 +14,8 @@ public sealed record WorkflowTaskWork(
     Dictionary<string, JsonElement?>? With,
     TaskArtifactCapture? Artifacts = null,
     Dictionary<string, string>? SetVars = null,
-    RecoveryDefinition? Recovery = null) : WorkflowWork(Stage);
+    RecoveryDefinition? Recovery = null,
+    int? RecoveryRemaining = null) : WorkflowWork(Stage);
 
 public sealed record WorkflowChecksWork(
     string Stage,
@@ -46,7 +47,7 @@ public static partial class WorkflowRunExtensions
 
             var pendingTask = NextUnclaimedTask(current);
             if (pendingTask is not null)
-                return new WorkflowTaskWork(current.Id, pendingTask.Id, pendingTask.Title, pendingTask.Uses, pendingTask.WithInput, pendingTask.Artifacts, pendingTask.SetVars, pendingTask.Recovery);
+                return new WorkflowTaskWork(current.Id, pendingTask.Id, pendingTask.Title, pendingTask.Uses, pendingTask.WithInput, pendingTask.Artifacts, pendingTask.SetVars, pendingTask.Recovery, pendingTask.RecoveryRemaining);
 
             var pendingChecks = current.Checks
                 .Where(c => c.Status == StageCheckStatus.Pending)
@@ -160,6 +161,36 @@ public static partial class WorkflowRunExtensions
             return tasks.Count > 0 ? [new WorkflowRunResumed()] : [];
         }
 
+        internal IReadOnlyList<WorkflowEvent> AddRuntimeTaskAttempts(
+            IReadOnlyList<(TaskDefinition Definition, int? RecoveryRemaining)> tasks,
+            DateTimeOffset now)
+        {
+            var current = run.CurrentStage();
+            var runningIndex = current.Tasks.FindIndex(t => t.Status == TaskRunStatus.Running);
+            var firstIncompleteIndex = current.Tasks.FindIndex(t => t.Status is not (TaskRunStatus.Completed or TaskRunStatus.Failed));
+            var insertIndex = runningIndex >= 0
+                ? runningIndex + 1
+                : firstIncompleteIndex >= 0
+                    ? firstIncompleteIndex
+                    : current.Tasks.Count;
+
+            foreach (var task in tasks)
+            {
+                var newTask = task.RecoveryRemaining is { } remaining
+                    ? TaskRun.MakeContinuationTask(current.Tasks, task.Definition, remaining)
+                    : TaskRun.MakeTask(current.Tasks, task.Definition);
+                current.Tasks.Insert(insertIndex, newTask);
+                insertIndex++;
+            }
+
+            current.Failure = null;
+            if (current.IsAwaitingApproval)
+                current.ApprovalStatus = null;
+            current.Status = StageRunStatus.Running;
+            ApplyActiveOrWaitingForDispatchStatus(run, now);
+            return tasks.Count > 0 ? [new WorkflowRunResumed()] : [];
+        }
+
         public bool HasIncompleteTaskWithUses(string uses)
         {
             var current = run.CurrentStage();
@@ -178,7 +209,7 @@ public static partial class WorkflowRunExtensions
         var workId = task.WorkId ?? task.Id;
         var item = WorkItem.Task(
             stage.Id, workId, task.Title, task.Uses,
-            task.WithInput, task.Artifacts, task.SetVars, task.Recovery);
+            task.WithInput, task.Artifacts, task.SetVars, task.Recovery, task.RecoveryRemaining);
         return new WorkflowActiveWork(item, task.Id);
     }
 

@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Issue.Services;
@@ -13,15 +14,18 @@ public sealed class AgentSessionListAssembler : IScopedService
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly AgentSessionQuery _sessionQuery;
     private readonly TimeProvider _timeProvider;
+    private readonly ILogger<AgentSessionListAssembler> _logger;
 
     public AgentSessionListAssembler(
         IDbContextFactory<MohistDbContext> dbFactory,
         AgentSessionQuery sessionQuery,
-        TimeProvider timeProvider)
+        TimeProvider timeProvider,
+        ILogger<AgentSessionListAssembler> logger)
     {
         _dbFactory = dbFactory;
         _sessionQuery = sessionQuery;
         _timeProvider = timeProvider;
+        _logger = logger;
     }
 
     public async Task<IReadOnlyList<AgentSessionInfoDto>> ListCurrentAsync(
@@ -37,7 +41,7 @@ public sealed class AgentSessionListAssembler : IScopedService
             limit,
             status: status,
             ct: ct);
-        sessions = await ActiveSessionReconciler.ReconcileAsync(db, sessions, ct);
+        sessions = await ActiveSessionReconciler.ReconcileAsync(db, sessions, _logger, ct);
         var issueTitles = await IssueTitleLookup.LoadTitlesAsync(db, projectId, sessions.Select(r => r.IssueNumber()), ct);
         var eventSummaries = await TranscriptReductions.LoadEventSummariesAsync(db, sessions.Select(r => r.Session.Id), ct);
 

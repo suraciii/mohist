@@ -56,7 +56,8 @@ public sealed record RuntimeTaskInput(
     [property: Id(5)] bool InvalidateChecks = false,
     [property: Id(6)] RecoveryDefinition? Recovery = null,
     [property: Id(7)] TaskArtifactCapture? Artifacts = null,
-    [property: Id(8)] Dictionary<string, string>? SetVars = null);
+    [property: Id(8)] Dictionary<string, string>? SetVars = null,
+    [property: Id(9)] int? RecoveryRemaining = null);
 
 [GenerateSerializer]
 public sealed record RuntimeTaskAddedResult(
