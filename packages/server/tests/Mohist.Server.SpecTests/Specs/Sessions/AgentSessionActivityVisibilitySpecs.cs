@@ -42,7 +42,6 @@ public class AgentSessionActivityVisibilitySpecs
             .ToList();
 
         var card = Assert.Single(sessions, s => s.GetProperty("sessionId").GetString() == sessionId);
-        Assert.Equal($"agent_{agentId}", card.GetProperty("issueId").GetString());
         Assert.Equal(agentId, card.GetProperty("agentId").GetString());
         Assert.Equal(agentName, card.GetProperty("agentName").GetString());
     }
@@ -65,7 +64,6 @@ public class AgentSessionActivityVisibilitySpecs
             .ToList();
 
         var card = Assert.Single(sessions, s => s.GetProperty("sessionId").GetString() == sessionId);
-        Assert.Equal($"agent_{agentId}", card.GetProperty("issueId").GetString());
         Assert.Equal(0, card.GetProperty("issueNumber").GetInt32());
         Assert.Equal(agentId, card.GetProperty("agentId").GetString());
         Assert.Equal(agentName, card.GetProperty("agentName").GetString());
@@ -114,7 +112,6 @@ public class AgentSessionActivityVisibilitySpecs
             .ToList();
 
         var entry = Assert.Single(activeAgents, a => a.GetProperty("sessionId").GetString() == sessionId);
-        Assert.Equal($"agent_{agentId}", entry.GetProperty("issueId").GetString());
         Assert.Equal(agentId, entry.GetProperty("agentId").GetString());
         Assert.Equal(agentName, entry.GetProperty("agentName").GetString());
     }

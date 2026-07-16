@@ -1,5 +1,7 @@
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using Mohist.Server.Epic.Services;
+using Mohist.Server.Issue.Services;
 using Mohist.Server.Sessions.Services;
 
 namespace Mohist.Server.Api;
@@ -33,10 +35,13 @@ public static class AgentSessionContextAssociationRoutes
             HttpContext context,
             string projectRef,
             int number,
+            IssueQuerier issues,
             AgentSessionQuerier sessions,
             CancellationToken ct) =>
         {
             var project = context.GetResolvedProject();
+            if (await issues.GetAsync(project.Id, number) is null)
+                return ApiResults.NotFound($"Issue #{number} not found");
             var items = await sessions.ListSessionsByContextRefAsync(
                 project.Id,
                 projectRef,
@@ -58,10 +63,13 @@ public static class AgentSessionContextAssociationRoutes
             HttpContext context,
             string projectRef,
             int number,
+            EpicQuerier epics,
             AgentSessionQuerier sessions,
             CancellationToken ct) =>
         {
             var project = context.GetResolvedProject();
+            if (await epics.GetAsync(project.Id, number) is null)
+                return ApiResults.NotFound($"Epic #{number} not found");
 
             var items = await sessions.ListSessionsByContextRefAsync(
                 project.Id,

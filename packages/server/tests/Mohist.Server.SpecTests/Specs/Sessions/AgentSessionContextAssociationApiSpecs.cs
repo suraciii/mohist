@@ -78,6 +78,19 @@ public class AgentSessionContextAssociationApiSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
+    public async Task IssueAssociation_UnknownIssueNumber_Returns404()
+    {
+        var project = await CreateProjectAsync("issue-404");
+
+        using var response = await _client.GetAsync(
+            $"/api/projects/{project}/issues/9999/agent-sessions");
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
     public async Task EpicAssociation_ReturnsSessionsReferencingThatEpic()
     {
         var project = await CreateProjectAsync("epic-assoc");
@@ -88,10 +101,10 @@ public class AgentSessionContextAssociationApiSpecs
         var epic = await CreateEpicAsync(project, "Epic for agent session");
 
         await InsertGenericSessionWithContextAsync(project, sessionId, agentId, agentName,
-            epicNumber: epic.Number!.Value.ToString());
+            epicNumber: epic.Number.ToString());
 
         var result = await _client.GetDataAsync<JsonElement>(
-            $"/api/projects/{project}/epics/{epic.Number!.Value}/agent-sessions");
+            $"/api/projects/{project}/epics/{epic.Number}/agent-sessions");
 
         var items = result.EnumerateArray().ToList();
         Assert.Single(items);
@@ -114,7 +127,7 @@ public class AgentSessionContextAssociationApiSpecs
         var epic = await CreateEpicAsync(project, "Empty epic");
 
         using var response = await _client.GetAsync(
-            $"/api/projects/{project}/epics/{epic.Number!.Value}/agent-sessions");
+            $"/api/projects/{project}/epics/{epic.Number}/agent-sessions");
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var body = await response.Content.ReadFromJsonAsync<JsonElement>();
@@ -125,20 +138,20 @@ public class AgentSessionContextAssociationApiSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
-    public async Task EpicAssociation_ByEpicId_ResolvesCorrectly()
+    public async Task EpicAssociation_ByEpicNumber_ResolvesCorrectly()
     {
         var project = await CreateProjectAsync("epic-by-id");
         var agentId = "agent_epicById";
         var agentName = "epic-by-id-agent";
         var sessionId = $"sess-{Guid.NewGuid():N}";
 
-        var epic = await CreateEpicAsync(project, "Epic by id");
+        var epic = await CreateEpicAsync(project, "Epic by number");
 
         await InsertGenericSessionWithContextAsync(project, sessionId, agentId, agentName,
-            epicNumber: epic.Number!.Value.ToString());
+            epicNumber: epic.Number.ToString());
 
         var result = await _client.GetDataAsync<JsonElement>(
-            $"/api/projects/{project}/epics/{epic.Id}/agent-sessions");
+            $"/api/projects/{project}/epics/{epic.Number}/agent-sessions");
 
         var items = result.EnumerateArray().ToList();
         Assert.Single(items);
@@ -153,7 +166,7 @@ public class AgentSessionContextAssociationApiSpecs
         var project = await CreateProjectAsync("epic-404");
 
         using var response = await _client.GetAsync(
-            $"/api/projects/{project}/epics/epic_unknown/agent-sessions");
+            $"/api/projects/{project}/epics/9999/agent-sessions");
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
@@ -237,12 +250,10 @@ public class AgentSessionContextAssociationApiSpecs
         response.EnsureSuccessStatusCode();
         var body = await response.Content.ReadFromJsonAsync<JsonElement>();
         var data = body.GetProperty("data");
-        return new EpicDto(
-            data.GetProperty("id").GetString()!,
-            data.TryGetProperty("number", out var n) ? n.GetInt32() : null);
+        return new EpicDto(data.GetProperty("number").GetInt32());
     }
 
     private sealed record IssueInfo(int Number);
 
-    private sealed record EpicDto(string Id, int? Number);
+    private sealed record EpicDto(int Number);
 }
