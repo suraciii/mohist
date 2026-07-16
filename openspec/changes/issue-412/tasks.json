@@ -1,151 +1,181 @@
 {
   "project": "mohist-local",
-  "description": "Stamp full business lineage (issue/epic/workflow-run/stage) into CloudEvents envelope extensions at every producer, raise EventCatalog to the per-type required-attribute registry that guards the matrix, and reconcile all issueno/epicno readers to the unified protocol names.",
+  "description": "Replace the dual Issue/Epic identity and Epic-owned membership model with Project-scoped number identities, Issue-owned current affiliation, one-aggregate durable coordination, and canonical producer-family event lineage.",
   "tasks": [
     {
       "id": "T-001",
-      "title": "Raise EventCatalog to the per-type lineage registry with a conformance helper",
-      "spec": "specs/event-catalog-conformance/spec.md#eventcatalog-declares-required-lineage-attributes-per-type",
-      "description": "Turn EventCatalog from the flat All name list into the protocol registry: every registered type declares the lineage attributes its envelope MUST always carry, grouped by family so workflow.stage.*/task.*/check.*/feedback.requested inherit the workflow.* base plus stage. Preserve the existing All list as a derived introspection surface so current callers keep compiling. Add a conformance helper (e.g. EventCatalog.RequiredAttributes(type) plus a test-side EnvelopeConformance.AssertRequired(envelope, type)) that fails when an emitted envelope is missing any required attribute. Declaration is the single source of truth the producers (T-002..T-006) stamp against and that the distributed conformance assertions call.",
+      "title": "Introduce scoped Issue/Epic keys and migrate persisted references",
+      "spec": "specs/scoped-work-item-identity/spec.md#issue-and-epic-have-one-project-scoped-identity",
+      "description": "Introduce strong IssueKey(ProjectId, IssueNumber) and EpicKey(ProjectId, EpicNumber) values plus one lossless Orleans grain-key codec. Build an idempotent current-state migration from random IssueId/EpicId references to Project + number across Issue/Epic rows and every owning reference (comments, prerequisites, workflow/profile metadata, inbox, sessions, projections, attachments/associations where applicable). Preserve existing current relationships and distinguish equal numbers in different Projects. Keep any temporary translation adapter private to this migration sequence; it is not part of the target model and must be removed by T-002/T-008.",
       "acceptanceCriteria": [
-        "EventCatalog exposes, for every registered type, the set of always-required lineage attributes matching the matrix: workflow.run.* -> {projectid, workflowrunid}; workflow.stage.*/task.*/check.*/feedback.requested -> {projectid, workflowrunid, stage}; issue.* -> {projectid, issueid, issue}; epic.* -> {projectid, epicid}; agent-session.* -> {projectid, sessionid}; runner.* -> {runnerid}; com.mohist.inbox.item-persisted -> {projectid, issueid, issue}.",
-        "Catalog-only types with no producer today (runner.disconnected, workflow.repair-scheduled) are declared in the registry with their matrix required attributes but are not exercised by the conformance check.",
-        "Conditional/affiliation-dependent attributes (issueid/issue/epicid on workflow.*, epicid on issue.*, agentid/issue/workflowrunid/stage on agent-session.*) are modelled as conditional and validated by the stamping scenarios in the producer tasks, not as always-required.",
-        "A unit test proves the helper: a synthetic envelope of a registered type carrying all required attributes passes, and one missing a required attribute fails (negative case proving the guard actually catches drift).",
-        "Existing callers of EventCatalog.All still compile; the build passes with TreatWarningsAsErrors (`npm test` server track)."
+        "IssueKey and EpicKey encode/decode both components through one shared typed GrainKey codec; call sites do not hand-concatenate scoped keys.",
+        "Persistence has canonical ProjectId + IssueNumber / EpicNumber references for every current-state relationship that previously used IssueId/EpicId.",
+        "A migration spec seeds Issues/Epics plus comments, prerequisites, WorkflowRun/profile/session/inbox/projection references, runs the migration twice, and proves all relationships resolve to the same Project-scoped resources without duplicates.",
+        "Two Projects may both contain Issue 42 and Epic 7 without actor, query, or persistence collisions.",
+        "No migration transaction combines two aggregate state transitions; schema/data migration may transform stored rows but runtime aggregate commands remain outside it.",
+        "Focused server migration, key-codec, and query specs pass; server builds with TreatWarningsAsErrors."
       ],
       "priority": 1,
       "mode": "AFK",
       "type": "WRITE",
-      "output": "packages/server/src/Mohist.Server/Infrastructure/Events/EventCatalog.cs (registry + RequiredAttributes), the conformance helper, and a unit test with a passing positive and a failing negative case.",
+      "output": "Typed scoped keys/codec, EF row/reference migration, current-state migration specs, and compiling server storage/query foundations for number-only identity.",
       "dependsOn": [],
       "passes": false,
-      "notes": "Authoritative matrix lives here first; T-002..T-006 stamp to match and assert via the helper. Keep the matrix inside EventCatalog (D4) — do not introduce a second LineageMatrix class."
+      "notes": "Known direct owners from the planning audit include IssueRow/EpicRow, IssueCommentRow, IssueWorkflowProfile, InboxItemRow, WorkflowRun metadata/WorkIssueRef, workflow artifacts/profile lookups, Issue/Epic event source/index paths, AgentSession origin labels, and API/read projections; IssuePrerequisiteRow is already number-shaped but still needs scoped-key verification. Audit again before changing columns. A database surrogate is disallowed if domain code or contracts can observe it as Issue/Epic identity. Do not rewrite historical CloudEvent envelopes; supporting current-query indexes may be migrated separately."
     },
     {
       "id": "T-002",
-      "title": "Stamp workflow-run identity and stage lineage in WorkflowRunStore",
-      "spec": "specs/event-lineage-stamping/spec.md#lineage-stamped-on-every-event-family-at-production-time",
-      "description": "Extend WorkflowRunStore.ToCloudEvent to stamp workflowrunid (always) and issue/issueid from run annotations, plus epicid from the run's persisted lineage snapshot, and to stamp stage by structural inspection of the WorkflowEvent union variants that expose a Stage member (Stage*, StageApproval*, FeedbackRequested, Task*, Check*), not by bus-type prefix. Stamping stays inside the existing append transaction and derives everything from producer-owned state — no issue/epic aggregate load. Absent affiliations are omitted, never empty.",
+      "title": "Cut the server domain and APIs to number-only Issue/Epic identity",
+      "spec": "specs/scoped-work-item-identity/spec.md#actor-and-resource-keys-derive-from-domain-identity",
+      "description": "Switch Issue/Epic domain entities, grains, repositories, queriers, API routes/DTOs, profiles, and server-side commands/events to IssueKey/EpicKey and Project-scoped number references. Remove random id creation, id resolvers, id-based grain access, id fields, and dual id/number server contracts. Resource paths and CloudEvents sources use Project + number. Update affected fakes and specs to build scoped identities directly.",
       "acceptanceCriteria": [
-        "A workflow.run.* event whose annotations carry project id, issue id, and issue number stamps projectid, issueid, issue, and workflowrunid; the existing conditional-extensions path (only stamp when something is present) is preserved.",
-        "A workflow.* event for a run with no issue annotation omits issueid and issue while still carrying projectid and workflowrunid (no empty values).",
-        "Stage/task/check events stamp stage set to the stage name in addition to the workflow.* lineage; FeedbackRequested (typed workflow.feedback.requested) also stamps stage because it is structurally stage-bearing; WorkflowArtifactRecorded does not stamp stage because it carries no Stage member (D2).",
-        "WorkflowRunStore issues no cross-aggregate query (no issue/epic load) to stamp lineage.",
-        "TransactionalEventAppendSpecs (workflow) is updated to assert the new keys, the absent-annotation omission case, and that every emitted envelope satisfies EventCatalog.RequiredAttributes for its type via the conformance helper.",
-        "Server build + `npm test` pass."
+        "Creating an Issue or Epic allocates only its Project-local number and returns no random IssueId/EpicId.",
+        "Issue/Epic domain state, DTOs, grains, queries, routes, profiles, domain commands, and current-state events use Project + number as the canonical identity.",
+        "Issue/Epic resource and CloudEvents source paths include ProjectId and number and require no alias lookup.",
+        "Production server code no longer creates or resolves random IssueId/EpicId; migration-only input readers are removed once current state is converted.",
+        "Cross-Project same-number API and grain specs prove isolation.",
+        "Focused Issue/Epic API, grain, query, and profile specs pass; server unit/spec projects build cleanly."
       ],
       "priority": 2,
       "mode": "AFK",
       "type": "WRITE",
-      "output": "packages/server/src/Mohist.Server/Infrastructure/Data/Workflow/WorkflowRunStore.cs updated; TransactionalEventAppendSpecs extended with lineage + stage assertions and conformance checks.",
+      "output": "Number-only Issue/Epic server domain, actors, API contracts, queries, profiles, event sources, and updated focused specs with no id alias layer.",
       "dependsOn": ["T-001"],
       "passes": false,
-      "notes": "Pattern-match the unwrapped WorkflowEvent variants to decide stage carriage (WorkflowEvent.cs lists which variants carry Stage). Use StringComparer.Ordinal for the extensions dict (already the convention here)."
+      "notes": "This is a breaking cutover. Do not preserve id fields in DTOs or add fallback route resolution. Keep independently identified resources such as WorkflowRunId, SessionId, AgentId, RunnerId, ProjectId, and EventId unchanged."
     },
     {
       "id": "T-003",
-      "title": "Stamp issue lineage from its producer-owned EpicId snapshot",
-      "spec": "specs/event-lineage-stamping/spec.md#lineage-stamped-on-every-event-family-at-production-time",
-      "description": "In IssueStore rename the stamped issue number from issueno to issue (the protocol name users will write in expressions). Add a nullable EpicId property to the Issue aggregate plus an idempotent SetEpicId transition. Persist the producer-owned snapshot in Issues.EpicId as part of the Issue transaction and never replace Issue state from an Epic transaction. Stamp epicid from Issue state with no cross-aggregate query and omit it when the snapshot is null. T-004 delivers the affiliation through durable Epic-event reactions. Keep stamping a production-time snapshot; do not rewrite history on later relationship changes.",
+      "title": "Move Epic membership authority into Issue and rebuild progression",
+      "spec": "specs/issue-owned-epic-membership/spec.md#issue-is-the-sole-authority-for-current-epic-affiliation",
+      "description": "Add nullable EpicNumber to Issue as the only current affiliation fact. Implement idempotent AssignEpic and expected-number RemoveEpic with IssueEpicChanged(previous,current). Rewrite link/unlink/move so Epic validates and commands Issue without sharing a transaction. Migrate current affiliation from old membership rows, then remove EpicIssueRow/EpicActiveIssue and all dual writes. Rebuild Epic member/progress/candidate queries over Issue state and use guarded Issue.TryStartFromEpic commands. Durable Issue reactions recompute affected Epics and refresh active Workflow context from current Issue state.",
       "acceptanceCriteria": [
-        "An issue.* event stamps projectid, issueid, and issue (the issue number); no issueno key is present.",
-        "An issue.* event for an issue whose persisted lineage snapshot carries a non-null EpicId additionally stamps epicid; an issue with a null snapshot omits epicid entirely (no empty value).",
-        "IssueStore hydrates Issue.EpicId on load; on save, epicid, serialized state, and the scalar projection all come from the Issue aggregate's current snapshot, with no query against db.EpicIssues or any other aggregate.",
-        "Issue exposes a nullable EpicId and an idempotent SetEpicId transition; IIssueGrain.SetEpicAffiliationAsync commits the local snapshot through IssueStore without recording a second membership event, since the authoritative EpicIssueLinked/EpicIssueUnlinked events live on the epic stream.",
-        "IssueStore persists the Issue snapshot and appends the Issue's own events in one transaction; no Epic or WorkflowRun state participates in that transaction.",
-        "IssueTransactionalEventAppendSpecs asserts issue (not issueno), epicid presence when state.EpicId is set and absence when null, and that each emitted envelope satisfies EventCatalog.RequiredAttributes for its type.",
-        "Server build + `npm test` pass."
+        "Issue commits EpicNumber changes and IssueEpicChanged in one Issue-only transaction; no Epic or WorkflowRun state participates.",
+        "Link is idempotent across lost replies and later Epic closure; new links to closed Epic are rejected; expected-number unlink cannot clear a newer move.",
+        "Moving A -> B is one Issue state change with no two-owner intermediate state.",
+        "Epic membership/progress/startable candidates come from current Issue state; Epic owns only lifecycle/progression state.",
+        "done revival, closed rejection, reopen, empty/all-terminal completion, sequential advance, prerequisites, and sub-Issue exclusions retain their product behavior on the new model.",
+        "Out-of-order/repeated IssueEpicChanged handlers re-read current Issue and never regress Epic or Workflow context.",
+        "Migration specs preserve current affiliation and remove old membership/active rows; no runtime code reads or writes those tables afterward.",
+        "Focused Issue membership, Epic lifecycle/progression, transaction failure, and durable redelivery specs pass."
       ],
       "priority": 3,
       "mode": "AFK",
       "type": "WRITE",
-      "output": "packages/server/src/Mohist.Server/Issue/Domain/Issue.cs (EpicId + SetEpicId), packages/server/src/Mohist.Server/Issue/Grains/IIssueGrain.cs + IssueGrain.cs (SetEpicAffiliationAsync), packages/server/src/Mohist.Server/Infrastructure/Data/Issue/IssueStore.cs (rename + epicid stamp from state); IssueTransactionalEventAppendSpecs extended.",
-      "dependsOn": ["T-001"],
+      "output": "Issue-owned EpicNumber model, affiliation commands/events/reactions, derived Epic queries/progression, old membership storage removal, migration and crash/redelivery specs.",
+      "dependsOn": ["T-002"],
       "passes": false,
-      "notes": "Issue.EpicId is the Issue aggregate's locally applied affiliation revision, while EpicIssueRow remains membership truth. A durable Epic event reaction commands Issue after the Epic transaction commits; Issue then propagates its saved revision to WorkflowRun in a separate command. Historical event rows keep issueno (Non-Goal: no event backfill); read-side fallback is handled in T-007."
+      "notes": "Do not replace the old rows with a new relation aggregate or generic OwnerRef. Epic may synchronously call Issue, but Issue must not synchronously call back into Epic on that stack; reverse progress is event-driven."
     },
     {
       "id": "T-004",
-      "title": "Drop epicno and propagate lineage through durable aggregate commands",
-      "spec": "specs/event-lineage-stamping/spec.md#lineage-stamped-on-every-event-family-at-production-time",
-      "description": "Two Epic changes. (1) Stamp epic.* events with only projectid and epicid, removing epicno, and commit every Epic state transition with its Epic domain events in the same Epic transaction. (2) For lineage propagation (D5), link/unlink/status commands update only Epic-owned state and emit durable Epic events. Their handlers re-resolve current affiliation from the committed membership read model and send an idempotent command to Issue; Issue saves its own snapshot, then sends its saved lineage revision to WorkflowRun, whose own transaction applies it. Backfill current snapshots during schema migration without rewriting historical events.",
+      "title": "Replace Workflow binding and lineage revision with durable EnsureStarted",
+      "spec": "specs/aggregate-coordination/spec.md#durable-issueworkstarted-creates-workflowrun-idempotently",
+      "description": "Simplify Issue -> Workflow coordination to the durable IssueWorkStarted fact. Issue allocates/stores WorkflowRunId and raises its event in an Issue-only transaction. The handler re-reads current Issue and calls WorkflowRun.EnsureStarted(runId, {ProjectId, IssueNumber, EpicNumber?}); WorkflowRun creates/starts idempotently in its own transaction. Store only that small context and refresh it from current Issue after affiliation events. Remove AwaitingBinding, WorkflowBindingPending, EnsureWorkflowBinding/confirmation, IssueLineageVersion/LineageVersion ordering, related status/control/runner/web handling, migrations, and tests for the superseded protocol. Preserve the reviewer fix that rejects a dirty WorkflowGrain activation before Start mutates stale state.",
       "acceptanceCriteria": [
-        "An epic.* event stamps projectid and epicid and contains no epicno key.",
-        "Every Epic state mutation and its Epic domain events commit together; no best-effort post-commit Epic event append remains.",
-        "A unit test (on the extracted helper, no silo required) asserts projectid+epicid present and epicno absent, and that the produced extensions satisfy EventCatalog.RequiredAttributes for an epic.* type.",
-        "Link, unlink, terminal, and reopen transactions write only Epic-owned state and Epic events; they never write or lock Issue or WorkflowRun state.",
-        "After commit, Epic commands may send the same idempotent Issue command for latency; durable Epic handlers re-resolve the current affiliation on every delivery and retry if Issue or WorkflowRun propagation fails.",
-        "Issue and WorkflowRun apply lineage in their own transactions using the monotonic Issue lineage revision, so duplicate or delayed deliveries cannot overwrite a newer snapshot.",
-        "Existing Issue and WorkflowRun JSON epic ids are copied into the new snapshots at cutover; no historical event is rewritten.",
-        "Server build + `npm test` pass."
+        "Issue start transaction writes only Issue state plus IssueWorkStarted and never creates/locks WorkflowRun.",
+        "EnsureStarted creates and starts exactly the allocated run and is idempotent across duplicate delivery and lost replies.",
+        "Handler no-ops when a delayed event no longer identifies the Issue's current active run.",
+        "WorkflowRun context is exactly ProjectId, IssueNumber, EpicNumber?; affiliation refresh uses current Issue state and no revision field.",
+        "Workflow result commands carry expected WorkflowRunId so old completion/failure cannot change a newer Issue run.",
+        "AwaitingBinding, pending/confirmation commands, lineage revision fields, special control guards, runner statuses, and web statuses are absent from the target code.",
+        "Crash-window specs cover before creation, after creation before reply, redelivery after acknowledgement failure, context refresh ordering, and stale Workflow results.",
+        "WorkflowGrain Start still calls RejectIfRunReloadRequired before mutation; its state-save-failure regression passes."
       ],
       "priority": 4,
       "mode": "AFK",
       "type": "WRITE",
-      "output": "EpicGrain commits only Epic state/events; durable Epic subscription handlers propagate current affiliation through IIssueGrain.SetEpicAffiliationAsync and WorkflowRun lineage commands; one-time migration backfills current snapshots; Epic extension helper is unit-tested.",
-      "dependsOn": ["T-001", "T-003"],
+      "output": "IssueWorkStarted handler + WorkflowRun.EnsureStarted, minimal run context, expected-run result guards, removal of binding/revision protocol, and focused recovery specs.",
+      "dependsOn": ["T-003"],
       "passes": false,
-      "notes": "The Epic transaction is the consistency boundary for EpicRow, membership rows, active-membership rows, and Epic events only. Producer snapshots let IssueStore and WorkflowRunStore stamp from their own state without membership lookup. Link/unlink entry points are LinkIssueAsync/LinkIssuesAsync/UnlinkIssueAsync/UnlinkIssuesAsync; terminal/reopen status events also trigger re-resolution for retained memberships."
+      "notes": "A WorkflowRun may be temporarily absent after Issue commits; that is a normal durable-process interval, not a new persisted Workflow status. Do not reintroduce discovery scans or binding markers."
     },
     {
       "id": "T-005",
-      "title": "Project AgentSession lineage from Metadata.Labels in AgentSessionStore",
-      "spec": "specs/event-lineage-stamping/spec.md#lineage-stamped-on-every-event-family-at-production-time",
-      "description": "Replace the current extensions: null in AgentSessionStore.ToCloudEvent by projecting the session's own Metadata.Labels onto extensions: projectid (mohist.io/project-id), sessionid (the session id), agentid (mohist.io/agent-id) when agent-origin, and issue/workflowrunid/stage (mohist.io/issue-number / mohist.io/source-id / mohist.io/stage) when the session originates from a workflow/issue. Absent labels are omitted, never empty. Stamping uses only the session's own metadata — no cross-aggregate query.",
+      "title": "Adopt canonical lineage extensions and producer-family conformance",
+      "spec": "specs/event-lineage-stamping/spec.md#every-producer-stamps-its-locally-committed-business-context",
+      "description": "Replace issueid/epicid/issueno/epicno with projectid + issue/epic number lineage. Stamp WorkflowRun, Issue, Epic, AgentSession, Runner producers and the inbox-synthesized event from producer-owned state/metadata only; use structural Stage inspection. Reduce EventCatalog back to stable type names and replace per-type RequiredAttributes/EnvelopeConformance/CatalogOnlyTypes with producer-family conformance used by real production-path specs. Remove catalog entries that were accidentally presented as produced facts only when they are not stable reserved protocol names; otherwise retain them strictly as type constants without fake conformance.",
       "acceptanceCriteria": [
-        "An agent-session.* event whose labels carry project id, agent id, and an agent source kind stamps projectid, sessionid, and agentid.",
-        "A workflow/issue-origin session additionally stamps issue, workflowrunid, and stage from its labels; a session without those labels omits them (no empty values).",
-        "No cross-aggregate query is issued to stamp; all values come from Metadata.Labels (the session's own metadata).",
-        "AgentSessionTransactionalEventAppendSpecs is updated: the current 'projectid is NOT present' assertion is replaced by assertions that projectid/sessionid (and agentid/issue/workflowrunid/stage when labelled) are stamped, that absent labels are omitted, and that each envelope satisfies EventCatalog.RequiredAttributes for its type.",
-        "Server build + `npm test` pass."
+        "WorkflowRun stamps projectid/workflowrunid plus local issue/epic and structural stage; Issue stamps projectid/issue plus local epic; Epic stamps projectid/epic.",
+        "AgentSession, Runner, and inbox paths stamp the applicable canonical context defined by the delta spec; optional values are omitted, never empty.",
+        "No append/synthesis path queries another aggregate to gather lineage.",
+        "No new producer emits issueid, epicid, issueno, or epicno.",
+        "EventCatalog has no required-attribute registry; CatalogOnlyTypes and per-type bypass logic are removed.",
+        "Producer-family conformance covers every real producer and serializable domain-event variant, including negative missing/empty cases.",
+        "Stage conformance follows event structure, including feedback-requested and excluding non-stage artifact/run events.",
+        "Focused transactional append/synthesis and conformance specs pass."
       ],
       "priority": 5,
       "mode": "AFK",
       "type": "WRITE",
-      "output": "packages/server/src/Mohist.Server/Infrastructure/Data/Sessions/AgentSessionStore.cs updated; AgentSessionTransactionalEventAppendSpecs updated for lineage projection + conformance.",
-      "dependsOn": ["T-001"],
+      "output": "Canonical number-only lineage builders at all producers, structural Stage logic, simplified EventCatalog, producer-family conformance helper/specs, and obsolete registry removal.",
+      "dependsOn": ["T-004"],
       "passes": false,
-      "notes": "Label key constants live in packages/server/src/Mohist.Server/Sessions/Services/AgentSessionQueryMetadataKeys.cs (mohist.io/project-id, mohist.io/issue-number, mohist.io/source-id, mohist.io/stage, mohist.io/source-kind) and packages/server/src/Mohist.Server/Sessions/Services/GenericAgentSessionMetadata.cs (mohist.io/agent-id). The existing spec explicitly documents extensions: null as intentional (design OQ3) — that assertion is being superseded by this change."
+      "notes": "Historical envelopes are not rewritten and need not satisfy the new shape. Conformance must test actual append/synthesis paths, not merely helper dictionaries or catalog declarations."
     },
     {
       "id": "T-006",
-      "title": "Lift issue lineage in the inbox-synthesized event and reconcile its own issueno read",
-      "spec": "specs/event-lineage-stamping/spec.md#lineage-stamped-on-every-event-family-at-production-time",
-      "description": "In InboxProjectionHandler, synthesize com.mohist.inbox.item-persisted with projectid plus issue and issueid lifted from the InboxItemPersistedHint already held in scope (no extra lookup). In the same file, update ResolveFromIssueExtensions to read the issue number from the issue key (with an issueno fallback so historical rows that were never backfilled still resolve), since IssueStore now stamps issue.",
+      "title": "Reconcile server lineage consumers and current-state integrations",
+      "spec": "specs/event-lineage-stamping/spec.md#issue-and-epic-have-no-legacy-lineage-aliases",
+      "description": "Update server subscriptions, Epic progression reactions, Inbox, Hermes payloads, Session origin metadata, Workflow profile/context lookup, and other current-state consumers to Project + issue/epic number and canonical envelope context. Routing decisions use envelope extensions first and payload remains unchanged display/audit data. Remove legacy issueno/epicno and issueid/epicid fallbacks from target paths. Ensure durable handlers re-read current Issue only when executing a domain reaction; matcher/dispatcher routing itself remains envelope-only.",
       "acceptanceCriteria": [
-        "The synthesized inbox.item-persisted envelope stamps projectid, issueid, and issue from the hint payload (no additional lookup).",
-        "ResolveFromIssueExtensions resolves the issue number from the issue key, falling back to issueno for pre-change historical rows, and still returns null when neither is parseable.",
-        "A spec covering the inbox synthesis path asserts projectid/issueid/issue are stamped and that the envelope satisfies EventCatalog.RequiredAttributes for com.mohist.inbox.item-persisted.",
-        "Server build + `npm test` pass."
+        "Epic/Issue/Workflow subscription handlers resolve scoped number identity from canonical envelope context and do not depend on payload identity.",
+        "Inbox-synthesized events inherit current canonical context and no longer carry IssueId.",
+        "Hermes current payload exposes issueNumber and optional epicNumber, not issueId/epicId.",
+        "Workflow-origin AgentSession metadata/events carry issue/epic number context where present; agent-origin sessions keep their independent agent/session identities.",
+        "Payload/envelope disagreement specs route by envelope while preserving payload bytes/object for display.",
+        "No server consumer retains issueno/epicno or random Issue/Epic id fallback in current paths.",
+        "Focused subscription, Inbox, Hermes, Session, and profile specs pass."
       ],
       "priority": 6,
       "mode": "AFK",
       "type": "WRITE",
-      "output": "packages/server/src/Mohist.Server/Events/Subscriptions/InboxProjectionHandler.cs updated (synthesis stamping + dual-key read); inbox synthesis spec extended.",
-      "dependsOn": ["T-001"],
+      "output": "Canonical server consumer/subscription routing, Inbox/Hermes/Session/profile integration changes, removal of legacy reads, and disagreement/redelivery specs.",
+      "dependsOn": ["T-005"],
       "passes": false,
-      "notes": "Synthesis site is InboxProjectionHandler.cs:148-167; the issueno read is at :213. The InboxItemPersistedHint already carries IssueId/IssueNumber. The issueno fallback is the permanent history shim (Non-Goal forbids backfill)."
+      "notes": "Domain reaction handlers may query current Issue before a command; event matching and dispatch selection may not. Do not mutate payload to smuggle routing identity into existing client shapes."
     },
     {
       "id": "T-007",
-      "title": "Reconcile issueno/epicno readers (server handlers + web) to the unified names",
-      "spec": "specs/event-lineage-stamping/spec.md#user-visible-identity-uses-short-names-internal-ids-carry-the-id-suffix",
-      "description": "Update the remaining read-side consumers that key on the legacy names so lineage resolution stays consistent with the stamped names. EpicAutoDoneHandler and HermesIssueNotificationHandler read issue (with an issueno fallback for historical rows). The web envelope reader and any fixtures/docs referencing issueno or epicno move to issue / epicid. This lands in the same change as the producer rename so producers and consumers never disagree on the key (D3).",
+      "title": "Cut CLI and Web to scoped numbers and envelope-first routing",
+      "spec": "specs/scoped-work-item-identity/spec.md#references-use-the-owning-resources-canonical-identity",
+      "description": "Update CLI and Web Issue/Epic resource contracts to use Project-scoped numbers only. Remove id-or-number inputs and id fields from client types, query keys, routes, fixtures, and displays. Ensure Epic link/unlink/start/pause/resume/done/close/reopen take Epic number and Issue number in Project scope. Update Web event-envelope/timeline logic so canonical extensions determine routing while payload remains display data.",
       "acceptanceCriteria": [
-        "EpicAutoDoneHandler (the two issueno reads in EpicProgressRecomputeDispatcher) resolves the issue number from issue, falling back to issueno for historical rows.",
-        "HermesIssueNotificationHandler.ResolveFromIssueExtensions reads issue with an issueno fallback.",
-        "packages/web event-envelope.ts documents issue (and epicid) instead of issueno/epicno; any web code/fixtures hardcoding issueno or epicno are updated to issue / epicid.",
-        "Server build + `npm test` pass; web `npm run typecheck -w packages/web` and `npm run test:run -w packages/web` pass.",
-        "After T-003 (issueno -> issue producer) and T-004 (epicno drop) land, no producer or consumer references issueno as the primary key or references epicno anywhere; only the intentional history-fallback reads remain."
+        "CLI Issue/Epic commands send scoped numbers and expose no id-or-number ambiguity; Epic reopen is available with the same number contract.",
+        "Web Issue/Epic API clients, entity types, query keys, links, and forms carry ProjectId + number and no random id identity.",
+        "Web timeline uses extensions.issue/extensions.epic before payload identity and preserves the original payload.",
+        "Cross-Project same-number client/query tests do not share cache entries or routes.",
+        "No current CLI/Web fixture or production path uses issueid, epicid, issueno, or epicno.",
+        "CLI tests, Web typecheck, and Web test suite pass."
       ],
       "priority": 7,
       "mode": "AFK",
       "type": "WRITE",
-      "output": "EpicAutoDoneHandler.cs, HermesIssueNotificationHandler.cs, and packages/web/src/app/providers/model/event-envelope.ts (+ fixtures) reconciled to issue/epicid with history fallback where rows are traversed.",
-      "dependsOn": ["T-003", "T-004"],
+      "output": "Number-only CLI/Web contracts and commands, Project-scoped query/routes, Epic reopen CLI, envelope-first timeline routing, and updated tests/fixtures.",
+      "dependsOn": ["T-006"],
       "passes": false,
-      "notes": "Ship the rename atomically (D3): web only reads issue after the server stamps it. T-003 produces the issue rename and T-004 drops epicno, so T-007 depends on both before its end-state AC can hold; T-006 already handled InboxProjectionHandler's own read in the same file. Keep the dual-key issueno fallback minimal and permanent in history-traversing handlers (Non-Goal: no backfill)."
+      "notes": "The product is pre-compatibility. Do not retain id aliases or dual cache keys. Keep Project selection explicit because number alone is not globally unique."
+    },
+    {
+      "id": "T-008",
+      "title": "Remove superseded model and verify aggregate recovery end to end",
+      "spec": "specs/aggregate-coordination/spec.md#one-transaction-commits-one-aggregate-and-its-events",
+      "description": "Perform the final invariant audit and delete all superseded candidate code, schema, migrations, tests, and documentation fragments: random Issue/Epic ids, membership/active rows, affiliation caches owned by Epic, AwaitingBinding/pending/confirmation, lineage revisions, per-type catalog lineage registry, catalog-only bypasses, and legacy extension aliases. Add end-to-end durable dispatcher specs for the link/move/start/complete crash and ordering matrix. Validate the current-state migration and all server/CLI/Web/runner contracts as one cutover.",
+      "acceptanceCriteria": [
+        "A production-code audit finds no random IssueId/EpicId identity, Epic membership/active row, AwaitingBinding/binding marker, lineage revision, CatalogOnlyTypes, or legacy lineage alias outside explicit historical migration descriptions.",
+        "Transaction-boundary specs prove Epic commands never write Issue/WorkflowRun, Issue commands never write Epic/WorkflowRun, and WorkflowRun commands never read/write Issue in the same transaction.",
+        "Dispatcher specs cover lost link reply, failed Epic recompute, out-of-order affiliation events, Issue start before run creation, EnsureStarted lost reply, and delayed old Workflow result without dead letters or state regression.",
+        "Current-state migration is idempotent and leaves no orphan references; historical event rows remain untouched.",
+        "git diff --check passes; server build/test, CLI tests, Web typecheck/tests, runner typecheck/tests, architecture tests, and the repository full npm test pass.",
+        "OpenSpec progress/self-review describe the implemented target rather than the superseded candidate."
+      ],
+      "priority": 8,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Clean number-only/Issue-owned implementation, deleted obsolete protocol, aggregate transaction and dispatcher recovery specs, migration proof, and complete validation record.",
+      "dependsOn": ["T-007"],
+      "passes": false,
+      "notes": "Do not mark this task complete by excluding legacy types from an audit. Remove them or document a truly independent identity with a different domain owner. Preserve unrelated reviewer guard fixes and user changes."
     }
   ]
 }

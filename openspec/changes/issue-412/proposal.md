@@ -1,38 +1,65 @@
 ## Why
 
-An event knows who emitted it (`source`) and what happened (`type`), but not which business chain it belongs to — which issue, which epic, which workflow run, which stage. So the most natural supervision ask — "subscribe to everything happening under issue #42" — cannot be expressed: lineage is scattered across `source` paths, `subject`, and `data`, never as matchable envelope attributes. The design's three-axis envelope (`design/event-protocol.md`) already specifies a stamping matrix and naming for this third axis; this issue fills the matrix in at every producer and raises `EventCatalog` into the protocol registry that enforces it. It is the prerequisite for expression-based subscription (a later issue) — without stamped lineage there is nothing for an expression to match.
+The failed candidate treated missing event lineage as an envelope-only problem. That led it to
+preserve two identities for every Issue/Epic, keep Epic membership authoritative in Epic-owned
+rows, copy that affiliation into Issue and WorkflowRun, and add revisions and binding states to
+keep the copies synchronized. The result crossed aggregate transaction boundaries and grew a
+recovery protocol whose failure modes were harder than the original requirement.
+
+The root problem is ambiguous identity and write authority. Before lineage can be simple, Issue
+and Epic need one identity each and current Epic affiliation needs one owner.
 
 ## What Changes
 
-- **Lineage stamped on every event family at production time**, per the matrix in `design/event-protocol.md:59-70`. Stamping uses only identity the aggregate already holds (own state or existing annotations/labels) — producers SHALL NOT issue cross-aggregate queries to stamp.
-  - `workflow.*`: `projectid` and `workflowrunid` are required producer identity; `issueid`, `issue` (issue number), and `epicid` are printed when their locally applied affiliation is present, omitted when absent. A workflow missing its required project identity cannot emit an event.
-  - `workflow.stage.*` / `workflow.task.*` / `workflow.check.*` / `workflow.feedback.requested`: additionally print `stage` — the value is already carried on these structurally stage-bearing event records but never lifted to the envelope today.
-  - `issue.*`: add `epicid` when the issue belongs to an epic. Because the Issue aggregate does not own epic membership, `epicid` is denormalized onto Issue state by the Epic domain at link/unlink and stamped from the issue's own state — no cross-aggregate query at stamp time (design D5).
-  - `agent-session.*`: `projectid` and `sessionid` are required producer identity; sessions missing their project label cannot emit an event. Stamp `agentid` for agent-origin sessions and `issue`/`workflowrunid`/`stage` when the session originates from a workflow/issue (all already present in `Metadata.Labels`).
-  - `epic.*` and the inbox-synthesized event are brought under the same matrix.
-- **Lineage is a production-time snapshot.** Attributes record the affiliation revision already applied by the producing aggregate at emit time; durable propagation converges Epic membership to Issue and WorkflowRun without widening their transaction boundaries. Later relationship changes do not rewrite history. Absent affiliation is omitted — never an empty string.
-- **BREAKING — lineage attribute names unify to the design protocol.** The short user-visible name becomes `issue` (not the current `issueno`), and `epicno` is removed (epic routes on `epicid`). This name is what users write in expressions, so it must be stable before subscription lands. Reconciliation of the three server handlers and web reads that key on `issueno`, and of already-persisted rows, is scoped here (mechanics in design.md; history is not rewritten, per Non-Goals).
-- **`EventCatalog` rises from a flat type list to the protocol registry.** Each registered type declares the lineage attributes it must carry (`EventCatalog.cs` is name-only today).
-- **Conformance check guards the matrix.** A spec test walks every event production path and asserts the emitted envelope satisfies the catalog's declared required attributes; adding an event type and forgetting its lineage fails the check.
+- **BREAKING: Issue and Epic use Project-scoped numbers as their only identity.** Issue identity is
+  `(ProjectId, IssueNumber)` and Epic identity is `(ProjectId, EpicNumber)`. Random `IssueId` /
+  `EpicId`, alias resolution, and id-based routes/contracts are removed. Grain keys, persistence
+  references, API/CLI/Web contracts, profiles, comments, prerequisites, sessions, and event sources
+  migrate to the scoped identities.
+- **BREAKING: Issue owns current Epic affiliation.** Issue stores nullable `EpicNumber`; assigning
+  a different Epic replaces the old value in one Issue transaction. Epic no longer owns writable
+  membership or active-membership rows. Its member list, progress, and candidates are queries over
+  Issue state.
+- **Epic and Issue coordinate without a shared transaction.** `Epic.LinkIssue` handles acceptance
+  and idempotency, then commands `Issue.AssignEpic`. Issue emits `IssueEpicChanged`; durable
+  reactions recompute the old/new Epic and refresh the active WorkflowRun from current Issue state.
+  Epic progression queries candidates and sends guarded commands that Issue revalidates.
+- **Workflow handoff is reduced to one durable fact.** Issue persists its allocated
+  `WorkflowRunId` and `IssueWorkStarted`. The durable reaction calls
+  `WorkflowRun.EnsureStarted(runId, { ProjectId, IssueNumber, EpicNumber? })`. The old
+  `AwaitingBinding`, pending marker, lineage revision, and confirmation protocol are removed.
+- **Lineage names match the single identity model.** Envelopes use `projectid`, `issue`, `epic`,
+  `workflowrunid`, `stage`, `agentid`, `sessionid`, and `runnerid`. They do not use `issueid`,
+  `epicid`, `issueno`, or `epicno`.
+- **Conformance follows producers, not a second registry.** `EventCatalog` remains a type catalog.
+  Producer-family rules and structural Stage detection validate every real production path; there
+  is no per-type required-attribute registry or `CatalogOnlyTypes` bypass list.
+- **The old candidate is removed, not compatibility-wrapped.** Existing current state is migrated;
+  historical event envelopes are not rewritten. Old schema, dual reads/writes, membership rows,
+  binding states, revision guards, and fallback aliases are deleted after cutover.
 
 ## Capabilities
 
-- `event-lineage-stamping`: Every event family SHALL stamp its full business lineage (issue number / issue id / epic id / workflow run id / agent id / session id / runner id / project id / stage, as applicable per the matrix) into envelope extensions at production time, using only identity the aggregate already holds. Absent affiliation SHALL be omitted, not empty. Attributes SHALL be a production-time snapshot and SHALL NOT be rewritten on later relationship changes. Producers SHALL NOT issue cross-aggregate queries to stamp lineage.
-- `event-catalog-conformance`: `EventCatalog` SHALL declare, per registered event type, the lineage attributes that type must carry. A conformance check SHALL exercise every event production path and fail when an emitted envelope is missing a required attribute.
+- `scoped-work-item-identity`: Issue and Epic have one Project-scoped number identity across the
+  domain model, persistence, actors, routes, clients, and references.
+- `issue-owned-epic-membership`: Issue is the sole write authority for its current optional Epic;
+  Epic derives membership and progress and drives Issue through guarded commands.
+- `aggregate-coordination`: cross-aggregate Issue/Epic/Workflow processes use one-aggregate commits,
+  durable events, current-state re-resolution, and idempotent commands without synchronous cycles.
+- `event-lineage-stamping`: every producer stamps its locally committed business context with the
+  number-only protocol and never queries another aggregate while appending an event.
+- `event-producer-conformance`: conformance tests cover each actual producer family and determine
+  Stage requirements from event structure rather than a duplicated catalog matrix.
 
 ## Impact
 
-- **Producer stamping sites** (all server-side; runner does not emit into this envelope system):
-  - `Infrastructure/Data/Workflow/WorkflowRunStore.cs:81-103` — stamps `projectid`+`issueid` only today; add `workflowrunid`, `issue` (from annotations), and `stage` (from the event record for stage/task/check events).
-  - `Infrastructure/Data/Issue/IssueStore.cs:130-138` — stamps `projectid`/`issueid`/`issueno`; rename `issueno` → `issue` and stamp `epicid` from the Issue aggregate's own `EpicId` snapshot, applied through a durable post-Epic-commit command.
-  - `Issue/Domain/Issue.cs` + `Issue/Grains/IIssueGrain.cs` / `IssueGrain.cs` — `Issue` gains a nullable `EpicId` (the same cross-aggregate-reference pattern it already uses for `WorkflowRunId`) and an eventless `SetEpicId` transition; `IIssueGrain.SetEpicAffiliationAsync` persists it via the state-only save (no domain event — it is a denormalization).
-  - `Epic/Grains/EpicGrain.cs:1098-1103,1148-1153` — stamps `projectid`/`epicid`/`epicno`; drop `epicno` (not a routing dimension per the matrix). The link/unlink paths additionally push `EpicId` onto the linked issue via `IIssueGrain.SetEpicAffiliationAsync` (D5 denormalization), and a one-time backfill sets `Issue.EpicId` from `EpicIssueRow` for already-linked issues.
-  - `Infrastructure/Data/Sessions/AgentSessionStore.cs:118-131` — passes `extensions: null` today; project `Metadata.Labels` (`project-id`, `agent-id`, `agent-launch/issue-number`, `source-kind`, `work-id`, `stage`) onto extensions.
-  - `Events/Subscriptions/InboxProjectionHandler.cs:148-167` — synthesizes `inbox.item-persisted` stamping only `projectid`; lift `issue`/`issueid` already present in the hint payload.
-- **Catalog / registry**:
-  - `Infrastructure/Events/EventCatalog.cs:8-100` — gains per-type required-attribute declarations (currently a flat `IReadOnlyList<string>` of names).
-- **Consumers of the renamed `issueno`** (read path updates during reconciliation):
-  - `Events/Subscriptions/EpicAutoDoneHandler.cs:374,388`, `Events/Subscriptions/HermesIssueNotificationHandler.cs:163`, `Events/Subscriptions/InboxProjectionHandler.cs:213`.
-  - `packages/web/src/app/providers/model/event-envelope.ts:28-29` (doc/read), and web test fixtures using `epicno`/`issueno`.
-- **Persistence**: Issue and WorkflowRun carry durable `EpicId` producer snapshots. A schema migration initializes those snapshots from the affiliation visible at cutover; historical event rows keep their already-stamped attributes (Non-Goal: no event backfill).
-- **Conformance tests**: new spec covering all production paths; no web/CLI/runner contract change.
+- Server: Issue, Epic, Workflow, Session, Event, Inbox, Hermes, API, query services, grains, EF Core
+  rows/migrations, and their specs.
+- CLI and Web: Issue/Epic resource references and event timeline routing.
+- Persistence: composite Project-scoped references replace Issue/Epic random ids; current Epic
+  affiliation moves into Issue state; obsolete Epic membership and binding/revision storage is
+  removed.
+- OpenSpec: the prior D5 denormalization/binding design and completed task record are superseded.
+  All tasks in the replacement plan start incomplete.
+- Risk: high. The work is sequenced by authority boundary and verified with focused migration,
+  idempotency, redelivery, and transaction-boundary specs before the full suite.

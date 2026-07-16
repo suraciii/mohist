@@ -1,325 +1,69 @@
-T-001 progress
+# Issue 412 redesign baseline
 
-## Codebase Patterns
+## Why the previous progress is superseded
 
-- Tests collocated near code: UnitTests in `packages/server/tests/Mohist.Server.UnitTests/Events/`, namespace `Mohist.Server.UnitTests.Events`.
-- New `CloudEvent(...)` is built via named parameters; extensions are usually passed as a `Dictionary<string, string>(StringComparer.Ordinal)` (confirmed in spec tests, e.g. `IssueTransactionalEventAppendSpecs`). Use the same comparer convention when constructing envelopes for conformance assertions.
-- The existing `CloudEvent` type is `Mohist.Server.Infrastructure.Events.CloudEvent` (non-generic, takes `JsonElement?` data). Use it as-is; do NOT introduce a second envelope type.
-- `EventCatalog.All` is a flat `IReadOnlyList<string>` referenced from `tests/Mohist.Server.UnitTests/Sessions/AgentSessionEventSerializerTests.cs:20-26`, `tests/Mohist.Server.UnitTests/Workflow/Artifacts/WorkflowArtifactDomainTests.cs:44-48`, and `tests/Mohist.Server.SpecTests/Specs/Epic/Grain/EpicEventPublishSpecs.cs:344-362`. Keep it as a derived/introspection surface (any new `ReverseDns` constants must appear in `All` for those tests). The unit test `EventCatalog_IncludesTranscriptRuntimeEventTypes` asserts legacy transcript names are still in `All`.
-- `Directory.Build.props` sets `TreatWarningsAsErrors=true`; unused private fields/members must be either referenced or removed (the registry's `ReverseDns`, `Lineage`, `All`, `RequiredAttributes`, `HasLineageDeclaration` are all referenced by tests/external code).
+The previous T-001..T-007 implementation completed an event-lineage plan built on random
+IssueId/EpicId identities, Epic-owned membership rows, copied EpicId snapshots, Workflow binding
+states/revisions, and a per-type EventCatalog registry. Repeated check failures exposed failures in
+normal cross-aggregate crash windows. The user then confirmed a different domain model, so those
+task completion claims no longer describe the accepted target.
 
-## T-001 decisions / layout (for downstream tasks)
+The old implementation commits remain in the candidate as migration input. Replacement tasks must
+remove or reshape them; they are not accepted progress and no task in the new tasks.json is marked
+passing.
 
-- `EventCatalog.cs` now exposes:
-  - `All` (unchanged): flat `IReadOnlyList<string>` of every registered type.
-  - `ReverseDns.*` (unchanged): typed constants for emits.
-  - `Lineage.*` (NEW): typed constants for the lineage attribute protocol names (`projectid`, `workflowrunid`, `issueid`, `issue`, `epicid`, `stage`, `agentid`, `sessionid`, `runnerid`). Prefer these over string literals when stamping.
-  - `RequiredAttributes(string type)` (NEW): the always-required matrix per type. Empty list when the type has no lineage declaration (transcript / legacy names).
-  - `HasLineageDeclaration(string type)` (NEW): whether the protocol tracks that type. Useful for skipping non-protocol events in conformance checks.
-- `EnvelopeConformance.cs` (NEW, sibling of `EventCatalog.cs` in `Infrastructure/Events/`):
-  - `Missing(envelope)` / `Missing(extensions, type)`: returns the list of required attributes that are absent.
-  - `AssertRequired(envelope)` / `AssertRequired(extensions, type)`: throws `EnvelopeConformanceException` listing the missing attributes when the envelope fails. Empty values count as missing (lineage is omitted, never empty).
-  - Unknown / out-of-protocol types are a no-op (empty required list).
-  - Exception type `EnvelopeConformanceException : Exception` exposes `EventType` and `MissingAttributes`.
+## Authoritative redesign
 
-## Matrix (pinned here — producers stamp to match)
+- Master spec commit: `71f2cd7b9 docs: define Issue-owned Epic membership`
+- Live Issue #412 title/body updated to the number-only identity and Issue-owned affiliation model.
+- Workdir rebased onto `origin/master` at that spec commit.
+- New OpenSpec proposal/design/delta specs/tasks replace the old D5 denormalization and binding plan.
 
-| Family | Always-required lineage |
+Core target:
+
+- Issue identity: (`ProjectId`, `IssueNumber`)
+- Epic identity: (`ProjectId`, `EpicNumber`)
+- current affiliation authority: Issue.`EpicNumber?`
+- Workflow local context: `{ ProjectId, IssueNumber, EpicNumber? }`
+- cross-aggregate process: aggregate commit + durable event + idempotent target command
+- event keys: `projectid`, `issue`, `epic`, `workflowrunid`, `stage` (plus independent entity ids)
+- conformance: real producer-family paths and structural Stage, not a per-type catalog matrix
+
+## Preserved independent repair
+
+Commit `6ef69d923` adds `RejectIfRunReloadRequired()` at the start of `WorkflowGrain.StartAsync` and a
+state-save-failure regression. This guard is independent of the superseded lineage protocol and must
+survive T-004 cleanup.
+
+## Current candidate debt to remove
+
+The rebased branch still contains old implementation references including:
+
+- random IssueId/EpicId and number alias resolution;
+- EpicIssueRow/EpicActiveIssue ownership;
+- copied EpicId lineage snapshots;
+- AwaitingBinding, WorkflowBindingPending, binding confirmation, and lineage revisions;
+- EventCatalog.RequiredAttributes, EnvelopeConformance, and CatalogOnlyTypes;
+- issueid/epicid/issueno/epicno producer and fallback paths.
+
+These are expected before new build tasks run. They must not be treated as compatibility requirements.
+
+## Replacement task state
+
+| Task | State |
 |---|---|
-| `workflow.run.*` (8 types) | `{projectid, workflowrunid}` |
-| `workflow.stage.*` (5) + `workflow.feedback.requested` | `{projectid, workflowrunid, stage}` |
-| `workflow.task.*` (3) | `{projectid, workflowrunid, stage}` |
-| `workflow.check.*` (4, includes catalog-only `check.started`) | `{projectid, workflowrunid, stage}` |
-| `workflow.artifact.recorded` | `{projectid, workflowrunid}` (NOT stage-bearing per D2) |
-| `workflow.repair-scheduled` (catalog-only) | `{projectid, workflowrunid}` |
-| `issue.*` (13) | `{projectid, issueid, issue}` |
-| `epic.*` (9) | `{projectid, epicid}` |
-| `agent-session.*` (6) | `{projectid, sessionid}` |
-| `runner.disconnected` (catalog-only) | `{runnerid}` |
-| `com.mohist.inbox.item-persisted` | `{projectid, issueid, issue}` |
+| T-001 scoped keys and persisted references | pending |
+| T-002 number-only server model/APIs | pending |
+| T-003 Issue-owned membership and Epic progression | pending |
+| T-004 durable EnsureStarted Workflow handoff | pending |
+| T-005 canonical lineage and producer-family conformance | pending |
+| T-006 server lineage consumers/integrations | pending |
+| T-007 CLI/Web cutover | pending |
+| T-008 cleanup and end-to-end recovery verification | pending |
 
-Conditional/affiliation-dependent attributes that are NOT in the always-required matrix (validated by producer-tasks' stamping scenarios instead):
-- `workflow.*`: `issueid`, `issue`, `epicid` — present iff the run's metadata annotations / Issue.EpicId has it at emit time.
-- `issue.*`: `epicid` — present iff `Issue.EpicId` is non-null at emit time (D5 denormalization, written by T-004).
-- `agent-session.*`: `agentid` when the session originates from an agent; `issue`, `workflowrunid`, `stage` when it originates from a workflow/issue.
-- `runner.*`: `projectid` when present (no producer today).
+## Validation of planning artifacts
 
-## Gotchas
-
-- T-002 etc. must stamp `stage` via STRUCTURAL inspection of the `WorkflowEvent` union variants (per D2), NOT by `type` prefix. The variants that carry a `Stage` member are: `Stage*`, `StageApproval*`, `FeedbackRequested`, `Task*`, `Check*`. `WorkflowArtifactRecorded` (workflow.artifact.recorded) has no `Stage` and must NOT get a stage stamp. `workflow.check.started` has no producer today (catalog-only).
-- The conformance `Missing` helper treats null AND empty-string values as missing. Do not stamp `""` for absent affiliation — omission IS the contract.
-- `ReverseDns.WorkflowRunStopped` and `WorkflowRunPaused` are declared in `All` and the matrix — make sure any consumer-driven type filter (`string.Equals(type, WorkflowRunCompleted)` etc.) is still correct after stamping changes.
-- `RunnerDisconnected` has only `runnerid` in the always-required set (no `projectid`). If a producer is added later, the matrix should be raised to include `projectid` whenever it is present.
-
-## Verification
-
-- Server build: `dotnet build packages/server/src/Mohist.Server/Mohist.Server.csproj -p:SkipWebBuild=true` is clean (0 warn, 0 err).
-- Unit tests: `dotnet test packages/server/tests/Mohist.Server.UnitTests/Mohist.Server.UnitTests.csproj` — all 1365 pass (incl. 22 new tests in `Events/EventCatalogTests.cs`).
-- ArchTests: all 22 pass.
-- Existing `EventCatalog.All` callers compile and remain unchanged.
-
----
-
-T-002 progress
-
-## Codebase Patterns (additions)
-
-- `WorkflowRunMetadata.Annotations` carries three identity-shaped keys today: `projectId`, `issueId`, `issueNumber`. The producer lifts them onto CloudEvent extensions using the protocol names from `EventCatalog.Lineage` (`projectid`, `issueid`, `issue`) — `issueNumber` (annotation) → `issue` (envelope key). T-003/T-004/T-006 will keep using the same convention.
-
-## T-002 decisions / layout
-
-- `WorkflowRunStore.ToCloudEvent` now delegates extension construction to a pure helper `WorkflowRunLineage.BuildExtensions(run, evt)` (new file at `packages/server/src/Mohist.Server/Infrastructure/Data/Workflow/WorkflowRunLineage.cs`). The helper is unit-testable without an Orleans silo and is reused by the spec tests.
-- Stamp matrix applied by the helper (per the matrix pinned in the T-001 section):
-  - `workflowrunid` is ALWAYS stamped (the run is the producer — even a metadata-less run still has a run id).
-  - `projectid`, `issueid`, `issue` are stamped only when the run's metadata annotation carries them; `IsNullOrWhiteSpace` skips them. Absent = omitted, NEVER an empty string.
-  - `stage` is stamped by `WorkflowRunLineage.StageOf(evt)`, which pattern-matches the unwrapped `WorkflowEvent` union. Variants with a `Stage` member: `StageStarted`/`StageCompleted`/`StageFailed`, `StageApprovalRequested`/`StageApprovalResolved`, `FeedbackRequested`, `TaskStarted`/`TaskCompleted`/`TaskFailed`, `CheckPassed`/`CheckFailed`/`CheckPending`. Everything else (run lifecycle variants + `WorkflowArtifactRecorded`) returns null and skips the stamp.
-- The `SaveAsync(run, events)` transactional path reads `WorkflowRunMetadata.Annotations` inside the append loop, so the lineage snapshot stays consistent with the EF Core transaction (D1). No cross-aggregate query is issued — `IssueStore`/`EpicGrain` is not touched. Verified by reading the test scenarios; if a future change adds such a query, the spec-test suite breaks.
-- The `ToCloudEvent(run, ...)` overload signature changed: now takes the whole `WorkflowRun` instead of pre-extracted `projectId`/`issueId` strings. Callers pass `run` once and the helper does the rest. Simpler than threading three nullable strings through.
-
-## Tests added
-
-- `TransactionalEventAppendSpecs` (already existed for issue-361 atomicity; extended for T-002):
-  - `SaveAsync_RunBoundToIssue_StampsProjectIdIssueIdIssueAndWorkflowRunIdOnExtensions` — replaces the old 2-key test, now asserts all four lineage keys including the always-stamped `workflowrunid` and the unified `issue` key (D3).
-  - `SaveAsync_RunWithoutIssueAnnotation_OmitsIssueAttributesButKeepsProjectIdAndWorkflowRunId` — replaces the old 1-key test, now asserts `issueid`/`issue` are absent while `projectid` and `workflowrunid` stay present (AC).
-  - `SaveAsync_StageTaskCheckAndFeedbackEvents_StampStageInAdditionToWorkflowLineage` — drives every stage-bearing variant through `SaveAsync` and asserts the unified `stage` value matches the variant's `Stage` member (D2).
-  - `SaveAsync_WorkflowArtifactRecordedEvent_DoesNotStampStage` — pins the explicit D2 non-carriage for `WorkflowArtifactRecorded` (which is `com.mohist.workflow.artifact.recorded` but has no `Stage` member).
-  - `SaveAsync_NoMetadataAnnotations_StampsOnlyWorkflowRunId` — defensive: a run with no metadata stamps ONLY `workflowrunid`; conditional keys stay absent.
-  - `SaveAsync_StampedEnvelopes_SatisfyEventCatalogRequiredAttributes` — drives a representative of every workflow event family (run/stage/task/check/feedback/artifact) and asserts each emitted envelope satisfies its catalog-declared required attributes via `EnvelopeConformance.AssertRequired` + `Missing`.
-  - `WorkflowRunLineage_StageOf_RecognisesAllStageBearingVariants` — pins the structural stage-decision for every variant (positive for all 12 stage-bearing; null for the 6 run-lifecycle variants + `WorkflowArtifactRecorded`).
-- `WorkflowRunStoreSpecs` (Service-tier specs at `Tests/Specs/Workflow/Storage/`):
-  - `SaveAsync_WithProjectAnnotation_StampsProjectIdOnPersistedEventExtensions` extended to also assert `workflowrunid`.
-  - `SaveAsync_WithIssueAnnotation_StampsIssueIdOnPersistedEventExtensions` left as-is (still asserts `issueid`).
-  - New `SaveAsync_WithIssueAnnotation_StampsIssueNumberAsUnifiedIssueKey` — `issueNumber` annotation → `issue` extension key (D3).
-  - `SaveAsync_WithoutProjectAnnotation_DoesNotStampProjectIdExtension` renamed to `..._StampsWorkflowRunIdOnly` — now pins the absent-affiliation contract: `workflowrunid` is present, `projectid`/`issueid`/`issue`/`stage` are absent.
-
-## Gotchas / hand-offs
-
-- The conformance spec test was kept DRY by writing the assertion loop once per "save a bunch of events, list them, assert extensions" pattern. Future producers (T-003..T-006) should follow the same skeleton: drive a representative event per family, list via the store, then `EnvelopeConformance.AssertRequired(envelope)` per entry + targeted key assertions for the conditional attributes.
-- `IReadOnlyDictionary<string, string>` extension access is read-only in the test (the run-id dictionary is built inside the helper); if a test wants to write extensions (negative cases) it must construct a fresh dictionary. The conformance `Missing` helper treats both null and empty-string values as missing, so the contract on omission (never empty) is shared.
-- The `stampedStage` value comes from the event payload — never from the bus type. A future producer that adds a new stage-bearing variant only needs to extend the `StageOf` switch; the conformance check catches the omission in CI.
-
-## Verification
-
-- Server build: clean (0 warn, 0 err).
-- `Mohist.Server.SpecTests`: 2744 pass (was 2738; +6 from T-002's extended/new tests in `TransactionalEventAppendSpecs` + `WorkflowRunStoreSpecs`).
-- Full `npm test` suite: all 10,663 tests pass across server (1365 unit + 22 arch + 2744 spec + 865 cli), web (4653), runner (1014).
-
----
-
-T-003 progress
-
-## Codebase Patterns (additions)
-- `Issue` already follows the cross-aggregate-reference pattern: `WorkflowRunId` is a nullable string the aggregate carries as a denormalized cache. `EpicId` rides the same field on the existing `State` JSON column, so no schema migration is needed and the read-side (`IssueRowMapper.Deserialize`) does not change. The `_epicId` field follows the same `NormalizeOptional` pattern as `_workflowRunId` (whitespace → null).
-- The `IssueTransactionalEventAppendSpecs` Sqlite fixture uses a single in-memory connection shared across all `[Fact]`s in the class. The unique index on `Issues.(ProjectId, Number)` therefore requires each test issue to use a distinct `Number`. `BuildIssue` now takes an optional `number:` so each test passes a unique int — the legacy constant `IssueNumber = 7` is no longer used by any test fixture but stays as the helper's default.
-
-## T-003 decisions / layout
-- `Issue.cs` gains a nullable `EpicId` (init-getter, normalized via the existing `NormalizeOptional` helper) and an eventless `SetEpicId(string?, DateTime?)` transition. The transition records no `IssueEvent` (denormalization only — the authoritative `EpicIssueLinked` / `EpicIssueUnlinked` events live on the epic stream).
-- `IIssueGrain.SetEpicAffiliationAsync(string? epicId)` is the synchronous push from the Epic domain. Implementation: idempotent (no-op when value unchanged); normalizes whitespace to null; persists via the existing `SaveIssueAsync()` flow, which calls `IssueStore.SaveAsync(key, state, [])` with an empty pending-events list. That overload is the same one used by every other state-only path on the grain (no domain event recorded).
-- `IssueLineage.BuildExtensions(state)` (new file at `packages/server/src/Mohist.Server/Infrastructure/Data/Issue/IssueLineage.cs`) is the pure helper that mirrors `WorkflowRunLineage.BuildExtensions(run, evt)`. It reads ONLY from the supplied `Issue` instance — no DB context, no grain call, no cross-aggregate query. The dictionary always stamps `{projectid, issueid, issue}`; `epicid` is added only when `state.EpicId` is non-null.
-- `IssueStore.SaveAsync(key, state, events, ct)` now calls `IssueLineage.BuildExtensions(state)` inside the EF Core transaction (it sits right after the source/subject resolution, before the per-event `ToCloudEvent` loop). Stamping stays consistent with the append because the extensions are derived from the same `state` instance the row is staged from. The legacy `BuildIdentityExtensions` private method is removed; its callers and tests are rewired to `IssueLineage`.
-- Eight test fakes that implement `IIssueGrain` (in `EpicBatchMembershipSpecs`, `EpicMembershipSpecs`, `EpicProgressionSpecs`, `EpicWakeUpSpecs`, `EpicRecoverySpecs`, `EpicAutoDoneHandlerSpecs`, `IssueWorkflowCompletionHandlerSpecs`) gained a one-line `SetEpicAffiliationAsync(string?) => throw new NotSupportedException()` stub so the interface still compiles. They are placeholders — T-004 (EpicGrain link/unlink → SetEpicAffiliationAsync) is what actually exercises them.
-
-## Tests added
-- `IssueTransactionalEventAppendSpecs` (extended for T-003):
-  - `SaveAsync_StampsProjectIdIssueIdAndIssueOnExtensions` (renamed from `...IssueNoOnExtensions`): now asserts `issue` (D3 rename), and pins the absence of `issueno` and `epicid` for an unaffiliated issue.
-  - `SaveAsync_IssueWithEpicAffiliation_StampsEpicIdOnExtensions`: D5 — a stateful `EpicId` produces an `epicid` stamp on every `issue.*` event.
-  - `SaveAsync_IssueWithoutEpicAffiliation_OmitsEpicIdEntirely`: absent affiliation = no key (no empty value).
-  - `SaveAsync_IssueWithoutEpicAffiliation_OmitsEpicId_AndEmptyStringEpicIdIsTreatedAsAbsent`: defensive — a whitespace-only `EpicId` is normalized to null by the property setter, so the envelope still omits `epicid`.
-  - `SaveAsync_StampedEnvelopes_SatisfyEventCatalogRequiredAttributes`: drives two representative issues (affiliated and unaffiliated) through the full production path and asserts each envelope passes `EnvelopeConformance.AssertRequired` and `Missing` is empty.
-  - `IssueLineage_BuildExtensions_StampsProjectIdIssueIdIssueAndOptionalEpicId`: pins the pure helper — `issue`/`projectid`/`issueid` always, `epicid` only when state carries one, never an `issueno` key.
-- `IssueDomainTests` (extended):
-  - `SetEpicId_StoresValueAndTouchesUpdatedAt_AndDoesNotEmitDomainEvent`: the eventless transition's contract — it touches `UpdatedAt` and adds NO entry to `PendingEvents`.
-  - `SetEpicId_NullClearsAffiliation`: null clears, matches the unlink path.
-  - `SetEpicId_NoOpWhenValueUnchanged`: idempotent; `UpdatedAt` is not bumped when value is already equal.
-  - `SetEpicId_WhitespaceIsNormalizedToNull`: matches the existing `NormalizeOptional` rule.
-  - `State_RoundTripsEpicId`: the `EpicId` field round-trips through the `State` JSON column.
-
-## Gotchas / hand-offs
-- The grain's `SetEpicAffiliationAsync` does NOT call `EnsureIssue()` (the issue is allowed to be null — link/unlink may target an issue that hasn't been activated yet on this silo). Instead it short-circuits when `_issue is null`. The state-only save then happens through `SaveIssueAsync()` which already handles a null `_issue` gracefully. This matches the EpicGrain call sites' expectations: EpicGrain's link/unlink `await` will route through Orleans, which deactivates the grain if needed, then activates it on the next call — at which point `OnActivateAsync` loads the state from the store and the in-memory `_issue` becomes available. If T-004's link call lands on an issue that has never been activated, the synchronous push will be a no-op on this code path; the durable `EpicIssueLinkedHandler` re-applies it later (per the design's "self-healing drift" mitigation).
-- `IssueLineage.BuildExtensions` runs INSIDE the EF Core transaction (right after the source/subject resolution, before the event loop). This keeps the `epicid` snapshot consistent with the append per D1.
-- The conformance spec test reads `entry.Envelope.Subject` against the issue number — keep that subject shape in mind for any later refactor of `IssueEventPersistence.IssueSource`/`subject`.
-- The `IssueWorkflowCompletionHandlerSpecs` and other `Epic*` test files have TWO grain fake classes (recording + throwing). Both got the new `SetEpicAffiliationAsync` stub via a single regex pass. If more fakes appear, follow the same pattern.
-
-## Verification
-- Server build: clean (0 warn, 0 err) on `packages/server/src/Mohist.Server`.
-- `Mohist.Server.SpecTests`: 2749 pass (was 2744; +5 from T-003's new tests in `IssueTransactionalEventAppendSpecs`).
-- `Mohist.Server.UnitTests`: 1370 pass (was 1365; +5 from new `SetEpicId_*` and `State_RoundTripsEpicId` tests in `IssueDomainTests`).
-- `Mohist.Server.ArchTests`: 22 pass.
-- Full `npm test` suite: all 10,673 tests pass across server (1370 unit + 22 arch + 2749 spec + 865 cli), web (4653), runner (1014).
-
----
-
-T-004 progress
-
-## Codebase Patterns (additions)
-- `EpicGrain` follows the same `Mohist.Server.Infrastructure.Data.<Domain>.<Domain>Lineage` placement as `WorkflowRunLineage` (Workflow/Domain) and `IssueLineage` (Issue/Domain). New lineage helpers MUST live in the data layer, take only the producing aggregate's state, and never invoke a grain or query a join table — otherwise they break the "no cross-aggregate query" invariant the conformance matrix enforces.
-- `IGrainFactory.GetGrain<IIssueGrain>(...)` follows the same `GrainKey.Issue(issueId)` pattern as `EpicCounter(projectId)` / `WorkflowBacklog(projectId)` (`Infrastructure/Orleans/GrainKey.cs`); the route key is the issue id (no project prefix). Use that constant rather than concatenating a project key.
-
-## T-004 decisions / layout
-- `EpicLineage.BuildExtensions(state)` (new file at `packages/server/src/Mohist.Server/Infrastructure/Data/Epic/EpicLineage.cs`) is the pure helper that mirrors `WorkflowRunLineage` / `IssueLineage`. It always returns exactly `{projectid, epicid}` (StringComparer.Ordinal); there is no `epicno` key because the matrix treats `epicid` as the single routing dimension and `epicno` is a non-routing read convenience.
-- `EpicGrain` has TWO `PersistEpicEventsAsync` overloads — a post-commit `AppendAsync(envelope)` (used by `CreateAsync`/`SetStatusAsync`/`UpdateAsync`/`ReopenAsync`/`PauseAsync`) and a transactional `AppendAsync(db, envelope)` (used by `StartAsync`/`ResumeAsync`/`LinkIssueAsync`/`UnlinkIssueAsync`/`TryAutoMarkDoneAsync`/`TryStartNextAsync` start-failure path). Both now read extensions from `EpicLineage.BuildExtensions(epic)` and so produce an identical unified set — no producer drift between the two overloads.
-- The stamp uses `EpicAggregate` (alias `Mohist.Server.Epic.Domain.Epic`) — the same instance the producer just stamped onto its pending events. No DB re-read; `BuildExtensions` is a pure function over the in-memory domain state.
-- Link entry points (`LinkIssueAsync`, `LinkIssuesAsync`) and unlink entry points (`UnlinkIssueAsync`, `UnlinkIssuesAsync`) call `PushEpicAffiliationAsync(issueId, epicId-or-null, "link"|"unlink")` immediately after the epic transaction commits. The helper is `try/catch` + log + swallow: synchronous push failure must NOT break the epic mutation (the durable `EpicIssueLinkedHandler` / `EpicIssueUnlinkedHandler` re-applies the same denormalization on every redelivery, so drift is bounded and self-healing).
-- `EpicIssueLinkedHandler` and `EpicIssueUnlinkedHandler` (in `Events/Subscriptions/EpicAutoDoneHandler.cs`) gain a new `EpicIssueAffiliationDispatcher.DispatchAsync(eventId, issueId, epicId, isLink, ct)` call. The dispatcher also wraps in `try/catch` + log: a synchronous failure here would otherwise dead-letter the durable handler and take the convergence path with it. The same `try/catch` mirror image lives in both the command path (`EpicGrain.PushEpicAffiliationAsync`) and the durable path (`EpicIssueAffiliationDispatcher`).
-- One-time backfill is a pure data migration `20260715000000_BackfillIssueEpicAffiliation` that writes `Issues.State.$.epicId` from `EpicActiveIssues` for every issue already linked to an active epic at cutover. It only writes rows where `epicId` is currently NULL and a row exists in `EpicActiveIssues`. Idempotent: re-running matches zero rows because the presence guard fails. `Down` is a no-op (additive projection, per the `BackfillIssueCompletedAt` precedent). The migration is pure data — no `BuildTargetModel` snapshot — because `Issue.EpicId` already rides the existing `State` JSON column (T-003 brought it in).
-- `EpicRecoveryFixture` (the only in-process silo test fixture) needed additional service registrations once the durable `EpicIssueLinkedHandler` started routing through `IIssueGrain.SetEpicAffiliationAsync` — it now calls `siloBuilder.Services.AddMohistConventionalServices()` plus the explicit `IConfiguration`/`IEnvironmentVariableProvider`/`IssueRepositoryResolver`/`IssueIdentityResolver`/`AttachmentService` `AddSingleton` lines that the conventional scan doesn't surface as `IScopedService`/`ISingletonService`. Without those, the InProcessTestCluster-backed `IssueGrain` fails to activate on `SetEpicAffiliationAsync` and the test's existing convergence expectations break.
-
-## Tests added
-- `EpicLineageTests` (new unit test, no silo):
-  - `BuildExtensions_StampsProjectIdAndEpicIdOnly`: pins the exact two keys + their values.
-  - `BuildExtensions_OmitsEpicNoKey`: legacy `epicno` is not present (the matrix decision).
-  - `BuildExtensions_OnlyStampsTwoKeysForEpic`: defensive count of 2 keys (catches accidental re-adds of `epicno` or future drift).
-  - `BuildExtensions_SatisfiesEventCatalogForEveryEpicType`: theory-driven across all nine registry entries — `EnvelopeConformance.Missing(extensions, type)` is empty for every `com.mohist.epic.*` type. Same conformance check the producer path calls, run from the pure helper.
-  - `BuildExtensions_AssertRequiredDoesNotThrow_ForAnEpicType`: the throwing variant for `EpicIssueLinked` — catches drift in CI rather than at the live call site.
-  - `BuildExtensions_StampsFromEpicStateWithoutAnyCrossAggregateLoad`: pins the constructor arity (state only) — a future refactor that adds a grain call or DB query would change this signature and surface here.
-- `EpicEventPublishSpecs` (extended):
-  - `CreateAsync_StampsProjectIdAndEpicIdOnly_NoEpicNo`: post-commit overload path — pins projectid + epicid and asserts exactly two keys, no epicno.
-  - `StartAsync_StampsProjectIdAndEpicIdOnly_NoEpicNo`: transactional overload path — same matrix; proves both overloads stamp identically.
-  - `LinkIssueAsync_LinkedEventStampsProjectIdAndEpicIdOnly_NoEpicNo`: live link path + records the `SetEpicAffiliationAsync(epicId)` push through a recording `IIssueGrain` stub.
-  - `UnlinkIssueAsync_UnlinkedEventStampsProjectIdAndEpicIdOnly_NoEpicNo_AndPushesNullAffiliation`: mirrors unlink with `null`.
-  - `LinkIssueAsync_PushFailure_IsSwallowedAndDoesNotBreakTheLink`: `ThrowingAffiliationGrainFactory` exercises the best-effort try/catch around the push — link row still commits and `EpicIssueLinked` event still fires.
-- One historical assertion updated: `CreateAsync_PersistsEpicCreatedEvent` flipped from asserting `epicno == "1"` to asserting `epicno` is absent — the matrix-level change.
-
-## Gotchas / hand-offs
-- The two `PersistEpicEventsAsync` overloads MUST share the same extensions dictionary shape. Going through the same `EpicLineage` helper is what enforces that — keep the helper as the single source of truth; do not reintroduce per-overload literal dictionaries.
-- `EpicGrain.PushEpicAffiliationAsync` and `EpicIssueAffiliationDispatcher.DispatchAsync` are mirror images in shape and behavior. Both wrap in `try/catch` + log + swallow. Any future change to one MUST mirror into the other (the new EpicEventPublishSpecs push-failure case locks the EpicGrain path; the durability contract comes from the dispatcher's matching contract).
-- `EpicRecoveryFixture` now registers the same conventional services as the production silo (specifically the `IIssueStore`/`IssueRepositoryResolver`/`IssueIdentityResolver` cluster the IssueGrain needs to activate). Without these, the durable handler's new IIssueGrain call dead-letters — confirmed by the `IssueLinkedEvent_DispatcherConvergesWhenInlineRecomputeWasSkipped` test reverting to red. The fixture-specific failure to remember: the disaptcher's `try/catch` swallows it back to a warning so the convergence test passes either way; the registrations are still required so the production-like path doesn't get exercised by a fake.
-- The backfill migration gates on `json_extract(State, '$.epicId') IS NULL` to be idempotent and preserve any live-written values (the live EpicGrain push is the only other writer). It only writes when an `EpicActiveIssues` row exists, mirroring the live write path (terminal-history rows leave the issue's `EpicId` cache clear). `Down` is intentionally a no-op — see `BackfillIssueCompletedAt.cs` for the precedent.
-- The `EpicIssueLinkedHandler` / `EpicIssueUnlinkedHandler` already had a `RecomputeProgressAsync()` dispatcher; T-004 does NOT replace that. The handler now does BOTH the affiliation push AND the recompute in sequence. They were both present in the design; T-004 only adds the first half. The order matters: affiliation push first (so the issue's later events stamp epicid), recompute second (so the epic's progress is updated). Swapping the two would still converge but would leave a small window where the issue's `EpicId` lag the join row.
-- `Mohist.Server.Infrastructure.Orleans.GrainKey.Issue(issueId)` is the canonical way to address `IIssueGrain`. Calling `_grains.GetGrain<IIssueGrain>(issueId)` (the literal-id form) also works because the grain uses `IGrainWithStringKey` and the key is the issue id, but the helper preserves the convention other EpicGrain callers use.
-- `EpicEventPublishSpecs` has TWO new grain fake classes (`RecordingIssueGrain` and `ThrowingIssueGrain`) alongside the existing `StubGrainFactory`/`StubEpicCounterGrain`. Both implement `IIssueGrain` and accept any `IGrainFactory` method. Keep the new fakes local to the test file — no shared fixture change needed.
-
-## Verification
-- Server build: clean (0 warn, 0 err) on `packages/server/src/Mohist.Server`.
-- `Mohist.Server.UnitTests`: 1384 pass (was 1370; +14 from new `EpicLineageTests` — 5 unique methods + 9-row theory).
-- `Mohist.Server.SpecTests`: 2754 pass (was 2749; +5 from the new EpicGrain stamp + push coverage in `EpicEventPublishSpecs`).
-- `Mohist.Server.ArchTests`: 22 pass (unchanged).
-- `Mohist.Cli.Tests`: 865 pass (unchanged).
-- Full `npm test` suite: all 10,692 tests pass across server (1384 unit + 22 arch + 2754 spec + 865 cli), web (4653), runner (1014).
-
----
-T-005 progress
-
-## T-005 decisions / layout
-- `AgentSessionLineage.BuildExtensions(session)` (new file at `packages/server/src/Mohist.Server/Infrastructure/Data/Sessions/AgentSessionLineage.cs`) is the pure helper that mirrors `WorkflowRunLineage` / `IssueLineage` / `EpicLineage`. It reads ONLY from the supplied `AgentSession.Metadata.Labels` — no DB context, no grain call, no cross-aggregate query (D6).
-- The helper's projection rules (D6):
-  - `projectid` is stamped from the `mohist.io/project-id` label when present; whitespace-only label is treated as absent.
-  - `sessionid` is always stamped (the session's own id; the producer's identity).
-  - When `source-kind = "workflow"` (workflow/issue-origin session): `issue` (from `mohist.io/issue-number`), `workflowrunid` (from `mohist.io/source-id`), and `stage` (from `mohist.io/stage`) are stamped when their labels are present.
-  - For all other source kinds (e.g. `agent-launch`): `agentid` is stamped from `mohist.io/agent-id` when present. The `agentid` and `issue`/`workflowrunid`/`stage` keys are mutually exclusive at the producer level — they describe different session origins.
-  - Absent labels are omitted, never an empty value.
-- `AgentSessionStore.SaveAsync` now computes the extensions dictionary once before the event loop (same shape as `IssueStore.SaveAsync`) and passes the read-only dictionary into `ToCloudEvent`. The previous `extensions: null` is gone.
-- `AgentSessionStore.ToCloudEvent` signature now takes an `IReadOnlyDictionary<string, string> extensions` parameter (was: nothing). The dictionary is the shared stamp; the CloudEvent extensions property is set to that dictionary.
-- `BuildSession` helper in the spec now takes an optional `AgentSessionMetadata` so each scenario can build its own labels. `BuildAgentLaunchLabels(projectId, agentId)` and `BuildWorkflowOriginLabels(projectId, workflowRunId, issueNumber, stage)` wrap `GenericAgentSessionMetadata.Metadata(...)` and `WorkflowAgentSessionMetadata.Metadata(...)` so the test scenarios use the exact same label-baking helpers the production paths use.
-
-## Tests added
-- `AgentSessionLineageTests` (new unit test, no silo — 15 tests, in `tests/Mohist.Server.UnitTests/Events/`):
-  - `BuildExtensions_AgentLaunchSession_StampsProjectSessionAndAgentId` — pins agent-launch path: `projectid`/`sessionid`/`agentid`.
-  - `BuildExtensions_AgentLaunchSession_OmitsWorkflowLineage` — agent-launch does NOT carry `issue`/`workflowrunid`/`stage` (the source-kind branch).
-  - `BuildExtensions_WorkflowOriginSession_StampsIssueWorkflowRunIdAndStage` — pins workflow path: `projectid`/`sessionid`/`issue`/`workflowrunid`/`stage`.
-  - `BuildExtensions_WorkflowOriginSession_OmitsAgentId` — workflow path does NOT carry `agentid` (mutual exclusion by source-kind).
-  - `BuildExtensions_WorkflowOriginSessionWithoutIssueNumber_OmitsIssueKey` — absent affiliation = no key (no empty value).
-  - `BuildExtensions_EmptyLabels_StampsOnlySessionId` — bare session with no labels: only `sessionid` is stamped; `projectid`/`agentid`/issue/workflowrunid/stage are absent.
-  - `BuildExtensions_AbsentProjectLabel_OmitsProjectId` — whitespace-only project-id label is treated as absent.
-  - `BuildExtensions_NoCrossAggregateLoad_TakesOnlySessionState` — pins the constructor arity (state only), defensive for any future refactor that adds a query.
-  - `BuildExtensions_AgentLaunchSession_SatisfiesEventCatalogForEveryAgentSessionType` — theory across all six agent-session.* types: `EnvelopeConformance.Missing(extensions, type)` is empty for each.
-  - `BuildExtensions_WorkflowSession_SatisfiesEventCatalogForAgentSessionType` — the throwing variant for a workflow-origin session against `AgentSessionRuntimeBound`.
-  - Plus the explicit `AssertRequired` on a workflow-origin session against `AgentSessionRuntimeBound`.
-- `AgentSessionTransactionalEventAppendSpecs` (extended for T-005 — 11 tests total, was 6):
-  - `SaveAsync_StampsSourceAndSubjectOnEveryLifecycleEnvelope` — the `projectid is NOT present` assertion was REMOVED. The OQ3 design note in the XML doc and inline comment was superseded.
-  - `SaveAsync_AgentLaunchSession_StampsProjectIdSessionIdAndAgentId` — drives the full save path with agent-launch labels and asserts the three keys on every envelope.
-  - `SaveAsync_WorkflowOriginSession_StampsIssueWorkflowRunIdAndStageFromLabels` — drives the full save path with workflow-origin labels and asserts the three additional keys; also asserts `agentid` is absent.
-  - `SaveAsync_WorkflowOriginSessionWithoutIssueNumber_OmitsIssueKey` — absent affiliation contract on the live path.
-  - `SaveAsync_SessionWithoutProjectIdLabel_OmitsProjectId` — defensive: a session with no project-id label does not stamp `projectid`; `sessionid` is still stamped from the session's own id.
-  - `SaveAsync_StampedEnvelopes_SatisfyEventCatalogRequiredAttributes` — drives both agent-launch and workflow-origin sessions through the production path and asserts every envelope passes `EnvelopeConformance.AssertRequired` (and `Missing` is empty).
-  - Class-level XML doc updated to reflect the new lineage contract (drops the OQ3 wording).
-
-## Gotchas / hand-offs
-- The label-key constants are stable across the codebase: `AgentSessionQueryMetadataKeys.ProjectId` (`mohist.io/project-id`), `AgentSessionQueryMetadataKeys.IssueNumber` (`mohist.io/issue-number`), `AgentSessionQueryMetadataKeys.WorkflowRunId` (`mohist.io/source-id`), `AgentSessionQueryMetadataKeys.Stage` (`mohist.io/stage`), `AgentSessionQueryMetadataKeys.SourceKind` (`mohist.io/source-kind`, with values `"agent-launch"` and `"workflow"`), and `GenericAgentSessionMetadata.AgentId` (`mohist.io/agent-id`). The `AgentSessionLineage` helper references them by constant — no string literals.
-- The `source-kind` label is the single discriminator between the two projection branches. A future source kind (e.g. a third-party integration) defaults to the non-workflow branch (stamp `agentid` when its `mohist.io/agent-id` label is present). That matches the matrix's "agentid when agent-origin" wording without an explicit enumeration of every future kind.
-- The `mohist.io/agent-launch/issue-number` label (the `GenericAgentSessionMetadata.IssueNumber` constant) is intentionally NOT read for stamping. The matrix is `issue` only when the session originates from a workflow/issue — generic agent-launch sessions do not contribute `issue`/`workflowrunid`/`stage` to the envelope, even if the user supplied an issue context reference at launch. The optional context refs stay in `Annotations` only (they do not create scope, mount, or supervisor lifecycle per the design of `GenericAgentSessionContext`).
-- The previous test's `Assert.False(entry.Envelope.Extensions.ContainsKey("projectid"))` was a contract assertion (the OQ3 design choice). T-005 supersedes it: projectid IS stamped when the label is present. The other assertions in that test (source / subject) are unchanged and re-verified.
-- `SaveAsync_StampedEnvelopes_SatisfyEventCatalogRequiredAttributes` is the only conformance spec test exercising the agent-session path; the unit test `BuildExtensions_AgentLaunchSession_SatisfiesEventCatalogForEveryAgentSessionType` covers the helper in isolation. The two together pin the matrix end to end.
-
-## Verification
-- Server build: clean (0 warn, 0 err) on `packages/server/src/Mohist.Server`.
-- `Mohist.Server.UnitTests`: 1399 pass (was 1384; +15 from new `AgentSessionLineageTests`).
-- `Mohist.Server.SpecTests`: 2759 pass (was 2754; +5 from new lineage + conformance scenarios in `AgentSessionTransactionalEventAppendSpecs`).
-- `Mohist.Server.ArchTests`: 22 pass (unchanged).
-- `Mohist.Cli.Tests`: 865 pass (unchanged).
-- Web + runner suites: unchanged.
-- Full `npm test` suite: all 10,712 tests pass across server (1399 unit + 22 arch + 2759 spec + 865 cli), web (4653), runner (1014).
-
----
-T-006 progress
-
-## T-006 decisions / layout
-- `InboxProjectionHandler.ProjectAsync` now stamps `eventcatalog.lineage.issueid` and `eventcatalog.lineage.issue` alongside `projectid` on the synthesized `com.mohist.inbox.item-persisted` envelope, lifted from `draft.issueid` and `draft.issuenumber` — the `inboxitempersistedhint` already in scope carries the same identity, so no extra lookup is issued. The dictionary is built with `stringcomparer.ordinal`, matching the convention in the spec tests.
-- `ResolveFromIssueExtensions` reads `projectid`/`issueid` via the `eventcatalog.lineage.*` constants, then routes the issue number through a new helper `tryreadissuenumber(extensions)` that prefers the unified `issue` key and falls back to the legacy `issueno` key when `issue` is absent. Whitespace-only values are treated as absent; `null`/missing on both keys returns `null` (the handler then skips silently — same shape as the previous missing-extension path).
-- The `issuenumber` fallback is the permanent history shim called out in the design (D3 / Risk: "Historical rows retain `issueno`/`epicno`; new readers key on `issue`"). The Non-Goal forbids backfill, so dual-key reads stay in the two handlers that read history.
-- `ResolveFromWorkflowRunAsync` was NOT touched — it reads from `WorkflowRunMetadata.Annotations` (the run's own state) using the legacy-cased annotation keys (`projectid`/`issueid`/`issuenumber`), which are the documented contract for that store. The annotations live on the run's own state, not on envelope extensions; renaming them is T-007's scope.
-- `InboxProjectionTestSupport.BuildIssueEvent` now stamps `issue` (not `issueno`), matching what `IssueStore` emits post-change. A new `BuildLegacyIssueEvent` helper stamps the legacy `issueno` shape so the fallback test can drive the historical-row path.
-- XML doc on the handler updated: identity-resolution section notes the unified `issue` key with the `issueno` fallback; realtime-hint section lists all three lineage keys.
-
-## Tests added
-- `InboxProjectionHandlerRealtimeHintSpecs` (extended for T-006):
-  - `Hint_CarriesIssueLineageFromDraft`: drives the full save path and asserts the synthesized envelope stamps `projectid`/`issueid`/`issue` lifted from the `inboxitemdraft` already in scope (no extra lookup). Values match the seeded issue identity exactly.
-  - `Hint_SatisfiesEventCatalogRequiredAttributesForInboxItemPersisted`: drives every kind the handler can emit (workflow failed, stage approval-requested, issue work-started, issue completed) and asserts every envelope passes `EnvelopeConformance.AssertRequired` and `Missing` is empty for `com.mohist.inbox.item-persisted`. Also pins the catalog declaration (`HasLineageDeclaration == true`, `RequiredAttributes == [projectid, issueid, issue]`).
-  - Class-level XML doc updated to reflect the new lineage contract.
-- `InboxProjectionHandlerSpecs` (extended):
-  - `IssueEvent_LegacyIssuenoKeyFallback_ResolvesIssueNumber`: a pre-change row stamped with `issueno` still resolves to the right issue (history shim).
-  - `IssueEvent_NoIssueNumberKey_ReturnsNullWithoutThrowing`: when neither `issue` nor `issueno` is present, the handler skips silently (matches the prior "missing extension" skip pattern).
-  - `IssueEvent_BothKeysPresent_PrefersUnifiedIssueKey`: when both keys are stamped, the unified `issue` wins — even if `issueno` disagrees, the loaded-issue sanity check pins the correct number.
-
-## Gotchas / hand-offs
-- `inboxitempersistedhint` carries `projectid`/`issueid`/`issuenumber`, but the synthesis stamps `issuenumber.toString()` into the `issue` extension key. The hint payload is unchanged — D7 keeps the identity-only payload contract.
-- The two existing `IssueEvent_Missing*Extension_SkipsWithoutThrowing` tests still pass without modification. The negative paths cover missing `projectid` and missing `issueid`; `issue`/`issueno` missing is now pinned by the new `IssueEvent_NoIssueNumberKey_ReturnsNullWithoutThrowing`.
-- `EnvelopeConformance.Missing` treats null AND empty-string values as missing — the synthesis dictionary uses `draft.ProjectId`/`draft.IssueId` (non-nullable strings from the loaded issue) and `draft.IssueNumber.ToString()` (never empty), so conformance passes by construction.
-- The class-level XML doc on `InboxProjectionHandler` no longer claims the issue path reads `issueno`; it now reads `issue` with an explicit `issueno` fallback paragraph. If a future task removes the fallback, the doc comment must also drop the fallback note.
-- `InboxProjectionHandlerSpecs.Hint_ProjectIdExtensionMatchesOwningProjectNotSourceRoute` still passes — it asserts only that `projectid` matches the owning project, which is still true alongside the new `issueid`/`issue` keys.
-
-## Verification
-- Server build: clean (0 warn, 0 err) on `packages/server/src/Mohist.Server`.
-- `Mohist.Server.SpecTests`: 2764 pass (was 2759; +5 from new T-006 tests).
-- `Mohist.Server.UnitTests`: 1399 pass (unchanged).
-- `Mohist.Server.ArchTests`: 22 pass (unchanged).
-- `Mohist.Cli.Tests`: 865 pass (unchanged).
-- Web + runner suites: unchanged.
-- Full `npm test` suite: all 10,717 tests pass across server (1399 unit + 22 arch + 2764 spec + 865 cli), web (4653), runner (1014).
-
----
-T-007 progress
-
-## T-007 decisions / layout
-- `EpicProgressRecomputeDispatcher.DispatchAsync` (in `EpicAutoDoneHandler.cs:381`) lifts the issue-number lookup into a `TryReadIssueNumber(extensions)` helper that prefers `EventCatalog.Lineage.Issue` (`"issue"`) and falls back to the legacy `"issueno"` key. Both `_epicQuerier` (DI-injected) and `EpicQuerier from scope` branches now share a single helper, eliminating the duplicated `int.TryParse(extensions.GetValueOrDefault("issueno"), out var issueNo)` calls. The helper returns `int?` so a missing-or-empty value cleanly short-circuits the prerequisite reverse lookup (the direct-membership dispatch still proceeds).
-- `HermesIssueNotificationHandler.ResolveFromIssueExtensions` (in `Events/Subscriptions/HermesIssueNotificationHandler.cs:158`) now uses `EventCatalog.Lineage.ProjectId` / `EventCatalog.Lineage.IssueId` constants for the primary reads and a new `TryReadIssueNumberText` private helper for the issue-number lookup (same shape as the dispatcher's helper). The `projectid`/`issueid` reads were also updated from raw string literals to the typed `EventCatalog.Lineage.*` constants — same convention the T-006 helper introduced in `InboxProjectionHandler`.
-- `packages/web/src/app/providers/model/event-envelope.ts:25-37` doc comment now names the unified `issue` lineage key (and lists the full `EventCatalog.Lineage` set the server stamps) instead of the legacy `issueno`. Web fixtures (`packages/web/src/entities/epic/api/client.test.ts:148`, `.../queries.test.ts:239`, `.../EpicActivityTimelineSection.test.tsx:41`) drop the `"epicno"` field from envelope data; `packages/web/tests/browser/activity.spec.ts:29,46` fixture extensions use the unified `issue` key. The web never had producer-side stamping or read-side extension parsing for these keys, so no other code path needed updating.
-
-## Tests added
-- `EpicAutoDoneHandlerSpecs` (extended for T-007, 4 new tests):
-  - `HandleAsync_ExternalPrerequisiteCompletes_DispatchesToDependentEpic_ViaUnifiedIssueKey` — drives the new unified `issue` key through the prerequisite reverse lookup; pins the post-change path.
-  - `HandleAsync_ExternalPrerequisiteCompletes_DispatchesToDependentEpic_ViaLegacyIssuenoFallback` — drives the legacy `issueno` key through the same path; pins the history shim (Non-Goal forbids backfill).
-  - `HandleAsync_BothKeysPresent_DispatchesViaUnifiedIssueKey` — both keys stamped, `issue` wins; pins the precedence contract.
-  - `HandleAsync_NeitherIssueNorIssueno_SkipsPrerequisiteLookupAndStillDispatchesOwningEpic` — neither key present; the direct-membership dispatch still proceeds and the prerequisite lookup is skipped silently (the helper returns `null`).
-- `HermesIssueNotificationTests` (extended for T-007, 4 new tests in `tests/Mohist.Server.UnitTests/Notifications/`):
-  - `IssueEvent_UnifiedIssueKey_ResolvesIdentity` — drives a post-change row stamped with `EventCatalog.Lineage.*` constants; pins the post-change notification path.
-  - `IssueEvent_LegacyIssuenoFallback_ResolvesIdentity` — pre-change historical row stamped with the legacy key; pins the history shim.
-  - `IssueEvent_BothKeysPresent_PrefersUnifiedIssueKey` — unified key wins on conflict.
-  - `IssueEvent_NoIssueNumberKey_SkipsWithoutSending` — neither key present; no notification is dispatched.
-
-## Gotchas / hand-offs
-- The `EpicProgressRecomputeDispatcher.TryReadIssueNumber` helper is `internal static` so spec tests can drive it directly if a future task needs to pin its behavior in isolation. The InboxProjectionHandler and HermesIssueNotificationHandler helpers are `private static` because they live behind a CloudEvent boundary (the test path drives the handler, not the helper). Following the InboxProjectionHandler's example, a `BuildLegacyIssueEvent` + `BuildIssueEvent` pair in the test support module is the cleanest way to add a similar test for any future history-traversing handler that needs the dual-key contract.
-- The two existing `EpicAutoDoneHandlerSpecs` test fixtures `BuildCompletedEvent` / `BuildCancelledEvent` / `BuildEpicIssueLinkedEvent` etc. continue to stamp `issueno` / `epicno` on their input. They drive handlers that don't read those keys (the prerequisite reverse lookup reads `issue`/`issueno`; the EpicEventRecomputeDispatcher reads only `projectid`/`epicid`), so the noise is harmless and the T-007 dual-key helper makes the historical-row path the default behavior for those existing tests. No fixture churn needed.
-- The XML doc on `EpicProgressRecomputeDispatcher` now names the unified `issue` key alongside the `issueno` fallback — the comment is the single sentence future readers will use to understand the rename. The XML doc on `HermesIssueNotificationHandler` was not updated (the private helper name is self-documenting).
-- Web envelope reader's doc comment is now the single sentence that documents the lineage key set; if a future issue adds a new lineage key to `EventCatalog.Lineage`, the web doc should be re-checked — the comment is intentionally exhaustive rather than pointing to a server-side constant the web can't import.
-
-## Verification
-- Server build: clean (0 warn, 0 err) on `packages/server/src/Mohist.Server`.
-- `Mohist.Server.UnitTests`: 1403 pass (was 1399; +4 from new HermesIssueNotificationTests for the dual-key read).
-- `Mohist.Server.SpecTests`: 2768 pass (was 2764; +4 from new EpicAutoDoneHandlerSpecs for the unified key / legacy fallback / both-keys / no-number cases).
-- `Mohist.Server.ArchTests`: 22 pass (unchanged).
-- `Mohist.Cli.Tests`: 865 pass (unchanged).
-- Web typecheck (`npm run typecheck -w packages/web`): clean.
-- Web `npm run test:run`: 4653 pass (unchanged — the fixture updates are pure data shape, no behavior change).
-- Runner typecheck + tests: unchanged.
-- Full `npm test` suite: all 10,725 tests pass across server (1403 unit + 22 arch + 2768 spec + 865 cli), web (4653), runner (1014).
+- tasks.json parses as JSON and all dependencies point to prior tasks.
+- Every task references an existing delta spec requirement.
+- The plan contains no accepted path that shares a database transaction across aggregates.
+- Every ambiguous cross-aggregate failure window has a specified idempotent/redelivery outcome.
