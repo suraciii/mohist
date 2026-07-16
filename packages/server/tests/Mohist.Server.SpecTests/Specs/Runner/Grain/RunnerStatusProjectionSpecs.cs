@@ -33,7 +33,6 @@ public class RunnerStatusProjectionSpecs : WorkflowGrainSpecs
         string runnerId,
         string workflowId,
         string projectId,
-        string issueId,
         int issueNumber,
         string title = "Issue Task")
     {
@@ -47,7 +46,6 @@ public class RunnerStatusProjectionSpecs : WorkflowGrainSpecs
             Annotations: new Dictionary<string, string>(StringComparer.Ordinal)
             {
                 ["projectId"] = projectId,
-                ["issueId"] = issueId,
                 ["issueNumber"] = issueNumber.ToString(),
             })));
         await workflow.AssignWorkerAsync(runnerId);
@@ -386,7 +384,6 @@ public class RunnerStatusProjectionSpecs : WorkflowGrainSpecs
             runnerId,
             workflowId,
             issue.ProjectId,
-            issue.IssueId,
             issue.IssueNumber,
             "Task 1");
 
@@ -400,7 +397,6 @@ public class RunnerStatusProjectionSpecs : WorkflowGrainSpecs
         Assert.Equal("Task 1", active.Title);
         Assert.NotNull(active.Issue);
         Assert.Equal(issue.ProjectId, active.Issue!.ProjectId);
-        Assert.Equal(issue.IssueId, active.Issue.IssueId);
         Assert.Equal(issue.IssueNumber, active.Issue.IssueNumber);
     }
 
@@ -522,7 +518,6 @@ public class RunnerStatusProjectionSpecs : WorkflowGrainSpecs
             runnerId,
             workflowId,
             issue.ProjectId,
-            issue.IssueId,
             issue.IssueNumber);
 
         var service = CreateService(Grains, new RunnerConnectionTracker(), TimeAt(_fixture.TimeProvider.GetUtcNow()));
@@ -531,9 +526,8 @@ public class RunnerStatusProjectionSpecs : WorkflowGrainSpecs
         var work = Assert.Single(view.ActiveWorks);
         Assert.Equal(workflowId, work.OwnerId);
         Assert.NotNull(work.Issue);
-        Assert.Equal("test-project", work.Issue!.ProjectId);
-        Assert.Equal("issue-xyz", work.Issue.IssueId);
-        Assert.Equal(9, work.Issue.IssueNumber);
+        Assert.Equal(issue.ProjectId, work.Issue!.ProjectId);
+        Assert.Equal(issue.IssueNumber, work.Issue.IssueNumber);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
