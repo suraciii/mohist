@@ -21,7 +21,7 @@
       "type": "WRITE",
       "output": "Small typed IssueKey/EpicKey primitives, exact shared ScopedGrainKeyCodec, typed GrainKey entry points, and focused unit/architecture tests only.",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "This task intentionally does not touch EF migrations. The rejected first attempt mixed codec and an incomplete old-id backfill; do not recreate 20260716120000_AdoptScopedIssueEpicIdentity here. Preserve existing callers until T-004."
     },
     {
@@ -44,7 +44,7 @@
       "type": "WRITE",
       "output": "Complete Issue-reference owner inventory, canonical scoped columns/indexes, real idempotent backfill migration/reconciler, model snapshot/designer updates, and exhaustive owner migration specs.",
       "dependsOn": ["T-001"],
-      "passes": false,
+      "passes": true,
       "notes": "Do not populate missing legacy IssueId values and call that canonical adoption. Historical CloudEvent envelope JSON is not rewritten, but current event-query/index ownership must be accounted for. Schema/data migration is operational; runtime aggregate transactions remain untouched."
     },
     {
@@ -66,7 +66,7 @@
       "type": "WRITE",
       "output": "Canonical Epic-reference columns/indexes, owner inventory, affiliation cutover dataset, real idempotent migration and cross-Project preservation specs.",
       "dependsOn": ["T-002"],
-      "passes": false,
+      "passes": true,
       "notes": "Membership rows are temporary migration input only and are deleted in T-005 after Issue.EpicNumber is authoritative. Do not introduce another generic relation/owner aggregate."
     },
     {
@@ -88,7 +88,7 @@
       "type": "WRITE",
       "output": "Number-only Issue/Epic server domain, actors, persistence keys, routes/contracts, profiles/projections and removal of legacy identity runtime/schema.",
       "dependsOn": ["T-003"],
-      "passes": false,
+      "passes": true,
       "notes": "Keep WorkflowRunId, SessionId, AgentId, RunnerId, ProjectId, EventId, attachment id, and other independently owned identities unchanged. This task removes the temporary GrainKey legacy seam from T-001."
     },
     {
@@ -110,7 +110,7 @@
       "type": "WRITE",
       "output": "Issue-owned EpicNumber model, affiliation events/reactions, derived Epic progression, relation-table removal and recovery specs.",
       "dependsOn": ["T-004"],
-      "passes": false,
+      "passes": true,
       "notes": "No replacement membership aggregate or OwnerRef. Epic -> Issue may be synchronous; reverse progress is after-commit durable event only."
     },
     {
@@ -131,7 +131,7 @@
       "type": "WRITE",
       "output": "IssueWorkStarted + EnsureStarted process, minimal Workflow context, expected-run guards, old binding protocol deletion and recovery specs.",
       "dependsOn": ["T-005"],
-      "passes": false,
+      "passes": true,
       "notes": "Temporary absence of WorkflowRun after Issue commit is a normal process interval, not a persisted Workflow status."
     },
     {
@@ -152,7 +152,7 @@
       "type": "WRITE",
       "output": "Canonical lineage builders, structural Stage, simplified catalog, producer-family conformance and obsolete registry removal.",
       "dependsOn": ["T-006"],
-      "passes": false,
+      "passes": true,
       "notes": "Historical envelope JSON is immutable and not required to match the new shape. Test actual producer paths, not only helpers."
     },
     {
@@ -172,7 +172,7 @@
       "type": "WRITE",
       "output": "Canonical server consumers/integrations, envelope-first routing and disagreement/redelivery specs.",
       "dependsOn": ["T-007"],
-      "passes": false,
+      "passes": true,
       "notes": "Do not move current-state routing identity into payload for client convenience."
     },
     {

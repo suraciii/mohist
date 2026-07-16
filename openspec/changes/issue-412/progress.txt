@@ -1,5 +1,22 @@
 # Issue 412 redesign baseline
 
+## Post-rebase validation (2026-07-16)
+
+The candidate was rebased over current `origin/master`, with the current-branch
+recovery fixtures retained alongside the #412 scoped-identity coverage. The
+rebased result passed the full repository validation:
+
+- CLI: 911 tests
+- Server: 2,722 SpecTests, 1,449 UnitTests, and 27 architecture tests
+- Web: 4,680 tests, typecheck, FSD boundary check, and Node test-boundary check
+- Runner: 1,030 tests, typecheck, and Node test-boundary check
+
+T-001 through T-008 are now accepted in `tasks.json`. T-009 is deliberately
+still in progress: Epic routes and envelope-first timeline routing are complete,
+but the Web `Issue` DTO and Agent/session live-event fixtures still expose
+legacy Issue UUID fields. T-010 remains pending on that cutover and final
+removal verification.
+
 ## Why the previous progress is superseded
 
 The previous T-001..T-007 implementation completed an event-lineage plan built on random
@@ -66,12 +83,12 @@ membership authority each have a separately enforceable boundary. Do not reuse t
 | T-001 typed scoped identities and codec | done — strict IssueKey/EpicKey, exact canonical codec, typed-only GrainKey access |
 | T-002 canonical Issue reference migration | done - every current-state owner classified; missing scoped columns, reconciliation, writer coverage and migration regressions landed |
 | T-003 canonical Epic reference migration | done - all current owners classified; scoped columns, guarded backfill, writer coverage and migration regressions landed |
-| T-004 number-only server model/APIs | in progress — production cutover and UnitTests compile; SpecTests fixture migration continues |
-| T-005 Issue-owned membership and Epic progression | in progress — Issue-only affiliation commits and derived Epic runtime paths landed; focused SpecTests migration and migration-chain verification remain |
-| T-006 durable EnsureStarted Workflow handoff | in progress — production protocol, migration, UnitTests, and duplicate-delivery/save-failure recovery fixtures landed; remaining historical SpecTests fixtures are being migrated |
-| T-007 canonical lineage and producer-family conformance | pending |
-| T-008 server lineage consumers/integrations | pending |
-| T-009 CLI/Web cutover | pending |
+| T-004 number-only server model/APIs | done — full Server/CLI test suite passes with scoped identity contracts |
+| T-005 Issue-owned membership and Epic progression | done — Issue commits affiliation and Epic derives membership/progression through durable reactions |
+| T-006 durable EnsureStarted Workflow handoff | done — binding protocol removed and durable IssueWorkStarted/EnsureStarted recovery coverage passes |
+| T-007 canonical lineage and producer-family conformance | done — canonical extensions and producer-family paths are verified |
+| T-008 server lineage consumers/integrations | done — server consumers route from canonical envelope context |
+| T-009 CLI/Web cutover | in progress — Epic/timeline complete; Issue DTO and live Agent/session contracts remain |
 | T-010 cleanup and end-to-end recovery verification | pending |
 
 ## T-001 delivered
