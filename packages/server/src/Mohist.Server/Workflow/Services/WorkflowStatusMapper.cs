@@ -159,12 +159,6 @@ public static class WorkflowStatusMapper
                 actions.Add(new AvailableActionView("retry", title, retry.Target));
             }
 
-            if (failure.Reason is FailureReason.ContextExhaustion)
-            {
-                actions.Add(new AvailableActionView("compact", "Compact session", failure.Stage));
-                actions.Add(new AvailableActionView("reset", "Reset session", failure.Stage));
-            }
-
             actions.Add(new AvailableActionView("rerun", "Rerun stage", run.CurrentStageId));
         }
 

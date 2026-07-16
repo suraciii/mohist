@@ -12,7 +12,6 @@ internal interface IWorkflowGrainContext
     string GrainKey { get; }
     WorkflowProfileManager ProfileManager { get; }
     IGrainFactory Grains { get; }
-    WorkflowSessionHealthService SessionHealthGate { get; }
     ILogger Log { get; }
     DateTimeOffset Now();
 

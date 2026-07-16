@@ -566,7 +566,6 @@ public sealed class DispatcherFixture : IAsyncLifetime
         siloBuilder.Services.AddScoped<Mohist.Server.Runner.Services.DispatchService>();
         siloBuilder.Services.AddScoped<Mohist.Server.Runner.Services.WorkflowReportService>();
         siloBuilder.Services.AddScoped<WorkflowItemTranslator>();
-        siloBuilder.Services.AddScoped<WorkflowSessionHealthService>();
         siloBuilder.Services.AddSingleton<IAgentJobWorkCoordinator, AgentJobWorkCoordinator>();
         siloBuilder.Services.AddScoped<IssueWorkflowProfileRegistry>();
         siloBuilder.Services.AddScoped<EffectiveWorkflowProfileResolver>();

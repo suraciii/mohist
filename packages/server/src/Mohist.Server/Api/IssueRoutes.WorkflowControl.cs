@@ -75,24 +75,8 @@ public static partial class IssueRoutes
             var control = await ResolveWorkflowControlAsync(project.Id, number, issuesQuery, issueIdentityResolver, grains, WorkflowControlAction.RetryOrRerun);
             if (control.Result is not null) return control.Result;
             var wrId = control.WorkflowRunId!;
-            try
-            {
-                await grains.GetGrain<IWorkflowGrain>(wrId).RetryAsync();
-                return ApiResults.Ok();
-            }
-            catch (WorkflowSessionContextExhaustedException ex)
-            {
-                return ApiResults.Conflict(
-                    ex.Message,
-                    "session_context_exhausted",
-                    new
-                    {
-                        contextUsagePercent = ex.ContextUsagePercent,
-                        stage = ex.Stage,
-                        taskId = ex.TaskId,
-                        recoveryActions = WorkflowSessionHealthGate.RecoveryActions,
-                    });
-            }
+            await grains.GetGrain<IWorkflowGrain>(wrId).RetryAsync();
+            return ApiResults.Ok();
         });
 
         group.MapPost("/{number:int}/rerun", async (
