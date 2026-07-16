@@ -226,9 +226,7 @@ public class IssueWorkspaceRepositoryResolutionSpecs : IAsyncLifetime
             new { title, repositoryName, isDraft });
         response.EnsureSuccessStatusCode();
         var json = await response.Content.ReadFromJsonAsync<JsonElement>();
-        return new IssueDto(
-            json.GetProperty("data").GetProperty("id").GetString()!,
-            json.GetProperty("data").GetProperty("number").GetInt32());
+        return new IssueDto(json.GetProperty("data").GetProperty("number").GetInt32());
     }
 
     private async Task StartIssueAndAssignmentRunnerAsync(string projectId, int number)
@@ -255,5 +253,5 @@ public class IssueWorkspaceRepositoryResolutionSpecs : IAsyncLifetime
 
     }
 
-    private sealed record IssueDto(string Id, int Number);
+    private sealed record IssueDto(int Number);
 }

@@ -703,7 +703,7 @@ public class ProjectEventsApiSpecs
             extensions: new Dictionary<string, string>(StringComparer.Ordinal)
             {
                 ["projectid"] = projectId,
-                ["issueno"] = issueNumber.ToString(),
+                ["issue"] = issueNumber.ToString(),
             });
     }
 
@@ -726,7 +726,7 @@ public class ProjectEventsApiSpecs
             extensions: new Dictionary<string, string>(StringComparer.Ordinal)
             {
                 ["projectid"] = projectId,
-                ["issueno"] = issueNumber.ToString(),
+                ["issue"] = issueNumber.ToString(),
                 ["workflowrunid"] = workflowRunId,
                 ["stage"] = "test",
             });
@@ -772,7 +772,7 @@ public class ProjectEventsApiSpecs
             extensions: new Dictionary<string, string>(StringComparer.Ordinal)
             {
                 ["projectid"] = projectId,
-                ["epicno"] = epicNumber.ToString(),
+                ["epic"] = epicNumber.ToString(),
             });
     }
 
@@ -820,7 +820,7 @@ public class ProjectEventsApiSpecs
             ExtensionsJson = JsonSerializer.Serialize(new Dictionary<string, string>
             {
                 ["projectid"] = projectId,
-                ["issueno"] = issueNumber.ToString(),
+                ["issue"] = issueNumber.ToString(),
             }),
         }));
         await db.SaveChangesAsync();
