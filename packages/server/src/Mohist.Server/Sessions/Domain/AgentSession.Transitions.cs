@@ -77,7 +77,7 @@ public static partial class AgentSessionExtensions
             if (string.IsNullOrWhiteSpace(model)) return [];
             var oldModel = session.Settings.Model;
             session.Settings = session.Settings with { Model = model };
-            session.Status = session.Status with { LastDataAt = now };
+            session.Status = session.Status with { LastDataAt = now, CurrentTurnEndedAt = null };
             return !string.Equals(oldModel, session.Settings.Model, StringComparison.Ordinal)
                 ? [new AgentSessionModelChanged(session.Settings.Model)]
                 : [];
@@ -85,7 +85,7 @@ public static partial class AgentSessionExtensions
 
         public IReadOnlyList<AgentSessionEvent> RecordActivity(DateTime now)
         {
-            session.Status = session.Status with { LastDataAt = now };
+            session.Status = session.Status with { LastDataAt = now, CurrentTurnEndedAt = null };
             return [];
         }
 

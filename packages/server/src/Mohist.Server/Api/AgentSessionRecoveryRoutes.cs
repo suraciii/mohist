@@ -37,7 +37,7 @@ public static class AgentSessionRecoveryRoutes
             if (canonicalSessionId is null)
                 return ApiResults.NotFound($"Agent session {sessionId} not found");
 
-            return await ExecuteCompactAsync(canonicalSessionId, grains, commands, ct);
+            return await ExecuteCompactAsync(canonicalSessionId, RecoveryIdempotencyKey(context), grains, commands, ct);
         });
 
         group.MapPost("/{sessionId}/reset", async (
@@ -56,6 +56,7 @@ public static class AgentSessionRecoveryRoutes
 
             return await ExecuteResetAsync(
                 canonicalSessionId,
+                RecoveryIdempotencyKey(context),
                 grains,
                 commands,
                 ct);
@@ -66,6 +67,7 @@ public static class AgentSessionRecoveryRoutes
 
     internal static async Task<IResult> ExecuteCompactAsync(
         string sessionId,
+        string? idempotencyKey,
         IGrainFactory grains,
         ISessionCommandDispatcher commands,
         CancellationToken ct)
@@ -74,9 +76,9 @@ public static class AgentSessionRecoveryRoutes
         SessionCommandRequest? request = null;
         try
         {
-            if (await grain.GetCompletedRecoveryAsync(SessionCommandKind.Compact) is { } completed)
+            if (await grain.GetCompletedRecoveryAsync(SessionCommandKind.Compact, idempotencyKey) is { } completed)
                 return ApiResults.Ok(completed);
-            request = await grain.PrepareSessionCommandAsync(SessionCommandKind.Compact);
+            request = await grain.PrepareSessionCommandAsync(SessionCommandKind.Compact, idempotencyKey);
             var commandResult = await commands.DispatchAsync(request, ct);
             if (MapCommandResult(request, commandResult) is { } commandFailure)
             {
@@ -108,6 +110,7 @@ public static class AgentSessionRecoveryRoutes
 
     internal static async Task<IResult> ExecuteResetAsync(
         string sessionId,
+        string? idempotencyKey,
         IGrainFactory grains,
         ISessionCommandDispatcher commands,
         CancellationToken ct)
@@ -116,9 +119,9 @@ public static class AgentSessionRecoveryRoutes
         SessionCommandRequest? request = null;
         try
         {
-            if (await grain.GetCompletedRecoveryAsync(SessionCommandKind.Reset) is { } completed)
+            if (await grain.GetCompletedRecoveryAsync(SessionCommandKind.Reset, idempotencyKey) is { } completed)
                 return ApiResults.Ok(completed);
-            request = await grain.BeginResetAsync();
+            request = await grain.BeginResetAsync(idempotencyKey);
             var commandResult = await commands.DispatchAsync(request, ct);
             if (MapCommandResult(request, commandResult) is { } commandFailure)
             {
@@ -218,4 +221,9 @@ public static class AgentSessionRecoveryRoutes
             502,
             "runner_invalid_response",
             new { sessionId });
+
+    internal static string? RecoveryIdempotencyKey(HttpContext context) =>
+        context.Request.Headers.TryGetValue("Idempotency-Key", out var values)
+            ? values.FirstOrDefault()
+            : null;
 }

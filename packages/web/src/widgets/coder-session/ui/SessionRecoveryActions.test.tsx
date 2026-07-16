@@ -153,7 +153,7 @@ describe('SessionRecoveryActions — compact action', () => {
     await waitFor(() => {
       expect(compactClient).toHaveBeenCalledTimes(1)
     })
-    expect(compactClient).toHaveBeenCalledWith(110, 'session-abc', 'proj-1')
+    expect(compactClient).toHaveBeenCalledWith(110, 'session-abc', 'proj-1', expect.any(String))
     await waitFor(() => {
       expect(onSuccess).toHaveBeenCalledTimes(1)
     })
@@ -264,7 +264,7 @@ describe('SessionRecoveryActions — reset action and confirmation dialog', () =
     await waitFor(() => {
       expect(resetClient).toHaveBeenCalledTimes(1)
     })
-    expect(resetClient).toHaveBeenCalledWith(110, 'session-abc', 'proj-1')
+    expect(resetClient).toHaveBeenCalledWith(110, 'session-abc', 'proj-1', expect.any(String))
     await waitFor(() => {
       expect(onSuccess).toHaveBeenCalledTimes(1)
     })

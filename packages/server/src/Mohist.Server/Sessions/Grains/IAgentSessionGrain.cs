@@ -11,9 +11,9 @@ public interface IAgentSessionGrain : IGrainWithStringKey
     Task<IReadOnlyList<AgentSessionRuntimeEventInfo>> AppendSystemEventsAsync(AppendAgentSessionSystemEventsCommand command);
     Task<AgentSessionRecoveryResult> CompactAsync(CompactAgentSessionCommand command);
     Task<AgentSessionRecoveryResult> ResetAsync(ResetAgentSessionCommand command);
-    Task<AgentSessionRecoveryResult?> GetCompletedRecoveryAsync(SessionCommandKind command);
-    Task<SessionCommandRequest> PrepareSessionCommandAsync(SessionCommandKind command);
-    Task<SessionCommandRequest> BeginResetAsync();
+    Task<AgentSessionRecoveryResult?> GetCompletedRecoveryAsync(SessionCommandKind command, string? idempotencyKey = null);
+    Task<SessionCommandRequest> PrepareSessionCommandAsync(SessionCommandKind command, string? idempotencyKey = null);
+    Task<SessionCommandRequest> BeginResetAsync(string? idempotencyKey = null);
     Task<AgentSessionRecoveryResult> CompleteCompactAsync(CompleteCompactAgentSessionCommand command);
     Task<AgentSessionRecoveryResult> CompleteResetAsync(CompleteResetAgentSessionCommand command);
     Task AbandonResetAsync(string operationId);

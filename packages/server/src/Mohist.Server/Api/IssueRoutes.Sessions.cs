@@ -61,7 +61,8 @@ public static partial class IssueRoutes
             var sessionId = await sessions.ResolveIssueSessionIdAsync(project.Id, number, name, ct);
             if (sessionId is null) return ApiResults.NotFound($"Session {name} not found");
 
-            return await AgentSessionRecoveryRoutes.ExecuteCompactAsync(sessionId, grains, commands, ct);
+            return await AgentSessionRecoveryRoutes.ExecuteCompactAsync(
+                sessionId, AgentSessionRecoveryRoutes.RecoveryIdempotencyKey(ctx), grains, commands, ct);
         });
 
         group.MapPost("/{number:int}/sessions/{name}/reset", async (
@@ -80,6 +81,7 @@ public static partial class IssueRoutes
 
             return await AgentSessionRecoveryRoutes.ExecuteResetAsync(
                 sessionId,
+                AgentSessionRecoveryRoutes.RecoveryIdempotencyKey(ctx),
                 grains,
                 commands,
                 ct);

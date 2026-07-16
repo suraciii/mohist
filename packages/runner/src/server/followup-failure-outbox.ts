@@ -5,6 +5,7 @@ import type { ServerConnection } from "./connection.js"
 
 const DEFAULT_FOLLOWUP_FAILURE_OUTBOX_FILE = ".mohist/runner-state/followup-failures.json"
 const RETRY_DELAY_MS = 2_000
+const DELIVERY_TIMEOUT_MS = 5_000
 
 export interface FollowupFailureRecord {
   operationId: string
@@ -142,18 +143,30 @@ async function publishFailure(server: ServerConnection, entry: FollowupFailureRe
       },
     ],
   }
-  const signal = new AbortController().signal
-  if (entry.target.kind === "workflow") {
-    await server.workflowAgentSessionRuntimeEvents(
-      entry.target.projectId,
-      entry.target.workflowRunId,
-      entry.target.sessionName,
-      body,
-      signal,
-    )
-    return
+  const controller = new AbortController()
+  let rejectTimeout!: (error: Error) => void
+  const timeout = new Promise<never>((_, reject) => { rejectTimeout = reject })
+  const timer = setTimeout(() => {
+    controller.abort()
+    rejectTimeout(new Error("follow-up terminal delivery timed out"))
+  }, DELIVERY_TIMEOUT_MS)
+  timer.unref?.()
+  try {
+    if (entry.target.kind === "workflow") {
+      await Promise.race([server.workflowAgentSessionRuntimeEvents(
+        entry.target.projectId,
+        entry.target.workflowRunId,
+        entry.target.sessionName,
+        body,
+        controller.signal,
+      ), timeout])
+      return
+    }
+    await Promise.race([server.agentSessionRuntimeEvents(
+      entry.target.projectId, entry.target.sessionId, body, controller.signal), timeout])
+  } finally {
+    clearTimeout(timer)
   }
-  await server.agentSessionRuntimeEvents(entry.target.projectId, entry.target.sessionId, body, signal)
 }
 
 function parseOutbox(raw: string): FollowupFailureOutboxFile | null {

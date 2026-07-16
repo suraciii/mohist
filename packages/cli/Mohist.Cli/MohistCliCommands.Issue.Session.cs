@@ -171,7 +171,8 @@ internal static partial class IssueCommands
                     path,
                     new { },
                     mode,
-                    nameof(MohistCliApi.TableShape.SessionRecovery));
+                    nameof(MohistCliApi.TableShape.SessionRecovery),
+                    headers: new Dictionary<string, string> { ["Idempotency-Key"] = Guid.NewGuid().ToString("N") });
             }
         });
         return cmd;
@@ -211,7 +212,8 @@ internal static partial class IssueCommands
                     path,
                     new { },
                     mode,
-                    nameof(MohistCliApi.TableShape.SessionRecovery));
+                    nameof(MohistCliApi.TableShape.SessionRecovery),
+                    headers: new Dictionary<string, string> { ["Idempotency-Key"] = Guid.NewGuid().ToString("N") });
             }
         });
         return cmd;

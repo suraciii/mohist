@@ -263,7 +263,8 @@ public sealed record AgentSessionStatusSnapshot(
     AgentSessionResetReservation? PendingReset = null,
     AgentSessionFollowupLease? PendingFollowup = null,
     IReadOnlyList<AgentSessionFollowupLease>? PendingFollowups = null,
-    IReadOnlyList<AgentSessionTranscriptEvidence>? PendingTranscriptEvidence = null)
+    IReadOnlyList<AgentSessionTranscriptEvidence>? PendingTranscriptEvidence = null,
+    DateTime? CurrentTurnEndedAt = null)
 {
     public static AgentSessionStatusSnapshot Created(DateTime now) =>
         new(CreatedAt: now, UsageSummary: new AgentUsageSummary(), RuntimeSessionLineage: [], ContextUsageHistory: []);
@@ -298,7 +299,8 @@ public sealed record AgentSessionResetReservation(
     string Runtime,
     DateTime StartedAt,
     string Command = "reset",
-    AgentSessionRecoveryOutcome? Outcome = null);
+    AgentSessionRecoveryOutcome? Outcome = null,
+    string? IdempotencyKey = null);
 
 public sealed record AgentSessionRecoveryOutcome(
     string Id,
@@ -314,7 +316,8 @@ public sealed record AgentSessionRecoveryOutcome(
 public sealed record AgentSessionFollowupLease(
     [property: Id(0)] string OperationId,
     [property: Id(1)] string RuntimeSessionId,
-    [property: Id(2)] bool Accepted = false);
+    [property: Id(2)] bool Accepted = false,
+    [property: Id(3)] DateTime? AcceptedAt = null);
 
 public sealed record AgentSessionTranscriptEvidence(
     string Id,

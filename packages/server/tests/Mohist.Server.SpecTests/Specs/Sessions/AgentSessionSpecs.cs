@@ -565,7 +565,7 @@ public class AgentSessionSpecs
 
         var grainSession = await _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id).GetAsync();
         Assert.NotNull(grainSession);
-        Assert.Equal("active", grainSession.Status);
+        Assert.Equal("inactive", grainSession.Status);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -592,7 +592,7 @@ public class AgentSessionSpecs
             Metadata: WorkflowSessionMetadata(project.Id, session.IssueNumber, session.WorkflowRunId, session.SessionName, work.WorkId, work.WorkType, work.Stage, work.Title)));
 
         Assert.Equal(session.Id, reopened.Id);
-        Assert.Equal("active", reopened.Status);
+        Assert.Equal("inactive", reopened.Status);
         Assert.Equal(_runnerId, reopened.RunnerId);
 
         var nextRunnerId = $"{_runnerId}-next";
@@ -602,7 +602,7 @@ public class AgentSessionSpecs
             Metadata: WorkflowSessionMetadata(project.Id, session.IssueNumber, session.WorkflowRunId, session.SessionName, work.WorkId, work.WorkType, work.Stage, work.Title)));
 
         Assert.Equal(session.Id, repeated.Id);
-        Assert.Equal("active", repeated.Status);
+        Assert.Equal("inactive", repeated.Status);
         Assert.Equal(_runnerId, repeated.RunnerId);
     }
 
@@ -672,7 +672,7 @@ public class AgentSessionSpecs
                 Metadata: WorkflowSessionMetadata(project.Id, issue.Number, work.WorkflowRunId, session.SessionName, "fix-review-findings:1.1", "task", "check", "Fix review findings")));
 
         Assert.Equal(session.Id, opened.Id);
-        Assert.Equal("active", opened.Status);
+        Assert.Equal("inactive", opened.Status);
         Assert.NotNull(opened.AgentSessionId);
     }
 
@@ -817,7 +817,7 @@ public class AgentSessionSpecs
 
         var grainSession = await _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id).GetAsync();
         Assert.NotNull(grainSession);
-        Assert.Equal("active", grainSession.Status);
+        Assert.Equal("inactive", grainSession.Status);
         Assert.Equal(10, grainSession.InputTokens);
         Assert.Equal(0.001, grainSession.CostAmount);
 
@@ -881,7 +881,7 @@ public class AgentSessionSpecs
 
         var grainSession = await _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id).GetAsync();
         Assert.NotNull(grainSession);
-        Assert.Equal("active", grainSession.Status);
+        Assert.Equal("inactive", grainSession.Status);
         Assert.Equal("probe_timeout", grainSession.FailureCategory);
     }
 

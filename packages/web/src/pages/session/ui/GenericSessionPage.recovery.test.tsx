@@ -93,12 +93,12 @@ describe('GenericSessionPage recovery', () => {
 
     await waitFor(() => expect(screen.getByTestId('session-recovery-compact')).not.toBeDisabled())
     fireEvent.click(screen.getByTestId('session-recovery-compact'))
-    await waitFor(() => expect(compact).toHaveBeenCalledWith('sess-abc', 'proj-1'))
+    await waitFor(() => expect(compact).toHaveBeenCalledWith('sess-abc', 'proj-1', expect.any(String)))
     await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: ['agent-sessions'] }))
 
     fireEvent.click(screen.getByTestId('session-recovery-reset'))
     fireEvent.click(screen.getByTestId('session-recovery-reset-confirm'))
-    await waitFor(() => expect(reset).toHaveBeenCalledWith('sess-abc', 'proj-1'))
+    await waitFor(() => expect(reset).toHaveBeenCalledWith('sess-abc', 'proj-1', expect.any(String)))
   })
 
   it('disables recovery when the server reports an active generic session', async () => {

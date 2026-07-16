@@ -89,4 +89,40 @@ describe("FollowupFailureOutbox", () => {
     const delivered = calls.map(([, , body]) => body.runtimeEvents[0]!.payload.operationId).sort()
     expect(delivered).toEqual(["followup-1", "followup-2"])
   })
+
+  it("retries a terminal delivery after its request stalls", async () => {
+    const root = await mkdtemp(join(tmpdir(), "mohist-followup-outbox-"))
+    roots.push(root)
+    vi.useFakeTimers()
+    let entered!: () => void
+    const enteredDelivery = new Promise<void>((resolve) => { entered = resolve })
+    const server = {
+      workflowAgentSessionRuntimeEvents: vi.fn(async () => undefined),
+      agentSessionRuntimeEvents: vi.fn()
+        .mockImplementationOnce((...args: unknown[]) => new Promise<void>((_, reject) => {
+          const signal = args[3] as AbortSignal
+          entered()
+          signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true })
+        }))
+        .mockResolvedValueOnce(undefined),
+    }
+    const outbox = new FollowupFailureOutbox(root)
+    await outbox.load()
+
+    const recording = outbox.record({
+      operationId: "followup-stalled",
+      target: { kind: "generic", projectId: "project-1", sessionId: "session-1" },
+      runtimeSessionId: "runtime-1",
+      status: "failed",
+      error: "prompt rejected",
+      completedAt: "2026-01-01T00:00:00.000Z",
+    }, server as never)
+    await enteredDelivery
+    await vi.advanceTimersByTimeAsync(5_000)
+    await recording
+    await vi.advanceTimersByTimeAsync(2_000)
+
+    expect(server.agentSessionRuntimeEvents).toHaveBeenCalledTimes(2)
+    vi.useRealTimers()
+  })
 })

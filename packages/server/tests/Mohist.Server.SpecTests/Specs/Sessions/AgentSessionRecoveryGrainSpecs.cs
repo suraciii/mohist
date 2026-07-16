@@ -232,6 +232,24 @@ public sealed class AgentSessionRecoveryGrainSpecs : IClassFixture<AgentSessionG
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
+    public async Task CompletedCompact_ReplaysOnlyItsIdempotencyKeyAndStartsANewOperationForAnotherKey()
+    {
+        var (grain, _) = await CreateAttachedSessionAsync("runtime-recovery-key");
+        var first = await grain.PrepareSessionCommandAsync(SessionCommandKind.Compact, "compact-1");
+        await grain.CompleteCompactAsync(new CompleteCompactAgentSessionCommand(first.OperationId, Summary: "first"));
+
+        Assert.NotNull(await grain.GetCompletedRecoveryAsync(SessionCommandKind.Compact, "compact-1"));
+        _fixture.TimeProvider.Advance(AgentSessionJsonHelper.ActiveRuntimeEventWindow + TimeSpan.FromSeconds(1));
+        var second = await grain.PrepareSessionCommandAsync(SessionCommandKind.Compact, "compact-2");
+        await grain.CompleteCompactAsync(new CompleteCompactAgentSessionCommand(second.OperationId, Summary: "second"));
+
+        Assert.NotEqual(first.OperationId, second.OperationId);
+        Assert.Equal(2, _fixture.StateStore.Events.Count(e => e.Value is AgentSessionContextCompacted));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
     public async Task DelayedAttachAfterReset_CannotRestoreThePreviousRuntimeBinding()
     {
         var (grain, _) = await CreateAttachedSessionAsync("runtime-before-reset");
@@ -312,6 +330,37 @@ public sealed class AgentSessionRecoveryGrainSpecs : IClassFixture<AgentSessionG
         Assert.Equal("inactive", AgentSessionJsonHelper.StatusName(state, now));
         var result = await grain.CompactAsync(new CompactAgentSessionCommand(Summary: "summary"));
         Assert.Equal(sessionId, result.Id);
+        Assert.True(result.WasCompacted);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
+    public async Task Compact_AfterAcceptedFollowupIsLost_ExpiresTheLeaseWithoutSynthesizingATerminalEvent()
+    {
+        var (grain, _) = await CreateAttachedSessionAsync("runtime-lost-followup");
+        var followup = await grain.BeginFollowupAsync();
+        await grain.ConfirmFollowupAsync(followup.OperationId!);
+        _fixture.TimeProvider.Advance(AgentSessionJsonHelper.ActiveRuntimeEventWindow + TimeSpan.FromSeconds(1));
+
+        var result = await grain.CompactAsync(new CompactAgentSessionCommand(Summary: "available"));
+
+        Assert.True(result.WasCompacted);
+        Assert.Empty(_fixture.StateStore.State!.Status.PendingFollowups!);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
+    public async Task Compact_AfterSessionClosed_IsImmediatelyAvailable()
+    {
+        var (grain, _) = await CreateAttachedSessionAsync("runtime-closed");
+        await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
+            new[] { new AgentSessionRuntimeEventInput(RuntimeEventTypes.SessionClosed, "{\"status\":\"completed\"}") },
+            "runtime-closed"));
+
+        var result = await grain.CompactAsync(new CompactAgentSessionCommand(Summary: "available"));
+
         Assert.True(result.WasCompacted);
     }
 

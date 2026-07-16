@@ -109,13 +109,13 @@ export function SessionRecoveryActions({
   }, [status])
 
   const compactMutation = useMutation({
-    mutationFn: () => {
+    mutationFn: (idempotencyKey: string) => {
       if (!projectId) {
         return Promise.reject(new ApiError('Project is required', 400))
       }
       return genericSessionId
-        ? genericClients.compact(genericSessionId, projectId)
-        : clients.compact(issueNumber, sessionName, projectId)
+        ? genericClients.compact(genericSessionId, projectId, idempotencyKey)
+        : clients.compact(issueNumber, sessionName, projectId, idempotencyKey)
     },
     onSuccess: () => {
       setInlineError(null)
@@ -127,13 +127,13 @@ export function SessionRecoveryActions({
   })
 
   const resetMutation = useMutation({
-    mutationFn: () => {
+    mutationFn: (idempotencyKey: string) => {
       if (!projectId) {
         return Promise.reject(new ApiError('Project is required', 400))
       }
       return genericSessionId
-        ? genericClients.reset(genericSessionId, projectId)
-        : clients.reset(issueNumber, sessionName, projectId)
+        ? genericClients.reset(genericSessionId, projectId, idempotencyKey)
+        : clients.reset(issueNumber, sessionName, projectId, idempotencyKey)
     },
     onSuccess: () => {
       setResetDialogOpen(false)
@@ -149,7 +149,7 @@ export function SessionRecoveryActions({
 
   function handleCompact() {
     if (active || anyPending) return
-    compactMutation.mutate()
+    compactMutation.mutate(crypto.randomUUID())
   }
 
   function openResetDialog() {
@@ -171,7 +171,7 @@ export function SessionRecoveryActions({
 
   function handleResetConfirm() {
     if (resetMutation.isPending) return
-    resetMutation.mutate()
+    resetMutation.mutate(crypto.randomUUID())
   }
 
   const compactButton = (

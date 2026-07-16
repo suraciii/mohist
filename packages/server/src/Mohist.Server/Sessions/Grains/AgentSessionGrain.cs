@@ -150,6 +150,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
     public async Task<AgentSessionRecoveryResult> CompactAsync(CompactAgentSessionCommand command)
     {
         var session = await GetRequiredAsync();
+        await ExpireAcceptedFollowupsAsync(session);
         EnsureRuntimeSessionPresent(session);
         EnsureSessionIdleForRecovery(session);
 
@@ -185,6 +186,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
     public async Task<AgentSessionRecoveryResult> ResetAsync(ResetAgentSessionCommand command)
     {
         var session = await GetRequiredAsync();
+        await ExpireAcceptedFollowupsAsync(session);
         EnsureSessionIdleForRecovery(session);
         session.EnsureExpectedRuntimeSession(command.ExpectedRuntimeSessionId);
 
@@ -205,43 +207,48 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         return BuildRecoveryResult(session, usedBefore, size, "reset", wasCompacted: false);
     }
 
-    public async Task<SessionCommandRequest> PrepareSessionCommandAsync(SessionCommandKind command)
+    public async Task<SessionCommandRequest> PrepareSessionCommandAsync(SessionCommandKind command, string? idempotencyKey = null)
     {
         if (command is not (SessionCommandKind.Compact or SessionCommandKind.Reset))
             throw new ArgumentOutOfRangeException(nameof(command), command, "Unsupported session command");
 
-        return await BeginSessionCommandAsync(command);
+        return await BeginSessionCommandAsync(command, idempotencyKey);
     }
 
-    public Task<SessionCommandRequest> BeginResetAsync() =>
-        BeginSessionCommandAsync(SessionCommandKind.Reset);
+    public Task<SessionCommandRequest> BeginResetAsync(string? idempotencyKey = null) =>
+        BeginSessionCommandAsync(SessionCommandKind.Reset, idempotencyKey);
 
-    public async Task<AgentSessionRecoveryResult?> GetCompletedRecoveryAsync(SessionCommandKind command)
+    public async Task<AgentSessionRecoveryResult?> GetCompletedRecoveryAsync(SessionCommandKind command, string? idempotencyKey = null)
     {
         var session = await GetRequiredAsync();
         var reservation = session.Status.PendingReset;
         return reservation is not null
             && string.Equals(reservation.Command, CommandName(command), StringComparison.Ordinal)
+            && string.Equals(reservation.IdempotencyKey, RecoveryIdempotencyKey(idempotencyKey), StringComparison.Ordinal)
             && reservation.Outcome is not null
             ? ToRecoveryResult(reservation.Outcome)
             : null;
     }
 
-    private async Task<SessionCommandRequest> BeginSessionCommandAsync(SessionCommandKind command)
+    private async Task<SessionCommandRequest> BeginSessionCommandAsync(SessionCommandKind command, string? idempotencyKey)
     {
         var session = await GetRequiredAsync();
+        await ExpireAcceptedFollowupsAsync(session);
         EnsureSessionIdleForRecovery(session);
+        var key = RecoveryIdempotencyKey(idempotencyKey);
 
         if (session.Status.PendingReset is { } pending)
         {
-            if (pending.Outcome is not null && !string.Equals(pending.Command, CommandName(command), StringComparison.Ordinal))
+            if (pending.Outcome is not null && (!string.Equals(pending.Command, CommandName(command), StringComparison.Ordinal)
+                || !string.Equals(pending.IdempotencyKey, key, StringComparison.Ordinal)))
             {
                 session.Status = session.Status with { PendingReset = null };
                 await CommitAsync(session, []);
             }
             else
             {
-            if (string.Equals(pending.Command, CommandName(command), StringComparison.Ordinal))
+            if (string.Equals(pending.Command, CommandName(command), StringComparison.Ordinal)
+                && string.Equals(pending.IdempotencyKey, key, StringComparison.Ordinal))
             {
                 return BuildSessionCommandRequest(session, command, pending);
             }
@@ -266,7 +273,8 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             session.Status.AgentRuntimeSessionId,
             runtime,
             Now(),
-            CommandName(command));
+            CommandName(command),
+            IdempotencyKey: key);
         session.Status = session.Status with { PendingReset = reservation };
         await CommitAsync(session, []);
         return BuildSessionCommandRequest(session, command, reservation);
@@ -275,6 +283,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
     public async Task<AgentSessionRecoveryResult> CompleteCompactAsync(CompleteCompactAgentSessionCommand command)
     {
         var session = await GetRequiredAsync();
+        await ExpireAcceptedFollowupsAsync(session);
         var reservation = RequireReservation(session, command.OperationId, SessionCommandKind.Compact);
         if (reservation.Outcome is not null)
             return ToRecoveryResult(reservation.Outcome);
@@ -299,6 +308,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
     public async Task<AgentSessionRecoveryResult> CompleteResetAsync(CompleteResetAgentSessionCommand command)
     {
         var session = await GetRequiredAsync();
+        await ExpireAcceptedFollowupsAsync(session);
         var reservation = RequireReservation(session, command.OperationId, SessionCommandKind.Reset);
         if (reservation.Outcome is not null)
             return ToRecoveryResult(reservation.Outcome);
@@ -367,7 +377,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             return;
 
         var next = pending.ToArray();
-        next[index] = next[index] with { Accepted = true };
+        next[index] = next[index] with { Accepted = true, AcceptedAt = Now() };
         SetPendingFollowups(session, next);
         await CommitAsync(session, []);
     }
@@ -434,6 +444,23 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         outcome.ContextWindowUsedBefore,
         outcome.Operation,
         outcome.WasCompacted);
+
+    private const string LegacyRecoveryIdempotencyKey = "legacy";
+
+    private static string RecoveryIdempotencyKey(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? LegacyRecoveryIdempotencyKey : value;
+
+    private async Task ExpireAcceptedFollowupsAsync(AgentSession session)
+    {
+        var pending = GetPendingFollowups(session);
+        var now = Now();
+        var remaining = pending.Where(lease => !lease.Accepted
+            || lease.AcceptedAt is { } acceptedAt
+                && now - acceptedAt <= AgentSessionJsonHelper.ActiveRuntimeEventWindow).ToArray();
+        if (remaining.Length == pending.Count) return;
+        SetPendingFollowups(session, remaining);
+        await CommitAsync(session, []);
+    }
 
     private static AgentSessionResetReservation RequireReservation(
         AgentSession session,
@@ -719,6 +746,8 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         }
 
         var now = Now();
+        if (runtimeEvents.Any(e => string.Equals(e.Type, RuntimeEventTypes.SessionClosed, StringComparison.Ordinal)))
+            session.Status = session.Status with { CurrentTurnEndedAt = now };
         if (requireCurrentRuntimeBinding && runtimeEvents.Any(e => TerminatesFollowupLease(e.Type)))
         {
             SetPendingFollowups(session, GetPendingFollowups(session)
@@ -726,7 +755,8 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
                 .ToArray());
         }
         var events = new List<AgentSessionEvent>();
-        if (runtimeEvents.Any(ShouldRecordActivity))
+        if (runtimeEvents.Any(ShouldRecordActivity)
+            && (session.Status.CurrentTurnEndedAt is null || runtimeEvents.Any(ResumesTurn)))
             events.AddRange(session.RecordActivity(now));
         _stateDirty = true;
 
@@ -854,6 +884,9 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
 
     private static bool ShouldRecordActivity(AgentSessionRuntimeEventInput runtimeEvent)
     {
+        if (string.Equals(runtimeEvent.Type, RuntimeEventTypes.SessionClosed, StringComparison.Ordinal)
+            || IsFollowupTerminal(runtimeEvent.Type))
+            return false;
         if (!string.Equals(runtimeEvent.Type, RuntimeEventTypes.SessionInput, StringComparison.Ordinal))
             return true;
 
@@ -868,6 +901,14 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             return true;
         }
     }
+
+    private static bool ResumesTurn(AgentSessionRuntimeEventInput runtimeEvent) =>
+        runtimeEvent.Type is RuntimeEventTypes.SessionInput
+            or RuntimeEventTypes.MessageDelta
+            or RuntimeEventTypes.ReasoningDelta
+            or RuntimeEventTypes.ToolCallStarted
+            or RuntimeEventTypes.ToolCallUpdated
+            or RuntimeEventTypes.ToolCallCompleted;
 
     private static bool IsFollowupTerminal(string? type) =>
         string.Equals(type, RuntimeEventTypes.SessionFollowupFailed, StringComparison.Ordinal)
@@ -1294,7 +1335,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         return runtimeEvent.Type switch
         {
             RuntimeEventTypes.SessionLiveness => session.RecordActivity(now),
-            RuntimeEventTypes.SessionClosed => session.RecordActivity(now),
+            RuntimeEventTypes.SessionClosed => [],
             RuntimeEventTypes.UsageUpdated => session.ApplyUsage(
                 AgentSessionJsonHelper.GetLongProp(payload, "inputTokens"),
                 AgentSessionJsonHelper.GetLongProp(payload, "outputTokens"),

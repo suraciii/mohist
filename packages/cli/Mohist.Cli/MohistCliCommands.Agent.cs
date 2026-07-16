@@ -697,7 +697,8 @@ internal static class AgentCommands
                     ProjectAgentSessionsPath(resolvedProjectId, $"/{MohistCliCommands.Escape(sessionId!)}/{operation}"),
                     new { },
                     mode,
-                    nameof(MohistCliApi.TableShape.SessionRecovery));
+                    nameof(MohistCliApi.TableShape.SessionRecovery),
+                    headers: new Dictionary<string, string> { ["Idempotency-Key"] = Guid.NewGuid().ToString("N") });
             }
         });
         return cmd;
