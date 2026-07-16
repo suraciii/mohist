@@ -131,10 +131,10 @@ function issueHandler(ctx: HandlerContext): void {
   if (applyReverseDnsOutcome(decideReverseDnsOutcome(ctx.eventName, ctx.parsed), ctx.queryClient, ctx.setRebaseConflict)) {
     return
   }
-  const { issueId } = ctx.parsed as { issueId: string; projectId: string }
+  const { issueNumber } = ctx.parsed as { issueNumber?: number }
   ctx.queryClient.invalidateQueries({ queryKey: ['issues'] })
-  if (issueId) {
-    ctx.queryClient.invalidateQueries({ queryKey: ['issues', 'detail', issueId] })
+  if (typeof issueNumber === 'number') {
+    ctx.queryClient.invalidateQueries({ queryKey: ['issues', issueNumber, ctx.projectId] })
   }
 }
 
@@ -150,20 +150,20 @@ function workflowRunHandler(ctx: HandlerContext): void {
     ctx.queryClient.invalidateQueries({ queryKey: ['agent-sessions'] })
   }
   if (ctx.eventName === REVERSE_DNS_EVENT_TYPES.WorkflowRunPaused) {
-    const evt = ctx.parsed as { issueId: string }
-    notifyRunLifecycleToast(ctx.queryClient, ctx.viewedIssue, evt.issueId, 'pause')
+    const evt = ctx.parsed as { issueNumber?: number }
+    if (typeof evt.issueNumber === 'number') notifyRunLifecycleToast(ctx.viewedIssue, evt.issueNumber, 'pause')
   } else if (ctx.eventName === REVERSE_DNS_EVENT_TYPES.WorkflowRunFailed) {
-    const evt = ctx.parsed as { issueId: string }
-    notifyRunLifecycleToast(ctx.queryClient, ctx.viewedIssue, evt.issueId, 'error')
+    const evt = ctx.parsed as { issueNumber?: number }
+    if (typeof evt.issueNumber === 'number') notifyRunLifecycleToast(ctx.viewedIssue, evt.issueNumber, 'error')
   }
 }
 
 function approvalHandler(ctx: HandlerContext): void {
   if (ctx.eventName === REVERSE_DNS_EVENT_TYPES.StageApprovalRequested) {
-    const evt = ctx.parsed as { issueId: string; projectId: string; issueNumber?: number }
+    const evt = ctx.parsed as { issueNumber?: number }
     ctx.queryClient.invalidateQueries({ queryKey: ['issues'] })
     ctx.queryClient.invalidateQueries({ queryKey: ['agent-activity'] })
-    notifyApprovalRequestedToast(ctx.queryClient, ctx.viewedIssue, evt)
+    notifyApprovalRequestedToast(ctx.viewedIssue, evt)
     return
   }
   // StageApprovalResolved

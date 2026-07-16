@@ -125,13 +125,13 @@ describe('LiveTaskProvider reverse-DNS integration outcome (D2 test-first)', () 
     expect(rebaseEvents).toContainEqual({ type: 'rebase_completed', issueNumber: 7, rebased: true })
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['issues'] })
     // Issue-arm default fallback only fires when the outcome handler returns false;
-    // the rebase-completed arm returns true and breaks, so the detail invalidation
-    // is intentionally NOT issued. Pin that.
+    // the rebase-completed arm returns true and breaks, so scoped detail invalidation
+    // is intentionally not issued. Pin that.
     const detailInvalidations = invalidateSpy.mock.calls
       .map((args) => args[0] as { queryKey?: unknown[] })
       .filter((arg) => Array.isArray(arg.queryKey)
         && arg.queryKey[0] === 'issues'
-        && arg.queryKey[1] === 'detail')
+        && arg.queryKey[1] === 7)
     expect(detailInvalidations).toHaveLength(0)
     expect(toast.success).not.toHaveBeenCalled()
     expect(toast.error).not.toHaveBeenCalled()
@@ -293,7 +293,7 @@ describe('LiveTaskProvider reverse-DNS integration outcome (D2 test-first)', () 
     // The switch arm's default invalidations still run (they are not the
     // outcome handler's job):
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['issues'] })
-    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['issues', 'detail', 'iss-fall'] })
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['issues', 5, TEST_PROJECT.id] })
 
     offRebase()
   })
@@ -302,7 +302,7 @@ describe('LiveTaskProvider reverse-DNS integration outcome (D2 test-first)', () 
 /**
  * Pin the currently-untested branches of the in-file `notifyRunLifecycleToast`
  * (pause / error / suppression by currently-viewed-issue /
- * suppression when no issue number resolves) BEFORE the refactor in this
+ * suppression when canonical issue context is absent) BEFORE the refactor in this
  * issue moves the helper. Characterization tests against the current
  * implementation; see design.md#D2.
  */
@@ -391,17 +391,13 @@ describe('LiveTaskProvider notifyRunLifecycleToast (D2 test-first)', () => {
     expect(toast.error).not.toHaveBeenCalled()
   })
 
-  it('suppresses the lifecycle toast when findIssueNumber resolves no issue number (issueId not in any cached list)', () => {
+  it('suppresses the lifecycle toast when the event omits canonical issue context', () => {
     pathname = '/test-project/issues/some-page'
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-    // Seed the cache with only unrelated issues — the lookup by issueId will
-    // not find a match, so findIssueNumber returns null and the helper bails.
-    queryClient.setQueryData(['issues'], [makeIssue('iss-other-1', 1), makeIssue('iss-other-2', 2)])
     const handleEvent = mountWith(queryClient)
 
     act(() => {
       handleEvent(REVERSE_DNS_EVENT_TYPES.WorkflowRunPaused, {
-        issueId: 'iss-unknown',
       })
     })
 
