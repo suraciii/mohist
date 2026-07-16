@@ -33,7 +33,7 @@ Core target:
 
 Commit `6ef69d923` adds `RejectIfRunReloadRequired()` at the start of `WorkflowGrain.StartAsync` and a
 state-save-failure regression. This guard is independent of the superseded lineage protocol and must
-survive T-004 cleanup.
+survive T-006 cleanup.
 
 ## Current candidate debt to remove
 
@@ -48,18 +48,31 @@ The rebased branch still contains old implementation references including:
 
 These are expected before new build tasks run. They must not be treated as compatibility requirements.
 
+## Rejected implementation attempt
+
+The first replacement T-001 attempt (`c75a3e263`) mixed typed-key primitives with an incomplete
+data patch. It backfilled missing legacy IssueId values, silently deleted orphan membership rows,
+left known owners without canonical columns, and tested copied migration SQL rather than a complete
+owner migration. It was reverted by `2544a2475` before any later task ran.
+
+The plan was split so identity primitives, Issue references, Epic references, runtime cutover, and
+membership authority each have a separately enforceable boundary. Do not reuse the rejected
+`20260716120000_AdoptScopedIssueEpicIdentity` migration.
+
 ## Replacement task state
 
 | Task | State |
 |---|---|
-| T-001 scoped keys and persisted references | pending |
-| T-002 number-only server model/APIs | pending |
-| T-003 Issue-owned membership and Epic progression | pending |
-| T-004 durable EnsureStarted Workflow handoff | pending |
-| T-005 canonical lineage and producer-family conformance | pending |
-| T-006 server lineage consumers/integrations | pending |
-| T-007 CLI/Web cutover | pending |
-| T-008 cleanup and end-to-end recovery verification | pending |
+| T-001 typed scoped identities and codec | pending |
+| T-002 canonical Issue reference migration | pending |
+| T-003 canonical Epic reference migration | pending |
+| T-004 number-only server model/APIs | pending |
+| T-005 Issue-owned membership and Epic progression | pending |
+| T-006 durable EnsureStarted Workflow handoff | pending |
+| T-007 canonical lineage and producer-family conformance | pending |
+| T-008 server lineage consumers/integrations | pending |
+| T-009 CLI/Web cutover | pending |
+| T-010 cleanup and end-to-end recovery verification | pending |
 
 ## Validation of planning artifacts
 

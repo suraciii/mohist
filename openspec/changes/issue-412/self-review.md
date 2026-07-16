@@ -9,7 +9,7 @@
   Scope: root-cause alignment
   Evidence: The prior artifacts treated Epic membership as Epic-owned truth and added Issue/Workflow
   snapshots. The accepted decision makes Issue.`EpicNumber?` the sole authority.
-  Verification: proposal, design, membership delta spec, and T-003 now use one authority and delete
+  Verification: proposal, design, membership delta spec, and T-005 now use one authority and delete
   membership/active rows rather than synchronizing them.
   Status: resolved
 
@@ -36,9 +36,10 @@
   Scope: implementation sequencing
   Evidence: Number-only identity affects many references and cannot be safely hidden inside the
   event-stamping task.
-  Verification: tasks now sequence persisted-reference migration, server identity cutover,
-  membership/progression, Workflow coordination, producers, consumers, clients, and final cleanup.
-  Each boundary has focused migration/recovery acceptance criteria.
+  Verification: tasks now separate typed identity primitives, Issue reference migration, Epic
+  reference migration, server identity cutover, membership/progression, Workflow coordination,
+  producers, consumers, clients, and final cleanup. Each boundary has focused migration/recovery
+  acceptance criteria. The rejected combined T-001 attempt was reverted before later tasks ran.
   Status: resolved
 
 ## Blocking Items
@@ -52,18 +53,18 @@
   Scope: wide current-state migration
   Evidence: Comments, prerequisites, profiles, sessions, inbox/projections, and Workflow metadata may
   all reference Issue/Epic identity today.
-  SuggestedAction: T-001 must inventory actual reference ownership and its migration spec must seed
-  every discovered owner before any old id column is dropped.
-  Status: planned in T-001/T-008
+  SuggestedAction: T-002/T-003 must inventory actual reference ownership and their migration specs
+  must seed every discovered owner before T-004 drops any old id column.
+  Status: planned in T-002/T-004/T-010
 
 - [ID: item-6]
   Severity: implementation-risk
   Scope: superseded code in the candidate
   Evidence: Rebase intentionally preserved old implementation commits so the replacement can be
   reviewed as a migration rather than silently lost.
-  SuggestedAction: tasks must delete obsolete code/tests as each boundary lands; T-008 has a final
+  SuggestedAction: tasks must delete obsolete code/tests as each boundary lands; T-010 has a final
   production-code audit and cannot pass by adding exclusions.
-  Status: planned in T-003..T-008
+  Status: planned in T-005..T-010
 
 ## Consistency Check
 
