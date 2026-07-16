@@ -188,16 +188,19 @@ public class AgentSessionGrainRecoveryTranscriptFailureSpecs : AgentSessionGrain
         // flush cycle.
         var grain = NewGrain();
         await grain.OpenAsync(new OpenAgentSessionCommand("runner-1", "test"));
+        await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand("runtime-before"));
+        Fixture.TimeProvider.Advance(TimeSpan.FromMinutes(6));
         var openedSaveCount = Fixture.StateStore.SaveCount;
 
         Fixture.TranscriptStore.NextException = new InvalidOperationException("transcript store down");
 
         var result = await grain.CompactAsync(
-            new CompactAgentSessionCommand(NewAgentSessionId: "acp-after-compact", Summary: "s"));
+            new CompactAgentSessionCommand(Summary: "s"));
 
         // The recovery command succeeds even though the transcript failed:
-        // the rebind/compaction domain events committed atomically.
-        Assert.Equal("acp-after-compact", result.AgentSessionId);
+        // the compaction domain event committed atomically without replacing
+        // the physical runtime session.
+        Assert.Equal("runtime-before", result.AgentSessionId);
         Assert.True(result.WasCompacted);
 
         // Exactly one recovery save happened (the event-aware commit). A
@@ -208,6 +211,20 @@ public class AgentSessionGrainRecoveryTranscriptFailureSpecs : AgentSessionGrain
         var transcriptError = Assert.Single(Fixture.Logger.Entries, e => e.Level == LogLevel.Error);
         Assert.Contains("recovery transcript", transcriptError.Message);
         Assert.Contains("transcript store down", transcriptError.Exception?.Message ?? string.Empty);
+    }
+
+    [Fact]
+    public async Task ResetAsync_ClearsRuntimeBinding()
+    {
+        var grain = NewGrain();
+        await grain.OpenAsync(new OpenAgentSessionCommand("runner-1", "test"));
+        await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand("runtime-before"));
+        Fixture.TimeProvider.Advance(TimeSpan.FromMinutes(6));
+
+        var result = await grain.ResetAsync(new ResetAgentSessionCommand());
+
+        Assert.Null(result.AgentSessionId);
+        Assert.Null((await grain.GetAsync())?.AgentSessionId);
     }
 }
 

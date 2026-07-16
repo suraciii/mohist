@@ -176,9 +176,9 @@ executor 在 Action 返回后应用 `expect`、artifacts、`failIf`、Action Out
 
 SSE 沉默不表示失败，`idle` event 也不是完成权威。等待完成的 Prompt 响应决定回合
 是否结束。现有调用方 abort signal 是唯一执行期限：Workflow task executor 与 AgentJob
-executor 拥有工作回合的执行期限（沿用现有分层 timeout signal 与默认值），期限到达时
-abort 回合并让工作失败。移除 ACP liveness probe 后，这个 executor 期限是悬挂回合的
-唯一兜底；`OpenCodeRuntime` 不自带静默检测。收到 abort 时调用
+executor 拥有工作回合的执行期限；未显式指定时，单个 Prompt 的默认期限为 60 分钟，
+显式期限可以覆盖该默认值。期限到达时 abort 回合并让工作失败。移除 ACP liveness probe
+后，这个 executor 期限是悬挂回合的唯一兜底；`OpenCodeRuntime` 不自带静默检测。收到 abort 时调用
 `client.session.abort()`，向调用者返回 interrupted result。
 
 Runner 生命周期内可以 retry startup 与 readiness 操作。Prompt submission 以及任何
@@ -330,7 +330,7 @@ Mohist 跟随这些真实内部调用路径，而不是假设每个生成的 V2 
 
 当前 Runner 仍使用 `@agentclientprotocol/sdk`、`mohist/acp-agent`、ACP liveness 与 log
 heuristics、CLI model parsing、private compaction metadata 和 `acpSessionId` wire fields。
-当前 Compact 仍合成 Mohist 侧 transcript state 并替换物理绑定，Workflow schema 也仍把
+当前 Compact 仍合成 Mohist 侧 transcript state，而不是请求 Runtime 压缩物理 Session；
+Reset 会清空 runtime binding，并让下一次任务创建新的物理 Session。Workflow schema 也仍把
 `expect` 放在 `with` 内；内置 profile 中写在 task 顶层的 `expect` 被当前解析器静默
-丢弃，从未生效。当前 Compact / Reset 的 API 与 CLI 还会轮换并返回新的 AgentSession
-ID。这些路径是相对目标设计的实现债务，必须在同一次替换中移除。
+丢弃，从未生效。这些路径是相对目标设计的实现债务，必须在同一次替换中移除。

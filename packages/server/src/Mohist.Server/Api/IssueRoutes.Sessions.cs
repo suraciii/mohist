@@ -61,7 +61,7 @@ public static partial class IssueRoutes
             var grain = grains.GetGrain<IAgentSessionGrain>(sessionId);
             try
             {
-                var result = await grain.CompactAsync(new CompactAgentSessionCommand(NewAgentSessionId: BuildNewAgentSessionId()));
+                var result = await grain.CompactAsync(new CompactAgentSessionCommand());
                 return ApiResults.Ok(result);
             }
             catch (InvalidOperationException ex) when (ex.Message.Contains("currently active", StringComparison.OrdinalIgnoreCase))
@@ -86,7 +86,7 @@ public static partial class IssueRoutes
             var grain = grains.GetGrain<IAgentSessionGrain>(sessionId);
             try
             {
-                var result = await grain.ResetAsync(new ResetAgentSessionCommand(NewAgentSessionId: BuildNewAgentSessionId()));
+                var result = await grain.ResetAsync(new ResetAgentSessionCommand());
                 return ApiResults.Ok(result);
             }
             catch (InvalidOperationException ex) when (ex.Message.Contains("currently active", StringComparison.OrdinalIgnoreCase))
@@ -148,7 +148,6 @@ public static partial class IssueRoutes
         });
     }
 
-    private static string BuildNewAgentSessionId() => Guid.NewGuid().ToString("N");
 }
 
 public sealed record FollowupRequest(string? Text);

@@ -88,8 +88,9 @@ public sealed record AgentSessionSettings(string? Model = null);
 /// <see cref="AgentSession"/> during its lifetime. The Mohist
 /// <see cref="AgentSession.Id"/> is the stable identity; each
 /// <see cref="AgentRuntimeSessionId"/> is a mutable runtime facet
-/// created by compact/reset rebinds
-/// (<c>design/conventions.md#identity-terms</c>). The chain
+/// replaced after a reset or another runtime-boundary change
+/// (<c>design/conventions.md#identity-terms</c>). Compaction preserves the
+/// current runtime binding. The chain
 /// <see cref="AgentSessionStatusSnapshot.RuntimeSessionLineage"/>
 /// holds all such entries — predecessor/successor are derived by
 /// position. Entries are append-only on rebind; the first entry

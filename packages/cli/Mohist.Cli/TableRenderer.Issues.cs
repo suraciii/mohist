@@ -388,7 +388,9 @@ internal sealed partial class TableRenderer
         var contextUsagePercent = NumberOf(data, "contextUsagePercent");
         var status = StringOf(data, "status");
 
-        _out.WriteLine($"New session: {agentSessionId}");
+        _out.WriteLine(string.IsNullOrWhiteSpace(agentSessionId)
+            ? "Runtime session: will be created on the next task"
+            : $"Runtime session: {agentSessionId}");
         _out.WriteLine($"operation:   {operation}");
         _out.WriteLine($"compacted:   {wasCompacted}");
         _out.WriteLine($"context:     {contextWindowUsedBefore} → {contextWindowUsed} ({contextUsagePercent})");

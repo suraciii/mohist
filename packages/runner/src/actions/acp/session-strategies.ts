@@ -38,7 +38,7 @@ import {
   waitForData,
 } from "./liveness.js"
 
-const DEFAULT_TIMEOUT_MS = 30 * 60 * 1000
+const DEFAULT_TIMEOUT_MS = 60 * 60 * 1000
 const DEFAULT_SESSION_START_TIMEOUT_MS = 30 * 1000
 const DEFAULT_LIVENESS_QUIET_THRESHOLD_MS = 5 * 60 * 1000
 const DEFAULT_PROBE_TIMEOUT_MS = 30 * 1000
