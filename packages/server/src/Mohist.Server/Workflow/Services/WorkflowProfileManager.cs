@@ -261,10 +261,12 @@ public class WorkflowProfileManager : IScopedService
             .FirstOrDefaultAsync(x => x.WorkflowRunId == runId);
 
         var projectId = workflowRun?.MetadataProjectId;
+        var issueNumber = workflowRun?.IssueNumber;
         var issue = await FindIssueForRunAsync(db, runId);
         projectId = string.IsNullOrWhiteSpace(projectId) ? issue?.ProjectId : projectId;
+        issueNumber ??= issue?.Number;
 
-        return new RunContext(projectId, issue?.Number, workflowRun is not null);
+        return new RunContext(projectId, issueNumber, workflowRun is not null);
     }
 
     private static string? TryReadAnnotation(string? stateJson, string key)
