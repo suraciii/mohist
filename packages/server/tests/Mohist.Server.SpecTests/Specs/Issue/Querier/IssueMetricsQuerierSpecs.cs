@@ -2488,7 +2488,7 @@ public class IssueMetricsQuerierSpecs
 
     private static void UpdateCompletedAtAndCreatedAt(
         MohistDbContext db,
-        Issue issue,
+        Mohist.Server.Issue.Domain.Issue issue,
         DateTime createdAt,
         DateTime completedAt)
     {
@@ -2521,7 +2521,7 @@ public class IssueMetricsQuerierSpecs
 
     private static void UpdateIssueUpdatedAt(
         MohistDbContext db,
-        Issue issue,
+        Mohist.Server.Issue.Domain.Issue issue,
         DateTime updatedAt)
     {
         var row = db.Issues.AsNoTracking()
@@ -2583,7 +2583,7 @@ public class IssueMetricsQuerierSpecs
 
     private static void SeedEvent(
         MohistDbContext db,
-        Issue issue,
+        Mohist.Server.Issue.Domain.Issue issue,
         string type,
         DateTimeOffset time,
         string? workflowRunId = null)
