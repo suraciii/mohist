@@ -301,6 +301,36 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
+    public async Task StaleFailedTaskReport_DoesNotFailNewerActiveTask()
+    {
+        await StartWorkflowAsync(SingleStage(
+            tasks:
+            [
+                new TaskDefinition("first", "First", "spec/task"),
+                new TaskDefinition("second", "Second", "spec/task"),
+            ],
+            checks: []));
+        var (first, runnerId) = await PollWorkAnyAsync();
+        await ReportAsync(runnerId, first.WorkId, "completed");
+        var (second, sameRunner) = await PollWorkAnyAsync();
+
+        var workflow = Grains.GetGrain<IWorkflowGrain>(_workflowId!);
+        var ack = await workflow.ReceiveTaskReportAsync(sameRunner, first.WorkId, new TaskReport(
+            first.WorkId,
+            TaskReportStatus.Failed,
+            Output: "stale",
+            Artifacts: null,
+            Detail: "stale report"));
+
+        Assert.Equal(ReportAck.Stale, ack);
+        var run = await LoadRunAsync(_workflowId!);
+        Assert.Equal(TaskRunStatus.Completed, run.CurrentStage().Tasks.Single(task => task.Id == "first.1").Status);
+        Assert.Equal(TaskRunStatus.Running, run.CurrentStage().Tasks.Single(task => task.Id == "second.1").Status);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
     public async Task ExhaustedRecoveryRound_UserRetryStartsNewFullRound()
     {
         var recovery = new RecoveryDefinition(

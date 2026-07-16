@@ -15,6 +15,7 @@ using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Workflow.Services;
+using Mohist.Server.SpecTests.Specs.Sessions;
 using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Issue.Querier;
@@ -937,6 +938,53 @@ public class IssueMetricsQuerierSpecs
         Assert.Equal(1, result.Window.SampleCount);
         Assert.Equal(0.0, result.Window.FirstTimeRightRate);
         Assert.All(result.Window.Stages, stage => Assert.Equal(0, stage.EnteredCount));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task GetQualityAsync_NullWorkflowRun_LogsReadModelAndMetricsIntegrityErrors()
+    {
+        using var scope = _fixture.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var project = new ProjectInfo { Id = $"proj-quality-null-run-{Guid.NewGuid():N}", Name = "Quality Null Run Project" };
+        var now = new DateTimeOffset(2026, 6, 19, 12, 0, 0, TimeSpan.Zero);
+        const string workflowRunId = "wr_quality_null_run_1";
+
+        var issue = SeedIssue(db, project, "issue_quality_null_run_1", workflowRunId: workflowRunId, status: IssueStatus.Done);
+        await db.SaveChangesAsync();
+        SeedEvent(db, issue.Id, EventCatalog.ReverseDns.IssueCompleted, now.AddDays(-2), workflowRunId);
+        await db.Database.ExecuteSqlRawAsync(
+            "INSERT OR REPLACE INTO WorkflowRuns (WorkflowRunId, State, ETag) VALUES ({0}, {1}, 0)",
+            workflowRunId,
+            "null");
+        await db.SaveChangesAsync();
+
+        var readModelLogger = new TestLogger<IssueReadModelLoader>();
+        var loader = new IssueReadModelLoader(
+            scope.ServiceProvider.GetRequiredService<IssueWorkflowProfileRegistry>(),
+            scope.ServiceProvider.GetRequiredService<EffectiveWorkflowProfileResolver>(),
+            scope.ServiceProvider.GetRequiredService<ProjectWorkflowProfileManager>(),
+            readModelLogger);
+        var metricsLogger = new TestLogger<IssueMetricsQuerier>();
+        var service = new IssueMetricsQuerier(
+            scope.ServiceProvider.GetRequiredService<IDbContextFactory<MohistDbContext>>(),
+            scope.ServiceProvider.GetRequiredService<IssueWorkflowProfileRegistry>(),
+            scope.ServiceProvider.GetRequiredService<EffectiveWorkflowProfileResolver>(),
+            scope.ServiceProvider.GetRequiredService<ProjectWorkflowProfileManager>(),
+            loader,
+            metricsLogger);
+
+        var result = await service.GetQualityAsync(project.Id, now);
+
+        Assert.Equal(1, result.Window.SampleCount);
+        Assert.Equal(0.0, result.Window.FirstTimeRightRate);
+        Assert.Contains(readModelLogger.Entries, entry =>
+            entry.Level == Microsoft.Extensions.Logging.LogLevel.Error
+            && entry.Message.Contains(workflowRunId, StringComparison.Ordinal));
+        Assert.Contains(metricsLogger.Entries, entry =>
+            entry.Level == Microsoft.Extensions.Logging.LogLevel.Error
+            && entry.Message.Contains(workflowRunId, StringComparison.Ordinal));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]

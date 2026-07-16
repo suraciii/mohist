@@ -1783,7 +1783,13 @@ public class IssueMetricsQuerier : IScopedService
     {
         try
         {
-            return JsonSerializer.Deserialize<WorkflowRun>(WorkflowRunStore.MigrateLegacyWorkflowRunJson(json), JSON.Options);
+            var run = JsonSerializer.Deserialize<WorkflowRun>(WorkflowRunStore.MigrateLegacyWorkflowRunJson(json), JSON.Options);
+            if (run is not null) return run;
+
+            _logger.LogError(
+                "Cannot include workflow run {WorkflowRunId} in issue metrics: persisted state deserialized to null. The run will be omitted from metrics until repaired.",
+                workflowRunId);
+            return null;
         }
         catch (Exception ex)
         {

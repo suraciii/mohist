@@ -362,7 +362,13 @@ public class IssueReadModelLoader : IScopedService
     {
         try
         {
-            return JsonSerializer.Deserialize<WorkflowRun>(WorkflowRunStore.MigrateLegacyWorkflowRunJson(json), JSON.Options);
+            var run = JsonSerializer.Deserialize<WorkflowRun>(WorkflowRunStore.MigrateLegacyWorkflowRunJson(json), JSON.Options);
+            if (run is not null) return run;
+
+            _logger.LogError(
+                "Cannot project workflow run {WorkflowRunId} into the issue read model: persisted state deserialized to null. The workflow will be omitted from issue projections until repaired.",
+                workflowRunId);
+            return null;
         }
         catch (Exception ex)
         {

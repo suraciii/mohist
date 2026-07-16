@@ -61,8 +61,13 @@ public sealed class WorkflowReportService : IScopedService
                 _log.LogError(
                     "Workflow {RunId} work {WorkId} rejected recovery follow-up: {Error}",
                     workflowRunId, workId, ex.Message);
-                await workflow.FailActiveWorkAsync(workerId, $"Recovery follow-up rejected: {ex.Message}");
-                return (ReportAck.Accepted.ToString().ToLowerInvariant(), await workflow.GetRunStatusAsync());
+                var rejectionAck = await workflow.ReceiveTaskReportAsync(workerId, workId, new TaskReport(
+                    workId,
+                    TaskReportStatus.Failed,
+                    result.Output,
+                    Artifacts: null,
+                    Detail: $"Recovery follow-up rejected: {ex.Message}"));
+                return (rejectionAck.ToString().ToLowerInvariant(), await workflow.GetRunStatusAsync());
             }
         }
 
