@@ -3,8 +3,10 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Mohist.Server.Events.Grains;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Workflow;
+using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Project.Grains;
@@ -74,7 +76,7 @@ public class WorkflowRerunFromStageApiSpecs
     [Fact]
     public async Task RerunFromStage_UnknownStage_Returns400()
     {
-        var (projectId, issueNumber, issueId, wrId) = await SeedInProgressIssueWithWorkflowRunAsync();
+        var (projectId, issueNumber, issueKey, wrId) = await SeedInProgressIssueWithWorkflowRunAsync();
 
         var response = await _client.PostAsJsonAsync(
             $"/api/projects/{projectId}/issues/{issueNumber}/rerun-from-stage",
@@ -253,15 +255,16 @@ public class WorkflowRerunFromStageApiSpecs
         return data.EnumerateArray().Select(e => e.Clone()).ToList();
     }
 
-    private async Task<(string projectId, int issueNumber, string issueId, string wrId)>
+    private async Task<(string projectId, int issueNumber, string issueKey, string wrId)>
         SeedInProgressIssueWithWorkflowRunAsync()
     {
         var (projectId, _) = await SeedProjectAsync();
-        var (issueId, issueNumber) = await CreateIssueInBacklogAsync(projectId);
+        var (issueKey, issueNumber) = await CreateIssueInBacklogAsync(projectId);
         await SeedWorkflowTemplateAsync(projectId);
-        var grain = _grains.GetGrain<IIssueGrain>(issueId);
+        var grain = _grains.GetGrain<IIssueGrain>(issueKey);
         var wrId = await grain.StartWorkAsync();
-        return (projectId, issueNumber, issueId, wrId);
+        await DispatchEventsAsync();
+        return (projectId, issueNumber, issueKey, wrId);
     }
 
     private async Task DriveWorkflowToRunningBuildAsync(string wrId, string projectId)
@@ -366,12 +369,12 @@ public class WorkflowRerunFromStageApiSpecs
         await db.SaveChangesAsync();
     }
 
-    private async Task<(string projectId, int issueNumber, string issueId)>
+    private async Task<(string projectId, int issueNumber, string issueKey)>
         SeedProjectWithIssueOnlyAsync()
     {
         var (projectId, _) = await SeedProjectAsync();
-        var (issueId, issueNumber) = await CreateIssueInBacklogAsync(projectId);
-        return (projectId, issueNumber, issueId);
+        var (issueKey, issueNumber) = await CreateIssueInBacklogAsync(projectId);
+        return (projectId, issueNumber, issueKey);
     }
 
     private async Task<(string projectId, string projectName)> SeedProjectAsync()
@@ -389,12 +392,15 @@ public class WorkflowRerunFromStageApiSpecs
         return (id, name);
     }
 
-    private async Task<(string issueId, int number)> CreateIssueInBacklogAsync(string projectId)
+    private async Task<(string issueKey, int number)> CreateIssueInBacklogAsync(string projectId)
     {
         var number = await _grains.GetGrain<IIssueCounterGrain>(projectId).NextAsync();
-        var issueId = $"issue_{Guid.NewGuid():N}";
-        var grain = _grains.GetGrain<IIssueGrain>(issueId);
-        await grain.CreateAsync(projectId, number, "Rerun from stage test", null, null, null, null, issueId, isDraft: false);
-        return (issueId, number);
+        var issueKey = GrainKey.Issue(new IssueKey(projectId, number));
+        var grain = _grains.GetGrain<IIssueGrain>(issueKey);
+        await grain.CreateAsync(projectId, number, "Rerun from stage test", null, null, null, isDraft: false);
+        return (issueKey, number);
     }
+
+    private Task DispatchEventsAsync() =>
+        _grains.GetGrain<IEventDispatcherGrain>(EventDispatcherGrain.Global).DispatchNowAsync();
 }
