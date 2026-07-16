@@ -7,6 +7,7 @@ using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Domain.Definition;
+using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Services.Prompts;
 using Mohist.Server.Infrastructure.Data.Workflow;
 
@@ -232,6 +233,26 @@ public class WorkflowProfileManager : IScopedService
         var layered = await ResolveLayeredVariablesAsync(runId);
         return layered.ResolveStageVars(stage)
             ?? JSON.DeserializeElement("{}");
+    }
+
+    public async Task<WorkspaceIdentity?> LoadIssueWorkspaceAsync(string projectId, int issueNumber)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var issueProfile = await LoadIssueProfileAsync(db, new RunContext(projectId, issueNumber));
+        var vars = VariableBundle.FromJson(issueProfile?.Variables).Vars;
+        if (vars is not { ValueKind: JsonValueKind.Object }
+            || !vars.Value.TryGetProperty("workspace", out var workspace)
+            || workspace.ValueKind != JsonValueKind.Object
+            || !workspace.TryGetProperty("path", out var path)
+            || string.IsNullOrWhiteSpace(path.GetString()))
+        {
+            return null;
+        }
+
+        return new WorkspaceIdentity(
+            path.GetString()!,
+            workspace.TryGetProperty("branch", out var branch) ? branch.GetString() : null,
+            workspace.TryGetProperty("changeDir", out var changeDir) ? changeDir.GetString() : null);
     }
 
     private static async Task<RunContext> ResolveRunContextAsync(MohistDbContext db, string runId)

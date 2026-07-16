@@ -12,6 +12,7 @@ using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Infrastructure.Serialization;
 using Mohist.Server.Infrastructure.Events;
+using Mohist.Server.Events.Grains;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Services;
@@ -372,8 +373,14 @@ public class IssueWorkflowLifecycleSpecs
 
         var grain = _grains.GetGrain<IIssueGrain>(issueKey);
         var wrId = await grain.StartWorkAsync();
+        await DispatchEventsAsync();
 
         return (projectId, projectName, number, issueKey, wrId);
+    }
+
+    private async Task DispatchEventsAsync()
+    {
+        await _grains.GetGrain<IEventDispatcherGrain>(EventDispatcherGrain.Global).DispatchNowAsync();
     }
 
     private async Task PoisonWorkflowFailureReasonAsync(string workflowRunId, string reason)

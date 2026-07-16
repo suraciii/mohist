@@ -164,6 +164,7 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
             Annotations: WorkflowRunLineage.AnnotationsFor(context.ProjectId, context.IssueNumber, context.EpicNumber));
         var structure = await _profileManager.LoadStructureAsync(GrainKey, context.ProjectId, context.IssueNumber);
         _run = WorkflowRun.Create(GrainKey, structure, Now(), metadata);
+        _run.Workspace = await _profileManager.LoadIssueWorkspaceAsync(context.ProjectId, context.IssueNumber);
     }
 
     public async Task ResumeAsync()

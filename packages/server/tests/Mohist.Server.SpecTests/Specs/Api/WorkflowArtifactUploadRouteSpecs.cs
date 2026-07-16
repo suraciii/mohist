@@ -6,6 +6,8 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Workflow;
+using Mohist.Server.Infrastructure.Events;
+using Mohist.Server.Events.Grains;
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Issue.Grains;
@@ -345,6 +347,7 @@ public class WorkflowArtifactUploadRouteSpecs
         {
             Assert.Equal(HttpStatusCode.OK, startResp.StatusCode);
         }
+        await DispatchEventsAsync();
 
         var runnerId = $"upload-test-{Guid.NewGuid():N}";
         await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new
@@ -374,5 +377,10 @@ public class WorkflowArtifactUploadRouteSpecs
         // would break the subsequent upload assertions that require an active
         // task. The runner is short-lived and torn down with the silo.
         return (workflowRunId, work!.WorkId, runnerId);
+    }
+
+    private async Task DispatchEventsAsync()
+    {
+        await _fixture.Grains.GetGrain<IEventDispatcherGrain>(EventDispatcherGrain.Global).DispatchNowAsync();
     }
 }
