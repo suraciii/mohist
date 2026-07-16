@@ -157,8 +157,7 @@ public sealed partial class Epic
             throw new ArgumentOutOfRangeException(nameof(issueNumber));
         if (_status is EpicStatus.Closed)
             throw new EpicClosedCannotLinkException(Number);
-        if (_linkedIssueNumbers.Contains(issueNumber))
-            throw new EpicDuplicateLinkedIssueException(issueNumber);
+        if (_linkedIssueNumbers.Contains(issueNumber)) return;
         _linkedIssueNumbers.Add(issueNumber);
         Touch(now);
         RecordEvent(new EpicIssueLinked(issueNumber));

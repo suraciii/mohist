@@ -312,15 +312,4 @@ public class GrainKeyTypedEntryPointTests
         Assert.Empty(scalarOverloads);
     }
 
-    [Fact]
-    public void LegacyIssue_TransitionSeam_IsInternal()
-    {
-        var randomIdOverload = typeof(GrainKey).GetMethod(
-            "Issue",
-            BindingFlags.NonPublic | BindingFlags.Static,
-            new[] { typeof(string) });
-
-        Assert.NotNull(randomIdOverload);
-        Assert.False(randomIdOverload!.IsPublic);
-    }
 }

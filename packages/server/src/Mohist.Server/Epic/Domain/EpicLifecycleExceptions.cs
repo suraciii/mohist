@@ -89,17 +89,6 @@ public class EpicResumeRequiresPausedException : InvalidOperationException
     }
 }
 
-public class EpicDuplicateLinkedIssueException : InvalidOperationException
-{
-    public int IssueNumber { get; }
-
-    public EpicDuplicateLinkedIssueException(int issueNumber)
-        : base($"Issue #{issueNumber} is already linked to this epic.")
-    {
-        IssueNumber = issueNumber;
-    }
-}
-
 public class EpicClosedCannotLinkException : InvalidOperationException
 {
     public int EpicNumber { get; }
