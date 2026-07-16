@@ -20,8 +20,8 @@ namespace Mohist.Server.UnitTests.Epic.Services;
 public class EpicEventQuerierListAsyncTests
 {
     private const string ProjectId = "project_1";
-    private const string EpicId = "epic_1";
-    private const string OtherEpicId = "epic_2";
+    private const int EpicNumber = 1;
+    private const int OtherEpicNumber = 2;
 
     [Fact]
     public async Task ListAsync_ReturnsEmptyForEpicWithNoEvents()
@@ -29,7 +29,7 @@ public class EpicEventQuerierListAsyncTests
         var eventStore = new RecordingEventStore();
         var querier = new EpicEventQuerier(eventStore);
 
-        var events = await querier.ListAsync(EpicId);
+        var events = await querier.ListAsync(ProjectId, EpicNumber);
 
         Assert.Empty(events);
     }
@@ -39,15 +39,15 @@ public class EpicEventQuerierListAsyncTests
     {
         var fixedTime = new DateTimeOffset(2026, 6, 30, 12, 0, 0, TimeSpan.Zero);
         var eventStore = new RecordingEventStore();
-        await AppendEpicEventAsync(eventStore, EpicId, ProjectId,
+        await AppendEpicEventAsync(eventStore, ProjectId, EpicNumber,
             new EpicCreated("Auth", "desc", "p2"), fixedTime, subject: "1");
-        await AppendEpicEventAsync(eventStore, EpicId, ProjectId,
+        await AppendEpicEventAsync(eventStore, ProjectId, EpicNumber,
             new EpicPriorityChanged("p2", "p0"), fixedTime.AddSeconds(1), subject: "1");
-        await AppendEpicEventAsync(eventStore, EpicId, ProjectId,
+        await AppendEpicEventAsync(eventStore, ProjectId, EpicNumber,
             new EpicStatusChanged("idle", "running"), fixedTime.AddSeconds(2), subject: "1");
 
         var querier = new EpicEventQuerier(eventStore);
-        var events = await querier.ListAsync(EpicId);
+        var events = await querier.ListAsync(ProjectId, EpicNumber);
 
         Assert.Equal(3, events.Count);
         Assert.Equal(EventCatalog.ReverseDns.EpicCreated, events[0].Envelope.Type);
@@ -61,21 +61,21 @@ public class EpicEventQuerierListAsyncTests
     public async Task ListAsync_IsolatesEventsByEpicSource()
     {
         var eventStore = new RecordingEventStore();
-        await AppendEpicEventAsync(eventStore, EpicId, ProjectId,
+        await AppendEpicEventAsync(eventStore, ProjectId, EpicNumber,
             new EpicCreated("Auth", "desc", "p2"), TestTime.UtcNow, subject: "1");
-        await AppendEpicEventAsync(eventStore, OtherEpicId, ProjectId,
+        await AppendEpicEventAsync(eventStore, ProjectId, OtherEpicNumber,
             new EpicCreated("Billing", "desc", "p2"), TestTime.UtcNow, subject: "1");
 
         var querier = new EpicEventQuerier(eventStore);
-        var first = await querier.ListAsync(EpicId);
-        var second = await querier.ListAsync(OtherEpicId);
+        var first = await querier.ListAsync(ProjectId, EpicNumber);
+        var second = await querier.ListAsync(ProjectId, OtherEpicNumber);
 
         var firstSingle = Assert.Single(first);
         Assert.Equal(EventCatalog.ReverseDns.EpicCreated, firstSingle.Envelope.Type);
-        Assert.Equal($"/mohist/epics/{EpicId}", firstSingle.Envelope.Source.ToString());
+        Assert.Equal($"/mohist/projects/{ProjectId}/epics/{EpicNumber}", firstSingle.Envelope.Source.ToString());
 
         var secondSingle = Assert.Single(second);
-        Assert.Equal($"/mohist/epics/{OtherEpicId}", secondSingle.Envelope.Source.ToString());
+        Assert.Equal($"/mohist/projects/{ProjectId}/epics/{OtherEpicNumber}", secondSingle.Envelope.Source.ToString());
     }
 
     [Fact]
@@ -88,24 +88,24 @@ public class EpicEventQuerierListAsyncTests
         // faithful pass-through.
         var fixedTime = new DateTimeOffset(2026, 6, 30, 12, 0, 0, TimeSpan.Zero);
         var eventStore = new RecordingEventStore();
-        await AppendEpicEventAsync(eventStore, EpicId, ProjectId,
+        await AppendEpicEventAsync(eventStore, ProjectId, EpicNumber,
             new EpicCreated("Auth epic", "auth-related description", "p2"),
             fixedTime, subject: "1");
 
         var querier = new EpicEventQuerier(eventStore);
-        var events = await querier.ListAsync(EpicId);
+        var events = await querier.ListAsync(ProjectId, EpicNumber);
         var stored = Assert.Single(events);
 
         Assert.NotEqual(0, stored.Id);
         Assert.Equal(EventCatalog.ReverseDns.EpicCreated, stored.Envelope.Type);
         Assert.Equal(fixedTime, stored.Envelope.Time);
-        Assert.Equal(new Uri($"/mohist/epics/{EpicId}", UriKind.Relative), stored.Envelope.Source);
+        Assert.Equal(new Uri($"/mohist/projects/{ProjectId}/epics/{EpicNumber}", UriKind.Relative), stored.Envelope.Source);
         Assert.Equal("1", stored.Envelope.Subject);
         Assert.NotNull(stored.Envelope.Data);
         Assert.Equal("Auth epic", stored.Envelope.Data!.Value.GetProperty("title").GetString());
         Assert.Equal("p2", stored.Envelope.Data!.Value.GetProperty("priority").GetString());
         Assert.Equal(ProjectId, stored.Envelope.Extensions["projectid"]);
-        Assert.Equal(EpicId, stored.Envelope.Extensions["epicid"]);
+        Assert.Equal(EpicNumber.ToString(), stored.Envelope.Extensions[EventCatalog.Lineage.Epic]);
     }
 
     [Fact]
@@ -115,14 +115,14 @@ public class EpicEventQuerierListAsyncTests
         var eventStore = new RecordingEventStore();
         for (var i = 0; i < 5; i++)
         {
-            await AppendEpicEventAsync(eventStore, EpicId, ProjectId,
+            await AppendEpicEventAsync(eventStore, ProjectId, EpicNumber,
                 new EpicUpdated("title " + i, null, null),
                 fixedTime.AddSeconds(i),
                 subject: "1");
         }
 
         var querier = new EpicEventQuerier(eventStore);
-        var lastTwo = await querier.ListAsync(EpicId, limit: 2);
+        var lastTwo = await querier.ListAsync(ProjectId, EpicNumber, limit: 2);
 
         Assert.Equal(2, lastTwo.Count);
         // TakeLast preserves chronological order on the returned tail.
@@ -138,11 +138,11 @@ public class EpicEventQuerierListAsyncTests
         // JsonElement produced by the serializer.
         var fixedTime = new DateTimeOffset(2026, 6, 30, 12, 0, 0, TimeSpan.Zero);
         var eventStore = new RecordingEventStore();
-        await AppendEpicEventAsync(eventStore, EpicId, ProjectId,
+        await AppendEpicEventAsync(eventStore, ProjectId, EpicNumber,
             new EpicPriorityChanged("p2", "p0"), fixedTime, subject: "1");
 
         var querier = new EpicEventQuerier(eventStore);
-        var events = await querier.ListAsync(EpicId);
+        var events = await querier.ListAsync(ProjectId, EpicNumber);
         var stored = Assert.Single(events);
 
         var dto = StoredCloudEventDto.From(stored);
@@ -155,18 +155,17 @@ public class EpicEventQuerierListAsyncTests
 
     private static async Task AppendEpicEventAsync(
         RecordingEventStore eventStore,
-        string epicId,
         string projectId,
+        int epicNumber,
         EpicEvent payload,
         DateTimeOffset time,
         string subject)
     {
-        var source = EpicEventPersistence.EpicSource(epicId);
+        var source = EpicEventPersistence.EpicSource(projectId, epicNumber);
         var extensions = new Dictionary<string, string>
         {
-            ["projectid"] = projectId,
-            ["epicid"] = epicId,
-            ["epicno"] = subject,
+            [EventCatalog.Lineage.ProjectId] = projectId,
+            [EventCatalog.Lineage.Epic] = epicNumber.ToString(),
         };
 
         await eventStore.AppendAsync(new CloudEvent(
