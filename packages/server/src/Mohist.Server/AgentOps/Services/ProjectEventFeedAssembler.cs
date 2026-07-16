@@ -361,9 +361,15 @@ public sealed record ProjectEventEnvelope(
 
     private static string ExtractAggregateId(string source, string aggregateKind)
     {
+        if (aggregateKind == "issue")
+        {
+            var issueMarker = "/issues/";
+            var index = source.LastIndexOf(issueMarker, StringComparison.Ordinal);
+            return index >= 0 ? source[(index + issueMarker.Length)..] : source;
+        }
+
         var prefix = aggregateKind switch
         {
-            "issue" => IssueEventPersistence.SourcePrefix,
             "workflow-run" => WorkflowRunEventPersistence.SourcePrefix,
             "agent-session" => AgentSessionEventPersistence.SourcePrefix,
             _ => null,

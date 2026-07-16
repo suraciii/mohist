@@ -829,10 +829,9 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
     {
         if (run.Metadata?.Annotations is not { } annotations) return null;
         if (!annotations.TryGetValue("projectId", out var projectId)
-            || !annotations.TryGetValue("issueId", out var issueId)
             || !annotations.TryGetValue("issueNumber", out var numberStr)
             || !int.TryParse(numberStr, out var number))
             return null;
-        return new WorkIssueRef(projectId, issueId, number);
+        return new WorkIssueRef(projectId, number);
     }
 }

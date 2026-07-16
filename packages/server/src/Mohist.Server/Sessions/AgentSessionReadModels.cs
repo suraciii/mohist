@@ -330,7 +330,7 @@ public sealed record ActivityCardDto(
 public sealed record ActivityWorkItemDto(string Type, string Id, string Title, string? Stage, string? SessionWorkType);
 public sealed record ActivityTaskProgressDto(int Completed, int Total);
 public sealed record ActivityPreviewDto(string Kind, string Text, string CreatedAt);
-public sealed record ActivityWaitingCardDto(string IssueId, int IssueNumber, string IssueTitle, string? Stage, string Label, string? RequestedAt, string? Preview);
+public sealed record ActivityWaitingCardDto(int IssueNumber, string IssueTitle, string? Stage, string Label, string? RequestedAt, string? Preview);
 
 public sealed record AgentSessionStatusRequest([property: JsonPropertyName("status")] string Status, DateTime? LastDataAt = null, string? FailureReason = null);
 

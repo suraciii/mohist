@@ -57,7 +57,7 @@ public sealed class AgentJobArtifactUploadService : IScopedService
                 TaskRunId: workId,
                 Title: "Agent Job",
                 ProjectId: null,
-                IssueId: null);
+                IssueNumber: null);
         }
     }
 }

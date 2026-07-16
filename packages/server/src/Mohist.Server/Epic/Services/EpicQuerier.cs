@@ -175,7 +175,7 @@ public class EpicQuerier : IScopedService
         var activeOwner = await (
             from active in db.EpicActiveIssues.AsNoTracking()
             join epic in db.Epics.AsNoTracking()
-                on new { active.ProjectId, active.EpicNumber } equals new { epic.ProjectId, epic.Number }
+                on new { active.ProjectId, EpicNumber = active.EpicNumber } equals new { epic.ProjectId, EpicNumber = epic.Number }
             where active.ProjectId == projectId
                 && active.IssueNumber == issueNumber
                 && epic.ProjectId == projectId
@@ -213,7 +213,7 @@ public class EpicQuerier : IScopedService
         var epicIds = await (
             from active in db.EpicActiveIssues.AsNoTracking()
             join epic in db.Epics.AsNoTracking()
-                on new { active.ProjectId, active.EpicNumber } equals new { epic.ProjectId, epic.Number }
+                on new { active.ProjectId, EpicNumber = active.EpicNumber } equals new { epic.ProjectId, EpicNumber = epic.Number }
             where active.ProjectId == projectId
                 && issueNumberRows.Contains(active.IssueNumber)
                 && epic.ProjectId == projectId

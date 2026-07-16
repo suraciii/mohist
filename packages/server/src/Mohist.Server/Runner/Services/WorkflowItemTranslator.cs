@@ -351,7 +351,6 @@ public sealed class WorkflowItemTranslator : IScopedService
                 item.Artifacts,
                 variables: await ResolveBindVariablesAsync(workflowRunId, run, item.Stage),
                 projectId: run.Metadata?.Annotations?.GetValueOrDefault("projectId"),
-                issueId: run.Metadata?.Annotations?.GetValueOrDefault("issueId"),
                 issueNumber: ReadIssueNumber(run));
 
             if (!bindResult.IsSuccess)
