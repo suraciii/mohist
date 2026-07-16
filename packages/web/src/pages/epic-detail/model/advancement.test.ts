@@ -11,7 +11,6 @@ import {
 
 function makeLinkedIssue(overrides: Partial<LinkedIssue> = {}): LinkedIssue {
   return {
-    id: 'issue-default',
     number: 1,
     title: 'Default issue',
     status: IssueStatus.Backlog,
@@ -32,8 +31,8 @@ describe('deriveAdvancementState', () => {
       const state = deriveAdvancementState({
         epicStatus: EpicStatus.Running,
         linkedIssues: [
-          makeLinkedIssue({ id: 'i-1', number: 7, status: IssueStatus.InProgress, stage: WorkflowStage.Build }),
-          makeLinkedIssue({ id: 'i-2', number: 8, status: IssueStatus.Backlog, canStart: true, startBlocker: null }),
+          makeLinkedIssue({ number: 7, status: IssueStatus.InProgress, stage: WorkflowStage.Build }),
+          makeLinkedIssue({ number: 8, status: IssueStatus.Backlog, canStart: true, startBlocker: null }),
         ],
       })
       expect(state).toEqual({ kind: 'waiting-for-in-progress', issueNumber: 7 })
@@ -43,8 +42,8 @@ describe('deriveAdvancementState', () => {
       const state = deriveAdvancementState({
         epicStatus: EpicStatus.Running,
         linkedIssues: [
-          makeLinkedIssue({ id: 'i-1', number: 7, status: IssueStatus.Backlog, canStart: true, startBlocker: null }),
-          makeLinkedIssue({ id: 'i-2', number: 11, status: IssueStatus.InProgress, stage: WorkflowStage.Build }),
+          makeLinkedIssue({ number: 7, status: IssueStatus.Backlog, canStart: true, startBlocker: null }),
+          makeLinkedIssue({ number: 11, status: IssueStatus.InProgress, stage: WorkflowStage.Build }),
         ],
       })
       expect(state).toEqual({ kind: 'waiting-for-in-progress', issueNumber: 11 })
@@ -54,8 +53,8 @@ describe('deriveAdvancementState', () => {
       const state = deriveAdvancementState({
         epicStatus: EpicStatus.Idle,
         linkedIssues: [
-          makeLinkedIssue({ id: 'i-1', number: 7, status: IssueStatus.Backlog, canStart: false, startBlocker: { kind: 'draft' } }),
-          makeLinkedIssue({ id: 'i-2', number: 11, status: IssueStatus.InProgress, stage: WorkflowStage.Build }),
+          makeLinkedIssue({ number: 7, status: IssueStatus.Backlog, canStart: false, startBlocker: { kind: 'draft' } }),
+          makeLinkedIssue({ number: 11, status: IssueStatus.InProgress, stage: WorkflowStage.Build }),
         ],
       })
       expect(state).toEqual({ kind: 'waiting-for-in-progress', issueNumber: 11 })
@@ -67,8 +66,8 @@ describe('deriveAdvancementState', () => {
       const state = deriveAdvancementState({
         epicStatus: EpicStatus.Running,
         linkedIssues: [
-          makeLinkedIssue({ id: 'i-1', number: 7, status: IssueStatus.Done, stage: WorkflowStage.Done, health: IssueHealth.Done, canStart: false }),
-          makeLinkedIssue({ id: 'i-2', number: 8, status: IssueStatus.Done, stage: WorkflowStage.Done, health: IssueHealth.Done, canStart: false }),
+          makeLinkedIssue({ number: 7, status: IssueStatus.Done, stage: WorkflowStage.Done, health: IssueHealth.Done, canStart: false }),
+          makeLinkedIssue({ number: 8, status: IssueStatus.Done, stage: WorkflowStage.Done, health: IssueHealth.Done, canStart: false }),
         ],
       })
       expect(state).toEqual({ kind: 'nothing-pending' })
@@ -78,7 +77,7 @@ describe('deriveAdvancementState', () => {
       const state = deriveAdvancementState({
         epicStatus: EpicStatus.Idle,
         linkedIssues: [
-          makeLinkedIssue({ id: 'i-1', number: 7, status: IssueStatus.Cancelled, stage: WorkflowStage.Done, health: IssueHealth.Cancelled, canStart: false }),
+          makeLinkedIssue({ number: 7, status: IssueStatus.Cancelled, stage: WorkflowStage.Done, health: IssueHealth.Cancelled, canStart: false }),
         ],
       })
       expect(state).toEqual({ kind: 'idle-no-next', reason: 'no startable issue' })
@@ -88,8 +87,8 @@ describe('deriveAdvancementState', () => {
       const state = deriveAdvancementState({
         epicStatus: EpicStatus.Idle,
         linkedIssues: [
-          makeLinkedIssue({ id: 'i-1', number: 7, status: IssueStatus.Done, stage: WorkflowStage.Done, health: IssueHealth.Done, canStart: false }),
-          makeLinkedIssue({ id: 'i-2', number: 8, status: IssueStatus.Cancelled, stage: WorkflowStage.Done, health: IssueHealth.Cancelled, canStart: false }),
+          makeLinkedIssue({ number: 7, status: IssueStatus.Done, stage: WorkflowStage.Done, health: IssueHealth.Done, canStart: false }),
+          makeLinkedIssue({ number: 8, status: IssueStatus.Cancelled, stage: WorkflowStage.Done, health: IssueHealth.Cancelled, canStart: false }),
         ],
       })
       expect(state).toEqual({ kind: 'idle-no-next', reason: 'no startable issue' })
@@ -109,7 +108,7 @@ describe('deriveAdvancementState', () => {
       const state = deriveAdvancementState({
         epicStatus: EpicStatus.Idle,
         linkedIssues: [
-          makeLinkedIssue({ id: 'i-1', number: 14, status: IssueStatus.Backlog, canStart: false, startBlocker: { kind: 'draft' } }),
+          makeLinkedIssue({ number: 14, status: IssueStatus.Backlog, canStart: false, startBlocker: { kind: 'draft' } }),
         ],
       })
       expect(state).toEqual({ kind: 'draft-blocker', issueNumber: 14 })
@@ -122,7 +121,6 @@ describe('deriveAdvancementState', () => {
         epicStatus: EpicStatus.Idle,
         linkedIssues: [
           makeLinkedIssue({
-            id: 'i-1',
             number: 21,
             status: IssueStatus.Backlog,
             canStart: false,
@@ -146,7 +144,6 @@ describe('deriveAdvancementState', () => {
         epicStatus: EpicStatus.Running,
         linkedIssues: [
           makeLinkedIssue({
-            id: 'i-1',
             number: 5,
             status: IssueStatus.Backlog,
             canStart: false,
@@ -168,7 +165,7 @@ describe('deriveAdvancementState', () => {
       const state = deriveAdvancementState({
         epicStatus: EpicStatus.Idle,
         linkedIssues: [
-          makeLinkedIssue({ id: 'i-1', number: 42, status: IssueStatus.Backlog, canStart: true, startBlocker: null }),
+          makeLinkedIssue({ number: 42, status: IssueStatus.Backlog, canStart: true, startBlocker: null }),
         ],
       })
       expect(state).toEqual({ kind: 'has-next', issueNumber: 42 })
@@ -179,7 +176,6 @@ describe('deriveAdvancementState', () => {
         epicStatus: EpicStatus.Idle,
         linkedIssues: [
           makeLinkedIssue({
-            id: 'i-1',
             number: 42,
             status: IssueStatus.Backlog,
             canStart: true,
@@ -196,8 +192,8 @@ describe('deriveAdvancementState', () => {
       const state = deriveAdvancementState({
         epicStatus: EpicStatus.Idle,
         linkedIssues: [
-          makeLinkedIssue({ id: 'i-old', number: 1, priority: 'p4', status: IssueStatus.Backlog, canStart: false, startBlocker: { kind: 'draft' } }),
-          makeLinkedIssue({ id: 'i-next', number: 3, priority: 'p1', status: IssueStatus.Backlog, canStart: true, startBlocker: null }),
+          makeLinkedIssue({ number: 1, priority: 'p4', status: IssueStatus.Backlog, canStart: false, startBlocker: { kind: 'draft' } }),
+          makeLinkedIssue({ number: 3, priority: 'p1', status: IssueStatus.Backlog, canStart: true, startBlocker: null }),
         ],
       })
       expect(state).toEqual({ kind: 'has-next', issueNumber: 3 })
@@ -207,8 +203,8 @@ describe('deriveAdvancementState', () => {
       const state = deriveAdvancementState({
         epicStatus: EpicStatus.Idle,
         linkedIssues: [
-          makeLinkedIssue({ id: 'i-later', number: 20, priority: 'p1', status: IssueStatus.Backlog, canStart: true, startBlocker: null }),
-          makeLinkedIssue({ id: 'i-earlier', number: 10, priority: 'p1', status: IssueStatus.Backlog, canStart: false, startBlocker: { kind: 'draft' } }),
+          makeLinkedIssue({ number: 20, priority: 'p1', status: IssueStatus.Backlog, canStart: true, startBlocker: null }),
+          makeLinkedIssue({ number: 10, priority: 'p1', status: IssueStatus.Backlog, canStart: false, startBlocker: { kind: 'draft' } }),
         ],
       })
       expect(state).toEqual({ kind: 'draft-blocker', issueNumber: 10 })
@@ -221,7 +217,6 @@ describe('deriveAdvancementState', () => {
         epicStatus: EpicStatus.Running,
         linkedIssues: [
           makeLinkedIssue({
-            id: 'i-1',
             number: 12,
             status: IssueStatus.Backlog,
             canStart: false,
@@ -237,7 +232,6 @@ describe('deriveAdvancementState', () => {
         epicStatus: EpicStatus.Running,
         linkedIssues: [
           makeLinkedIssue({
-            id: 'i-1',
             number: 12,
             status: IssueStatus.Backlog,
             canStart: false,
@@ -255,7 +249,6 @@ describe('deriveAdvancementState', () => {
         epicStatus: EpicStatus.Running,
         linkedIssues: [
           makeLinkedIssue({
-            id: 'i-1',
             number: 12,
             status: IssueStatus.Backlog,
             canStart: false,
@@ -271,7 +264,6 @@ describe('deriveAdvancementState', () => {
         epicStatus: EpicStatus.Running,
         linkedIssues: [
           makeLinkedIssue({
-            id: 'i-1',
             number: 12,
             status: IssueStatus.Backlog,
             canStart: false,
@@ -292,7 +284,6 @@ describe('deriveAdvancementState', () => {
         epicStatus: EpicStatus.Idle,
         linkedIssues: [
           makeLinkedIssue({
-            id: 'i-1',
             number: 12,
             status: IssueStatus.Backlog,
             canStart: false,
@@ -310,7 +301,6 @@ describe('deriveAdvancementState', () => {
         epicStatus: EpicStatus.Idle,
         linkedIssues: [
           makeLinkedIssue({
-            id: 'i-1',
             number: 12,
             status: IssueStatus.Backlog,
             canStart: false,
@@ -329,7 +319,6 @@ describe('deriveAdvancementState', () => {
         epicStatus: EpicStatus.Idle,
         linkedIssues: [
           makeLinkedIssue({
-            id: 'i-1',
             number: 12,
             status: IssueStatus.Backlog,
             canStart: false,
@@ -349,7 +338,7 @@ describe('deriveAdvancementState', () => {
       const state = deriveAdvancementState({
         epicStatus: EpicStatus.Running,
         linkedIssues: [
-          makeLinkedIssue({ id: 'i-1', number: 1, status: IssueStatus.InProgress, stage: WorkflowStage.Build }),
+          makeLinkedIssue({ number: 1, status: IssueStatus.InProgress, stage: WorkflowStage.Build }),
         ],
       })
       expect(state.kind).toBe('waiting-for-in-progress')
@@ -360,7 +349,6 @@ describe('deriveAdvancementState', () => {
         epicStatus: EpicStatus.Idle,
         linkedIssues: [
           makeLinkedIssue({
-            id: 'i-1',
             number: 12,
             status: IssueStatus.Backlog,
             canStart: false,
@@ -376,8 +364,8 @@ describe('deriveAdvancementState', () => {
       const state = deriveAdvancementState({
         epicStatus: EpicStatus.Running,
         linkedIssues: [
-          makeLinkedIssue({ id: 'i-draft', number: 4, priority: 'p3', status: IssueStatus.Backlog, canStart: false, startBlocker: { kind: 'draft' } }),
-          makeLinkedIssue({ id: 'i-server-next', number: 9, priority: 'p0', status: IssueStatus.Backlog, canStart: true, startBlocker: null }),
+          makeLinkedIssue({ number: 4, priority: 'p3', status: IssueStatus.Backlog, canStart: false, startBlocker: { kind: 'draft' } }),
+          makeLinkedIssue({ number: 9, priority: 'p0', status: IssueStatus.Backlog, canStart: true, startBlocker: null }),
         ],
       })
       expect(state).toEqual({ kind: 'has-next', issueNumber: 9 })
@@ -388,18 +376,17 @@ describe('deriveAdvancementState', () => {
     it('produces only known kinds across a matrix of inputs', () => {
       const known = new Set(ADVANCEMENT_STATE_KINDS)
       const linkedIssues: LinkedIssue[] = [
-        makeLinkedIssue({ id: 'a', number: 1, status: IssueStatus.InProgress, stage: WorkflowStage.Build }),
-        makeLinkedIssue({ id: 'b', number: 2, status: IssueStatus.Backlog, canStart: false, startBlocker: { kind: 'draft' } }),
+        makeLinkedIssue({ number: 1, status: IssueStatus.InProgress, stage: WorkflowStage.Build }),
+        makeLinkedIssue({ number: 2, status: IssueStatus.Backlog, canStart: false, startBlocker: { kind: 'draft' } }),
         makeLinkedIssue({
-          id: 'c',
           number: 3,
           status: IssueStatus.Backlog,
           canStart: false,
           startBlocker: null,
           externalPrerequisites: [{ number: 9, title: 'X', stage: 'plan', status: 'backlog' }],
         }),
-        makeLinkedIssue({ id: 'd', number: 4, status: IssueStatus.Backlog, canStart: true, startBlocker: null }),
-        makeLinkedIssue({ id: 'e', number: 5, status: IssueStatus.Done, stage: WorkflowStage.Done, health: IssueHealth.Done, canStart: false }),
+        makeLinkedIssue({ number: 4, status: IssueStatus.Backlog, canStart: true, startBlocker: null }),
+        makeLinkedIssue({ number: 5, status: IssueStatus.Done, stage: WorkflowStage.Done, health: IssueHealth.Done, canStart: false }),
       ]
       const statuses = [EpicStatus.Idle, EpicStatus.Running, EpicStatus.Paused, EpicStatus.Done, EpicStatus.Closed]
       for (const status of statuses) {

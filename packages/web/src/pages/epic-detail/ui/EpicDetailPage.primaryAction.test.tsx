@@ -17,39 +17,39 @@ const _pauseEpicHandler = vi.fn()
 const _resumeEpicHandler = vi.fn()
 
 useMswServer(
-  http.get('*/api/projects/:projectId/epics/:epicId', () =>
+  http.get('*/api/projects/:projectId/epics/:epicNumber', () =>
     HttpResponse.json({ success: true, data: _epicData }),
   ),
-  http.get('*/api/projects/:projectId/epics/:epicId/events', () =>
+  http.get('*/api/projects/:projectId/epics/:epicNumber/events', () =>
     HttpResponse.json({ success: true, data: [] }),
   ),
   http.get('*/api/projects/:projectId/issues', () =>
     HttpResponse.json({ success: true, data: _issuesData }),
   ),
-  http.post('*/api/projects/:projectId/epics/:epicId/start', ({ params }) => {
-    _startEpicHandler(params.epicId)
+  http.post('*/api/projects/:projectId/epics/:epicNumber/start', ({ params }) => {
+    _startEpicHandler(Number(params.epicNumber))
     return HttpResponse.json({ success: true, data: {} })
   }),
-  http.post('*/api/projects/:projectId/epics/:epicId/done', ({ params }) => {
-    _markDoneHandler(params.epicId)
+  http.post('*/api/projects/:projectId/epics/:epicNumber/done', ({ params }) => {
+    _markDoneHandler(Number(params.epicNumber))
     return HttpResponse.json({ success: true, data: {} })
   }),
-  http.post('*/api/projects/:projectId/epics/:epicId/pause', async ({ request, params }) => {
+  http.post('*/api/projects/:projectId/epics/:epicNumber/pause', async ({ request, params }) => {
     let reason: string | null = null
     try { const body = await request.json() as any; reason = body.reason ?? null } catch { /* empty body */ }
-    _pauseEpicHandler({ id: params.epicId, reason })
+    _pauseEpicHandler({ number: Number(params.epicNumber), reason })
     return HttpResponse.json({ success: true, data: {} })
   }),
-  http.post('*/api/projects/:projectId/epics/:epicId/resume', ({ params }) => {
-    _resumeEpicHandler(params.epicId)
+  http.post('*/api/projects/:projectId/epics/:epicNumber/resume', ({ params }) => {
+    _resumeEpicHandler(Number(params.epicNumber))
     return HttpResponse.json({ success: true, data: {} })
   }),
 )
 
 function makeEpic(overrides: Record<string, unknown> = {}) {
   return {
-    id: 'epic-12345678',
-    number: null,
+    projectId: 'proj-1',
+    number: 123,
     title: 'Epic title',
     description: 'Epic description',
     priority: 'p1',
@@ -108,7 +108,7 @@ describe('EpicDetailPage single prominent primary action', () => {
 
     await waitFor(() => {
       expect(_startEpicHandler).toHaveBeenCalledTimes(1)
-      expect(_startEpicHandler).toHaveBeenCalledWith('epic-12345678')
+      expect(_startEpicHandler).toHaveBeenCalledWith(123)
     })
   })
 
@@ -134,7 +134,7 @@ describe('EpicDetailPage single prominent primary action', () => {
 
     fireEvent.click(screen.getByTestId('pause-epic-confirm'))
     await waitFor(() => expect(_pauseEpicHandler).toHaveBeenCalledWith(
-      { id: 'epic-12345678', reason: null },
+      { number: 123, reason: null },
     ))
   })
 
@@ -151,7 +151,7 @@ describe('EpicDetailPage single prominent primary action', () => {
         readyToMarkDone: true,
       },
       linkedIssues: [
-        linkedIssue({ id: 'issue-1', number: 1, title: 'Done issue', status: IssueStatus.Done, stage: WorkflowStage.Done, health: IssueHealth.Done, priority: 'p2' }),
+        linkedIssue({ number: 1, title: 'Done issue', status: IssueStatus.Done, stage: WorkflowStage.Done, health: IssueHealth.Done, priority: 'p2' }),
       ],
     })
 
@@ -187,7 +187,7 @@ describe('EpicDetailPage single prominent primary action', () => {
         readyToMarkDone: true,
       },
       linkedIssues: [
-        linkedIssue({ id: 'issue-1', number: 1, title: 'Done issue', status: IssueStatus.Done, stage: WorkflowStage.Done, health: IssueHealth.Done, priority: 'p2' }),
+        linkedIssue({ number: 1, title: 'Done issue', status: IssueStatus.Done, stage: WorkflowStage.Done, health: IssueHealth.Done, priority: 'p2' }),
       ],
     })
 
@@ -198,7 +198,7 @@ describe('EpicDetailPage single prominent primary action', () => {
 
     await waitFor(() => {
       expect(_resumeEpicHandler).toHaveBeenCalledTimes(1)
-      expect(_resumeEpicHandler).toHaveBeenCalledWith('epic-12345678')
+      expect(_resumeEpicHandler).toHaveBeenCalledWith(123)
     })
   })
 
@@ -215,7 +215,7 @@ describe('EpicDetailPage single prominent primary action', () => {
         readyToMarkDone: true,
       },
       linkedIssues: [
-        linkedIssue({ id: 'issue-1', number: 1, title: 'Done issue', status: IssueStatus.Done, stage: WorkflowStage.Done, health: IssueHealth.Done, priority: 'p2' }),
+        linkedIssue({ number: 1, title: 'Done issue', status: IssueStatus.Done, stage: WorkflowStage.Done, health: IssueHealth.Done, priority: 'p2' }),
       ],
     })
 
@@ -246,7 +246,7 @@ describe('EpicDetailPage single prominent primary action', () => {
         readyToMarkDone: true,
       },
       linkedIssues: [
-        linkedIssue({ id: 'issue-1', number: 1, title: 'Done issue', status: IssueStatus.Done, stage: WorkflowStage.Done, health: IssueHealth.Done, priority: 'p2' }),
+        linkedIssue({ number: 1, title: 'Done issue', status: IssueStatus.Done, stage: WorkflowStage.Done, health: IssueHealth.Done, priority: 'p2' }),
       ],
     })
 
@@ -275,7 +275,7 @@ describe('EpicDetailPage single prominent primary action', () => {
         readyToMarkDone: true,
       },
       linkedIssues: [
-        linkedIssue({ id: 'issue-1', number: 1, title: 'Done issue', status: IssueStatus.Done, stage: WorkflowStage.Done, health: IssueHealth.Done, priority: 'p2' }),
+        linkedIssue({ number: 1, title: 'Done issue', status: IssueStatus.Done, stage: WorkflowStage.Done, health: IssueHealth.Done, priority: 'p2' }),
       ],
     })
 
@@ -286,7 +286,7 @@ describe('EpicDetailPage single prominent primary action', () => {
 
     await waitFor(() => {
       expect(_markDoneHandler).toHaveBeenCalledTimes(1)
-      expect(_markDoneHandler).toHaveBeenCalledWith('epic-12345678')
+      expect(_markDoneHandler).toHaveBeenCalledWith(123)
     })
   })
 
@@ -303,7 +303,7 @@ describe('EpicDetailPage single prominent primary action', () => {
         readyToMarkDone: true,
       },
       linkedIssues: [
-        linkedIssue({ id: 'issue-1', number: 1, title: 'Done issue', status: IssueStatus.Done, stage: WorkflowStage.Done, health: IssueHealth.Done, priority: 'p2' }),
+        linkedIssue({ number: 1, title: 'Done issue', status: IssueStatus.Done, stage: WorkflowStage.Done, health: IssueHealth.Done, priority: 'p2' }),
       ],
     })
 
@@ -343,8 +343,8 @@ describe('EpicDetailPage single prominent primary action', () => {
         readyToMarkDone: false,
       },
       linkedIssues: [
-        linkedIssue({ id: 'issue-1', number: 1, title: 'Backlog issue', status: IssueStatus.Backlog, stage: WorkflowStage.Plan, priority: 'p2' }),
-        linkedIssue({ id: 'issue-2', number: 2, title: 'Backlog issue', status: IssueStatus.Backlog, stage: WorkflowStage.Plan, priority: 'p2' }),
+        linkedIssue({ number: 1, title: 'Backlog issue', status: IssueStatus.Backlog, stage: WorkflowStage.Plan, priority: 'p2' }),
+        linkedIssue({ number: 2, title: 'Backlog issue', status: IssueStatus.Backlog, stage: WorkflowStage.Plan, priority: 'p2' }),
       ],
     })
 
@@ -367,14 +367,14 @@ describe('EpicDetailPage single prominent primary action', () => {
         totalIssueCount: 3,
         blockedIssues: [],
         activeIssues: [],
-        nextIssue: { id: 'issue-2', number: 2, title: 'Active issue' },
+        nextIssue: { number: 2, title: 'Active issue' },
         nextIssueReason: null,
         readyToMarkDone: false,
       },
       linkedIssues: [
-        linkedIssue({ id: 'issue-1', number: 1, title: 'Done issue', status: IssueStatus.Done, stage: WorkflowStage.Done, health: IssueHealth.Done, priority: 'p2' }),
-        linkedIssue({ id: 'issue-2', number: 2, title: 'Active issue', status: IssueStatus.InProgress, stage: WorkflowStage.Build, priority: 'p1' }),
-        linkedIssue({ id: 'issue-3', number: 3, title: 'Backlog issue', status: IssueStatus.Backlog, stage: WorkflowStage.Plan, priority: 'p3' }),
+        linkedIssue({ number: 1, title: 'Done issue', status: IssueStatus.Done, stage: WorkflowStage.Done, health: IssueHealth.Done, priority: 'p2' }),
+        linkedIssue({ number: 2, title: 'Active issue', status: IssueStatus.InProgress, stage: WorkflowStage.Build, priority: 'p1' }),
+        linkedIssue({ number: 3, title: 'Backlog issue', status: IssueStatus.Backlog, stage: WorkflowStage.Plan, priority: 'p3' }),
       ],
     })
 
@@ -396,13 +396,13 @@ describe('EpicDetailPage single prominent primary action', () => {
         totalIssueCount: 2,
         blockedIssues: [],
         activeIssues: [],
-        nextIssue: { id: 'issue-2', number: 2, title: 'Blocked issue' },
+        nextIssue: { number: 2, title: 'Blocked issue' },
         nextIssueReason: null,
         readyToMarkDone: false,
       },
       linkedIssues: [
-        linkedIssue({ id: 'issue-1', number: 1, title: 'Done issue', status: IssueStatus.Done, stage: WorkflowStage.Done, health: IssueHealth.Done, priority: 'p2' }),
-        linkedIssue({ id: 'issue-2', number: 2, title: 'Blocked issue', status: IssueStatus.InProgress, stage: WorkflowStage.Build, health: IssueHealth.Blocked, priority: 'p1' }),
+        linkedIssue({ number: 1, title: 'Done issue', status: IssueStatus.Done, stage: WorkflowStage.Done, health: IssueHealth.Done, priority: 'p2' }),
+        linkedIssue({ number: 2, title: 'Blocked issue', status: IssueStatus.InProgress, stage: WorkflowStage.Build, health: IssueHealth.Blocked, priority: 'p1' }),
       ],
     })
 
@@ -469,7 +469,7 @@ describe('EpicDetailPage single prominent primary action', () => {
         readyToMarkDone: true,
       },
       linkedIssues: [
-        linkedIssue({ id: 'issue-1', number: 1, title: 'Done issue', status: IssueStatus.Done, stage: WorkflowStage.Done, health: IssueHealth.Done, priority: 'p2' }),
+        linkedIssue({ number: 1, title: 'Done issue', status: IssueStatus.Done, stage: WorkflowStage.Done, health: IssueHealth.Done, priority: 'p2' }),
       ],
     })
 
@@ -504,7 +504,7 @@ describe('EpicDetailPage Start Epic refresh on success', () => {
 
     await waitFor(() => {
       expect(_startEpicHandler).toHaveBeenCalledTimes(1)
-      expect(_startEpicHandler).toHaveBeenCalledWith('epic-12345678')
+      expect(_startEpicHandler).toHaveBeenCalledWith(123)
     })
   })
 

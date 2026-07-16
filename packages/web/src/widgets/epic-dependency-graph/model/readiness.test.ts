@@ -5,7 +5,6 @@ import type { LinkedIssue } from '../../../entities/epic/model/types'
 
 function makeLinkedIssue(overrides: Partial<LinkedIssue> = {}): LinkedIssue {
   return {
-    id: 'issue-default',
     number: 1,
     title: 'Default issue',
     status: IssueStatus.Backlog,

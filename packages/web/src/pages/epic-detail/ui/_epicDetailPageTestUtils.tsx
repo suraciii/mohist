@@ -76,7 +76,7 @@ export function createDependencyGraphTestComponents(
 }
 
 export function linkedIssue(
-  overrides: Pick<LinkedIssue, 'id' | 'number'> & Partial<Omit<LinkedIssue, 'id' | 'number'>>,
+  overrides: Pick<LinkedIssue, 'number'> & Partial<Omit<LinkedIssue, 'number'>>,
 ): LinkedIssue {
   return {
     title: 'Issue one',
@@ -104,7 +104,8 @@ export function issue(overrides: Record<string, unknown>) {
 }
 
 export const epic = {
-  id: 'epic-12345678',
+  projectId: 'proj-1',
+  number: 123,
   title: 'Epic title',
   description: 'Epic description',
   priority: 'p1',
@@ -114,22 +115,22 @@ export const epic = {
   progress: {
     deliveredCount: 1,
     totalIssueCount: 2,
-    blockedIssues: [{ id: 'issue-2', number: 2, title: 'Blocked issue', health: 'blocked' }],
+    blockedIssues: [{ number: 2, title: 'Blocked issue', health: 'blocked' }],
     activeIssues: [],
-    nextIssue: { id: 'issue-2', number: 2, title: 'Blocked issue' },
+    nextIssue: { number: 2, title: 'Blocked issue' },
     nextIssueReason: null,
     readyToMarkDone: false,
   },
   linkedIssues: [
-    linkedIssue({ id: 'issue-1', number: 1, title: 'Done issue', status: IssueStatus.Done, stage: WorkflowStage.Done, health: IssueHealth.Done, priority: 'p2' }),
-    linkedIssue({ id: 'issue-2', number: 2, title: 'Blocked issue', status: IssueStatus.InProgress, stage: WorkflowStage.Build, health: IssueHealth.Blocked, priority: 'p1' }),
+    linkedIssue({ number: 1, title: 'Done issue', status: IssueStatus.Done, stage: WorkflowStage.Done, health: IssueHealth.Done, priority: 'p2' }),
+    linkedIssue({ number: 2, title: 'Blocked issue', status: IssueStatus.InProgress, stage: WorkflowStage.Build, health: IssueHealth.Blocked, priority: 'p1' }),
   ],
 }
 
 export const issues = [
-  issue({ id: 'issue-1', number: 1, title: 'Done issue', canStart: false, status: 'done', health: 'done' }),
-  issue({ id: 'issue-2', number: 2, title: 'Blocked issue', canStart: false, status: 'in_progress', health: 'blocked' }),
-  issue({ id: 'issue-3', number: 3, title: 'Candidate issue' }),
+  issue({ number: 1, title: 'Done issue', canStart: false, status: 'done', health: 'done' }),
+  issue({ number: 2, title: 'Blocked issue', canStart: false, status: 'in_progress', health: 'blocked' }),
+  issue({ number: 3, title: 'Candidate issue' }),
 ]
 
 export function LocationProbe() {
@@ -146,13 +147,13 @@ export interface EpicDetailRenderOptions {
 
 export function renderPage(options: EpicDetailRenderOptions = {}): RenderResult & { rerenderPage: () => void } {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  const epicId = options.epic?.id ?? epic.id
-  const eventsQueryKey = ['epics', 'proj-1', epicId, 'events']
+  const epicNumber = options.epic?.number ?? epic.number
+  const eventsQueryKey = ['epics', 'proj-1', epicNumber, 'events']
   queryClient.setQueryDefaults(eventsQueryKey, { staleTime: Infinity })
   queryClient.setQueryData(eventsQueryKey, [])
   if (options.epic) {
-    queryClient.setQueryDefaults(['epics', 'proj-1', 'epic-12345678'], { staleTime: Infinity })
-    queryClient.setQueryData(['epics', 'proj-1', 'epic-12345678'], options.epic)
+    queryClient.setQueryDefaults(['epics', 'proj-1', options.epic.number], { staleTime: Infinity })
+    queryClient.setQueryData(['epics', 'proj-1', options.epic.number], options.epic)
   }
   if (options.issues) {
     const issuesQueryKey = ['issues', { projectId: 'proj-1' }]
@@ -162,11 +163,11 @@ export function renderPage(options: EpicDetailRenderOptions = {}): RenderResult 
   const ui = (): ReactElement => (
     <QueryClientProvider client={queryClient}>
       <ProjectProvider initialProjectId="proj-1">
-        <MemoryRouter initialEntries={['/epic/epic-12345678']}>
+        <MemoryRouter initialEntries={[`/epic/${epicNumber}`]}>
           <LocationProbe />
           <Routes>
             <Route
-              path="/epic/:id"
+              path="/epic/:number"
               element={(
                 <EpicDetailPage
                   components={options.components}

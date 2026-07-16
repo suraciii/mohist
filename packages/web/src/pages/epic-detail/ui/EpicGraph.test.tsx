@@ -21,7 +21,7 @@ const _removeEpicIssueTracker = vi.fn()
 const _updateEpicTracker = vi.fn()
 
 const removeEpicIssueHook: RemoveEpicIssueHook = () =>
-  useMutation<{ epicId: string; issueId: string }, Error, { epicId: string; issueId: string }>({
+  useMutation<{ epicNumber: number; issueNumber: number }, Error, { epicNumber: number; issueNumber: number }>({
     mutationFn: async (variables) => {
       _removeEpicIssueTracker(variables)
       return variables
@@ -39,7 +39,7 @@ function renderPage(epic: EpicDetail) {
 
 function makeEpicWithLinkedIssues(linkedIssues: LinkedIssue[]): EpicDetail {
   return {
-    id: 'epic-12345678',
+    projectId: 'proj-1',
     number: 7,
     title: 'Graph epic',
     description: 'Epic description',
@@ -73,8 +73,8 @@ describe('EpicDetailPage linked issues view toggle', () => {
 
   it('defaults to the list view and shows the toggle when the epic has 2+ linked issues', async () => {
     renderPage(makeEpicWithLinkedIssues([
-      makeLinkedIssue({ id: 'issue-1', number: 1 }),
-      makeLinkedIssue({ id: 'issue-2', number: 2, prerequisiteNumbers: [1] }),
+      makeLinkedIssue({ number: 1 }),
+      makeLinkedIssue({ number: 2, prerequisiteNumbers: [1] }),
     ]))
 
     await screen.findByTestId('linked-issues-list-region')
@@ -88,8 +88,8 @@ describe('EpicDetailPage linked issues view toggle', () => {
 
   it('switches to the graph view when the Graph tab is clicked and does not mutate data', async () => {
     renderPage(makeEpicWithLinkedIssues([
-      makeLinkedIssue({ id: 'issue-1', number: 1, title: 'Root' }),
-      makeLinkedIssue({ id: 'issue-2', number: 2, title: 'Dep', prerequisiteNumbers: [1] }),
+      makeLinkedIssue({ number: 1, title: 'Root' }),
+      makeLinkedIssue({ number: 2, title: 'Dep', prerequisiteNumbers: [1] }),
     ]))
 
     await screen.findByTestId('linked-issues-view-toggle')
@@ -114,8 +114,8 @@ describe('EpicDetailPage linked issues view toggle', () => {
 
   it('returns to the list view when the List tab is clicked after the graph is shown', async () => {
     renderPage(makeEpicWithLinkedIssues([
-      makeLinkedIssue({ id: 'issue-1', number: 1 }),
-      makeLinkedIssue({ id: 'issue-2', number: 2, prerequisiteNumbers: [1] }),
+      makeLinkedIssue({ number: 1 }),
+      makeLinkedIssue({ number: 2, prerequisiteNumbers: [1] }),
     ]))
 
     await screen.findByTestId('linked-issues-view-toggle')
@@ -156,7 +156,7 @@ describe('EpicDetailPage linked issues view toggle', () => {
 
   it('keeps the Graph tab reachable with an empty-data explanation when the epic has exactly one linked issue', async () => {
     renderPage(makeEpicWithLinkedIssues([
-      makeLinkedIssue({ id: 'issue-1', number: 1, title: 'Lone issue' }),
+      makeLinkedIssue({ number: 1, title: 'Lone issue' }),
     ]))
 
     await screen.findByTestId('linked-issues-list-region')
@@ -180,8 +180,8 @@ describe('EpicDetailPage linked issues view toggle', () => {
 
   it('falls back to the list view when the graph reports a cycle', async () => {
     renderPage(makeEpicWithLinkedIssues([
-      makeLinkedIssue({ id: 'issue-1', number: 1, prerequisiteNumbers: [2] }),
-      makeLinkedIssue({ id: 'issue-2', number: 2, prerequisiteNumbers: [1] }),
+      makeLinkedIssue({ number: 1, prerequisiteNumbers: [2] }),
+      makeLinkedIssue({ number: 2, prerequisiteNumbers: [1] }),
     ]))
 
     await screen.findByTestId('linked-issues-view-toggle')
@@ -207,8 +207,8 @@ describe('EpicDetailPage linked issues view toggle', () => {
 
   it('keeps the Linked Issues list and add-issue selector fully functional when the graph is the default tab', async () => {
     renderPage(makeEpicWithLinkedIssues([
-      makeLinkedIssue({ id: 'issue-1', number: 1, title: 'L-1' }),
-      makeLinkedIssue({ id: 'issue-2', number: 2, title: 'L-2' }),
+      makeLinkedIssue({ number: 1, title: 'L-1' }),
+      makeLinkedIssue({ number: 2, title: 'L-2' }),
     ]))
 
     await screen.findByTestId('linked-issues-list-region')
@@ -221,7 +221,7 @@ describe('EpicDetailPage linked issues view toggle', () => {
 
     fireEvent.click(screen.getByTestId('linked-issue-remove-confirm'))
     await waitFor(() =>
-      expect(_removeEpicIssueTracker).toHaveBeenCalledWith({ epicId: 'epic-12345678', issueId: 'issue-1' }),
+      expect(_removeEpicIssueTracker).toHaveBeenCalledWith({ epicNumber: 7, issueNumber: 1 }),
     )
   })
 })
@@ -237,8 +237,8 @@ describe('EpicDetailPage Graph mobile degradation', () => {
 
   it('defaults to the List view when 2+ linked issues are present (List is always the initial state)', async () => {
     renderPage(makeEpicWithLinkedIssues([
-      linkedIssue({ id: 'issue-1', number: 1, title: 'Root' }),
-      linkedIssue({ id: 'issue-2', number: 2, title: 'Dep', prerequisiteNumbers: [1] }),
+      linkedIssue({ number: 1, title: 'Root' }),
+      linkedIssue({ number: 2, title: 'Dep', prerequisiteNumbers: [1] }),
     ]))
 
     await screen.findByTestId('linked-issues-view-list')
@@ -250,8 +250,8 @@ describe('EpicDetailPage Graph mobile degradation', () => {
 
   it('keeps both List and Graph tabs visible and clickable when graphAvailable is true (data-testids unchanged)', async () => {
     renderPage(makeEpicWithLinkedIssues([
-      linkedIssue({ id: 'issue-1', number: 1, title: 'Root' }),
-      linkedIssue({ id: 'issue-2', number: 2, title: 'Dep', prerequisiteNumbers: [1] }),
+      linkedIssue({ number: 1, title: 'Root' }),
+      linkedIssue({ number: 2, title: 'Dep', prerequisiteNumbers: [1] }),
     ]))
 
     await screen.findByTestId('linked-issues-view-list')
@@ -275,8 +275,8 @@ describe('EpicDetailPage Graph mobile degradation', () => {
 
   it('wraps the graph canvas in an overflow-x-auto container with md:overflow-visible (no scrollbar on desktop)', async () => {
     renderPage(makeEpicWithLinkedIssues([
-      linkedIssue({ id: 'issue-1', number: 1, title: 'Root' }),
-      linkedIssue({ id: 'issue-2', number: 2, title: 'Dep', prerequisiteNumbers: [1] }),
+      linkedIssue({ number: 1, title: 'Root' }),
+      linkedIssue({ number: 2, title: 'Dep', prerequisiteNumbers: [1] }),
     ]))
 
     await screen.findByTestId('linked-issues-view-toggle')
@@ -297,8 +297,8 @@ describe('EpicDetailPage Graph mobile degradation', () => {
 
   it('gives the inner graph canvas a min-width class so it horizontally scrolls on narrow viewports', async () => {
     renderPage(makeEpicWithLinkedIssues([
-      linkedIssue({ id: 'issue-1', number: 1, title: 'Root' }),
-      linkedIssue({ id: 'issue-2', number: 2, title: 'Dep', prerequisiteNumbers: [1] }),
+      linkedIssue({ number: 1, title: 'Root' }),
+      linkedIssue({ number: 2, title: 'Dep', prerequisiteNumbers: [1] }),
     ]))
 
     await screen.findByTestId('linked-issues-view-toggle')
@@ -317,8 +317,8 @@ describe('EpicDetailPage Graph mobile degradation', () => {
 
   it('renders a narrow-screen hint with md:hidden above the graph canvas', async () => {
     renderPage(makeEpicWithLinkedIssues([
-      linkedIssue({ id: 'issue-1', number: 1, title: 'Root' }),
-      linkedIssue({ id: 'issue-2', number: 2, title: 'Dep', prerequisiteNumbers: [1] }),
+      linkedIssue({ number: 1, title: 'Root' }),
+      linkedIssue({ number: 2, title: 'Dep', prerequisiteNumbers: [1] }),
     ]))
 
     await screen.findByTestId('linked-issues-view-toggle')
@@ -338,8 +338,8 @@ describe('EpicDetailPage Graph mobile degradation', () => {
 
   it('places the narrow-screen hint above the scroll container in DOM order', async () => {
     renderPage(makeEpicWithLinkedIssues([
-      linkedIssue({ id: 'issue-1', number: 1, title: 'Root' }),
-      linkedIssue({ id: 'issue-2', number: 2, title: 'Dep', prerequisiteNumbers: [1] }),
+      linkedIssue({ number: 1, title: 'Root' }),
+      linkedIssue({ number: 2, title: 'Dep', prerequisiteNumbers: [1] }),
     ]))
 
     await screen.findByTestId('linked-issues-view-toggle')
@@ -363,8 +363,8 @@ describe('EpicDetailPage Graph mobile degradation', () => {
 
   it('keeps the narrow-screen hint hidden when the list view is the default (only renders inside the graph region)', async () => {
     renderPage(makeEpicWithLinkedIssues([
-      linkedIssue({ id: 'issue-1', number: 1, title: 'Root' }),
-      linkedIssue({ id: 'issue-2', number: 2, title: 'Dep', prerequisiteNumbers: [1] }),
+      linkedIssue({ number: 1, title: 'Root' }),
+      linkedIssue({ number: 2, title: 'Dep', prerequisiteNumbers: [1] }),
     ]))
 
     await screen.findByTestId('linked-issues-list-region')
@@ -376,8 +376,8 @@ describe('EpicDetailPage Graph mobile degradation', () => {
 
   it('switches between List and Graph tabs without error and keeps the overflow-x-auto wrapper on every Graph render', async () => {
     renderPage(makeEpicWithLinkedIssues([
-      linkedIssue({ id: 'issue-1', number: 1, title: 'Root' }),
-      linkedIssue({ id: 'issue-2', number: 2, title: 'Dep', prerequisiteNumbers: [1] }),
+      linkedIssue({ number: 1, title: 'Root' }),
+      linkedIssue({ number: 2, title: 'Dep', prerequisiteNumbers: [1] }),
     ]))
 
     await screen.findByTestId('linked-issues-view-toggle')

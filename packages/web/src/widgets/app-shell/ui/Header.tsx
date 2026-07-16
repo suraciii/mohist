@@ -5,22 +5,24 @@ import { PlusIcon } from 'lucide-react'
 import { useAgentStatus, useAgent } from '../../../entities/agent'
 import { useEpic } from '../../../entities/epic'
 
-function findEpicIdSegment(pathname: string): string | null {
+function findEpicNumberSegment(pathname: string): number | null {
   const segments = pathname.split('/').filter(Boolean)
   for (let i = 0; i < segments.length - 1; i += 1) {
-    if (segments[i] === 'epics') return segments[i + 1] || null
+    if (segments[i] !== 'epics') continue
+    const number = Number(segments[i + 1])
+    return Number.isInteger(number) && number > 0 ? number : null
   }
   return null
 }
 
 function formatEpicTitle(
   epicLoading: boolean,
-  epic: { number: number | null } | undefined,
-  fallbackSegment: string | null,
+  epic: { number: number } | undefined,
+  fallbackNumber: number | null,
 ): string {
   if (epicLoading) return 'Epic #\u2026'
   if (typeof epic?.number === 'number') return `Epic #${epic.number}`
-  if (fallbackSegment) return `Epic #${fallbackSegment.slice(0, 8)}`
+  if (fallbackNumber !== null) return `Epic #${fallbackNumber}`
   return 'Epic'
 }
 
@@ -38,12 +40,12 @@ const defaultDataHooks: HeaderDataHooks = {
 
 function usePageTitle(dataHooks: HeaderDataHooks): string {
   const location = useLocation()
-  const params = useParams<{ number?: string; id?: string; section?: string; agentId?: string }>()
+  const params = useParams<{ number?: string; section?: string; agentId?: string }>()
   const segments = location.pathname.split('/').filter(Boolean)
   const firstSegment = segments[0] ?? ''
   const section = segments.length > 1 ? `/${segments.slice(1).join('/')}` : '/'
-  const epicIdSegment = findEpicIdSegment(location.pathname)
-  const { data: epic, isLoading: epicLoading } = dataHooks.epicHook(epicIdSegment ?? '')
+  const epicNumberSegment = findEpicNumberSegment(location.pathname)
+  const { data: epic, isLoading: epicLoading } = dataHooks.epicHook(epicNumberSegment)
   const agentId = params.agentId ?? (segments[0] === 'agents' ? segments[1] : undefined)
   const { data: agent } = dataHooks.agentHook(agentId ?? '')
 
@@ -52,7 +54,7 @@ function usePageTitle(dataHooks: HeaderDataHooks): string {
   }
   if (firstSegment === 'activity') return 'Activity'
   if (firstSegment === 'epics') {
-    if (segments.length > 1) return formatEpicTitle(epicLoading, epic, epicIdSegment)
+    if (segments.length > 1) return formatEpicTitle(epicLoading, epic, epicNumberSegment)
     return 'Epics'
   }
   if (firstSegment === 'agents') {
@@ -72,7 +74,7 @@ function usePageTitle(dataHooks: HeaderDataHooks): string {
   if (section.startsWith('/activity')) return 'Activity'
   if (section === '/epics') return 'Epics'
   if (section.startsWith('/epics/')) {
-    return formatEpicTitle(epicLoading, epic, epicIdSegment)
+    return formatEpicTitle(epicLoading, epic, epicNumberSegment)
   }
   if (section.startsWith('/issues/')) {
     return `Issue #${params.number ?? section.split('/')[2]}`

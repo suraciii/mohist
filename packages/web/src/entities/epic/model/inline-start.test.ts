@@ -5,7 +5,6 @@ import { canInlineStartRow } from './inline-start'
 
 function makeLinkedIssue(overrides: Partial<LinkedIssue> = {}): LinkedIssue {
   return {
-    id: 'issue-1',
     number: 1,
     title: 'Default issue',
     status: IssueStatus.Backlog,

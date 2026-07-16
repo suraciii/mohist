@@ -73,7 +73,7 @@ describe('getEpics query-string forwarding', () => {
   it('returns the parsed epics array on a 200 success envelope', async () => {
     const payload = [
       {
-        id: 'epic-1',
+        projectId: 'proj-1',
         number: 1,
         title: 'Auth migration',
         description: 'desc',
@@ -97,12 +97,12 @@ describe('getEpics query-string forwarding', () => {
     const result = await getEpics({ projectId: 'proj-1', search: 'auth' })
 
     expect(result).toHaveLength(1)
-    expect(result[0].id).toBe('epic-1')
+    expect(result[0].number).toBe(1)
   })
 })
 
 describe('getEpicEvents', () => {
-  it('requests GET /api/projects/{ref}/epics/{id}/events with the encoded id', async () => {
+  it('requests GET /api/projects/{ref}/epics/{number}/events', async () => {
     const requests: Request[] = []
     server.use(
       http.get('*/api/projects/:projectId/epics/:epicId/events', ({ request }) => {
@@ -111,26 +111,12 @@ describe('getEpicEvents', () => {
       }),
     )
 
-    await getEpicEvents('epic-1', 'proj-1')
+    await getEpicEvents(1, 'proj-1')
 
     expect(requests).toHaveLength(1)
-    expect(requestPath(requests[0])).toBe('/api/projects/proj-1/epics/epic-1/events')
+    expect(requestPath(requests[0])).toBe('/api/projects/proj-1/epics/1/events')
     expect(requests[0].method).toBe('GET')
     expect(requests[0].headers.get('content-type')).toBe('application/json')
-  })
-
-  it('encodes epic ids that contain characters needing URL escaping', async () => {
-    const paths: string[] = []
-    server.use(
-      http.get('*/api/projects/:projectId/epics/:epicId/events', ({ request }) => {
-        paths.push(requestPath(request))
-        return successResponse([])
-      }),
-    )
-
-    await getEpicEvents('epic with/slash', 'proj-1')
-
-    expect(paths).toEqual(['/api/projects/proj-1/epics/epic%20with%2Fslash/events'])
   })
 
   it('returns the parsed events array on a 200 success envelope', async () => {
@@ -138,21 +124,21 @@ describe('getEpicEvents', () => {
       {
         id: 1,
         eventId: 'evt-1',
-        source: '/mohist/epics/epic-1',
+        source: '/mohist/projects/proj-1/epics/1',
         type: 'com.mohist.epic.created',
         specVersion: '1.0',
         subject: '1',
         time: '2026-06-30T12:00:00+00:00',
         dataContentType: 'application/json',
         data: { title: 'Auth epic', description: 'desc', priority: 'p2' },
-        extensions: { projectid: 'proj-1', epicid: 'epic-1' },
+        extensions: { projectid: 'proj-1', epic: '1' },
       },
     ]
     server.use(
       http.get('*/api/projects/:projectId/epics/:epicId/events', () => successResponse(payload)),
     )
 
-    const result = await getEpicEvents('epic-1', 'proj-1')
+    const result = await getEpicEvents(1, 'proj-1')
 
     expect(result).toHaveLength(1)
     expect(result[0].type).toBe('com.mohist.epic.created')

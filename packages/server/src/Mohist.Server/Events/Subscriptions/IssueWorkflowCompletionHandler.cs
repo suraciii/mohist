@@ -9,14 +9,11 @@ namespace Mohist.Server.Events.Subscriptions;
 /// Subscribes to <c>com.mohist.workflow.run.completed</c> and dispatches
 /// an <see cref="IIssueGrain.CompleteWorkAsync"/> call to the owning
 /// issue. The owning issue is recovered directly from the CloudEvent
-/// <c>extensions["issueid"]</c> stamp applied at write time by
-/// <c>WorkflowRunStore.ToCloudEvent</c>; no scoped service resolution
-/// or reverse database lookup is required to identify the target issue.
-/// The stamp is the symmetric counterpart of the issue-bound annotation
-/// (<c>Annotations["issueId"]</c>) the workflow grain receives at start
-/// time from <see cref="IIssueGrain"/>, so the producer (which already
-/// knew the binding) propagates it onto the event at write time and the
-/// handler reads it back without a second hop.
+/// <c>extensions["projectid"]</c> and <c>extensions["issue"]</c>
+/// stamps applied at write time by <c>WorkflowRunStore.ToCloudEvent</c>;
+/// no scoped service resolution or reverse database lookup is required to
+/// identify the target issue. The workflow's local context carries the
+/// same project-scoped Issue number from its durable start command.
 /// <para>
 /// This is the symmetric counterpart of
 /// <see cref="EpicAutoDoneHandler"/> (issue→epic): a terminal

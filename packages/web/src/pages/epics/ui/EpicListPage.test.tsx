@@ -20,6 +20,7 @@ const _startIssueHandler = vi.fn()
 const _createEpicHandler = vi.fn()
 let _blockStartIssue = false
 let _startIssueError: { status: number; error: string } | null = null
+let nextEpicNumber = 100
 
 useMswServer(
   http.get('*/api/projects/:projectId/epics', ({ request }) => {
@@ -33,7 +34,7 @@ useMswServer(
   http.post('*/api/projects/:projectId/epics', async ({ request }) => {
     const body = await request.json() as Record<string, string>
     _createEpicHandler(body)
-    return HttpResponse.json({ success: true, data: { id: 'new-epic', ...body } })
+    return HttpResponse.json({ success: true, data: { projectId: 'proj-1', number: 999, ...body } })
   }),
   http.post('*/api/projects/:projectId/issues/:issueNumber/start', ({ params }) => {
     _startIssueHandler(Number(params.issueNumber))
@@ -49,9 +50,10 @@ useMswServer(
 )
 
 function makeEpic(overrides: Record<string, unknown>) {
+  const number = typeof overrides.number === 'number' ? overrides.number : nextEpicNumber++
   return {
-    id: 'epic-id',
-    number: null,
+    projectId: 'proj-1',
+    number,
     title: 'Epic',
     description: 'desc',
     priority: 'p1',
@@ -72,35 +74,35 @@ function makeEpic(overrides: Record<string, unknown>) {
 }
 
 const runningEpic = makeEpic({
-  id: 'epic-running',
+  number: 1,
   title: 'Running Epic',
   progress: {
     deliveredCount: 1,
     totalIssueCount: 3,
     blockedIssues: [],
-    activeIssues: [{ id: 'issue-2', number: 2, title: 'Continue work', health: 'active' }],
-    nextIssue: { id: 'issue-3', number: 3, title: 'Queued next' },
+    activeIssues: [{ number: 2, title: 'Continue work', health: 'active' }],
+    nextIssue: { number: 3, title: 'Queued next' },
     nextIssueReason: 'Waiting for #2 to complete',
     readyToMarkDone: false,
   },
 })
 
 const readyToStartEpic = makeEpic({
-  id: 'epic-ready-to-start',
+  number: 2,
   title: 'Ready To Start Epic',
   progress: {
     deliveredCount: 1,
     totalIssueCount: 3,
     blockedIssues: [],
     activeIssues: [],
-    nextIssue: { id: 'issue-3', number: 3, title: 'Start me' },
+    nextIssue: { number: 3, title: 'Start me' },
     nextIssueReason: null,
     readyToMarkDone: false,
   },
 })
 
 const waitingBlockedEpic = makeEpic({
-  id: 'epic-waiting',
+  number: 3,
   title: 'Waiting Epic',
   progress: {
     deliveredCount: 1,
@@ -114,7 +116,7 @@ const waitingBlockedEpic = makeEpic({
 })
 
 const idleReadyEpic = makeEpic({
-  id: 'epic-idle-ready',
+  number: 4,
   title: 'Idle Ready Epic',
   progress: {
     deliveredCount: 3,
@@ -128,7 +130,7 @@ const idleReadyEpic = makeEpic({
 })
 
 const idleEmptyEpic = makeEpic({
-  id: 'epic-idle-empty',
+  number: 5,
   title: 'Empty Epic',
   progress: {
     deliveredCount: 0,
@@ -142,7 +144,7 @@ const idleEmptyEpic = makeEpic({
 })
 
 const doneEpic = makeEpic({
-  id: 'epic-done',
+  number: 6,
   title: 'Done Epic',
   status: EpicStatus.Done,
   progress: {
@@ -157,7 +159,7 @@ const doneEpic = makeEpic({
 })
 
 const closedEpic = makeEpic({
-  id: 'epic-closed',
+  number: 7,
   title: 'Closed Epic',
   status: EpicStatus.Closed,
   progress: {
@@ -180,7 +182,7 @@ function renderPage() {
           <LocationProbe />
           <Routes>
             <Route path="/epics" element={<EpicListPage />} />
-            <Route path="/epics/:id" element={<div>Epic Detail</div>} />
+            <Route path="/epics/:number" element={<div>Epic Detail</div>} />
           </Routes>
         </MemoryRouter>
       </ProjectProvider>
@@ -542,8 +544,8 @@ describe('EpicListPage basic actions', () => {
     _epicsData = [
       readyToStartEpic,
       {
-        id: 'epic-paused',
-        number: null,
+        projectId: 'proj-1',
+        number: 8,
         title: 'Paused Epic',
         description: 'On hold',
         priority: 'p2',
@@ -555,7 +557,7 @@ describe('EpicListPage basic actions', () => {
           totalIssueCount: 2,
           blockedIssues: [],
           activeIssues: [],
-          nextIssue: { id: 'issue-paused-next', number: 11, title: 'Resume-ready paused work' },
+          nextIssue: { number: 11, title: 'Resume-ready paused work' },
           nextIssueReason: null,
           readyToMarkDone: false,
         },
@@ -604,7 +606,6 @@ describe('EpicListPage basic actions', () => {
   it('keeps the legacy paused progress fallback for waiting, ready-to-mark-done, and empty paused cards', async () => {
     _epicsData = [
       makeEpic({
-        id: 'epic-paused-waiting',
         title: 'Paused Waiting Epic',
         status: EpicStatus.Paused,
         progress: {
@@ -618,7 +619,6 @@ describe('EpicListPage basic actions', () => {
         },
       }),
       makeEpic({
-        id: 'epic-paused-ready',
         title: 'Paused Ready Epic',
         status: EpicStatus.Paused,
         progress: {
@@ -632,7 +632,6 @@ describe('EpicListPage basic actions', () => {
         },
       }),
       makeEpic({
-        id: 'epic-paused-empty',
         title: 'Paused Empty Epic',
         status: EpicStatus.Paused,
         progress: {
@@ -686,7 +685,7 @@ describe('EpicListPage basic actions', () => {
 
     fireEvent.click(screen.getByText('Ready To Start Epic'))
 
-    expect(screen.getByTestId('current-path').textContent).toBe('/epics/epic-ready-to-start')
+    expect(screen.getByTestId('current-path').textContent).toBe('/epics/2')
   })
 })
 
@@ -705,13 +704,11 @@ describe('EpicListPage numbered display', () => {
   it('renders #N as the primary epic identifier when number is present', async () => {
     const numbered = [
       makeEpic({
-        id: 'epic-uuid-1-aaaa-bbbb-cccccccccccc',
         number: 7,
         title: 'Numbered Ready Epic',
         progress: readyToStartEpic.progress,
       }),
       makeEpic({
-        id: 'epic-uuid-2-aaaa-bbbb-dddddddddddd',
         number: 8,
         title: 'Numbered Done Epic',
         status: EpicStatus.Done,
@@ -730,13 +727,13 @@ describe('EpicListPage numbered display', () => {
     expect(numbers.some(n => n.textContent === '#8')).toBe(true)
   })
 
-  it('falls back to the truncated UUID when epic number is null', async () => {
+  it('displays the canonical epic number', async () => {
     _epicsData = [readyToStartEpic]
     renderPage()
     await waitForList()
 
     const numbers = screen.getAllByTestId('epic-number')
-    expect(numbers[0]).toHaveTextContent('#epic-re')
+    expect(numbers[0]).toHaveTextContent('#2')
   })
 })
 
@@ -792,27 +789,25 @@ describe('EpicListPage responsive markup', () => {
   it('keeps status badge and current/next issue number visible (state-bearing strings not truncated)', async () => {
     _epicsData = [
       makeEpic({
-        id: 'epic-running-long',
         title: 'A very long epic title that should wrap across multiple lines on narrow viewports without clipping the badge',
         progress: {
           deliveredCount: 0,
           totalIssueCount: 1,
           blockedIssues: [],
-          activeIssues: [{ id: 'i1', number: 12345, title: 'A current issue with a very long descriptive title that may otherwise be truncated', health: 'active' }],
+          activeIssues: [{ number: 12345, title: 'A current issue with a very long descriptive title that may otherwise be truncated', health: 'active' }],
           nextIssue: null,
           nextIssueReason: null,
           readyToMarkDone: false,
         },
       }),
       makeEpic({
-        id: 'epic-ready-long',
         title: 'Another long ready-to-start epic title used to confirm that wrapping also keeps the next issue number visible',
         progress: {
           deliveredCount: 0,
           totalIssueCount: 1,
           blockedIssues: [],
           activeIssues: [],
-          nextIssue: { id: 'i1', number: 67890, title: 'A queued next issue with a long descriptive title that may otherwise be truncated' },
+          nextIssue: { number: 67890, title: 'A queued next issue with a long descriptive title that may otherwise be truncated' },
           nextIssueReason: null,
           readyToMarkDone: false,
         },
@@ -994,26 +989,24 @@ describe('EpicListPage search and sort controls', () => {
 
   it('groups the data the server returned under the requested sort + filter', async () => {
     const authReady = makeEpic({
-      id: 'epic-auth-ready',
       title: 'Auth ready',
       progress: {
         deliveredCount: 1,
         totalIssueCount: 3,
         blockedIssues: [],
         activeIssues: [],
-        nextIssue: { id: 'issue-auth-next', number: 9, title: 'Next auth work' },
+        nextIssue: { number: 9, title: 'Next auth work' },
         nextIssueReason: null,
         readyToMarkDone: false,
       },
     })
     const authRunning = makeEpic({
-      id: 'epic-auth-running',
       title: 'Auth running',
       progress: {
         deliveredCount: 1,
         totalIssueCount: 3,
         blockedIssues: [],
-        activeIssues: [{ id: 'issue-auth-active', number: 4, title: 'Active auth work', health: 'active' }],
+        activeIssues: [{ number: 4, title: 'Active auth work', health: 'active' }],
         nextIssue: null,
         nextIssueReason: null,
         readyToMarkDone: false,

@@ -113,8 +113,7 @@ public class IssueQuerier : IScopedService
     /// minimal — number + title only — so the read surface does not
     /// grow into a full <see cref="IssueReadModel"/> companion.
     /// <para>
-    /// Unlike <see cref="GetIssueIdForWorkflowRunAsync"/>, this lookup is
-    /// intentionally status-independent: the detail read model is
+    /// This lookup is intentionally status-independent: the detail read model is
     /// correlation context for scripts and agents, so completed issues with
     /// preserved run history still need to resolve to their issue handle.
     /// </para>

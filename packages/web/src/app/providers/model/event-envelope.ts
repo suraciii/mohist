@@ -25,11 +25,9 @@ export function routeTranscriptEventName(name: string): string {
 /**
  * Wire shape from the SignalR bus. The server now sends the full CloudEvents
  * 1.0.2 envelope; the Web reads {@link payload} for the original event body
- * and merges {@link extensions} routing metadata (projectid, issueid, issue,
- * workflowrunid, epicid, stage, agentid, sessionid, runnerid — see
- * `EventCatalog.Lineage` on the server). The user-visible issue number rides
- * under the `issue` key (the unified protocol name; `issueno` is the legacy
- * name retained only on pre-change historical rows). Falls back to the
+ * and merges {@link extensions} routing metadata (projectid, issue, epic,
+ * workflowrunid, stage, agentid, sessionid, runnerid). The user-visible
+ * issue number rides under the `issue` key. Falls back to the
  * legacy raw-payload shape (where the event body sits in a top-level
  * `payload` field) for any unmigrated producers.
  *
@@ -55,8 +53,7 @@ function mergeIssueLineage(
 ): Record<string, unknown> {
   const extensionIssue = extensions?.issue
   const shouldAddIssueNumber = !hasIssueNumber(payload) && isNonEmptyString(extensionIssue)
-  const shouldAddIssueId = !isNonEmptyString(payload.issueId) && isNonEmptyString(extensions?.issueid)
-  if (!shouldAddIssueNumber && !shouldAddIssueId) return payload
+  if (!shouldAddIssueNumber) return payload
 
   const normalized = { ...payload }
   if (shouldAddIssueNumber) {
@@ -64,9 +61,6 @@ function mergeIssueLineage(
     if (Number.isFinite(issueNumber)) {
       normalized.issueNumber = issueNumber
     }
-  }
-  if (shouldAddIssueId) {
-    normalized.issueId = extensions.issueid
   }
   return normalized
 }
