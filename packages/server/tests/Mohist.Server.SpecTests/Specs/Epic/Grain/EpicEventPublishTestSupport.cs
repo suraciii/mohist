@@ -17,7 +17,7 @@ using DomainIssue = Mohist.Server.Issue.Domain.Issue;
 
 namespace Mohist.Server.SpecTests.Specs.Epic.Grain;
 
-internal sealed record AffiliationCall(string IssueId, string? EpicId, bool IsLink);
+internal sealed record AffiliationCall(string IssueKey, int? EpicNumber, bool IsLink);
 
 internal sealed class RecordingGrainFactory : IGrainFactory
 {
@@ -68,7 +68,7 @@ internal sealed class RecordingIssueGrain : IIssueGrain
 
     public string IssueId { get; }
 
-    public Task<string> CreateAsync(string projectId, int number, string title, string? body, IReadOnlyDictionary<string, string>? labels, string? priority, string? repositoryRef = null, string? issueId = null, string? risk = null, bool isDraft = false, string[]? attachmentIds = null, string? workflowProfileId = null, int[]? prerequisiteNumbers = null) => throw new NotSupportedException();
+    public Task<int> CreateAsync(string projectId, int number, string title, string? body, IReadOnlyDictionary<string, string>? labels, string? priority, string? repositoryRef = null, string? risk = null, bool isDraft = false, string[]? attachmentIds = null, string? workflowProfileId = null, int[]? prerequisiteNumbers = null) => throw new NotSupportedException();
     public Task<string> StartWorkAsync(WorkflowProjectContext? project = null) => throw new NotSupportedException();
     public Task EnsureWorkflowBindingAsync(string workflowRunId) => throw new NotSupportedException();
     public Task CompleteWorkAsync(string workflowRunId) => throw new NotSupportedException();
@@ -85,9 +85,9 @@ internal sealed class RecordingIssueGrain : IIssueGrain
     public Task<IssueCommentResult> AddCommentAsync(string body, string[]? attachmentIds = null) => throw new NotSupportedException();
     public Task DeactivateForTestAsync() => throw new NotSupportedException();
 
-    public Task SetEpicAffiliationAsync(string? epicId)
+    public Task SetEpicAffiliationAsync(int? epicNumber)
     {
-        _owner.AffiliationCalls.Add(new AffiliationCall(IssueId, epicId, IsLink: epicId is not null));
+        _owner.AffiliationCalls.Add(new AffiliationCall(IssueId, epicNumber, IsLink: epicNumber is not null));
         return Task.CompletedTask;
     }
 }
@@ -122,7 +122,7 @@ internal sealed class ThrowingAffiliationGrainFactory : IGrainFactory
 
 internal sealed class ThrowingIssueGrain : IIssueGrain
 {
-    public Task<string> CreateAsync(string projectId, int number, string title, string? body, IReadOnlyDictionary<string, string>? labels, string? priority, string? repositoryRef = null, string? issueId = null, string? risk = null, bool isDraft = false, string[]? attachmentIds = null, string? workflowProfileId = null, int[]? prerequisiteNumbers = null) => throw new NotSupportedException();
+    public Task<int> CreateAsync(string projectId, int number, string title, string? body, IReadOnlyDictionary<string, string>? labels, string? priority, string? repositoryRef = null, string? risk = null, bool isDraft = false, string[]? attachmentIds = null, string? workflowProfileId = null, int[]? prerequisiteNumbers = null) => throw new NotSupportedException();
     public Task<string> StartWorkAsync(WorkflowProjectContext? project = null) => throw new NotSupportedException();
     public Task EnsureWorkflowBindingAsync(string workflowRunId) => throw new NotSupportedException();
     public Task CompleteWorkAsync(string workflowRunId) => throw new NotSupportedException();
@@ -138,7 +138,7 @@ internal sealed class ThrowingIssueGrain : IIssueGrain
     public Task<IssueStartReadiness> GetStartReadinessAsync() => throw new NotSupportedException();
     public Task<IssueCommentResult> AddCommentAsync(string body, string[]? attachmentIds = null) => throw new NotSupportedException();
     public Task DeactivateForTestAsync() => throw new NotSupportedException();
-    public Task SetEpicAffiliationAsync(string? epicId) =>
+    public Task SetEpicAffiliationAsync(int? epicNumber) =>
         throw new InvalidOperationException("simulated silo failure on D5 push");
 }
 
@@ -185,8 +185,7 @@ internal static class EpicEventPublishTestSupport
     public static async Task SeedEpicAsync(
         TestDatabase database,
         string projectId = "project_1",
-        string epicId = "epic_1",
-        int number = 1,
+        int epicNumber = 1,
         string status = "idle",
         string priority = "p1")
     {
@@ -194,10 +193,9 @@ internal static class EpicEventPublishTestSupport
         await using var db = database.CreateDbContext();
         db.Epics.Add(new EpicRow
         {
-            Id = epicId,
             ProjectId = projectId,
-            Number = number,
-            Title = $"Epic {epicId}",
+            Number = epicNumber,
+            Title = $"Epic {epicNumber}",
             Description = "",
             Priority = priority,
             Status = status,
@@ -211,12 +209,10 @@ internal static class EpicEventPublishTestSupport
     public static async Task SeedIssueAsync(
         TestDatabase database,
         string projectId = "project_1",
-        string issueId = "issue_1",
         int issueNumber = 1)
     {
         var issue = new DomainIssue
         {
-            Id = issueId,
             ProjectId = projectId,
             Number = issueNumber,
             Title = $"Issue {issueNumber}",
@@ -227,7 +223,6 @@ internal static class EpicEventPublishTestSupport
         await using var db = database.CreateDbContext();
         db.Issues.Add(new IssueRow
         {
-            IssueId = issueId,
             ProjectId = projectId,
             Number = issueNumber,
             State = IssueStore.Serialize(issue),
@@ -235,14 +230,13 @@ internal static class EpicEventPublishTestSupport
         await db.SaveChangesAsync();
     }
 
-    public static async Task SeedLinkAsync(TestDatabase database, string issueId, int issueNumber)
+    public static async Task SeedLinkAsync(TestDatabase database, int issueNumber)
     {
         await using var db = database.CreateDbContext();
         db.EpicIssues.Add(new EpicIssueRow
         {
-            EpicId = "epic_1",
+            EpicNumber = 1,
             ProjectId = "project_1",
-            IssueId = issueId,
             IssueNumber = issueNumber,
             CreatedAt = new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero),
         });
@@ -285,8 +279,8 @@ internal sealed class ThrowingEventStore : IEventStore
         throw new InvalidOperationException("simulated IEventStore failure");
 
     public Task<IReadOnlyList<StoredCloudEvent>> ListAsync(string workflowRunId, int limit = 200, CancellationToken ct = default) => Task.FromResult<IReadOnlyList<StoredCloudEvent>>([]);
-    public Task<IReadOnlyList<StoredCloudEvent>> ListIssueEventsAsync(string issueId, int limit = 200, CancellationToken ct = default) => Task.FromResult<IReadOnlyList<StoredCloudEvent>>([]);
-    public Task<IReadOnlyList<StoredCloudEvent>> ListEpicEventsAsync(string epicId, int limit = 200, CancellationToken ct = default) => Task.FromResult<IReadOnlyList<StoredCloudEvent>>([]);
+    public Task<IReadOnlyList<StoredCloudEvent>> ListIssueEventsAsync(string projectId, int issueNumber, int limit = 200, CancellationToken ct = default) => Task.FromResult<IReadOnlyList<StoredCloudEvent>>([]);
+    public Task<IReadOnlyList<StoredCloudEvent>> ListEpicEventsAsync(string projectId, int epicNumber, int limit = 200, CancellationToken ct = default) => Task.FromResult<IReadOnlyList<StoredCloudEvent>>([]);
     public Task<IReadOnlyList<StoredCloudEvent>> ListAgentSessionEventsAsync(string sessionId, int limit = 200, CancellationToken ct = default) => Task.FromResult<IReadOnlyList<StoredCloudEvent>>([]);
     public Task MarkDispatchedAsync(EventOrigin origin, string source, long id, DateTimeOffset dispatchedAt, CancellationToken ct = default) => Task.CompletedTask;
     public Task<IReadOnlyList<UndeliveredEvent>> ListUndeliveredAsync(int limit = 100, CancellationToken ct = default) => Task.FromResult<IReadOnlyList<UndeliveredEvent>>([]);
