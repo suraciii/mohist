@@ -1,0 +1,143 @@
+T-001 progress notes
+====================
+
+Implementation landed in commit 98643eb86 "T-001 enforce project repository invariants".
+
+What exists
+-----------
+- Domain policy: packages/server/src/Mohist.Server/Project/Domain/RepositoryPolicy.cs
+  - Validate(list): empty-list / duplicate-name (case-insensitive) / missing-or-multiple default / blank name or gitUrl or baseBranch
+  - Normalize(list): one existing default preserved; multiple defaults → first marked wins; no default → first declaration; blank baseBranch becomes "main"
+  - CreateInitial(name, gitUrl, baseBranch): IsDefault=true, blank baseBranch → "main"
+  - BuildAdd: rejects duplicate (case-insensitive) and blank fields; sets IsDefault based on explicit SetDefault or absence of a current default
+  - BuildUpdate: requires at least one of gitUrl/baseBranch; name immutable
+  - BuildSetDefault: returns Previous=Next when target is already sole default (idempotent no-op)
+  - BuildRemove: rejects default deletion with code "repository_default_deletion_conflict"
+- ProjectGrain (Domain/Grains/ProjectGrain.cs) routes Create/Add/Update/SetDefault/Remove through the policy before persisting.
+- ProjectInfo.DefaultRepository resolves via Repositories.FirstOrDefault(r => r.IsDefault); no silent list-order fallback.
+- ProjectRoutes enforces the API contract: repository is required on POST /api/projects; PATCH /repositories/{name} disallows mixing setDefault with metadata and rejects empty patch; DELETE returns 409 for default deletion; 404 for unknown repository with project id; 409 for duplicate name with stable error code "repository_name_conflict".
+
+Test coverage
+-------------
+- Unit: packages/server/tests/Mohist.Server.UnitTests/Project/Domain/RepositoryPolicyTests.cs (32 tests)
+  - Validate empty / missing default / multiple defaults / duplicate case-insensitive / blank gitUrl / clean single-default
+  - Normalize no-default / multi-default / single-default preserved / blank baseBranch → main / order & names preserved / empty list
+  - CreateInitial sets IsDefault
+  - BuildAdd new (first → default) / duplicate (case-insensitive) / no setDefault / with setDefault / blank gitUrl / blank name / null baseBranch → main
+  - BuildUpdate only gitUrl / only baseBranch / empty patch / unknown name / name immutable
+  - BuildSetDefault non-default → only default / on current default no-op / unknown name
+  - BuildRemove non-default ok / default rejected with conflict code / unknown name
+- Spec (grain): packages/server/tests/Mohist.Server.SpecTests/Specs/Project/Grain/ProjectGrainSpecs.cs (25 tests) covers grain-level create-with-default, add preserves/rebinds default, duplicate case-insensitive, blank gitUrl / blank name / blank baseBranch defaulting to main, set-default switch / idempotent / unknown, remove non-default / default conflict / unknown, update metadata, empty patch, default query without fallback.
+- Spec (API): packages/server/tests/Mohist.Server.SpecTests/Specs/Project/Api/ProjectApiSpecs.cs (16 tests) covers POST /api/projects without repository / with repository, list repos preserving default, duplicate-name conflict, blank gitUrl bad request + no mutation, PATCH metadata, PATCH empty bad request, PATCH unknown 404, PATCH setDefault switching default, PATCH setDefault idempotent, DELETE non-default success, DELETE default 409, GET project query model returning flagged default.
+
+Verification
+------------
+- dotnet test packages/server/tests/Mohist.Server.UnitTests --filter "FullyQualifiedName~RepositoryPolicyTests" → 32/32 passed
+- dotnet test packages/server/tests/Mohist.Server.SpecTests --filter "FullyQualifiedName~ProjectGrainSpecs" → 25/25 passed
+- dotnet test packages/server/tests/Mohist.Server.SpecTests --filter "FullyQualifiedName~ProjectApiSpecs" → 16/16 passed
+
+Acceptance check
+----------------
+- Default-invariant preservation: covered by AddRepository_PreservesDefaultWhenNotSetDefault (grain) + PostRepository_WithGitUrl_AddsSecondRepositoryPreservingDefault (api).
+- Case-insensitive duplicate rejection: AddRepository_DuplicateNameDifferentCase_Rejected + PostRepository_DuplicateNameDifferentCase_ReturnsConflict + BuildAdd_DuplicateCaseInsensitive_RejectedWithoutMutation.
+- Metadata-only update: UpdateRepository_ChangesGitUrlAndBaseBranch + PatchRepository_MetadataUpdate_PersistsNewGitUrlAndBaseBranch + BuildUpdate_NameIsImmutable_NextNameRemainsOriginal.
+- Idempotent default selection: SetDefaultRepository_OnCurrentDefault_IsIdempotent + PatchRepository_SetDefaultOnCurrentDefault_IsIdempotent + BuildSetDefault_OnCurrentDefault_IsNoOp.
+- Default-deletion conflict: RemoveRepository_Default_RejectedAsConflict + DeleteRepository_Default_ReturnsConflictAndDoesNotMutate + BuildRemove_DefaultRepository_RejectedAsConflict.
+- Repository-less creation rejected: PostProject_WithoutRepository_ReturnsBadRequest.
+- Query model returns flagged default (no fallback): DefaultRepository_ReturnsFlaggedRepositoryWithoutFallback + GetProject_QueryModel_ReturnsFlaggedDefaultRepository.
+- Actionable envelopes for validation/duplicate/conflict/not-found: covered by 4-way mix in ProjectApiSpecs.
+
+Codebase patterns
+-----------------
+- Pure domain policies live under Project/Domain/ and are exercised by unit tests without grains or web.
+- Grains orchestrate DB persistence + policy; never duplicate validation.
+- Route handlers map domain outcomes to ApiResults.{BadRequest,Conflict,NotFound,Ok} with stable error codes ("repository_name_required", "repository_name_conflict", "repository_default_deletion_conflict", "repository_patch_mixed_scope", "repository_update_empty").
+- ProjectInfo.DefaultRepository returns the flagged default rather than the first list entry; AddRepositoryAsync that adds to a project without any default promotes the new repo via BuildAdd's "anyCurrentDefault==false" branch.
+
+Gotchas
+-------
+- BuildAdd returns IsDefault=true when the project has no current default. ApplyAdd in ProjectGrain then clears existing entries' IsDefault to keep validation happy; with no existing entries the loop is a no-op, so this is safe.
+- UpdateRepositoryAsync treats a no-change metadata patch as Unchanged (returns _project without persisting) when BuildUpdate reports Changed=false. Empty patch (neither gitUrl nor baseBranch supplied) still raises ArgumentException via BuildUpdate before this short-circuit, so the route's "Provide gitUrl and/or baseBranch" 400 fires correctly.
+- SetDefaultRepositoryAsync on the current default short-circuits before mutating the list, so a redundant setDefault call doesn't even rewrite the persisted JSON.
+- BaseBranch normalization lives in TryNormalizeBaseBranch: null/empty/whitespace all collapse to "main" without error.
+
+T-002 progress notes
+====================
+
+Implementation
+--------------
+- DatabaseInitializer now owns the shared startup sequence: EF MigrateAsync followed by ProjectRepositoryDataUpgrader. Program's primary and OTLP fallback hosts both invoke it before StartAsync.
+- ProjectRepositoryDataUpgrader reads Projects in Id order, preflights every row, then writes all changed RepositoriesJson values in one transaction. Any diagnostic aborts before mutation.
+- Historical declarations are validated with RepositoryPolicy before Normalize, except missing/multiple-default errors are intentionally repairable. This prevents Normalize's live-input base-branch defaulting from fabricating metadata during upgrade.
+- Valid repository lists are compared structurally and left byte-for-byte untouched. Missing defaults select the first declaration; multiple defaults retain the first marked declaration. No Project timestamp or identity is changed.
+- Diagnostics include Project name/id and policy declaration details; malformed JSON, null declarations, empty lists, blank/null fields, and case-insensitive duplicate names are unrecoverable.
+
+Coverage and verification
+-------------------------
+- ProjectRepositoryDataUpgraderSpecs uses MigratedSqliteTemplate and covers single/missing/multiple/valid defaults, metadata/order/identity/timestamp preservation, idempotency, all unrecoverable inputs, and all-row rollback.
+- DatabaseInitializerRepositoryUpgradeSpecs verifies the Migrate-then-upgrade startup sequence.
+- IssueWorkflowRepositoryResolutionSpecs covers an existing issue with no repository selection starting from the upgraded default and an in-flight workflow retaining the same persisted repository variables/run id.
+- Focused server specs: 24/24 passed; RepositoryPolicy unit regression: 32/32 passed.
+- Full `npm test`: CLI 865, server unit 1375, arch 22, server specs 2774, web 4665, runner 1014 all passed.
+
+T-003 progress notes
+====================
+
+Implementation
+--------------
+- ProjectRepositoryBootstrap helper: `packages/cli/Mohist.Cli/ProjectRepositoryBootstrap.cs`.
+  Returns `Outcome.Success(Result)` with (WorkTreeRoot, RepositoryName, GitUrl, BaseBranch) or `Outcome.Failure(string message)`. All work happens locally; no HTTP is issued on failure.
+- Bootstrap steps (matching design D5):
+  1. Canonicalize path with `Path.GetFullPath` (rejecting null/blank/whitespace as "--path is required").
+  2. Verify the path is a directory and contains `.git`.
+  3. `git -C <root> rev-parse --show-toplevel` to resolve the work-tree root.
+  4. `git -C <root> rev-parse HEAD` to confirm a reachable commit.
+  5. `git -C <root> remote get-url origin`; non-zero exit or blank stdout is rejected.
+  6. Try `git symbolic-ref --short refs/remotes/origin/HEAD` and strip `origin/`; if it fails or is blank, fall back to `git symbolic-ref --short HEAD`. A detached/no-branch state is an actionable failure.
+  7. Resource name = directory name of the resolved work-tree root.
+  8. The path, root, remote alias, and any local checkout data stay in CLI memory; only the resolved declaration is sent.
+- ProjectCommands.BuildCreate now requires `--path`; the action delegates to the bootstrap and posts `{ name, repository: { name, gitUrl, baseBranch } }` only on success. A failure writes a single actionable line to stderr and returns exit 1, with no HTTP request.
+
+Coverage and verification
+-------------------------
+- Unit: `ProjectRepositoryBootstrapTests` (13 tests) — missing/blank path, missing directory, missing .git, rev-parse failure, no commit, missing origin, blank origin URL, no resolvable branch, origin/HEAD branch with prefix stripped, fallback to checked-out branch when origin/HEAD is missing/blank, no path/remote/origin fields in the Result record.
+- Spec: `CliProjectCommandSpecs` (7 tests) — valid Git path posts repository-backed creation with no path fields; missing `--path` rejected before any HTTP; non-Git path rejected; missing `origin` rejected; unresolvable branch rejected; origin/HEAD falls back to checked-out branch; existing project list test still passes.
+- Server-side `ProjectCliTests.ProjectCreate_NameOnly_SendsNameOnlyBodyAndOmitsPathFields` now drives the CLI through the `--path` flow with a queued Git response, asserting the new repository declaration in the request body and still asserting no `path`/`effectivePath` fields.
+- Full `npm test`: CLI 883, server unit 1375, arch 22, server specs 2774, web 4665, runner 1014 all passed.
+
+Codebase patterns
+-----------------
+- The bootstrap helper uses the existing `ICommandExecutor` seam from `MohistCliApi`; no new process abstraction is introduced.
+- `FakeCommandExecutor` gained a `QueueForFile(fileName, exit, stdout, stderr)` helper for ordering scripted Git responses per call. Default behavior (empty queue) remains `(0, "", "")` so existing tests still pass.
+- Project creation requests without a successful bootstrap never reach `MohistCliApi.PrintPostAsync`, so the server-side path-rejection layer is the only contract — the CLI never includes the local path in the payload.
+
+Gotchas
+-------
+- The bootstrap pre-verifies `.git` on the canonicalized path before invoking any git command, so it returns an actionable error fast for non-work-tree directories without consuming git slots in the fake executor.
+- Origin/HEAD fallback treats a blank `origin/HEAD` reference (e.g. an unconfigured remote) as "fall back to checked-out branch"; it does not default to `main` like the optional `mo repo add --base-branch` argument does.
+- Description strings for `project create` were tuned to avoid containing the substring "repo" — the server-side `ProjectHelp_DoesNotListRepoSubcommand` spec asserts the absence of that literal, so wording like "local Git working tree" is safer than "local Git repository".
+
+T-004 progress notes
+====================
+
+Implementation
+--------------
+- `RepositoryCommands` now defaults repository command output to table and passes the repository table shape for every successful mutation.
+- `repo add` sends `setDefault`, normalizes omitted or blank `--base-branch` to `main`, and renders the updated Project's repository collection.
+- `repo update` exposes only `--git-url` and `--base-branch`; unsupported identity/default options are parser errors, and an empty metadata update fails locally before project resolution or HTTP dispatch.
+- `repo set-default` sends only `{ setDefault: true }`; idempotent server results render unchanged repository state.
+- `repo delete` renders the updated Project on success and preserves server conflict/not-found envelopes and non-zero exit codes.
+- The repository renderer accepts either a repository array or an updated Project object, displays name, Git URL, base branch, and explicit yes/no default status, and no longer displays legacy path/remote fields.
+
+Coverage and verification
+-------------------------
+- Baseline focused repository specs passed before refactoring: 32/32.
+- Updated `CliRepositoryCommandSpecs`: 41/41 passed, covering all five commands, both project scope flags and active scope, table/JSON output, default marking, `main` defaulting, atomic default selection payload, metadata-only update validation, unsupported update options, idempotent set-default output, successful/non-default delete, default-delete conflict, duplicate/not-found diagnostics, and updated-Project rendering.
+- Full CLI suite: 892/892 passed.
+- `dotnet build packages/cli/Mohist.Cli/Mohist.Cli.csproj --no-restore`: succeeded with 0 warnings and 0 errors.
+
+Codebase patterns
+-----------------
+- Repository mutation endpoints return Project-shaped data; keep extraction of `repositories` inside the renderer instead of duplicating it across command handlers.
+- Shared `Print*WithOutputAsync` helpers preserve successful JSON data and server errors; repository handlers only select the repository table shape.
+- Unsupported command options should be omitted from `System.CommandLine` definitions so parsing rejects them before actions and HTTP resolution run.

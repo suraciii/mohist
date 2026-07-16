@@ -40,7 +40,7 @@ public class ProjectCliTests
     }
 
     [Fact]
-    public async Task ProjectCreate_NameOnly_SendsNameOnlyBodyAndOmitsPathFields()
+    public async Task ProjectCreate_WithGitPath_SendsRepositoryBodyAndOmitsPathFields()
     {
         var files = new FakeFileSystem();
         var http = new RecordingHttpHandler();
@@ -50,16 +50,25 @@ public class ProjectCliTests
               "data": { "id": "proj_new", "name": "alpha" }
             }
             """);
+        const string workTreeRoot = "/work/alpha";
+        files.AddDirectory(workTreeRoot);
+        files.AddDirectory(Path.Combine(workTreeRoot, ".git"));
         var output = new StringWriter();
         var error = new StringWriter();
+        var executor = new ExpectedGitCommandExecutor([
+            new(["-C", workTreeRoot, "rev-parse", "--show-toplevel"], workTreeRoot, 0, workTreeRoot + "\n"),
+            new(["-C", workTreeRoot, "rev-parse", "HEAD"], workTreeRoot, 0, "abc123\n"),
+            new(["-C", workTreeRoot, "remote", "get-url", "origin"], workTreeRoot, 0, "git@example.com:team/alpha.git\n"),
+            new(["-C", workTreeRoot, "symbolic-ref", "--short", "refs/remotes/origin/HEAD"], workTreeRoot, 0, "origin/main\n"),
+        ]);
 
         var exitCode = await MohistCliCommands.RunAsync(
             new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
-            ["project", "create", "alpha"],
+            ["project", "create", "alpha", "--path", workTreeRoot],
             output,
             error,
             files,
-            new NoopCommandExecutor(),
+            executor,
             getUserHome: () => "/mohist-tests/user");
 
         Assert.Equal(0, exitCode);
@@ -68,9 +77,11 @@ public class ProjectCliTests
         Assert.Equal("/api/projects", request.RequestUri!.PathAndQuery);
         var body = http.RequestBodies.Single();
         Assert.Contains("\"name\": \"alpha\"", body);
+        Assert.Contains("\"repository\":", body);
+        Assert.Contains("\"gitUrl\": \"git@example.com:team/alpha.git\"", body);
         Assert.DoesNotContain("\"path\"", body);
         Assert.DoesNotContain("\"effectivePath\"", body);
-        Assert.DoesNotContain("\"baseBranch\"", body);
+        executor.AssertExpectedCommandsExecuted();
     }
 
     [Fact]
@@ -117,7 +128,7 @@ public class ProjectCliTests
     }
 
     [Fact]
-    public async Task RepositoryAdd_WithGitUrl_SendsGitUrlBaseBranchNameAndIsDefault()
+    public async Task RepositoryAdd_WithGitUrl_SendsGitUrlBaseBranchNameAndSetDefault()
     {
         var files = new FakeFileSystem();
         var statePath = Path.Combine(
@@ -159,7 +170,7 @@ public class ProjectCliTests
         Assert.Contains("\"name\": \"backend\"", body);
         Assert.Contains("\"gitUrl\": \"git@example.com:backend.git\"", body);
         Assert.Contains("\"baseBranch\": \"main\"", body);
-        Assert.Contains("\"isDefault\": true", body);
+        Assert.Contains("\"setDefault\": true", body);
         Assert.DoesNotContain("\"path\"", body);
         Assert.DoesNotContain("\"remote\"", body);
         Assert.DoesNotContain("\"resolvedPath\"", body);
@@ -268,6 +279,36 @@ public class ProjectCliTests
         public Task<(int ExitCode, string Stdout, string Stderr)> ExecuteAsync(string fileName, string[] args, string? workingDirectory = null, CancellationToken cancellationToken = default) =>
             Task.FromResult((0, "", ""));
     }
+
+    private sealed class ExpectedGitCommandExecutor : ICommandExecutor
+    {
+        private readonly Queue<ExpectedGitCommand> _commands;
+
+        public ExpectedGitCommandExecutor(IEnumerable<ExpectedGitCommand> commands)
+        {
+            _commands = new Queue<ExpectedGitCommand>(commands);
+        }
+
+        public Task<(int ExitCode, string Stdout, string Stderr)> ExecuteAsync(string fileName, string[] args, string? workingDirectory = null, CancellationToken cancellationToken = default)
+        {
+            var expected = _commands.Count > 0
+                ? _commands.Dequeue()
+                : throw new InvalidOperationException($"Unexpected command: {fileName} {string.Join(' ', args)}");
+            Assert.Equal("git", fileName);
+            Assert.Equal(expected.Args, args);
+            Assert.Equal(expected.WorkingDirectory, workingDirectory);
+            return Task.FromResult((expected.ExitCode, expected.Stdout, expected.Stderr));
+        }
+
+        public void AssertExpectedCommandsExecuted() => Assert.Empty(_commands);
+    }
+
+    private sealed record ExpectedGitCommand(
+        string[] Args,
+        string WorkingDirectory,
+        int ExitCode,
+        string Stdout,
+        string Stderr = "");
 
     private sealed class RecordingHttpHandler : HttpMessageHandler
     {

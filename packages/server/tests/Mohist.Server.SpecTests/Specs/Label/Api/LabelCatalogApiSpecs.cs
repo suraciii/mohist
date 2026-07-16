@@ -380,19 +380,10 @@ public class LabelCatalogApiSpecs
 
     private async Task<ProjectDto> CreateProjectAsync(string prefix)
     {
-        var project = await _client.PostDataAsync<ProjectDto>(
+        return await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>(
             "/api/projects",
-            new { name = $"cat-{prefix}-{Guid.NewGuid():N}" });
-        await _client.PostOkAsync(
-            $"/api/projects/{project.Id}/repositories",
-            new
-            {
-                name = "main",
-                gitUrl = $"file://{Guid.NewGuid():N}",
-                baseBranch = "main",
-                isDefault = true,
-            });
-        return project;
+            $"cat-{prefix}-{Guid.NewGuid():N}",
+            gitUrl: $"file://{Guid.NewGuid():N}");
     }
 
     private sealed record ProjectDto(string Id);

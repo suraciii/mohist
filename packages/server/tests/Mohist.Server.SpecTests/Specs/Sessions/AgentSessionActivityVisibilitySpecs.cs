@@ -282,7 +282,11 @@ public class AgentSessionActivityVisibilitySpecs
     {
         var raw = $"{prefix}-{Guid.NewGuid():N}".ToLowerInvariant();
         var name = raw.Length > 63 ? raw[..63] : raw;
-        using var response = await _client.PostAsJsonAsync("/api/projects", new { name });
+        using var response = await _client.PostAsJsonAsync("/api/projects", new
+        {
+            name,
+            repository = new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main" },
+        });
         response.EnsureSuccessStatusCode();
         var body = await response.Content.ReadFromJsonAsync<JsonElement>();
         return body.GetProperty("data").GetProperty("id").GetString()

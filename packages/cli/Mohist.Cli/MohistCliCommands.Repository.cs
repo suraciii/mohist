@@ -24,7 +24,7 @@ internal static class RepositoryCommands
         var cmd = new Command("list", "List repositories");
         cmd.Aliases.Add("ls");
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
-        var outputOpt = MohistCliCommands.OutputOption();
+        var outputOpt = MohistCliCommands.OutputOption("table");
         cmd.Options.Add(projectOpt);
         cmd.Options.Add(projectIdOpt);
         cmd.Options.Add(outputOpt);
@@ -60,7 +60,7 @@ internal static class RepositoryCommands
         var baseBranchOpt = new Option<string?>("--base-branch", "-b") { Description = "Base branch" };
         var setDefaultOpt = new Option<bool>("--set-default", "-d") { Description = "Set as default repository" };
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
-        var outputOpt = MohistCliCommands.OutputOption();
+        var outputOpt = MohistCliCommands.OutputOption("table");
         cmd.Arguments.Add(nameArg);
         cmd.Options.Add(gitUrlOpt);
         cmd.Options.Add(baseBranchOpt);
@@ -73,7 +73,7 @@ internal static class RepositoryCommands
             var name = ctx.GetValue(nameArg);
             var gitUrl = ctx.GetValue(gitUrlOpt);
             var baseBranch = ctx.GetValue(baseBranchOpt);
-            var isDefault = ctx.GetValue(setDefaultOpt);
+            var setDefault = ctx.GetValue(setDefaultOpt);
             var project = ctx.GetValue(projectOpt);
             var projectId = ctx.GetValue(projectIdOpt);
             var output = ctx.GetValue(outputOpt);
@@ -93,16 +93,19 @@ internal static class RepositoryCommands
             {
                 var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
                 if (resolveExit != 0) return resolveExit;
+                var payload = new Dictionary<string, object?>
+                {
+                    ["name"] = name,
+                    ["gitUrl"] = gitUrl,
+                    ["baseBranch"] = string.IsNullOrWhiteSpace(baseBranch) ? "main" : baseBranch,
+                };
+                if (setDefault)
+                    payload["setDefault"] = true;
                 return await api.PrintPostWithOutputAsync(
                     ProjectRepositoriesPath(resolvedProjectId),
-                    new
-                    {
-                        name,
-                        gitUrl,
-                        baseBranch,
-                        isDefault,
-                    },
-                    mode);
+                    payload,
+                    mode,
+                    nameof(MohistCliApi.TableShape.RepoList));
             }
         });
         return cmd;
@@ -114,15 +117,11 @@ internal static class RepositoryCommands
         var nameArg = new Argument<string>("name") { Description = "Repository name" };
         var gitUrlOpt = new Option<string?>("--git-url", "-u") { Description = "Git URL" };
         var baseBranchOpt = new Option<string?>("--base-branch", "-b") { Description = "Base branch" };
-        var newNameOpt = new Option<string?>("--new-name", "-n") { Description = "New repository name" };
-        var setDefaultOpt = new Option<bool>("--set-default", "-d") { Description = "Set as default repository" };
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
-        var outputOpt = MohistCliCommands.OutputOption();
+        var outputOpt = MohistCliCommands.OutputOption("table");
         cmd.Arguments.Add(nameArg);
         cmd.Options.Add(gitUrlOpt);
         cmd.Options.Add(baseBranchOpt);
-        cmd.Options.Add(newNameOpt);
-        cmd.Options.Add(setDefaultOpt);
         cmd.Options.Add(projectOpt);
         cmd.Options.Add(projectIdOpt);
         cmd.Options.Add(outputOpt);
@@ -131,8 +130,6 @@ internal static class RepositoryCommands
             var name = ctx.GetValue(nameArg);
             var gitUrl = ctx.GetValue(gitUrlOpt);
             var baseBranch = ctx.GetValue(baseBranchOpt);
-            var newName = ctx.GetValue(newNameOpt);
-            var setDefault = ctx.GetValue(setDefaultOpt);
             var project = ctx.GetValue(projectOpt);
             var projectId = ctx.GetValue(projectIdOpt);
             var output = ctx.GetValue(outputOpt);
@@ -145,11 +142,12 @@ internal static class RepositoryCommands
                 payload["gitUrl"] = gitUrl;
             if (ctx.GetResult(baseBranchOpt) is not null)
                 payload["baseBranch"] = baseBranch;
-            if (ctx.GetResult(newNameOpt) is not null)
-                payload["newName"] = newName;
-            var setDefaultResult = ctx.GetResult(setDefaultOpt);
-            if (setDefaultResult is not null && !setDefaultResult.Implicit)
-                payload["setDefault"] = setDefault;
+
+            if (payload.Count == 0)
+            {
+                api.Error.WriteLine($"Repository '{name}' requires --git-url and/or --base-branch to update");
+                return Task.FromResult(1);
+            }
 
             return UpdateAsync();
 
@@ -160,7 +158,8 @@ internal static class RepositoryCommands
                 return await api.PrintPatchWithOutputAsync(
                     $"{ProjectRepositoriesPath(resolvedProjectId)}/{MohistCliCommands.Escape(name!)}",
                     payload,
-                    mode);
+                    mode,
+                    nameof(MohistCliApi.TableShape.RepoList));
             }
         });
         return cmd;
@@ -171,7 +170,7 @@ internal static class RepositoryCommands
         var cmd = new Command("set-default", "Set a repository as the project default");
         var nameArg = new Argument<string>("name") { Description = "Repository name" };
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
-        var outputOpt = MohistCliCommands.OutputOption();
+        var outputOpt = MohistCliCommands.OutputOption("table");
         cmd.Arguments.Add(nameArg);
         cmd.Options.Add(projectOpt);
         cmd.Options.Add(projectIdOpt);
@@ -195,7 +194,8 @@ internal static class RepositoryCommands
                 return await api.PrintPatchWithOutputAsync(
                     $"{ProjectRepositoriesPath(resolvedProjectId)}/{MohistCliCommands.Escape(name!)}",
                     new { setDefault = true },
-                    mode);
+                    mode,
+                    nameof(MohistCliApi.TableShape.RepoList));
             }
         });
         return cmd;
@@ -208,7 +208,7 @@ internal static class RepositoryCommands
         cmd.Aliases.Add("rm");
         var nameArg = new Argument<string>("name") { Description = "Repository name" };
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
-        var outputOpt = MohistCliCommands.OutputOption();
+        var outputOpt = MohistCliCommands.OutputOption("table");
         cmd.Arguments.Add(nameArg);
         cmd.Options.Add(projectOpt);
         cmd.Options.Add(projectIdOpt);
@@ -231,7 +231,8 @@ internal static class RepositoryCommands
                 if (resolveExit != 0) return resolveExit;
                 return await api.PrintDeleteWithOutputAsync(
                     $"{ProjectRepositoriesPath(resolvedProjectId)}/{MohistCliCommands.Escape(name!)}",
-                    mode);
+                    mode,
+                    nameof(MohistCliApi.TableShape.RepoList));
             }
         });
         return cmd;

@@ -143,7 +143,7 @@ mo project workflow template delete <模板id>
 ## Project（项目）
 
 ```
-mo project create <名> [--path <仓库路径>]   --path 的仓库注册为 default 仓库
+mo project create <名> --path <仓库路径>     --path 的仓库注册为 default 仓库
 mo project list
 mo project get <名或id>
 mo project use <名或id>            设置当前项目
@@ -154,7 +154,7 @@ mo project workflow ...            工作流配置（template / profile，见上
 
 ## Repository（仓库）
 
-一个 project 可声明多个仓库作为执行资源（产品的 server 与 web 是两个代码库时，同一 project 声明两个仓库；issue 用 `--repo` 指定目标仓库，缺省落 default 仓库）。仓库是项目作用域内的资源，用 `--project` 限定作用域（对标 `--namespace`），不嵌套在 project 命令下。产品语义见 [仓库](repositories.md)。
+一个 project 可声明多个仓库作为执行资源（产品的 server 与 web 是两个代码库时，同一 project 声明两个仓库）。当前 issue 一律使用 default 仓库。仓库是项目作用域内的资源，用 `--project` 限定作用域（对标 `--namespace`），不嵌套在 project 命令下。产品语义见 [仓库](repositories.md)。
 
 ```
 mo repo list [--project <名>]
@@ -169,8 +169,8 @@ mo repo delete <名> [--project <名>]
 ## Issue（工作项）
 
 ```
-mo issue create <标题> [--repo <仓库>] [--parent <编号>] [options]
-mo issue list [--repo <仓库>] [--parent <编号>] [options]
+mo issue create <标题> [--parent <编号>] [options]
+mo issue list [--parent <编号>] [options]
 mo issue get <编号>
 mo issue update <编号> [options]
 mo issue start <编号>
@@ -220,7 +220,7 @@ mo issue rerun <number> --from-stage <stage>
 
 Issue 的工作流快捷方式（approve/retry/rerun/...）是对应 `mo workflow` 命令的人类便利别名，行为一致。
 
-`--repo` 指定目标仓库（缺省 default 仓库，见「Repository」节）；`--parent` 创建/挂靠子 issue，`mo issue update <编号> --parent none` 解除。复合 issue 的完整语义见 [复合 Issue 与子 Issue](sub-issues.md)。
+`--parent` 创建/挂靠子 issue，`mo issue update <编号> --parent none` 解除。Issue 的仓库选择尚未进入命令面，当前工作流使用 Project 的 default 仓库。复合 issue 的完整语义见 [复合 Issue 与子 Issue](sub-issues.md)。
 
 ## Epic（产品目标）
 

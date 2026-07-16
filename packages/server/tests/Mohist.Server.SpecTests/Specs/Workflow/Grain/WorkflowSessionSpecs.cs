@@ -34,7 +34,7 @@ public class WorkflowSessionSpecs
         var project = await _client.PostProjectWithRepositoryAsync<ProjectDto>(
             "/api/projects",
             new { name = $"all-disabled-start-{Guid.NewGuid():N}" },
-            new { name = "main", gitUrl = "https://example.com/repo.git", baseBranch = "main", isDefault = true });
+            new { name = "main", gitUrl = "https://example.com/repo.git", baseBranch = "main" });
         var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new
         {
             title = "Persisted issue in all-disabled project",
@@ -181,7 +181,7 @@ public class WorkflowSessionSpecs
         await _client.PostOkAsync(RunnerAgentSessionAttachPath(_runnerId, project.Id, workflowRunId, sessionName), new
         {
             agentSessionId = sessionId,
-            workDir = project.Path,
+            workDir = $"/workspaces/{project.Id}",
             processPid = 1234
         });
         await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(_runnerId, project.Id, workflowRunId, sessionName), new
@@ -256,16 +256,13 @@ public class WorkflowSessionSpecs
     private async Task<(ProjectDto Project, IssueDto Issue, string WorkflowRunId)> CreateIssueWorkflowAsync(string title)
     {
         var projectName = $"wfs-{Guid.NewGuid():N}";
-        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new
-        {
-            name = projectName,
-        });
+        var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", projectName);
         await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new
         {
             name = "main",
             gitUrl = "https://example.com/repo.git",
             baseBranch = "main",
-            isDefault = true
+            setDefault = true
         });
         var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new
         {
@@ -340,7 +337,7 @@ public class WorkflowSessionSpecs
     private sealed record WorkflowSessionUsageDto(long? TotalTokens);
     private sealed record WorkflowSessionDetailDto(WorkflowSessionDto Session, IssueSessionTranscriptTestResponse Transcript);
     private sealed record SessionEventDto(long Sequence, string Type, string? WorkId);
-    private sealed record ProjectDto(string Id, string Name, string Path, string BaseBranch);
+    private sealed record ProjectDto(string Id, string Name);
     private sealed record IssueDto(
         string Id,
         int Number,

@@ -50,7 +50,7 @@ public class RuntimeEntrySpecs
     public async Task AgentStatus_WhenRunnerRegisteredWithoutActiveWork_ReportsIdleRuntime()
     {
         var projectName = $"runtime-status-{Guid.NewGuid():N}";
-        var project = await _fixture.Client.PostDataAsync<ProjectDto>("/api/projects", new { name = projectName, path = "/mohist-tests/projects/runtime-entry", baseBranch = "main" });
+        var project = await _fixture.Client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", projectName);
 
         // Capacity is summed across every online runner in the global registry,
         // which is shared across the integration collection. Drain it so the
@@ -91,7 +91,7 @@ public class RuntimeEntrySpecs
     public async Task AgentStatus_WhenGlobalRunnerRegistered_ReportsRunnerAvailableForProject()
     {
         var projectName = $"runtime-global-runner-{Guid.NewGuid():N}";
-        var project = await _fixture.Client.PostDataAsync<ProjectDto>("/api/projects", new { name = projectName, path = "/mohist-tests/projects/runtime-entry", baseBranch = "main" });
+        var project = await _fixture.Client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", projectName);
         var runnerId = $"runtime-global-runner-{Guid.NewGuid():N}";
 
         try
@@ -116,7 +116,7 @@ public class RuntimeEntrySpecs
     public async Task AgentStatus_WhenRunnerRegisteredButOffline_DoesNotReportAvailableCapacity()
     {
         var projectName = $"runtime-offline-runner-{Guid.NewGuid():N}";
-        var project = await _fixture.Client.PostDataAsync<ProjectDto>("/api/projects", new { name = projectName, path = "/mohist-tests/projects/runtime-entry", baseBranch = "main" });
+        var project = await _fixture.Client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", projectName);
         var runnerId = $"runtime-offline-runner-{Guid.NewGuid():N}";
 
         var registry = _fixture.Grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
@@ -141,7 +141,7 @@ public class RuntimeEntrySpecs
     public async Task AgentStatus_WhenRunnerUnregistered_HeartbeatRefreshesInfoButPollRestoresPresence()
     {
         var projectName = $"runtime-presence-repair-{Guid.NewGuid():N}";
-        var project = await _fixture.Client.PostDataAsync<ProjectDto>("/api/projects", new { name = projectName, path = "/mohist-tests/projects/runtime-entry", baseBranch = "main" });
+        var project = await _fixture.Client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", projectName);
         var runnerId = $"runtime-presence-repair-{Guid.NewGuid():N}";
 
         try
@@ -182,7 +182,7 @@ public class RuntimeEntrySpecs
     public async Task RunnerHeartbeat_WithNoBody_RefreshesRegisteredRunner()
     {
         var projectName = $"runtime-empty-heartbeat-{Guid.NewGuid():N}";
-        var project = await _fixture.Client.PostDataAsync<ProjectDto>("/api/projects", new { name = projectName, path = "/mohist-tests/projects/runtime-entry", baseBranch = "main" });
+        var project = await _fixture.Client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", projectName);
         var runnerId = $"runtime-empty-heartbeat-{Guid.NewGuid():N}";
 
         try
@@ -230,7 +230,7 @@ public class RuntimeEntrySpecs
         // /agent/status.capacity.active must follow the runner active-works
         // count, not the (smaller) AgentSession count.
         var projectName = $"runtime-divergence-{Guid.NewGuid():N}";
-        var project = await _fixture.Client.PostDataAsync<ProjectDto>("/api/projects", new { name = projectName, path = "/mohist-tests/projects/runtime-entry", baseBranch = "main" });
+        var project = await _fixture.Client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", projectName);
         var registry = _fixture.Grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
         foreach (var staleId in await registry.ListRunnerIdsAsync())
             await registry.UnregisterAsync(staleId);
@@ -352,7 +352,7 @@ public class RuntimeEntrySpecs
     private sealed record AgentStatusDto(bool Running, bool RunnerAvailable, bool EmbeddedRunnerEnabled, string? RunnerMessage, RunnerDto[] Runners, AgentCapacityDto Capacity, System.Text.Json.JsonElement? ActiveAgents = null);
     private sealed record AgentCapacityDto(int Active, int Max);
     private sealed record RunnerDto(string Id, string? Kind = null, int Active = 0, int Max = 0);
-    private sealed record ProjectDto(string Id, string Name, string Path, string BaseBranch);
+    private sealed record ProjectDto(string Id, string Name);
     private sealed record IssueDto(int Number, string Title);
     private sealed record ApiErrorDto(bool Success, string? Error);
 

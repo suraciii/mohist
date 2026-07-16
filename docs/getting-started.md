@@ -70,8 +70,8 @@ Web UI 上：
 
 1. 点 **Create Project**
 2. 填项目名（如 `my-app`）
-3. 指向你已有的 git 仓库路径（必须已经初始化了 git，且至少有一个 commit）
-4. 确认 base branch（默认从 `main` 或 `master` 自动检测）
+3. 填初始仓库的资源名（如 `server`）和 Git URL
+4. 确认 base branch（默认 `main`）
 
 或用 CLI：
 

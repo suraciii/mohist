@@ -9,6 +9,7 @@ using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Workflow.Services;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using System.Text.Json;
+using RepositoryPolicy = Mohist.Server.Project.Domain.RepositoryPolicy;
 
 namespace Mohist.Server.Project.Grains;
 
@@ -41,20 +42,48 @@ public class ProjectGrain : Grain, IProjectGrain
 
     public Task<ProjectInfo?> GetAsync() => Task.FromResult(_project);
 
-    public async Task<ProjectInfo> CreateAsync(string name)
+    public async Task<ProjectInfo> CreateAsync(string name, RepositoryInfo initialRepository)
     {
-        name = ProjectName.NormalizeOrThrow(name);
-
         if (_project is not null)
             throw new InvalidOperationException($"Project '{GrainKey}' already exists");
 
+        name = ProjectName.NormalizeOrThrow(name);
+
+        if (initialRepository is null)
+            throw new ArgumentNullException(nameof(initialRepository));
+
+        if (string.IsNullOrWhiteSpace(initialRepository.Name))
+            throw new ArgumentException("Repository name is required.", nameof(initialRepository));
+        if (string.IsNullOrWhiteSpace(initialRepository.GitUrl))
+            throw new ArgumentException("gitUrl is required.", nameof(initialRepository));
+
+        var initial = RepositoryPolicy.CreateInitial(
+            initialRepository.Name,
+            initialRepository.GitUrl,
+            string.IsNullOrWhiteSpace(initialRepository.BaseBranch) ? null : initialRepository.BaseBranch);
+
+        var validation = RepositoryPolicy.Validate([initial]);
+        if (validation.Count > 0)
+            throw new ArgumentException(string.Join("; ", validation.Select(v => v.Message)));
+
         var now = Now();
         var nowText = now.UtcDateTime.ToString("o");
+        var serialized = JSON.Serialize(new List<RepositoryInfo>
+        {
+            new()
+            {
+                Name = initial.Name,
+                GitUrl = initial.GitUrl,
+                BaseBranch = initial.BaseBranch,
+                IsDefault = initial.IsDefault,
+            },
+        });
+
         var entry = new ProjectRow
         {
             Id = GrainKey,
             Name = name,
-            RepositoriesJson = "[]",
+            RepositoriesJson = serialized,
             CreatedAt = now,
             UpdatedAt = now,
         };
@@ -66,14 +95,23 @@ public class ProjectGrain : Grain, IProjectGrain
         _project = new ProjectInfo
         {
             Id = GrainKey,
-            Name = name,
+            Name = entry.Name,
             CreatedAt = nowText,
             UpdatedAt = nowText,
-            Repositories = [],
+            Repositories =
+            [
+                new RepositoryInfo
+                {
+                    Name = initial.Name,
+                    GitUrl = initial.GitUrl,
+                    BaseBranch = initial.BaseBranch,
+                    IsDefault = initial.IsDefault,
+                },
+            ],
             Variables = ProjectVariablesBag.Empty,
         };
 
-        _log.LogInformation("Project {Name} created", name);
+        _log.LogInformation("Project {Name} created", entry.Name);
         return _project;
     }
 
@@ -114,68 +152,73 @@ public class ProjectGrain : Grain, IProjectGrain
         return Task.FromResult(_project?.Repositories ?? []);
     }
 
-    public async Task<ProjectInfo?> AddRepositoryAsync(string repoName, string gitUrl, string? baseBranch, bool? isDefault = null)
+    public async Task<ProjectInfo?> AddRepositoryAsync(string repoName, string gitUrl, string? baseBranch, bool? setDefault = null)
     {
         if (_project is null) return null;
-        if (string.IsNullOrWhiteSpace(gitUrl))
-            throw new ArgumentException("gitUrl is required");
-        if (_project.Repositories.Any(r => string.Equals(r.Name, repoName, StringComparison.OrdinalIgnoreCase)))
-            throw new InvalidOperationException($"Repository '{repoName}' already exists");
 
-        var makeDefault = isDefault ?? _project.Repositories.Count == 0;
-        if (makeDefault)
-        {
-            foreach (var r in _project.Repositories)
-                r.IsDefault = false;
-        }
+        var current = SnapshotNormalized(_project.Repositories);
+        var build = RepositoryPolicy.BuildAdd(
+            new RepositoryPolicy.TransitionInput(repoName, gitUrl, baseBranch, setDefault),
+            current);
 
-        _project.Repositories.Add(new RepositoryInfo
-        {
-            Name = repoName,
-            GitUrl = gitUrl,
-            BaseBranch = baseBranch ?? "main",
-            IsDefault = makeDefault,
-        });
+        if (!build.IsSuccess)
+            throw new ArgumentException(string.Join("; ", build.Errors.Select(e => e.Message)));
 
-        _project.UpdatedAt = Now().UtcDateTime.ToString("o");
-        await PersistRepositoriesAsync();
+        var added = build.Value;
+        var next = ApplyAdd(current, added, setDefault ?? false);
+        var validation = RepositoryPolicy.Validate(next);
+        if (validation.Count > 0)
+            throw new ArgumentException(string.Join("; ", validation.Select(v => v.Message)));
+
+        var repositories = ToRepositoryInfos(next);
+        var updatedAt = Now();
+        if (!await PersistRepositoriesAsync(repositories, updatedAt))
+            return null;
+
+        _project.Repositories = repositories;
+        _project.UpdatedAt = updatedAt.UtcDateTime.ToString("o");
         return _project;
     }
 
-    public async Task<ProjectInfo?> UpdateRepositoryAsync(string repoName, string? newName = null, string? gitUrl = null, string? baseBranch = null, bool? isDefault = null)
+    public async Task<ProjectInfo?> UpdateRepositoryAsync(string repoName, string? gitUrl = null, string? baseBranch = null)
     {
         if (_project is null) return null;
 
-        var repo = _project.Repositories.FirstOrDefault(r => string.Equals(r.Name, repoName, StringComparison.OrdinalIgnoreCase));
-        if (repo is null) return null;
+        var current = SnapshotNormalized(_project.Repositories);
+        var build = RepositoryPolicy.BuildUpdate(
+            repoName,
+            new RepositoryPolicy.TransitionInput(repoName, gitUrl, baseBranch),
+            current);
 
-        if (!string.IsNullOrWhiteSpace(newName) && !string.Equals(newName, repo.Name, StringComparison.OrdinalIgnoreCase))
+        if (!build.IsSuccess)
         {
-            if (_project.Repositories.Any(r => string.Equals(r.Name, newName, StringComparison.OrdinalIgnoreCase) && !string.Equals(r.Name, repoName, StringComparison.OrdinalIgnoreCase)))
-                throw new InvalidOperationException($"Repository '{newName}' already exists");
-            repo.Name = newName;
+            if (build.Errors.Any(e => e.Code == "name"))
+            {
+                var nameError = build.Errors.First(e => e.Code == "name").Message;
+                if (nameError.Contains("not found", StringComparison.OrdinalIgnoreCase))
+                    return null;
+            }
+            throw new ArgumentException(string.Join("; ", build.Errors.Select(e => e.Message)));
         }
 
-        if (!string.IsNullOrWhiteSpace(gitUrl))
-            repo.GitUrl = gitUrl;
+        var update = build.Value;
+        if (!update.Changed)
+            return _project;
 
-        if (baseBranch is not null)
-            repo.BaseBranch = string.IsNullOrWhiteSpace(baseBranch) ? "main" : baseBranch;
+        var next = current
+            .Select(r => string.Equals(r.Name, repoName, StringComparison.OrdinalIgnoreCase) ? update.Next : r)
+            .ToList();
+        var validation = RepositoryPolicy.Validate(next);
+        if (validation.Count > 0)
+            throw new ArgumentException(string.Join("; ", validation.Select(v => v.Message)));
 
-        if (isDefault == true)
-        {
-            foreach (var r in _project.Repositories)
-                r.IsDefault = false;
-            repo.IsDefault = true;
-        }
-        else if (isDefault == false && repo.IsDefault && _project.Repositories.Count > 1)
-        {
-            repo.IsDefault = false;
-            _project.Repositories[0].IsDefault = true;
-        }
+        var repositories = ToRepositoryInfos(next);
+        var updatedAt = Now();
+        if (!await PersistRepositoriesAsync(repositories, updatedAt))
+            return null;
 
-        _project.UpdatedAt = Now().UtcDateTime.ToString("o");
-        await PersistRepositoriesAsync();
+        _project.Repositories = repositories;
+        _project.UpdatedAt = updatedAt.UtcDateTime.ToString("o");
         return _project;
     }
 
@@ -183,15 +226,32 @@ public class ProjectGrain : Grain, IProjectGrain
     {
         if (_project is null) return null;
 
-        var repo = _project.Repositories.FirstOrDefault(r => string.Equals(r.Name, repoName, StringComparison.OrdinalIgnoreCase));
-        if (repo is null) return null;
+        var current = SnapshotNormalized(_project.Repositories);
+        var build = RepositoryPolicy.BuildRemove(repoName, current);
 
-        _project.Repositories.Remove(repo);
-        if (repo.IsDefault && _project.Repositories.Count > 0)
-            _project.Repositories[0].IsDefault = true;
+        if (!build.IsSuccess)
+        {
+            if (build.Errors.Any(e => e.Code == "repository_default_deletion_conflict"))
+                throw new InvalidOperationException(build.Errors.First().Message);
+            if (build.Errors.Any(e => e.Code == "name" && e.Message.Contains("not found", StringComparison.OrdinalIgnoreCase)))
+                return null;
+            throw new ArgumentException(string.Join("; ", build.Errors.Select(e => e.Message)));
+        }
 
-        _project.UpdatedAt = Now().UtcDateTime.ToString("o");
-        await PersistRepositoriesAsync();
+        var next = current
+            .Where(r => !string.Equals(r.Name, repoName, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        var validation = RepositoryPolicy.Validate(next);
+        if (validation.Count > 0)
+            throw new ArgumentException(string.Join("; ", validation.Select(v => v.Message)));
+
+        var repositories = ToRepositoryInfos(next);
+        var updatedAt = Now();
+        if (!await PersistRepositoriesAsync(repositories, updatedAt))
+            return null;
+
+        _project.Repositories = repositories;
+        _project.UpdatedAt = updatedAt.UtcDateTime.ToString("o");
         return _project;
     }
 
@@ -199,36 +259,57 @@ public class ProjectGrain : Grain, IProjectGrain
     {
         if (_project is null) return null;
 
-        var found = false;
-        foreach (var repo in _project.Repositories)
+        var current = SnapshotNormalized(_project.Repositories);
+        var build = RepositoryPolicy.BuildSetDefault(repoName, current);
+
+        if (!build.IsSuccess)
         {
-            if (string.Equals(repo.Name, repoName, StringComparison.OrdinalIgnoreCase))
+            if (build.Errors.Any(e => e.Code == "name"))
             {
-                repo.IsDefault = true;
-                found = true;
+                var nameError = build.Errors.First(e => e.Code == "name").Message;
+                if (nameError.Contains("not found", StringComparison.OrdinalIgnoreCase))
+                    return null;
             }
-            else
-            {
-                repo.IsDefault = false;
-            }
+            throw new ArgumentException(string.Join("; ", build.Errors.Select(e => e.Message)));
         }
 
-        if (!found) return null;
+        var (_, next) = build.Value;
+        var previousDefault = current.Single(r => r.IsDefault);
+        if (string.Equals(previousDefault.Name, next.Name, StringComparison.OrdinalIgnoreCase)
+            && current.Count(r => r.IsDefault) == 1)
+            return _project;
 
-        _project.UpdatedAt = Now().UtcDateTime.ToString("o");
-        await PersistRepositoriesAsync();
+        var updated = current
+            .Select(r => r with { IsDefault = false })
+            .Select(r => string.Equals(r.Name, next.Name, StringComparison.OrdinalIgnoreCase) ? next : r)
+            .ToList();
+
+        var validation = RepositoryPolicy.Validate(updated);
+        if (validation.Count > 0)
+            throw new ArgumentException(string.Join("; ", validation.Select(v => v.Message)));
+
+        var repositories = ToRepositoryInfos(updated);
+        var updatedAt = Now();
+        if (!await PersistRepositoriesAsync(repositories, updatedAt))
+            return null;
+
+        _project.Repositories = repositories;
+        _project.UpdatedAt = updatedAt.UtcDateTime.ToString("o");
         return _project;
     }
 
-    private async Task PersistRepositoriesAsync()
+    private async Task<bool> PersistRepositoriesAsync(
+        IReadOnlyList<RepositoryInfo> repositories,
+        DateTimeOffset updatedAt)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
         var entry = await db.Projects.FindAsync(GrainKey);
-        if (entry is null) return;
+        if (entry is null) return false;
 
-        entry.RepositoriesJson = JSON.Serialize(_project!.Repositories);
-        entry.UpdatedAt = Now();
+        entry.RepositoriesJson = JSON.Serialize(repositories);
+        entry.UpdatedAt = updatedAt;
         await db.SaveChangesAsync();
+        return true;
     }
 
     public Task<ProjectVariablesBag?> GetVariablesAsync()
@@ -321,4 +402,50 @@ public class ProjectGrain : Grain, IProjectGrain
 
         return JSON.SerializeToElement(values);
     }
+
+    private static IReadOnlyList<RepositoryPolicy.NormalizedRepository> SnapshotNormalized(
+        IEnumerable<RepositoryInfo> repositories) =>
+        repositories
+            .Select(r => new RepositoryPolicy.NormalizedRepository(
+                r.Name,
+                r.GitUrl,
+                r.BaseBranch,
+                r.IsDefault))
+            .ToList();
+
+    private static List<RepositoryInfo> ToRepositoryInfos(
+        IEnumerable<RepositoryPolicy.NormalizedRepository> repositories) =>
+        repositories
+            .Select(repository => new RepositoryInfo
+            {
+                Name = repository.Name,
+                GitUrl = repository.GitUrl,
+                BaseBranch = repository.BaseBranch,
+                IsDefault = repository.IsDefault,
+            })
+            .ToList();
+
+    private static List<RepositoryPolicy.NormalizedRepository> ApplyAdd(
+        IReadOnlyList<RepositoryPolicy.NormalizedRepository> current,
+        RepositoryPolicy.NormalizedRepository added,
+        bool setDefault)
+    {
+        var next = current.ToList();
+        next.Add(added);
+
+        if (setDefault)
+        {
+            for (var i = 0; i < next.Count; i++)
+                next[i] = next[i] with { IsDefault = false };
+            next[^1] = next[^1] with { IsDefault = true };
+        }
+        else if (added.IsDefault)
+        {
+            for (var i = 0; i < next.Count - 1; i++)
+                next[i] = next[i] with { IsDefault = false };
+        }
+
+        return next;
+    }
+
 }

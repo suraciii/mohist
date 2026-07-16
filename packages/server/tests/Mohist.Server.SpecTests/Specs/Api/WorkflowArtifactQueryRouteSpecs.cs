@@ -31,13 +31,13 @@ public class WorkflowArtifactQueryRouteSpecs
         var projectName = UniqueProjectName("artq");
         var projectResponse = await _fixture.Client.PostAsJsonAsync(
             "/api/projects",
-            new { name = projectName });
+            new
+            {
+                name = projectName,
+                repository = new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main" },
+            });
         var projectJson = await projectResponse.Content.ReadFromJsonAsync<JsonElement>();
         var projectId = projectJson.GetProperty("data").GetProperty("id").GetString()!;
-
-        await _fixture.Client.PostAsJsonAsync(
-            $"/api/projects/{projectId}/repositories",
-            new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
 
         var issueResponse = await _fixture.Client.PostAsJsonAsync(
             $"/api/projects/{projectId}/issues",
@@ -216,13 +216,13 @@ public class WorkflowArtifactQueryRouteSpecs
         var projectName = UniqueProjectName("no-wf");
         var projectResponse = await _fixture.Client.PostAsJsonAsync(
             "/api/projects",
-            new { name = projectName });
+            new
+            {
+                name = projectName,
+                repository = new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main" },
+            });
         var projectJson = await projectResponse.Content.ReadFromJsonAsync<JsonElement>();
         var projectId = projectJson.GetProperty("data").GetProperty("id").GetString()!;
-
-        await _fixture.Client.PostAsJsonAsync(
-            $"/api/projects/{projectId}/repositories",
-            new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
 
         var issueResponse = await _fixture.Client.PostAsJsonAsync(
             $"/api/projects/{projectId}/issues",

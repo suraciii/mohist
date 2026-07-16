@@ -1498,8 +1498,8 @@ public class MohistLocalWorkflowProfileStartWorkSpecs
     [Fact]
     public async Task StartWork_WithUnknownPromptReference_Returns400MissingPromptsWithMissingKeysDetails()
     {
-        var project = await _client.PostDataAsync<StartProjectDto>("/api/projects", new { name = $"missing-prompts-{Guid.NewGuid():N}" });
-        await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
+        var project = await _client.CreateProjectWithDefaultRepositoryAsync<StartProjectDto>("/api/projects", $"missing-prompts-{Guid.NewGuid():N}");
+        await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", setDefault = true });
         var issue = await _client.PostDataAsync<StartIssueDto>($"/api/projects/{project.Id}/issues", new { title = "Workflow references unknown prompt", projectId = project.Id, isDraft = false });
 
         var customYaml = """
@@ -1532,8 +1532,8 @@ public class MohistLocalWorkflowProfileStartWorkSpecs
     [Fact]
     public async Task StartWork_WithMultipleUnknownPromptReferences_ReturnsAllMissingKeysInDetails()
     {
-        var project = await _client.PostDataAsync<StartProjectDto>("/api/projects", new { name = $"multi-missing-prompts-{Guid.NewGuid():N}" });
-        await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
+        var project = await _client.CreateProjectWithDefaultRepositoryAsync<StartProjectDto>("/api/projects", $"multi-missing-prompts-{Guid.NewGuid():N}");
+        await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", setDefault = true });
         var issue = await _client.PostDataAsync<StartIssueDto>($"/api/projects/{project.Id}/issues", new { title = "Workflow references multiple unknown prompts", projectId = project.Id, isDraft = false });
 
         var customYaml = """
@@ -1567,8 +1567,8 @@ public class MohistLocalWorkflowProfileStartWorkSpecs
     [Fact]
     public async Task StartWork_WithKnownSystemPromptKey_DoesNotEmitMissingPromptsError()
     {
-        var project = await _client.PostDataAsync<StartProjectDto>("/api/projects", new { name = $"known-prompts-{Guid.NewGuid():N}" });
-        await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
+        var project = await _client.CreateProjectWithDefaultRepositoryAsync<StartProjectDto>("/api/projects", $"known-prompts-{Guid.NewGuid():N}");
+        await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", setDefault = true });
         var issue = await _client.PostDataAsync<StartIssueDto>($"/api/projects/{project.Id}/issues", new { title = "Workflow references known prompt", projectId = project.Id, isDraft = false });
 
         var customYaml = """

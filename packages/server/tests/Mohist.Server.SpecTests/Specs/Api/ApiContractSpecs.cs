@@ -61,10 +61,10 @@ public class ApiContractSpecs
     [Fact]
     public async Task OpencodeModels_ReturnsRunnerReportedModels()
     {
-        var projectResponse = await _fixture.Client.PostAsJsonAsync("/api/projects", new { name = $"models-{Guid.NewGuid():N}" });
+        var projectResponse = await _fixture.Client.PostAsJsonAsync("/api/projects", new { name = $"models-{Guid.NewGuid():N}", repository = new { name = "test-repo", gitUrl = "git@example.com:test-repo.git", baseBranch = "main" } });
         var projectJson = await projectResponse.Content.ReadFromJsonAsync<JsonElement>();
         var projectId = projectJson.GetProperty("data").GetProperty("id").GetString()!;
-        await _fixture.Client.PostAsJsonAsync($"/api/projects/{projectId}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
+        await _fixture.Client.PostAsJsonAsync($"/api/projects/{projectId}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", setDefault = true });
 
         var runnerId = $"model-runner-{Guid.NewGuid():N}";
         await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new
@@ -92,10 +92,10 @@ public class ApiContractSpecs
     [Fact]
     public async Task AgentStatus_ReportsRegisteredRunnerWorkflowSlots()
     {
-        var projectResponse = await _fixture.Client.PostAsJsonAsync("/api/projects", new { name = $"slots-{Guid.NewGuid():N}" });
+        var projectResponse = await _fixture.Client.PostAsJsonAsync("/api/projects", new { name = $"slots-{Guid.NewGuid():N}", repository = new { name = "test-repo", gitUrl = "git@example.com:test-repo.git", baseBranch = "main" } });
         var projectJson = await projectResponse.Content.ReadFromJsonAsync<JsonElement>();
         var projectId = projectJson.GetProperty("data").GetProperty("id").GetString()!;
-        await _fixture.Client.PostAsJsonAsync($"/api/projects/{projectId}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
+        await _fixture.Client.PostAsJsonAsync($"/api/projects/{projectId}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", setDefault = true });
 
         // Capacity.Max is summed across all currently-registered global
         // runners, so we need a clean registry to assert against this
@@ -143,10 +143,10 @@ public class ApiContractSpecs
     public async Task ProjectApi_ResolvesProjectByNameOrId_AndUseReturnsProject()
     {
         var projectName = UniqueProjectName("resolve");
-        var projectResponse = await _fixture.Client.PostAsJsonAsync("/api/projects", new { name = projectName });
+        var projectResponse = await _fixture.Client.PostAsJsonAsync("/api/projects", new { name = projectName, repository = new { name = "test-repo", gitUrl = "git@example.com:test-repo.git", baseBranch = "main" } });
         var projectJson = await projectResponse.Content.ReadFromJsonAsync<JsonElement>();
         var projectId = projectJson.GetProperty("data").GetProperty("id").GetString()!;
-        await _fixture.Client.PostAsJsonAsync($"/api/projects/{projectId}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
+        await _fixture.Client.PostAsJsonAsync($"/api/projects/{projectId}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", setDefault = true });
 
         var byName = await _fixture.Client.GetDataAsync<ProjectDto>($"/api/projects/{projectName}");
         var byId = await _fixture.Client.GetDataAsync<ProjectDto>($"/api/projects/{projectId}");
@@ -164,15 +164,15 @@ public class ApiContractSpecs
     [Fact]
     public async Task ProjectApi_CreatesDnsProjectName_AndRejectsInvalidName()
     {
-        var response = await _fixture.Client.PostAsJsonAsync("/api/projects", new { name = "Dns-Project" });
+        var response = await _fixture.Client.PostAsJsonAsync("/api/projects", new { name = "Dns-Project", repository = new { name = "test-repo", gitUrl = "git@example.com:test-repo.git", baseBranch = "main" } });
         response.EnsureSuccessStatusCode();
         var responseJson = await response.Content.ReadFromJsonAsync<JsonElement>();
         var responseId = responseJson.GetProperty("data").GetProperty("id").GetString()!;
-        await _fixture.Client.PostAsJsonAsync($"/api/projects/{responseId}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
+        await _fixture.Client.PostAsJsonAsync($"/api/projects/{responseId}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", setDefault = true });
 
         Assert.Equal("dns-project", responseJson.GetProperty("data").GetProperty("name").GetString());
 
-        using var invalid = await _fixture.Client.PostAsJsonAsync("/api/projects", new { name = "Bad Project" });
+        using var invalid = await _fixture.Client.PostAsJsonAsync("/api/projects", new { name = "Bad Project", repository = new { name = "test-repo", gitUrl = "git@example.com:test-repo.git", baseBranch = "main" } });
         Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
         var invalidPayload = await invalid.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal("invalid_project_name", invalidPayload.GetProperty("code").GetString());
@@ -184,8 +184,11 @@ public class ApiContractSpecs
     public async Task ProjectScopedApis_AcceptProjectNameAsProjectRef()
     {
         var projectName = UniqueProjectName("scope");
-        var project = await _fixture.Client.PostDataAsync<ProjectDto>("/api/projects", new { name = projectName });
-        await _fixture.Client.PostDataAsync<RepositoryDto>($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
+        var project = await _fixture.Client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>(
+            "/api/projects",
+            projectName,
+            repoName: "main",
+            gitUrl: $"file://{Guid.NewGuid():N}");
 
         var repos = await _fixture.Client.GetDataAsync<RepositoryDto[]>($"/api/projects/{project.Name}/repositories");
         Assert.Single(repos);
@@ -212,7 +215,7 @@ public class ApiContractSpecs
 
         try
         {
-            var project = await _fixture.Client.PostDataAsync<ProjectDto>("/api/projects", new { name = UniqueProjectName("global-models"), path = "/tmp/project", baseBranch = "main" });
+            var project = await _fixture.Client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", UniqueProjectName("global-models"));
             var response = await _fixture.Client.GetDataAsync<OpencodeModelsDto>($"/api/projects/{project.Id}/opencode/models");
 
             Assert.Contains("openai/gpt-5.5", response.Models);
@@ -228,10 +231,10 @@ public class ApiContractSpecs
     [Fact]
     public async Task OpencodeModels_RunnerReportsVariants_ReturnsModelVariantsMap()
     {
-        var projectResponse = await _fixture.Client.PostAsJsonAsync("/api/projects", new { name = $"variants-{Guid.NewGuid():N}" });
+        var projectResponse = await _fixture.Client.PostAsJsonAsync("/api/projects", new { name = $"variants-{Guid.NewGuid():N}", repository = new { name = "test-repo", gitUrl = "git@example.com:test-repo.git", baseBranch = "main" } });
         var projectJson = await projectResponse.Content.ReadFromJsonAsync<JsonElement>();
         var projectId = projectJson.GetProperty("data").GetProperty("id").GetString()!;
-        await _fixture.Client.PostAsJsonAsync($"/api/projects/{projectId}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
+        await _fixture.Client.PostAsJsonAsync($"/api/projects/{projectId}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", setDefault = true });
 
         var runnerId = $"variant-runner-{Guid.NewGuid():N}";
         await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new
@@ -266,10 +269,10 @@ public class ApiContractSpecs
     [Fact]
     public async Task OpencodeModels_ModelWithoutVariants_KeepsModelAndOmitsFromVariantsMap()
     {
-        var projectResponse = await _fixture.Client.PostAsJsonAsync("/api/projects", new { name = $"no-variants-{Guid.NewGuid():N}" });
+        var projectResponse = await _fixture.Client.PostAsJsonAsync("/api/projects", new { name = $"no-variants-{Guid.NewGuid():N}", repository = new { name = "test-repo", gitUrl = "git@example.com:test-repo.git", baseBranch = "main" } });
         var projectJson = await projectResponse.Content.ReadFromJsonAsync<JsonElement>();
         var projectId = projectJson.GetProperty("data").GetProperty("id").GetString()!;
-        await _fixture.Client.PostAsJsonAsync($"/api/projects/{projectId}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
+        await _fixture.Client.PostAsJsonAsync($"/api/projects/{projectId}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", setDefault = true });
 
         var runnerId = $"no-variants-runner-{Guid.NewGuid():N}";
         await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new
@@ -303,10 +306,10 @@ public class ApiContractSpecs
     [Fact]
     public async Task OpencodeModels_DisjointRunnerModels_ProducesUnionWithVariantsPreserved()
     {
-        var projectResponse = await _fixture.Client.PostAsJsonAsync("/api/projects", new { name = $"union-{Guid.NewGuid():N}" });
+        var projectResponse = await _fixture.Client.PostAsJsonAsync("/api/projects", new { name = $"union-{Guid.NewGuid():N}", repository = new { name = "test-repo", gitUrl = "git@example.com:test-repo.git", baseBranch = "main" } });
         var projectJson = await projectResponse.Content.ReadFromJsonAsync<JsonElement>();
         var projectId = projectJson.GetProperty("data").GetProperty("id").GetString()!;
-        await _fixture.Client.PostAsJsonAsync($"/api/projects/{projectId}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
+        await _fixture.Client.PostAsJsonAsync($"/api/projects/{projectId}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", setDefault = true });
 
         var projectRunnerId = $"union-project-runner-{Guid.NewGuid():N}";
         var globalRunnerId = $"union-global-runner-{Guid.NewGuid():N}";
@@ -352,10 +355,10 @@ public class ApiContractSpecs
     [Fact]
     public async Task RunnerStatus_RunnerWithVariants_KeepsCoderModelsAsStringArray()
     {
-        var projectResponse = await _fixture.Client.PostAsJsonAsync("/api/projects", new { name = $"status-{Guid.NewGuid():N}" });
+        var projectResponse = await _fixture.Client.PostAsJsonAsync("/api/projects", new { name = $"status-{Guid.NewGuid():N}", repository = new { name = "test-repo", gitUrl = "git@example.com:test-repo.git", baseBranch = "main" } });
         var projectJson = await projectResponse.Content.ReadFromJsonAsync<JsonElement>();
         var projectId = projectJson.GetProperty("data").GetProperty("id").GetString()!;
-        await _fixture.Client.PostAsJsonAsync($"/api/projects/{projectId}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
+        await _fixture.Client.PostAsJsonAsync($"/api/projects/{projectId}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", setDefault = true });
 
         var runnerId = $"status-variant-runner-{Guid.NewGuid():N}";
         await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new
@@ -398,10 +401,10 @@ public class ApiContractSpecs
     public async Task IssueRebaseApi_QueuesWorkflowTask()
     {
         var projectName = UniqueProjectName("rebase");
-        var projectResponse = await _fixture.Client.PostAsJsonAsync("/api/projects", new { name = projectName });
+        var projectResponse = await _fixture.Client.PostAsJsonAsync("/api/projects", new { name = projectName, repository = new { name = "test-repo", gitUrl = "git@example.com:test-repo.git", baseBranch = "main" } });
         var projectJson = await projectResponse.Content.ReadFromJsonAsync<JsonElement>();
         var projectId = projectJson.GetProperty("data").GetProperty("id").GetString();
-        await _fixture.Client.PostAsJsonAsync($"/api/projects/{projectId}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "trunk", isDefault = true });
+        await _fixture.Client.PostAsJsonAsync($"/api/projects/{projectId}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "trunk", setDefault = true });
         var issueResponse = await _fixture.Client.PostAsJsonAsync($"/api/projects/{projectId}/issues", new { title = "Needs rebase", isDraft = false });
         var issueJson = await issueResponse.Content.ReadFromJsonAsync<JsonElement>();
         var number = issueJson.GetProperty("data").GetProperty("number").GetInt32();

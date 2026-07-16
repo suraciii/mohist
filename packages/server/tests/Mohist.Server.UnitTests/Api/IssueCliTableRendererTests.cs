@@ -252,12 +252,12 @@ public class IssueCliTableRendererTests
     }
 
     [Fact]
-    public async Task RenderTable_RepoList_ListsNamePathRemoteBaseBranchAndIsDefault()
+    public async Task RenderTable_RepoList_ListsNameGitUrlBaseBranchAndIsDefault()
     {
         var data = JsonNode.Parse("""
             [
-              { "name": "master", "path": "/home/repo", "remote": "git@example.com:repo.git", "baseBranch": "master", "isDefault": true },
-              { "name": "alt",    "path": "/tmp/alt",   "remote": null,                            "baseBranch": "main",   "isDefault": false }
+              { "name": "master", "gitUrl": "git@example.com:repo.git", "baseBranch": "master", "isDefault": true },
+              { "name": "alt",    "gitUrl": "git@example.com:alt.git",  "baseBranch": "main",   "isDefault": false }
             ]
             """);
 
@@ -273,14 +273,15 @@ public class IssueCliTableRendererTests
 
         var text = output.ToString();
         Assert.Contains("name", text);
-        Assert.Contains("path", text);
-        Assert.Contains("remote", text);
+        Assert.Contains("git URL", text);
         Assert.Contains("base branch", text);
         Assert.Contains("default", text);
         Assert.Contains("master", text);
         Assert.Contains("alt", text);
         Assert.Contains("git@example.com:repo.git", text);
         Assert.Contains("yes", text);
+        Assert.DoesNotContain("path", text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("remote", text, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

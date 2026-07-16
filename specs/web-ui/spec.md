@@ -2,13 +2,14 @@
 
 ### Requirement: WebUI 支持通过对话框创建项目
 
-WebUI SHALL provide `CreateProjectDialog` for creating a Mohist project scope from a project name. The dialog SHALL NOT ask for, validate, browse, or submit a local filesystem path. 创建成功后 SHALL 自动切换到新项目并刷新项目列表。
+WebUI SHALL provide `CreateProjectDialog` for creating a Mohist project scope with its initial repository name, Git URL, and optional base branch. The dialog SHALL NOT ask for, validate, browse, or submit a local filesystem path. 创建成功后 SHALL 自动切换到新项目并刷新项目列表。
 
 #### Scenario: 成功创建项目
 - **WHEN** 用户在 Header 下拉菜单点击 "New Project"
 - **AND** 在对话框中输入名称 "my-project"
+- **AND** 输入初始仓库名称、Git URL 和 base branch
 - **AND** 点击 "Create"
-- **THEN** 发送 `POST /api/projects` 请求（body: `{name}`）
+- **THEN** 发送 `POST /api/projects` 请求（body: `{name, repository: {name, gitUrl, baseBranch}}`）
 - **AND** the request SHALL NOT include `path`
 - **AND** 项目列表自动刷新
 - **AND** 当前项目自动切换到新创建的项目
@@ -20,19 +21,19 @@ WebUI SHALL provide `CreateProjectDialog` for creating a Mohist project scope fr
 - **AND** 对话框显示错误提示 "Project name already exists"
 - **AND** 对话框保持打开状态
 
-#### Scenario: 路径字段为空（验证失败）
-- **WHEN** 用户只输入名称 and no local path is selected
+#### Scenario: 初始仓库字段为空（验证失败）
+- **WHEN** 用户只输入名称 and no initial repository name or Git URL is supplied
 - **AND** 点击 "Create"
-- **THEN** the frontend SHALL submit the create request because project path is not part of the model
-- **AND** it SHALL NOT display "Path is required"
+- **THEN** the frontend SHALL NOT submit the create request
+- **AND** it SHALL NOT display a local-path validation message
 
 ### Requirement: 前端 API client 补齐项目管理方法
 
-`api.ts` SHALL provide `createProject`, `deleteProject`, and `useProject` methods for `POST /api/projects`, `DELETE /api/projects/:name`, and `POST /api/projects/:name/use`. `createProject` SHALL submit project scope metadata only and SHALL NOT submit local filesystem paths.
+`api.ts` SHALL provide `createProject`, `deleteProject`, and `useProject` methods for `POST /api/projects`, `DELETE /api/projects/:name`, and `POST /api/projects/:name/use`. `createProject` SHALL submit the initial repository declaration and SHALL NOT submit local filesystem paths.
 
 #### Scenario: createProject 调用
-- **WHEN** 调用 `api.createProject({name: "x"})`
-- **THEN** 发送 `POST /api/projects` 请求，body 为 `{name}`
+- **WHEN** 调用 `api.createProject({name: "x", repository: {name: "main", gitUrl: "https://example.com/x.git"}})`
+- **THEN** 发送 `POST /api/projects` 请求，body 包含 Project 名称和初始 repository declaration
 - **AND** 返回创建的 `Project` 对象
 - **AND** the returned object SHALL NOT include `path` or `effectivePath`
 
@@ -51,7 +52,7 @@ WebUI SHALL provide `CreateProjectDialog` for creating a Mohist project scope fr
 ### Requirement: WebUI 提供搜索式目录浏览器
 **Reason**: Project creation no longer accepts or stores a local project path, so a directory browser for selecting a project checkout would reintroduce the removed product model.
 
-**Migration**: Project creation uses a name-only dialog. Repository configuration uses Git URL and base branch fields. Workflow execution directories are runner-created workspaces and are not selected by the user.
+**Migration**: Project creation uses a repository-backed dialog with Git URL and base branch fields. Workflow execution directories are runner-created workspaces and are not selected by the user.
 
 #### Scenario: 模糊搜索目录
 - **WHEN** 用户创建或配置项目

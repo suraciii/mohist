@@ -203,14 +203,17 @@ public class IssueWorkspaceRepositoryResolutionSpecs : IAsyncLifetime
     {
         var projectId = await CreateProjectAsync($"proj-{Guid.NewGuid():N}");
         var grain = _fixture.Grains.GetGrain<IProjectGrain>(projectId);
-        await grain.AddRepositoryAsync("main", "git@main.example:repo.git", "main");
         await grain.AddRepositoryAsync("secondary", "git@secondary.example:repo.git", secondaryBaseBranch);
         return projectId;
     }
 
     private async Task<string> CreateProjectAsync(string name)
     {
-        using var response = await _client.PostAsJsonAsync("/api/projects", new { name });
+        using var response = await _client.PostAsJsonAsync("/api/projects", new
+        {
+            name,
+            repository = new { name = "main", gitUrl = "git@main.example:repo.git", baseBranch = "main" },
+        });
         response.EnsureSuccessStatusCode();
         var json = await response.Content.ReadFromJsonAsync<JsonElement>();
         return json.GetProperty("data").GetProperty("id").GetString()!;

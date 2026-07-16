@@ -373,15 +373,15 @@ public class IssuePatchRawPresenceMergeSpecs
     {
         var project = await _client.PostDataAsync<ProjectDto>(
             "/api/projects",
-            new { name = $"p-{prefix}-{Guid.NewGuid():N}" });
-        await _client.PostOkAsync(
-            $"/api/projects/{project.Id}/repositories",
             new
             {
-                name = "main",
-                gitUrl = $"file://{Guid.NewGuid():N}",
-                baseBranch = "main",
-                isDefault = true,
+                name = $"p-{prefix}-{Guid.NewGuid():N}",
+                repository = new
+                {
+                    name = "main",
+                    gitUrl = $"file://{Guid.NewGuid():N}",
+                    baseBranch = "main",
+                },
             });
         return project;
     }

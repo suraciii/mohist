@@ -1,4 +1,3 @@
-using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure.Config;
 using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Infrastructure.Data.Db;
@@ -60,11 +59,7 @@ builder.Services.AddMohistServerCore(builder.Configuration);
 
 var app = builder.Build();
 
-using (var scope = app.Services.CreateScope())
-{
-    var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-    db.Database.Migrate();
-}
+await DatabaseInitializer.InitializeAsync(app.Services);
 
 // 全局拦截 OTLP 端口上的非 /otel/v1/ 路径，返回 404 防止主 API 泄漏；
 // 同时拦截主端口上的 /otel/v1/ 路径，避免 SPA fallback 把它们误当成
@@ -93,7 +88,7 @@ catch (IOException ex) when (otelOptions.Enabled && OtelBindFailureDetector.IsOt
     OtelPortBindingLog.WriteBindFailure(otelOptions.Port, otelOptions.BindHost, ex);
     // await 失败的 app 不能复用 —— Kestrel 状态可能不一致。
     // 重新构造一个禁用 OTLP 的 host。
-    finalApp = BuildAlternateApp(args);
+    finalApp = await BuildAlternateApp(args);
     await finalApp.StartAsync();
 }
 catch (Exception ex)
@@ -104,7 +99,7 @@ catch (Exception ex)
 
 await finalApp.WaitForShutdownAsync();
 
-static WebApplication BuildAlternateApp(string[] args)
+static async Task<WebApplication> BuildAlternateApp(string[] args)
 {
     var fresh = WebApplication.CreateBuilder(args);
     fresh.Configuration.AddMohistUserConfigFile(fresh.Environment);
@@ -128,11 +123,7 @@ static WebApplication BuildAlternateApp(string[] args)
     fresh.Host.UseOrleans(silo => silo.ConfigureMohistSilo(fresh.Configuration));
     fresh.Services.AddMohistServerCore(fresh.Configuration);
     var alt = fresh.Build();
-    using (var scope = alt.Services.CreateScope())
-    {
-        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-        db.Database.Migrate();
-    }
+    await DatabaseInitializer.InitializeAsync(alt.Services);
     alt.UseOtelPortIsolation();
     alt.MapMohistApi();
     alt.MapMohistWeb();
