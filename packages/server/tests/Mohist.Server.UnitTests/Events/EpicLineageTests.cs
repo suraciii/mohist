@@ -8,11 +8,10 @@ namespace Mohist.Server.UnitTests.Events;
 public class EpicLineageTests
 {
     [Fact]
-    public void BuildExtensions_StampsProjectIdAndEpicIdOnly()
+    public void BuildExtensions_StampsProjectIdAndEpicNumberOnly()
     {
         var state = new Mohist.Server.Epic.Domain.Epic
         {
-            Id = "epic_lineage_1",
             ProjectId = "proj_lineage",
             Number = 7,
             Title = "Any title",
@@ -21,19 +20,16 @@ public class EpicLineageTests
         var extensions = EpicLineage.BuildExtensions(state);
 
         Assert.Equal("proj_lineage", extensions["projectid"]);
-        Assert.Equal("epic_lineage_1", extensions["epicid"]);
+        Assert.Equal("7", extensions[EventCatalog.Lineage.Epic]);
     }
 
     [Fact]
     public void BuildExtensions_OmitsEpicNoKey()
     {
-        // Per the matrix pinned in T-001, the routing dimension for an
-        // epic.* event is the epicid (the internal id); epicno is not a
-        // routing dimension and was dropped in T-004. The dictionary MUST
-        // not carry the legacy "epicno" key after the rename.
+        // Epic events route by the project-scoped epic number. The
+        // dictionary must not carry the superseded "epicno" alias.
         var state = new Mohist.Server.Epic.Domain.Epic
         {
-            Id = "epic_no_epicno_1",
             ProjectId = "proj_no_epicno",
             Number = 99,
             Title = "Any title",
@@ -49,7 +45,6 @@ public class EpicLineageTests
     {
         var state = new Mohist.Server.Epic.Domain.Epic
         {
-            Id = "epic_exact_two",
             ProjectId = "proj_exact_two",
             Number = 1,
             Title = "Any title",
@@ -80,7 +75,6 @@ public class EpicLineageTests
         // the conformance check would catch it on the live path too.
         var state = new Mohist.Server.Epic.Domain.Epic
         {
-            Id = "epic_conformance",
             ProjectId = "proj_conformance",
             Number = 5,
             Title = "Any title",
@@ -101,7 +95,6 @@ public class EpicLineageTests
         // site).
         var state = new Mohist.Server.Epic.Domain.Epic
         {
-            Id = "epic_assert_required",
             ProjectId = "proj_assert_required",
             Number = 1,
             Title = "Any title",
@@ -121,14 +114,13 @@ public class EpicLineageTests
         // arity and surface here.
         var state = new Mohist.Server.Epic.Domain.Epic
         {
-            Id = "epic_pure_helper",
             ProjectId = "proj_pure_helper",
             Number = 42,
             Title = "Any title",
         };
         var extensions = EpicLineage.BuildExtensions(state);
 
-        Assert.Equal("epic_pure_helper", extensions[EventCatalog.Lineage.EpicId]);
+        Assert.Equal("42", extensions[EventCatalog.Lineage.Epic]);
         Assert.Equal("proj_pure_helper", extensions[EventCatalog.Lineage.ProjectId]);
         // Pin against a stamp CloudEvent-shaped artifact so any added
         // accidental key is visible (e.g. a future "epicno" re-add).
@@ -136,7 +128,7 @@ public class EpicLineageTests
         // order insertion happened to land — set equality is what protects
         // the producer from accidental key drift.
         Assert.Equal(
-            new HashSet<string>(StringComparer.Ordinal) { "projectid", "epicid" },
+            new HashSet<string>(StringComparer.Ordinal) { "projectid", "epic" },
             new HashSet<string>(extensions.Keys, StringComparer.Ordinal));
     }
 }

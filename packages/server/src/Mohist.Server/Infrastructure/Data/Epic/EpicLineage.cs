@@ -11,16 +11,14 @@ namespace Mohist.Server.Infrastructure.Data.Epic;
 /// </summary>
 /// <remarks>
 /// Lineage attribute names live on <see cref="EventCatalog.Lineage"/> and
-/// stay in sync with <c>design/event-protocol.md</c>. <c>epicno</c> is no
-/// longer stamped: it is not a routing dimension per the matrix (D3) and
-/// the protocol routes on <c>epicid</c> only.
+/// stay in sync with <c>design/event-protocol.md</c>. Epic events route by
+/// the project-scoped <c>epic</c> number.
 /// </remarks>
 public static class EpicLineage
 {
     /// <summary>
     /// Build the <c>extensions</c> dictionary for an epic event. Always
-    /// stamps <c>projectid</c> and <c>epicid</c>; the legacy
-    /// <c>epicno</c> key is intentionally absent. Absent affiliation is
+    /// stamps <c>projectid</c> and <c>epic</c>. Absent affiliation is
     /// not possible here (the epic owns its own identity), so the
     /// dictionary is always populated with these two keys.
     /// </summary>
