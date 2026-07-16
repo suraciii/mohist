@@ -341,6 +341,23 @@ public class ProjectApiSpecs
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Project)]
+    [Theory]
+    [InlineData("""{"name":"web","gitUrl":"git@example.com:web.git","setDefault":false}""")]
+    [InlineData("""{"name":"web","gitUrl":"git@example.com:web.git","setDefault":null}""")]
+    public async Task PostRepository_WithInvalidDefaultSelection_ReturnsBadRequestAndDoesNotMutate(string payload)
+    {
+        var created = await CreateRepositoryUpdateProjectAsync();
+        using var content = new StringContent(payload, Encoding.UTF8, "application/json");
+        using var response = await _client.PostAsync(
+            $"/api/projects/{created.Id}/repositories",
+            content);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        await AssertRepositoryUnchangedAsync(created.Id);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task PatchRepository_MetadataUpdate_PersistsNewGitUrlAndBaseBranch()
     {

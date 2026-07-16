@@ -121,6 +121,9 @@ public static class ProjectRoutes
             if (IsSupplied(req.IsDefault))
                 return ApiResults.BadRequest("isDefault is derived by the server; use setDefault instead", "repository_default_forbidden");
 
+            if (IsSupplied(req.SetDefault) && req.SetDefault.ValueKind != JsonValueKind.True)
+                return ApiResults.BadRequest("setDefault must be true when supplied", "repository_default_selection_invalid");
+
             if (string.IsNullOrWhiteSpace(req.Name))
                 return ApiResults.BadRequest("name is required", "repository_name_required");
             if (string.IsNullOrWhiteSpace(req.GitUrl))
@@ -130,7 +133,11 @@ public static class ProjectRoutes
             var projectGrain = grains.GetGrain<IProjectGrain>(project.Id);
             try
             {
-                var updated = await projectGrain.AddRepositoryAsync(req.Name, req.GitUrl, req.BaseBranch, req.SetDefault);
+                var updated = await projectGrain.AddRepositoryAsync(
+                    req.Name,
+                    req.GitUrl,
+                    req.BaseBranch,
+                    req.SetDefault.ValueKind == JsonValueKind.True);
                 return updated is not null
                     ? Results.Json(new { success = true, data = updated }, statusCode: 201)
                     : ApiResults.NotFound("Project not found");
@@ -556,7 +563,7 @@ public record AddRepositoryRequest(
     string Name,
     string GitUrl,
     string? BaseBranch = null,
-    bool? SetDefault = null,
+    JsonElement SetDefault = default,
     JsonElement IsDefault = default);
 public record UpdateRepositoryRequest(
     JsonElement SetDefault = default,
