@@ -283,13 +283,13 @@ public class EpicProgressionSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
-    public async Task RecomputeProgressAsync_StartWorkAsyncThrows_PropagatesToDispatcher()
+    public async Task RecomputeProgressAsync_TryStartFromEpicAsyncThrows_PropagatesToDispatcher()
     {
         // Terminal-event recompute uses StartFailureMode.Propagate so the
         // durable dispatcher can retry / dead-letter. Command paths
         // (StartAsync / ResumeAsync / link) use PreserveRunning and
         // absorb the same failure, leaving the epic running-but-idle —
-        // covered by RecomputeProgressAsync_CommandPath_StartWorkAsyncThrows_LeavesEpicRunning.
+        // covered by RecomputeProgressAsync_CommandPath_TryStartFromEpicAsyncThrows_LeavesEpicRunning.
         var database = CreateDatabase();
         await SeedEpicAsync(database, status: "running");
         await SeedIssueAsync(database, projectId: "project_1", epicNumber: 1, issueNumber: 1, status: IssueStatus.Done, canStart: true);
@@ -307,10 +307,10 @@ public class EpicProgressionSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
-    public async Task RecomputeProgressAsync_CommandPath_StartWorkAsyncThrows_LeavesEpicRunning()
+    public async Task RecomputeProgressAsync_CommandPath_TryStartFromEpicAsyncThrows_LeavesEpicRunning()
     {
         // Command paths (StartAsync, ResumeAsync, link) use
-        // StartFailureMode.PreserveRunning. StartWorkAsync failures are
+        // StartFailureMode.PreserveRunning. TryStartFromEpicAsync failures are
         // caught and logged; the epic remains running-but-idle so the
         // next event-driven recompute can re-evaluate. Here we drive
         // ResumeAsync as a representative command path.
@@ -570,10 +570,7 @@ public class EpicProgressionSpecs
     }
 
     /// <summary>
-    /// Test double that stands in for the Orleans <c>IGrainFactory</c>
-    /// inside the EpicGrain unit tests. Captures IIssueGrain.StartWorkAsync
-    /// invocations so the progression logic can be observed without
-    /// the full workflow runtime.
+    /// Test double that records guarded Issue starts requested by Epic progression.
     /// </summary>
     private sealed class RecordingGrainFactory : IGrainFactory
     {
@@ -675,6 +672,12 @@ public class EpicProgressionSpecs
         public Task DeactivateForTestAsync() => throw new NotSupportedException();
         public Task<bool> AssignEpicAsync(int epicNumber) => throw new NotSupportedException();
         public Task<bool> RemoveEpicAsync(int expectedEpicNumber) => throw new NotSupportedException();
-        public Task<bool> TryStartFromEpicAsync(int expectedEpicNumber) => throw new NotSupportedException();
+        public Task<bool> TryStartFromEpicAsync(int expectedEpicNumber)
+        {
+            _owner.IssueStartCalls.Add(IssueKey);
+            if (_owner.ThrowOnStart)
+                throw new InvalidOperationException("simulated start failure");
+            return Task.FromResult(true);
+        }
     }
 }
