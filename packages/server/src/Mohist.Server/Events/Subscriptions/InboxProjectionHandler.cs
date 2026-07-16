@@ -6,6 +6,7 @@ using Mohist.Server.Infrastructure.Data;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Events;
+using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Inbox;
 using Mohist.Server.Issue.Domain.Events;
 using Mohist.Server.Workflow.Domain.Run;
@@ -131,7 +132,6 @@ public sealed class InboxProjectionHandler : ICloudEventHandler
 
         var draft = new InboxItemDraft(
             ProjectId: resolved.Value.ProjectId,
-            IssueId: resolved.Value.IssueId,
             IssueNumber: resolved.Value.IssueNumber,
             IssueTitle: issue.Title,
             NotificationKind: kind,
@@ -155,13 +155,11 @@ public sealed class InboxProjectionHandler : ICloudEventHandler
             ItemId: result.Id,
             ProjectId: draft.ProjectId,
             Kind: kind,
-            IssueId: draft.IssueId,
             IssueNumber: draft.IssueNumber);
 
         var extensions = new Dictionary<string, string>(StringComparer.Ordinal)
         {
             [EventCatalog.Lineage.ProjectId] = draft.ProjectId,
-            [EventCatalog.Lineage.IssueId] = draft.IssueId,
             [EventCatalog.Lineage.Issue] = draft.IssueNumber.ToString(),
         };
 
@@ -200,24 +198,22 @@ public sealed class InboxProjectionHandler : ICloudEventHandler
         var annotations = run.Metadata?.Annotations;
         if (annotations is null
             || !annotations.TryGetValue("projectId", out var projectId) || string.IsNullOrWhiteSpace(projectId)
-            || !annotations.TryGetValue("issueId", out var issueId) || string.IsNullOrWhiteSpace(issueId)
             || !annotations.TryGetValue("issueNumber", out var issueNumberText) || string.IsNullOrWhiteSpace(issueNumberText)
             || !int.TryParse(issueNumberText, out var issueNumber))
         {
             _log.LogDebug(
-                "Inbox projection skipped: workflow run {WorkflowRunId} for event {EventId} has no projectId/issueId/issueNumber annotations",
+                "Inbox projection skipped: workflow run {WorkflowRunId} for event {EventId} has no projectId/issueNumber annotations",
                 workflowRunId, evt.Id);
             return null;
         }
 
-        return new ResolvedIdentity(projectId, issueId, issueNumber);
+        return new ResolvedIdentity(projectId, issueNumber);
     }
 
     private static ResolvedIdentity? ResolveFromIssueExtensions(CloudEvent evt)
     {
         var extensions = evt.Extensions;
-        if (!extensions.TryGetValue(EventCatalog.Lineage.ProjectId, out var projectId) || string.IsNullOrWhiteSpace(projectId)
-            || !extensions.TryGetValue(EventCatalog.Lineage.IssueId, out var issueId) || string.IsNullOrWhiteSpace(issueId))
+        if (!extensions.TryGetValue(EventCatalog.Lineage.ProjectId, out var projectId) || string.IsNullOrWhiteSpace(projectId))
         {
             return null;
         }
@@ -228,7 +224,7 @@ public sealed class InboxProjectionHandler : ICloudEventHandler
             return null;
         }
 
-        return new ResolvedIdentity(projectId, issueId, issueNumber);
+        return new ResolvedIdentity(projectId, issueNumber);
     }
 
     private static string? TryReadIssueNumber(IReadOnlyDictionary<string, string> extensions)
@@ -250,7 +246,7 @@ public sealed class InboxProjectionHandler : ICloudEventHandler
 
     private async Task<DomainIssue?> ResolveIssueAsync(ResolvedIdentity resolved, IStateStore<DomainIssue> issueStore)
     {
-        var issue = await issueStore.LoadAsync(resolved.IssueId).ConfigureAwait(false);
+        var issue = await issueStore.LoadAsync(GrainKey.Issue(new IssueKey(resolved.ProjectId, resolved.IssueNumber))).ConfigureAwait(false);
         if (issue is null)
             return null;
 
@@ -258,9 +254,8 @@ public sealed class InboxProjectionHandler : ICloudEventHandler
             || issue.Number != resolved.IssueNumber)
         {
             _log.LogDebug(
-                "Inbox projection skipped: event identity project {EventProjectId} issue {IssueId} number {EventIssueNumber} disagrees with loaded issue project {IssueProjectId} number {IssueNumber}",
+                "Inbox projection skipped: event identity project {EventProjectId} number {EventIssueNumber} disagrees with loaded issue project {IssueProjectId} number {IssueNumber}",
                 resolved.ProjectId,
-                resolved.IssueId,
                 resolved.IssueNumber,
                 issue.ProjectId,
                 issue.Number);
@@ -271,8 +266,8 @@ public sealed class InboxProjectionHandler : ICloudEventHandler
             return issue;
 
         _log.LogDebug(
-            "Inbox projection skipped: issue {IssueId} has no title snapshot",
-            resolved.IssueId);
+            "Inbox projection skipped: issue #{IssueNumber} has no title snapshot",
+            resolved.IssueNumber);
         return null;
     }
 
@@ -298,5 +293,5 @@ public sealed class InboxProjectionHandler : ICloudEventHandler
         }
     }
 
-    private readonly record struct ResolvedIdentity(string ProjectId, string IssueId, int IssueNumber);
+    private readonly record struct ResolvedIdentity(string ProjectId, int IssueNumber);
 }

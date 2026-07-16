@@ -60,10 +60,9 @@ public class ProjectEventFeedAssembler : IScopedService
         var allowedTypes = filter?.CandidateTypes(ProjectEventOrigin.Issue);
         if (allowedTypes is { Length: 0 }) return [];
 
-        var query = from row in db.IssueEvents.AsNoTracking()
-                    join issue in db.Issues.AsNoTracking().Where(issue => issue.ProjectId == projectId)
-                        on row.Source equals IssueEventPersistence.SourcePrefix + issue.IssueId
-                    select row;
+        var sourcePrefix = IssueEventPersistence.ProjectSourcePrefix(projectId);
+        var query = db.IssueEvents.AsNoTracking()
+            .Where(row => row.Source.StartsWith(sourcePrefix));
         if (allowedTypes is not null) query = query.Where(row => allowedTypes.Contains(row.Type));
 
         var rows = await query

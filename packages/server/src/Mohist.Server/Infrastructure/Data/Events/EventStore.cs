@@ -69,7 +69,7 @@ public class EventStore : IEventStore
             return;
         }
 
-        if (source.StartsWith(IssueEventPersistence.SourcePrefix, StringComparison.Ordinal))
+        if (IssueEventPersistence.IsIssueSource(source))
         {
             var nextId = await NextIssueIdAsync(db, source, ct);
             db.IssueEvents.Add(new IssueEventRow
@@ -88,7 +88,7 @@ public class EventStore : IEventStore
             return;
         }
 
-        if (source.StartsWith(EpicEventPersistence.SourcePrefix, StringComparison.Ordinal))
+        if (EpicEventPersistence.IsEpicSource(source))
         {
             var nextId = await NextEpicIdAsync(db, source, ct);
             db.EpicEvents.Add(new EpicEventRow
@@ -137,9 +137,9 @@ public class EventStore : IEventStore
         return rows.Select(ToStored).ToList();
     }
 
-    public async Task<IReadOnlyList<StoredCloudEvent>> ListIssueEventsAsync(string issueId, int limit = 200, CancellationToken ct = default)
+    public async Task<IReadOnlyList<StoredCloudEvent>> ListIssueEventsAsync(string projectId, int issueNumber, int limit = 200, CancellationToken ct = default)
     {
-        var source = IssueEventPersistence.IssueSource(issueId);
+        var source = IssueEventPersistence.IssueSource(projectId, issueNumber);
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var rows = await db.IssueEvents.AsNoTracking()
             .Where(e => e.Source == source)
@@ -151,9 +151,9 @@ public class EventStore : IEventStore
         return rows.Select(ToIssueStored).ToList();
     }
 
-    public async Task<IReadOnlyList<StoredCloudEvent>> ListEpicEventsAsync(string epicId, int limit = 200, CancellationToken ct = default)
+    public async Task<IReadOnlyList<StoredCloudEvent>> ListEpicEventsAsync(string projectId, int epicNumber, int limit = 200, CancellationToken ct = default)
     {
-        var source = EpicEventPersistence.EpicSource(epicId);
+        var source = EpicEventPersistence.EpicSource(projectId, epicNumber);
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var rows = await db.EpicEvents.AsNoTracking()
             .Where(e => e.Source == source)

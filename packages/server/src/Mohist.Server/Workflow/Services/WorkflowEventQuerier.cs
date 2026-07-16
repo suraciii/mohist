@@ -18,12 +18,13 @@ public sealed class WorkflowEventQuerier : IScopedService
     }
 
     public async Task<IReadOnlyList<StoredCloudEvent>> ListIssueEventsAsync(
-        string issueId,
+        string projectId,
+        int issueNumber,
         string? workflowRunId,
         int limit,
         CancellationToken ct = default)
     {
-        var issueEvents = await _events.ListIssueEventsAsync(issueId, limit, ct);
+        var issueEvents = await _events.ListIssueEventsAsync(projectId, issueNumber, limit, ct);
         if (workflowRunId is null)
             return issueEvents;
 

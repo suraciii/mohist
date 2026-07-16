@@ -20,7 +20,7 @@ public static class WorkflowEventRoutes
             if (issue is null) return ApiResults.NotFound($"Issue #{number} not found");
 
             var ct = HttpContextRequestAborted(context);
-            var merged = await eventQuery.ListIssueEventsAsync(issue.Id, issue.WorkflowRunId, limit ?? 200, ct);
+            var merged = await eventQuery.ListIssueEventsAsync(project.Id, number, issue.WorkflowRunId, limit ?? 200, ct);
             var response = merged
                 .Select(StoredCloudEventDto.From)
                 .ToList();

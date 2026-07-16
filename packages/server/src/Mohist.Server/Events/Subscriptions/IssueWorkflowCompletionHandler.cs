@@ -64,16 +64,18 @@ public sealed class IssueWorkflowCompletionHandler : ICloudEventHandler
             return;
         }
 
-        if (!evt.Extensions.TryGetValue("issueid", out var issueId)
-            || string.IsNullOrWhiteSpace(issueId))
+        if (!evt.Extensions.TryGetValue(EventCatalog.Lineage.ProjectId, out var projectId)
+            || string.IsNullOrWhiteSpace(projectId)
+            || !evt.Extensions.TryGetValue(EventCatalog.Lineage.Issue, out var issueNumberText)
+            || !int.TryParse(issueNumberText, out var issueNumber))
         {
             _log.LogDebug(
-                "Workflow-run completed handler: cloud event {EventId} missing issueid extension, skipping ({WorkflowRunId})",
+                "Workflow-run completed handler: cloud event {EventId} missing project-scoped issue extension, skipping ({WorkflowRunId})",
                 evt.Id, workflowRunId);
             return;
         }
 
-        var grain = _grains.GetGrain<IIssueGrain>(GrainKey.Issue(issueId));
+        var grain = _grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(projectId, issueNumber)));
         await grain.CompleteWorkAsync(workflowRunId).ConfigureAwait(false);
     }
 }

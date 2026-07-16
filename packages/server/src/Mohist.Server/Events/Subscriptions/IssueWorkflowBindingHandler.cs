@@ -19,13 +19,15 @@ public sealed class IssueWorkflowBindingHandler : ICloudEventHandler<IssueWorkSt
 
     public async Task HandleAsync(CloudEvent<IssueWorkStarted> evt, CancellationToken ct)
     {
-        if (!evt.Extensions.TryGetValue(EventCatalog.Lineage.IssueId, out var issueId)
-            || string.IsNullOrWhiteSpace(issueId))
+        if (!evt.Extensions.TryGetValue(EventCatalog.Lineage.ProjectId, out var projectId)
+            || string.IsNullOrWhiteSpace(projectId)
+            || !evt.Extensions.TryGetValue(EventCatalog.Lineage.Issue, out var issueNumberText)
+            || !int.TryParse(issueNumberText, out var issueNumber))
         {
-            throw new InvalidOperationException($"IssueWorkStarted event '{evt.Id}' has no issueid.");
+            throw new InvalidOperationException($"IssueWorkStarted event '{evt.Id}' has no project-scoped issue number.");
         }
 
-        var issue = _grains.GetGrain<IIssueGrain>(GrainKey.Issue(issueId));
+        var issue = _grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(projectId, issueNumber)));
         await issue.EnsureWorkflowBindingAsync(evt.Data.WorkflowRunId);
     }
 }
