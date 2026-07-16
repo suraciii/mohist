@@ -142,6 +142,47 @@ public class EventDispatcherSpecs
     }
 
     [Fact]
+    public async Task DispatchAsync_RetryingStream_DoesNotBlockOtherStreams()
+    {
+        var time = new FakeTimeProvider(StartTime);
+        var events = new FakeEventStore();
+        var dlq = new FakeDeadLetterStore();
+        var firstAttempt = true;
+        var seen = new List<string>();
+        var sub = new Subscription(
+            IssueCompleted,
+            new Recorder(evt =>
+            {
+                if (evt.Id == "A_1" && firstAttempt)
+                {
+                    firstAttempt = false;
+                    throw new InvalidOperationException("transient");
+                }
+                seen.Add(evt.Id);
+            }),
+            DispatchDynamic);
+        var dispatcher = BuildDispatcher(events, dlq, [sub], time);
+
+        events.Enqueue(FakeEventStore.Build(IssueCompleted, "/mohist/issues/issue_A", id: 1, eventId: "A_1"));
+        events.Enqueue(FakeEventStore.Build(IssueCompleted, "/mohist/issues/issue_A", id: 2, eventId: "A_2"));
+        events.Enqueue(FakeEventStore.Build(IssueCompleted, "/mohist/issues/issue_B", id: 1, eventId: "B_1"));
+
+        await dispatcher.DispatchAsync(CancellationToken.None);
+
+        Assert.Equal(["B_1"], seen);
+        Assert.Equal(["B_1"], events.Marked.Select(ToStreamEventId));
+
+        time.Advance(TimeSpan.FromSeconds(1));
+        await dispatcher.DispatchAsync(CancellationToken.None);
+
+        Assert.Equal(["B_1", "A_1", "A_2"], seen);
+        Assert.Equal(["B_1", "A_1", "A_2"], events.Marked.Select(ToStreamEventId));
+    }
+
+    private static string ToStreamEventId(FakeEventStore.RecordedDispatch dispatch) =>
+        dispatch.Source.EndsWith("issue_A", StringComparison.Ordinal) ? $"A_{dispatch.Id}" : $"B_{dispatch.Id}";
+
+    [Fact]
     public async Task DispatchAsync_PerHandlerRetry_RecoversOnSecondAttempt_StillMarksDelivered()
     {
         var time = new FakeTimeProvider(StartTime);

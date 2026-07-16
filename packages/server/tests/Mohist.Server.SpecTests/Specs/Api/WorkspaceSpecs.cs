@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using Mohist.Server.Events.Grains;
 using Mohist.Server.Infrastructure.Workspace;
 using Mohist.Server.Runner.Services.SignalR;
 using Mohist.Server.SpecTests.Support;
@@ -49,6 +50,7 @@ public class WorkspaceSpecs
         var project = await CreateProjectWithRepositoryAsync();
         var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Workspace issue", projectId = project.Id, isDraft = false });
         await _client.PostOkAsync($"/api/projects/{project.Id}/issues/{issue.Number}/start");
+        await DispatchEventsAsync();
 
         var diff = await _client.GetDataAsync<UnavailableDto>($"/api/projects/{project.Id}/issues/{issue.Number}/diff");
         var commits = await _client.GetDataAsync<UnavailableDto>($"/api/projects/{project.Id}/issues/{issue.Number}/commits");
@@ -324,6 +326,7 @@ public class WorkspaceSpecs
         var project = await CreateProjectWithRepositoryAsync("main");
         var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Missing cleanup issue", projectId = project.Id, isDraft = false });
         await _client.PostOkAsync($"/api/projects/{project.Id}/issues/{issue.Number}/start");
+        await DispatchEventsAsync();
         _fixture.RunnerWorkspace.WorkspaceRemoval = new WorkspaceRemovalResultDto(false, "missing", "/fake/workspace", "workspace_missing", "Workspace already removed").ToDomain();
         await _client.PostOkAsync($"/api/projects/{project.Id}/issues/{issue.Number}/stop");
 
@@ -348,6 +351,7 @@ public class WorkspaceSpecs
     {
         await _client.PatchAsJsonAsync($"/api/projects/{project.Id}/issues/{issueNumber}", new { isDraft = false });
         await _client.PostOkAsync($"/api/projects/{project.Id}/issues/{issueNumber}/start");
+        await DispatchEventsAsync();
         var issue = await _client.GetDataAsync<WorkflowStatusDto>($"/api/projects/{project.Id}/issues/{issueNumber}/workflow/status");
         var workflowRunId = issue.WorkflowRunId ?? throw new InvalidOperationException("Issue started but no workflow run id was returned");
         var expectedRepository = Assert.Single(project.Repositories);
@@ -362,6 +366,9 @@ public class WorkspaceSpecs
         Assert.Equal(expectedRepository.BaseBranch, repository.GetProperty("baseBranch").GetString());
         return workflowRunId;
     }
+
+    private Task DispatchEventsAsync() =>
+        _fixture.Grains.GetGrain<IEventDispatcherGrain>(EventDispatcherGrain.Global).DispatchNowAsync();
 
     private static WorkspaceStatus AvailableStatus(string runId, string baseBranch, int ahead = 0, int behind = 0) => new()
     {
