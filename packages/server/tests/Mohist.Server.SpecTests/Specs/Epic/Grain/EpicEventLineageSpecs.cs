@@ -32,6 +32,23 @@ public class EpicEventLineageSpecs
     }
 
     [Fact]
+    public async Task CreateAsync_RejectsIdentityOutsideGrainKey()
+    {
+        var (database, eventStore) = CreateDatabaseWithRecordingEventStore();
+        await using (database)
+        {
+            var grain = CreateGrain(database.Factory, $"{ProjectId}:{EpicNumber}", eventStore, new FakeTimeProvider(FixedTime));
+
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                grain.CreateAsync("project_2", EpicNumber, "cross-project epic", null, "p1"));
+
+            await using var verify = database.CreateDbContext();
+            Assert.Empty(await verify.Epics.ToListAsync());
+            Assert.Empty(eventStore.Appended);
+        }
+    }
+
+    [Fact]
     public async Task StartAsync_StampsConformingProjectAndEpicLineage()
     {
         var (database, eventStore) = CreateDatabaseWithRecordingEventStore();

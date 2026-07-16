@@ -512,11 +512,13 @@ public class IssueGrain : Grain, IIssueGrain
 
     public async Task<int> CreateAsync(string projectId, int number, string title, string? body, IReadOnlyDictionary<string, string>? labels, string? priority, string? repositoryRef = null, string? risk = null, bool isDraft = false, string[]? attachmentIds = null, string? workflowProfileId = null, int[]? prerequisiteNumbers = null)
     {
+        var key = ParseIssueKey();
+        EnsureIdentityMatches(key, projectId, number);
         if (_issue is not null)
             throw new InvalidOperationException($"Issue '{GrainKey}' already exists");
 
-        var resolvedRef = await ResolveRepositoryRefAsync(projectId, repositoryRef);
-        await _attachmentService.ValidateIssueBindAsync(projectId, number, attachmentIds);
+        var resolvedRef = await ResolveRepositoryRefAsync(key.ProjectId, repositoryRef);
+        await _attachmentService.ValidateIssueBindAsync(key.ProjectId, key.IssueNumber, attachmentIds);
 
         if (!string.IsNullOrWhiteSpace(workflowProfileId) && !_profiles.Exists(workflowProfileId))
         {
@@ -524,8 +526,8 @@ public class IssueGrain : Grain, IIssueGrain
         }
 
         var issue = Domain.Issue.Create(
-            projectId,
-            number,
+            key.ProjectId,
+            key.IssueNumber,
             title,
             body,
             labels,
@@ -555,7 +557,7 @@ public class IssueGrain : Grain, IIssueGrain
             {
                 foreach (var prerequisiteNumber in prerequisiteNumbers.Distinct())
                 {
-                    if (prerequisiteNumber == number)
+                    if (prerequisiteNumber == key.IssueNumber)
                         throw PrerequisiteValidationException.SelfReference(prerequisiteNumber);
                     if (await LoadIssueSummaryAsync(prerequisiteNumber) is null)
                         throw PrerequisiteValidationException.NotFound(prerequisiteNumber);
@@ -572,7 +574,7 @@ public class IssueGrain : Grain, IIssueGrain
         }
 
         await SaveIssueAsync();
-        await _attachmentService.BindIssueAsync(projectId, issue.Number, attachmentIds);
+        await _attachmentService.BindIssueAsync(key.ProjectId, issue.Number, attachmentIds);
         return issue.Number;
     }
 
@@ -747,6 +749,21 @@ public class IssueGrain : Grain, IIssueGrain
         catch (InvalidOperationException)
         {
             return null;
+        }
+    }
+
+    private IssueKey ParseIssueKey()
+    {
+        ScopedGrainKeyCodec.Parse(GrainKey, out var projectId, out var issueNumber);
+        return new IssueKey(projectId, issueNumber);
+    }
+
+    private static void EnsureIdentityMatches(IssueKey key, string projectId, int number)
+    {
+        if (key.ProjectId != projectId || key.IssueNumber != number)
+        {
+            throw new InvalidOperationException(
+                $"Issue command identity '{projectId}#{number}' does not match grain identity '{key.ProjectId}#{key.IssueNumber}'.");
         }
     }
 

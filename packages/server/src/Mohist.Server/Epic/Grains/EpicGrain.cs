@@ -47,11 +47,13 @@ public class EpicGrain : Grain, IEpicGrain
 
     public async Task<EpicDto> CreateAsync(string projectId, int number, string title, string? description, string? priority)
     {
+        var key = ParseEpicKey();
+        EnsureIdentityMatches(key, projectId, number);
         await using var db = await _dbFactory.CreateDbContextAsync();
         var now = Now();
         var epic = EpicAggregate.Create(
-            projectId: projectId,
-            number: number,
+            projectId: key.ProjectId,
+            number: key.EpicNumber,
             title: title,
             description: description,
             priority: priority,
@@ -66,20 +68,21 @@ public class EpicGrain : Grain, IEpicGrain
 
     public async Task LinkIssueAsync(int issueNumber, string projectId)
     {
-        var (_, epicNumber) = ParseGrainKey();
+        var (scopedProjectId, epicNumber) = ParseGrainKey();
+        EnsureProjectScope(scopedProjectId, projectId);
         await using var db = await _dbFactory.CreateDbContextAsync();
         var epic = await db.Epics.AsNoTracking()
-            .FirstOrDefaultAsync(row => row.ProjectId == projectId && row.Number == epicNumber);
+            .FirstOrDefaultAsync(row => row.ProjectId == scopedProjectId && row.Number == epicNumber);
         if (epic is null) throw new InvalidOperationException($"Epic #{epicNumber} not found");
 
         var issue = await db.Issues.AsNoTracking()
-            .FirstOrDefaultAsync(row => row.ProjectId == projectId && row.Number == issueNumber);
+            .FirstOrDefaultAsync(row => row.ProjectId == scopedProjectId && row.Number == issueNumber);
         if (issue?.EpicNumber == epicNumber) return;
         if (epic.Status == EpicStatusName.Closed)
             throw new EpicClosedCannotLinkException(epicNumber);
 
         var target = _grains.GetGrain<IIssueGrain>(
-            Mohist.Server.Infrastructure.Orleans.GrainKey.Issue(new IssueKey(projectId, issueNumber)));
+            Mohist.Server.Infrastructure.Orleans.GrainKey.Issue(new IssueKey(scopedProjectId, issueNumber)));
         await target.AssignEpicAsync(epicNumber);
     }
 
@@ -88,17 +91,18 @@ public class EpicGrain : Grain, IEpicGrain
         string projectId)
     {
         if (issues.Count == 0) return [];
-        var (_, epicNumber) = ParseGrainKey();
+        var (scopedProjectId, epicNumber) = ParseGrainKey();
+        EnsureProjectScope(scopedProjectId, projectId);
         await using var db = await _dbFactory.CreateDbContextAsync();
         var epic = await db.Epics.AsNoTracking()
-            .FirstOrDefaultAsync(row => row.ProjectId == projectId && row.Number == epicNumber);
+            .FirstOrDefaultAsync(row => row.ProjectId == scopedProjectId && row.Number == epicNumber);
         if (epic is null) throw new InvalidOperationException($"Epic #{epicNumber} not found");
 
         var results = new List<BatchMembershipOutcome>();
         foreach (var item in issues.Where(item => item.IssueNumber > 0).DistinctBy(item => item.IssueNumber))
         {
             var issue = await db.Issues.AsNoTracking()
-                .FirstOrDefaultAsync(row => row.ProjectId == projectId && row.Number == item.IssueNumber);
+                .FirstOrDefaultAsync(row => row.ProjectId == scopedProjectId && row.Number == item.IssueNumber);
             if (issue is null)
             {
                 results.Add(BatchMembershipOutcome.NotFound(item.Identifier));
@@ -113,7 +117,7 @@ public class EpicGrain : Grain, IEpicGrain
                 throw new EpicClosedCannotLinkException(epicNumber);
 
             var target = _grains.GetGrain<IIssueGrain>(
-                Mohist.Server.Infrastructure.Orleans.GrainKey.Issue(new IssueKey(projectId, item.IssueNumber)));
+                Mohist.Server.Infrastructure.Orleans.GrainKey.Issue(new IssueKey(scopedProjectId, item.IssueNumber)));
             await target.AssignEpicAsync(epicNumber);
             results.Add(BatchMembershipOutcome.Linked(item.Identifier, item.IssueNumber));
         }
@@ -122,9 +126,10 @@ public class EpicGrain : Grain, IEpicGrain
 
     public async Task UnlinkIssueAsync(int issueNumber, string projectId)
     {
-        var (_, epicNumber) = ParseGrainKey();
+        var (scopedProjectId, epicNumber) = ParseGrainKey();
+        EnsureProjectScope(scopedProjectId, projectId);
         var target = _grains.GetGrain<IIssueGrain>(
-            Mohist.Server.Infrastructure.Orleans.GrainKey.Issue(new IssueKey(projectId, issueNumber)));
+            Mohist.Server.Infrastructure.Orleans.GrainKey.Issue(new IssueKey(scopedProjectId, issueNumber)));
         await target.RemoveEpicAsync(epicNumber);
     }
 
@@ -133,12 +138,13 @@ public class EpicGrain : Grain, IEpicGrain
         string projectId)
     {
         if (issues.Count == 0) return [];
-        var (_, epicNumber) = ParseGrainKey();
+        var (scopedProjectId, epicNumber) = ParseGrainKey();
+        EnsureProjectScope(scopedProjectId, projectId);
         var results = new List<BatchMembershipOutcome>();
         foreach (var item in issues.Where(item => item.IssueNumber > 0).DistinctBy(item => item.IssueNumber))
         {
             var target = _grains.GetGrain<IIssueGrain>(
-                Mohist.Server.Infrastructure.Orleans.GrainKey.Issue(new IssueKey(projectId, item.IssueNumber)));
+                Mohist.Server.Infrastructure.Orleans.GrainKey.Issue(new IssueKey(scopedProjectId, item.IssueNumber)));
             var removed = await target.RemoveEpicAsync(epicNumber);
             results.Add(removed
                 ? BatchMembershipOutcome.Unlinked(item.Identifier, item.IssueNumber)
@@ -641,6 +647,30 @@ public class EpicGrain : Grain, IEpicGrain
     {
         ScopedGrainKeyCodec.Parse(GrainKey, out var projectId, out var epicNumber);
         return (projectId, epicNumber);
+    }
+
+    private static void EnsureIdentityMatches(EpicKey key, string projectId, int number)
+    {
+        if (key.ProjectId != projectId || key.EpicNumber != number)
+        {
+            throw new InvalidOperationException(
+                $"Epic command identity '{projectId}#{number}' does not match grain identity '{key.ProjectId}#{key.EpicNumber}'.");
+        }
+    }
+
+    private static void EnsureProjectScope(string scopedProjectId, string requestedProjectId)
+    {
+        if (!string.Equals(scopedProjectId, requestedProjectId, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                $"Epic command project '{requestedProjectId}' does not match grain project '{scopedProjectId}'.");
+        }
+    }
+
+    private EpicKey ParseEpicKey()
+    {
+        var (projectId, epicNumber) = ParseGrainKey();
+        return new EpicKey(projectId, epicNumber);
     }
 
     private static IReadOnlyList<Epic.Domain.Events.EpicEvent> DrainPendingEvents(EpicAggregate epic)

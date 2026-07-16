@@ -69,10 +69,10 @@ public class EventStore : IEventStore
 
         if (IssueEventPersistence.IsIssueSource(source))
         {
-            var nextId = await NextIssueIdAsync(db, source, ct);
+            var nextSequence = await NextIssueSequenceAsync(db, source, ct);
             db.IssueEvents.Add(new IssueEventRow
             {
-                Id = nextId,
+                Id = nextSequence,
                 Source = source,
                 EventId = envelope.Id,
                 Type = envelope.Type,
@@ -88,10 +88,10 @@ public class EventStore : IEventStore
 
         if (EpicEventPersistence.IsEpicSource(source))
         {
-            var nextId = await NextEpicIdAsync(db, source, ct);
+            var nextSequence = await NextEpicSequenceAsync(db, source, ct);
             db.EpicEvents.Add(new EpicEventRow
             {
-                Id = nextId,
+                Id = nextSequence,
                 Source = source,
                 EventId = envelope.Id,
                 Type = envelope.Type,
@@ -325,10 +325,10 @@ public class EventStore : IEventStore
     private static Task<long> NextWorkflowIdAsync(MohistDbContext db, string source, CancellationToken ct) =>
         NextIdAsync(db.WorkflowRunEvents, source, ct);
 
-    private static Task<long> NextIssueIdAsync(MohistDbContext db, string source, CancellationToken ct) =>
+    private static Task<long> NextIssueSequenceAsync(MohistDbContext db, string source, CancellationToken ct) =>
         NextIdAsync(db.IssueEvents, source, ct);
 
-    private static Task<long> NextEpicIdAsync(MohistDbContext db, string source, CancellationToken ct) =>
+    private static Task<long> NextEpicSequenceAsync(MohistDbContext db, string source, CancellationToken ct) =>
         NextIdAsync(db.EpicEvents, source, ct);
 
     private static Task<long> NextAgentSessionIdAsync(MohistDbContext db, string source, CancellationToken ct) =>

@@ -39,6 +39,23 @@ public class IssueOwnedEpicMembershipSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
+    public async Task MembershipCommands_RejectProjectOutsideEpicGrainKey()
+    {
+        await using var database = CreateDatabase();
+        await SeedEpicAsync(database);
+        await SeedIssueAsync(database);
+        var grains = new RecordingGrainFactory();
+        var grain = CreateGrain(database.Factory, $"{ProjectId}:1", new NoopEventStore(), new FakeTimeProvider(), grains);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => grain.LinkIssueAsync(1, "project_2"));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => grain.UnlinkIssueAsync(1, "project_2"));
+
+        Assert.Empty(grains.AffiliationCalls);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
     public async Task LinkIssueAsync_AlreadyAssignedToClosedEpic_IsIdempotent()
     {
         await using var database = CreateDatabase();

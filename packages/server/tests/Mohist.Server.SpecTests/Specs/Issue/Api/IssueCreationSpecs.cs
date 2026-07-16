@@ -100,6 +100,22 @@ public class IssueCreationSpecs
         Assert.Equal("mohist/local", issue.WorkflowProfileId);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task CreateIssue_RejectsIdentityOutsideGrainKey()
+    {
+        var projectA = await SetupProjectAsync();
+        var projectB = await SetupProjectAsync();
+        var grain = IssueGrain(projectB.Id, 1);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            grain.CreateAsync(projectA.Id, 1, "cross-project issue", null, null, null));
+
+        Assert.Null(await GetIssueInfoAsync(projectA.Id, 1));
+        Assert.Null(await GetIssueInfoAsync(projectB.Id, 1));
+    }
+
     // Regression guard for the bug that left IssueEvents permanently empty:
     // SaveIssueAsync snapshotted PendingEvents by reference, then
     // ClearPendingEvents() drained the same list, so the publish path

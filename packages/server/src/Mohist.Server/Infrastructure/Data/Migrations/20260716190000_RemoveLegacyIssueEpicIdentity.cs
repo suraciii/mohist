@@ -9,6 +9,28 @@ public partial class RemoveLegacyIssueEpicIdentity : Migration
     protected override void Up(MigrationBuilder migrationBuilder)
     {
         migrationBuilder.Sql("ALTER TABLE \"WorkflowRuns\" DROP COLUMN \"EpicId\";");
+        migrationBuilder.Sql("""
+            UPDATE "WorkflowRuns"
+            SET "State" = json_remove(
+                "State",
+                '$.issueId',
+                '$.IssueId',
+                '$.epicId',
+                '$.EpicId',
+                '$.metadata.annotations.issueId',
+                '$.metadata.annotations.IssueId',
+                '$.metadata.annotations.issueid',
+                '$.metadata.annotations.epicId',
+                '$.metadata.annotations.EpicId',
+                '$.metadata.annotations.epicid',
+                '$.Metadata.Annotations.issueId',
+                '$.Metadata.Annotations.IssueId',
+                '$.Metadata.Annotations.issueid',
+                '$.Metadata.Annotations.epicId',
+                '$.Metadata.Annotations.EpicId',
+                '$.Metadata.Annotations.epicid')
+            WHERE json_type("State", '$') = 'object';
+            """);
         migrationBuilder.Sql("DROP INDEX \"IX_WorkflowArtifacts_IssueId_RecordedAt\";");
         migrationBuilder.Sql("ALTER TABLE \"WorkflowArtifacts\" DROP COLUMN \"IssueId\";");
         migrationBuilder.Sql("ALTER TABLE \"IssueComments\" DROP COLUMN \"IssueId\";");
@@ -69,6 +91,21 @@ public partial class RemoveLegacyIssueEpicIdentity : Migration
                 ON "Issues" ("ProjectId", "EpicNumber", "Number");
             CREATE INDEX "IX_Issues_WorkflowRunId" ON "Issues" ("WorkflowRunId");
             CREATE INDEX "IX_Issues_Status" ON "Issues" ("Status");
+            """);
+
+        migrationBuilder.Sql("""
+            UPDATE "Issues"
+            SET "State" = json_remove(
+                "State",
+                '$.id',
+                '$.Id',
+                '$.issueId',
+                '$.IssueId',
+                '$.issueid',
+                '$.epicId',
+                '$.EpicId',
+                '$.epicid')
+            WHERE json_type("State", '$') = 'object';
             """);
     }
 

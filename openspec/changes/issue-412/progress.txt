@@ -464,3 +464,9 @@ relation shapes, prerequisites, and sessions. Focused migration, querier, and wo
 verification passes: **29 passed / 0 failed / 0 skipped**. Server UnitTests pass (**1453**),
 ArchTests pass (**27**), and the server build has zero errors. A full SpecTests run had one transient
 `IssueRebaseApi_QueuesWorkflowTask` conflict response; rerunning that exact case passed.
+
+## T-004 cutover verification follow-up (2026-07-17)
+
+- The final `RemoveLegacyIssueEpicIdentity` migration now removes legacy identity properties from current Issue and WorkflowRun JSON after canonical columns are established. Historical event rows remain untouched; the migration does not rewrite event source, payload, or extension JSON.
+- The cutover spec applies the real migration from `20260716180000_RemoveWorkflowBindingState`, preserves Issue/Epic/WorkflowRun rows for `proj_alpha/#42` and `proj_beta/#42`, asserts the old current-state columns are absent, checks both JSON shapes lose `id`/`issueId`/`epicId`, and reruns the target migration to prove convergence.
+- Event-store per-source sequence helpers are named `NextIssueSequenceAsync` and `NextEpicSequenceAsync`; their numeric row sequence remains independent from Issue/Epic identity.
