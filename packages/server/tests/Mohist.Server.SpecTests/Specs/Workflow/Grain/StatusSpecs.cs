@@ -17,8 +17,6 @@ public class StatusSpecs : WorkflowGrainSpecs
 {
     public StatusSpecs(WorkflowGrainFixture fixture) : base(fixture) { }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task WorkflowStatusShowsCurrentStage()
     {
@@ -37,8 +35,6 @@ public class StatusSpecs : WorkflowGrainSpecs
         Assert.Equal("task", status.PendingWork.WorkType);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task WorkflowStatusBeforeRunnerAssignmentIsPending()
     {
@@ -54,8 +50,6 @@ public class StatusSpecs : WorkflowGrainSpecs
         Assert.Equal("pending", status.Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task WorkflowStatusShowsPendingWork()
     {
@@ -83,8 +77,6 @@ public class StatusSpecs : WorkflowGrainSpecs
         await ReportAsync(r2, task2.WorkId, "completed");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task WorkflowStatusShowsTasksChecksAndApproval()
     {
@@ -110,8 +102,6 @@ public class StatusSpecs : WorkflowGrainSpecs
         Assert.Null(planStage.ApprovalStatus.Result);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task WorkflowDoesNotStoreIssueOrWorkspaceContext()
     {
@@ -132,8 +122,6 @@ public class StatusSpecs : WorkflowGrainSpecs
         Assert.DoesNotContain("ChangeDir", typeof(WorkflowStatusView).GetProperties().Select(p => p.Name));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task WorkflowStatusToleratesUnknownLegacyFailureReason()
     {

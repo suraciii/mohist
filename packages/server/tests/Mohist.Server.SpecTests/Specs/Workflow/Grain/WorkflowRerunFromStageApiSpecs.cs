@@ -43,8 +43,6 @@ public class WorkflowRerunFromStageApiSpecs
         _connectionString = fixture.ConnectionString;
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task RerunFromStage_EmptyStage_Returns400()
     {
@@ -57,8 +55,6 @@ public class WorkflowRerunFromStageApiSpecs
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task RerunFromStage_NoWorkflowRun_Returns404()
     {
@@ -71,8 +67,6 @@ public class WorkflowRerunFromStageApiSpecs
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task RerunFromStage_UnknownStage_Returns400()
     {
@@ -93,8 +87,6 @@ public class WorkflowRerunFromStageApiSpecs
         Assert.Contains("plan", stages);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task RerunFromStage_ValidRequest_Returns200()
     {
@@ -111,8 +103,6 @@ public class WorkflowRerunFromStageApiSpecs
         Assert.Equal(2, run.Stages.Single(s => s.Id == "build").Attempt);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task RerunFromStage_NeverReachedStage_Returns400WithEligibleStages()
     {
@@ -136,8 +126,6 @@ public class WorkflowRerunFromStageApiSpecs
         Assert.Equal("plan", run.CurrentStageId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task RerunFromStage_ActiveWork_Returns409()
     {
@@ -154,8 +142,6 @@ public class WorkflowRerunFromStageApiSpecs
         Assert.Contains("Stop or cancel", payload.GetProperty("error").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task RerunFromStage_TimelineOmitsInvalidatedTaskHistory()
     {
@@ -183,8 +169,6 @@ public class WorkflowRerunFromStageApiSpecs
             && e.GetProperty("data").GetProperty("stage").GetString() == "build");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task RerunFromStage_TimelineWithLowLimitStillOmitsInvalidatedTaskHistory()
     {
@@ -204,8 +188,6 @@ public class WorkflowRerunFromStageApiSpecs
             && e.GetProperty("data").GetProperty("stage").GetString() == "build");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task RerunFromStage_WorkflowRunEventsOmitInvalidatedTaskHistory()
     {
@@ -225,8 +207,6 @@ public class WorkflowRerunFromStageApiSpecs
             && e.GetProperty("data").GetProperty("stage").GetString() == "build");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task RerunFromStage_WorkflowRunEventsWithLowLimitStillOmitInvalidatedTaskHistory()
     {

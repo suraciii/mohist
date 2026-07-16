@@ -9,8 +9,6 @@ namespace Mohist.Server.SpecTests.Specs.SystemSpecs;
 
 public class EventBridgeSpecs
 {
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task HandleAsync_ForSubscribedConnection_IsPushedToThatClient()
     {
@@ -49,8 +47,6 @@ public class EventBridgeSpecs
         Assert.Equal("project-1", innerEnvelope.Extensions?["projectid"]);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task HandleAsync_ForUnsubscribedConnection_IsNotPushedToAnyClient()
     {

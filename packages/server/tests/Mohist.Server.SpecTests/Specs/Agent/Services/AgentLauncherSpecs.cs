@@ -57,9 +57,6 @@ public class AgentLauncherSpecs
         _fixture = fixture;
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task Launch_WithTriggerLabels_MergesThemIntoSessionMetadataLabels()
     {
@@ -104,8 +101,6 @@ public class AgentLauncherSpecs
             record.Session.Metadata.Label(AgentSessionQueryMetadataKeys.SourceKind));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task Launch_RepeatedTrigger_ReusesStableSession()
     {
@@ -132,8 +127,6 @@ public class AgentLauncherSpecs
         Assert.Equal(1, await CountSessionsAsync(projectId));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task Launch_TriggerReplayAfterJobDeactivation_ReusesDurableWork()
     {
@@ -202,8 +195,6 @@ public class AgentLauncherSpecs
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task DispatcherDelivery_ResolvesSiloScopedAgentLaunchServices()
     {
@@ -254,9 +245,6 @@ public class AgentLauncherSpecs
         Assert.Equal(agent.Id, session.Session.Metadata.Label(GenericAgentSessionMetadata.AgentId));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task Launch_WithoutTriggerLabels_ProducesNoTriggerMetadataLabels()
     {
@@ -287,9 +275,6 @@ public class AgentLauncherSpecs
         Assert.DoesNotContain(labels, kv => kv.Key.StartsWith("mohist.io/trigger/", StringComparison.Ordinal));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task Launch_WithEmptyTriggerLabels_ProducesNoTriggerMetadataLabels()
     {
@@ -313,9 +298,6 @@ public class AgentLauncherSpecs
         Assert.Null(record.Session.Metadata.Label(GenericAgentSessionMetadata.TriggerSubscriptionId));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Theory]
     [InlineData("")]
     [InlineData("   ")]
@@ -341,9 +323,6 @@ public class AgentLauncherSpecs
         Assert.Equal(sessionsBefore, sessionsAfter);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task Launch_WithNullAgent_ThrowsArgumentNullException()
     {
@@ -358,9 +337,6 @@ public class AgentLauncherSpecs
                 triggerLabels: null));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task Launch_WithNullContext_ThrowsArgumentNullException()
     {

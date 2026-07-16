@@ -71,8 +71,6 @@ public class WorkflowCheckLoopArtifactSpecs : WorkflowGrainSpecs
                 [])
         ]);
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task RecoveryLoop_RunsFixThenRetriesReviewTask()
     {
@@ -83,8 +81,6 @@ public class WorkflowCheckLoopArtifactSpecs : WorkflowGrainSpecs
             captured.WorkIds);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task RecoveryLoop_TaskRunFilterReturnsEachProducingReviewArtifact()
     {
@@ -105,8 +101,6 @@ public class WorkflowCheckLoopArtifactSpecs : WorkflowGrainSpecs
         Assert.Contains("PASS", ReadStorageContent(secondReview.ArtifactStoragePath));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task RecoveryLoop_PathHistoryReturnsBothReviewVersions()
     {
@@ -120,8 +114,6 @@ public class WorkflowCheckLoopArtifactSpecs : WorkflowGrainSpecs
         Assert.Equal(["ai-review.1", "ai-review.2"], history.Select(a => a.TaskRunId).ToArray());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task RecoveryLoop_LatestQueryReturnsRetriedReview()
     {
@@ -138,8 +130,6 @@ public class WorkflowCheckLoopArtifactSpecs : WorkflowGrainSpecs
         Assert.Equal("review-round-2: PASS", ReadStorageContent(review.ArtifactStoragePath));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task RecoveryLoop_TaskRunViewsExposeBothImmutableArtifacts()
     {

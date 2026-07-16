@@ -24,9 +24,6 @@ public sealed class RunnerPollRecoveryStateApiSpecs
         _fixture = fixture;
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task Poll_PreservesExplicitNullAndNumericRecoveryState()
     {
@@ -83,9 +80,6 @@ public sealed class RunnerPollRecoveryStateApiSpecs
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task Report_MalformedRecoveryFollowUpAcksAndFailsTheRunTerminally()
     {

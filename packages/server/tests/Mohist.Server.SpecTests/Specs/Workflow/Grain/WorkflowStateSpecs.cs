@@ -19,8 +19,6 @@ public class WorkflowStateSpecs : WorkflowGrainSpecs
 {
     public WorkflowStateSpecs(WorkflowGrainFixture fixture) : base(fixture) { }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task FailedWorkflow_NoMoreWork()
     {
@@ -33,8 +31,6 @@ public class WorkflowStateSpecs : WorkflowGrainSpecs
         Assert.Null(await runner.PollAsync(Services));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task CompletedWorkflow_NoMoreWork()
     {
@@ -50,8 +46,6 @@ public class WorkflowStateSpecs : WorkflowGrainSpecs
         Assert.Null(await runner.PollAsync(Services));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task RejectedWorkflow_LegacyReject_SchedulesFeedbackTask()
     {
@@ -76,8 +70,6 @@ public class WorkflowStateSpecs : WorkflowGrainSpecs
         Assert.StartsWith("apply-feedback.", work!.WorkId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task TaskRunning_SecondPollWaitsForCompletion()
     {
@@ -100,8 +92,6 @@ public class WorkflowStateSpecs : WorkflowGrainSpecs
         await ReportChecksPassAsync(r2, check, "check-1");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task StaleReport_IgnoredWorkflowContinues()
     {
@@ -122,8 +112,6 @@ public class WorkflowStateSpecs : WorkflowGrainSpecs
         Assert.Null(await runner.PollAsync(Services));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task StartedWorkflow_RunnerAssignsFromBacklog()
     {
@@ -143,8 +131,6 @@ public class WorkflowStateSpecs : WorkflowGrainSpecs
         Assert.NotNull(work);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task StartWithoutRunner_RunnerAssignsFromBacklogLater()
     {
@@ -161,8 +147,6 @@ public class WorkflowStateSpecs : WorkflowGrainSpecs
         Assert.StartsWith("task-1.", work.WorkId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task ActiveTask_PreservesOwnership_BlocksDuplicateDispatch()
     {
@@ -179,8 +163,6 @@ public class WorkflowStateSpecs : WorkflowGrainSpecs
         Assert.Equal(r1, assignedRunner);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task ActiveTask_DifferentRunnerPoll_DoesNotOverwriteExistingWork()
     {
@@ -200,8 +182,6 @@ public class WorkflowStateSpecs : WorkflowGrainSpecs
 
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task ActiveTask_SameOwnerPoll_DoesNotCreateDuplicateAssignment()
     {
@@ -224,8 +204,6 @@ public class WorkflowStateSpecs : WorkflowGrainSpecs
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task TaskDelivery_IsCompletedWhenRunnerReports()
     {
@@ -245,8 +223,6 @@ public class WorkflowStateSpecs : WorkflowGrainSpecs
         Assert.Equal(TaskRunStatus.Completed, completed.CurrentStage().Tasks.Single().Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task WorkflowTaskStarted_IsRecordedAfterRunningTaskIsPersisted()
     {
@@ -259,8 +235,6 @@ public class WorkflowStateSpecs : WorkflowGrainSpecs
         Assert.Equal(runnerId, await workflow.GetAssignedWorkerIdAsync());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task StoppedAssignedWorkflow_RequestWorkRejectsAsNotRunnable()
     {
@@ -282,8 +256,6 @@ public class WorkflowStateSpecs : WorkflowGrainSpecs
         Assert.DoesNotContain(_workflowId, runtime.ActiveWorks.Select(w => w.OwnerId));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task StopAsync_StopEventAppendFailure_DoesNotPersistStoppedStateWithoutEvent()
     {
@@ -310,8 +282,6 @@ public class WorkflowStateSpecs : WorkflowGrainSpecs
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task EventAwareSaveFailure_DeactivationDoesNotFlushMutatedRunStateOnly()
     {
@@ -338,8 +308,6 @@ public class WorkflowStateSpecs : WorkflowGrainSpecs
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task StopAsync_AfterCommit_ReadbackKeepsStoppedEventAndState()
     {
@@ -360,8 +328,6 @@ public class WorkflowStateSpecs : WorkflowGrainSpecs
     // next pending item and flips it to Running in one atomic transition).
     // These specs were rewritten to compile against ClaimNextAsync; the old
     // offer-then-claim semantics no longer exist (design/workflow/scheduling.md).
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task PollWork_OffersWorkWithoutStarting_ClaimTransitionsToRunning()
     {
@@ -382,8 +348,6 @@ public class WorkflowStateSpecs : WorkflowGrainSpecs
         Assert.Equal(claimed.Id, claimedTask.WorkId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task ClaimNextAsync_ReturnsNull_WhenTaskAlreadyRunning()
     {

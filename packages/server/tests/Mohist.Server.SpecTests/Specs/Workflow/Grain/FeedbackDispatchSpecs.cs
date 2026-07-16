@@ -24,8 +24,6 @@ public class FeedbackDispatchSpecs : WorkflowGrainSpecs
         Converters = { new JsonStringEnumConverter() }
     };
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task AwaitingApproval_RequestChanges_NonFeedbackTaskDispatch_HasNoApprovalFeedback()
     {
@@ -36,8 +34,6 @@ public class FeedbackDispatchSpecs : WorkflowGrainSpecs
         Assert.False(HasApprovalFeedback(draft.Variables));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task AwaitingApproval_RequestChanges_FeedbackTaskDispatch_HasApprovalFeedbackContext()
     {
@@ -90,8 +86,6 @@ public class FeedbackDispatchSpecs : WorkflowGrainSpecs
         Assert.False(feedbackEl.TryGetProperty("body", out _), "full feedback body must not be inlined into dispatch variables");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task AwaitingApproval_RequestChanges_ShortBodySummary_NotTruncated()
     {
@@ -112,8 +106,6 @@ public class FeedbackDispatchSpecs : WorkflowGrainSpecs
         Assert.Equal("please add a quick start section", summary);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task AwaitingApproval_RequestChanges_DispatcherResolvesIssueNumberFromMetadata()
     {
@@ -154,8 +146,6 @@ public class FeedbackDispatchSpecs : WorkflowGrainSpecs
             command);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task AwaitingApproval_RequestChanges_FeedbackTaskCompletes_ResolvesFeedbackWithSummary()
     {
@@ -191,8 +181,6 @@ public class FeedbackDispatchSpecs : WorkflowGrainSpecs
         Assert.Equal("checks", rerunCheck.WorkType);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task AwaitingApproval_RequestChanges_FeedbackTaskFails_DoesNotResolveFeedback()
     {
@@ -219,8 +207,6 @@ public class FeedbackDispatchSpecs : WorkflowGrainSpecs
         Assert.Null(feedback.ResolutionSummary);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task AwaitingApproval_RequestChanges_FeedbackTaskCompletesWithoutSummary_StillResolves()
     {
@@ -247,8 +233,6 @@ public class FeedbackDispatchSpecs : WorkflowGrainSpecs
         Assert.Equal("agent finished without writing a summary", feedback.ResolutionSummary);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task AwaitingApproval_RequestChanges_FeedbackTaskCompletesWithEmptyOutput_ResolvesWithoutSummary()
     {
@@ -271,8 +255,6 @@ public class FeedbackDispatchSpecs : WorkflowGrainSpecs
         Assert.Null(feedback.ResolutionSummary);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task AwaitingApproval_RequestChanges_TaskDispatchedTwice_DoesNotInjectStaleContext()
     {
@@ -298,8 +280,6 @@ public class FeedbackDispatchSpecs : WorkflowGrainSpecs
         Assert.False(HasApprovalFeedback(buildTask.Variables), "non-feedback task must not carry approvalFeedback context");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task AwaitingApproval_RequestChanges_DeactivateThenDispatch_StillCarriesFeedbackContext()
     {

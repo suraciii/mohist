@@ -27,9 +27,6 @@ public class AgentJobRoutesSpecs
         _fixture = fixture;
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task PostValidate_MissingPrompt_ReturnsValidationError_AndDoesNotCreateGrain()
     {
@@ -48,9 +45,6 @@ public class AgentJobRoutesSpecs
         Assert.Contains("prompt", payload.GetProperty("error").GetString()!);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task PostValidate_EmptyBody_ReturnsValidationError()
     {
@@ -63,9 +57,6 @@ public class AgentJobRoutesSpecs
         Assert.False(payload.GetProperty("success").GetBoolean());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task PostValidate_WorkspacePathMissing_ReturnsValidationError()
     {
@@ -83,9 +74,6 @@ public class AgentJobRoutesSpecs
         Assert.Contains("workspace.path", payload.GetProperty("error").GetString()!);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task PostValidate_NoRunnerAvailable_ReturnsStructuredFailureWithRunnerUnavailableReason()
     {
@@ -119,9 +107,6 @@ public class AgentJobRoutesSpecs
         Assert.False(string.IsNullOrWhiteSpace(data.GetProperty("message").GetString()));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task PostValidate_WhenJobTimesOut_ReturnsStructuredTimeoutResult_NotOpaque500()
     {
@@ -155,9 +140,6 @@ public class AgentJobRoutesSpecs
         Assert.Equal(1, grain.SubmitCount);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task PostValidate_DoesNotAffectExistingHttpApiSurface()
     {
@@ -313,10 +295,6 @@ public class AgentJobDispatchRouteSpecs
         _fixture = fixture;
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task PostValidate_DispatchesAgentJobToRunner_AndReturnsReportedCompletion()
     {
@@ -374,10 +352,6 @@ public class AgentJobDispatchRouteSpecs
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task PostValidate_WhenRunnerReportsFailure_ReturnsStructuredFailure()
     {
@@ -426,10 +400,6 @@ public class AgentJobDispatchRouteSpecs
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task PostValidate_DispatchIncludesWorkspacePath_ForRunnerWorkspaceShortCircuit()
     {
@@ -482,10 +452,6 @@ public class AgentJobDispatchRouteSpecs
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task RunnerReportEndpoint_ForAgentJob_DeliversResultToValidateResponse()
     {
@@ -541,10 +507,6 @@ public class AgentJobDispatchRouteSpecs
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task RunnerPollEndpoint_ForAgentJob_ExposesOwnerKindAndAgentJobId()
     {
@@ -590,10 +552,6 @@ public class AgentJobDispatchRouteSpecs
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task HttpReportEndpoint_AgentJobWithoutAgentJobId_Returns400()
     {

@@ -10,8 +10,6 @@ public class FailureSpecs : WorkflowGrainSpecs
 {
     public FailureSpecs(WorkflowGrainFixture fixture) : base(fixture) { }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task RunningTask_ReportsFailure_WorkflowFails()
     {
@@ -24,8 +22,6 @@ public class FailureSpecs : WorkflowGrainSpecs
         Assert.Equal(RunnerStatus.Online, (await runner.GetRuntimeStateAsync()).Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task RunningCheck_ReportsFail_WorkflowFails()
     {

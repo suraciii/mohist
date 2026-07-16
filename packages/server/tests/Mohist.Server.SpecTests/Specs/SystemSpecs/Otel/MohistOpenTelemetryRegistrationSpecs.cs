@@ -13,8 +13,6 @@ namespace Mohist.Server.SpecTests.Specs.SystemSpecs.Otel;
 [Collection("OtelTracing")]
 public class MohistOpenTelemetryRegistrationSpecs
 {
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public void Disabled_DoesNotRegisterOpenTelemetryServices()
     {
@@ -35,8 +33,6 @@ public class MohistOpenTelemetryRegistrationSpecs
         Assert.DoesNotContain(services, d => d.ServiceType.FullName == "OpenTelemetry.Logs.LoggerProvider");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public void Disabled_ActivityCapturedByProcessorIsZero_NoPipelineExists()
     {
@@ -51,8 +47,6 @@ public class MohistOpenTelemetryRegistrationSpecs
         Assert.DoesNotContain(services, d => d.ServiceType.FullName == "OpenTelemetry.Trace.TracerProvider");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public void Enabled_RegistersTelemetryHostedServiceAndTracerProvider()
     {
@@ -65,8 +59,6 @@ public class MohistOpenTelemetryRegistrationSpecs
         Assert.Contains(services, d => d.ServiceType.FullName == "OpenTelemetry.Trace.TracerProvider");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public void Enabled_TracerProviderBuilt_IsResolvableAndCreatesInstrumentation()
     {
@@ -85,8 +77,6 @@ public class MohistOpenTelemetryRegistrationSpecs
         Assert.NotNull(tracerProvider);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public void Enabled_ActivityListenerSeesActivityStartedWhileProviderIsAlive()
     {

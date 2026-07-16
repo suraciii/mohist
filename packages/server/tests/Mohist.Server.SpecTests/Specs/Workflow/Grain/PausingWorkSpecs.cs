@@ -12,8 +12,6 @@ public class PausingWorkSpecs : WorkflowGrainSpecs
 {
     public PausingWorkSpecs(WorkflowGrainFixture fixture) : base(fixture) { }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task RunningWorkflow_Pause_StopsAfterCurrentTask()
     {
@@ -38,8 +36,6 @@ public class PausingWorkSpecs : WorkflowGrainSpecs
         Assert.Equal(RunnerStatus.Online, (await runner.GetRuntimeStateAsync()).Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task PausedWorkflow_Resume_ContinuesWithNextTask()
     {
@@ -71,8 +67,6 @@ public class PausingWorkSpecs : WorkflowGrainSpecs
         Assert.Equal(RunnerStatus.Online, (await runner2.GetRuntimeStateAsync()).Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task StoppedWorkflow_Resume_ThrowsInvalidOperationException()
     {
@@ -83,8 +77,6 @@ public class PausingWorkSpecs : WorkflowGrainSpecs
         await Assert.ThrowsAsync<InvalidOperationException>(() => workflow.ResumeAsync());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task StoppedWorkflow_HasTerminalStatus()
     {
@@ -102,8 +94,6 @@ public class PausingWorkSpecs : WorkflowGrainSpecs
         Assert.Equal("Stopped", statusAfter);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task StoppedWorkflow_Resumes_DoesNotReturnNewWork()
     {
@@ -117,8 +107,6 @@ public class PausingWorkSpecs : WorkflowGrainSpecs
         Assert.Null(await runner.PollAsync(Services));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task StoppedWorkflow_ReleasesLease()
     {
@@ -130,8 +118,6 @@ public class PausingWorkSpecs : WorkflowGrainSpecs
         Assert.Null(await workflow.GetCurrentWorkIdAsync());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task StoppedWorkflow_CannotBeStoppedAgain()
     {
@@ -142,8 +128,6 @@ public class PausingWorkSpecs : WorkflowGrainSpecs
         await Assert.ThrowsAsync<InvalidOperationException>(() => workflow.StopAsync("second"));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task CompletedWorkflow_CannotBeStopped()
     {

@@ -30,8 +30,6 @@ public class IssueMetricsApiSpecs
         _fixture = fixture;
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Theory]
     [InlineData("cumulative-flow")]
     [InlineData("cumulative-flow?range=30d")]
@@ -45,8 +43,6 @@ public class IssueMetricsApiSpecs
         Assert.Equal(System.Net.HttpStatusCode.NotFound, response.StatusCode);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task CompletionMetrics_DayBucket_ReturnsThirtyTrailingDays()
     {
@@ -68,8 +64,6 @@ public class IssueMetricsApiSpecs
         });
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task CompletionMetrics_WeekBucket_ReturnsTwelveTrailingWeeks()
     {
@@ -84,8 +78,6 @@ public class IssueMetricsApiSpecs
         Assert.Equal(12, payload.Buckets.Length);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task CompletionMetrics_UnsupportedBucket_ReturnsBadRequest()
     {
@@ -98,8 +90,6 @@ public class IssueMetricsApiSpecs
         Assert.Equal(System.Net.HttpStatusCode.BadRequest, response.StatusCode);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task CompletionMetrics_IssueEditedAfterCompletion_StaysInCompletionBucket()
     {
@@ -131,8 +121,6 @@ public class IssueMetricsApiSpecs
         Assert.Equal(1, hit.Completed);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task CompletionMetrics_ProjectScoping_OnlyCountsTargetProjectsIssues()
     {
@@ -160,8 +148,6 @@ public class IssueMetricsApiSpecs
         Assert.Equal(1, dayB.Completed);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task CompletionMetrics_DistinctPerBucket_CollapsesRepeatedEventsForSameIssueAndType()
     {
@@ -182,8 +168,6 @@ public class IssueMetricsApiSpecs
         Assert.Equal(0, day.Failed);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task CompletionMetrics_RecompletedIssue_CountsOnlyLatestTerminalBucket()
     {
@@ -205,8 +189,6 @@ public class IssueMetricsApiSpecs
         Assert.Equal(1, day19.Completed);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task CompletionMetrics_DayBucket_ReturnsBothWindowTotalsFromSeededEvents()
     {
@@ -244,8 +226,6 @@ public class IssueMetricsApiSpecs
         Assert.Equal("2026-06-30", payload.Buckets[^1].Boundary);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task CompletionMetrics_DayBucket_EmptyPreviousWindowReportsZeroSampleCount()
     {
@@ -267,8 +247,6 @@ public class IssueMetricsApiSpecs
         Assert.Equal(0, payload.PreviousTotal.SampleCount);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task CompletionMetrics_DayBucket_GenuineZeroCompletionPreviousWindowIsDistinctFromEmpty()
     {
@@ -295,8 +273,6 @@ public class IssueMetricsApiSpecs
         Assert.Equal(0, payload.CurrentTotal.SampleCount);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task CompletionMetrics_DayBucket_BothWindowTotalsAreAdditiveToExistingResponse()
     {
@@ -322,8 +298,6 @@ public class IssueMetricsApiSpecs
         Assert.NotNull(payload.PreviousTotal);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task CompletionMetrics_WeekBucket_ReturnsBothWindowTotalsFromSeededEvents()
     {
@@ -353,8 +327,6 @@ public class IssueMetricsApiSpecs
         Assert.Equal(1, payload.PreviousTotal.SampleCount);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task ApprovalWaitMetrics_HasCompletedApprovals_ReturnsWindowSampleCountAndStats()
     {
@@ -397,8 +369,6 @@ public class IssueMetricsApiSpecs
         Assert.Equal(approvedWait.TotalSeconds, payload.MaxSeconds);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task ApprovalWaitMetrics_MultipleCompletedApprovalStagesInOneRun_CountsEachGate()
     {
@@ -428,8 +398,6 @@ public class IssueMetricsApiSpecs
         Assert.Equal(checkWait.TotalSeconds, payload.MaxSeconds);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task ApprovalWaitMetrics_NoQualifyingApprovals_ReturnsEmptyResult()
     {
@@ -446,8 +414,6 @@ public class IssueMetricsApiSpecs
         Assert.Null(payload.MaxSeconds);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task QualityMetrics_ShippedIssuesWithRepairs_ReturnsBothWindowsWithRates()
     {
@@ -481,8 +447,6 @@ public class IssueMetricsApiSpecs
         Assert.Contains(payload.Window.Stages, s => s.Stage == "integrate" && s.EnteredCount == 0 && s.ReworkRate == null);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task QualityMetrics_NoShippedIssues_ReturnsEmptyResultPerWindow()
     {
@@ -501,8 +465,6 @@ public class IssueMetricsApiSpecs
         Assert.Contains(payload.Window.Stages, s => s.Stage == "integrate" && s.EnteredCount == 0 && s.ReworkRate == null);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task QualityMetrics_ShippedIssuesWithRepairs_ReturnsTrendAlongsideWindows()
     {
@@ -553,8 +515,6 @@ public class IssueMetricsApiSpecs
         Assert.Null(emptyPoint.ReworkRate);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task QualityMetrics_NoShippedIssues_ReturnsTwoHundredWithNullTrendRates()
     {
@@ -578,8 +538,6 @@ public class IssueMetricsApiSpecs
         Assert.Null(payload.Window.FirstTimeRightRate);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task QualityMetrics_BothWindowsReturned_DeltaDerivableAcrossAdjacent30DayWindows()
     {
@@ -632,8 +590,6 @@ public class IssueMetricsApiSpecs
             precision: 5);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task QualityMetrics_PreviousWindowEmpty_ReportsNullRateIndependentOfCurrentWindow()
     {
@@ -669,8 +625,6 @@ public class IssueMetricsApiSpecs
         Assert.Null(payload.PreviousFirstTimeRightRate);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task QualityMetrics_GenuineZeroAndGenuineOneRatesInPreviousWindow_AreDistinctFromEmpty()
     {
@@ -724,8 +678,6 @@ public class IssueMetricsApiSpecs
         Assert.NotEqual(0, payload.PreviousSampleCount);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task QualityMetrics_AdditivePreservation_ExistingWindowAndTrendUnchanged()
     {
@@ -773,8 +725,6 @@ public class IssueMetricsApiSpecs
         Assert.Null(payload.PreviousFirstTimeRightRate);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task QualityMetrics_UnknownProject_ReturnsNotFound()
     {
@@ -784,8 +734,6 @@ public class IssueMetricsApiSpecs
         Assert.Equal(System.Net.HttpStatusCode.NotFound, response.StatusCode);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task DeliveryTimeMetrics_DeliveredIssueWithWorkStart_ReturnsLeadAndCycle()
     {
@@ -817,8 +765,6 @@ public class IssueMetricsApiSpecs
         Assert.Equal(2.1667, point.CycleDays!.Value, precision: 3);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task DeliveryTimeMetrics_NoDeliveredIssues_ReturnsEmptyPoints()
     {
@@ -832,8 +778,6 @@ public class IssueMetricsApiSpecs
         Assert.Empty(payload.Points);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task DeliveryTimeMetrics_DeliveredIssueWithoutWorkStart_ReportsNullCycle()
     {
@@ -859,8 +803,6 @@ public class IssueMetricsApiSpecs
         Assert.Equal(3.25, point.LeadDays, precision: 5);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task DeliveryTimeMetrics_GenuineZeroDurationCycle_ReportsZeroAndIsDistinctFromEmpty()
     {
@@ -885,8 +827,6 @@ public class IssueMetricsApiSpecs
         Assert.Equal(0.0, point.CycleDays!.Value, precision: 5);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task DeliveryTimeMetrics_UsesInjectedRouteClockForTrailingWindow()
     {
@@ -916,8 +856,6 @@ public class IssueMetricsApiSpecs
         Assert.Equal(1, point.IssueNumber);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task DeliveryTimeMetrics_UnknownProject_ReturnsNotFound()
     {
@@ -927,8 +865,6 @@ public class IssueMetricsApiSpecs
         Assert.Equal(System.Net.HttpStatusCode.NotFound, response.StatusCode);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task DeliveryTimeMetrics_BothWindowsReturned_DeltaDerivableAcrossAdjacent30DayWindows()
     {
@@ -972,8 +908,6 @@ public class IssueMetricsApiSpecs
         Assert.NotNull(point.CycleDays);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task DeliveryTimeMetrics_PreviousWindowEmpty_ReportsNullIndependentOfCurrentWindow()
     {
@@ -1000,8 +934,6 @@ public class IssueMetricsApiSpecs
         Assert.Null(payload.PreviousCycleDays);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task DeliveryTimeMetrics_CurrentWindowEmpty_PreviousWindowAverageStillReturned()
     {
@@ -1032,8 +964,6 @@ public class IssueMetricsApiSpecs
         Assert.Equal(3.0, payload.PreviousCycleDays!.Value, precision: 5);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task DeliveryTimeMetrics_AdditivePreservation_PointsAndTrailingWindowUnchanged()
     {
@@ -1079,8 +1009,6 @@ public class IssueMetricsApiSpecs
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task StageDurationMetrics_DeliveredIssueWithStageEvents_ReturnsStagesRatioAndWait()
     {
@@ -1136,8 +1064,6 @@ public class IssueMetricsApiSpecs
         Assert.Equal(3 * 3600, payload.WaitBreakout.AverageInactiveGapSeconds!.Value, precision: 3);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task StageDurationMetrics_RunOnlyInLifecyclePayload_DiscoversStageEvents()
     {
@@ -1168,8 +1094,6 @@ public class IssueMetricsApiSpecs
         Assert.Equal(3 * 3600, planStage.AverageSeconds!.Value, precision: 3);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task StageDurationMetrics_NoDeliveredIssuesInWindow_ReturnsEmptyResult()
     {
@@ -1187,8 +1111,6 @@ public class IssueMetricsApiSpecs
         Assert.Null(payload.WaitBreakout.AverageInactiveGapSeconds);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task StageDurationMetrics_UsesInjectedRouteClockForTrailingWindow()
     {
@@ -1230,8 +1152,6 @@ public class IssueMetricsApiSpecs
         Assert.Equal(1, planStage.SampleCount);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task StageDurationMetrics_UnknownProject_ReturnsNotFound()
     {
@@ -1241,8 +1161,6 @@ public class IssueMetricsApiSpecs
         Assert.Equal(System.Net.HttpStatusCode.NotFound, response.StatusCode);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task RangeQuery_OmittedOnCompletionDayEndpoint_ReproducesThirtyDayWindow()
     {
@@ -1260,8 +1178,6 @@ public class IssueMetricsApiSpecs
         Assert.Equal(30, payload.Buckets.Length);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task RangeQuery_OmittedOnCompletionWeekEndpoint_ReproducesTwelveWeekWindow()
     {
@@ -1278,8 +1194,6 @@ public class IssueMetricsApiSpecs
         Assert.Equal(12, payload.Buckets.Length);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task RangeQuery_DayBucket_ScalesWindowToSelectedRange()
     {
@@ -1301,8 +1215,6 @@ public class IssueMetricsApiSpecs
         Assert.Equal(90, to.DayNumber - from.DayNumber);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task RangeQuery_WeekBucket_CountDerivesFromRangeRoundedUp()
     {
@@ -1325,8 +1237,6 @@ public class IssueMetricsApiSpecs
         Assert.Single(week7Payload.Buckets);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Theory]
     [InlineData("completion?bucket=day&range=bad")]
     [InlineData("completion?bucket=week&range=bad")]
@@ -1345,8 +1255,6 @@ public class IssueMetricsApiSpecs
         Assert.Equal(System.Net.HttpStatusCode.BadRequest, response.StatusCode);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task RangeQuery_DeliveryTimeEndpoint_90dScalesCurrentAndPreviousWindow()
     {
@@ -1390,8 +1298,6 @@ public class IssueMetricsApiSpecs
         Assert.Empty(omit.Points);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task RangeQuery_StageDurationEndpoint_OmittedReproduces30DayWindow()
     {
@@ -1406,8 +1312,6 @@ public class IssueMetricsApiSpecs
         Assert.Equal(TimeSpan.FromDays(30), to - from);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task RangeQuery_StageDurationEndpoint_90dScalesWindow()
     {
@@ -1422,8 +1326,6 @@ public class IssueMetricsApiSpecs
         Assert.Equal(TimeSpan.FromDays(90), to - from);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task RangeQuery_ApprovalWaitEndpoint_OmittedReproduces7DayWindow()
     {
@@ -1438,8 +1340,6 @@ public class IssueMetricsApiSpecs
         Assert.Equal(TimeSpan.FromDays(7), to - from);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task RangeQuery_ApprovalWaitEndpoint_30dScalesWindow()
     {
@@ -1454,8 +1354,6 @@ public class IssueMetricsApiSpecs
         Assert.Equal(TimeSpan.FromDays(30), to - from);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task RangeQuery_QualityEndpoint_OmittedDefaultsTo30DayPrimaryWindow()
     {
@@ -1482,8 +1380,6 @@ public class IssueMetricsApiSpecs
         Assert.Equal(windowTo, trendTo);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task RangeQuery_QualityEndpoint_90dScalesPrimaryPreviousAndTrend()
     {
@@ -1508,8 +1404,6 @@ public class IssueMetricsApiSpecs
         Assert.Equal(windowTo, trendTo);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task RangeQuery_QualityEndpoint_7dScalesPrimaryPreviousAndTrend()
     {

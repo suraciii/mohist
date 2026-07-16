@@ -16,8 +16,6 @@ public class EventStoreSpecs
         _fixture = fixture;
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task AppendAsync_StoresEnvelope()
     {
@@ -44,8 +42,6 @@ public class EventStoreSpecs
         Assert.Equal(source, first.Envelope.Source);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task ListAsync_RoundtripsEnvelopeWithExtensions()
     {
@@ -75,8 +71,6 @@ public class EventStoreSpecs
         Assert.Equal("proj", e.Envelope.Extensions["projectid"]);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task ListAsync_EmptyForUnknownWorkflowRun()
     {

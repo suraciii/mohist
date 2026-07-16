@@ -11,8 +11,6 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Events;
 
-[Trait(Traits.Speed.Name, Traits.Speed.Unit)]
-[Trait(Traits.Sut.Name, Traits.Sut.System)]
 public class EventStoreScopedAppendSpecs : IAsyncLifetime
 {
     private static readonly DateTimeOffset FixedTime = new(2026, 7, 8, 0, 0, 0, TimeSpan.Zero);

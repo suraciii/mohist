@@ -34,8 +34,6 @@ public class RunnerPollSchedulingSpecs : Mohist.Server.SpecTests.Specs.Workflow.
 {
     public RunnerPollSchedulingSpecs(Mohist.Server.SpecTests.Specs.Workflow.WorkflowGrainFixture fixture) : base(fixture) { }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task PollAsync_ReadyWorkflowIsDispatchedDirectly()
     {
@@ -55,8 +53,6 @@ public class RunnerPollSchedulingSpecs : Mohist.Server.SpecTests.Specs.Workflow.
         Assert.Equal(_workflowId, work!.WorkflowRunId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task PollAsync_RespectsSlotBudget_WhenRunningWorkflowIsAlreadyAssigned()
     {
@@ -86,8 +82,6 @@ public class RunnerPollSchedulingSpecs : Mohist.Server.SpecTests.Specs.Workflow.
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task CountRunningAssignedToAsync_ReturnsRunningRowsForTheRunner()
     {

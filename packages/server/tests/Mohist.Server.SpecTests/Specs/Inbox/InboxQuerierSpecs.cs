@@ -12,8 +12,6 @@ public class InboxQuerierSpecs
 {
     private static readonly DateTimeOffset FixedNow = new(2026, 6, 30, 0, 0, 0, TimeSpan.Zero);
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task ListAsync_ReturnsNonArchivedItemsMostRecentFirst()
     {
@@ -36,8 +34,6 @@ public class InboxQuerierSpecs
         Assert.Equal(1, items[2].IssueNumber);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task ListAsync_ExcludesArchivedItems()
     {
@@ -55,8 +51,6 @@ public class InboxQuerierSpecs
         Assert.False(only.IsArchived);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task ListAsync_OnlyReturnsItemsInRequestedProject()
     {
@@ -76,8 +70,6 @@ public class InboxQuerierSpecs
         Assert.Equal("proj_b", bItems[0].ProjectId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task ListAsync_ReturnsEmptyForUnknownProject()
     {
@@ -91,8 +83,6 @@ public class InboxQuerierSpecs
         Assert.Empty(items);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task ListAsync_ReflectsReadStateFromStore()
     {
@@ -113,8 +103,6 @@ public class InboxQuerierSpecs
         Assert.NotNull(items[1].ReadAt);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task ListAsync_CarriesStructuredFieldsForProductFacingText()
     {
@@ -139,8 +127,6 @@ public class InboxQuerierSpecs
         Assert.Equal("Render me client-side", item.IssueTitle);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task ListAsync_TieBreaksItemsWithIdenticalCreatedAtById()
     {

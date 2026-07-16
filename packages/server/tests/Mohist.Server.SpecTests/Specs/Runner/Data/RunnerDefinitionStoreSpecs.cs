@@ -8,8 +8,6 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Runner.Data;
 
-[Trait(Traits.Speed.Name, Traits.Speed.Service)]
-[Trait(Traits.Sut.Name, Traits.Sut.Runner)]
 public class RunnerDefinitionStoreSpecs : IAsyncLifetime
 {
     private readonly DbContextOptions<MohistDbContext> _options;

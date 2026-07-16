@@ -10,8 +10,6 @@ public class HappyPathSpecs : WorkflowGrainSpecs
 {
     public HappyPathSpecs(WorkflowGrainFixture fixture) : base(fixture) { }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task SingleStageTaskAndCheck_BothPass_WorkflowCompletes()
     {
@@ -34,8 +32,6 @@ public class HappyPathSpecs : WorkflowGrainSpecs
         Assert.Equal(RunnerStatus.Online, (await runner.GetRuntimeStateAsync()).Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task TwoStages_AllTasksAndChecksPass_WorkflowCompletes()
     {
@@ -63,8 +59,6 @@ public class HappyPathSpecs : WorkflowGrainSpecs
         Assert.Equal(RunnerStatus.Online, (await runner.GetRuntimeStateAsync()).Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task MultiTaskStage_AllTasksPass_CheckRunsAndCompletes()
     {

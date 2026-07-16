@@ -25,9 +25,6 @@ public class AgentSessionLaunchRoutesSpecs
         _fixture = fixture;
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task Launch_ResolvesAgent_ComposesSnapshot_MintsSession_Returns201_WithIdentityAndStatus()
     {
@@ -84,9 +81,6 @@ public class AgentSessionLaunchRoutesSpecs
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task Launch_GenericSession_IsReadableByProductMetadataAndTranscriptRoutes()
     {
@@ -138,9 +132,6 @@ public class AgentSessionLaunchRoutesSpecs
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task Launch_RecordsContextRefs_OnSessionMetadata_AsPromptContextOnly()
     {
@@ -195,9 +186,6 @@ public class AgentSessionLaunchRoutesSpecs
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Theory]
     [InlineData(0)]
     [InlineData(-1)]
@@ -215,9 +203,6 @@ public class AgentSessionLaunchRoutesSpecs
         Assert.Equal(sessionCountBefore, await CountAgentLaunchSessionsAsync(projectId));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Theory]
     [InlineData(0)]
     [InlineData(-1)]
@@ -235,9 +220,6 @@ public class AgentSessionLaunchRoutesSpecs
         Assert.Equal(sessionCountBefore, await CountAgentLaunchSessionsAsync(projectId));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task Launch_OpaqueEpicContext_Returns400WithoutCreatingSession()
     {
@@ -253,9 +235,6 @@ public class AgentSessionLaunchRoutesSpecs
         Assert.Equal(sessionCountBefore, await CountAgentLaunchSessionsAsync(projectId));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task Launch_EpicContextFromAnotherProject_Returns404WithoutCreatingSession()
     {
@@ -273,9 +252,6 @@ public class AgentSessionLaunchRoutesSpecs
         Assert.Equal(sessionCountBefore, await CountAgentLaunchSessionsAsync(projectId));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Theory]
     [InlineData("")]
     [InlineData("   ")]
@@ -300,9 +276,6 @@ public class AgentSessionLaunchRoutesSpecs
         Assert.Equal(sessionCountBefore, sessionCountAfter);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task Launch_MissingPromptField_Returns400_WithoutCreatingSessionOrJob()
     {
@@ -321,9 +294,6 @@ public class AgentSessionLaunchRoutesSpecs
         Assert.Equal(sessionCountBefore, sessionCountAfter);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task Launch_UnknownAgent_Returns404_WithoutCreatingSessionOrJob()
     {
@@ -343,9 +313,6 @@ public class AgentSessionLaunchRoutesSpecs
         Assert.Equal(sessionCountBefore, sessionCountAfter);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task Launch_ArchivedAgent_Returns409_WithoutCreatingSessionOrJob()
     {
@@ -380,9 +347,6 @@ public class AgentSessionLaunchRoutesSpecs
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task Launch_ResolvesAgentByName_WhenAgentRefIsFriendlyName()
     {
@@ -409,9 +373,6 @@ public class AgentSessionLaunchRoutesSpecs
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task Launch_IsDistinctFromValidationOnlyAgentJobsRoute()
     {
@@ -438,9 +399,6 @@ public class AgentSessionLaunchRoutesSpecs
             $"/api/projects/{projectId}/agents/agent_unknown/sessions");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task Launch_PolledDispatch_CarriesMintedAgentSessionIdVerbatimWithNoWorkflowRunId()
     {
@@ -480,10 +438,6 @@ public class AgentSessionLaunchRoutesSpecs
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task Launch_CompletedAgentJob_RecordsSessionClosedCompleted_AndResolvesCompletedStatus()
     {
@@ -540,9 +494,6 @@ public class AgentSessionLaunchRoutesSpecs
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task Launch_AgentJobTimeout_TransitionsGenericSessionToTerminalFailedState()
     {

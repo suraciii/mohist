@@ -15,8 +15,6 @@ namespace Mohist.Server.SpecTests.Specs.Epic.Grain;
 
 public class EpicAutoDoneSpecs
 {
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task AutoMarkDoneIfReadyAsync_IdleEpicWithAllDoneIssues_TransitionsToDone()
     {
@@ -36,8 +34,6 @@ public class EpicAutoDoneSpecs
         Assert.Equal("done", stored.Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task AutoMarkDoneIfReadyAsync_AlreadyDoneEpic_IsIdempotentNoOp()
     {
@@ -55,8 +51,6 @@ public class EpicAutoDoneSpecs
         Assert.Equal("done", stored.Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task AutoMarkDoneIfReadyAsync_AlreadyClosedEpic_IsIdempotentNoOp()
     {
@@ -70,8 +64,6 @@ public class EpicAutoDoneSpecs
         Assert.Equal("closed", result!.Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task AutoMarkDoneIfReadyAsync_PausedEpic_IsIdempotentNoOp()
     {
@@ -90,8 +82,6 @@ public class EpicAutoDoneSpecs
         Assert.Equal("paused", stored.Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task AutoMarkDoneIfReadyAsync_IdleEpicWithIncompleteIssue_StaysIdle()
     {
@@ -110,8 +100,6 @@ public class EpicAutoDoneSpecs
         Assert.Equal("idle", stored.Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task AutoMarkDoneIfReadyAsync_MixedDoneAndCancelledLinkedIssues_TransitionsToDone()
     {
@@ -135,8 +123,6 @@ public class EpicAutoDoneSpecs
         Assert.Equal("done", stored.Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task AutoMarkDoneIfReadyAsync_UnknownEpic_ReturnsNull()
     {
@@ -148,8 +134,6 @@ public class EpicAutoDoneSpecs
         Assert.Null(result);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task AutoMarkDoneIfReadyAsync_NoLinkedIssues_TransitionsToDone()
     {
@@ -163,8 +147,6 @@ public class EpicAutoDoneSpecs
         Assert.Equal("done", result!.Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task AutoMarkDoneIfReadyAsync_DuplicateCallsOnAlreadyDone_AllReturnDone()
     {
@@ -182,8 +164,6 @@ public class EpicAutoDoneSpecs
         Assert.Equal("done", third!.Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task ResumeAsync_PausedEpicWithAllCompleteIssues_TransitionsThroughRunningAndEndsDone()
     {
@@ -202,8 +182,6 @@ public class EpicAutoDoneSpecs
         Assert.Null(stored.PauseReason);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task ResumeAsync_PausedEpicWithIncompleteIssue_EndsRunning()
     {
@@ -221,8 +199,6 @@ public class EpicAutoDoneSpecs
         Assert.Equal("running", stored.Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task ResumeAsync_PausedEpicWithCancelledIssueOnly_AutoDoneAfterResume()
     {
@@ -242,8 +218,6 @@ public class EpicAutoDoneSpecs
         Assert.Equal("done", stored.Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task ResumeAsync_RunningEpicIsNoOpAndStaysRunning()
     {
@@ -257,8 +231,6 @@ public class EpicAutoDoneSpecs
         Assert.Equal("running", result.Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task ResumeAsync_IdleEpic_ThrowsEpicResumeRequiresPaused()
     {
@@ -279,8 +251,6 @@ public class EpicAutoDoneSpecs
         Assert.Equal("idle", stored.Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task ResumeAsync_DoneEpic_ThrowsEpicAlreadyTerminal()
     {
@@ -294,8 +264,6 @@ public class EpicAutoDoneSpecs
         Assert.Equal("running", ex.RequestedStatus);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task StartAsync_DoneEpic_ThrowsEpicAlreadyTerminal()
     {
@@ -309,8 +277,6 @@ public class EpicAutoDoneSpecs
         Assert.Equal("running", ex.RequestedStatus);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task StartAsync_PausedEpic_ThrowsEpicStartRequiresIdle()
     {
@@ -323,8 +289,6 @@ public class EpicAutoDoneSpecs
         Assert.Equal("paused", ex.CurrentStatus);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task SetStatusAsync_Done_StillThrowsOnTerminalOrPausedEpic_RegressionCheck()
     {
@@ -335,8 +299,6 @@ public class EpicAutoDoneSpecs
         await Assert.ThrowsAnyAsync<Exception>(() => grain.SetStatusAsync("done"));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task SetStatusAsync_Done_StillThrowsOnPausedEpic_RegressionCheck()
     {
@@ -348,8 +310,6 @@ public class EpicAutoDoneSpecs
         await Assert.ThrowsAnyAsync<Exception>(() => grain.SetStatusAsync("done"));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task SetStatusAsync_Done_StillThrowsOnUnreadyEpic_RegressionCheck()
     {
@@ -361,8 +321,6 @@ public class EpicAutoDoneSpecs
         await Assert.ThrowsAnyAsync<Exception>(() => grain.SetStatusAsync("done"));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task SetStatusAsync_Done_EpicWithOpenLinkedIssue_ThrowsNotReadyToMarkDoneAndStatusUnchanged()
     {
@@ -388,8 +346,6 @@ public class EpicAutoDoneSpecs
         Assert.Equal("running", stored.Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task AutoMarkDoneIfReadyAsync_EpicWithOpenLinkedIssue_IsNoOpAndStatusUnchanged()
     {
@@ -412,8 +368,6 @@ public class EpicAutoDoneSpecs
         Assert.Equal("idle", stored.Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task RecomputeProgressAsync_EpicWithOpenLinkedIssue_DoesNotMarkDoneAndStatusUnchanged()
     {

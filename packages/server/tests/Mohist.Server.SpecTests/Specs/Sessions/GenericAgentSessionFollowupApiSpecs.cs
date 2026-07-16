@@ -55,8 +55,6 @@ public class GenericAgentSessionFollowupApiSpecs : IAsyncLifetime
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task GenericFollowupEndpoint_ActiveGenericSessionOnlineRunner_ReturnsSent()
     {
@@ -98,8 +96,6 @@ public class GenericAgentSessionFollowupApiSpecs : IAsyncLifetime
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task GenericFollowupEndpoint_IdleSession_StartsUserTurnWithoutCreatingWorkUnit()
     {
@@ -139,8 +135,6 @@ public class GenericAgentSessionFollowupApiSpecs : IAsyncLifetime
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task GenericFollowupEndpoint_RunnerCannotResolveRestartedSession_ReturnsResetHint()
     {
@@ -167,8 +161,6 @@ public class GenericAgentSessionFollowupApiSpecs : IAsyncLifetime
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task GenericRunnerRoutes_CrossProjectSession_ReturnNotFoundAndDoNotMutate()
     {
@@ -195,8 +187,6 @@ public class GenericAgentSessionFollowupApiSpecs : IAsyncLifetime
         Assert.Equal(before.LastDataAt, after.LastDataAt);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task GenericRunnerOpen_UnknownSession_ReturnsNotFoundAndDoesNotCreateSession()
     {
@@ -212,8 +202,6 @@ public class GenericAgentSessionFollowupApiSpecs : IAsyncLifetime
         Assert.Null(await grain.GetAsync());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task GenericRunnerOpen_PreMintedLaunchSession_BindsRunnerIdForFollowupAndCancelResolution()
     {
@@ -253,8 +241,6 @@ public class GenericAgentSessionFollowupApiSpecs : IAsyncLifetime
         Assert.Equal(_runnerId, cancelTarget!.RunnerId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task GenericFollowupEndpoint_EmptyText_ReturnsBadRequest()
     {
@@ -267,8 +253,6 @@ public class GenericAgentSessionFollowupApiSpecs : IAsyncLifetime
         Assert.Equal("followup_text_missing", doc.RootElement.GetProperty("code").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task GenericFollowupEndpoint_WhitespaceText_ReturnsBadRequest()
     {
@@ -281,8 +265,6 @@ public class GenericAgentSessionFollowupApiSpecs : IAsyncLifetime
         Assert.Equal("followup_text_missing", doc.RootElement.GetProperty("code").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task GenericFollowupEndpoint_MissingText_ReturnsBadRequest()
     {
@@ -295,8 +277,6 @@ public class GenericAgentSessionFollowupApiSpecs : IAsyncLifetime
         Assert.Equal("followup_text_missing", doc.RootElement.GetProperty("code").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task GenericFollowupEndpoint_UnknownSession_ReturnsNotFound()
     {
@@ -309,8 +289,6 @@ public class GenericAgentSessionFollowupApiSpecs : IAsyncLifetime
         Assert.Equal("not_found", doc.RootElement.GetProperty("code").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task GenericFollowupEndpoint_MissingBindingBeforeRunnerOpens_ReturnsRuntimeSessionMissing()
     {
@@ -324,8 +302,6 @@ public class GenericAgentSessionFollowupApiSpecs : IAsyncLifetime
         Assert.Equal(sessionId, doc.RootElement.GetProperty("details").GetProperty("sessionId").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task GenericFollowupEndpoint_TerminalSession_ReturnsConflict()
     {
@@ -350,8 +326,6 @@ public class GenericAgentSessionFollowupApiSpecs : IAsyncLifetime
         Assert.Equal("session_inactive", doc.RootElement.GetProperty("code").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task GenericFollowupEndpoint_ActivityMarksActiveThenClosedBecomesConflict()
     {
@@ -393,8 +367,6 @@ public class GenericAgentSessionFollowupApiSpecs : IAsyncLifetime
         Assert.Equal(HttpStatusCode.Conflict, terminalResponse.StatusCode);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task GenericFollowupEndpoint_ActiveSessionOfflineRunner_ReturnsServiceUnavailable()
     {
@@ -417,8 +389,6 @@ public class GenericAgentSessionFollowupApiSpecs : IAsyncLifetime
         Assert.Equal("runner_offline", doc.RootElement.GetProperty("code").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task GenericFollowupEndpoint_SessionInOtherProject_ReturnsNotFound()
     {
@@ -432,8 +402,6 @@ public class GenericAgentSessionFollowupApiSpecs : IAsyncLifetime
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task ResolveGenericFollowupTargetAsync_ReadsRunnerIdAndIsActiveFromSession()
     {
@@ -458,8 +426,6 @@ public class GenericAgentSessionFollowupApiSpecs : IAsyncLifetime
         Assert.True(target.IsActive);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task ResolveGenericFollowupTargetAsync_NoRunnerOpened_ReturnsInactiveTargetWithEmptyRunner()
     {
@@ -480,8 +446,6 @@ public class GenericAgentSessionFollowupApiSpecs : IAsyncLifetime
         Assert.False(target.IsActive);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task ResolveGenericFollowupTargetAsync_UnknownSessionId_ReturnsNull()
     {
@@ -495,8 +459,6 @@ public class GenericAgentSessionFollowupApiSpecs : IAsyncLifetime
         Assert.Null(target);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task IssueScopedFollowupRoute_StillEmitsBothTopLevelAndTargetFields()
     {
@@ -545,8 +507,6 @@ public class GenericAgentSessionFollowupApiSpecs : IAsyncLifetime
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task CanonicalFollowupRoute_WorkflowSession_UsesWorkflowTarget()
     {
@@ -591,8 +551,6 @@ public class GenericAgentSessionFollowupApiSpecs : IAsyncLifetime
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task Followup_AfterReset_IgnoresTerminalStateFromPredecessorRuntime()
     {
@@ -626,8 +584,6 @@ public class GenericAgentSessionFollowupApiSpecs : IAsyncLifetime
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task IdleFollowupReservation_BlocksRecoveryUntilDeliveryCompletes()
     {
@@ -669,8 +625,6 @@ public class GenericAgentSessionFollowupApiSpecs : IAsyncLifetime
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task RejectedIdleFollowup_AbandonsReservationAndAllowsRecovery()
     {

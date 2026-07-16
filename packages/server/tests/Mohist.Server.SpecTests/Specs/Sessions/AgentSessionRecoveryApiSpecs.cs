@@ -48,8 +48,6 @@ public class AgentSessionRecoveryApiSpecs
             .Register(_runnerId, $"connection-{_runnerId}");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task CompactEndpoint_InactiveSession_ReturnsStableSessionIdOnly()
     {
@@ -79,8 +77,6 @@ public class AgentSessionRecoveryApiSpecs
         Assert.Equal(currentSession.Id, persisted?.AgentSessionId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task CompactEndpoint_ActiveSession_ReturnsConflict()
     {
@@ -97,8 +93,6 @@ public class AgentSessionRecoveryApiSpecs
         Assert.Empty(RunnerHub.Invocations);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task CompactEndpoint_NonexistentSession_ReturnsNotFound()
     {
@@ -109,8 +103,6 @@ public class AgentSessionRecoveryApiSpecs
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task ResetEndpoint_InactiveSession_ReturnsStableSessionIdOnly()
     {
@@ -137,8 +129,6 @@ public class AgentSessionRecoveryApiSpecs
         Assert.Equal($"{currentSession.Id}-replacement", persisted?.AgentSessionId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task ResetEndpoint_MissingReplacementRuntimeSessionId_ReturnsInvalidRunnerResponseWithoutRebinding()
     {
@@ -153,8 +143,6 @@ public class AgentSessionRecoveryApiSpecs
         Assert.Equal(currentSession.Id, (await _fixture.Grains.GetGrain<IAgentSessionGrain>(currentSession.Id).GetAsync())?.AgentSessionId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Theory]
     [InlineData("compact", false)]
     [InlineData("compact", true)]
@@ -201,8 +189,6 @@ public class AgentSessionRecoveryApiSpecs
         Assert.Equal(operation == "compact" ? currentSession.Id : $"{currentSession.Id}-replacement", state?.AgentSessionId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task ResetEndpoint_NewIdempotencyKeyJoinsPendingOperationAndReplaysItsResult()
     {
@@ -247,8 +233,6 @@ public class AgentSessionRecoveryApiSpecs
             .GetAsync())?.AgentSessionId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task ResetEndpoint_CommandNotStartedAllowsANewOperation()
     {
@@ -278,8 +262,6 @@ public class AgentSessionRecoveryApiSpecs
         Assert.NotEqual(requests[0].OperationId, requests[1].OperationId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Theory]
     [InlineData("compact")]
     [InlineData("reset")]
@@ -328,8 +310,6 @@ public class AgentSessionRecoveryApiSpecs
         Assert.Equal(operation == "compact" ? currentSession.Id : $"{currentSession.Id}-replacement", state.Status.AgentRuntimeSessionId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Theory]
     [InlineData("compact")]
     [InlineData("reset")]
@@ -379,8 +359,6 @@ public class AgentSessionRecoveryApiSpecs
         Assert.Equal(operation == "compact" ? currentSession.Id : $"{currentSession.Id}-replacement", state.Status.AgentRuntimeSessionId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task RuntimeEventsEndpoint_IgnoresOldPhysicalBindingAfterReset()
     {
@@ -418,8 +396,6 @@ public class AgentSessionRecoveryApiSpecs
         Assert.Empty(closedParts);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task CompactEndpoint_WhileResetDispatchIsInFlight_ReturnsRecoveryInProgressWithoutMutation()
     {
@@ -467,8 +443,6 @@ public class AgentSessionRecoveryApiSpecs
             .GetAsync())?.AgentSessionId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task CompactEndpoint_HandlerConflict_ReturnsIdleBoundaryConflict()
     {
@@ -494,8 +468,6 @@ public class AgentSessionRecoveryApiSpecs
             .GetAsync())?.AgentSessionId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task ResetEndpoint_HandlerMissing_ReturnsRuntimeSessionMissingWithResetHint()
     {
@@ -523,8 +495,6 @@ public class AgentSessionRecoveryApiSpecs
             .GetAsync())?.AgentSessionId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task ResetEndpoint_ActiveSession_ReturnsConflict()
     {
@@ -540,8 +510,6 @@ public class AgentSessionRecoveryApiSpecs
         Assert.Empty(RunnerHub.Invocations);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task ResetEndpoint_NonexistentSession_ReturnsNotFound()
     {
@@ -552,8 +520,6 @@ public class AgentSessionRecoveryApiSpecs
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Theory]
     [InlineData("compact", true)]
     [InlineData("reset", false)]
@@ -610,8 +576,6 @@ public class AgentSessionRecoveryApiSpecs
             .GetAsync())?.Id);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Theory]
     [InlineData("compact")]
     [InlineData("reset")]
@@ -634,8 +598,6 @@ public class AgentSessionRecoveryApiSpecs
         Assert.Equal(session.Id, doc.RootElement.GetProperty("details").GetProperty("sessionId").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Theory]
     [InlineData("compact")]
     [InlineData("reset")]
@@ -672,8 +634,6 @@ public class AgentSessionRecoveryApiSpecs
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Theory]
     [InlineData("compact")]
     [InlineData("reset")]
@@ -694,8 +654,6 @@ public class AgentSessionRecoveryApiSpecs
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task CompactEndpoint_PersistsCompactionEventAndPreservesRuntimeBinding()
     {
@@ -723,8 +681,6 @@ public class AgentSessionRecoveryApiSpecs
         Assert.Equal(currentSession.Id, row.AgentSessionId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task SessionMetadataEndpoint_AfterCompact_ExposesContextUsagePercent()
     {
@@ -739,8 +695,6 @@ public class AgentSessionRecoveryApiSpecs
         var usage = root.GetProperty("usage");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task CompactEndpoint_AfterClosedSession_EmitsContextExhaustionCategoryOnMetadata()
     {
@@ -756,8 +710,6 @@ public class AgentSessionRecoveryApiSpecs
         var usage = root.GetProperty("usage");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task AgentSessionGrain_Compact_RecoversAfterRuntimeEventsMakeSessionActive()
     {
@@ -767,8 +719,6 @@ public class AgentSessionRecoveryApiSpecs
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Theory]
     [InlineData("compact", null)]
     [InlineData("reset", null)]

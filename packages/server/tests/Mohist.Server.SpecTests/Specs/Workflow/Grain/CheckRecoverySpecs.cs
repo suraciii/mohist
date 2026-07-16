@@ -9,8 +9,6 @@ public class CheckRecoverySpecs : WorkflowGrainSpecs
 {
     public CheckRecoverySpecs(WorkflowGrainFixture fixture) : base(fixture) { }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task Reactivation_WithDispatchedCheckAndOnlineRunner_RedispatchesCheckWork()
     {
@@ -36,8 +34,6 @@ public class CheckRecoverySpecs : WorkflowGrainSpecs
         Assert.Equal(StageCheckStatus.Running, check.Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task DispatchedCheckWorkerIdDerivesFromWorkflowAssignment()
     {
@@ -53,8 +49,6 @@ public class CheckRecoverySpecs : WorkflowGrainSpecs
         Assert.Equal(StageCheckStatus.Running, check.Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task CheckResultFromRunnerOutsideWorkflowAssignmentIsIgnored()
     {

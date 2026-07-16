@@ -42,8 +42,6 @@ public abstract class AgentSessionGrainPersistenceSpecsBase : IClassFixture<Agen
     }
 }
 
-[Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-[Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
 public class AgentSessionGrainPersistSuccessSpecs : AgentSessionGrainPersistenceSpecsBase
 {
     public AgentSessionGrainPersistSuccessSpecs(AgentSessionGrainFixture fixture) : base(fixture) { }
@@ -82,8 +80,6 @@ public class AgentSessionGrainPersistSuccessSpecs : AgentSessionGrainPersistence
     }
 }
 
-[Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-[Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
 public class AgentSessionGrainPersistStateFailureSpecs : AgentSessionGrainPersistenceSpecsBase
 {
     public AgentSessionGrainPersistStateFailureSpecs(AgentSessionGrainFixture fixture) : base(fixture) { }
@@ -124,8 +120,6 @@ public class AgentSessionGrainPersistStateFailureSpecs : AgentSessionGrainPersis
     }
 }
 
-[Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-[Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
 public class AgentSessionGrainPersistTranscriptFailureSpecs : AgentSessionGrainPersistenceSpecsBase
 {
     public AgentSessionGrainPersistTranscriptFailureSpecs(AgentSessionGrainFixture fixture) : base(fixture) { }
@@ -168,8 +162,6 @@ public class AgentSessionGrainPersistTranscriptFailureSpecs : AgentSessionGrainP
     }
 }
 
-[Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-[Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
 public class AgentSessionGrainRecoveryTranscriptFailureSpecs : AgentSessionGrainPersistenceSpecsBase
 {
     public AgentSessionGrainRecoveryTranscriptFailureSpecs(AgentSessionGrainFixture fixture) : base(fixture) { }
@@ -248,8 +240,6 @@ public class AgentSessionGrainRecoveryTranscriptFailureSpecs : AgentSessionGrain
     }
 }
 
-[Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-[Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
 public class AgentSessionGrainDeactivationSpecs : AgentSessionGrainPersistenceSpecsBase
 {
     public AgentSessionGrainDeactivationSpecs(AgentSessionGrainFixture fixture) : base(fixture) { }

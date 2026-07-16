@@ -16,8 +16,6 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
 {
     public WorkflowRetrySpecs(WorkflowGrainFixture fixture) : base(fixture) { }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task TaskFails_UserRetriesWorkflow_RunnerGetsNextTaskAttempt()
     {
@@ -35,8 +33,6 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
         Assert.Equal(r1, r2);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task TaskFailsBeforeLaterTasks_UserRetriesWorkflow_NewAttemptRunsBeforeLaterTasks()
     {
@@ -63,8 +59,6 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
         Assert.StartsWith("task-2.1", task2.WorkId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task TaskFails_UserRetriesWorkflow_PreviousAttemptStaysFailed()
     {
@@ -84,8 +78,6 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
         Assert.Equal("failed", task1.Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task TaskFails_UserRetriesWorkflow_StatusNoLongerShowsActiveFailure()
     {
@@ -107,8 +99,6 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
         Assert.Null(buildStage.Failure);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task TaskFails_UserRetriesWorkflow_WorkflowContinuesAfterTaskSucceeds()
     {
@@ -129,8 +119,6 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
         await ReportChecksPassAsync(r3, checks, "check-1");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task TaskFails_UserRetriesWorkflow_RetriedTaskKeepsRecovery()
     {
@@ -210,8 +198,6 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
         Assert.Equal(2, selfRetryRecovery.RootElement.GetProperty("budget").GetInt32());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task RecoveryFollowUpWithoutRemainingState_FailsTheRunTerminallyInsteadOfThrowing()
     {
@@ -236,8 +222,6 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
         Assert.Equal(WorkflowRunStatus.Failed, failed.Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Theory]
     [InlineData(-1)]
     [InlineData(3)]
@@ -266,8 +250,6 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
         Assert.Equal(WorkflowRunStatus.Failed, failed.Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task RecoveryFollowUpBatchWithInvalidContinuation_FailsTheRunTerminallyWithoutInsertingEarlierTasks()
     {
@@ -298,8 +280,6 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
         Assert.Equal(WorkflowRunStatus.Failed, failed.Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task StaleFailedTaskReport_DoesNotFailNewerActiveTask()
     {
@@ -328,8 +308,6 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
         Assert.Equal(TaskRunStatus.Running, run.CurrentStage().Tasks.Single(task => task.Id == "second.1").Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task ExhaustedRecoveryRound_UserRetryStartsNewFullRound()
     {
@@ -392,8 +370,6 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
         new RuntimeTaskInput("review", "Review", "spec/review", Recovery: recovery, RecoveryRemaining: remaining),
     ];
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task CheckFails_UserRetriesWorkflow_CheckRunsAgain()
     {
@@ -412,8 +388,6 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
         Assert.StartsWith("checks-", retried.WorkId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task CheckFails_UserRetriesWorkflow_WorkflowContinuesAfterCheckPasses()
     {
@@ -434,8 +408,6 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
         Assert.Null(await runner.PollAsync(Services));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task WorkflowIsRunning_UserRetriesWorkflow_RetryIsRejected()
     {
@@ -446,8 +418,6 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
             await workflow.RetryAsync());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task PlanIsRejected_LegacyRejectRoutesToFeedbackLoop_RetryIsNotRejected()
     {
@@ -469,8 +439,6 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
             await workflow.RetryAsync());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task LegacyReject_UserViewsWorkflowStatus_FeedbackLoopIsObservable()
     {
@@ -503,8 +471,6 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
         Assert.Empty(status.AvailableActions);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task LegacyApprovalRejectedWithoutWorkflowFailure_UserViewsWorkflowStatus_RerunActionIsAvailable()
     {
@@ -530,8 +496,6 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
         Assert.Equal("plan", rerunAction.Target);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task TaskFails_UserRerunsStage_StageStartsFromFirstTask()
     {
@@ -554,8 +518,6 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
         await ReportAsync(r3, task3.WorkId, "completed");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task CheckFails_UserRerunsStage_StageStartsFromFirstTask()
     {
@@ -573,8 +535,6 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
         Assert.StartsWith("task-1.", task2.WorkId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task TaskFails_UserViewsWorkflowStatus_RetryActionIsAvailable()
     {
@@ -599,8 +559,6 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
         Assert.Equal("build", rerunAction.Target);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task WorkflowFailed_UserViewsWorkflowStatus_StartNewWorkflowActionIsAvailable()
     {
@@ -618,8 +576,6 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
         Assert.Equal("Start new workflow", startAction!.Label);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task CheckFails_UserViewsWorkflowStatus_RetryActionIsAvailable()
     {
@@ -646,8 +602,6 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
         Assert.NotNull(rerunAction);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task ApprovalRequested_UserViewsWorkflowStatus_ApprovalActionsAreAvailable()
     {
@@ -673,8 +627,6 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
         Assert.Null(status.AvailableActions.Find(a => a.Name == "reject"));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task WorkflowIsRunning_UserViewsWorkflowStatus_NoRetryActionAvailable()
     {

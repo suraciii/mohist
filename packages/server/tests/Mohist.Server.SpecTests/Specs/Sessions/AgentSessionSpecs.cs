@@ -37,8 +37,6 @@ public class AgentSessionSpecs
         _client = fixture.Client;
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task LoadLatestEventsActivity_DoesNotSuppressTerminalOrLivenessEventTypes()
     {
@@ -67,8 +65,6 @@ public class AgentSessionSpecs
         Assert.Equal("session.closed", card.LastActivity!.Text);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task IssueSessionMetadataEndpoint_ReturnsMetadataOnlyWithoutTurnsOrRawEvents()
     {
@@ -179,8 +175,6 @@ public class AgentSessionSpecs
         Assert.False(root.TryGetProperty("workflowLogs", out _));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task IssueSessionMetadataEndpoint_ProjectsTranscriptEventsInSequenceOrder_WhenRowsWereInsertedOutOfOrder()
     {
@@ -201,8 +195,6 @@ public class AgentSessionSpecs
         Assert.Equal("sequence-last-failure", eventSummary.GetProperty("failureCategory").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task RuntimeEvents_RefreshSessionSummaryActivityWithoutDomainEvents()
     {
@@ -241,8 +233,6 @@ public class AgentSessionSpecs
         Assert.False(wireSummary.TryGetProperty("coderSessionId", out _));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task CoderSessionSummary_UnboundSessionLeavesRuntimeSessionIdNull()
     {
@@ -255,8 +245,6 @@ public class AgentSessionSpecs
         Assert.False(summary.TryGetProperty("runtimeSessionId", out _));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task IssueSessionEventsEndpoint_ReturnsTranscriptSegmentsInAscendingSequence()
     {
@@ -296,8 +284,6 @@ public class AgentSessionSpecs
         Assert.DoesNotContain("workflowLogs", serialized, StringComparison.OrdinalIgnoreCase);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task IssueSessionMetadataEndpoint_MissingSession_ReturnsNotFound()
     {
@@ -312,8 +298,6 @@ public class AgentSessionSpecs
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task AgentSessionGrain_ForAgentWork_CreatesGuidSessionAndKeepsPollIdempotent()
     {
@@ -327,8 +311,6 @@ public class AgentSessionSpecs
         Assert.Equal(session.Id, repeated.Id);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task RunnerAttach_DifferentPhysicalSession_ReturnsConflictAndPreservesBinding()
     {
@@ -347,8 +329,6 @@ public class AgentSessionSpecs
         Assert.Equal("acp-1", sessionAfterConflict.AgentSessionId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task RunnerAppendsSessionEvents_ConcurrentChunks_BuffersUntilFlush()
     {
@@ -377,8 +357,6 @@ public class AgentSessionSpecs
         Assert.Equal("session.closed", parts[1].Type);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task RunnerAppendsManyChunks_PersistsAggregatedTranscriptSegmentsOnly()
     {
@@ -414,8 +392,6 @@ public class AgentSessionSpecs
         Assert.Equal(string.Concat(Enumerable.Range(0, 96).Select(i => i.ToString("D2"))), transcriptPart.Text);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task DeferredPersistence_SessionDetailTranscriptContainsAllTextAndToolParts()
     {
@@ -504,8 +480,6 @@ public class AgentSessionSpecs
         Assert.Equal("Read README", toolPart.Title);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task RunnerAppendsSessionEvents_StoresAggregateDomainEvents()
     {
@@ -532,8 +506,6 @@ public class AgentSessionSpecs
         Assert.All(appended, e => Assert.Equal(session.Id, e.Envelope.Subject));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task RunnerReportsTerminalSession_TerminalStatusExists_IgnoresLaterStatusChanges()
     {
@@ -569,8 +541,6 @@ public class AgentSessionSpecs
         Assert.Equal("inactive", grainSession.Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task AgentSessionOpen_ClosedRuntimeObservation_DoesNotRebindSession()
     {
@@ -607,8 +577,6 @@ public class AgentSessionSpecs
         Assert.Equal(_runnerId, repeated.RunnerId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task RuntimeEvents_AfterFailedClosedObservation_KeepSessionActive()
     {
@@ -629,8 +597,6 @@ public class AgentSessionSpecs
         Assert.Equal("active", grainSession.Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task OpenAgentSession_ExistingBoundSessionKeepsRuntimeBinding()
     {
@@ -647,8 +613,6 @@ public class AgentSessionSpecs
         Assert.NotNull(opened.AgentSessionId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task OpenAgentSession_ClosedObservationKeepsRuntimeBinding()
     {
@@ -677,8 +641,6 @@ public class AgentSessionSpecs
         Assert.NotNull(opened.AgentSessionId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task RunnerAppendsUsageUpdate_AccumulatesTokenAndCostCounters()
     {
@@ -737,8 +699,6 @@ public class AgentSessionSpecs
         Assert.Equal(250, grainSession.ContextWindowSize);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task RunnerAppendsUsageUpdate_PartialFields_DoesNotEraseExistingValues()
     {
@@ -778,8 +738,6 @@ public class AgentSessionSpecs
         Assert.Equal(100, grainSession.ContextWindowUsed);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task RunnerAppendsUsageUpdate_TerminalSession_PersistsEventButDoesNotMutateCounters()
     {
@@ -829,8 +787,6 @@ public class AgentSessionSpecs
         Assert.Equal("usage", runtimeEvents[1].Type);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task RunnerAppendsResolvedModelEvent_UpdatesResolvedModel()
     {
@@ -857,8 +813,6 @@ public class AgentSessionSpecs
         Assert.Equal("anthropic/claude-sonnet-4-20250514", grainSession.ResolvedModel);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task RunnerAppendsTerminalEvent_WithFailureCategory_PersistsCategory()
     {
@@ -886,8 +840,6 @@ public class AgentSessionSpecs
         Assert.Equal("probe_timeout", grainSession.FailureCategory);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task RunnerAppendsToolCallEvents_CountsCallsAndErrors()
     {
@@ -931,8 +883,6 @@ public class AgentSessionSpecs
     }
 
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task AgentActivity_ExposesObservabilityFields()
     {
@@ -1005,8 +955,6 @@ public class AgentSessionSpecs
         Assert.Equal(1, card.EventSummary.ToolErrorCount);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task AgentActivity_WhenRunnerActiveWorksExceedVisibleSessions_SlotsReflectRunner()
     {
@@ -1110,8 +1058,6 @@ public class AgentSessionSpecs
         await db.SaveChangesAsync();
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task AgentActivity_WithResolvableWorkflowStage_ReturnsTaskProgress()
     {
@@ -1167,8 +1113,6 @@ public class AgentSessionSpecs
         Assert.Equal(3, card.TaskProgress.Total);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task AgentActivity_WhenSessionStageIsStale_UsesWorkflowCurrentStageTaskProgress()
     {

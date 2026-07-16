@@ -24,8 +24,6 @@ public class AgentSessionReadApiSpecs
         _client = fixture.Client;
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task ListAgentSessions_ByAgentId_ReturnsRecencyOrderedGenericSessions()
     {
@@ -56,8 +54,6 @@ public class AgentSessionReadApiSpecs
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task ListAgentSessions_ByAgentName_ResolvesToSameSet()
     {
@@ -79,8 +75,6 @@ public class AgentSessionReadApiSpecs
         Assert.True(byIdCount >= 1);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task ListAgentSessions_StatusFilter_ReturnsOnlyMatchingStatus()
     {
@@ -106,8 +100,6 @@ public class AgentSessionReadApiSpecs
         Assert.Equal(2, multi.EnumerateArray().Count());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task ListAgentSessions_UnknownAgentRef_Returns404()
     {
@@ -119,8 +111,6 @@ public class AgentSessionReadApiSpecs
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task Summary_GenericSession_ReturnsEnrichedDto()
     {
@@ -146,8 +136,6 @@ public class AgentSessionReadApiSpecs
         Assert.False(summary.TryGetProperty("workId", out _));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task Summary_UnknownSessionId_Returns404()
     {
@@ -159,8 +147,6 @@ public class AgentSessionReadApiSpecs
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task Summary_WorkflowSession_Returns404()
     {
@@ -175,8 +161,6 @@ public class AgentSessionReadApiSpecs
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task Transcript_GenericSession_ReturnsTranscriptWithoutWorkflowRunId()
     {
@@ -194,8 +178,6 @@ public class AgentSessionReadApiSpecs
         Assert.False(transcript.TryGetProperty("workflowRunId", out _));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task Transcript_UnknownSessionId_Returns404()
     {
@@ -207,8 +189,6 @@ public class AgentSessionReadApiSpecs
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task Transcript_WorkflowSession_Returns404()
     {
@@ -223,8 +203,6 @@ public class AgentSessionReadApiSpecs
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task ListIsDistinctFromProjectWideList()
     {

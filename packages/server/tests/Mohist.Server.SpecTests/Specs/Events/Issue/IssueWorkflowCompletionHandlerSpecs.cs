@@ -29,8 +29,6 @@ public class IssueWorkflowCompletionHandlerSpecs
 {
     private static readonly DateTimeOffset FixedNow = new(2026, 6, 30, 0, 0, 0, TimeSpan.Zero);
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public void HasSingleSubscriptionAttributeForCompleted()
     {
@@ -40,8 +38,6 @@ public class IssueWorkflowCompletionHandlerSpecs
         Assert.Equal(EventCatalog.ReverseDns.WorkflowRunCompleted, attr!.Type);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task Querier_GetIssueForWorkflowRunAsync_ReturnsInProgressIssueReference()
     {
@@ -56,8 +52,6 @@ public class IssueWorkflowCompletionHandlerSpecs
         Assert.Equal(new IssueWorkflowRef("project_1", 1), issue);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task Querier_GetIssueForWorkflowRunAsync_DoneIssueWithPreservedReference_ReturnsNull()
     {
@@ -75,8 +69,6 @@ public class IssueWorkflowCompletionHandlerSpecs
         Assert.Null(issue);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task Querier_GetIssueForWorkflowRunAsync_MixedRows_ReturnsOnlyInProgressMatch()
     {
@@ -98,8 +90,6 @@ public class IssueWorkflowCompletionHandlerSpecs
         Assert.Equal(new IssueWorkflowRef("project_1", 3), issue);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task Querier_GetIssueForWorkflowRunAsync_NoMatch_ReturnsNull()
     {
@@ -114,8 +104,6 @@ public class IssueWorkflowCompletionHandlerSpecs
         Assert.Null(issue);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task Querier_GetIssueForWorkflowRunAsync_NullOrEmpty_ReturnsNull()
     {
@@ -128,8 +116,6 @@ public class IssueWorkflowCompletionHandlerSpecs
         Assert.Null(await querier.GetIssueForWorkflowRunAsync("   "));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task HandleAsync_CompletedEventForInProgressIssue_TransitionsIssueToDone()
     {
@@ -157,8 +143,6 @@ public class IssueWorkflowCompletionHandlerSpecs
         Assert.Equal(IssueStatus.Done, IssueStore.Deserialize(stored.State)!.Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task HandleAsync_EmptySource_NoOpsAndDoesNotInvokeGrain()
     {
@@ -179,8 +163,6 @@ public class IssueWorkflowCompletionHandlerSpecs
         Assert.Empty(grains.Calls);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task HandleAsync_MissingScopedIssueExtension_NoOpsAndDoesNotInvokeGrain()
     {
@@ -203,8 +185,6 @@ public class IssueWorkflowCompletionHandlerSpecs
         Assert.Empty(grains.Calls);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task HandleAsync_DuplicateCompletedDelivery_OnlyFirstInvocationRunsGrainLogic()
     {
@@ -238,8 +218,6 @@ public class IssueWorkflowCompletionHandlerSpecs
         Assert.Equal(IssueStatus.Done, IssueStore.Deserialize(stored.State)!.Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task HandleAsync_MismatchedWorkflowRunIdOnIssue_DoesNotMutateIssue()
     {
@@ -298,8 +276,6 @@ public class IssueWorkflowCompletionHandlerSpecs
         Assert.Equal(IssueStatus.Done, final.Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task HandleAsync_GrainThrows_PropagatesToDispatcher()
     {
@@ -317,8 +293,6 @@ public class IssueWorkflowCompletionHandlerSpecs
         Assert.Equal(1, grains.CallCount);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task Filter_FailedTerminalEvent_ReturnsFalse()
     {
@@ -337,8 +311,6 @@ public class IssueWorkflowCompletionHandlerSpecs
         Assert.False(handler.Filter(evt));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task Filter_StoppedTerminalEvent_ReturnsFalse()
     {
@@ -357,8 +329,6 @@ public class IssueWorkflowCompletionHandlerSpecs
         Assert.False(handler.Filter(evt));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task Filter_CompletedEvent_ReturnsTrue()
     {
@@ -372,8 +342,6 @@ public class IssueWorkflowCompletionHandlerSpecs
         Assert.True(handler.Filter(evt));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task HandleAsync_CompletesIssue_FromScopedIssueExtensions()
     {

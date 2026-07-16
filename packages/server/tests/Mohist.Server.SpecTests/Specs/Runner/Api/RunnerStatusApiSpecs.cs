@@ -97,8 +97,6 @@ public class RunnerStatusApiSpecs
         await db.SaveChangesAsync();
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task GetRunners_GlobalRunnerWithoutProjectId_IsReturned()
     {
@@ -128,8 +126,6 @@ public class RunnerStatusApiSpecs
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task GetRunners_GlobalRunner_ReturnsRunner()
     {
@@ -164,8 +160,6 @@ public class RunnerStatusApiSpecs
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task GetRunners_RunnerRegisteringWithProjectId_IsReturnedAsGlobal()
     {
@@ -201,8 +195,6 @@ public class RunnerStatusApiSpecs
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task GetRunners_NoRunnersForProject_ReturnsEmptyList()
     {
@@ -221,8 +213,6 @@ public class RunnerStatusApiSpecs
         Assert.Empty(runners.EnumerateArray());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task GetRunners_OnLegacyRoute_ReturnsNotFound()
     {
@@ -231,8 +221,6 @@ public class RunnerStatusApiSpecs
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task GetRunners_BusyRunner_IncludesActiveWork()
     {
@@ -272,8 +260,6 @@ public class RunnerStatusApiSpecs
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task GetRunners_DisconnectedBusyWorkspaceRunner_IsBusyAndStillShowsConnectionDiagnostic()
     {
@@ -314,8 +300,6 @@ public class RunnerStatusApiSpecs
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task GetRunners_RunnerFields_UseRunnerTerminology()
     {
@@ -357,8 +341,6 @@ public class RunnerStatusApiSpecs
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task RegisterRunner_WithBuildGitHash_ExposesHashInStatus()
     {
@@ -393,8 +375,6 @@ public class RunnerStatusApiSpecs
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task GetRunners_BusyMultiSlotRunner_ListsEveryActiveWorkIndependently()
     {
@@ -450,8 +430,6 @@ public class RunnerStatusApiSpecs
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task GetRunners_IdleRunner_HasEmptyActiveWorksArray()
     {
@@ -486,8 +464,6 @@ public class RunnerStatusApiSpecs
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task GetRunner_BusyRunner_Returns200WithFullDetail()
     {
@@ -545,8 +521,6 @@ public class RunnerStatusApiSpecs
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task GetRunner_IdleRunner_Returns200WithEmptyActiveWorks()
     {
@@ -582,8 +556,6 @@ public class RunnerStatusApiSpecs
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task GetRunner_UnknownRunner_Returns404WithRunnerNotFoundReason()
     {
@@ -600,8 +572,6 @@ public class RunnerStatusApiSpecs
         Assert.Contains(unknownRunnerId, payload.GetProperty("error").GetString()!);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task GetRunner_RunnerWithOtherProjectId_Returns200()
     {
@@ -631,8 +601,6 @@ public class RunnerStatusApiSpecs
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task GetRunner_IsReadOnly_NoDispatchHeartbeatOrUnregisterSideEffect()
     {

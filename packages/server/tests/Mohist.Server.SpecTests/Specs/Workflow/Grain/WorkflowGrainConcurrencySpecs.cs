@@ -21,8 +21,6 @@ public class WorkflowGrainConcurrencySpecs : WorkflowGrainSpecs
 {
     public WorkflowGrainConcurrencySpecs(WorkflowGrainFixture fixture) : base(fixture) { }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task ConcurrentPauseResume_FromPending_SettlesIntoOneSerializedOutcome()
     {
@@ -53,8 +51,6 @@ public class WorkflowGrainConcurrencySpecs : WorkflowGrainSpecs
         Assert.Equal(persisted.Stages.Count, reloaded.Stages.Count);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task ConcurrentStop_FromPending_ExactlyOneSucceeds_RestRejected()
     {
@@ -86,8 +82,6 @@ public class WorkflowGrainConcurrencySpecs : WorkflowGrainSpecs
         Assert.Equal(WorkflowRunStatus.Stopped, reloaded.Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task ConcurrentPauseAndStop_FromPending_SettlesToStopped()
     {
@@ -115,8 +109,6 @@ public class WorkflowGrainConcurrencySpecs : WorkflowGrainSpecs
         Assert.Equal(persisted.Status, reloaded.Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task ConcurrentAssignWorker_FromPending_ExactlyOneWorkerAssigned_PersistedAgreesWithInMemory()
     {
@@ -150,8 +142,6 @@ public class WorkflowGrainConcurrencySpecs : WorkflowGrainSpecs
         Assert.Equal(persisted.Assignment?.WorkerId, reloaded.Assignment?.WorkerId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task ConcurrentControlAcrossIndependentWorkflows_AllSettleIndependently()
     {

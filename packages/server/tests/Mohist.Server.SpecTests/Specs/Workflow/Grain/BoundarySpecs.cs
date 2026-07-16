@@ -11,8 +11,6 @@ public class BoundarySpecs : WorkflowGrainSpecs
 {
     public BoundarySpecs(WorkflowGrainFixture fixture) : base(fixture) { }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task EmptyStage_NoTasksOrChecks_WorkflowCompletes()
     {
@@ -26,8 +24,6 @@ public class BoundarySpecs : WorkflowGrainSpecs
         Assert.Equal(RunnerStatus.Online, (await runner.GetRuntimeStateAsync()).Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task CheckReportsPending_CheckRunsAgain()
     {
@@ -48,8 +44,6 @@ public class BoundarySpecs : WorkflowGrainSpecs
         Assert.Equal(RunnerStatus.Online, (await runner.GetRuntimeStateAsync()).Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task UnknownWorkReport_Ignored_CurrentWorkContinues()
     {

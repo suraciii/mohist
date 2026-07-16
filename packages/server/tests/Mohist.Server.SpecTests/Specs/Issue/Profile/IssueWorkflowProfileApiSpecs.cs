@@ -41,8 +41,6 @@ public class IssueWorkflowProfileApiSpecs : IAsyncLifetime
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetWorkflowProfileYaml_ReturnsNormalizedYaml_ForBacklogIssue()
     {
@@ -61,8 +59,6 @@ public class IssueWorkflowProfileApiSpecs : IAsyncLifetime
         Assert.False(string.IsNullOrWhiteSpace(data.GetProperty("updatedAt").GetString()));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetWorkflowProfileYaml_ExposesTemplateSourceLabel_ForInheritedProjectAndCustomModes()
     {
@@ -118,8 +114,6 @@ public class IssueWorkflowProfileApiSpecs : IAsyncLifetime
         Assert.False(clearedData.TryGetProperty("yaml", out _));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task SaveWorkflowProfileYaml_UpdatesIssueProfile_WithoutMutatingProjectProfile()
     {
@@ -170,8 +164,6 @@ public class IssueWorkflowProfileApiSpecs : IAsyncLifetime
         Assert.Equal(savedData.GetProperty("updatedAt").GetString(), reloadedData.GetProperty("updatedAt").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task SaveWorkflowProfileYaml_RejectsInvalidYamlSyntax()
     {
@@ -204,8 +196,6 @@ public class IssueWorkflowProfileApiSpecs : IAsyncLifetime
         Assert.DoesNotContain("broken", yaml ?? "");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task SaveWorkflowProfileYaml_RejectsInvalidWorkflowShape()
     {
@@ -231,8 +221,6 @@ public class IssueWorkflowProfileApiSpecs : IAsyncLifetime
         Assert.Equal("reference", stateData.GetProperty("updateMode").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task SaveWorkflowProfileYaml_SynchronizesActiveRunProfile_AndPreservesInitializedStageWork()
     {

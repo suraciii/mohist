@@ -38,8 +38,6 @@ public class IssueMetricsQuerierSpecs
     // returned empty while delivery-time (which reads db.Issues directly) kept
     // working — a contradiction the closed-loop fixtures below could not catch
     // because they seeded via the very constant under test.
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public void WorkCompletedConstant_MatchesIssueEventSerializerBusType()
     {
@@ -48,8 +46,6 @@ public class IssueMetricsQuerierSpecs
             IssueEventSerializer.BusType(new IssueCompleted(WorkflowRunId: "wr_guard")));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public void ClosedConstant_MatchesIssueEventSerializerBusType()
     {
@@ -58,8 +54,6 @@ public class IssueMetricsQuerierSpecs
             IssueEventSerializer.BusType(new IssueCancelled(Reason: null)));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetCompletionBucketsAsync_DayBucketing_ReturnsThirtyTrailingDays()
     {
@@ -84,8 +78,6 @@ public class IssueMetricsQuerierSpecs
         });
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetCompletionBucketsAsync_DayBucketing_BucketsCompletionAndFailureByIssueEventTime()
     {
@@ -114,8 +106,6 @@ public class IssueMetricsQuerierSpecs
         Assert.Equal(1, d19.Failed);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetCompletionBucketsAsync_IssueEditedAfterCompletion_StaysInCompletionBucket()
     {
@@ -146,8 +136,6 @@ public class IssueMetricsQuerierSpecs
         Assert.Equal(1, firstHit.Completed);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetCompletionBucketsAsync_WeekBucketing_ReopenedIssueCountsOnlyLatestTerminalBucket()
     {
@@ -176,8 +164,6 @@ public class IssueMetricsQuerierSpecs
         Assert.Equal(1, week2.Failed);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetCompletionBucketsAsync_DayBucketing_RecompletedIssueCountsOnlyLatestTerminalBucket()
     {
@@ -202,8 +188,6 @@ public class IssueMetricsQuerierSpecs
         Assert.Equal(1, day19.Completed);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetCompletionBucketsAsync_DistinctPerBucket_CollapsesRepeatedEventsForSameIssueAndType()
     {
@@ -229,8 +213,6 @@ public class IssueMetricsQuerierSpecs
         Assert.Equal(0, day.Failed);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetCompletionBucketsAsync_ProjectScoping_OnlyCountsTargetProjectsIssues()
     {
@@ -260,8 +242,6 @@ public class IssueMetricsQuerierSpecs
         Assert.DoesNotContain(resultA.Buckets, b => b.Completed > 1);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetCompletionBucketsAsync_NonTerminalEvents_AreNotCounted()
     {
@@ -287,8 +267,6 @@ public class IssueMetricsQuerierSpecs
         Assert.Equal(0, total);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetCompletionBucketsAsync_WeekBucketing_ReturnsTwelveTrailingWeeks()
     {
@@ -311,8 +289,6 @@ public class IssueMetricsQuerierSpecs
         Assert.Equal("2026-06-15", result.Buckets[^1].Boundary);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public void StartOfIsoWeek_ReturnsMondayForAnyInput()
     {
@@ -331,8 +307,6 @@ public class IssueMetricsQuerierSpecs
         Assert.Equal(new DateTime(2026, 6, 15), IssueMetricsQuerier.ISOWeekHelper.StartOfIsoWeek(sunday));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetApprovalWaitAsync_TrailingSevenDayWindow_IncludesOnlyRecentResponses()
     {
@@ -358,8 +332,6 @@ public class IssueMetricsQuerierSpecs
         Assert.Equal(now, result.Window.To);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetApprovalWaitAsync_Statistics_ReturnsAverageMedianMaxFromSameSamples()
     {
@@ -387,8 +359,6 @@ public class IssueMetricsQuerierSpecs
         Assert.Equal(TimeSpan.FromHours(16).TotalSeconds, result.MaxSeconds);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetApprovalWaitAsync_SingleSample_YieldsIdenticalAverageMedianMax()
     {
@@ -411,8 +381,6 @@ public class IssueMetricsQuerierSpecs
         Assert.Equal(expected, result.MaxSeconds);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetApprovalWaitAsync_PendingApproval_IsExcludedFromAggregate()
     {
@@ -435,8 +403,6 @@ public class IssueMetricsQuerierSpecs
         Assert.Equal(TimeSpan.FromHours(1).TotalSeconds, result.AverageSeconds);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetApprovalWaitAsync_RejectedApproval_ContributesLikeApproved()
     {
@@ -459,8 +425,6 @@ public class IssueMetricsQuerierSpecs
         Assert.Equal(wait.TotalSeconds, result.MaxSeconds);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetApprovalWaitAsync_MultipleCompletedApprovalStagesInOneRun_CountsEachGate()
     {
@@ -493,8 +457,6 @@ public class IssueMetricsQuerierSpecs
         Assert.Equal(checkWait.TotalSeconds, result.MaxSeconds);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetApprovalWaitAsync_ZeroSamples_ReturnsEmptyResultWithNullStats()
     {
@@ -516,8 +478,6 @@ public class IssueMetricsQuerierSpecs
         Assert.Null(result.MaxSeconds);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetApprovalWaitAsync_ZeroDurationWait_IsDistinguishableFromEmpty()
     {
@@ -539,8 +499,6 @@ public class IssueMetricsQuerierSpecs
         Assert.Equal(0, result.MaxSeconds);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetApprovalWaitAsync_ProjectScoping_OnlyCountsTargetProjectsIssues()
     {
@@ -566,8 +524,6 @@ public class IssueMetricsQuerierSpecs
         Assert.Equal(TimeSpan.FromHours(5).TotalSeconds, resultB.AverageSeconds);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetQualityAsync_AllChecksZeroRepair_IsFirstTimeRight()
     {
@@ -594,8 +550,6 @@ public class IssueMetricsQuerierSpecs
         Assert.Contains(result.Window.Stages, s => s.Stage == "build" && s.EnteredCount == 1 && s.ReworkRate == 0.0);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetQualityAsync_AnyRepairedCheck_IsNotFirstTimeRight()
     {
@@ -622,8 +576,6 @@ public class IssueMetricsQuerierSpecs
         Assert.Contains(result.Window.Stages, s => s.Stage == "build" && s.EnteredCount == 1 && s.ReworkRate == 1.0);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetQualityAsync_NonDoneIssues_AreExcludedFromNumeratorAndDenominator()
     {
@@ -652,8 +604,6 @@ public class IssueMetricsQuerierSpecs
         Assert.Equal(0.0, plan.ReworkRate);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetQualityAsync_NeverEnteredStage_IsReturnedWithNullStageRate()
     {
@@ -685,8 +635,6 @@ public class IssueMetricsQuerierSpecs
         Assert.Null(integrate.ReworkRate);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetQualityAsync_WindowBucketing_BucketsByShipEventTime()
     {
@@ -716,8 +664,6 @@ public class IssueMetricsQuerierSpecs
         Assert.Equal(1.0, result.Window.FirstTimeRightRate);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetQualityAsync_EmptyWindow_ReturnsNullRatesWithZeroSampleCount()
     {
@@ -740,8 +686,6 @@ public class IssueMetricsQuerierSpecs
         Assert.Contains(result.Window.Stages, s => s.Stage == "integrate" && s.EnteredCount == 0 && s.ReworkRate == null);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetQualityAsync_PerStageDenominators_AreIndependent()
     {
@@ -779,8 +723,6 @@ public class IssueMetricsQuerierSpecs
         Assert.Equal(0.0, integrate.ReworkRate);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetQualityAsync_PriorLifecycleRunRepair_PreventsFirstTimeRight()
     {
@@ -818,8 +760,6 @@ public class IssueMetricsQuerierSpecs
         Assert.Equal(0.0, build.ReworkRate);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetQualityAsync_HistoricalRepairEventBeforeStageRerun_UsesDurableReworkHistory()
     {
@@ -854,8 +794,6 @@ public class IssueMetricsQuerierSpecs
         Assert.Equal(1.0, check.ReworkRate);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetQualityAsync_CheckFailsThenManualRetry_CountsRepeatedCheckRunAsRework()
     {
@@ -890,8 +828,6 @@ public class IssueMetricsQuerierSpecs
         Assert.Equal(1.0, check.ReworkRate);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetQualityAsync_MissingWorkflowRun_CountsAsNotFirstTimeRight()
     {
@@ -913,8 +849,6 @@ public class IssueMetricsQuerierSpecs
         Assert.All(result.Window.Stages, stage => Assert.Equal(0, stage.EnteredCount));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetQualityAsync_UnreadableWorkflowRun_CountsAsNotFirstTimeRight()
     {
@@ -940,8 +874,6 @@ public class IssueMetricsQuerierSpecs
         Assert.All(result.Window.Stages, stage => Assert.Equal(0, stage.EnteredCount));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetQualityAsync_NullWorkflowRun_LogsReadModelAndMetricsIntegrityErrors()
     {
@@ -987,8 +919,6 @@ public class IssueMetricsQuerierSpecs
             && entry.Message.Contains(workflowRunId, StringComparison.Ordinal));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetQualityAsync_ProjectScoping_OnlyCountsTargetProjectsIssues()
     {
@@ -1018,8 +948,6 @@ public class IssueMetricsQuerierSpecs
         Assert.Equal(0.0, resultB.Window.FirstTimeRightRate);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetQualityAsync_Trend_ReturnsPreSizedThirtyDayDailySeries()
     {
@@ -1050,8 +978,6 @@ public class IssueMetricsQuerierSpecs
         });
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetQualityAsync_Trend_IncludesLeadingCalendarBoundarySample()
     {
@@ -1080,8 +1006,6 @@ public class IssueMetricsQuerierSpecs
         Assert.Equal(0.0, leadingPoint.ReworkRate);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetQualityAsync_Trend_PerBucketFtrRateEqualsFtrShippedOverAllShipped()
     {
@@ -1109,8 +1033,6 @@ public class IssueMetricsQuerierSpecs
         Assert.Equal(0.5, day17.FirstTimeRightRate);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetQualityAsync_Trend_PerBucketReworkRateUsesAnyStageClassification()
     {
@@ -1139,8 +1061,6 @@ public class IssueMetricsQuerierSpecs
         Assert.Equal(1.0, day18.ReworkRate);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetQualityAsync_Trend_IssueReworkedAtMultipleStagesCountsOnce()
     {
@@ -1176,8 +1096,6 @@ public class IssueMetricsQuerierSpecs
         Assert.Equal(1.0, build.ReworkRate);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetQualityAsync_Trend_EmptyBucketYieldsNullRatesIndependentOfSiblings()
     {
@@ -1217,8 +1135,6 @@ public class IssueMetricsQuerierSpecs
             });
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetQualityAsync_Trend_NonShippedIssuesDoNotContributeToAnyBucket()
     {
@@ -1250,8 +1166,6 @@ public class IssueMetricsQuerierSpecs
         });
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetQualityAsync_Trend_BucketMembershipIsAnchoredOnShipTime()
     {
@@ -1279,8 +1193,6 @@ public class IssueMetricsQuerierSpecs
         Assert.Equal(1.0, day.FirstTimeRightRate);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetQualityAsync_Trend_CurrentDayMorningShipUsesCurrentCalendarDayBucket()
     {
@@ -1313,8 +1225,6 @@ public class IssueMetricsQuerierSpecs
         Assert.Null(yesterday.ReworkRate);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetQualityAsync_Trend_MidWindowMorningShipUsesItsCalendarDayBucket()
     {
@@ -1347,8 +1257,6 @@ public class IssueMetricsQuerierSpecs
         Assert.Null(previousDay.ReworkRate);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetQualityAsync_Trend_AdditiveAndLeavesWindowScalarsUnchanged()
     {
@@ -1384,8 +1292,6 @@ public class IssueMetricsQuerierSpecs
     }
 
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetDeliveryTimesAsync_DeliveredIssue_ReturnsLeadAndCycleDurations()
     {
@@ -1418,8 +1324,6 @@ public class IssueMetricsQuerierSpecs
         Assert.Equal(2.1667, point.CycleDays!.Value, precision: 3);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetDeliveryTimesAsync_RetryKeepsEarliestWorkStart()
     {
@@ -1448,8 +1352,6 @@ public class IssueMetricsQuerierSpecs
         Assert.Equal(7.2917, point.CycleDays!.Value, precision: 3);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetDeliveryTimesAsync_ReopenedAndReCompleted_AnchorsOnLatestCompletion()
     {
@@ -1495,8 +1397,6 @@ public class IssueMetricsQuerierSpecs
         Assert.Equal(10.1667, point.CycleDays!.Value, precision: 3);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetDeliveryTimesAsync_DeliveredIssueWithoutWorkStart_CycleIsUndefined()
     {
@@ -1523,8 +1423,6 @@ public class IssueMetricsQuerierSpecs
         Assert.Null(point.CycleDays);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetDeliveryTimesAsync_GenuineZeroDurationCycle_ReportsZero()
     {
@@ -1551,8 +1449,6 @@ public class IssueMetricsQuerierSpecs
         Assert.Equal(0.0, point.CycleDays!.Value, precision: 5);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetDeliveryTimesAsync_CancelledIssue_ExcludedFromSeries()
     {
@@ -1579,8 +1475,6 @@ public class IssueMetricsQuerierSpecs
         Assert.Empty(result.Points);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetDeliveryTimesAsync_IssueEditedAfterCompletion_AnchorsOnCompletedAt()
     {
@@ -1612,8 +1506,6 @@ public class IssueMetricsQuerierSpecs
             point.CompletedAt);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetDeliveryTimesAsync_CompletedBeyond30Days_ExcludedFromWindow()
     {
@@ -1649,8 +1541,6 @@ public class IssueMetricsQuerierSpecs
         Assert.DoesNotContain(result.Points, p => string.Equals(p.IssueNumber.ToString(), "issue_dt_outside"));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetDeliveryTimesAsync_NoDeliveredIssuesInWindow_ReturnsEmptyPoints()
     {
@@ -1667,8 +1557,6 @@ public class IssueMetricsQuerierSpecs
         Assert.Empty(result.Points);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetDeliveryTimesAsync_DeliveredIssuesInOtherProject_NotInSeries()
     {
@@ -1697,8 +1585,6 @@ public class IssueMetricsQuerierSpecs
         Assert.DoesNotContain(resultA.Points, p => p.IssueNumber == a.Number + 1);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetDeliveryTimesAsync_MultipleDeliveredIssues_OrdersByCompletionAscending()
     {
@@ -1725,8 +1611,6 @@ public class IssueMetricsQuerierSpecs
         Assert.Equal(late.Number, result.Points[1].IssueNumber);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetStageDurationsAsync_MultiRunLatestAttempt_UsesLastAttemptPerStage()
     {
@@ -1772,8 +1656,6 @@ public class IssueMetricsQuerierSpecs
         Assert.Equal(2 * 3600, buildStage.MedianSeconds!.Value, precision: 3);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetStageDurationsAsync_CrossRunLatestPair_TakesLatestFromMostRecentRun()
     {
@@ -1816,8 +1698,6 @@ public class IssueMetricsQuerierSpecs
         Assert.Equal(0.5 * 3600, planStage.AverageSeconds!.Value, precision: 3);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetStageDurationsAsync_CrossRunApprovalWait_CountsEarlierRunGate()
     {
@@ -1876,8 +1756,6 @@ public class IssueMetricsQuerierSpecs
         Assert.Equal(7 * 3600, result.WaitBreakout.AverageInactiveGapSeconds!.Value, precision: 3);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetStageDurationsAsync_RunIdOnlyOnWorkCompleted_DiscoversStageEvents()
     {
@@ -1906,8 +1784,6 @@ public class IssueMetricsQuerierSpecs
         Assert.Equal(2 * 3600, planStage.AverageSeconds!.Value, precision: 3);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetStageDurationsAsync_DuplicateCompletion_UsesFirstCompletionAfterLatestStart()
     {
@@ -1936,8 +1812,6 @@ public class IssueMetricsQuerierSpecs
         Assert.Equal(2 * 3600, buildStage.AverageSeconds!.Value, precision: 3);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetStageDurationsAsync_StartedButNeverCompleted_ExcludedFromAverage()
     {
@@ -1979,8 +1853,6 @@ public class IssueMetricsQuerierSpecs
         Assert.DoesNotContain(result.Stages, s => s.Stage == "build");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetStageDurationsAsync_SumToCycleDecomposition_HoldsForDeliveredIssue()
     {
@@ -2062,8 +1934,6 @@ public class IssueMetricsQuerierSpecs
         Assert.Equal(3 * 3600, result.WaitBreakout.AverageInactiveGapSeconds!.Value, precision: 3);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetStageDurationsAsync_PopulationWeightedRatio_NotArithmeticMean()
     {
@@ -2110,8 +1980,6 @@ public class IssueMetricsQuerierSpecs
         Assert.Equal(12.0 / 30.0, result.FlowEfficiencyRatio!.Value, precision: 3);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetStageDurationsAsync_WaitBreakoutAverages_ZeroWaitContributesZero()
     {
@@ -2200,8 +2068,6 @@ public class IssueMetricsQuerierSpecs
         Assert.NotNull(result.WaitBreakout.AverageInactiveGapSeconds);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetStageDurationsAsync_ApprovalWaitGreaterThanStageSpan_ExcludesIssueFromCycleAggregates()
     {
@@ -2232,8 +2098,6 @@ public class IssueMetricsQuerierSpecs
         Assert.Null(result.WaitBreakout.AverageInactiveGapSeconds);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetStageDurationsAsync_StageSpanGreaterThanCycle_ExcludesIssueFromCycleAggregates()
     {
@@ -2264,8 +2128,6 @@ public class IssueMetricsQuerierSpecs
         Assert.Null(result.WaitBreakout.AverageInactiveGapSeconds);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetStageDurationsAsync_NoDeliveredIssuesInWindow_ReturnsEmptyResult()
     {
@@ -2289,8 +2151,6 @@ public class IssueMetricsQuerierSpecs
         Assert.Null(result.WaitBreakout.AverageInactiveGapSeconds);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetStageDurationsAsync_GenuineZeroDurationStage_DistinctFromEmpty()
     {
@@ -2327,8 +2187,6 @@ public class IssueMetricsQuerierSpecs
         Assert.Equal(0.0, planStage.MedianSeconds!.Value, precision: 3);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetStageDurationsAsync_CompletedBeyond30Days_ExcludedFromWindow()
     {
@@ -2372,8 +2230,6 @@ public class IssueMetricsQuerierSpecs
         Assert.Equal(3600, planStage.AverageSeconds!.Value, precision: 3);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetStageDurationsAsync_DeliveredIssuesInOtherProject_NotInStages()
     {
@@ -2417,8 +2273,6 @@ public class IssueMetricsQuerierSpecs
         Assert.Equal(4 * 3600, planB.AverageSeconds!.Value, precision: 3);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetStageDurationsAsync_StagesOrderedByWorkflowStageOrder()
     {

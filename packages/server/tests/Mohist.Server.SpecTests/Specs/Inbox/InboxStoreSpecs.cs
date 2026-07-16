@@ -9,8 +9,6 @@ namespace Mohist.Server.SpecTests.Specs.Inbox;
 
 public class InboxStoreSpecs
 {
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task InsertAsync_GeneratesIdAndPersistsRow()
     {
@@ -42,8 +40,6 @@ public class InboxStoreSpecs
         Assert.Null(row.ArchivedAt);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task InsertAsync_RepeatedSourceEventId_IsIdempotent()
     {
@@ -76,8 +72,6 @@ public class InboxStoreSpecs
         Assert.Equal("Hello", row.IssueTitle);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task InsertAsync_SameSourceEventIdAcrossDifferentSources_CreatesDistinctItems()
     {
@@ -108,8 +102,6 @@ public class InboxStoreSpecs
         Assert.Equal(2, db.InboxItems.Count());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task InsertAsync_InvalidNotificationKind_ThrowsAndDoesNotPersist()
     {
@@ -128,8 +120,6 @@ public class InboxStoreSpecs
         Assert.Empty(db.InboxItems);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task MarkReadAsync_SetsReadAtOnMatchingItem()
     {
@@ -147,8 +137,6 @@ public class InboxStoreSpecs
         Assert.Null(rows[1].ReadAt);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task MarkReadAsync_DoesNotMatchItemInOtherProject()
     {
@@ -167,8 +155,6 @@ public class InboxStoreSpecs
         Assert.Null(db.InboxItems.Single(r => r.Id == inB.Id).ReadAt);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task MarkReadAsync_DoesNotTouchArchivedItems()
     {
@@ -182,8 +168,6 @@ public class InboxStoreSpecs
         Assert.Equal(0, affected);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task MarkAllReadAsync_OnlyTouchesTargetProject()
     {
@@ -203,8 +187,6 @@ public class InboxStoreSpecs
         Assert.All(bRows, r => Assert.Null(r.ReadAt));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task MarkAllReadAsync_SkipsAlreadyReadItems()
     {
@@ -220,8 +202,6 @@ public class InboxStoreSpecs
         Assert.Equal(1, affected);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task MarkAllReadAsync_SkipsArchivedItems()
     {
@@ -238,8 +218,6 @@ public class InboxStoreSpecs
         Assert.Null(db.InboxItems.Single(r => r.Id == archived.Id).ReadAt);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task ArchiveAsync_SetsArchivedAt()
     {
@@ -257,8 +235,6 @@ public class InboxStoreSpecs
         Assert.Null(rows[1].ArchivedAt);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task ArchiveAsync_DoesNotMatchItemInOtherProject()
     {
@@ -274,8 +250,6 @@ public class InboxStoreSpecs
         Assert.Null(db.InboxItems.Single(r => r.Id == inA.Id).ArchivedAt);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task ArchiveAsync_IsIdempotent()
     {
@@ -290,8 +264,6 @@ public class InboxStoreSpecs
         Assert.Equal(0, second);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task MarkReadAsync_AfterArchive_DoesNothing()
     {

@@ -27,8 +27,6 @@ public class AgentCostRollupApiSpecs
 
     private DateTime Today => _fixture.TimeProvider.GetUtcNow().UtcDateTime.Date;
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetCost_ReturnsEnvelopeWithAllFourFields()
     {
@@ -43,8 +41,6 @@ public class AgentCostRollupApiSpecs
         Assert.NotNull(response.CostPerShip);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetCost_TotalCostSumsAcrossAllSessionsWithUsage()
     {
@@ -64,8 +60,6 @@ public class AgentCostRollupApiSpecs
         Assert.Equal("USD", response.TotalCost.Currency);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetCost_SessionsWithoutUsageAreSkipped()
     {
@@ -82,8 +76,6 @@ public class AgentCostRollupApiSpecs
         Assert.Equal(1, response.TotalCost.SampleCount);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetCost_TodayCostBucketExcludesPriorDays()
     {
@@ -102,8 +94,6 @@ public class AgentCostRollupApiSpecs
         Assert.Equal(1, response.TodayCost.SampleCount);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetCost_TodayBucketBoundaryMatchesTimeseriesCurrentDay()
     {
@@ -118,8 +108,6 @@ public class AgentCostRollupApiSpecs
         Assert.Equal(1, response.TodayCost.SampleCount);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetCost_DoneIssuesCountCountsOnlyDone()
     {
@@ -142,8 +130,6 @@ public class AgentCostRollupApiSpecs
         Assert.Equal(7, response.DoneIssuesCount);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetCost_CostPerShipEqualsTotalCostOverDoneIssues()
     {
@@ -163,8 +149,6 @@ public class AgentCostRollupApiSpecs
         Assert.Equal("USD", response.CostPerShip.Currency);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetCost_FreeShippingIsRealZeroNotEmpty()
     {
@@ -185,8 +169,6 @@ public class AgentCostRollupApiSpecs
         Assert.Equal(1, response.CostPerShip.SampleCount);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetCost_ZeroShippedIssuesYieldsUndefinedCostPerShip()
     {
@@ -203,8 +185,6 @@ public class AgentCostRollupApiSpecs
         Assert.Equal(0, response.CostPerShip.SampleCount);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetCost_ProjectWithoutUsageReturnsEmptySpendNotZero()
     {
@@ -222,8 +202,6 @@ public class AgentCostRollupApiSpecs
         Assert.Equal(0, response.DoneIssuesCount);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetCost_EmptinessIsEvaluatedIndependentlyPerMetric()
     {
@@ -243,8 +221,6 @@ public class AgentCostRollupApiSpecs
         Assert.Equal(0, response.CostPerShip.SampleCount);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetCost_UnknownProjectReturns404()
     {
@@ -252,8 +228,6 @@ public class AgentCostRollupApiSpecs
         Assert.Equal(System.Net.HttpStatusCode.NotFound, response.StatusCode);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetCost_UsageTimeseriesEndpointRemainsAvailableAndUnchanged()
     {
@@ -268,8 +242,6 @@ public class AgentCostRollupApiSpecs
         Assert.Equal(7, usageResponse.Buckets.Count);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetCost_WindowedSpendSumsCurrentAndPreviousWindowSessions()
     {
@@ -300,8 +272,6 @@ public class AgentCostRollupApiSpecs
         Assert.Equal("USD", response.PreviousWindow.Spend.Currency);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetCost_WindowedPerIssueCostIsWindowSpendDividedByCompletedIssues()
     {
@@ -335,8 +305,6 @@ public class AgentCostRollupApiSpecs
         Assert.Equal(1, response.PreviousWindow.PerIssueCost.SampleCount);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetCost_WindowedBothWindowsReturned_DeriveDeltaInSingleRead()
     {
@@ -372,8 +340,6 @@ public class AgentCostRollupApiSpecs
         Assert.Equal(0.20, perIssueDelta, precision: 5);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetCost_WindowedEmptinessIsEvaluatedIndependentlyPerMetricPerWindow()
     {
@@ -403,8 +369,6 @@ public class AgentCostRollupApiSpecs
         Assert.Equal(0, response.PreviousWindow.PerIssueCost.SampleCount);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetCost_WindowedSpendNoSessionsYieldsEmptyNotGenuineZero()
     {
@@ -424,8 +388,6 @@ public class AgentCostRollupApiSpecs
         Assert.Equal(0, response.PreviousWindow.Spend.SampleCount);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetCost_WindowedGenuineZeroSpendIsDistinctFromEmpty()
     {
@@ -449,8 +411,6 @@ public class AgentCostRollupApiSpecs
         Assert.Equal(1, response.CurrentWindow.PerIssueCost.SampleCount);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetCost_WindowedAdditivePreservation_CumulativeRollupAndTimeseriesUnchanged()
     {
@@ -486,8 +446,6 @@ public class AgentCostRollupApiSpecs
         Assert.Equal(1, costResponse.PreviousWindow.Spend.SampleCount);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetCost_Range90d_ScalesWindowedCurrentAndPreviousWindow()
     {
@@ -514,8 +472,6 @@ public class AgentCostRollupApiSpecs
         Assert.Equal(1, response.PreviousWindow.Spend.SampleCount);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetCost_Range7d_ScalesWindowedCurrentAndPreviousWindow()
     {
@@ -539,8 +495,6 @@ public class AgentCostRollupApiSpecs
         Assert.Equal(1, response.PreviousWindow.Spend.SampleCount);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetCost_Range_DoesNotAffectAllTimeFigures()
     {
@@ -581,8 +535,6 @@ public class AgentCostRollupApiSpecs
         Assert.Equal(omit.CostPerShip.Amount, r7.CostPerShip.Amount);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetCost_OmittedRange_Reproduces30DayWindow()
     {
@@ -607,8 +559,6 @@ public class AgentCostRollupApiSpecs
         Assert.Equal(1, response.PreviousWindow.Spend.SampleCount);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetCost_UnknownRange_ReturnsBadRequest()
     {
@@ -618,8 +568,6 @@ public class AgentCostRollupApiSpecs
         Assert.Equal(System.Net.HttpStatusCode.BadRequest, response.StatusCode);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Theory]
     [InlineData("7d")]
     [InlineData("30d")]

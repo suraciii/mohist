@@ -34,8 +34,6 @@ namespace Mohist.Server.SpecTests.Specs.Events;
 /// value (D6); and every emitted envelope satisfies the AgentSession
 /// producer-family rule.
 /// </summary>
-[Trait(Traits.Speed.Name, Traits.Speed.Unit)]
-[Trait(Traits.Sut.Name, Traits.Sut.System)]
 public class AgentSessionTransactionalEventAppendSpecs : IAsyncLifetime
 {
     private static readonly DateTime FixedTime = new(2026, 7, 15, 0, 0, 0, DateTimeKind.Utc);

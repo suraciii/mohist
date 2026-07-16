@@ -42,9 +42,6 @@ public class RunnerConfigApiSpecs : IClassFixture<RunnerConfigFixture>, IAsyncLi
     public Task InitializeAsync() => Task.CompletedTask;
     public Task DisposeAsync() => _fixture.UnregisterRunnersAsync();
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task Config_ConfiguredPolicy_ProjectsAllFields()
     {
@@ -71,9 +68,6 @@ public class RunnerConfigApiSpecs : IClassFixture<RunnerConfigFixture>, IAsyncLi
         Assert.Equal(536_870_912L, policyElement.GetProperty("storageTargetWatermarkBytes").GetInt64());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task Config_NonPositiveFields_AreEmittedAsNullSentinels()
     {
@@ -110,9 +104,6 @@ public class RunnerConfigApiSpecs : IClassFixture<RunnerConfigFixture>, IAsyncLi
         Assert.Equal(JsonValueKind.Null, watermark.ValueKind);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task Config_PartiallyConfiguredPolicy_EmitsConfiguredValueAndNullsForUnsetFields()
     {
@@ -138,9 +129,6 @@ public class RunnerConfigApiSpecs : IClassFixture<RunnerConfigFixture>, IAsyncLi
         Assert.Equal(JsonValueKind.Null, watermark.ValueKind);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task Config_FullyUnconfiguredPolicy_Returns200WithAllNullFields()
     {
@@ -168,9 +156,6 @@ public class RunnerConfigApiSpecs : IClassFixture<RunnerConfigFixture>, IAsyncLi
             key => Assert.Equal(JsonValueKind.Null, cleanup.GetProperty(key).ValueKind));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task Config_IdleSystem_Returns200WithBody_IndependentOfPollState()
     {
@@ -200,9 +185,6 @@ public class RunnerConfigApiSpecs : IClassFixture<RunnerConfigFixture>, IAsyncLi
         Assert.Equal(JsonValueKind.Null, budget.ValueKind);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task Config_IsPlainGet_NoRequestBodyNoETagNegotiation()
     {
@@ -231,9 +213,6 @@ public class RunnerConfigApiSpecs : IClassFixture<RunnerConfigFixture>, IAsyncLi
         Assert.Equal(7, body.GetProperty("cleanupPolicy").GetProperty("retentionDays").GetInt32());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task Config_ResponseShape_IsIdenticalToCleanupPolicyDto()
     {
@@ -263,9 +242,6 @@ public class RunnerConfigApiSpecs : IClassFixture<RunnerConfigFixture>, IAsyncLi
         Assert.Equal(new[] { "retentionDays", "storageBudgetBytes", "storageTargetWatermarkBytes" }, keys);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task Poll_IsUnchangedByConfigEndpoint_StillReturns204WhenIdle()
     {
@@ -293,9 +269,6 @@ public class RunnerConfigApiSpecs : IClassFixture<RunnerConfigFixture>, IAsyncLi
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task Poll_DispatchBody_NoLongerContainsCleanupPolicy()
     {

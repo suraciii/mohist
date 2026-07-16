@@ -44,8 +44,6 @@ public class IssueTitleLookupSpecs
         _fixture = fixture;
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task LoadTitlesAsync_EmptyInput_ReturnsEmptyDictionaryWithoutTouchingDatabase()
     {
@@ -65,8 +63,6 @@ public class IssueTitleLookupSpecs
         Assert.Empty(titles);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task LoadTitlesAsync_DuplicateNumbers_AreDeduplicatedBeforeLookup()
     {
@@ -89,8 +85,6 @@ public class IssueTitleLookupSpecs
         Assert.Equal("Deduped title", titles[42]);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task LoadTitlesAsync_LoadsAllDistinctNumbersForProject()
     {
@@ -117,8 +111,6 @@ public class IssueTitleLookupSpecs
         Assert.Equal("Third", titles[3]);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task LoadTitlesAsync_DropsIssuesFromOtherProjects()
     {
@@ -147,8 +139,6 @@ public class IssueTitleLookupSpecs
         Assert.DoesNotContain(titles, pair => pair.Value == "Foreign #1");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public void Resolve_StoredTitle_ReturnedVerbatim()
     {
@@ -157,8 +147,6 @@ public class IssueTitleLookupSpecs
         Assert.Equal("Stored", IssueTitleLookup.Resolve(titles, 42));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public void Resolve_AbsentNumber_FallsBackToIssueHash()
     {
@@ -167,8 +155,6 @@ public class IssueTitleLookupSpecs
         Assert.Equal("Issue #7", IssueTitleLookup.Resolve(titles, 7));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public void Resolve_WhitespaceTitle_FallsBackToIssueHash()
     {
@@ -184,8 +170,6 @@ public class IssueTitleLookupSpecs
         Assert.Equal("Issue #3", IssueTitleLookup.Resolve(titles, 3));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public void Resolve_NumberZero_UsesLiteralZeroInFallback()
     {
@@ -197,8 +181,6 @@ public class IssueTitleLookupSpecs
         Assert.Equal("Issue #0", IssueTitleLookup.Resolve(titles, 0));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task QuerierAndAssembler_ShareSameTitlesForSameProjectAndNumbers()
     {

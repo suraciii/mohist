@@ -16,8 +16,6 @@ using DomainIssue = Mohist.Server.Issue.Domain.Issue;
 
 namespace Mohist.Server.SpecTests.Specs.Events;
 
-[Trait(Traits.Speed.Name, Traits.Speed.Unit)]
-[Trait(Traits.Sut.Name, Traits.Sut.System)]
 public class IssueTransactionalEventAppendSpecs : IAsyncLifetime
 {
     private const string ProjectId = "proj_issue_txn";

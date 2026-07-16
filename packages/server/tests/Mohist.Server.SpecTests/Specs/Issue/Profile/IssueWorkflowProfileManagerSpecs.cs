@@ -55,8 +55,6 @@ public class IssueWorkflowProfileManagerSpecs : IAsyncLifetime
 
     // ===================== Template =====================
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetProfile_ReturnsNull_WhenNoRecord()
     {
@@ -64,8 +62,6 @@ public class IssueWorkflowProfileManagerSpecs : IAsyncLifetime
         Assert.Null(profile);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task UpdateTemplate_ProjectReference_StoresSourceTemplateId()
     {
@@ -82,8 +78,6 @@ public class IssueWorkflowProfileManagerSpecs : IAsyncLifetime
         Assert.Equal(1, stored.IssueNumber);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task UpdateTemplate_CustomYaml_StoresParsedDefinition()
     {
@@ -105,8 +99,6 @@ public class IssueWorkflowProfileManagerSpecs : IAsyncLifetime
         Assert.Equal("my-custom", def.Id);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task UpdateTemplate_BothSet_Throws()
     {
@@ -123,8 +115,6 @@ public class IssueWorkflowProfileManagerSpecs : IAsyncLifetime
                         """)));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task UpdateTemplate_NullClears_BothFields()
     {
@@ -139,8 +129,6 @@ public class IssueWorkflowProfileManagerSpecs : IAsyncLifetime
         Assert.Null(row.Template);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task UpdateTemplate_OverwritesPreviousCustom()
     {
@@ -168,8 +156,6 @@ public class IssueWorkflowProfileManagerSpecs : IAsyncLifetime
 
     // ===================== Variables =====================
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetVariables_Empty_WhenNoRecord()
     {
@@ -177,8 +163,6 @@ public class IssueWorkflowProfileManagerSpecs : IAsyncLifetime
         Assert.Same(VariableBundle.Empty, bundle);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task SetVariables_StoresAndRetrieves()
     {
@@ -191,8 +175,6 @@ public class IssueWorkflowProfileManagerSpecs : IAsyncLifetime
         Assert.NotNull(got.Vars);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task PatchVariables_DeepMergesAcrossCalls()
     {
@@ -215,8 +197,6 @@ public class IssueWorkflowProfileManagerSpecs : IAsyncLifetime
         Assert.Equal("gpt-4o", agent.GetProperty("model").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task VariableOperations_AreIsolatedFromTemplateOperations()
     {
@@ -236,8 +216,6 @@ public class IssueWorkflowProfileManagerSpecs : IAsyncLifetime
         Assert.Equal(1, doc.RootElement.GetProperty("keep").GetInt32());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task SetVariables_ChineseValues_PersistAndRoundTripVerbatimFromSqlite()
     {

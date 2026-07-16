@@ -10,8 +10,6 @@ namespace Mohist.Server.SpecTests.Specs.Runner.Subscriptions;
 
 public class RunnerWorkflowTerminalStatusHandlerSpecs
 {
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task HandleAsync_RouterThrows_ExceptionPropagates()
     {
@@ -32,8 +30,6 @@ public class RunnerWorkflowTerminalStatusHandlerSpecs
         Assert.Equal(new[] { "wr_propagate:Completed" }, observed);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task HandleAsync_UnresolvedSource_EnvelopesNoOpWithoutCallingRouter()
     {

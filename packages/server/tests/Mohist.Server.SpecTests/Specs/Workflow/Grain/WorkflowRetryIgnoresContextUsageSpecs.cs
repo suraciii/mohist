@@ -42,8 +42,6 @@ public class WorkflowRetryIgnoresContextUsageSpecs
         _client = fixture.Client;
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Theory]
     [InlineData(0L, 0L, "no usage data")]
     [InlineData(400L, 1000L, "healthy usage")]
@@ -87,8 +85,6 @@ public class WorkflowRetryIgnoresContextUsageSpecs
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task TaskFails_NoSession_RetrySucceeds()
     {

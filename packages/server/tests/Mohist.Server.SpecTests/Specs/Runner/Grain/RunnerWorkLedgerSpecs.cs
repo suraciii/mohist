@@ -31,8 +31,6 @@ public class RunnerWorkLedgerSpecs : WorkflowGrainSpecs
     // only server-side timer is presence expiry, so the five
     // EnsureWorkTimeoutReminder_* specs were deleted too.
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task AgentJobWork_HasItsOnlyHomeInRunnerWorks()
     {
@@ -75,8 +73,6 @@ public class RunnerWorkLedgerSpecs : WorkflowGrainSpecs
         Assert.Equal(takeTime, row.TakenAt);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task RunnerLoss_SynthesizesFailedRunnerLost_ForWorkflowWork()
     {
@@ -96,8 +92,6 @@ public class RunnerWorkLedgerSpecs : WorkflowGrainSpecs
         Assert.Equal("runner-lost", run.Failure?.Message);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task RunnerLoss_SynthesizesAgentJobFailure_AndUpdatesLedgerRow()
     {

@@ -48,8 +48,6 @@ public class IssueWorkflowProductLoopSpecs : IAsyncLifetime
         await _fixture.Grains.GetGrain<IEventDispatcherGrain>(EventDispatcherGrain.Global).DispatchNowAsync();
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task IssueStart_RunnerCompletesWorkflow_IssueBecomesDone()
     {
@@ -116,8 +114,6 @@ var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/i
         await _client.PostOkAsync($"/api/projects/{project.Id}/issues/{issue.Number}/archive");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task IssueWorkflowVariablesPatch_AppliesToFutureDispatches()
     {
@@ -147,8 +143,6 @@ var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/i
         Assert.Equal(1200, agent.GetProperty("timeout").GetInt32());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task IssueWorkflowVariablesPatch_ProjectsModelSettingsOnIssueDetail()
     {
@@ -175,8 +169,6 @@ var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/i
         Assert.Equal("issue/plan-model", detail.StageModels["plan"]);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task ProjectVariablesPatch_AppliesToNextTaskDispatch()
     {
@@ -224,8 +216,6 @@ var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/i
         Assert.Equal(1500, agent.GetProperty("timeout").GetInt32());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task ProjectVariablesEdit_PropagatesToIssueCreatedWithPriorProjectConfig()
     {
@@ -281,8 +271,6 @@ var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/i
         Assert.DoesNotContain("old-coding/legacy", build.Variables);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task ProjectStageVariablesPatch_OverridesPersistedWorkflowStageAgent()
     {
@@ -329,8 +317,6 @@ var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/i
         Assert.Equal(1500, agent.GetProperty("timeout").GetInt32());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task IssueStart_GlobalRunnerAssignsProjectBacklogWork()
     {
@@ -358,8 +344,6 @@ var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/i
         Assert.Equal("plan", work.Stage);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task IssueWorkflowYaml_ReturnsActiveWorkflowDefinition()
     {

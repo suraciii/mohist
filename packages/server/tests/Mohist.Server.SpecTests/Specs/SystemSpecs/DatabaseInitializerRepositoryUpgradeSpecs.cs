@@ -12,8 +12,6 @@ namespace Mohist.Server.SpecTests.Specs.SystemSpecs;
 
 public class DatabaseInitializerRepositoryUpgradeSpecs
 {
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task InitializeAsync_AfterMigration_UpgradesProjectRepositories()
     {

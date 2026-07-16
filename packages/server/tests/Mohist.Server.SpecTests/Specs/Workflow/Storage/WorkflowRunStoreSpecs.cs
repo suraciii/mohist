@@ -55,8 +55,6 @@ public class WorkflowRunStoreSpecs
     private const string WorkflowRunId = "wr_ws_1";
     private static readonly DateTimeOffset FixedTime = new(2026, 7, 15, 0, 0, 0, TimeSpan.Zero);
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task SaveAsync_WithProjectAnnotation_StampsProjectIdOnPersistedEventExtensions()
     {
@@ -92,8 +90,6 @@ public class WorkflowRunStoreSpecs
         Assert.Equal(WorkflowRunId, stampedRunId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task SaveAsync_UsesTheWorkflowOwnedLineageSnapshot()
     {
@@ -108,8 +104,6 @@ public class WorkflowRunStoreSpecs
         Assert.Equal("2", started.Envelope.Extensions[EventCatalog.Lineage.Epic]);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task SaveAsync_WithIssueContext_StampsIssueNumberOnPersistedEventExtensions()
     {
@@ -137,8 +131,6 @@ public class WorkflowRunStoreSpecs
         Assert.Equal(IssueNumber.ToString(), stored.Envelope.Extensions[EventCatalog.Lineage.Issue]);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task SaveAsync_WithoutProjectAnnotation_FailsBecauseProjectOwnershipIsRequired()
     {
@@ -162,8 +154,6 @@ public class WorkflowRunStoreSpecs
         Assert.Empty(await eventStore.ListAsync(WorkflowRunId));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task SaveAsync_WithEvents_PersistsStateAndEventRowsInSameTransaction()
     {
@@ -200,8 +190,6 @@ public class WorkflowRunStoreSpecs
         Assert.Equal(WorkflowRunId, loaded!.Id);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task SaveAsync_UsesCurrentEpicSnapshotAfterLinkAndUnlink()
     {
@@ -236,8 +224,6 @@ public class WorkflowRunStoreSpecs
         Assert.False(events[2].Envelope.Extensions.ContainsKey(EventCatalog.Lineage.Epic));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task LoadAsync_LegacyExhaustedRecovery_RetryPersistsFreshRecoveryRound()
     {
@@ -280,8 +266,6 @@ public class WorkflowRunStoreSpecs
         Assert.Equal(JsonValueKind.Null, recoveryRemaining.ValueKind);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task LoadAsync_LegacySameDefinitionAcrossStages_PreservesIndependentRecoveryRounds()
     {

@@ -26,8 +26,6 @@ public class StageInitEagerSpecs : WorkflowGrainSpecs
 {
     public StageInitEagerSpecs(WorkflowGrainFixture fixture) : base(fixture) { }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task Start_InitialStage_InitializedBeforePollReturnsWork()
     {
@@ -45,8 +43,6 @@ public class StageInitEagerSpecs : WorkflowGrainSpecs
         Assert.StartsWith("task-1.", task.WorkId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task MultiStage_AdvanceEnteringNextStage_InitializesImmediately()
     {
@@ -67,8 +63,6 @@ public class StageInitEagerSpecs : WorkflowGrainSpecs
             "Stage transitioned into via Advance() must be initialized before its StageStarted is surfaced");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task EmptyLeadingStage_SkippedAndInitialized_WithoutSurfacingStageInit()
     {
@@ -88,8 +82,6 @@ public class StageInitEagerSpecs : WorkflowGrainSpecs
             $"Stage {s.Id} must be initialized even when skipped due to emptiness"));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task Rerun_RestartsStage_StageInitializedInSameCommit()
     {
@@ -110,8 +102,6 @@ public class StageInitEagerSpecs : WorkflowGrainSpecs
         Assert.Equal(TaskRunStatus.Pending, buildStage.Tasks[0].Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task Start_NextWork_DirectlyReturnsTaskOrChecks_NeverUninitializedStage()
     {
@@ -128,8 +118,6 @@ public class StageInitEagerSpecs : WorkflowGrainSpecs
             "After Start, the initial stage must be initialized, so NextWork never has to return a stage-init work item");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task ProfileChange_DuringRunningStage_DoesNotMutateThatStage()
     {

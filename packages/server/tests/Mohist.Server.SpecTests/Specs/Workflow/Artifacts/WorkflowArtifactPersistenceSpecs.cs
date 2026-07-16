@@ -24,8 +24,6 @@ public class WorkflowArtifactPersistenceSpecs
          $"{label}.{Guid.NewGuid():N}",
          $"{label}_{Guid.NewGuid():N}_");
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task WorkflowArtifactRow_RoundTripsCoreFields()
     {
@@ -66,8 +64,6 @@ public class WorkflowArtifactPersistenceSpecs
         Assert.Equal(1024L, reloaded.Size);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task WorkflowArtifactRow_PersistsDirectoryKind()
     {
@@ -92,8 +88,6 @@ public class WorkflowArtifactPersistenceSpecs
         Assert.Equal("directory", reloaded.Kind);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task WorkflowArtifactRow_LatestProjectionByPathIsPossible()
     {
@@ -151,8 +145,6 @@ public class WorkflowArtifactPersistenceSpecs
         Assert.Equal(baseTime.AddMinutes(5), latestForRun.RecordedAt);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task WorkflowArtifactRow_HistoryByPathReturnsAllVersionsInProductionOrder()
     {
@@ -204,8 +196,6 @@ public class WorkflowArtifactPersistenceSpecs
         Assert.Equal(new[] { v1Id, v2Id, v3Id }, history);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task WorkflowArtifactRow_TaskRunFilterReturnsProducedArtifacts()
     {
@@ -246,8 +236,6 @@ public class WorkflowArtifactPersistenceSpecs
         Assert.Equal(firstId, single.ArtifactId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task WorkflowArtifactPendingUpload_RoundTripsIdempotencyFields()
     {
@@ -283,8 +271,6 @@ public class WorkflowArtifactPersistenceSpecs
         Assert.Equal(2048L, reloaded.Size);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task WorkflowArtifactPendingUpload_IdempotencyKeyRejectsDuplicate()
     {
@@ -322,8 +308,6 @@ public class WorkflowArtifactPersistenceSpecs
         await Assert.ThrowsAsync<DbUpdateException>(() => db.SaveChangesAsync());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void EfModelSnapshot_ExposesIndexesForLatestHistoryAndTaskRunQueries()
     {
@@ -340,8 +324,6 @@ public class WorkflowArtifactPersistenceSpecs
         Assert.Contains("ProjectId,IssueNumber,RecordedAt", indexNames);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void EfModelSnapshot_ExposesUniqueIdempotencyKeyForPendingUploads()
     {

@@ -44,8 +44,6 @@ public class AgentUsageReporterSpecs
         return scope.ServiceProvider.GetRequiredService<AgentUsageReporter>();
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task GetCostWindowedAsync_BothWindows30Days_AdjacentImmediatelyPreceding()
     {
@@ -80,8 +78,6 @@ public class AgentUsageReporterSpecs
         Assert.Equal("USD", result.PreviousWindow.Spend.Currency);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task GetCostWindowedAsync_PerIssueCostIsWindowSpendDividedByCompletedIssueCount()
     {
@@ -116,8 +112,6 @@ public class AgentUsageReporterSpecs
         Assert.Equal(1, result.PreviousWindow.PerIssueCost.SampleCount);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task GetCostWindowedAsync_NoSessionsInWindow_YieldsEmptySpend()
     {
@@ -137,8 +131,6 @@ public class AgentUsageReporterSpecs
         Assert.Equal(0, result.PreviousWindow.Spend.SampleCount);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task GetCostWindowedAsync_GenuineZeroSpend_DistinctFromEmpty()
     {
@@ -160,8 +152,6 @@ public class AgentUsageReporterSpecs
         Assert.Equal(1, result.CurrentWindow.PerIssueCost.SampleCount);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task GetCostWindowedAsync_EmptinessIndependentPerMetricPerWindow()
     {
@@ -192,8 +182,6 @@ public class AgentUsageReporterSpecs
         Assert.Equal(0, result.PreviousWindow.PerIssueCost.SampleCount);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task GetCostWindowedAsync_WindowsAreIndependent_AsymmetricEmptyResults()
     {
@@ -225,8 +213,6 @@ public class AgentUsageReporterSpecs
         Assert.Equal(1, result.PreviousWindow.PerIssueCost.SampleCount);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task GetCostWindowedAsync_WindowDays7_CurrentAndPreviousEachCover7Days()
     {
@@ -248,8 +234,6 @@ public class AgentUsageReporterSpecs
         Assert.Equal(1, result.PreviousWindow.Spend.SampleCount);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task GetCostWindowedAsync_WindowDays90_CurrentAndPreviousEachCover90Days()
     {
@@ -271,8 +255,6 @@ public class AgentUsageReporterSpecs
         Assert.Equal(1, result.PreviousWindow.Spend.SampleCount);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task GetCostWindowedAsync_OmittedWindowDays_Reproduces30DayWindow()
     {
@@ -291,8 +273,6 @@ public class AgentUsageReporterSpecs
         Assert.Equal(1, omit.PreviousWindow.Spend.SampleCount);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task GetCostRollupAsync_NoSessions_YieldsEmptyMetrics()
     {
@@ -307,8 +287,6 @@ public class AgentUsageReporterSpecs
         Assert.Equal(0, result.TodayCost.SampleCount);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task GetCostRollupAsync_TotalAndTodayPartitionedByCreatedAtDate()
     {
@@ -335,8 +313,6 @@ public class AgentUsageReporterSpecs
         Assert.Equal("USD", result.TodayCost.Currency);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task GetCostRollupAsync_SessionsWithoutUsageAreSkipped()
     {
@@ -354,8 +330,6 @@ public class AgentUsageReporterSpecs
         Assert.Equal(0, result.TodayCost.SampleCount);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task GetUsageTimeseriesAsync_NoSessions_ReturnsSevenEmptyBuckets()
     {
@@ -380,8 +354,6 @@ public class AgentUsageReporterSpecs
         Assert.Equal(7, result.CumulativeCostPerShip!.Count);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task GetUsageTimeseriesAsync_OmittedWindowDays_Reproduces7Day7BucketDailyWindow()
     {
@@ -396,8 +368,6 @@ public class AgentUsageReporterSpecs
         Assert.Equal(7, result.Buckets.Count);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task GetUsageTimeseriesAsync_WindowDays7_Daily7Buckets()
     {
@@ -412,8 +382,6 @@ public class AgentUsageReporterSpecs
         Assert.Equal(7, result.Buckets.Count);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task GetUsageTimeseriesAsync_WindowDays30_Daily30Buckets()
     {
@@ -429,8 +397,6 @@ public class AgentUsageReporterSpecs
         Assert.Equal(TimeSpan.FromDays(30), result.RangeTo - result.RangeFrom);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task GetUsageTimeseriesAsync_WindowDays90_Weekly13Buckets()
     {
@@ -452,8 +418,6 @@ public class AgentUsageReporterSpecs
         Assert.Equal(result.RangeTo, last.BucketEnd);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task GetUsageTimeseriesAsync_SessionLandsInExpectedBucket()
     {
@@ -473,8 +437,6 @@ public class AgentUsageReporterSpecs
         Assert.Equal("USD", bucket.CostCurrency);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task GetUsageTimeseriesAsync_CumulativeCostPerShipAggregatesPreWindowAndBuckets()
     {
@@ -508,8 +470,6 @@ public class AgentUsageReporterSpecs
         Assert.Equal(2, lastPoint.CumulativeShippedCount);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task GetUsageTimeseriesAsync_CumulativeSeriesFollowsBucketGrid()
     {

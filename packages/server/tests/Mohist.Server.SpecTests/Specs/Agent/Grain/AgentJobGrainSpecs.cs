@@ -104,8 +104,6 @@ public class AgentJobGrainSpecs
     private static AgentJobInput MakeInput(string prompt, string projectId, string workspacePath = "/tmp/agent-job") =>
         new(Prompt: prompt, WorkspacePath: workspacePath, ProjectId: projectId);
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task SubmitAsync_TransitionsPendingToRunning_WhenRunnerAcceptsDispatch()
     {
@@ -133,8 +131,6 @@ public class AgentJobGrainSpecs
         Assert.Contains(jobKey, state.ActiveWorks.Select(w => w.OwnerId));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task ReportResultAsync_TransitionsRunningToCompleted_OnSuccess()
     {
@@ -171,8 +167,6 @@ public class AgentJobGrainSpecs
         Assert.Null(terminal.FailureReason);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task ReportResultAsync_TransitionsRunningToFailed_OnFailure()
     {
@@ -208,8 +202,6 @@ public class AgentJobGrainSpecs
         Assert.Equal("boom", terminal.FailureReason);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task ReportResultAsync_AfterTerminalCompletion_IsRejected_AndPriorResultPreserved()
     {
@@ -245,8 +237,6 @@ public class AgentJobGrainSpecs
         Assert.Equal("first result", stillTerminal.Message);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task SubmitAsync_NoEligibleRunner_StaysPendingAndRetriesWithBackoff()
     {
@@ -266,8 +256,6 @@ public class AgentJobGrainSpecs
         Assert.Equal(AgentJobStatus.Pending, stillPending);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task SubmitAsync_RunnerAtPersistedSlots_LeavesSecondAgentJobPending()
     {
@@ -301,8 +289,6 @@ public class AgentJobGrainSpecs
         Assert.DoesNotContain(activeWorks, w => w.OwnerId == secondJobKey);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task SubmitAsync_BoundExceeded_TransitionsToFailedWithRunnerUnavailable()
     {
@@ -321,8 +307,6 @@ public class AgentJobGrainSpecs
         Assert.Equal(AgentJobFailureReasons.RunnerUnavailable, terminal.FailureReason);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task SubmitAsync_GenericSession_NoEligibleRunner_ClosesSessionAsFailed()
     {
@@ -383,8 +367,6 @@ public class AgentJobGrainSpecs
         Assert.Equal(AgentJobFailureReasons.RunnerUnavailable, payload.RootElement.GetProperty("failureCategory").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task SubmitAsync_DoesNotUseWorkflowAssignment()
     {
@@ -402,8 +384,6 @@ public class AgentJobGrainSpecs
         Assert.Equal(jobKey, polled.AgentJobId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task RunningJob_WithoutReport_JobTimeout_TransitionsToFailed()
     {
@@ -423,8 +403,6 @@ public class AgentJobGrainSpecs
         Assert.Equal(AgentJobFailureReasons.ReportTimeout, terminal.FailureReason);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task DelayedGenericJobFailure_AfterReset_DoesNotCloseTheReplacementRuntime()
     {
@@ -469,8 +447,6 @@ public class AgentJobGrainSpecs
             .ToListAsync());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task AttachedGenericJobFailure_RecordsOneTerminalFactWithRuntimeFailureCategory()
     {
@@ -517,8 +493,6 @@ public class AgentJobGrainSpecs
         Assert.Equal("prompt_timeout", payload.RootElement.GetProperty("failureCategory").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task GetGrain_IAgentJobGrain_ResolvesActiveActivation()
     {
@@ -538,8 +512,6 @@ public class AgentJobGrainSpecs
         Assert.Null(terminal.FailureReason);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task SubmitAsync_SecondCallAfterRunning_ThrowsInvalidOperationException()
     {
@@ -554,8 +526,6 @@ public class AgentJobGrainSpecs
             async () => await job.SubmitAsync(MakeInput("second", projectId, "/tmp/agent-job-resubmit")));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task SubmitAsync_IdenticalSecondCallAfterRunning_IsIdempotent()
     {
@@ -571,8 +541,6 @@ public class AgentJobGrainSpecs
         Assert.Equal(AgentJobStatus.Running, await job.GetStatusAsync());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task SubmitAsync_NoEligibleRunner_IncrementsDispatchAttemptsAcrossRetries()
     {
@@ -591,8 +559,6 @@ public class AgentJobGrainSpecs
         Assert.True(snapshot.DispatchAttempts >= 2);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task SubmitAsync_WithAgentDefinition_ComposesInstructionsConfigAndPrompt_OnDispatchEnvelope()
     {
@@ -639,8 +605,6 @@ public class AgentJobGrainSpecs
         Assert.Equal("openai/gpt-5.5", with.GetProperty("agent").GetProperty("model").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task SubmitAsync_RawPromptOnly_PassesBarePromptToDispatchEnvelope_AndLeavesNewFieldsUnset()
     {
@@ -664,8 +628,6 @@ public class AgentJobGrainSpecs
         Assert.Equal("raw prompt only", with.GetProperty("prompt").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task SubmitAsync_AgentJobWithAgentSessionId_PopulatesSessionIdOnDispatchEnvelope()
     {
@@ -692,8 +654,6 @@ public class AgentJobGrainSpecs
         Assert.Equal(sessionId, polled.AgentSessionId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task SubmitAsync_AgentJobWithoutSessionId_LeavesAgentSessionIdUnset()
     {
@@ -716,8 +676,6 @@ public class AgentJobGrainSpecs
         Assert.Null(polled.AgentSessionId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task SubmitAsync_PolledDispatch_ExposesProjectIdAndAgentSessionIdThroughHttpPoll()
     {
@@ -755,8 +713,6 @@ public class AgentJobOptionsBindingSpecs
         _fixture = fixture;
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task AgentJobOptions_ResolveBackoffSchedule_UsesDefaultsFromConfigurationKnob()
     {

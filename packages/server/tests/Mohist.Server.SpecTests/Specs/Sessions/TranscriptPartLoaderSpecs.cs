@@ -24,7 +24,6 @@ public sealed class TranscriptPartLoaderSpecs
 {
     private static readonly DateTime FixedTime = new(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Fact]
     public async Task LoadAsync_EmptySessionIds_ReturnsEmptyResult()
     {
@@ -38,7 +37,6 @@ public sealed class TranscriptPartLoaderSpecs
         Assert.Empty(result.Parts);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Fact]
     public async Task LoadAsync_DuplicateSessionIds_AreDedupedBeforeQuery()
     {
@@ -59,7 +57,6 @@ public sealed class TranscriptPartLoaderSpecs
         Assert.Contains(2L, result.SessionByTurnId.Keys);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Fact]
     public async Task LoadAsync_MultipleSessions_ReturnsSessionByTurnId_AndAllParts()
     {
@@ -87,7 +84,6 @@ public sealed class TranscriptPartLoaderSpecs
         Assert.All(result.Parts, p => Assert.Contains(result.Turns, t => t.Id == p.TurnId));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Fact]
     public async Task LoadAsync_OnlySessionIdsWithoutTurns_ReturnsEmptyResult()
     {
@@ -103,7 +99,6 @@ public sealed class TranscriptPartLoaderSpecs
         Assert.Empty(result.Parts);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Fact]
     public async Task LoadAsync_PartTypeFilter_ReturnsOnlyMatchingParts()
     {
@@ -128,7 +123,6 @@ public sealed class TranscriptPartLoaderSpecs
         Assert.All(result.Parts, p => Assert.Equal(TranscriptPartTypes.SessionClosed, p.Type));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Fact]
     public async Task LoadAsync_PartTypeFilter_NoMatches_ReturnsEmptyPartsList()
     {
@@ -150,7 +144,6 @@ public sealed class TranscriptPartLoaderSpecs
         Assert.Empty(result.Parts);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Fact]
     public async Task LoadAsync_DoesNotImposeOrderingOnMaterializedParts()
     {

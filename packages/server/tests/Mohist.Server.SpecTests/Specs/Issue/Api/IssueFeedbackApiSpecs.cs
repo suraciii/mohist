@@ -44,8 +44,6 @@ public class IssueFeedbackApiSpecs
         _connectionString = fixture.ConnectionString;
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task CreateFeedback_AtAwaitingApprovalStage_ResumesStageAndPersistsFeedback()
     {
@@ -81,8 +79,6 @@ public class IssueFeedbackApiSpecs
         Assert.Null(current.ApprovalStatus);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task CreateFeedback_OnNonAwaitingStage_Returns409()
     {
@@ -95,8 +91,6 @@ public class IssueFeedbackApiSpecs
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task CreateFeedback_WithoutStageOrBody_Returns400()
     {
@@ -113,8 +107,6 @@ public class IssueFeedbackApiSpecs
         Assert.Equal(HttpStatusCode.BadRequest, missingStage.StatusCode);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task ListFeedback_ReturnsAllFeedbackForRun_OrderedByCreatedAtDesc()
     {
@@ -151,8 +143,6 @@ public class IssueFeedbackApiSpecs
         Assert.Equal("first feedback", list[1].Body);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task ListFeedback_WithStageFilter_ReturnsOnlyMatchingStage()
     {
@@ -172,8 +162,6 @@ public class IssueFeedbackApiSpecs
         Assert.Empty(checkOnly);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task ListFeedback_WithoutAnyFeedback_ReturnsEmptyArray()
     {
@@ -186,8 +174,6 @@ public class IssueFeedbackApiSpecs
         Assert.Empty(list);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetFeedback_ReturnsFullFeedbackRecord()
     {
@@ -208,8 +194,6 @@ public class IssueFeedbackApiSpecs
         Assert.Null(single.Resolution);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetFeedback_JsonWireShape_ExposesNestedResolutionObject()
     {
@@ -261,8 +245,6 @@ public class IssueFeedbackApiSpecs
         Assert.Equal("Addressed live", resolution.GetProperty("resolutionSummary").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task ListFeedback_JsonWireShape_ExposesNestedResolutionObject()
     {
@@ -288,8 +270,6 @@ public class IssueFeedbackApiSpecs
             "list entries must not flatten 'resolutionSummary' to the top level");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetFeedback_UnknownId_Returns404()
     {
@@ -301,8 +281,6 @@ public class IssueFeedbackApiSpecs
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task IssueDetail_IncludesFeedbackArray()
     {
@@ -322,8 +300,6 @@ public class IssueFeedbackApiSpecs
         Assert.Equal("open", detail.Feedback[0].Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task IssueDetail_WithoutFeedback_IncludesEmptyFeedbackArray()
     {
@@ -336,8 +312,6 @@ public class IssueFeedbackApiSpecs
         Assert.Empty(detail.Feedback);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task IssueDetail_FeedbackArrayOrderedByCreatedAtDesc()
     {
@@ -378,8 +352,6 @@ public class IssueFeedbackApiSpecs
         Assert.Equal("fb_first", detail.Feedback[2].Id);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task IssueDetail_ResolvesFeedbackRecords()
     {
@@ -411,8 +383,6 @@ public class IssueFeedbackApiSpecs
         Assert.Equal("apply-feedback.1", resolved.Resolution.ResolutionTaskId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task StageState_IncludesFeedbackScopedToStage()
     {
@@ -449,8 +419,6 @@ public class IssueFeedbackApiSpecs
         Assert.Equal("open", stageFeedback.Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task StageState_DistinguishesOpenAndResolvedFeedback()
     {
@@ -498,8 +466,6 @@ public class IssueFeedbackApiSpecs
         Assert.Equal("apply-feedback.1", resolved.Resolution.ResolutionTaskId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task StageState_WithoutFeedback_OmitsOrEmptyFeedbackArray()
     {

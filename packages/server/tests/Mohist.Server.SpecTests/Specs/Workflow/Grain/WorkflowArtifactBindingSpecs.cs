@@ -20,8 +20,6 @@ public class WorkflowArtifactBindingSpecs : WorkflowGrainSpecs
 {
     public WorkflowArtifactBindingSpecs(WorkflowGrainFixture fixture) : base(fixture) { }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task CompletedTask_WithUploadedArtifacts_BindsAndRecordsEvents()
     {
@@ -68,8 +66,6 @@ public class WorkflowArtifactBindingSpecs : WorkflowGrainSpecs
         Assert.False(events[artifactIndex].Envelope.Extensions.ContainsKey(EventCatalog.Lineage.Stage));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task RefreshIssueContextAsync_OverwritesTheCurrentEpicWithoutARevision()
     {
@@ -91,8 +87,6 @@ public class WorkflowArtifactBindingSpecs : WorkflowGrainSpecs
         Assert.Equal("2", paused.Envelope.Extensions[EventCatalog.Lineage.Epic]);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task CompletedTask_MissingDeclaredArtifact_CompletesWithBestEffort()
     {
@@ -119,8 +113,6 @@ public class WorkflowArtifactBindingSpecs : WorkflowGrainSpecs
         Assert.Empty(artifacts);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task CompletedTask_DeclaredArtifactUploaded_Succeeds()
     {
@@ -144,8 +136,6 @@ public class WorkflowArtifactBindingSpecs : WorkflowGrainSpecs
         Assert.Empty(pending);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task InvalidRecoveryFollowUp_AcksAndFailsTheRunWithoutBindingArtifacts()
     {
@@ -187,8 +177,6 @@ public class WorkflowArtifactBindingSpecs : WorkflowGrainSpecs
             .ToListAsync());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task FailedTask_WithDiagnosticUploads_BindsArtifacts()
     {
@@ -213,8 +201,6 @@ public class WorkflowArtifactBindingSpecs : WorkflowGrainSpecs
         Assert.Equal("task-1.1", artifacts[0].TaskRunId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task ForeignUploadId_Rejected_TaskFails()
     {
@@ -242,8 +228,6 @@ public class WorkflowArtifactBindingSpecs : WorkflowGrainSpecs
         Assert.Empty(artifacts);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task NoWorkflowArtifactMissingEvent_Emitted()
     {
@@ -264,8 +248,6 @@ public class WorkflowArtifactBindingSpecs : WorkflowGrainSpecs
             e.Envelope.Type?.Contains("artifact.missing", StringComparison.OrdinalIgnoreCase) == true);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task DynamicArtifact_WithoutDeclaration_BindsOnCompleted()
     {
@@ -290,8 +272,6 @@ public class WorkflowArtifactBindingSpecs : WorkflowGrainSpecs
         Assert.Equal("output.txt", artifacts[0].Path);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task MultipleUploads_BindAtomically_TaskSucceeds()
     {
@@ -325,8 +305,6 @@ public class WorkflowArtifactBindingSpecs : WorkflowGrainSpecs
         Assert.Equal("tasks.json", artifacts[1].Path);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task RepeatedTaskRuns_EachRetainTheirOwnArtifactSummary()
     {
@@ -361,8 +339,6 @@ public class WorkflowArtifactBindingSpecs : WorkflowGrainSpecs
         Assert.Equal("ai-review.1", latestArtifacts[0].TaskRunId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task LatestArtifact_PointsToNewestRun_WhileOlderRemain()
     {

@@ -25,8 +25,6 @@ public class IssueModelVariantRoundTripSpecs
         _fixture = fixture;
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task ReadModel_ReturnsModelAndVariantFromIssueWorkflowProfile()
     {
@@ -74,8 +72,6 @@ public class IssueModelVariantRoundTripSpecs
         Assert.Equal("high", loaded.ModelVariant);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task ReadModel_ReturnsPerStageModelAndVariant()
     {
@@ -135,8 +131,6 @@ public class IssueModelVariantRoundTripSpecs
         Assert.Equal("max", loaded.StageModelVariants!["build"]);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task ReadModel_SuppressesVariantWhenModelIsAbsent()
     {
@@ -203,8 +197,6 @@ public class IssueModelVariantRoundTripSpecs
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task ReadModel_MalformedStageModelsJson_ReturnsIssueWithoutPerStageOverrides()
     {

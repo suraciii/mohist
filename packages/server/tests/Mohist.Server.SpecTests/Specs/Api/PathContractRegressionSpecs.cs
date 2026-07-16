@@ -27,8 +27,6 @@ public class PathContractRegressionSpecs
         { "resolvedPath", "/runner/resolved-worktree" },
     };
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task LegacyWorktreeStatusRoute_ReturnsNotFound()
     {
@@ -55,8 +53,6 @@ public class PathContractRegressionSpecs
     // slug() helper in packages/runner/src/runtime/workspace.ts. The
     // runner-equivalent test in workspace.spec.ts asserts the JS side; this
     // test pins the C# side with representative Unicode inputs.
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Theory]
     [InlineData("my-project", "my-project")]
     [InlineData("My Project!", "my-project")]
@@ -71,8 +67,6 @@ public class PathContractRegressionSpecs
         Assert.Equal(expected, MohistWorkspaceLayout.Slug(input ?? string.Empty));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task ProjectsList_OmitsPathAndEffectivePath()
     {
@@ -95,8 +89,6 @@ public class PathContractRegressionSpecs
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task ProjectDetail_OmitsPathAndEffectivePath()
     {
@@ -117,8 +109,6 @@ public class PathContractRegressionSpecs
         AssertProjectHasNoLocalPathFields(data);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task ProjectCreate_WithoutPath_ReturnsProjectWithoutLocalPathFields()
     {
@@ -137,8 +127,6 @@ public class PathContractRegressionSpecs
         AssertProjectHasNoLocalPathFields(data);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Theory]
     [MemberData(nameof(ForbiddenLocalRepositoryFields))]
     public async Task ProjectCreate_WithForbiddenLocalRepositoryField_ReturnsBadRequestAndDoesNotCreateProject(
@@ -166,8 +154,6 @@ public class PathContractRegressionSpecs
             project => project.Name == name);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task RepositoryAdd_WithoutGitUrl_Returns400AndDoesNotMutateState()
     {
@@ -196,8 +182,6 @@ public class PathContractRegressionSpecs
         Assert.Equal(beforeRepos, afterRepos);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Theory]
     [MemberData(nameof(ForbiddenLocalRepositoryFields))]
     public async Task RepositoryAdd_WithForbiddenLocalRepositoryField_ReturnsBadRequestAndDoesNotMutateState(
@@ -231,8 +215,6 @@ public class PathContractRegressionSpecs
         Assert.Equal("main", repository.GetProperty("baseBranch").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task RepositoryAdd_WithGitUrl_ReturnsRepositoryWithoutLocalPathFields()
     {
@@ -259,8 +241,6 @@ public class PathContractRegressionSpecs
         Assert.Equal("develop", repo.GetProperty("baseBranch").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Theory]
     [MemberData(nameof(ForbiddenLocalRepositoryFields))]
     public async Task RepositoryUpdate_WithForbiddenLocalRepositoryField_ReturnsBadRequestAndDoesNotMutateState(
@@ -291,8 +271,6 @@ public class PathContractRegressionSpecs
         Assert.Equal("main", repository.GetProperty("baseBranch").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task IssueStart_DispatchVariables_ContainGitUrlButNoLocalPathFields()
     {
@@ -332,8 +310,6 @@ public class PathContractRegressionSpecs
         AssertDispatchVariablesHaveWorkspaceContract(variables);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task WorkflowRunProfileVariables_AreReadWrittenAsVariableBundle()
     {
@@ -367,8 +343,6 @@ public class PathContractRegressionSpecs
         Assert.Equal("put", profileData.GetProperty("variables").GetProperty("vars").GetProperty("source").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task WorkflowEffectiveVariableKeyPath_ReturnsValueOrJsonNull()
     {

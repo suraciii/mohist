@@ -47,8 +47,6 @@ public class GenericAgentSessionCancelApiSpecs : IAsyncLifetime
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task Cancel_ActiveSessionRunnerReportsCancelled_ReturnsCancelledState()
     {
@@ -86,8 +84,6 @@ public class GenericAgentSessionCancelApiSpecs : IAsyncLifetime
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Theory]
     [InlineData("workflow")]
     [InlineData("agent-launch")]
@@ -146,8 +142,6 @@ public class GenericAgentSessionCancelApiSpecs : IAsyncLifetime
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task Cancel_ActiveSessionRunnerReportsNotCancellable_ReturnsNotCancellableState()
     {
@@ -174,8 +168,6 @@ public class GenericAgentSessionCancelApiSpecs : IAsyncLifetime
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task Cancel_RunnerInvocationFails_ReturnsNotCancellableState()
     {
@@ -202,8 +194,6 @@ public class GenericAgentSessionCancelApiSpecs : IAsyncLifetime
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task Cancel_AlreadyTerminalSession_ShortCircuitsWithoutCallingRunner()
     {
@@ -244,8 +234,6 @@ public class GenericAgentSessionCancelApiSpecs : IAsyncLifetime
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task Cancel_AfterReset_IgnoresTerminalStateFromPredecessorRuntime()
     {
@@ -279,8 +267,6 @@ public class GenericAgentSessionCancelApiSpecs : IAsyncLifetime
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Theory]
     [InlineData("completed")]
     [InlineData("failed")]
@@ -306,8 +292,6 @@ public class GenericAgentSessionCancelApiSpecs : IAsyncLifetime
         Assert.Equal(terminalStatus, doc.RootElement.GetProperty("data").GetProperty("state").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task Cancel_UnknownSession_ReturnsNotFound()
     {
@@ -320,8 +304,6 @@ public class GenericAgentSessionCancelApiSpecs : IAsyncLifetime
         Assert.Equal("not_found", doc.RootElement.GetProperty("code").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task Cancel_SessionInOtherProject_ReturnsNotFound()
     {
@@ -333,8 +315,6 @@ public class GenericAgentSessionCancelApiSpecs : IAsyncLifetime
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task Cancel_ActiveSessionButRunnerOffline_ReturnsNotCancellableState()
     {
@@ -354,8 +334,6 @@ public class GenericAgentSessionCancelApiSpecs : IAsyncLifetime
         Assert.Empty(runnerHub.Invocations);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task Cancel_UnopenedAgentLaunchSession_ReturnsNotCancellableWithoutRequiringRuntimeBinding()
     {
@@ -377,8 +355,6 @@ public class GenericAgentSessionCancelApiSpecs : IAsyncLifetime
         Assert.Equal("not-cancellable", doc.RootElement.GetProperty("data").GetProperty("state").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task Cancel_BoundSessionWithMissingRuntime_ReturnsResetHint()
     {
@@ -401,8 +377,6 @@ public class GenericAgentSessionCancelApiSpecs : IAsyncLifetime
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task Cancel_RunnerRepliesWithTerminalState_MirrorsThatTerminalState()
     {
@@ -431,8 +405,6 @@ public class GenericAgentSessionCancelApiSpecs : IAsyncLifetime
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task ResolveGenericCancelTargetAsync_UnknownSessionId_ReturnsNull()
     {
@@ -446,8 +418,6 @@ public class GenericAgentSessionCancelApiSpecs : IAsyncLifetime
         Assert.Null(target);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task ResolveGenericCancelTargetAsync_ActiveSession_ReturnsNullTerminalState()
     {
@@ -464,8 +434,6 @@ public class GenericAgentSessionCancelApiSpecs : IAsyncLifetime
         Assert.Null(target.TerminalState);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Theory]
     [InlineData("failed")]
     [InlineData("cancelled")]

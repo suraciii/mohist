@@ -12,8 +12,6 @@ public class RetryRerunSpecs : WorkflowGrainSpecs
 {
     public RetryRerunSpecs(WorkflowGrainFixture fixture) : base(fixture) { }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task TaskFails_Retry_RunnerGetsNewAttempt()
     {
@@ -35,8 +33,6 @@ public class RetryRerunSpecs : WorkflowGrainSpecs
         await ReportChecksPassAsync(r3, check, "check-1");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task CheckFails_Retry_RunnerGetsNewCheckRun()
     {
@@ -58,8 +54,6 @@ public class RetryRerunSpecs : WorkflowGrainSpecs
         await ReportChecksPassAsync(r3, retriedCheck, "check-1");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task StageFails_Rerun_RunnerGetsNewStageRun()
     {
@@ -80,8 +74,6 @@ public class RetryRerunSpecs : WorkflowGrainSpecs
         await ReportChecksPassAsync(r3, check, "check-1");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task StagePasses_Rerun_RunnerGetsNewStageRun()
     {
@@ -100,8 +92,6 @@ public class RetryRerunSpecs : WorkflowGrainSpecs
         Assert.Equal(r2, r2b);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task RunningWorkflow_Retry_Error()
     {
@@ -114,8 +104,6 @@ public class RetryRerunSpecs : WorkflowGrainSpecs
         });
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task FailedWorkflow_Retry_RunnerGetsNewWork()
     {
@@ -139,8 +127,6 @@ public class RetryRerunSpecs : WorkflowGrainSpecs
         await ReportChecksPassAsync(r3, check, "check-1");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task MultipleRetries_TaskAttemptNumberIncreases()
     {

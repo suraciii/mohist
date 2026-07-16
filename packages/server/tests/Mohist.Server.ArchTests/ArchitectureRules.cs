@@ -9,7 +9,6 @@ using static ArchUnitNET.Fluent.Slices.SliceRuleDefinition;
 
 namespace Mohist.Server.ArchTests;
 
-[Trait(Traits.Sut.Name, Traits.Sut.Architecture)]
 public class ArchitectureRules
 {
     private static readonly ArchUnitNET.Domain.Architecture _architecture = new ArchLoader()

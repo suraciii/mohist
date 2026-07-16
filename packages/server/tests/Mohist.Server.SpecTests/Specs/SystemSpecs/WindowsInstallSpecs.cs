@@ -60,8 +60,6 @@ public class WindowsInstallSpecs
             Follow: follow);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public void BuildCreateTaskArgs_ContainsDiscreteElements()
     {
@@ -80,8 +78,6 @@ public class WindowsInstallSpecs
         Assert.Equal("/F", args[9]);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public void BuildRunArgs_ContainsDiscreteVerbAndTaskName()
     {
@@ -92,8 +88,6 @@ public class WindowsInstallSpecs
         Assert.Equal("Mohist_Server", args[2]);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public void BuildEndArgs_ContainsDiscreteVerbAndTaskName()
     {
@@ -104,8 +98,6 @@ public class WindowsInstallSpecs
         Assert.Equal("Mohist_Runner", args[2]);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public void BuildDeleteArgs_ContainsDiscreteVerbAndTaskNameAndForceFlag()
     {
@@ -117,8 +109,6 @@ public class WindowsInstallSpecs
         Assert.Equal("/F", args[3]);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public void BuildQueryArgs_ContainsDiscreteVerbAndTaskName()
     {
@@ -129,8 +119,6 @@ public class WindowsInstallSpecs
         Assert.Equal("Mohist_Runner", args[2]);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public void RenderServerLauncher_WithSpacePath_ContainsQuotedCd()
     {
@@ -144,8 +132,6 @@ public class WindowsInstallSpecs
         Assert.Contains(pathWithSpaces, body);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public void RenderRunnerLauncher_ContainsExpectedElements()
     {
@@ -160,8 +146,6 @@ public class WindowsInstallSpecs
         Assert.Contains(@"%USERPROFILE%\.mohist\runner\out.log", body);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public void RenderRunnerLauncher_WithNonDefaultServerUrl_PassesItThrough()
     {
@@ -173,8 +157,6 @@ public class WindowsInstallSpecs
         Assert.DoesNotContain("http://127.0.0.1:3456", body);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public void RenderServerLauncher_WithNonDefaultListenUrl_PassesItThrough()
     {
@@ -186,8 +168,6 @@ public class WindowsInstallSpecs
         Assert.DoesNotContain("http://127.0.0.1:3456", body);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public void RenderServerLauncher_WithoutListenUrl_OmitsAspnetcoreUrls()
     {
@@ -199,8 +179,6 @@ public class WindowsInstallSpecs
         Assert.Contains("dotnet run --project", body);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task InstallServer_WithoutListenUrl_OmitsAspnetcoreUrlsInLauncher()
     {
@@ -216,8 +194,6 @@ public class WindowsInstallSpecs
         Assert.Contains("dotnet run --project", body);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public void QuoteForCmdBody_And_QuoteForSchtasksTr_ProduceDifferentOutputs_ForSamePath()
     {
@@ -234,8 +210,6 @@ public class WindowsInstallSpecs
         Assert.NotEqual(cmdBody, schtasksTr);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public void QuoteForSchtasksTr_WithSpacePath_WrapsInDoubleQuotes()
     {
@@ -247,8 +221,6 @@ public class WindowsInstallSpecs
         Assert.Contains("Mohist User", tr);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public void QuoteForSchtasksTr_WithoutSpace_DoesNotWrapInDoubleQuotes()
     {
@@ -258,8 +230,6 @@ public class WindowsInstallSpecs
         Assert.Equal(path, tr);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public void BuildCreateTaskArgs_WithSpaceLauncherPath_WrapsTrPayloadInDoubleQuotes()
     {
@@ -276,8 +246,6 @@ public class WindowsInstallSpecs
         Assert.Contains("Mohist User", trPayload);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Theory]
     [InlineData("value with \r")]
     [InlineData("value with \n")]
@@ -288,8 +256,6 @@ public class WindowsInstallSpecs
         Assert.Throws<ArgumentException>(() => WindowsScheduledTaskInstaller.SanitizeForCmdAssignment(value));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public void SanitizeForCmdAssignment_AllowsSafeValues()
     {
@@ -297,8 +263,6 @@ public class WindowsInstallSpecs
         Assert.Equal(@"C:\repo\runner", WindowsScheduledTaskInstaller.SanitizeForCmdAssignment(@"C:\repo\runner"));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task InstallServer_WithInjectionInListenUrl_AbortsBeforeWrite()
     {
@@ -316,8 +280,6 @@ public class WindowsInstallSpecs
         Assert.False(files.HasFile(ServerLauncher));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task InstallRunner_WithInjectionInRunnerRoot_AbortsBeforeWrite()
     {
@@ -336,8 +298,6 @@ public class WindowsInstallSpecs
         Assert.False(files.HasFile(RunnerLauncher));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task InstallServer_WithFailingSchtasks_CreatesStartupFallbackAndRecordsMetadata()
     {
@@ -365,8 +325,6 @@ public class WindowsInstallSpecs
         Assert.Contains("mohist-server.cmd", startupBody);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task InstallRunner_WithFailingSchtasks_CreatesStartupFallbackAndRecordsMetadata()
     {
@@ -390,8 +348,6 @@ public class WindowsInstallSpecs
         Assert.Contains("startup-fallback", metadata);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task InstallServer_WithSucceedingSchtasks_WritesLauncherAndMetadata()
     {
@@ -422,8 +378,6 @@ public class WindowsInstallSpecs
         Assert.Contains("Mohist_Server", createCommand.Args);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task InstallRunner_WithSucceedingSchtasks_WritesLauncherAndMetadata()
     {
@@ -456,8 +410,6 @@ public class WindowsInstallSpecs
         Assert.Contains("Mohist_Runner", createCommand.Args);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task InstallServer_ReinstallFromStartupFallbackToScheduledTask_RemovesStaleStartupFile()
     {
@@ -480,8 +432,6 @@ public class WindowsInstallSpecs
         Assert.Contains("scheduled-task", files.ReadAllText(ServerMetadata));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task InstallRunner_ReinstallFromStartupFallbackToScheduledTask_RemovesStaleStartupFile()
     {
@@ -501,8 +451,6 @@ public class WindowsInstallSpecs
         Assert.Contains("scheduled-task", files.ReadAllText(RunnerMetadata));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task StartServer_WithScheduledTask_Backend_RunsSchtasksRun()
     {
@@ -525,8 +473,6 @@ public class WindowsInstallSpecs
         Assert.Equal("Mohist_Server", runCommand.Args[2]);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task StartServer_WithStartupFallback_Backend_StartsDetachedProcess()
     {
@@ -547,8 +493,6 @@ public class WindowsInstallSpecs
         Assert.True(launched[0].CreateNoWindow);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task StartServer_WithLauncherOnly_Backend_StartsDetachedProcess()
     {
@@ -566,8 +510,6 @@ public class WindowsInstallSpecs
         Assert.Equal(ServerLauncher, launched[0].FileName);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task StartServer_WithLauncherOnly_Backend_DetachesFromParentProcessGroup()
     {
@@ -591,8 +533,6 @@ public class WindowsInstallSpecs
         Assert.False(psi.ErrorDialog);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task StopServer_WithScheduledTask_Backend_RunsSchtasksEnd()
     {
@@ -618,8 +558,6 @@ public class WindowsInstallSpecs
         Assert.Equal(default, deleteCommand);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task StopServer_WithLauncherOnly_Backend_ScopesKillToMatchingLauncher()
     {
@@ -640,8 +578,6 @@ public class WindowsInstallSpecs
         Assert.Contains("IMAGENAME eq dotnet.exe", tasklist.Args);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task StopServer_WithLauncherOnly_Backend_TaskkillsPidsFoundInTaskList()
     {
@@ -670,8 +606,6 @@ public class WindowsInstallSpecs
         Assert.Contains(pidKills, k => k.Args.Contains("5678"));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task RestartServer_CallsStopThenStart()
     {
@@ -696,8 +630,6 @@ public class WindowsInstallSpecs
         Assert.True(endIndex < runIndex, "Stop should come before Start");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task StatusServer_WithScheduledTask_Backend_ReportsCorrectState()
     {
@@ -727,8 +659,6 @@ public class WindowsInstallSpecs
         Assert.Contains("health: reachable", text);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task LogsServer_TailsLastNLines()
     {
@@ -747,8 +677,6 @@ public class WindowsInstallSpecs
         Assert.DoesNotContain("Line 90", text);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task LogsServer_WithLargeFile_BoundedTailStillReturnsLastNLines()
     {
@@ -773,8 +701,6 @@ public class WindowsInstallSpecs
         Assert.Contains($"Line {lineCount - 49}", text);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task LogsServer_Follow_StreamsNewLinesUntilCancelled()
     {
@@ -815,8 +741,6 @@ public class WindowsInstallSpecs
         Assert.Contains("new line 1", text);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task UninstallServer_RemovesArtifactsButPreservesUserData()
     {
@@ -839,8 +763,6 @@ public class WindowsInstallSpecs
         Assert.True(files.HasFile(ServerLog), "out.log should be preserved");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task UninstallServer_WithFailingSchtasksDelete_StillCleansUpFiles()
     {
@@ -868,8 +790,6 @@ public class WindowsInstallSpecs
         Assert.False(files.HasFile(ServerMetadata));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task InstallServer_DryRun_DoesNotWriteOrExecute()
     {
@@ -887,8 +807,6 @@ public class WindowsInstallSpecs
             Assert.Equal(kvp.Value, files.Files[kvp.Key]);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task StartServer_DryRun_DoesNotExecute()
     {
@@ -905,8 +823,6 @@ public class WindowsInstallSpecs
         Assert.Equal(snapshot.Count, files.Files.Count);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task StopServer_DryRun_DoesNotExecute()
     {
@@ -923,8 +839,6 @@ public class WindowsInstallSpecs
         Assert.Equal(snapshot.Count, files.Files.Count);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task RestartServer_DryRun_DoesNotExecute()
     {
@@ -942,8 +856,6 @@ public class WindowsInstallSpecs
         Assert.Equal(snapshot.Count, files.Files.Count);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task StatusServer_DryRun_DoesNotExecute()
     {
@@ -960,8 +872,6 @@ public class WindowsInstallSpecs
         Assert.Equal(snapshot.Count, files.Files.Count);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task LogsServer_DryRun_DoesNotRead()
     {
@@ -978,8 +888,6 @@ public class WindowsInstallSpecs
         Assert.Equal(snapshot.Count, files.Files.Count);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task UninstallServer_DryRun_DoesNotExecuteOrDelete()
     {
@@ -1000,8 +908,6 @@ public class WindowsInstallSpecs
             Assert.Equal(kvp.Value, files.Files[kvp.Key]);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task StartRunner_WithScheduledTask_Backend_RunsSchtasksRun()
     {
@@ -1024,8 +930,6 @@ public class WindowsInstallSpecs
         Assert.Equal("Mohist_Runner", runCommand.Args[2]);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task StartRunner_WithLauncherOnly_Backend_StartsDetachedProcess()
     {
@@ -1043,8 +947,6 @@ public class WindowsInstallSpecs
         Assert.Equal(RunnerLauncher, launched[0].FileName);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task StopRunner_WithScheduledTask_Backend_RunsSchtasksEnd()
     {
@@ -1069,8 +971,6 @@ public class WindowsInstallSpecs
         Assert.Equal(default, deleteCommand);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task StopRunner_WithLauncherOnly_Backend_ScopesKillToMatchingLauncher()
     {
@@ -1087,8 +987,6 @@ public class WindowsInstallSpecs
         Assert.Contains("IMAGENAME eq node.exe", tasklist.Args);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task RestartRunner_CallsStopThenStart()
     {
@@ -1113,8 +1011,6 @@ public class WindowsInstallSpecs
         Assert.True(endIndex < runIndex, "Stop should come before Start");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task StatusRunner_WithScheduledTask_Backend_ReportsCorrectState()
     {
@@ -1142,8 +1038,6 @@ public class WindowsInstallSpecs
         Assert.Contains("running: yes", text);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task LogsRunner_TailsLastNLines()
     {
@@ -1162,8 +1056,6 @@ public class WindowsInstallSpecs
         Assert.DoesNotContain("Line 90", text);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task LogsRunner_Follow_StreamsNewLinesUntilCancelled()
     {
@@ -1204,8 +1096,6 @@ public class WindowsInstallSpecs
         Assert.Contains("new line 1", text);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task UninstallRunner_RemovesArtifactsButPreservesUserData()
     {
@@ -1228,8 +1118,6 @@ public class WindowsInstallSpecs
         Assert.True(files.HasFile(RunnerLog), "out.log should be preserved");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task StartRunner_DryRun_DoesNotExecute()
     {
@@ -1246,8 +1134,6 @@ public class WindowsInstallSpecs
         Assert.Equal(snapshot.Count, files.Files.Count);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task StopRunner_DryRun_DoesNotExecute()
     {
@@ -1264,8 +1150,6 @@ public class WindowsInstallSpecs
         Assert.Equal(snapshot.Count, files.Files.Count);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task RestartRunner_DryRun_DoesNotExecute()
     {
@@ -1283,8 +1167,6 @@ public class WindowsInstallSpecs
         Assert.Equal(snapshot.Count, files.Files.Count);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task StatusRunner_DryRun_DoesNotExecute()
     {
@@ -1301,8 +1183,6 @@ public class WindowsInstallSpecs
         Assert.Equal(snapshot.Count, files.Files.Count);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task LogsRunner_DryRun_DoesNotRead()
     {
@@ -1319,8 +1199,6 @@ public class WindowsInstallSpecs
         Assert.Equal(snapshot.Count, files.Files.Count);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task UninstallRunner_DryRun_DoesNotExecuteOrDelete()
     {

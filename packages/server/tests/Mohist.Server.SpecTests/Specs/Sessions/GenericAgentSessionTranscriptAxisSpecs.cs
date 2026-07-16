@@ -42,10 +42,6 @@ public class GenericAgentSessionTranscriptAxisSpecs : IAsyncLifetime
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task GenericLaunch_PolledDispatch_CarriesMintedAgentSessionIdAndNoWorkflowRunId()
     {
@@ -84,9 +80,6 @@ public class GenericAgentSessionTranscriptAxisSpecs : IAsyncLifetime
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task GenericLaunch_PolledDispatch_FakeAgentRunThroughRuntimeEventsEndpoint_PersistsNonEmptyTranscriptTurn()
     {
@@ -218,9 +211,6 @@ public class GenericAgentSessionTranscriptAxisSpecs : IAsyncLifetime
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task GenericLaunch_FollowUpRuntimeEvents_AppendNonEmptyTranscriptContent()
     {
@@ -350,9 +340,6 @@ public class GenericAgentSessionTranscriptAxisSpecs : IAsyncLifetime
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task GenericTranscript_RuntimeSessionFilter_ReturnsOnlySelectedBindingTurns()
     {
@@ -402,9 +389,6 @@ public class GenericAgentSessionTranscriptAxisSpecs : IAsyncLifetime
             .GetProperty("user").GetProperty("runtimeSessionId").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task CompactAfterResetWithoutInput_IsStoredOnReplacementRuntime()
     {
@@ -449,9 +433,6 @@ public class GenericAgentSessionTranscriptAxisSpecs : IAsyncLifetime
         Assert.Equal("runtime-second", compactionRuntimes[0]);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task GenericTranscript_IsReachable_SolelyBySessionId_WithoutWorkflowRunIdLookup()
     {

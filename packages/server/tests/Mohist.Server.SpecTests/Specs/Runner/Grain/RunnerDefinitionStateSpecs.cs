@@ -32,8 +32,6 @@ public class RunnerDefinitionStateSpecs : WorkflowGrainSpecs
             $"Runner grain '{runnerId}' to deactivate");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task RegisterAsync_NewRunner_InitializesPersistedSlotsToOne()
     {
@@ -52,8 +50,6 @@ public class RunnerDefinitionStateSpecs : WorkflowGrainSpecs
         Assert.Equal(1, definition);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task UpdateAsync_WriteThrough_PersistsAndNextDispatchHonorsNewCapacity()
     {
@@ -103,8 +99,6 @@ public class RunnerDefinitionStateSpecs : WorkflowGrainSpecs
         Assert.Equal(wf2Id, second!.WorkflowRunId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task GrainDeactivation_Reactivation_RestoresPersistedSlots()
     {
@@ -129,8 +123,6 @@ public class RunnerDefinitionStateSpecs : WorkflowGrainSpecs
         Assert.Equal(4, await reactivated.GetSlotsAsync());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task GrainReactivation_EmptyPollRestoresPresenceAndRedeliversAgentWork()
     {
@@ -165,8 +157,6 @@ public class RunnerDefinitionStateSpecs : WorkflowGrainSpecs
         Assert.Equal(RunnerStatus.Online, (await reactivated.GetRuntimeStateAsync()).Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task UpdateAsync_DoesNotWaitForAdmittedPollAndNextAdmissionUsesNewCapacity()
     {
@@ -193,8 +183,6 @@ public class RunnerDefinitionStateSpecs : WorkflowGrainSpecs
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task UnregisterAsync_DoesNotWaitForAdmittedPollBeforeClearingRegistration()
     {
@@ -212,8 +200,6 @@ public class RunnerDefinitionStateSpecs : WorkflowGrainSpecs
         Assert.Empty(await runner.PollAllAsync(Services));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task Poll_AfterCapacityReductionIgnoresEarlierSlotRead()
     {
@@ -250,8 +236,6 @@ public class RunnerDefinitionStateSpecs : WorkflowGrainSpecs
         Assert.DoesNotContain(works, work => work.WorkflowRunId == workflowId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task Dispatch_EnforcesPersistedSlotBound()
     {
@@ -313,8 +297,6 @@ public class RunnerDefinitionStateSpecs : WorkflowGrainSpecs
         Assert.Equal(wf3Id, work3!.WorkflowRunId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task Dispatch_AgentJobWork_ConsumesSharedWorkflowSlot()
     {
@@ -345,8 +327,6 @@ public class RunnerDefinitionStateSpecs : WorkflowGrainSpecs
         Assert.DoesNotContain(works, item => item.WorkflowRunId == workflowId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task OfflineRunner_DoesNotAssignmentOrAcceptNewWork()
     {

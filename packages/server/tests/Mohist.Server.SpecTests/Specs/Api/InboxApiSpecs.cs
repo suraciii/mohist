@@ -31,9 +31,6 @@ public class InboxApiSpecs
         _client = fixture.Client;
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task List_EmptyProject_ReturnsEmptyArray()
     {
@@ -45,9 +42,6 @@ public class InboxApiSpecs
         Assert.Empty(items);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task List_WithItems_ReturnsFieldsOrderedMostRecentFirstAndExcludesArchived()
     {
@@ -89,9 +83,6 @@ public class InboxApiSpecs
         Assert.False(failed.GetProperty("isRead").GetBoolean());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task MarkRead_SetsItemRead_LeavesOthersUnchanged()
     {
@@ -117,9 +108,6 @@ public class InboxApiSpecs
         Assert.False(secondItem.TryGetProperty("readAt", out _));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task MarkRead_RepeatedCall_StaysOk()
     {
@@ -139,9 +127,6 @@ public class InboxApiSpecs
         Assert.True(item.GetProperty("isRead").GetBoolean());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task MarkRead_CrossProjectItemId_Returns404()
     {
@@ -158,9 +143,6 @@ public class InboxApiSpecs
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task MarkRead_UnknownItemId_Returns404()
     {
@@ -173,9 +155,6 @@ public class InboxApiSpecs
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task MarkAllRead_MarksAllNonArchivedItemsInProject()
     {
@@ -200,9 +179,6 @@ public class InboxApiSpecs
         Assert.All(items, i => Assert.True(i.GetProperty("isRead").GetBoolean()));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task MarkAllRead_DoesNotTouchOtherProjectItems()
     {
@@ -228,9 +204,6 @@ public class InboxApiSpecs
         Assert.False(b.GetProperty("isRead").GetBoolean());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task Archive_ExcludesItemFromDefaultList()
     {
@@ -250,9 +223,6 @@ public class InboxApiSpecs
         Assert.False(surviving.GetProperty("isArchived").GetBoolean());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task Archive_CrossProjectItemId_Returns404()
     {
@@ -275,9 +245,6 @@ public class InboxApiSpecs
         Assert.False(a.GetProperty("isArchived").GetBoolean());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task Archive_UnknownItemId_Returns404()
     {
@@ -290,9 +257,6 @@ public class InboxApiSpecs
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task List_UnknownProject_Returns404()
     {
@@ -302,9 +266,6 @@ public class InboxApiSpecs
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task WorkflowRunStoreEvent_PersistsRowAndDispatcherProjectsItToInbox()
     {
@@ -373,9 +334,6 @@ public class InboxApiSpecs
             $"/api/projects/{otherProjectId}/inbox"));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task MarkRead_UnknownProject_Returns404()
     {

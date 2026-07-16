@@ -52,8 +52,6 @@ public class WorkflowRunControlApiSpecs
         _connectionString = fixture.ConnectionString;
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task Stop_OnActiveRun_TransitionsToStoppedAndReturnsOk()
     {
@@ -70,8 +68,6 @@ public class WorkflowRunControlApiSpecs
         Assert.Equal("in_progress", issueStatus);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task Approve_OnAwaitingApprovalRun_ApprovesStageAndAdvances()
     {
@@ -88,8 +84,6 @@ public class WorkflowRunControlApiSpecs
         Assert.Equal("build", run.CurrentStageId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task Reject_OnAwaitingApprovalRun_RecordsFeedbackAndSchedulesFeedbackTask()
     {
@@ -109,8 +103,6 @@ public class WorkflowRunControlApiSpecs
         Assert.Contains(plan.Tasks, t => t.DefinitionId == WorkflowRunExtensions.DefaultFeedbackTaskId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task Pause_OnActiveRun_TransitionsToPaused()
     {
@@ -124,8 +116,6 @@ public class WorkflowRunControlApiSpecs
         Assert.Equal(WorkflowRunStatus.Paused, run!.Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task Resume_OnPausedRun_LeavesRunActive()
     {
@@ -140,8 +130,6 @@ public class WorkflowRunControlApiSpecs
         Assert.NotEqual(WorkflowRunStatus.Paused, run!.Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task Reject_WithMissingMessage_Returns400AndDoesNotCallGrain()
     {
@@ -158,8 +146,6 @@ public class WorkflowRunControlApiSpecs
         Assert.Equal(WorkflowRunStatus.Pending, run!.Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Theory]
     [InlineData("approve")]
     [InlineData("reject")]
@@ -182,8 +168,6 @@ public class WorkflowRunControlApiSpecs
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task Retry_OnActiveRun_AdmitAndInvokesRetryAsync()
     {
@@ -199,8 +183,6 @@ public class WorkflowRunControlApiSpecs
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task RerunFromStage_WithBlankStage_Returns400()
     {
@@ -215,8 +197,6 @@ public class WorkflowRunControlApiSpecs
         Assert.Contains("Stage is required", payload.GetProperty("error").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task RerunFromStage_WithUnknownStage_Returns400WithUnknownStageCode()
     {
@@ -232,8 +212,6 @@ public class WorkflowRunControlApiSpecs
         Assert.Contains("no-such-stage", payload.GetProperty("error").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task NotFound_OnUnknownWorkflowRun_Returns404()
     {
@@ -245,8 +223,6 @@ public class WorkflowRunControlApiSpecs
         Assert.Contains("wr_does_not_exist", payload.GetProperty("error").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Theory]
     [InlineData("approve")]
     [InlineData("reject")]
@@ -273,8 +249,6 @@ public class WorkflowRunControlApiSpecs
         Assert.Equal(WorkflowRunStatus.Stopped, run!.Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Theory]
     [InlineData("retry")]
     [InlineData("rerun")]
@@ -293,8 +267,6 @@ public class WorkflowRunControlApiSpecs
         Assert.Null(plan.Failure);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task RerunFromStage_WithUnreachedStage_Returns400WithStageNotReachedCode()
     {
@@ -309,8 +281,6 @@ public class WorkflowRunControlApiSpecs
         Assert.Equal("stage_not_reached", payload.GetProperty("code").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task RerunFromStage_WithActiveWorkInRange_Returns409WithActiveWorkCode()
     {
@@ -330,8 +300,6 @@ public class WorkflowRunControlApiSpecs
         Assert.Equal("active_work_in_range", payload.GetProperty("code").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task RetryOrRerun_OnFailedRun_StoppedRunStillRejected()
     {
@@ -343,8 +311,6 @@ public class WorkflowRunControlApiSpecs
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Theory]
     [InlineData("approve", "approve")]
     [InlineData("resume", "resume")]
@@ -362,8 +328,6 @@ public class WorkflowRunControlApiSpecs
         Assert.Equal(HttpStatusCode.Conflict, runResponse.StatusCode);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task CrossPath_RerunOnFailedRun_AdmitDecisionMatchesIssueScopedRoute()
     {
@@ -377,8 +341,6 @@ public class WorkflowRunControlApiSpecs
         Assert.Equal(HttpStatusCode.OK, runResponse.StatusCode);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Theory]
     [InlineData("rerun", false)]
     [InlineData("rerun-from-stage", true)]
@@ -413,8 +375,6 @@ public class WorkflowRunControlApiSpecs
         Assert.NotNull(await LoadRunAsync(recoveredRunWrId!));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task CrossPath_RetryOnFailedRun_BothRoutesAdmitGuard()
     {
@@ -441,8 +401,6 @@ public class WorkflowRunControlApiSpecs
         Assert.NotEqual("Workflow is not active for this run", message);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task CrossPath_RejectWithoutMessage_FailsBothRoutesWith400()
     {
@@ -459,8 +417,6 @@ public class WorkflowRunControlApiSpecs
         Assert.Equal(HttpStatusCode.BadRequest, runResponse.StatusCode);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task CrossPath_RerunFromStage_UnknownStageReturnsSameStructuredError()
     {
@@ -481,8 +437,6 @@ public class WorkflowRunControlApiSpecs
         Assert.Equal("unknown_stage", runPayload.GetProperty("code").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task IssueScoped_ExistingEndpoints_RegressionUnchanged()
     {

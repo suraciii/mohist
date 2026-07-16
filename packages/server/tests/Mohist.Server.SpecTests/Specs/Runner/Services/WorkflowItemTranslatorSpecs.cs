@@ -144,8 +144,6 @@ public class WorkflowItemTranslatorSpecs : IAsyncLifetime
     // Out-direction: WorkItem → WorkDispatch
     // =========================================================================
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task TranslateToDispatch_TaskItem_ProducesDispatchWithResolvedVariablesAndPrompts()
     {
@@ -172,8 +170,6 @@ public class WorkflowItemTranslatorSpecs : IAsyncLifetime
         Assert.Equal(7, dispatch.EpicNumber);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task TranslateToDispatch_PreservesExplicitNullAndNumericRecoveryState()
     {
@@ -197,8 +193,6 @@ public class WorkflowItemTranslatorSpecs : IAsyncLifetime
         Assert.Equal(fresh.Recovery, continuation.Recovery);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task TranslateToDispatch_ChecksItem_ProducesDispatchWithChecksPayload()
     {
@@ -219,8 +213,6 @@ public class WorkflowItemTranslatorSpecs : IAsyncLifetime
         Assert.Equal(7, dispatch.EpicNumber);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task TranslateToDispatch_TaskItem_DoesNotInjectDispatchId()
     {
@@ -241,8 +233,6 @@ public class WorkflowItemTranslatorSpecs : IAsyncLifetime
     // In-direction: WorkResult → TaskReport | CheckReport
     // =========================================================================
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task TranslateResult_SucceededTaskWithoutDeclaredArtifacts_SucceedsWithOutput()
     {
@@ -261,8 +251,6 @@ public class WorkflowItemTranslatorSpecs : IAsyncLifetime
         Assert.Null(task.Value.Detail);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task TranslateResult_FailedTaskWithDetail_FailsWithDetailPreserved()
     {
@@ -282,8 +270,6 @@ public class WorkflowItemTranslatorSpecs : IAsyncLifetime
         Assert.True(task.Value.Status is TaskReportStatus.Succeeded or TaskReportStatus.Failed);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task TranslateResult_SucceededTaskMissingDeclaredArtifacts_SucceedsWithoutArtifacts()
     {
@@ -301,8 +287,6 @@ public class WorkflowItemTranslatorSpecs : IAsyncLifetime
         Assert.Null(task.Value.Artifacts);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task TranslateResult_SucceededTaskWithUploadIds_RecordsArtifactReferences()
     {
@@ -344,8 +328,6 @@ public class WorkflowItemTranslatorSpecs : IAsyncLifetime
         Assert.Equal("review.md", task.Value.Artifacts[0].Path);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task TranslateResult_ChecksItem_ParsesRunnerOutputIntoCheckResults()
     {
@@ -373,8 +355,6 @@ public class WorkflowItemTranslatorSpecs : IAsyncLifetime
         Assert.Equal("nope", checks.Value.Results[1].Message);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task TranslateResult_TimeoutLikeFailedTask_ReportsAsFailed_NotAsDistinctState()
     {
@@ -398,8 +378,6 @@ public class WorkflowItemTranslatorSpecs : IAsyncLifetime
         Assert.Equal(2, System.Enum.GetValues<TaskReportStatus>().Length);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task TranslateToDispatch_UnknownWorkType_Throws()
     {
@@ -416,8 +394,6 @@ public class WorkflowItemTranslatorSpecs : IAsyncLifetime
     // Protocol contract: WorkItem carries declaration only, no dispatch fields
     // =========================================================================
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void WorkItem_TaskVariant_ExposesOnlyDeclarationFields()
     {
@@ -438,8 +414,6 @@ public class WorkflowItemTranslatorSpecs : IAsyncLifetime
         Assert.Null(item.Items);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void WorkItem_ChecksVariant_ExposesStageAndItems()
     {
@@ -460,8 +434,6 @@ public class WorkflowItemTranslatorSpecs : IAsyncLifetime
         Assert.Null(item.With);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void TaskReportStatus_HasExactlyTwoStates_SucceededAndFailed()
     {
@@ -474,8 +446,6 @@ public class WorkflowItemTranslatorSpecs : IAsyncLifetime
         Assert.Contains(TaskReportStatus.Failed, values);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task TranslateResult_AllStatusAliases_CollapseToSucceeded()
     {
@@ -493,8 +463,6 @@ public class WorkflowItemTranslatorSpecs : IAsyncLifetime
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task TranslateResult_AllFailureAliases_CollapseToFailed_WithMessageAsDetail()
     {

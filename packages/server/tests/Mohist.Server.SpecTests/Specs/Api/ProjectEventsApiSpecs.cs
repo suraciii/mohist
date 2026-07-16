@@ -44,8 +44,6 @@ public class ProjectEventsApiSpecs
         _client = fixture.Client;
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetProjectEvents_ReturnsEventsAcrossAllAggregates_TimeSorted()
     {
@@ -104,8 +102,6 @@ public class ProjectEventsApiSpecs
             Assert.True(times[i - 1] >= times[i], $"Expected descending order but {times[i - 1]:o} < {times[i]:o}");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetProjectEvents_DefaultLimit_ReturnsMostRecentFirst()
     {
@@ -127,8 +123,6 @@ public class ProjectEventsApiSpecs
         Assert.Equal("test.event-5", response[^1].Type);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetProjectEvents_UsesWorkflowStoreMetadataForWorkflowContext()
     {
@@ -162,8 +156,6 @@ public class ProjectEventsApiSpecs
         Assert.Equal(workflowRunId, workflow.SourceAggregateId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetProjectEvents_UsesEnvelopeIssueNumberWhenPayloadDisagrees()
     {
@@ -188,8 +180,6 @@ public class ProjectEventsApiSpecs
         Assert.Equal(42, workflow.Data.GetProperty("issueNumber").GetInt32());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetProjectEvents_ProjectsPersistedSessionLifecycleWithHistoricalContext()
     {
@@ -217,8 +207,6 @@ public class ProjectEventsApiSpecs
         Assert.Equal("runner-1", closed.RunnerId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetProjectEvents_UsesSessionEnvelopeContextOverStoredMetadataAndPayload()
     {
@@ -243,8 +231,6 @@ public class ProjectEventsApiSpecs
         Assert.Equal(1, entry.Data.GetProperty("issueNumber").GetInt32());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetProjectEvents_DoesNotUseStoredSessionMetadataWhenEnvelopeContextIsAbsent()
     {
@@ -266,8 +252,6 @@ public class ProjectEventsApiSpecs
         Assert.Null(entry.EpicNumber);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetProjectEvents_WithExplicitLimit_CapsReturnedRows()
     {
@@ -289,8 +273,6 @@ public class ProjectEventsApiSpecs
         Assert.Equal("test.event-3", response[1].Type);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetProjectEvents_DoesNotLeakEventsFromOtherProjects()
     {
@@ -317,8 +299,6 @@ public class ProjectEventsApiSpecs
         Assert.Equal("1", responseB[0].SourceAggregateId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetProjectEvents_DoesNotLeakAgentSessionsFromOtherProjects()
     {
@@ -347,8 +327,6 @@ public class ProjectEventsApiSpecs
         Assert.DoesNotContain(responseB, e => e.SourceAggregateId == sessionAId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetProjectEvents_ForProjectWithNoEvents_ReturnsEmptyList()
     {
@@ -361,8 +339,6 @@ public class ProjectEventsApiSpecs
         Assert.Empty(response);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetProjectEvents_UnknownProject_Returns404()
     {
@@ -371,8 +347,6 @@ public class ProjectEventsApiSpecs
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetProjectEvents_RejectsEventTypesWithoutARecordedSource()
     {
@@ -386,8 +360,6 @@ public class ProjectEventsApiSpecs
         Assert.Equal(HttpStatusCode.BadRequest, emptyResponse.StatusCode);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetProjectEvents_DoesNotCreateAnyNewEvents()
     {
@@ -419,8 +391,6 @@ public class ProjectEventsApiSpecs
         Assert.Equal(sessionCountBefore, await db.AgentSessionEvents.AsNoTracking().CountAsync());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetProjectEvents_ProjectsOnlyActivitySafePayloadFields()
     {
@@ -448,8 +418,6 @@ public class ProjectEventsApiSpecs
         Assert.False(entry.Data.TryGetProperty("internalTrace", out _));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetProjectEvents_DoesNotExposeEnvelopeExtensions()
     {
@@ -466,8 +434,6 @@ public class ProjectEventsApiSpecs
         Assert.False(entry.TryGetProperty("extensions", out _));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetProjectEvents_AttentionFilter_FindsOlderFailureBeyondRoutineWindow()
     {
@@ -491,8 +457,6 @@ public class ProjectEventsApiSpecs
         Assert.Equal("com.mohist.workflow.stage.failed", failure.Type);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetProjectEvents_FailureFilter_FindsOlderStatusFailureBeyondRoutineWindow()
     {
@@ -524,8 +488,6 @@ public class ProjectEventsApiSpecs
         Assert.Equal("failed", failure.Data.GetProperty("status").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetProjectEvents_LargeHistory_ReturnsOnlyTheRequestedBoundedWindow()
     {
@@ -550,8 +512,6 @@ public class ProjectEventsApiSpecs
         Assert.Equal(200, defaultLimitResponse.Count);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetProjectEvents_LimitOne_UsesStableCompleteTieBreakAcrossAggregates()
     {
@@ -573,8 +533,6 @@ public class ProjectEventsApiSpecs
         Assert.Equal(first[0].EnvelopeId, Assert.Single(second).EnvelopeId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetProjectEvents_SubSecondTimes_AreOrderedByFractionalPrecision()
     {
@@ -599,8 +557,6 @@ public class ProjectEventsApiSpecs
             entry => Assert.Equal("early", entry.Subject));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetProjectEvents_ProjectsScalarAndArrayPayloadsAsEmptyObjects()
     {

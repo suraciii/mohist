@@ -14,8 +14,6 @@ public class ProjectRepositoryDataUpgraderSpecs
     private static readonly DateTimeOffset CreatedAt = DateTimeOffset.Parse("2026-01-01T00:00:00Z");
     private static readonly DateTimeOffset UpdatedAt = DateTimeOffset.Parse("2026-01-02T00:00:00Z");
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task UpgradeAsync_NormalizesDefaultsAndPreservesRepositoryMetadataAndProjectIdentity()
     {
@@ -62,8 +60,6 @@ public class ProjectRepositoryDataUpgraderSpecs
         Assert.Equal(UpdatedAt, single.UpdatedAt);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task UpgradeAsync_WhenCalledTwice_IsIdempotent()
     {
@@ -80,8 +76,6 @@ public class ProjectRepositoryDataUpgraderSpecs
         Assert.Equal(firstJson, (await LoadProjectAsync(db, "proj_legacy")).RepositoriesJson);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task UpgradeAsync_MigratesLegacyRemoteOrPathIntoGitUrl()
     {
@@ -123,8 +117,6 @@ public class ProjectRepositoryDataUpgraderSpecs
         { JSON.Serialize(new[] { Repository("server", "git@example.com:one.git", "main", false), Repository("SERVER", "git@example.com:two.git", "main", false) }), "Project 'broken' (proj_broken)", "Duplicate repository name 'SERVER'" },
     };
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Theory]
     [MemberData(nameof(InvalidProjects))]
     public async Task UpgradeAsync_UnrecoverableProject_FailsWithDiagnosticAndLeavesAllRowsUnchanged(
@@ -150,8 +142,6 @@ public class ProjectRepositoryDataUpgraderSpecs
         Assert.Equal(invalidJson, (await LoadProjectAsync(db, "proj_broken")).RepositoriesJson);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task UpgradeAsync_WhenPersistenceFails_RollsBackEveryPreparedProject()
     {

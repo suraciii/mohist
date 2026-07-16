@@ -21,8 +21,6 @@ public sealed class AgentJobGrainPersistenceSpecs
 
     private IGrainFactory Grains => _fixture.Grains;
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task SubmitAsync_PersistsInputAcrossDeactivation_AndReplayResumesSameJob()
     {
@@ -61,8 +59,6 @@ public sealed class AgentJobGrainPersistenceSpecs
             with.GetProperty("prompt").GetProperty("agent-launch").GetProperty("config").GetProperty("model").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task RunnerAcceptanceCrash_ReactivationReusesSameWork()
     {
@@ -100,8 +96,6 @@ public sealed class AgentJobGrainPersistenceSpecs
         Assert.Equal(prepared.CurrentWorkId, work.WorkId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task PreparedAssignment_OfflineBeforeAcceptance_ReassignsStableWorkToHealthyRunner()
     {

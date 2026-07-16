@@ -28,8 +28,6 @@ public class EpicAutoDoneHandlerSpecs
 {
     private static readonly DateTimeOffset EventTime = new(2026, 7, 1, 0, 0, 0, TimeSpan.Zero);
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task HandleAsync_LastIssueCompletes_TransitionsEpicToDone()
     {
@@ -52,8 +50,6 @@ public class EpicAutoDoneHandlerSpecs
         Assert.Equal("project_1:1", grains.Calls[0].GrainKey);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task HandleAsync_RehomedIssue_DispatchesToNonTerminalEpic()
     {
@@ -74,8 +70,6 @@ public class EpicAutoDoneHandlerSpecs
         Assert.Equal("project_1:2", call.GrainKey);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task HandleAsync_IssueNotLinkedToAnyEpic_NoOpsAndDoesNotInvokeGrain()
     {
@@ -95,8 +89,6 @@ public class EpicAutoDoneHandlerSpecs
         Assert.Equal("idle", stored.Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task HandleAsync_EpicStillHasIncompleteIssues_StaysIdle()
     {
@@ -119,8 +111,6 @@ public class EpicAutoDoneHandlerSpecs
         Assert.Equal("idle", stored.Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task HandleAsync_PausedEpic_RemainsPausedNoAutoDone()
     {
@@ -142,8 +132,6 @@ public class EpicAutoDoneHandlerSpecs
         Assert.Equal("on hold", stored.PauseReason);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task HandleAsync_DuplicateWorkCompletedEvents_ConvergeToDoneAndNoErrors()
     {
@@ -169,8 +157,6 @@ public class EpicAutoDoneHandlerSpecs
         Assert.Equal("done", stored.Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task HandleAsync_DispatchedByBus_AppendsRowButDoesNotInvokeHandler()
     {
@@ -223,8 +209,6 @@ public class EpicAutoDoneHandlerSpecs
         Assert.Equal(EventCatalog.ReverseDns.IssueCompleted, row.Envelope.Type);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task DispatchAsync_CompletedEventSelectedIssueStartFailure_RetriesThenDeadLetters()
     {
@@ -305,8 +289,6 @@ public class EpicAutoDoneHandlerSpecs
         Assert.Equal(0, events.PendingCount);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task HandleAsync_MissingProjectIdExtension_NoOpsWithoutError()
     {
@@ -331,8 +313,6 @@ public class EpicAutoDoneHandlerSpecs
         Assert.Empty(grains.Calls);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task HandleAsync_HasSubscriptionAttributeWithExpectedType()
     {
@@ -342,8 +322,6 @@ public class EpicAutoDoneHandlerSpecs
         Assert.Equal(EventCatalog.ReverseDns.IssueCompleted, attr!.Type);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task CancelledHandler_HasSubscriptionAttributeOnCancelledType()
     {
@@ -356,8 +334,6 @@ public class EpicAutoDoneHandlerSpecs
         Assert.Equal(EventCatalog.ReverseDns.IssueCancelled, attr!.Type);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task CancelledHandler_CancelledIssue_InvokesRecomputeOnOwningEpic()
     {
@@ -382,8 +358,6 @@ public class EpicAutoDoneHandlerSpecs
         Assert.Equal("project_1:1", call.GrainKey);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task CancelledHandler_RehomedIssue_DispatchesToNonTerminalEpic()
     {
@@ -404,8 +378,6 @@ public class EpicAutoDoneHandlerSpecs
         Assert.Equal("project_1:2", call.GrainKey);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task CancelledHandler_IssueNotLinkedToAnyEpic_NoOpsWithoutGrainCall()
     {
@@ -422,8 +394,6 @@ public class EpicAutoDoneHandlerSpecs
         Assert.Empty(grains.Calls);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task CancelledHandler_DuplicateCancelledEvents_AreIdempotent()
     {
@@ -452,8 +422,6 @@ public class EpicAutoDoneHandlerSpecs
         Assert.Equal("done", stored.Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task CancelledHandler_TerminalEpic_StaysTerminalNoError()
     {
@@ -480,8 +448,6 @@ public class EpicAutoDoneHandlerSpecs
         Assert.Equal("done", stored.Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task CancelledHandler_MissingProjectIdExtension_NoOpsWithoutError()
     {
@@ -506,8 +472,6 @@ public class EpicAutoDoneHandlerSpecs
         Assert.Empty(grains.Calls);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task CancelledHandler_MissingIssueExtension_NoOpsWithoutError()
     {
@@ -532,8 +496,6 @@ public class EpicAutoDoneHandlerSpecs
         Assert.Empty(grains.Calls);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task BothHandlers_FireOnOutOfOrderTerminalSignals_Converge()
     {
@@ -566,8 +528,6 @@ public class EpicAutoDoneHandlerSpecs
 
     // --- Fix C-1: EpicDraftChangedHandler (undraft triggers recompute) ---
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task DraftChangedHandler_HasSubscriptionAttributeOnDraftChangedType()
     {
@@ -577,8 +537,6 @@ public class EpicAutoDoneHandlerSpecs
         Assert.Equal(EventCatalog.ReverseDns.IssueDraftChanged, attr!.Type);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task DraftChangedHandler_Undraft_InvokesRecomputeOnOwningEpic()
     {
@@ -599,8 +557,6 @@ public class EpicAutoDoneHandlerSpecs
         Assert.Equal("project_1:1", call.GrainKey);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task DraftChangedHandler_Drafting_IgnoresEvent()
     {
@@ -617,8 +573,6 @@ public class EpicAutoDoneHandlerSpecs
 
     // --- Fix item-4: EpicPrerequisiteRemovedHandler ---
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task PrerequisiteRemovedHandler_HasSubscriptionAttribute()
     {
@@ -628,8 +582,6 @@ public class EpicAutoDoneHandlerSpecs
         Assert.Equal(EventCatalog.ReverseDns.IssuePrerequisiteRemoved, attr!.Type);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task PrerequisiteRemovedHandler_RemovedPrereq_InvokesRecomputeOnOwningEpic()
     {
@@ -649,8 +601,6 @@ public class EpicAutoDoneHandlerSpecs
         Assert.Equal("project_1:1", call.GrainKey);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task IssueReopenedHandler_HasSubscriptionAttribute()
     {
@@ -660,8 +610,6 @@ public class EpicAutoDoneHandlerSpecs
         Assert.Equal(EventCatalog.ReverseDns.IssueReopened, attr!.Type);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task IssueReopenedHandler_ReopenedIssue_InvokesRecomputeOnOwningEpic()
     {
@@ -694,8 +642,6 @@ public class EpicAutoDoneHandlerSpecs
 
     // --- Fix C-2: External prerequisite reverse lookup ---
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task HandleAsync_ExternalPrerequisiteCompletes_DispatchesToDependentEpic()
     {
@@ -735,8 +681,6 @@ public class EpicAutoDoneHandlerSpecs
         Assert.Equal("project_1:1", call.GrainKey);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task HandleAsync_ExternalPrerequisiteCompletes_DispatchesToDependentEpic_ViaUnifiedIssueKey()
     {
@@ -772,8 +716,6 @@ public class EpicAutoDoneHandlerSpecs
         Assert.Equal("project_1:1", call.GrainKey);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task HandleAsync_ExternalPrerequisiteCompletes_MissingIssue_NoOps()
     {
@@ -806,8 +748,6 @@ public class EpicAutoDoneHandlerSpecs
         Assert.Empty(grains.Calls);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task HandleAsync_ExtraExtension_DoesNotChangeUnifiedIssueRouting()
     {
@@ -844,8 +784,6 @@ public class EpicAutoDoneHandlerSpecs
         Assert.Equal("project_1:1", call.GrainKey);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task HandleAsync_MissingIssue_NoOps()
     {
@@ -877,8 +815,6 @@ public class EpicAutoDoneHandlerSpecs
         Assert.Empty(grains.Calls);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task CancelledHandler_ExternalCancelledPrerequisite_DoesNotDispatchDependentEpic()
     {
@@ -911,8 +847,6 @@ public class EpicAutoDoneHandlerSpecs
 
     // --- Fix D: EpicStartRetryHandler (start-attempt-failed triggers recompute) ---
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task StartRetryHandler_HasSubscriptionAttributeOnStartAttemptFailedType()
     {
@@ -922,8 +856,6 @@ public class EpicAutoDoneHandlerSpecs
         Assert.Equal(EventCatalog.ReverseDns.EpicStartAttemptFailed, attr!.Type);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task StartRetryHandler_StartAttemptFailedEvent_InvokesRecomputeOnOwningEpic()
     {

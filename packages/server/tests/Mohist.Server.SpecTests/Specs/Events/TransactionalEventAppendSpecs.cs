@@ -29,8 +29,6 @@ namespace Mohist.Server.SpecTests.Specs.Events;
 /// <c>stage</c> from structural inspection of the union variant (D2);
 /// every emitted envelope satisfies the WorkflowRun producer-family rule.
 /// </summary>
-[Trait(Traits.Speed.Name, Traits.Speed.Unit)]
-[Trait(Traits.Sut.Name, Traits.Sut.System)]
 public class TransactionalEventAppendSpecs : IAsyncLifetime
 {
     private const string ProjectId = "proj_txn";

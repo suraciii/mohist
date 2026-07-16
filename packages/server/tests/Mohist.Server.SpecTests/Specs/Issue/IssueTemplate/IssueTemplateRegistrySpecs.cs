@@ -57,8 +57,6 @@ public class IssueTemplateRegistrySpecs
             },
         });
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public void List_WithoutProjectId_ReturnsThreeBuiltins()
     {
@@ -73,8 +71,6 @@ public class IssueTemplateRegistrySpecs
         Assert.Contains(list, t => t.Id == "refactor" && t.Source == "builtin");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public void List_EntriesHaveNameAndDescriptionOnly()
     {
@@ -91,8 +87,6 @@ public class IssueTemplateRegistrySpecs
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public void List_EntriesAreSortedById()
     {
@@ -107,8 +101,6 @@ public class IssueTemplateRegistrySpecs
         Assert.Equal("refactor", list[2].Id);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public void List_DoesNotReadBuiltInTemplateBodies()
     {
@@ -142,8 +134,6 @@ public class IssueTemplateRegistrySpecs
         Assert.Empty(fullReads);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public void Discover_BuiltInWithUnterminatedFrontmatter_FailsBeforeScanningWholeBody()
     {
@@ -172,8 +162,6 @@ public class IssueTemplateRegistrySpecs
         Assert.False(reader.MarkerWasRead);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public void Get_ReadsOnlyRequestedBuiltInTemplateBody()
     {
@@ -202,8 +190,6 @@ public class IssueTemplateRegistrySpecs
         Assert.Equal("/templates/bug.md", path);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public void Get_Feature_ReturnsFullSections()
     {
@@ -223,8 +209,6 @@ public class IssueTemplateRegistrySpecs
         Assert.Contains("## Section B", template.Body);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public void Get_NullOrEmptyId_ReturnsDefaultFeature()
     {
@@ -238,8 +222,6 @@ public class IssueTemplateRegistrySpecs
         Assert.Equal("feature", template2.Id);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public void Get_Bug_ReturnsBugTemplate()
     {
@@ -253,8 +235,6 @@ public class IssueTemplateRegistrySpecs
         Assert.Equal("Fix functional bugs", template.Description);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public void Get_Refactor_ReturnsRefactorTemplate()
     {
@@ -268,8 +248,6 @@ public class IssueTemplateRegistrySpecs
         Assert.Equal("Internal quality", template.Description);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public void Get_AliasMohistDefault_ReturnsFeature()
     {
@@ -285,8 +263,6 @@ public class IssueTemplateRegistrySpecs
         Assert.Equal(canonical.Body, alias.Body);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public void Exists_FeatureAndAlias_ReturnTrue()
     {
@@ -300,8 +276,6 @@ public class IssueTemplateRegistrySpecs
         Assert.True(registry.Exists("Feature")); // case insensitive
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public void Exists_Nonexistent_ReturnsFalse()
     {
@@ -313,8 +287,6 @@ public class IssueTemplateRegistrySpecs
         Assert.False(registry.Exists(""));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public void Get_NonexistentTemplate_ThrowsKeyNotFoundException()
     {
@@ -324,8 +296,6 @@ public class IssueTemplateRegistrySpecs
         Assert.Throws<KeyNotFoundException>(() => registry.Get("nonexistent"));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public void IsBuiltin_ReturnsTrueForBuiltinsAndAlias()
     {
@@ -338,8 +308,6 @@ public class IssueTemplateRegistrySpecs
         Assert.False(registry.IsBuiltin("nonexistent"));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public void List_WithProjectId_ReturnsBuiltinsWhenNotDisabled()
     {
@@ -361,8 +329,6 @@ public class IssueTemplateRegistrySpecs
         Assert.Contains(list, t => t.Id == "refactor");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public void List_WithProjectId_ExcludesAllBuiltinsWhenDisabled()
     {
@@ -384,8 +350,6 @@ public class IssueTemplateRegistrySpecs
         Assert.DoesNotContain(list, t => t.Id == "refactor");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public void Get_DisabledDefault_ThrowsKeyNotFoundException()
     {
@@ -405,8 +369,6 @@ public class IssueTemplateRegistrySpecs
         Assert.Throws<KeyNotFoundException>(() => registry.Get("refactor", "project-1"));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public void DisabledBuiltIn_CanBeShadowedByProjectCustomTemplate()
     {
@@ -438,8 +400,6 @@ public class IssueTemplateRegistrySpecs
         Assert.True(registry.Exists("feature", "project-1"));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public void Default_Property_ReturnsFeature()
     {
@@ -454,8 +414,6 @@ public class IssueTemplateRegistrySpecs
         Assert.Equal("builtin", info.Source);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public void List_WithProjectId_MergesBuiltinAndCustomTemplates()
     {
@@ -487,8 +445,6 @@ public class IssueTemplateRegistrySpecs
         Assert.Contains(list, t => t.Id == "custom" && t.Source == "custom");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public void CustomTemplates_AreProjectPrivate()
     {
@@ -520,8 +476,6 @@ public class IssueTemplateRegistrySpecs
         Assert.DoesNotContain(listB, t => t.Id == "custom");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public void DisableDefault_AffectsOnlySpecifiedProject()
     {
@@ -545,8 +499,6 @@ public class IssueTemplateRegistrySpecs
         Assert.Contains(list2, t => t.Id == "bug");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public void CustomTemplate_WithOnlyIdNameAndSections_IsAccepted()
     {
@@ -579,8 +531,6 @@ public class IssueTemplateRegistrySpecs
         Assert.Equal(string.Empty, template.Description); // No About provided
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public void CustomTemplate_LegacyAbout_MapsToDescription()
     {
@@ -619,8 +569,6 @@ public class IssueTemplateRegistrySpecs
     // or Placeholder no longer fails — it just yields a thinner body. Only structural problems
     // (missing Id/Name, id≠rowName, empty sections, corrupt JSON) still reject a custom template.
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public void List_InvalidTemplate_MissingRequiredFields_IsNotSurfaced()
     {
@@ -648,8 +596,6 @@ public class IssueTemplateRegistrySpecs
         Assert.DoesNotContain(list, t => t.Id == "invalid");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public void List_InvalidTemplate_RowNameAndIdMismatch_IsNotSurfaced()
     {
@@ -679,8 +625,6 @@ public class IssueTemplateRegistrySpecs
         Assert.False(registry.Exists("bug-report", "project-1"));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public void List_CustomTemplateWithEmptySections_StillSurfacesMetadata()
     {
@@ -710,8 +654,6 @@ public class IssueTemplateRegistrySpecs
         Assert.Throws<KeyNotFoundException>(() => registry.Get("invalid", "project-1"));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public void List_WithCorruptTemplate_IsNotSurfaced()
     {
@@ -732,8 +674,6 @@ public class IssueTemplateRegistrySpecs
         Assert.DoesNotContain(list, t => t.Id == "corrupt");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public void Get_CustomTemplate_ReturnsFullTemplate()
     {

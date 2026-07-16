@@ -18,8 +18,6 @@ namespace Mohist.Server.SpecTests.Specs.Runner.Services;
 /// Locks in the persist-then-publish contract of
 /// <see cref="TaskLogService.AppendAsync"/>.
 /// </summary>
-[Trait(Traits.Speed.Name, Traits.Speed.Service)]
-[Trait(Traits.Sut.Name, Traits.Sut.Runner)]
 public class TaskLogServicePersistThenPublishSpecs : IAsyncLifetime
 {
     private static readonly DateTimeOffset FixedNow = new(2026, 6, 30, 0, 0, 0, TimeSpan.Zero);

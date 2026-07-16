@@ -36,8 +36,6 @@ public class ProjectWorkflowProfileDisabledSpecs : IAsyncLifetime
         return Task.CompletedTask;
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task GetDisabledWorkflowProfileIds_DefaultProject_ReturnsEmpty()
     {
@@ -46,8 +44,6 @@ public class ProjectWorkflowProfileDisabledSpecs : IAsyncLifetime
         Assert.Empty(disabled);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task DisableProfile_AddsToBlacklist()
     {
@@ -59,8 +55,6 @@ public class ProjectWorkflowProfileDisabledSpecs : IAsyncLifetime
         Assert.Single(disabled);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task EnableProfile_RemovesFromBlacklist()
     {
@@ -72,8 +66,6 @@ public class ProjectWorkflowProfileDisabledSpecs : IAsyncLifetime
         Assert.Empty(await _manager.GetDisabledWorkflowProfileIdsAsync("proj-enable"));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task DisableOneOfSeveralProfiles_Succeeds()
     {
@@ -88,8 +80,6 @@ public class ProjectWorkflowProfileDisabledSpecs : IAsyncLifetime
         Assert.Single(disabled);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task DisableLastEnabledProfile_ThrowsAndBlacklistUnchanged()
     {
@@ -110,8 +100,6 @@ public class ProjectWorkflowProfileDisabledSpecs : IAsyncLifetime
         Assert.Contains("mohist/local", disabled);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task EnableNonExistentProfile_ThrowsAndDoesNotChangeBlacklist()
     {
@@ -121,8 +109,6 @@ public class ProjectWorkflowProfileDisabledSpecs : IAsyncLifetime
         Assert.Empty(await _manager.GetDisabledWorkflowProfileIdsAsync("proj-noop"));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task DisableNonExistentProfile_ThrowsAndDoesNotChangeBlacklist()
     {
@@ -136,8 +122,6 @@ public class ProjectWorkflowProfileDisabledSpecs : IAsyncLifetime
         Assert.Contains("mohist/local", disabled);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task DisableMohistLocal_WithOtherEnabled_Succeeds()
     {

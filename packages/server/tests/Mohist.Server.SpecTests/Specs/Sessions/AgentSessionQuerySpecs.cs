@@ -64,8 +64,6 @@ public class AgentSessionQuerySpecs
     private const string WorkflowIssueNumberW1 = "100";
     private static readonly FakeTimeProvider TimeProvider = new(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero));
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task QueryByAgentId_ReturnsOnlyThatAgentsGenericSessions()
     {
@@ -101,8 +99,6 @@ public class AgentSessionQuerySpecs
         Assert.DoesNotContain(unfiltered, m => m.Row.Id == "s_w1_workflow");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task QueryByAgentName_ResolvesToSameSetAsAgentId()
     {
@@ -127,8 +123,6 @@ public class AgentSessionQuerySpecs
             byName.Select(r => r.Row.Id).OrderBy(id => id, StringComparer.Ordinal));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Theory]
     [InlineData("s_a1_2_with_issue", GenericAgentSessionMetadata.IssueNumber, AgentA1IssueNumber)]
     [InlineData("s_a1_3_with_epic", GenericAgentSessionMetadata.EpicNumber, AgentA1EpicNumber)]
@@ -163,8 +157,6 @@ public class AgentSessionQuerySpecs
         Assert.DoesNotContain(matches, m => m.Row.Id == "s_w1_workflow");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Theory]
     [InlineData(AgentSessionQueryMetadataKeys.ProjectId, ProjectA, new[] { "s_a1_1", "s_a1_2_with_issue", "s_a1_3_with_epic", "s_a1_with_repo", "s_a1_with_workspace", "s_a2_1", "s_w1_workflow" })]
     [InlineData(AgentSessionQueryMetadataKeys.WorkflowRunId, WorkflowRunW1, new[] { "s_w1_workflow" })]
@@ -189,8 +181,6 @@ public class AgentSessionQuerySpecs
         Assert.Equal(expectedIds.OrderBy(id => id, StringComparer.Ordinal), ids);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task QueryByTriggerLabels_ResolvesSubscriptionTriggeredSessions()
     {
@@ -242,8 +232,6 @@ public class AgentSessionQuerySpecs
         Assert.Empty(byMissingEvent);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task QueryByTriggerLabels_ManualSessionsDoNotMatch()
     {
@@ -260,8 +248,6 @@ public class AgentSessionQuerySpecs
         Assert.Empty(matches);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task ComputedColumns_PopulateFromStateJson_WithoutBackfill()
     {
@@ -350,8 +336,6 @@ public class AgentSessionQuerySpecs
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task AgentScopedQuery_FiltersByProjectAndAgent_ExcludesOtherProjects()
     {

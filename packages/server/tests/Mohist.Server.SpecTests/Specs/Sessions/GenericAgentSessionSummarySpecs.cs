@@ -62,8 +62,6 @@ public class GenericAgentSessionSummarySpecs
     private static readonly DateTime CreatedAt = new(2026, 6, 15, 10, 0, 0, DateTimeKind.Utc);
     private static readonly FakeTimeProvider TimeProvider = new(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero));
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task Summary_CarriesEnrichedFields()
     {
@@ -87,8 +85,6 @@ public class GenericAgentSessionSummarySpecs
         Assert.Equal(1, result.ToolErrorCount);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task Summary_CarriesFailureCategory_WhenTranscriptHasClosedEvent()
     {
@@ -103,8 +99,6 @@ public class GenericAgentSessionSummarySpecs
         Assert.Equal("failed", result.Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task Summary_ReportsRecoveryUnavailableForAnActiveTurn()
     {
@@ -119,8 +113,6 @@ public class GenericAgentSessionSummarySpecs
         Assert.False(result.RecoveryAvailable);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task Summary_ProjectsTranscriptEventsInSequenceOrder_WhenRowsWereInsertedOutOfOrder()
     {
@@ -136,8 +128,6 @@ public class GenericAgentSessionSummarySpecs
         Assert.Equal("sequence-last-failure", result.FailureCategory);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task Summary_CarriesContextRefs_WhenPresent()
     {
@@ -155,8 +145,6 @@ public class GenericAgentSessionSummarySpecs
         Assert.Equal(AgentWorkspacePath, result.ContextRefs.WorkspacePath);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task Summary_ContextRefsIsNull_WhenNoContextReferences()
     {
@@ -170,8 +158,6 @@ public class GenericAgentSessionSummarySpecs
         Assert.Null(result!.ContextRefs);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task Summary_NoWorkflowFields()
     {
@@ -193,8 +179,6 @@ public class GenericAgentSessionSummarySpecs
         Assert.False(doc.RootElement.TryGetProperty("stage", out _));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task Summary_UnknownSessionId_ReturnsNull()
     {
@@ -207,8 +191,6 @@ public class GenericAgentSessionSummarySpecs
         Assert.Null(result);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task Summary_DifferentProject_ReturnsNull()
     {
@@ -221,8 +203,6 @@ public class GenericAgentSessionSummarySpecs
         Assert.Null(result);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public async Task Summary_WorkflowSession_ReturnsNull()
     {

@@ -13,8 +13,6 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Runner.Services;
 
-[Trait(Traits.Speed.Name, Traits.Speed.Service)]
-[Trait(Traits.Sut.Name, Traits.Sut.Runner)]
 public class TaskLogServiceSpecs : IAsyncLifetime
 {
     private readonly DbContextOptions<MohistDbContext> _options;

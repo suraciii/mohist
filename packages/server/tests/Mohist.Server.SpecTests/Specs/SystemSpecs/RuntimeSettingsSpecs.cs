@@ -14,8 +14,6 @@ public class RuntimeSettingsSpecs
         _client = fixture.Client;
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task GivenUserChoosesDefaultAndStageModels_WhenSettingsPatchProjectVariables_ThenMohistUsesThoseRuntimePreferences()
     {

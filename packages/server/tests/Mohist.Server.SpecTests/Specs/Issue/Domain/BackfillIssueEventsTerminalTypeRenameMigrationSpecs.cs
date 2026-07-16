@@ -11,8 +11,6 @@ public class BackfillIssueEventsTerminalTypeRenameMigrationSpecs
 {
     private const string MigrationId = "20260702120000_BackfillIssueEventsTerminalTypeRename";
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task Up_RewritesLegacyClosedRows_ToCancelled()
     {
@@ -30,8 +28,6 @@ public class BackfillIssueEventsTerminalTypeRenameMigrationSpecs
             await ReadTypeAsync(verify, "/mohist/issues/issue_a", 1));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task Up_RewritesLegacyWorkCompletedRows_ToCompleted()
     {
@@ -49,8 +45,6 @@ public class BackfillIssueEventsTerminalTypeRenameMigrationSpecs
             await ReadTypeAsync(verify, "/mohist/issues/issue_b", 1));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task Up_RewritesBothLegacyTerminalTypes_InSingleRun()
     {
@@ -77,8 +71,6 @@ public class BackfillIssueEventsTerminalTypeRenameMigrationSpecs
             await ReadTypeAsync(verify, "/mohist/issues/issue_e", 1));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task Up_SecondRun_IsIdempotent()
     {
@@ -104,8 +96,6 @@ public class BackfillIssueEventsTerminalTypeRenameMigrationSpecs
             await ReadTypeAsync(verify, "/mohist/issues/issue_g", 1));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task Up_DoesNotTouchCanonicalRows_WrittenAfterRename()
     {
@@ -129,8 +119,6 @@ public class BackfillIssueEventsTerminalTypeRenameMigrationSpecs
             await ReadTypeAsync(verify, "/mohist/issues/issue_i", 1));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task Up_OnEmptyIssueEvents_IsNoOp()
     {
@@ -143,8 +131,6 @@ public class BackfillIssueEventsTerminalTypeRenameMigrationSpecs
         Assert.Equal(0, count);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task Down_RewritesCanonicalRows_BackToLegacy()
     {
@@ -166,8 +152,6 @@ public class BackfillIssueEventsTerminalTypeRenameMigrationSpecs
             await ReadTypeAsync(verify, "/mohist/issues/issue_k", 1));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task Down_SecondRun_IsIdempotent()
     {
@@ -186,8 +170,6 @@ public class BackfillIssueEventsTerminalTypeRenameMigrationSpecs
             await ReadTypeAsync(verify, "/mohist/issues/issue_l", 1));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task UpThenDown_RoundTripsTerminalTypes_AcrossEras()
     {
@@ -238,8 +220,6 @@ public class BackfillIssueEventsTerminalTypeRenameMigrationSpecs
             await ReadTypeAsync(afterDown, "/mohist/issues/issue_p", 1));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task Up_DoesNotAlterIssueState_OrStatus()
     {
@@ -267,8 +247,6 @@ public class BackfillIssueEventsTerminalTypeRenameMigrationSpecs
         Assert.Equal(stateBefore, stateAfter);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task Up_PreRenameAndPostRename_TerminalRowsClassifyIdentically()
     {
@@ -295,8 +273,6 @@ public class BackfillIssueEventsTerminalTypeRenameMigrationSpecs
         Assert.Equal("com.mohist.issue.cancelled", pre);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task DatabaseMigrate_IncludesBackfillIssueEventsTerminalTypeRenameMigration()
     {
@@ -308,8 +284,6 @@ public class BackfillIssueEventsTerminalTypeRenameMigrationSpecs
         Assert.Contains(applied, m => m == MigrationId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public void MigrationClass_DoesNotOverrideBuildTargetModel()
     {

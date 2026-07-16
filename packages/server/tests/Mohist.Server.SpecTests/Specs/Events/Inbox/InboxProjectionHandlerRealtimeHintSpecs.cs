@@ -28,8 +28,6 @@ public class InboxProjectionHandlerRealtimeHintSpecs
     private const string HintType = "com.mohist.inbox.item-persisted";
     private const string HintSource = "/mohist/inbox";
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task NonDuplicateInsert_PublishesExactlyOneHint()
     {
@@ -54,8 +52,6 @@ public class InboxProjectionHandlerRealtimeHintSpecs
         Assert.Equal(HintSource, hint.Source);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task DeduplicatedInsert_PublishesNoHint()
     {
@@ -88,8 +84,6 @@ public class InboxProjectionHandlerRealtimeHintSpecs
         Assert.Equal("evt-dedup", item.SourceEventId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task FailedInsert_PropagatesAndPublishesNoHint()
     {
@@ -126,8 +120,6 @@ public class InboxProjectionHandlerRealtimeHintSpecs
         Assert.Empty(await InboxProjectionTestSupport.GetInboxAsync(database, "proj_a"));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task Hint_PayloadContainsOnlyIdentity()
     {
@@ -166,8 +158,6 @@ public class InboxProjectionHandlerRealtimeHintSpecs
         Assert.Equal(row.Id, data.GetProperty("itemId").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task Hint_CarriesProjectIdExtension()
     {
@@ -192,8 +182,6 @@ public class InboxProjectionHandlerRealtimeHintSpecs
         Assert.Equal("proj_x", hint.Extensions!["projectid"]);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task Hint_CarriesIssueLineageFromDraft()
     {
@@ -221,8 +209,6 @@ public class InboxProjectionHandlerRealtimeHintSpecs
         Assert.Equal("42", hint.Extensions[EventCatalog.Lineage.Issue]);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task Hint_CarriesInboxProducerContext()
     {
@@ -372,8 +358,6 @@ public class InboxProjectionHandlerRealtimeHintSpecs
         Assert.False(extensions.ContainsKey(EventCatalog.Lineage.Stage));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task Hint_PublishException_RollsBackProjectionAndReplayCommitsBothWrites()
     {
@@ -407,8 +391,6 @@ public class InboxProjectionHandlerRealtimeHintSpecs
         Assert.Single(publisher.Published);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task Hint_RealEventStore_RollsBackAndReplaysBothRowsAtomically()
     {
@@ -462,8 +444,6 @@ public class InboxProjectionHandlerRealtimeHintSpecs
         await AssertPersistedCountsAsync(database, inbox: 1, hints: 1);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task Hint_EmittedForEveryProjectScopedNotificationKind()
     {
@@ -505,8 +485,6 @@ public class InboxProjectionHandlerRealtimeHintSpecs
         }, kinds);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task DisabledKind_PublishesNoHint()
     {
@@ -532,8 +510,6 @@ public class InboxProjectionHandlerRealtimeHintSpecs
         Assert.Empty(await InboxProjectionTestSupport.GetInboxAsync(database, "proj_a"));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task Hint_ProjectIdExtensionMatchesOwningProjectNotSourceRoute()
     {
