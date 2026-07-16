@@ -1,149 +1,109 @@
-### Requirement: Workflow execution uses an authoritative target repository context
+### Requirement: Workflow start resolves the Issue target repository
 
-Starting an Issue SHALL resolve its stored target repository name against that Issue's Project and supply the resulting canonical name, Git URL, and base branch as the authoritative repository context for workflow execution. Project, Issue, workflow-profile, stage, run, or action-default variables MUST NOT replace that context with another repository. Changing the Project default MUST NOT redirect an existing Issue. If the stored target cannot be resolved, startup SHALL fail before a workflow run or workspace is created and MUST NOT fall back to the default repository.
+At the start of each workflow run, Mohist SHALL resolve the Issue's stored target name against the repositories currently declared by its Project and SHALL provide that repository's canonical name, Git URL, and base branch as the authoritative execution context. Configurable workflow variables MUST NOT redirect repository operations to another repository. If the target declaration cannot be resolved, workflow start SHALL fail before a workspace is created and MUST NOT fall back to the Project default.
 
-#### Scenario: Start an Issue on an explicit target
+#### Scenario: Start on an explicit non-default target
 
 - **WHEN** an Issue bound to `web` starts in a Project whose default repository is `server`
-- **THEN** the workflow repository context SHALL name `web`
-- **AND** its Git URL and base branch SHALL be resolved from the `web` declaration
+- **THEN** the workflow SHALL use the canonical name, Git URL, and base branch declared for `web`
 
 #### Scenario: A default change does not redirect startup
 
 - **WHEN** an Issue was bound to `server` and the Project later makes `web` the default
 - **THEN** starting that Issue SHALL still resolve and use repository `server`
 
-#### Scenario: Routing variables cannot override the binding
+#### Scenario: Workflow variables cannot override the binding
 
-- **WHEN** configurable variables contain repository values that point to a repository other than the Issue target
-- **THEN** repository operations SHALL use the authoritative context resolved from the stored target
-- **AND** the configurable values MUST NOT redirect the workspace or Git operation
+- **WHEN** configurable workflow variables contain repository values different from the Issue target
+- **THEN** every repository operation SHALL use the context resolved from the stored Issue target
 
 #### Scenario: Missing target declaration fails closed
 
-- **WHEN** an Issue's stored target repository is not declared when startup is requested
-- **THEN** startup SHALL fail with a repository-configuration error identifying that target
-- **AND** no workflow run or workspace SHALL be created
-- **AND** the Project default MUST NOT be substituted
+- **WHEN** workflow start is requested for an Issue whose stored target is no longer declared
+- **THEN** startup SHALL fail with a repository error, create no workspace, and MUST NOT substitute the Project default
 
-### Requirement: A workflow run keeps one coherent repository context
+### Requirement: A workflow run uses one coherent repository context
 
-At workflow start, Mohist SHALL resolve the Issue's stable target name from the Project's current declaration at that moment and capture one immutable repository runtime context for that workflow run. Workspace materialization, review reads, automatic rebase and recovery, local delivery, and GitHub pull-request delivery for that run MUST use the same captured canonical name, Git URL, and base branch. A Project repository metadata change after the run starts SHALL affect workflow runs created afterward and MUST NOT partially redirect or mix metadata within the existing run.
+Every workflow run SHALL use one coherent target repository context for workspace creation, review, maintenance, recovery, and delivery. Repository metadata changed after a run starts MUST NOT partially redirect that run or mix new metadata with its existing workspace. A later workflow run SHALL resolve the then-current metadata for the Issue's unchanged target name.
 
-#### Scenario: Repository metadata changes before startup
+#### Scenario: Metadata changes before workflow start
 
-- **WHEN** an Issue is bound to `web` and the Project updates `web`'s Git URL or base branch before the Issue starts
-- **THEN** startup SHALL use the updated `web` metadata
-- **AND** the Issue's stored target name SHALL remain `web`
+- **WHEN** the Project changes the Git URL or base branch for target `web` before an Issue workflow starts
+- **THEN** the new workflow run SHALL use the updated `web` metadata while the Issue binding remains `web`
 
-#### Scenario: Repository metadata changes after startup
+#### Scenario: Metadata changes during a workflow run
 
-- **WHEN** an Issue workflow starts with repository `web` at Git URL `git@example.com:web.git` and base branch `develop`
-- **AND** the Project later changes the `web` declaration while that workflow run remains active
-- **THEN** every later Git operation in that run SHALL continue to use `git@example.com:web.git` and `develop`
-- **AND** the run MUST NOT combine new metadata with its existing workspace
+- **WHEN** the Project changes the declaration for `web` after a workflow run has created its `web` workspace
+- **THEN** later operations in that run SHALL continue using the same repository metadata and MUST NOT redirect the existing workspace
 
-#### Scenario: A later workflow run uses updated metadata
+#### Scenario: A later run resolves updated metadata
 
-- **WHEN** the Project updates repository `web` before a new workflow run is created for an Issue bound to `web`
-- **THEN** that new run SHALL capture the updated `web` Git URL and base branch
+- **WHEN** repository `web` is updated before another workflow run starts for an Issue bound to `web`
+- **THEN** that later run SHALL resolve and use the updated `web` metadata
 
-### Requirement: Workspace materialization is bound to the target repository
+### Requirement: Workspace and review operations stay in the target repository
 
-The Runner SHALL materialize exactly one repository for an Issue workflow: the Git URL from the authoritative target context. It SHALL create the workflow run branch from that repository's configured base branch and SHALL keep workspace identity distinct by Project, target repository, Issue, and workflow run. Re-entering an existing workspace MUST verify that it belongs to the same target repository and run before reuse. An inaccessible repository, missing base branch, or repository identity mismatch SHALL fail without cloning, reusing, or modifying another Project repository's workspace.
+The Runner SHALL materialize exactly one repository for an Issue workflow from the target Git URL and SHALL create its run branch from the target base branch. Before reusing a workspace, the Runner MUST verify that it belongs to the requested Issue, target repository, and workflow run. Diff, commit, commit-diff, file-content, status, cleanup, and rebase operations SHALL act only on that target workspace. An inaccessible target, missing target base branch, or workspace identity mismatch SHALL fail without using or modifying another repository workspace.
 
 #### Scenario: Materialize the selected repository
 
-- **WHEN** an Issue bound to `web` starts with Git URL `git@example.com:web.git` and base branch `develop`
-- **THEN** the Runner SHALL clone `git@example.com:web.git`
-- **AND** it SHALL create the run branch from `develop`
+- **WHEN** an Issue bound to `web` starts with target base branch `develop`
+- **THEN** the Runner SHALL materialize the `web` repository and create the workflow branch from `develop`
 
-#### Scenario: Do not reuse a workspace for another repository
+#### Scenario: Read review data from the target workspace
 
-- **WHEN** a workspace path contains a clone or marker for a different repository or workflow run
-- **THEN** the Runner MUST NOT treat that workspace as the requested target workspace
-- **AND** preparation SHALL fail with an identity error before Issue work executes
-- **AND** the mismatched workspace SHALL remain unmodified
+- **WHEN** an Issue bound to `web` has a materialized workflow workspace
+- **THEN** its diff, commits, commit diffs, file content, and status SHALL be read from that `web` workspace only
+
+#### Scenario: Rebase uses the target base branch
+
+- **WHEN** rebase is requested without an explicit base branch for an Issue bound to `web`
+- **THEN** rebase SHALL operate in the `web` workspace against the base branch resolved for that workflow run
+
+#### Scenario: Reject a mismatched workspace
+
+- **WHEN** a candidate workspace belongs to another repository, Issue, or workflow run
+- **THEN** the Runner SHALL reject reuse before Issue work executes and MUST NOT modify the mismatched workspace
 
 #### Scenario: An inaccessible target does not fall back
 
 - **WHEN** the Runner cannot access the target repository or its configured base branch
-- **THEN** workspace preparation SHALL fail with an actionable repository error
-- **AND** it MUST NOT clone the Project default or use an implicit `main` branch
-
-### Requirement: Review and maintenance operations stay in the target workspace
-
-Issue diff, commit list, commit diff, file-content, workspace-status, cleanup, and rebase operations SHALL act only on the workspace and run branch created for the Issue's target repository. Operations that derive a base branch SHALL use the workflow run's captured target base branch. A missing target declaration at workflow start SHALL produce a repository-configuration conflict, while a missing or unverifiable persisted workspace for an existing run SHALL produce a workspace-unavailable result. Neither condition can cause the system to synthesize a default repository, legacy branch, or alternative workspace; such fallback MUST NOT occur. Cleanup SHALL rely on the persisted workflow-run workspace identity and SHALL NOT require a live repository declaration.
-
-#### Scenario: Diff and commits come from the target repository
-
-- **WHEN** an Issue bound to `web` has a materialized workflow workspace
-- **THEN** its diff, commit list, commit diff, and file-content reads SHALL inspect that `web` workspace and run branch
-- **AND** they MUST NOT read the `server` repository or another Issue workspace
-
-#### Scenario: Rebase defaults to the target base branch
-
-- **WHEN** a user requests rebase without an explicit base branch for an Issue bound to `web`
-- **THEN** rebase SHALL use the `web` base branch captured by the workflow run
-
-#### Scenario: A non-empty explicit rebase base is operation-scoped
-
-- **WHEN** a user requests rebase with an explicit non-empty base-branch override
-- **THEN** that override SHALL apply only to that rebase operation in the target workspace
-- **AND** it MUST NOT change the Issue binding or the delivery target used by Integrate
-
-#### Scenario: Missing workspace returns a workspace result
-
-- **WHEN** an existing workflow run has no persisted or verifiable target workspace
-- **AND** a user requests diff, commits, file content, status, or rebase
-- **THEN** the operation SHALL return a workspace-unavailable result
-- **AND** it MUST NOT derive another path or repository from the Project default
-
-#### Scenario: Cleanup remains run-scoped after terminal repository deletion
-
-- **WHEN** a terminal Issue's repository declaration has been deleted but its persisted workflow workspace still exists
-- **THEN** cleanup SHALL remove only that workflow run's workspace
-- **AND** cleanup SHALL NOT require or substitute another repository declaration
+- **THEN** workspace preparation SHALL fail and MUST NOT clone the Project default or infer another base branch
 
 ### Requirement: Delivery completes in the target repository
 
-Every built-in delivery path SHALL publish and integrate changes only in the Issue's target repository. Local integration SHALL rebase, verify, squash, and push to the base branch captured in the workflow run's repository context. GitHub pull-request delivery SHALL create or reuse, inspect, mark ready, and merge the pull request in that repository with the captured base branch as its target. Neither delivery path SHALL infer the Project default or an unrelated repository from matching branch or pull-request numbers.
+Every built-in delivery path SHALL publish and integrate changes only in the Issue's target repository. Local integration SHALL deliver to the target base branch used by the workflow run. Pull-request delivery SHALL create, inspect, update, and merge the pull request in the target repository with that base branch as its destination. Delivery MUST NOT infer the Project default or another repository from an Issue number, branch name, or pull-request number.
 
-#### Scenario: Local Integrate pushes the target repository
+#### Scenario: Local integration delivers to the target
 
-- **WHEN** an Issue bound to `web` reaches Integrate under the local workflow profile
-- **THEN** all integration Git actions SHALL run in the `web` workspace
-- **AND** the delivered commit SHALL be pushed to the `web` base branch captured by the workflow run
+- **WHEN** an Issue bound to `web` reaches Integrate under a local delivery workflow
+- **THEN** all integration actions SHALL run in the `web` workspace and deliver to the `web` base branch used by that run
 
-#### Scenario: GitHub delivery uses the target repository
+#### Scenario: Pull-request delivery uses the target
 
 - **WHEN** an Issue bound to `web` reaches pull-request publication and merge
-- **THEN** pull-request operations SHALL execute against the repository represented by the `web` workspace
-- **AND** the pull request base SHALL be the `web` base branch captured by the workflow run
+- **THEN** pull-request operations SHALL use the repository and base branch represented by the run's `web` target context
 
-#### Scenario: Identical pull-request numbers remain repository-scoped
+#### Scenario: Equal pull-request numbers remain repository-scoped
 
-- **WHEN** repositories `server` and `web` each contain pull request number 42 for different Issues
-- **THEN** each Issue's pull-request operations SHALL resolve number 42 only in its own target repository
+- **WHEN** repositories `server` and `web` each contain the same pull-request number for different Issues
+- **THEN** each Issue's pull-request operations SHALL resolve that number only in its own target repository
 
 ### Requirement: Repository coordination isolates unrelated Issues
 
-Issues SHALL have distinct workflow workspaces and run branches. Integrate coordination SHALL serialize delivery side effects for Issues targeting the same canonical repository resource, while Issues targeting different repository resources SHALL NOT block one another solely because they belong to the same Project. Repository coordination SHALL be scoped by Project and canonical repository name so case variants share one scope and equal names in different Projects remain independent.
+Mohist SHALL keep workflow workspaces and run branches distinct between Issues. Concurrent delivery to the same Project repository SHALL be protected from overlapping repository side effects. A blocked or failed delivery in one repository MUST NOT prevent delivery in another repository from proceeding solely because both repositories belong to the same Project. Same-named repositories in different Projects SHALL remain independent.
 
 #### Scenario: Issues in the same repository integrate serially
 
 - **WHEN** two Issues in one Project target repository `server` and reach Integrate concurrently
-- **THEN** their repository delivery side effects SHALL be serialized
-- **AND** each Issue SHALL retain its own workspace and run branch
+- **THEN** their repository delivery side effects SHALL NOT overlap and each Issue SHALL retain its own workspace and run branch
 
 #### Scenario: Issues in different repositories integrate independently
 
-- **WHEN** one Issue targets `server` and another targets `web` in the same Project
-- **AND** both reach Integrate while execution capacity is available
-- **THEN** repository coordination SHALL allow both Integrate stages to progress independently
-- **AND** neither repository's lock, remote, branch, pull request, or failure state SHALL be shared with the other
+- **WHEN** delivery for repository `server` is blocked or fails while an Issue targeting `web` is also ready to deliver and execution capacity is available
+- **THEN** the `web` delivery SHALL proceed independently and its repository state and result SHALL remain unaffected by the `server` delivery
 
-#### Scenario: Equal repository names in different Projects remain isolated
+#### Scenario: Same-named repositories in different Projects remain isolated
 
 - **WHEN** two Projects each declare a repository named `server`
-- **THEN** execution and integration coordination for one Project's `server` repository SHALL NOT block or redirect the other Project's repository
+- **THEN** execution and delivery coordination for one Project's `server` repository SHALL NOT block or redirect the other Project's repository
