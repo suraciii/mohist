@@ -15,9 +15,7 @@ public sealed class FileConfigDocumentStore : IConfigDocumentStore
 
     public FileConfigDocumentStore(IEnvironmentVariableProvider environment)
     {
-        var home = environment.GetEnvironmentVariable("HOME")
-            ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        _path = Path.Combine(home, ".mohist", "config.jsonc");
+        _path = MohistConfigPath.Resolve(environment);
     }
 
     public string Location => _path;

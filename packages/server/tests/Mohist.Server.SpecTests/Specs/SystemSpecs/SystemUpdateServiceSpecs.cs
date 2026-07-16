@@ -11,7 +11,6 @@ namespace Mohist.Server.SpecTests.Specs.SystemSpecs;
 
 public class SystemUpdateServiceSpecs
 {
-    private static readonly TimeSpan AsyncWaitTimeout = TimeSpan.FromSeconds(5);
     private static readonly DateTimeOffset FixedNow = new(2026, 6, 30, 0, 0, 0, TimeSpan.Zero);
 
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]
@@ -1674,7 +1673,7 @@ public class SystemUpdateServiceSpecs
 
                 var waiter = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
                 _unlockWaiters.Add(waiter);
-                return waiter.Task.WaitAsync(AsyncWaitTimeout);
+                return waiter.Task;
             }
         }
 
@@ -1726,7 +1725,7 @@ public class SystemUpdateServiceSpecs
 
                 var waiter = new StatusWaiter(status);
                 _statusWaiters.Add(waiter);
-                return waiter.Task.WaitAsync(AsyncWaitTimeout);
+                return waiter.Task;
             }
         }
 
@@ -1783,7 +1782,7 @@ public class SystemUpdateServiceSpecs
 
                 var waiter = new CountWaiter(count);
                 _waiters.Add(waiter);
-                return waiter.Task.WaitAsync(AsyncWaitTimeout);
+                return waiter.Task;
             }
         }
 
@@ -1844,7 +1843,7 @@ public class SystemUpdateServiceSpecs
 
                 var waiter = new CountWaiter(count);
                 _waiters.Add(waiter);
-                return waiter.Task.WaitAsync(AsyncWaitTimeout);
+                return waiter.Task;
             }
         }
 
@@ -1905,7 +1904,7 @@ public class SystemUpdateServiceSpecs
 
                 var waiter = new CountWaiter(count);
                 _waiters.Add(waiter);
-                return waiter.Task.WaitAsync(AsyncWaitTimeout);
+                return waiter.Task;
             }
         }
 

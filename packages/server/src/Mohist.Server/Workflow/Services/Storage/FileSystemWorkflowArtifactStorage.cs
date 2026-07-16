@@ -102,7 +102,12 @@ public sealed class FileSystemWorkflowArtifactStorage : IWorkflowArtifactStorage
         var contentPath = Path.Combine(directory, FileContentName);
         try
         {
-            var written = await WriteStreamAsync(contentPath, content, write.Size, cancellationToken)
+            var written = await WriteStreamAsync(
+                    contentPath,
+                    content,
+                    write.Size,
+                    maxBytes: null,
+                    cancellationToken)
                 .ConfigureAwait(false);
 
             metadata.Size = written;
@@ -177,14 +182,15 @@ public sealed class FileSystemWorkflowArtifactStorage : IWorkflowArtifactStorage
                     throw new WorkflowArtifactStorageException(
                         $"Directory entry '{entry.RelativePath}' appears more than once in a single write.");
 
+                if (entry.Size < 0)
+                    throw new WorkflowArtifactStorageException(
+                        $"Directory entry '{entry.RelativePath}' has a negative declared size ({entry.Size}).");
                 if (entry.Size > effectiveLimits.MaxFileBytes)
                     throw new WorkflowArtifactStorageException(
                         $"Directory entry '{entry.RelativePath}' exceeds single-file size limit ({entry.Size} > {effectiveLimits.MaxFileBytes}).");
                 if (totalBytes + entry.Size > effectiveLimits.MaxTotalBytes)
                     throw new WorkflowArtifactStorageException(
                         $"Directory entry '{entry.RelativePath}' would exceed total size limit ({effectiveLimits.MaxTotalBytes}).");
-
-                totalBytes += entry.Size;
 
                 var destination = Path.Combine(filesRoot, containedPath.Value.Replace('/', Path.DirectorySeparatorChar));
                 var resolvedDestination = Path.GetFullPath(destination);
@@ -200,8 +206,18 @@ public sealed class FileSystemWorkflowArtifactStorage : IWorkflowArtifactStorage
 
                 await using (var input = SafeOpenContent(entry, containedPath.Value))
                 {
-                    await WriteStreamAsync(resolvedDestination, input, entry.Size, cancellationToken)
+                    var remainingTotalBytes = effectiveLimits.MaxTotalBytes - totalBytes;
+                    var maximumBytes = Math.Min(
+                        effectiveLimits.MaxFileBytes,
+                        remainingTotalBytes);
+                    var written = await WriteStreamAsync(
+                            resolvedDestination,
+                            input,
+                            entry.Size,
+                            maximumBytes,
+                            cancellationToken)
                         .ConfigureAwait(false);
+                    totalBytes += written;
                 }
             }
 
@@ -397,12 +413,9 @@ public sealed class FileSystemWorkflowArtifactStorage : IWorkflowArtifactStorage
         string destination,
         Stream source,
         long declaredSize,
+        long? maxBytes,
         CancellationToken cancellationToken)
     {
-        if (declaredSize < 0)
-            throw new WorkflowArtifactStorageException(
-                $"Declared size {declaredSize} is negative.");
-
         var tempPath = destination + ".tmp";
         long written = 0;
         bool committed = false;
@@ -421,19 +434,16 @@ public sealed class FileSystemWorkflowArtifactStorage : IWorkflowArtifactStorage
                 bufferSize: 81920,
                 useAsync: true))
             {
-                var buffer = new byte[81920];
-                int read;
-                while ((read = await source.ReadAsync(buffer, cancellationToken).ConfigureAwait(false)) > 0)
-                {
-                    await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
-                    written += read;
-                }
+                written = await WorkflowArtifactStreamCopier.CopyAsync(
+                        source,
+                        output,
+                        declaredSize,
+                        maxBytes,
+                        destination,
+                        cancellationToken)
+                    .ConfigureAwait(false);
                 await output.FlushAsync(cancellationToken).ConfigureAwait(false);
             }
-
-            if (declaredSize > 0 && written != declaredSize)
-                throw new WorkflowArtifactStorageException(
-                    $"Content size mismatch for '{destination}': declared {declaredSize} bytes, wrote {written} bytes.");
 
             if (File.Exists(destination))
                 File.Delete(destination);

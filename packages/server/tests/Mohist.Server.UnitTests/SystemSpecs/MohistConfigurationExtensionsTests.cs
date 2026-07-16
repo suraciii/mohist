@@ -1,4 +1,5 @@
 using System.Text;
+using EnvironmentAbstractions.TestHelpers;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Configuration.Json;
 using Microsoft.Extensions.FileProviders;
@@ -55,6 +56,27 @@ public class MohistConfigurationExtensionsTests
 
         Assert.Single(builder.Sources.OfType<JsonConfigurationSource>());
         Assert.Equal("from-user-file", configuration["Mohist:Host"]);
+    }
+
+    [Fact]
+    public void ConfigPath_WhenHomeIsProvided_IsSharedByStartupAndDocumentStore()
+    {
+        var environment = new MockEnvironmentVariableProvider();
+        environment["HOME"] = "/mohist-tests/home";
+        var expectedPath = "/mohist-tests/home/.mohist/config.jsonc";
+        var files = new InMemoryFileProvider().AddText(expectedPath, "{}");
+        var builder = new ConfigurationBuilder();
+
+        builder.AddMohistConfigFile(
+            path: null,
+            optional: true,
+            reloadOnChange: false,
+            fileProvider: files,
+            environment: environment);
+
+        var source = Assert.Single(builder.Sources.OfType<JsonConfigurationSource>());
+        Assert.Equal(expectedPath, source.Path);
+        Assert.Equal(expectedPath, MohistConfigPath.Resolve(environment));
     }
 
     [Fact]

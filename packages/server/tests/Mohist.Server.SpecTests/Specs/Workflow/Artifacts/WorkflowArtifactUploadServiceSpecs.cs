@@ -571,6 +571,34 @@ public class WorkflowArtifactUploadServiceSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
+    public async Task UploadAsync_WhenRequestIsCancelledDuringRollback_CleanupUsesIndependentToken()
+    {
+        var workflowRunId = $"wr_{Guid.NewGuid():N}";
+        var workId = $"task-1.1_{Guid.NewGuid():N}";
+        var resolver = new StubWorkContextResolver();
+        resolver.Register(workflowRunId, workId, "task-1.1");
+        var service = BuildService(resolver);
+        using var cancellation = new CancellationTokenSource();
+        _storage.BeforeDelete = cancellation.Cancel;
+
+        var result = await service.UploadAsync(new WorkflowArtifactUploadRequest
+        {
+            WorkflowRunId = workflowRunId,
+            WorkId = workId,
+            Path = "specs",
+            ContentType = "application/x-mohist-artifact-directory",
+            ContentHash = "sha256:bad",
+            Size = 1,
+            OpenContent = () => new MemoryStream(Bytes("{"), writable: false),
+        }, cancellation.Token);
+
+        Assert.Equal(WorkflowArtifactUploadResultKind.Invalid, result.Kind);
+        Assert.Equal(CancellationToken.None, _storage.LastDeleteCancellationToken);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
     public async Task BindAsync_DirectoryPendingUpload_BindsAsDirectoryKind()
     {
         // End-to-end: drive a real runner upload through the upload

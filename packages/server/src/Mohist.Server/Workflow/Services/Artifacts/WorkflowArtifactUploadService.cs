@@ -202,7 +202,7 @@ public sealed class WorkflowArtifactUploadService : IScopedService
                 .ConfigureAwait(false);
             if (!committed.WasCreated)
             {
-                await SafeRemoveStorageDirectoryAsync(writeResult.StoragePath, cancellationToken).ConfigureAwait(false);
+                await SafeRemoveStorageDirectoryAsync(writeResult.StoragePath).ConfigureAwait(false);
                 return ExistingUploadResult(committed.Row, request.ContentHash);
             }
         }
@@ -211,19 +211,19 @@ public sealed class WorkflowArtifactUploadService : IScopedService
             // Malformed directory envelope (bad JSON, size mismatch,
             // invalid base64, ...). Surface as a client-visible 400 so
             // the runner gets a diagnosable error instead of a 500.
-            await SafeRemoveStorageDirectoryAsync(storagePath, cancellationToken).ConfigureAwait(false);
+            await SafeRemoveStorageDirectoryAsync(storagePath).ConfigureAwait(false);
             return WorkflowArtifactUploadResult.Invalid(ex.Message);
         }
         catch (WorkflowArtifactStorageException ex)
         {
             // Storage rejected the content (limit breach, path
             // traversal, duplicate entry, ...). Same: surface as 400.
-            await SafeRemoveStorageDirectoryAsync(storagePath, cancellationToken).ConfigureAwait(false);
+            await SafeRemoveStorageDirectoryAsync(storagePath).ConfigureAwait(false);
             return WorkflowArtifactUploadResult.Invalid(ex.Message);
         }
         catch
         {
-            await SafeRemoveStorageDirectoryAsync(storagePath, cancellationToken).ConfigureAwait(false);
+            await SafeRemoveStorageDirectoryAsync(storagePath).ConfigureAwait(false);
             throw;
         }
 
@@ -282,14 +282,12 @@ public sealed class WorkflowArtifactUploadService : IScopedService
             IncomingContentHash: incomingContentHash));
     }
 
-    private async Task SafeRemoveStorageDirectoryAsync(
-        string storagePath,
-        CancellationToken cancellationToken)
+    private async Task SafeRemoveStorageDirectoryAsync(string storagePath)
     {
         if (string.IsNullOrEmpty(storagePath)) return;
         try
         {
-            await _storage.DeleteAsync(storagePath, cancellationToken).ConfigureAwait(false);
+            await _storage.DeleteAsync(storagePath, CancellationToken.None).ConfigureAwait(false);
         }
         catch (Exception ex)
         {

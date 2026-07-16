@@ -107,7 +107,7 @@ public class AgentJobRoutesSpecs
             request,
             new SingleAgentJobGrainFactory(grain),
             Options.Create(new AgentJobOptions { JobTimeout = TimeSpan.FromSeconds(8) }),
-            TimeProvider.System,
+            new FakeTimeProvider(TestTime.UtcNow),
             CancellationToken.None);
 
         var payload = await AgentJobRouteTestHelpers.ExecuteJsonResultAsync(result);

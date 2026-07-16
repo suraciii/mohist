@@ -52,7 +52,7 @@ public class OtelExecutionChainTracingSpecs : IClassFixture<MohistIntegrationFix
             var response = await _fixture.Client.GetAsync("/api/health");
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
-            await recorder.WaitForAsync(s => s.Any(IsInboundHttpSpan), TimeSpan.FromSeconds(5));
+            await recorder.WaitForAsync(s => s.Any(IsInboundHttpSpan));
         }
 
         var inbound = recorder.EndedActivities.Where(IsInboundHttpSpan).ToList();
@@ -104,8 +104,7 @@ public class OtelExecutionChainTracingSpecs : IClassFixture<MohistIntegrationFix
             && s.Any(IsSignalRActivity)
             && s.Any(IsOrleansActivity)
             && s.Any(IsEfCoreActivity)
-            && s.Any(IsOutboundHttpSpan),
-            TimeSpan.FromSeconds(5));
+            && s.Any(IsOutboundHttpSpan));
 
         var inbound = Assert.Single(host.Recorder.EndedActivities, IsInboundHttpSpan);
         var signalr = Assert.Single(host.Recorder.EndedActivities, IsTestSignalRActivity);
@@ -162,7 +161,7 @@ public class OtelExecutionChainTracingSpecs : IClassFixture<MohistIntegrationFix
             content);
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
 
-        await recorder.WaitForAsync(s => FindIssueCreationTrace(s) is not null, TimeSpan.FromSeconds(5));
+        await recorder.WaitForAsync(s => FindIssueCreationTrace(s) is not null);
 
         var activities = recorder.EndedActivities;
 
@@ -246,7 +245,7 @@ public class OtelExecutionChainTracingSpecs : IClassFixture<MohistIntegrationFix
                 content);
             Assert.Equal(HttpStatusCode.Created, response.StatusCode);
 
-            await recorder.WaitForAsync(s => s.Any(IsEfCoreActivity), TimeSpan.FromSeconds(5));
+            await recorder.WaitForAsync(s => s.Any(IsEfCoreActivity));
         }
 
         var ef = recorder.EndedActivities.Where(IsEfCoreActivity).ToList();
@@ -465,20 +464,15 @@ public class OtelExecutionChainTracingSpecs : IClassFixture<MohistIntegrationFix
             }
         }
 
-        /// <summary>
-        /// Resolves as soon as <see cref="Record"/> appends an activity
-        /// that makes <paramref name="predicate"/> true, instead of
-        /// polling the wall clock. <paramref name="timeout"/> only
-        /// bounds the never-satisfied case.
-        /// </summary>
-        public async Task<List<Activity>> WaitForAsync(Func<List<Activity>, bool> predicate, TimeSpan timeout)
+        public async Task<List<Activity>> WaitForAsync(
+            Func<List<Activity>, bool> predicate,
+            CancellationToken cancellationToken = default)
         {
-            using var cts = new CancellationTokenSource(timeout);
-            await WaitForAsync(predicate, cts.Token);
+            await WaitUntilAsync(predicate, cancellationToken);
             return EndedActivities.ToList();
         }
 
-        public Task WaitForAsync(Func<List<Activity>, bool> predicate, CancellationToken cancellationToken)
+        private Task WaitUntilAsync(Func<List<Activity>, bool> predicate, CancellationToken cancellationToken)
         {
             lock (_gate)
             {

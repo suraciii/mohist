@@ -18,18 +18,18 @@ public sealed class RuntimeBuildInfo : IRuntimeBuildInfo, ISingletonService
     public string? GitHash { get; }
     public DateTimeOffset StartedAt { get; }
 
-    public RuntimeBuildInfo()
-        : this(SystemEnvironmentVariableProvider.Instance, TimeProvider.System)
+    public RuntimeBuildInfo(
+        IEnvironmentVariableProvider environment,
+        IRuntimeSourceIdentity sourceIdentity,
+        TimeProvider timeProvider)
     {
+        StartedAt = timeProvider.GetUtcNow();
+        (Version, GitHash) = ResolveIdentity(environment, sourceIdentity);
     }
 
-    public RuntimeBuildInfo(IEnvironmentVariableProvider environment, TimeProvider? timeProvider = null)
-    {
-        StartedAt = (timeProvider ?? TimeProvider.System).GetUtcNow();
-        (Version, GitHash) = ResolveIdentity(environment);
-    }
-
-    private static (string? Version, string? GitHash) ResolveIdentity(IEnvironmentVariableProvider environment)
+    private static (string? Version, string? GitHash) ResolveIdentity(
+        IEnvironmentVariableProvider environment,
+        IRuntimeSourceIdentity sourceIdentity)
     {
         var assembly = typeof(RuntimeBuildInfo).Assembly;
         var informationalVersion = assembly
@@ -41,7 +41,7 @@ public sealed class RuntimeBuildInfo : IRuntimeBuildInfo, ISingletonService
             versionFromAssembly,
             () => environment.GetEnvironmentVariable(
                 GitHashEnvironmentVariable),
-            () => null);
+            () => sourceIdentity.GitHead);
     }
 
     internal static (string? Version, string? GitHash) ResolveIdentity(

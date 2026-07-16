@@ -11,7 +11,10 @@ public class RuntimeBuildInfoTests
     public void MetadataIdentity_WhenAssemblyHasInformationalVersion_ReturnsVersionAndGitHash()
     {
         var time = new FakeTimeProvider(TestTime.UtcNow);
-        var info = new RuntimeBuildInfo(new MockEnvironmentVariableProvider(), time);
+        var info = new RuntimeBuildInfo(
+            new MockEnvironmentVariableProvider(),
+            new StubRuntimeSourceIdentity(),
+            time);
 
         Assert.NotNull(info.Version);
         Assert.NotNull(info.GitHash);
@@ -23,8 +26,12 @@ public class RuntimeBuildInfoTests
     [Fact]
     public void GitHash_WhenInitialized_RemainsStableForProcessLifetime()
     {
-        var info1 = new RuntimeBuildInfo();
-        var info2 = new RuntimeBuildInfo();
+        var environment = new MockEnvironmentVariableProvider();
+        var sourceIdentity = new StubRuntimeSourceIdentity("headhash456");
+        var time = new FakeTimeProvider(TestTime.UtcNow);
+
+        var info1 = new RuntimeBuildInfo(environment, sourceIdentity, time);
+        var info2 = new RuntimeBuildInfo(environment, sourceIdentity, time);
 
         Assert.Equal(info1.GitHash, info2.GitHash);
         Assert.Equal(info1.Version, info2.Version);
@@ -61,9 +68,16 @@ public class RuntimeBuildInfoTests
     {
         var time = new FakeTimeProvider(TestTime.UtcNow);
 
-        var info = new RuntimeBuildInfo(new MockEnvironmentVariableProvider(), time);
+        var info = new RuntimeBuildInfo(
+            new MockEnvironmentVariableProvider(),
+            new StubRuntimeSourceIdentity(),
+            time);
 
         Assert.Equal(TestTime.UtcNow, info.StartedAt);
     }
 
+    private sealed class StubRuntimeSourceIdentity(string? gitHead = null) : IRuntimeSourceIdentity
+    {
+        public string? GitHead { get; } = gitHead;
+    }
 }

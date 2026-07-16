@@ -4,6 +4,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Events.Grains;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Issue;
@@ -40,7 +41,7 @@ public sealed class MohistDbFixture : IAsyncLifetime
 {
     private readonly InMemoryEventBus _eventBus = new(
         new NoopEventStore(),
-        TimeProvider.System,
+        new FakeTimeProvider(TestTime.UtcNow),
         NullLogger<InMemoryEventBus>.Instance);
     private readonly RecordingEventStore _eventStore = new();
     private SqliteConnection _keeper = null!;

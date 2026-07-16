@@ -102,6 +102,7 @@ public static class MohistServiceRegistration
         services.AddSingleton<IRuntimeBuildInfo>(sp => sp.GetRequiredService<RuntimeBuildInfo>());
         services.TryAddSingleton(TimeProvider.System);
         services.AddSingleton<IFileSystem, PhysicalFileSystem>();
+        services.AddSingleton<IRuntimeSourceIdentity, RuntimeSourceIdentity>();
         services.AddSingleton<IEnvironmentVariableProvider>(SystemEnvironmentVariableProvider.Instance);
         services.AddSingleton<IConfigDocumentStore, FileConfigDocumentStore>();
         services.AddSingleton<IWebContentProvider, WebContentProvider>();

@@ -218,7 +218,7 @@ internal static class AgentSubscriptionDispatchTestSupport
             {
                 var services = new ServiceCollection();
                 services.AddSingleton<IDbContextFactory<MohistDbContext>>(database.Factory);
-                services.AddSingleton(TimeProvider.System);
+                services.AddSingleton<TimeProvider>(new FakeTimeProvider(TestTime.UtcNow));
                 services.AddSingleton<IAgentLauncher>(launcher);
                 services.AddScoped<AgentSubscriptionStore>();
                 services.AddScoped<AgentQuerier>();

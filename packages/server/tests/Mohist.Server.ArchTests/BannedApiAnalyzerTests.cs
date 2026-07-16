@@ -9,10 +9,10 @@ namespace Mohist.Server.ArchTests;
 
 public class BannedApiAnalyzerTests
 {
-    [Fact]
-    public async Task TestPolicy_RejectsPhysicalFilesystemApi()
+    public static TheoryData<string, string> RejectedTestApis => new()
     {
-        const string source = """
+        {
+            """
             namespace System.IO
             {
                 public static class File
@@ -25,26 +25,105 @@ public class BannedApiAnalyzerTests
             {
                 public static bool Exists(string path) => System.IO.File.Exists(path);
             }
-            """;
+            """,
+            "in-memory filesystem"
+        },
+        {
+            """
+            namespace System.Net.Http
+            {
+                public class HttpClientHandler
+                {
+                    public HttpClientHandler() { }
+                }
+            }
+
+            internal static class Candidate
+            {
+                public static System.Net.Http.HttpClientHandler Create() =>
+                    new System.Net.Http.HttpClientHandler();
+            }
+            """,
+            "HttpMessageHandler"
+        },
+        {
+            """
+            namespace System
+            {
+                public abstract class TimeProvider
+                {
+                    public static TimeProvider System => null!;
+                }
+            }
+
+            internal static class Candidate
+            {
+                public static object Clock => System.TimeProvider.System;
+            }
+            """,
+            "FakeTimeProvider"
+        },
+        {
+            """
+            namespace System
+            {
+                public struct TimeSpan { }
+            }
+
+            namespace System.Threading
+            {
+                public class CancellationTokenSource
+                {
+                    public CancellationTokenSource(System.TimeSpan timeout) { }
+                }
+            }
+
+            internal static class Candidate
+            {
+                public static object Create(System.TimeSpan timeout) =>
+                    new System.Threading.CancellationTokenSource(timeout);
+            }
+            """,
+            "FakeTimeProvider"
+        },
+    };
+
+    [Theory]
+    [MemberData(nameof(RejectedTestApis))]
+    public async Task CheckedInTestPolicy_RejectsForbiddenApi(string source, string expectedMessage)
+    {
+        var diagnostics = await AnalyzeAsync(source);
+
+        Assert.Contains(diagnostics, item =>
+            item.Id == "RS0030"
+            && item.GetMessage().Contains(expectedMessage, StringComparison.Ordinal));
+    }
+
+    private static async Task<ImmutableArray<Diagnostic>> AnalyzeAsync(string source)
+    {
         var compilation = CSharpCompilation.Create(
             "Candidate",
             [CSharpSyntaxTree.ParseText(source)],
             options: new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
         var analyzerOptions = new AnalyzerOptions([
-            new InMemoryAdditionalText(
-                "BannedSymbols.Tests.txt",
-                "T:System.IO.File; Tests must use an in-memory filesystem or a domain storage fake.")
+            EmbeddedPolicy("BannedSymbols.Product.txt"),
+            EmbeddedPolicy("BannedSymbols.Tests.txt"),
         ]);
 
-        var diagnostics = await compilation
+        return await compilation
             .WithAnalyzers(
                 ImmutableArray.Create<DiagnosticAnalyzer>(new CSharpSymbolIsBannedAnalyzer()),
                 analyzerOptions)
             .GetAnalyzerDiagnosticsAsync();
+    }
 
-        var diagnostic = Assert.Single(diagnostics, item => item.Id == "RS0030");
-        Assert.Contains("File", diagnostic.GetMessage(), StringComparison.Ordinal);
-        Assert.Contains("in-memory filesystem", diagnostic.GetMessage(), StringComparison.Ordinal);
+    private static AdditionalText EmbeddedPolicy(string resourceName)
+    {
+        var assembly = typeof(BannedApiAnalyzerTests).Assembly;
+        using var stream = assembly.GetManifestResourceStream(resourceName)
+            ?? throw new InvalidOperationException($"Embedded policy '{resourceName}' is missing.");
+        using var reader = new StreamReader(stream);
+        return new InMemoryAdditionalText(resourceName, reader.ReadToEnd());
     }
 
     private sealed class InMemoryAdditionalText(string path, string content) : AdditionalText

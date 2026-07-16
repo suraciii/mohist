@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Infrastructure.Data.Workflow;
@@ -49,7 +50,7 @@ public class WorkflowItemTranslatorSpecs : IAsyncLifetime
             factory, promptLoader, new PromptTemplateEngine(),
             WorkflowGrainTestHelpers.CreateEmptyConfigService(), runProfileManager);
         _bindService = new WorkflowArtifactBindService(
-            factory, BindNullLogger, TimeProvider.System);
+            factory, BindNullLogger, new FakeTimeProvider(TestTime.UtcNow));
         _translator = new WorkflowItemTranslator(_profileManager, _bindService, TranslatorNullLogger);
 
         MigratedSqliteTemplate.CopyTo(_keeper);

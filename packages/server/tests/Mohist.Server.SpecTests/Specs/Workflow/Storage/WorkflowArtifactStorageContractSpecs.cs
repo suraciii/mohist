@@ -114,6 +114,7 @@ public class WorkflowArtifactStorageContractSpecs
         Assert.Equal(3, result.FileCount);
         var listing = await _storage.ListDirectoryEntriesAsync(storagePath);
         Assert.Equal(["index.md", "specs/auth.md", "specs/data.md"], listing.Entries.Select(entry => entry.RelativePath));
+        Assert.All(listing.Entries, entry => Assert.Null(entry.ContentType));
         Assert.Equal(25, listing.TotalSize);
         using var reader = new StreamReader(_storage.OpenDirectoryEntry(storagePath, "specs/auth.md"));
         Assert.Equal("auth-spec", await reader.ReadToEndAsync());
@@ -157,6 +158,37 @@ public class WorkflowArtifactStorageContractSpecs
         var duplicatePath = _storage.GenerateStoragePath("wr_d", "t_d", "a_d", WorkflowArtifactStorageKind.Directory);
         await Assert.ThrowsAsync<WorkflowArtifactStorageException>(() =>
             _storage.WriteDirectoryAsync(duplicatePath, [Entry("same", "a"), Entry("same", "b")], WriteFor("specs/", 2), SampleRecordedAt));
+    }
+
+    [Fact]
+    public async Task WriteDirectoryAsync_RejectsActualBytesBeyondDeclaredSizeAndLimits()
+    {
+        var limits = new WorkflowArtifactDirectoryLimits
+        {
+            MaxFileCount = 2,
+            MaxTotalBytes = 4,
+            MaxFileBytes = 3,
+        };
+        var entry = new WorkflowArtifactDirectoryEntryInput
+        {
+            RelativePath = "large.md",
+            Size = 0,
+            OpenContent = () => Bytes("large"u8.ToArray()),
+        };
+        var storagePath = _storage.GenerateStoragePath(
+            "wr_actual",
+            "t_actual",
+            "a_actual",
+            WorkflowArtifactStorageKind.Directory);
+
+        await Assert.ThrowsAsync<WorkflowArtifactStorageException>(() =>
+            _storage.WriteDirectoryAsync(
+                storagePath,
+                [entry],
+                WriteFor("specs/", 0),
+                SampleRecordedAt,
+                limits));
+        Assert.False(_storage.Contains(storagePath));
     }
 
     [Fact]

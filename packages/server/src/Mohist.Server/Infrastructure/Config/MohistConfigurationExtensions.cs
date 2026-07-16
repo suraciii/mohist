@@ -19,7 +19,12 @@ public static class MohistConfigurationExtensions
         if (environment.IsEnvironment(MohistHostEnvironment.Testing))
             return builder;
 
-        return builder.AddMohistConfigFile(path, optional, reloadOnChange, fileProvider);
+        return builder.AddMohistConfigFile(
+            path,
+            optional,
+            reloadOnChange,
+            fileProvider,
+            SystemEnvironmentVariableProvider.Instance);
     }
 
     public static IConfigurationBuilder AddMohistConfigFile(
@@ -27,12 +32,11 @@ public static class MohistConfigurationExtensions
         string? path = null,
         bool optional = true,
         bool reloadOnChange = true,
-        IFileProvider? fileProvider = null)
+        IFileProvider? fileProvider = null,
+        IEnvironmentVariableProvider? environment = null)
     {
-        var configPath = path ?? Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            ".mohist",
-            "config.jsonc");
+        var configPath = path ?? MohistConfigPath.Resolve(
+            environment ?? SystemEnvironmentVariableProvider.Instance);
 
         if (fileProvider is null && !File.Exists(configPath))
             return builder;

@@ -8,6 +8,8 @@ public sealed class InMemoryWorkflowArtifactStorage : IWorkflowArtifactStorage
     private readonly Dictionary<string, StoredArtifact> _artifacts = new(StringComparer.Ordinal);
     private readonly object _gate = new();
 
+    public CancellationToken? LastDeleteCancellationToken { get; private set; }
+    public Action? BeforeDelete { get; set; }
     public string StorageRoot => Root;
 
     public string GenerateStoragePath(
@@ -33,11 +35,14 @@ public sealed class InMemoryWorkflowArtifactStorage : IWorkflowArtifactStorage
             throw new WorkflowArtifactStorageException($"Declared size {write.Size} is negative.");
 
         await using var buffer = new MemoryStream();
-        await content.CopyToAsync(buffer, cancellationToken).ConfigureAwait(false);
+        await WorkflowArtifactStreamCopier.CopyAsync(
+            content,
+            buffer,
+            write.Size,
+            maxBytes: null,
+            storagePath,
+            cancellationToken).ConfigureAwait(false);
         var bytes = buffer.ToArray();
-        if (write.Size > 0 && bytes.LongLength != write.Size)
-            throw new WorkflowArtifactStorageException(
-                $"Content size mismatch for '{storagePath}': declared {write.Size} bytes, wrote {bytes.LongLength} bytes.");
 
         var metadata = CreateMetadata(path, write, recordedAt, "file", bytes.LongLength, null);
         Add(path.Value, new StoredArtifact(metadata, bytes, null));
@@ -77,17 +82,21 @@ public sealed class InMemoryWorkflowArtifactStorage : IWorkflowArtifactStorage
             await using var input = entry.OpenContent()
                 ?? throw new WorkflowArtifactStorageException($"Content supplier for '{containedPath}' returned a null stream.");
             await using var buffer = new MemoryStream();
-            await input.CopyToAsync(buffer, cancellationToken).ConfigureAwait(false);
+            var remainingTotalBytes = effectiveLimits.MaxTotalBytes - totalBytes;
+            var maximumBytes = Math.Min(
+                effectiveLimits.MaxFileBytes,
+                remainingTotalBytes);
+            var written = await WorkflowArtifactStreamCopier.CopyAsync(
+                input,
+                buffer,
+                entry.Size,
+                maximumBytes,
+                containedPath,
+                cancellationToken).ConfigureAwait(false);
             var bytes = buffer.ToArray();
-            if (entry.Size > 0 && bytes.LongLength != entry.Size)
-                throw new WorkflowArtifactStorageException(
-                    $"Content size mismatch for '{containedPath}': declared {entry.Size} bytes, wrote {bytes.LongLength} bytes.");
-            if (totalBytes + bytes.LongLength > effectiveLimits.MaxTotalBytes)
-                throw new WorkflowArtifactStorageException(
-                    $"Directory entry '{entry.RelativePath}' would exceed total size limit ({effectiveLimits.MaxTotalBytes}).");
 
-            totalBytes += bytes.LongLength;
-            storedEntries[containedPath] = new StoredDirectoryEntry(bytes, entry.ContentType);
+            totalBytes += written;
+            storedEntries[containedPath] = new StoredDirectoryEntry(bytes);
         }
 
         var metadata = CreateMetadata(path, write, recordedAt, "directory", totalBytes, storedEntries.Count);
@@ -122,7 +131,7 @@ public sealed class InMemoryWorkflowArtifactStorage : IWorkflowArtifactStorage
             {
                 RelativePath = pair.Key,
                 Size = pair.Value.Content.LongLength,
-                ContentType = pair.Value.ContentType,
+                ContentType = null,
             })
             .ToArray();
         return Task.FromResult(new WorkflowArtifactDirectoryListing(path.Value, entries, entries.Sum(entry => entry.Size)));
@@ -155,6 +164,8 @@ public sealed class InMemoryWorkflowArtifactStorage : IWorkflowArtifactStorage
         string storagePath,
         CancellationToken cancellationToken = default)
     {
+        LastDeleteCancellationToken = cancellationToken;
+        BeforeDelete?.Invoke();
         cancellationToken.ThrowIfCancellationRequested();
         var path = WorkflowArtifactStoragePath.Parse(storagePath).Value;
         lock (_gate)
@@ -240,5 +251,5 @@ public sealed class InMemoryWorkflowArtifactStorage : IWorkflowArtifactStorage
         byte[]? FileContent,
         IReadOnlyDictionary<string, StoredDirectoryEntry>? DirectoryEntries);
 
-    private sealed record StoredDirectoryEntry(byte[] Content, string? ContentType);
+    private sealed record StoredDirectoryEntry(byte[] Content);
 }

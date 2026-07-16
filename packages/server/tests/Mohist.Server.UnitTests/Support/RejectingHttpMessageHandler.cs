@@ -2,7 +2,10 @@ namespace Mohist.Server.UnitTests.Support;
 
 internal sealed class RejectingHttpMessageHandler : HttpMessageHandler
 {
-    public static HttpClient CreateClient() => new(new RejectingHttpMessageHandler());
+    public static HttpClient CreateClient() => new(new RejectingHttpMessageHandler())
+    {
+        BaseAddress = new Uri("http://localhost:3456"),
+    };
 
     protected override Task<HttpResponseMessage> SendAsync(
         HttpRequestMessage request,

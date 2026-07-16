@@ -212,6 +212,63 @@ public class ArchitectureRules
     }
 
     [Fact]
+    public void ServerSource_ShouldUseSharedJsonSerializerOptions()
+    {
+        var localConstructorOffenders = new List<string>();
+        var localFieldOffenders = new List<string>();
+        var fieldPattern = new System.Text.RegularExpressions.Regex(
+            @"static\s+readonly\s+JsonSerializerOptions\s+\w+\s*=",
+            System.Text.RegularExpressions.RegexOptions.None);
+
+        foreach (var source in EmbeddedSources("ServerSources/")
+                     .Where(source => !source.Path.Equals(
+                         "Infrastructure/JSON.cs",
+                         StringComparison.Ordinal)))
+        {
+            var lineNumber = 1;
+            foreach (var line in source.Content.Split('\n'))
+            {
+                if (line.Contains("new JsonSerializerOptions(", StringComparison.Ordinal))
+                    localConstructorOffenders.Add($"{source.Path}:{lineNumber}");
+
+                if (fieldPattern.IsMatch(line)
+                    && !line.Contains("JSON.Options", StringComparison.Ordinal)
+                    && !line.Contains("JSON.Indented", StringComparison.Ordinal))
+                {
+                    localFieldOffenders.Add($"{source.Path}:{lineNumber}");
+                }
+
+                lineNumber++;
+            }
+        }
+
+        Assert.True(
+            localConstructorOffenders.Count == 0,
+            "Found local JsonSerializerOptions construction outside the JSON facade: "
+            + string.Join(", ", localConstructorOffenders));
+        Assert.True(
+            localFieldOffenders.Count == 0,
+            "Found local static JsonSerializerOptions fields outside the JSON facade: "
+            + string.Join(", ", localFieldOffenders));
+    }
+
+    [Fact]
+    public void ProductionProjects_ShouldReferenceEnvironmentAnalyzer()
+    {
+        var missing = EmbeddedSources("ProductionProjects/")
+            .Where(project => !project.Content.Contains(
+                "EnvironmentAbstractions.BannedApiAnalyzer",
+                StringComparison.Ordinal))
+            .Select(project => project.Path)
+            .ToArray();
+
+        Assert.True(
+            missing.Length == 0,
+            "Production projects must reference EnvironmentAbstractions.BannedApiAnalyzer: "
+            + string.Join(", ", missing));
+    }
+
+    [Fact]
     public void GrainImplementations_ShouldInheritFromGrain()
     {
         Classes().That().HaveNameEndingWith("Grain")

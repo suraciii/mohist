@@ -197,7 +197,7 @@ public class EpicAutoDoneHandlerSpecs
                         e.DataContentType, e.Subject, e.SpecVersion, e.Extensions),
                     ct)),
         };
-        var bus = new InMemoryEventBus(subscriptions, store, TimeProvider.System, NullLogger<InMemoryEventBus>.Instance);
+        var bus = new InMemoryEventBus(subscriptions, store, new FakeTimeProvider(EventTime), NullLogger<InMemoryEventBus>.Instance);
 
         var extensions = new Dictionary<string, string>
         {
