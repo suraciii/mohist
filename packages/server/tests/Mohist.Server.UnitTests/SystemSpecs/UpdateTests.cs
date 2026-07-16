@@ -1006,7 +1006,7 @@ public class UpdateTests
 
         Assert.Equal(1, exitCode);
         Assert.Contains("Runner unavailable", stderr.ToString());
-        Assert.Contains("mo server start --runner", stderr.ToString());
+        Assert.Contains("mo runner start", stderr.ToString());
     }
 
     [Fact]
@@ -1241,7 +1241,7 @@ public class UpdateTests
         var errOutput = stderr.ToString();
         Assert.Contains("not fully usable", errOutput);
         Assert.Contains("Runner unavailable", errOutput);
-        Assert.Contains("mo server start --runner", errOutput);
+        Assert.Contains("mo runner start", errOutput);
     }
 
     [Fact]
