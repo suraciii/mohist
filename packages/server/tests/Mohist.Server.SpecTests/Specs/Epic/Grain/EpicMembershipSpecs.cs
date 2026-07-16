@@ -48,6 +48,7 @@ public class EpicMembershipSpecs
             .SingleAsync(l => l.ProjectId == ProjectId && l.EpicId == "epic_1");
         Assert.Equal("issue_1", link.IssueId);
         Assert.Equal(1, link.IssueNumber);
+        Assert.Equal(1, link.EpicNumber);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]

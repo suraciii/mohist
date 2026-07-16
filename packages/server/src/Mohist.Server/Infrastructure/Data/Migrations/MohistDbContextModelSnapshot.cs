@@ -140,12 +140,17 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("TEXT");
 
+                    b.Property<int>("EpicNumber")
+                        .HasColumnType("INTEGER");
+
                     b.Property<int>("IssueNumber")
                         .HasColumnType("INTEGER");
 
                     b.HasKey("ProjectId", "IssueId");
 
                     b.HasIndex("ProjectId", "EpicId");
+
+                    b.HasIndex("ProjectId", "EpicNumber", "IssueNumber");
 
                     b.ToTable("EpicActiveIssues");
                 });
@@ -170,6 +175,9 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("TEXT");
 
+                    b.Property<int>("EpicNumber")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("IssueId")
                         .HasMaxLength(256)
                         .HasColumnType("TEXT");
@@ -191,6 +199,8 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
 
                     b.HasIndex("ProjectId", "IssueNumber");
 
+                    b.HasIndex("ProjectId", "EpicNumber", "IssueNumber");
+
                     b.ToTable("EpicIssues");
                 });
 
@@ -207,7 +217,7 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
-                    b.Property<int?>("Number")
+                    b.Property<int>("Number")
                         .HasColumnType("INTEGER");
 
                     b.Property<string>("PauseReason")
@@ -239,7 +249,8 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("ProjectId", "Number");
+                    b.HasIndex("ProjectId", "Number")
+                        .IsUnique();
 
                     b.HasIndex("ProjectId", "Status", "CreatedAt");
 
@@ -836,6 +847,9 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("TEXT");
 
+                    b.Property<int?>("EpicNumber")
+                        .HasColumnType("INTEGER");
+
                     b.Property<long>("LineageVersion")
                         .IsConcurrencyToken()
                         .ValueGeneratedOnAdd()
@@ -904,6 +918,8 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
 
                     b.HasIndex("ProjectId", "Number")
                         .IsUnique();
+
+                    b.HasIndex("ProjectId", "EpicNumber", "Number");
 
                     b.ToTable("Issues", (string)null);
                 });
@@ -1274,6 +1290,9 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
 
                     b.HasIndex("LabelProjectId", "LabelAgentLaunchIssueNumber", "CreatedAt")
                         .HasDatabaseName("IX_AgentSessions_LabelProjectId_LabelAgentLaunchIssueNumber_CreatedAt");
+
+                    b.HasIndex("LabelProjectId", "LabelAgentLaunchEpicNumber", "CreatedAt")
+                        .HasDatabaseName("IX_AgentSessions_LabelProjectId_LabelAgentLaunchEpicNumber_CreatedAt");
 
                     b.HasIndex("LabelProjectId", "LabelIssueNumber", "CreatedAt")
                         .HasDatabaseName("IX_AgentSessions_LabelProjectId_LabelIssueNumber_CreatedAt");
@@ -1736,6 +1755,9 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("TEXT");
 
+                    b.Property<int?>("EpicNumber")
+                        .HasColumnType("INTEGER");
+
                     b.Property<int?>("IssueNumber")
                         .ValueGeneratedOnAddOrUpdate()
                         .HasColumnType("INTEGER")
@@ -1773,6 +1795,9 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
 
                     b.HasIndex("MetadataProjectId", "IssueNumber")
                         .HasDatabaseName("IX_WorkflowRuns_ProjectId_IssueNumber");
+
+                    b.HasIndex("MetadataProjectId", "EpicNumber")
+                        .HasDatabaseName("IX_WorkflowRuns_ProjectId_EpicNumber");
 
                     b.HasIndex("Status", "AssignedWorkerId", "ReadySince")
                         .HasDatabaseName("IX_WorkflowRuns_Status_ReadySince");

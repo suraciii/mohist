@@ -4,7 +4,7 @@ public class EpicRow
 {
     public string Id { get; set; } = null!;
     public string ProjectId { get; set; } = null!;
-    public int? Number { get; set; }
+    public int Number { get; set; }
     public string Title { get; set; } = null!;
     public string Description { get; set; } = "";
     public string Priority { get; set; } = "p2";

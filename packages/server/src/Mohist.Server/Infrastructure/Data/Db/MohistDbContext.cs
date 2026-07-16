@@ -201,6 +201,8 @@ public class MohistDbContext : DbContext
                 .HasDatabaseName("IX_AgentSessions_LabelProjectId_LabelAgentLaunchIssueNumber_CreatedAt");
             entity.HasIndex(e => e.LabelAgentLaunchEpicNumber)
                 .HasDatabaseName("IX_AgentSessions_LabelAgentLaunchEpicNumber");
+            entity.HasIndex(e => new { e.LabelProjectId, e.LabelAgentLaunchEpicNumber, e.CreatedAt })
+                .HasDatabaseName("IX_AgentSessions_LabelProjectId_LabelAgentLaunchEpicNumber_CreatedAt");
         });
 
         modelBuilder.Entity<AgentSessionTranscriptTurnRow>(entity =>
@@ -279,7 +281,7 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.Status).HasMaxLength(32).IsRequired();
             entity.Property(e => e.PauseReason).HasMaxLength(1024);
             entity.HasIndex(e => new { e.ProjectId, e.Status, e.CreatedAt });
-            entity.HasIndex(e => new { e.ProjectId, e.Number });
+            entity.HasIndex(e => new { e.ProjectId, e.Number }).IsUnique();
         });
 
         modelBuilder.Entity<EpicIssueRow>(entity =>
@@ -296,6 +298,7 @@ public class MohistDbContext : DbContext
             // invariant at the database boundary.
             entity.HasIndex(e => new { e.ProjectId, e.IssueId });
             entity.HasIndex(e => new { e.ProjectId, e.IssueNumber });
+            entity.HasIndex(e => new { e.ProjectId, e.EpicNumber, e.IssueNumber });
         });
 
         modelBuilder.Entity<EpicActiveIssueRow>(entity =>
@@ -305,6 +308,7 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.IssueId).HasMaxLength(256).IsRequired();
             entity.Property(e => e.EpicId).HasMaxLength(64).IsRequired();
             entity.HasIndex(e => new { e.ProjectId, e.EpicId });
+            entity.HasIndex(e => new { e.ProjectId, e.EpicNumber, e.IssueNumber });
         });
 
         modelBuilder.Entity<IssueRow>(entity =>
@@ -336,6 +340,7 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.IsArchived)
                 .HasComputedColumnSql("json_extract(State, '$.archivedAt') IS NOT NULL");
             entity.HasIndex(e => new { e.ProjectId, e.Number }).IsUnique();
+            entity.HasIndex(e => new { e.ProjectId, e.EpicNumber, e.Number });
             entity.HasIndex(e => e.WorkflowRunId);
             entity.HasIndex(e => e.Status);
         });
@@ -616,6 +621,8 @@ public class MohistDbContext : DbContext
             entity.HasIndex(e => new { e.MetadataProjectId, e.AssignedWorkerId, e.CreatedAt });
             entity.HasIndex(e => new { e.MetadataProjectId, e.IssueNumber })
                 .HasDatabaseName("IX_WorkflowRuns_ProjectId_IssueNumber");
+            entity.HasIndex(e => new { e.MetadataProjectId, e.EpicNumber })
+                .HasDatabaseName("IX_WorkflowRuns_ProjectId_EpicNumber");
             // Issue-318 D3: covering index for the two scheduler queries
             // (FindAssignableAsync -> status == pending, FindAssignedToAsync
             // -> status == ready AND assigned == worker). The composite

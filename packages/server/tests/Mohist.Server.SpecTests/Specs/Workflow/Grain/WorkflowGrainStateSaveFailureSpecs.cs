@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Data.Epic;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.Workflow.Domain.Definition;
@@ -37,6 +38,7 @@ public sealed class WorkflowGrainStateSaveFailureSpecs
 
         await using var scope = _fixture.Services.CreateAsyncScope();
         var store = scope.ServiceProvider.GetRequiredService<IWorkflowRunStore>();
+        await SeedEpicAsync(scope.ServiceProvider, projectId, "epic_2");
         await store.SaveAsync(CreateBoundRun(workflowRunId, projectId, issueId));
 
         var failingStore = new FailingWorkflowRunStore(store);
@@ -186,6 +188,25 @@ public sealed class WorkflowGrainStateSaveFailureSpecs
         {
             ProjectId = projectId,
             DefaultTemplateId = definition.Id,
+        });
+        await db.SaveChangesAsync();
+    }
+
+    private static async Task SeedEpicAsync(IServiceProvider services, string projectId, string epicId)
+    {
+        var factory = services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
+        await using var db = await factory.CreateDbContextAsync();
+        db.Epics.Add(new EpicRow
+        {
+            Id = epicId,
+            ProjectId = projectId,
+            Number = 1,
+            Title = epicId,
+            Description = "",
+            Priority = "p2",
+            Status = "running",
+            CreatedAt = FixedTime,
+            UpdatedAt = FixedTime,
         });
         await db.SaveChangesAsync();
     }

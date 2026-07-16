@@ -170,6 +170,7 @@ public class EpicRecoverySpecs
     public async Task AffiliationReplay_WriteFailureLeavesEventPendingUntilLaterAttemptPersistsAffiliation()
     {
         await _fixture.ResetAsync();
+        await _fixture.SeedEpicAsync(ProjectId, EpicId, "running");
         await _fixture.SeedIssueAsync(ProjectId, IssueId, 1, IssueStatus.Backlog);
         await _fixture.SeedLinkAsync(ProjectId, EpicId, IssueId, 1);
         var grains = new FlakyAffiliationGrainFactory(_fixture.DbFactory);
@@ -203,6 +204,7 @@ public class EpicRecoverySpecs
     public async Task AffiliationReplay_DownstreamFailureAfterIssueCommitKeepsEventPending()
     {
         await _fixture.ResetAsync();
+        await _fixture.SeedEpicAsync(ProjectId, EpicId, "running");
         await _fixture.SeedIssueAsync(ProjectId, IssueId, 1, IssueStatus.Backlog);
         await _fixture.SeedLinkAsync(ProjectId, EpicId, IssueId, 1);
         var grains = new FlakyAffiliationGrainFactory(
@@ -237,6 +239,7 @@ public class EpicRecoverySpecs
     public async Task UnlinkedAffiliationReplay_WriteFailureRetainsThenClearsAffiliationOnRedelivery()
     {
         await _fixture.ResetAsync();
+        await _fixture.SeedEpicAsync(ProjectId, EpicId, "running");
         await _fixture.SeedIssueAsync(ProjectId, IssueId, 1, IssueStatus.Backlog, epicId: EpicId);
         await _fixture.SeedLinkAsync(ProjectId, EpicId, IssueId, 1);
         await _fixture.SeedActiveLinkAsync(ProjectId, EpicId, IssueId, 1);
@@ -656,11 +659,15 @@ public sealed class EpicRecoveryFixture : IAsyncLifetime
     public async Task SeedEpicAsync(string projectId, string epicId, string status)
     {
         await using var db = CreateDbContext();
+        var number = await db.Epics
+            .Where(row => row.ProjectId == projectId)
+            .Select(row => (int?)row.Number)
+            .MaxAsync() ?? 0;
         db.Epics.Add(new EpicRow
         {
             Id = epicId,
             ProjectId = projectId,
-            Number = 1,
+            Number = number + 1,
             Title = "Recovery epic",
             Description = "",
             Priority = "p2",
@@ -697,10 +704,15 @@ public sealed class EpicRecoveryFixture : IAsyncLifetime
     public async Task SeedLinkAsync(string projectId, string epicId, string issueId, int issueNumber)
     {
         await using var db = CreateDbContext();
+        var epicNumber = await db.Epics
+            .Where(row => row.ProjectId == projectId && row.Id == epicId)
+            .Select(row => row.Number)
+            .SingleAsync();
         db.EpicIssues.Add(new EpicIssueRow
         {
             ProjectId = projectId,
             EpicId = epicId,
+            EpicNumber = epicNumber,
             IssueId = issueId,
             IssueNumber = issueNumber,
             CreatedAt = TimeProvider.GetUtcNow(),
@@ -711,10 +723,15 @@ public sealed class EpicRecoveryFixture : IAsyncLifetime
     public async Task SeedActiveLinkAsync(string projectId, string epicId, string issueId, int issueNumber)
     {
         await using var db = CreateDbContext();
+        var epicNumber = await db.Epics
+            .Where(row => row.ProjectId == projectId && row.Id == epicId)
+            .Select(row => row.Number)
+            .SingleAsync();
         db.EpicActiveIssues.Add(new EpicActiveIssueRow
         {
             ProjectId = projectId,
             EpicId = epicId,
+            EpicNumber = epicNumber,
             IssueId = issueId,
             IssueNumber = issueNumber,
             CreatedAt = TimeProvider.GetUtcNow(),

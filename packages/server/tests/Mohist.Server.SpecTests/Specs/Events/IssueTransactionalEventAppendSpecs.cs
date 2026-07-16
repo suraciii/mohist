@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Logging.Abstractions;
 using Mohist.Server.Events.Grains;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Data.Epic;
 using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Infrastructure.Events;
@@ -22,13 +23,12 @@ namespace Mohist.Server.SpecTests.Specs.Events;
 /// rolls back the state transaction and propagates (no
 /// log-and-swallow catch remains); durable event rows survive a
 /// crash-after-commit and remain readable on a fresh
-/// <c>DbContext</c>. Also covers issue-412 T-003 lineage stamping:
+/// <c>DbContext</c>. Also covers the transitional issue-412 lineage stamping:
 /// events stamped by <c>IssueStore.SaveAsync</c> carry the issue's
 /// identity (<c>projectid</c>, <c>issueid</c>, <c>issue</c>) in
 /// <c>extensions</c> (D3 — user-visible number uses the protocol
 /// <c>issue</c> key, no <c>issueno</c> key remains), additionally
-/// stamp <c>epicid</c> when <c>state.EpicId</c> is non-null (D5 — no
-/// cross-aggregate query), and every emitted envelope satisfies the
+/// stamp <c>epicid</c> when <c>state.EpicId</c> is non-null, and every emitted envelope satisfies the
 /// catalog's declared required lineage attributes via the conformance
 /// helper.
 /// </summary>
@@ -61,7 +61,16 @@ public class IssueTransactionalEventAppendSpecs : IAsyncLifetime
         _eventStore = new EventStore(_dbFactory, NullLogger<EventStore>.Instance);
     }
 
-    public Task InitializeAsync() => Task.CompletedTask;
+    public async Task InitializeAsync()
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        db.Epics.AddRange(
+            NewEpic("epic_txn_1", 1),
+            NewEpic("epic_snapshot", 2),
+            NewEpic("epic_atomic", 3),
+            NewEpic("epic_txn_conformance", 4));
+        await db.SaveChangesAsync();
+    }
 
     public Task DisposeAsync()
     {
@@ -165,11 +174,8 @@ public class IssueTransactionalEventAppendSpecs : IAsyncLifetime
     [Fact]
     public async Task SaveAsync_IssueWithEpicAffiliation_StampsEpicIdOnExtensions()
     {
-        // D5 denormalization: when the issue's own state carries an
-        // EpicId (applied to Issue by durable Epic coordination, T-004),
-        // every issue.* event stamps `epicid` from that state. No
-        // cross-aggregate query is issued; the issue aggregate's
-        // own state is the sole source.
+        // The transitional legacy envelope still stamps EpicId from Issue state.
+        // Canonical EpicNumber resolution happens before the Issue transaction.
         var store = new IssueStore(_dbFactory, _eventStore, _grainFactory, NullLogger<IssueStore>.Instance);
         var issue = BuildIssue("issue_txn_with_epic", epicId: "epic_txn_1", number: 5);
 
@@ -369,6 +375,19 @@ public class IssueTransactionalEventAppendSpecs : IAsyncLifetime
             EpicId = epicId,
         };
     }
+
+    private static EpicRow NewEpic(string epicId, int number) => new()
+    {
+        Id = epicId,
+        ProjectId = ProjectId,
+        Number = number,
+        Title = epicId,
+        Description = "",
+        Priority = "p2",
+        Status = "running",
+        CreatedAt = TestTime.UtcNow,
+        UpdatedAt = TestTime.UtcNow,
+    };
 
     private sealed class Factory : IDbContextFactory<MohistDbContext>
     {

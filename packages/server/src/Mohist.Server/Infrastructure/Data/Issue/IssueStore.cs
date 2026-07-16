@@ -51,7 +51,8 @@ public class IssueStore : IIssueStore
     public async Task SaveAsync(string key, DomainIssue state)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
-        await StageIssueAsync(db, state, CancellationToken.None);
+        var epicNumber = await ResolveEpicNumberAsync(db, state, CancellationToken.None);
+        await StageIssueAsync(db, state, epicNumber, CancellationToken.None);
         await db.SaveChangesAsync();
     }
 
@@ -60,10 +61,11 @@ public class IssueStore : IIssueStore
         var source = IssueEventPersistence.IssueSource(state.Id);
         var subject = state.Number.ToString();
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var epicNumber = await ResolveEpicNumberAsync(db, state, ct);
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
         try
         {
-            await StageIssueAsync(db, state, ct);
+            await StageIssueAsync(db, state, epicNumber, ct);
             var extensions = IssueLineage.BuildExtensions(state);
             foreach (var evt in events)
             {
@@ -89,7 +91,11 @@ public class IssueStore : IIssueStore
 
     public Task<IReadOnlyList<DomainIssue>> ListAsync() => throw new NotImplementedException();
 
-    private static async Task StageIssueAsync(MohistDbContext db, DomainIssue state, CancellationToken ct)
+    private static async Task StageIssueAsync(
+        MohistDbContext db,
+        DomainIssue state,
+        int? epicNumber,
+        CancellationToken ct)
     {
         var row = await db.Issues.FindAsync(new object[] { state.Id }, ct);
         if (row is null)
@@ -100,6 +106,7 @@ public class IssueStore : IIssueStore
                 State = Serialize(state),
                 Risk = state.Risk,
                 EpicId = NormalizeEpicId(state.EpicId),
+                EpicNumber = epicNumber,
                 LineageVersion = 1,
             });
             state.SetLineageVersion(1);
@@ -110,8 +117,30 @@ public class IssueStore : IIssueStore
             row.State = Serialize(state);
             row.Risk = state.Risk;
             row.EpicId = NormalizeEpicId(state.EpicId);
+            row.EpicNumber = epicNumber;
             row.LineageVersion++;
         }
+    }
+
+    private static async Task<int?> ResolveEpicNumberAsync(
+        MohistDbContext db,
+        DomainIssue state,
+        CancellationToken ct)
+    {
+        var epicId = NormalizeEpicId(state.EpicId);
+        if (epicId is null) return null;
+
+        var epicNumber = await db.Epics.AsNoTracking()
+            .Where(epic => epic.ProjectId == state.ProjectId && epic.Id == epicId)
+            .Select(epic => (int?)epic.Number)
+            .SingleOrDefaultAsync(ct);
+        if (epicNumber is not > 0)
+        {
+            throw new InvalidOperationException(
+                $"Issue '{state.ProjectId}/#{state.Number}' references unresolved Epic '{epicId}'.");
+        }
+
+        return epicNumber;
     }
 
     private static string? NormalizeEpicId(string? epicId) =>

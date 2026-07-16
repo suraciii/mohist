@@ -120,6 +120,7 @@ public class EpicGrain : Grain, IEpicGrain
         db.EpicIssues.Add(new EpicIssueRow
         {
             EpicId = epicId,
+            EpicNumber = row.Number,
             ProjectId = projectId,
             IssueId = issueId,
             IssueNumber = issueNumber,
@@ -142,6 +143,7 @@ public class EpicGrain : Grain, IEpicGrain
                 ProjectId = projectId,
                 IssueId = issueId,
                 EpicId = epicId,
+                EpicNumber = row.Number,
                 IssueNumber = issueNumber,
             });
         }
@@ -309,6 +311,7 @@ public class EpicGrain : Grain, IEpicGrain
             db.EpicIssues.Add(new EpicIssueRow
             {
                 EpicId = epicId,
+                EpicNumber = row.Number,
                 ProjectId = projectId,
                 IssueId = item.IssueId,
                 IssueNumber = item.IssueNumber,
@@ -329,6 +332,7 @@ public class EpicGrain : Grain, IEpicGrain
                     ProjectId = projectId,
                     IssueId = item.IssueId,
                     EpicId = epicId,
+                    EpicNumber = row.Number,
                     IssueNumber = item.IssueNumber,
                 });
             }
@@ -737,6 +741,7 @@ public class EpicGrain : Grain, IEpicGrain
                 ProjectId = projectId,
                 IssueId = link.IssueId,
                 EpicId = epicId,
+                EpicNumber = link.EpicNumber,
                 IssueNumber = link.IssueNumber,
             });
         }
@@ -1090,7 +1095,7 @@ public class EpicGrain : Grain, IEpicGrain
         {
             Id = row.Id,
             ProjectId = row.ProjectId,
-            Number = row.Number ?? 0,
+            Number = row.Number,
             Title = row.Title,
             Description = row.Description,
             Priority = row.Priority,

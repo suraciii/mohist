@@ -6,6 +6,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Mohist.Server.Events.Grains;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Data.Epic;
 using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Infrastructure.Data.Workflow;
@@ -105,6 +106,7 @@ public class WorkflowRunStoreSpecs
 
         await using (var seed = factory.CreateDbContext())
         {
+            seed.Epics.Add(NewEpic("epic_from_workflow", 1));
             seed.Issues.Add(new IssueRow
             {
                 IssueId = IssueId,
@@ -276,6 +278,11 @@ public class WorkflowRunStoreSpecs
         using var factory = new FakeWorkflowRunStoreDbContextFactory();
         var eventStore = new EventStore(factory, NullLogger<EventStore>.Instance);
         var store = new WorkflowRunStore(factory, eventStore, new NullDispatchGrainFactory(), NullLogger<WorkflowRunStore>.Instance);
+        await using (var seed = factory.CreateDbContext())
+        {
+            seed.Epics.Add(NewEpic("epic_workflow", 1));
+            await seed.SaveChangesAsync();
+        }
         var run = new WorkflowRun
         {
             Id = WorkflowRunId,
@@ -507,6 +514,19 @@ public class WorkflowRunStoreSpecs
             Stages = [],
         };
     }
+
+    private static EpicRow NewEpic(string epicId, int number) => new()
+    {
+        Id = epicId,
+        ProjectId = ProjectId,
+        Number = number,
+        Title = epicId,
+        Description = "",
+        Priority = "p2",
+        Status = "running",
+        CreatedAt = FixedTime,
+        UpdatedAt = FixedTime,
+    };
 
     /// <summary>
     /// Minimal <see cref="IGrainFactory"/> stand-in for transactional

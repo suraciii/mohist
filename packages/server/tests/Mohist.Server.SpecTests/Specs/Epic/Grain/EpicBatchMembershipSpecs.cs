@@ -347,7 +347,7 @@ public class EpicBatchMembershipSpecs
 
         var time = new FakeTimeProvider(new DateTimeOffset(2026, 7, 1, 12, 0, 0, TimeSpan.Zero));
         var grain = new EpicGrain(
-            database.CreateFactory(new InsertConflictingActiveIssueBeforeSaveInterceptor(ProjectId, "issue_race", "epic_owner", 1)),
+            database.CreateFactory(new InsertConflictingActiveIssueBeforeSaveInterceptor(ProjectId, "issue_race", "epic_owner", 2, 1)),
             new NullGrainFactory(),
             time,
             store,
@@ -874,6 +874,7 @@ public class EpicBatchMembershipSpecs
         string projectId,
         string issueId,
         string ownerEpicId,
+        int ownerEpicNumber,
         int issueNumber) : SaveChangesInterceptor
     {
         private bool _inserted;
@@ -902,12 +903,13 @@ public class EpicBatchMembershipSpecs
             {
                 await using var command = connection.CreateCommand();
                 command.CommandText = """
-                    INSERT INTO "EpicActiveIssues" ("ProjectId", "IssueId", "EpicId", "IssueNumber", "CreatedAt")
-                    VALUES ($projectId, $issueId, $epicId, $issueNumber, $createdAt)
+                    INSERT INTO "EpicActiveIssues" ("ProjectId", "IssueId", "EpicId", "EpicNumber", "IssueNumber", "CreatedAt")
+                    VALUES ($projectId, $issueId, $epicId, $epicNumber, $issueNumber, $createdAt)
                     """;
                 AddParameter(command, "$projectId", projectId);
                 AddParameter(command, "$issueId", issueId);
                 AddParameter(command, "$epicId", ownerEpicId);
+                AddParameter(command, "$epicNumber", ownerEpicNumber);
                 AddParameter(command, "$issueNumber", issueNumber);
                 AddParameter(command, "$createdAt", new DateTimeOffset(2026, 7, 1, 12, 0, 0, TimeSpan.Zero));
                 await command.ExecuteNonQueryAsync(cancellationToken);

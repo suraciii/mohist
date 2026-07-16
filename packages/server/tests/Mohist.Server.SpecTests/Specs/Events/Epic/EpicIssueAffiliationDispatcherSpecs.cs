@@ -66,6 +66,10 @@ public class EpicIssueAffiliationDispatcherSpecs
     private async Task ReplaceMembershipAsync(string oldEpicId, string newEpicId)
     {
         await using var db = _fixture.CreateDbContext();
+        var newEpicNumber = await db.Epics
+            .Where(row => row.ProjectId == ProjectId && row.Id == newEpicId)
+            .Select(row => row.Number)
+            .SingleAsync();
         var oldLinks = await db.EpicIssues
             .Where(row => row.ProjectId == ProjectId && row.EpicId == oldEpicId && row.IssueId == IssueId)
             .ToListAsync();
@@ -78,6 +82,7 @@ public class EpicIssueAffiliationDispatcherSpecs
         {
             ProjectId = ProjectId,
             EpicId = newEpicId,
+            EpicNumber = newEpicNumber,
             IssueId = IssueId,
             IssueNumber = 1,
             CreatedAt = _fixture.TimeProvider.GetUtcNow(),
@@ -86,6 +91,7 @@ public class EpicIssueAffiliationDispatcherSpecs
         {
             ProjectId = ProjectId,
             EpicId = newEpicId,
+            EpicNumber = newEpicNumber,
             IssueId = IssueId,
             IssueNumber = 1,
             CreatedAt = _fixture.TimeProvider.GetUtcNow(),

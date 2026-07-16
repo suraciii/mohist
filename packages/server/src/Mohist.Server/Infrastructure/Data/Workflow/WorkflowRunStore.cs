@@ -42,7 +42,8 @@ public class WorkflowRunStore : IWorkflowRunStore
     public async Task SaveAsync(WorkflowRun run, CancellationToken ct = default)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        await StageRunAsync(db, run, ct);
+        var epicNumber = await ResolveEpicNumberAsync(db, run, ct);
+        await StageRunAsync(db, run, epicNumber, ct);
         await db.SaveChangesAsync(ct);
     }
 
@@ -57,10 +58,11 @@ public class WorkflowRunStore : IWorkflowRunStore
         var source = WorkflowEventSource(run.Id);
 
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var epicNumber = await ResolveEpicNumberAsync(db, run, ct);
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
         try
         {
-            await StageRunAsync(db, run, ct);
+            await StageRunAsync(db, run, epicNumber, ct);
             foreach (var evt in events)
             {
                 if (evt is null) continue;
@@ -116,7 +118,11 @@ public class WorkflowRunStore : IWorkflowRunStore
         return run;
     }
 
-    private static async Task StageRunAsync(MohistDbContext db, WorkflowRun run, CancellationToken ct)
+    private static async Task StageRunAsync(
+        MohistDbContext db,
+        WorkflowRun run,
+        int? epicNumber,
+        CancellationToken ct)
     {
         var entity = await db.WorkflowRuns.FindAsync([run.Id], ct);
 
@@ -127,6 +133,7 @@ public class WorkflowRunStore : IWorkflowRunStore
                 WorkflowRunId = run.Id,
                 State = JSON.Serialize(run),
                 EpicId = WorkflowRunLineage.EpicAffiliationOf(run),
+                EpicNumber = epicNumber,
             };
             db.WorkflowRuns.Add(newEntity);
             db.Entry(newEntity).Property<long>("ETag").CurrentValue = 1;
@@ -134,9 +141,38 @@ public class WorkflowRunStore : IWorkflowRunStore
         }
 
         entity.EpicId = WorkflowRunLineage.EpicAffiliationOf(run);
+        entity.EpicNumber = epicNumber;
         entity.State = JSON.Serialize(run);
         var entry = db.Entry(entity);
         entry.Property<long>("ETag").CurrentValue = entry.Property<long>("ETag").OriginalValue + 1;
+    }
+
+    private static async Task<int?> ResolveEpicNumberAsync(
+        MohistDbContext db,
+        WorkflowRun run,
+        CancellationToken ct)
+    {
+        var epicId = WorkflowRunLineage.EpicAffiliationOf(run);
+        if (epicId is null) return null;
+
+        var projectId = run.Metadata.Annotations?.GetValueOrDefault("projectId");
+        if (string.IsNullOrWhiteSpace(projectId))
+        {
+            throw new InvalidOperationException(
+                $"Workflow run '{run.Id}' cannot persist Epic '{epicId}' without project context.");
+        }
+
+        var epicNumber = await db.Epics.AsNoTracking()
+            .Where(epic => epic.ProjectId == projectId && epic.Id == epicId)
+            .Select(epic => (int?)epic.Number)
+            .SingleOrDefaultAsync(ct);
+        if (epicNumber is not > 0)
+        {
+            throw new InvalidOperationException(
+                $"Workflow run '{run.Id}' references unresolved Epic '{epicId}' in Project '{projectId}'.");
+        }
+
+        return epicNumber;
     }
 
     private static WorkflowRun? Deserialize(string json)

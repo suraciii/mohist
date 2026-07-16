@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Logging.Abstractions;
 using Mohist.Server.Events.Grains;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Data.Epic;
 using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Events;
@@ -58,7 +59,23 @@ public class TransactionalEventAppendSpecs : IAsyncLifetime
         _eventStore = new EventStore(_dbFactory, NullLogger<EventStore>.Instance);
     }
 
-    public Task InitializeAsync() => Task.CompletedTask;
+    public async Task InitializeAsync()
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        db.Epics.Add(new EpicRow
+        {
+            Id = "epic_txn_1",
+            ProjectId = ProjectId,
+            Number = 1,
+            Title = "epic_txn_1",
+            Description = "",
+            Priority = "p2",
+            Status = "running",
+            CreatedAt = FixedTime,
+            UpdatedAt = FixedTime,
+        });
+        await db.SaveChangesAsync();
+    }
 
     public Task DisposeAsync()
     {

@@ -114,6 +114,7 @@ public class CanonicalIssueReferenceMigrationSpecs
 
         var runs = await verify.WorkflowRuns.AsNoTracking()
             .OrderBy(row => row.WorkflowRunId)
+            .Select(row => new { row.MetadataProjectId, row.IssueNumber })
             .ToListAsync();
         Assert.Collection(
             runs,
@@ -451,7 +452,9 @@ public class CanonicalIssueReferenceMigrationSpecs
         var attachment = await context.Attachments.AsNoTracking()
             .SingleAsync(row => row.Id == "att_alpha");
         var run = await context.WorkflowRuns.AsNoTracking()
-            .SingleAsync(row => row.WorkflowRunId == "run_alpha");
+            .Where(row => row.WorkflowRunId == "run_alpha")
+            .Select(row => new { row.MetadataProjectId, row.IssueNumber })
+            .SingleAsync();
         return new ConvergedValues(
             profile.ProjectId,
             profile.IssueNumber,

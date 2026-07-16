@@ -65,7 +65,7 @@ membership authority each have a separately enforceable boundary. Do not reuse t
 |---|---|
 | T-001 typed scoped identities and codec | done — strict IssueKey/EpicKey, exact canonical codec, typed-only GrainKey access |
 | T-002 canonical Issue reference migration | done - every current-state owner classified; missing scoped columns, reconciliation, writer coverage and migration regressions landed |
-| T-003 canonical Epic reference migration | pending |
+| T-003 canonical Epic reference migration | done - all current owners classified; scoped columns, guarded backfill, writer coverage and migration regressions landed |
 | T-004 number-only server model/APIs | pending |
 | T-005 Issue-owned membership and Epic progression | pending |
 | T-006 durable EnsureStarted Workflow handoff | pending |
@@ -219,6 +219,70 @@ attachment id and event id remain independent identities.
 - Server ArchTests: **22 passed / 0 failed / 0 skipped**.
 - Server SpecTests full suite: **2833 passed / 0 failed / 0 skipped**.
 - EF pending-model snapshot check and `git diff --check` pass; server builds with zero warnings.
+
+## T-003 delivered
+
+### Current-state Epic owner inventory
+
+- `Epics` is the aggregate root. (`ProjectId`, `Number`) is now required and unique. Legacy `Id`
+  remains only as the T-004 transition lookup and migration source.
+- `EpicIssues` and `EpicActiveIssues` are the current Epic-owned retained/current membership rows.
+  Both now persist `ProjectId` + `EpicNumber` + `IssueNumber`. They remain temporary T-005 migration
+  input; T-005 removes both rows after Issue becomes the sole affiliation authority.
+- `Issues` now persists nullable `EpicNumber` beside the transitional `EpicId` copy. Reconciliation
+  requires its JSON state, copied columns, and current membership to agree. Active membership wins;
+  otherwise the latest retained membership is the deterministic current-affiliation dataset for
+  T-005.
+- `WorkflowRuns` now persists nullable `EpicNumber` beside the transitional `EpicId` copy and its
+  computed Project context. Current writers resolve the canonical number before the WorkflowRun
+  transaction starts.
+- Direct Agent-launch `AgentSessions` already persist Project and epic number through computed
+  labels. Reconciliation requires a positive canonical decimal that resolves within the same
+  Project and adds a Project-scoped recency index. Workflow-origin Sessions do not currently own an
+  Epic field; T-006/T-008 will carry the minimal Workflow context into those integrations.
+
+Epic managers, grains, queriers and API/read DTOs are access paths over these owners, not additional
+persisted owners. Existing API and domain contracts still expose `EpicId` until the number-only
+server cutover in T-004.
+
+### Historical and later-removal references
+
+- Existing `EpicEvents` source paths, payloads and extension JSON are immutable historical
+  envelopes. The migration proves they remain byte-for-byte unchanged.
+- Historical migration/designer files remain historical evidence and are not rewritten.
+- Current Epic event sources/query methods and `epicid` lineage remain transition runtime paths for
+  T-004 and T-007. Server consumers and integrations move to canonical envelope context in T-008.
+- Legacy `EpicId` on root, membership, Issue, WorkflowRun and current DTOs remains only until the
+  tasks named above remove it. No compatibility owner/controller model was introduced.
+
+### Migration and transaction boundary
+
+- `20260716150000_AddCanonicalEpicReferenceColumns` adds nullable transition columns from the
+  immediate previous schema. `20260716160000_BackfillCanonicalEpicReferences` executes one guarded
+  reconciliation, makes root/relation numbers required, and creates scoped indexes.
+- Reconciliation validates every owner before changing data. Missing roots, cross-Project links,
+  invalid/non-unique numbers, conflicting copied values and invalid Session references fail with an
+  owner-specific constraint. No Epic, membership, Issue, WorkflowRun, Session or event row is
+  deleted.
+- Migration specs seed `proj_alpha/Epic 7` and `proj_beta/Epic 7`, preserve all owner counts and
+  Project isolation, apply the actual migration through `IMigrator`, and execute reconciliation
+  twice after migration to prove idempotency.
+- Transitional Issue/Workflow writers resolve `EpicNumber` before opening their aggregate
+  transaction. The transaction itself still writes only that aggregate state and its events. Epic
+  membership writers copy the Epic root's own number inside the existing Epic aggregate boundary.
+
+### T-003 validation
+
+- Canonical Epic migration and writer specs: **11 passed / 0 failed**.
+- Formerly affected recovery, transactional append, artifact and historical migration specs:
+  **66 passed / 0 failed**.
+- Server SpecTests full suite: **2816 passed / 0 failed / 0 skipped**.
+- Server UnitTests: **1454 passed / 0 failed / 0 skipped**.
+- Server ArchTests: **27 passed / 0 failed / 0 skipped**.
+- EF runtime model matches `MohistDbContextModelSnapshot`; `git diff --check` and OpenSpec JSON
+  validation pass.
+- Full `npm test` passes: CLI **861**, Web **4683**, and Runner **1018** in addition to the server
+  suites above; Web/Runner typechecks and boundary checks are green.
 
 ## Validation of planning artifacts
 

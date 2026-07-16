@@ -277,10 +277,15 @@ public class IssueQuerierPrimaryEpicSpecs
         string issueId,
         int issueNumber)
     {
+        var epicNumber = db.Epics
+            .Where(row => row.ProjectId == projectId && row.Id == epicId)
+            .Select(row => row.Number)
+            .Single();
         db.EpicIssues.Add(new EpicIssueRow
         {
             ProjectId = projectId,
             EpicId = epicId,
+            EpicNumber = epicNumber,
             IssueId = issueId,
             IssueNumber = issueNumber,
             CreatedAt = TestTime.UtcNow,

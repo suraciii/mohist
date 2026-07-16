@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Data.Epic;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Runner.Grains;
@@ -34,6 +35,7 @@ public class WorkflowArtifactBindingSpecs : WorkflowGrainSpecs
 
         var (work, runnerId) = await PollWorkAnyAsync();
         var uploadId = await SeedPendingUploadAsync(work.WorkflowRunId, work.WorkId, "task-1.1", "review.md");
+        await SeedEpicAsync(work.WorkflowRunId, "epic_artifact");
         var workflow = Grains.GetGrain<IWorkflowGrain>(work.WorkflowRunId);
         await workflow.ApplyIssueLineageAsync(new WorkflowIssueLineage(
             TestIssueId(work.WorkflowRunId),
@@ -76,6 +78,7 @@ public class WorkflowArtifactBindingSpecs : WorkflowGrainSpecs
         var (work, _) = await PollWorkAnyAsync();
         var workflow = Grains.GetGrain<IWorkflowGrain>(work.WorkflowRunId);
         var issueId = TestIssueId(work.WorkflowRunId);
+        await SeedEpicAsync(work.WorkflowRunId, "epic_current");
 
         await workflow.ApplyIssueLineageAsync(new WorkflowIssueLineage(issueId, "epic_current", 2));
         await workflow.ApplyIssueLineageAsync(new WorkflowIssueLineage(issueId, "epic_stale", 1));
@@ -88,6 +91,24 @@ public class WorkflowArtifactBindingSpecs : WorkflowGrainSpecs
         var paused = Assert.Single((await EventStore.ListAsync(work.WorkflowRunId)), entry =>
             entry.Envelope.Type == EventCatalog.ReverseDns.WorkflowRunPaused);
         Assert.Equal("epic_current", paused.Envelope.Extensions[EventCatalog.Lineage.EpicId]);
+    }
+
+    private async Task SeedEpicAsync(string workflowRunId, string epicId)
+    {
+        await using var db = CreateDb();
+        db.Epics.Add(new EpicRow
+        {
+            Id = epicId,
+            ProjectId = TestProjectId(workflowRunId),
+            Number = 1,
+            Title = epicId,
+            Description = "",
+            Priority = "p2",
+            Status = "running",
+            CreatedAt = TestTime.UtcNow,
+            UpdatedAt = TestTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]

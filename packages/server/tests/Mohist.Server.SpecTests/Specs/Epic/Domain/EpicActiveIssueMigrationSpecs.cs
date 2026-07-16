@@ -29,21 +29,22 @@ public class EpicActiveIssueMigrationSpecs
             NewEpic("epic_paused", 3, "paused", createdAt.AddMinutes(2)),
             NewEpic("epic_done", 4, "done", createdAt.AddMinutes(3)),
             NewEpic("epic_closed", 5, "closed", createdAt.AddMinutes(4)));
-        context.EpicIssues.AddRange(
+        await context.SaveChangesAsync();
+        await SeedLinksAsync(
+            context,
             NewLink("epic_idle", "issue_idle", 101, createdAt),
             NewLink("epic_running", "issue_running", 102, createdAt.AddMinutes(1)),
             NewLink("epic_paused", "issue_paused", 103, createdAt.AddMinutes(2)),
             NewLink("epic_done", "issue_done", 104, createdAt.AddMinutes(3)),
             NewLink("epic_closed", "issue_closed", 105, createdAt.AddMinutes(4)));
-        await context.SaveChangesAsync();
 
         await migrator.MigrateAsync("20260628022822_DropEpicIssueMembershipUniqueIndex");
 
-        var activeSlots = await context.EpicActiveIssues
-            .AsNoTracking()
-            .OrderBy(row => row.IssueNumber)
-            .Select(row => new { row.EpicId, row.IssueId, row.IssueNumber })
-            .ToListAsync();
+        var activeSlots = await context.Database.SqlQueryRaw<ActiveSlot>("""
+            SELECT "EpicId", "IssueId", "IssueNumber"
+            FROM "EpicActiveIssues"
+            ORDER BY "IssueNumber"
+            """).ToListAsync();
 
         Assert.Equal(3, activeSlots.Count);
         Assert.Collection(activeSlots,
@@ -66,7 +67,8 @@ public class EpicActiveIssueMigrationSpecs
                 Assert.Equal(103, row.IssueNumber);
             });
 
-        Assert.Equal(5, await context.EpicIssues.AsNoTracking().CountAsync());
+        Assert.Equal(5, await context.Database.SqlQueryRaw<int>(
+            "SELECT COUNT(*) AS \"Value\" FROM \"EpicIssues\"").SingleAsync());
         Assert.DoesNotContain(activeSlots, row => row.EpicId is "epic_done" or "epic_closed");
     }
 
@@ -91,6 +93,24 @@ public class EpicActiveIssueMigrationSpecs
         IssueNumber = issueNumber,
         CreatedAt = createdAt,
     };
+
+    private static async Task SeedLinksAsync(MohistDbContext context, params EpicIssueRow[] links)
+    {
+        foreach (var link in links)
+        {
+            await context.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO "EpicIssues" ("EpicId", "IssueId", "ProjectId", "IssueNumber", "CreatedAt")
+                VALUES ({link.EpicId}, {link.IssueId}, {link.ProjectId}, {link.IssueNumber}, {link.CreatedAt})
+                """);
+        }
+    }
+
+    private sealed class ActiveSlot
+    {
+        public string EpicId { get; set; } = string.Empty;
+        public string IssueId { get; set; } = string.Empty;
+        public int IssueNumber { get; set; }
+    }
 
     private static async Task<bool> TableExistsAsync(MohistDbContext context, string tableName)
     {

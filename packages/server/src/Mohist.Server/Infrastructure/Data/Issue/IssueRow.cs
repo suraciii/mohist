@@ -15,5 +15,6 @@ public class IssueRow
     public string? PrerequisiteNumbersJson { get; set; }
     public string? Risk { get; set; }
     public string? EpicId { get; set; }
+    public int? EpicNumber { get; set; }
     public long LineageVersion { get; set; } = 1;
 }
