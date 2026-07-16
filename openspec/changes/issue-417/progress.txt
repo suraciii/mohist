@@ -24,3 +24,33 @@
 - T-001 没有改任何生产代码、没有跑测试（设计阶段任务）。后续 T-002 起的迁移 / 编码
   任务如果要把协调者 grain 真正落出来，需要遵守本节五条约束，并由 T-005 的 ArchTest
   兜底「仅协调者依赖窄 participant 接口」。
+
+## T-002 notes (AddIssueRepositoryProjection migration)
+
+- 走的还是 `AddAgentLaunchLabelComputedColumns` 既有的 SQLite stored
+  generated column 套路：`AddColumn` 先把列加出来（plain nullable
+  string），再 `AlterColumn` 把同一列改成 STORED computed 定义，触发
+  EF 的自动 `CREATE TABLE ... AS (...) STORED` table rebuild。
+  比 `AddIssueIsArchivedComputedColumn` 多走两步是因为后者本来就在建表
+  时直接生成。
+- ProjectRow 新加的 `RepositoryRevision` (long) 和
+  `LastRepositoryCommandJson` (string?) 是普通列，迁移里给前者显式
+  `defaultValue: 0L`，协调者真正落地前不会被任何业务读写；后者 null
+  即可。`Design.md` D2 把这两个字段定位为「协调者进程的 receipt 与
+  revision 载体」，T-005 实现时才把读写连起来。
+- EF Core 11 的 `HasDefaultValue(0L)` 并不会让 INSERT 省略列——
+  测过两遍都是同一结果：EF 仍然把列加进 INSERT 语句。所以测试侧
+  想在「老 schema + 新 model」组合下不踩到缺失列，唯一干净的做法是
+  把 schema 升级到当前 model（`EnsureCreated()`），而不是把列
+  排除在 INSERT 之外。这条规律对后续 T-005 写新 spec 时同样适用。
+- `MigratedSqliteTemplate.CopyTo(connection, "...")` 把 schema 钉
+  在某个历史 migration 上，本任务里只对「专门验证该 migration 行为」
+  的测试安全；任何走「用当前 model 写一行」的测试都得切到完整模板
+  或 `EnsureCreated`，否则会撞上新加列——`InboxSubscriptionsMigrationSpecs
+  .Up_StoresAndReadsSubscriptionRow` 因此改成用 `EnsureCreated()`。
+- 跨任务命名统一：`IssueRow.RepositoryName`（camelCase JSON
+  path `$.repositoryRef`）+ `IX_Issues_ProjectId_RepositoryName_Status`
+  索引名沿用 D3 的规范；T-004 的 blocker 查询可以直接消费。
+- `dotnet test` 全跑过：911 CLI + 1372 unit + 27 arch + 2789 spec
+  + 1016 runner，`dotnet build Mohist.sln -p:SkipWebBuild=true`
+  在 warnings-as-errors 下 0 warning 0 error。
