@@ -260,7 +260,6 @@ export function IssueDetailPage({
                 <div className="flex shrink-0 items-center gap-2">
                   <ActivityDialog
                     issueNumber={issueNumber}
-                    issueId={issue?.id}
                     workflowStatus={issue?.workflowStatus}
                     TimelinePanel={components?.EventTimelinePanel}
                   />

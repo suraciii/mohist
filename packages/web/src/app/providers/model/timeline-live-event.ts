@@ -1,8 +1,31 @@
 import type { TimelineLiveEvent } from '../../../entities/issue'
 
 export function readIssueNumber(parsed: Record<string, unknown>): number | null {
-  const issueNumber = parsed.issueNumber ?? parsed.issueNo ?? parsed.number
+  const issueNumber = parsed.issueNumber
   return typeof issueNumber === 'number' ? issueNumber : null
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null
+}
+
+function readEnvelopePayload(rawData: unknown, parsed: Record<string, unknown>): Record<string, unknown> {
+  const envelope = asRecord(rawData)
+  if (!envelope || typeof envelope.specVersion !== 'string') return parsed
+
+  return asRecord(envelope.payload) ?? asRecord(envelope.data) ?? parsed
+}
+
+function readEnvelopeIssueNumber(rawData: unknown): number | null {
+  const envelope = asRecord(rawData)
+  const extensions = envelope && asRecord(envelope.extensions)
+  const issue = extensions?.issue
+  if (typeof issue !== 'string' || issue.trim() === '') return null
+
+  const issueNumber = Number(issue)
+  return Number.isFinite(issueNumber) ? issueNumber : null
 }
 
 export function readTimelineEventId(rawData: unknown): string | null {
@@ -27,12 +50,12 @@ export function buildTimelineLiveEvent(
   rawData: unknown,
   parsed: Record<string, unknown>,
 ): TimelineLiveEvent {
+  const payload = readEnvelopePayload(rawData, parsed)
   return {
-    issueNumber: readIssueNumber(parsed),
-    issueId: typeof parsed.issueId === 'string' ? parsed.issueId : null,
+    issueNumber: readEnvelopeIssueNumber(rawData) ?? readIssueNumber(payload),
     type: eventName,
-    time: readTimelineTime(rawData, parsed),
+    time: readTimelineTime(rawData, payload),
     eventId: readTimelineEventId(rawData),
-    payload: parsed,
+    payload,
   }
 }

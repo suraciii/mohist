@@ -33,14 +33,13 @@ const projects: Project[] = [
   },
 ]
 
-function renderDialog(props: { issueNumber?: number; issueId?: string | null; workflowStatus?: string | null } = {}) {
+function renderDialog(props: { issueNumber?: number; workflowStatus?: string | null } = {}) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <QueryClientProvider client={queryClient}>
       <ProjectProvider initialProjects={projects} initialProjectId="proj-1">
         <ActivityDialog
           issueNumber={props.issueNumber ?? 42}
-          issueId={props.issueId ?? 'issue-42'}
           workflowStatus={props.workflowStatus ?? null}
           TimelinePanel={TestTimelinePanel}
         />
@@ -71,7 +70,7 @@ describe('ActivityDialog', () => {
   })
 
   it('opens the timeline inside a Dialog and fetches persisted events', async () => {
-    renderDialog({ issueNumber: 42, issueId: 'issue-42' })
+    renderDialog({ issueNumber: 42 })
 
     fireEvent.click(screen.getByTestId('activity-entry'))
 

@@ -42,7 +42,6 @@ function makeHistoryEvent(overrides: Partial<StoredCloudEventDto> = {}): StoredC
 function makeLiveEvent(overrides: Partial<TimelineLiveEvent> = {}): TimelineLiveEvent {
   return {
     issueNumber: 42,
-    issueId: 'issue-42',
     type: 'com.mohist.workflow.stage.started',
     time: '2026-06-18T10:01:00.000Z',
     eventId: 'evt-live-1',
@@ -75,9 +74,9 @@ function makeWrapper() {
 
 function renderTimelineHook(enabled: boolean = true) {
   return renderHook(
-    ({ number, issueId, isEnabled }) => useEventTimeline(number, issueId, isEnabled, historyHook),
+    ({ number, isEnabled }) => useEventTimeline(number, isEnabled, historyHook),
     {
-      initialProps: { number: 42, issueId: 'issue-42', isEnabled: enabled },
+      initialProps: { number: 42, isEnabled: enabled },
       wrapper: makeWrapper(),
     },
   )
@@ -121,7 +120,6 @@ describe('useEventTimeline', () => {
     act(() => {
       dispatchTimelineEvent(makeLiveEvent({
         issueNumber: 99,
-        issueId: 'issue-99',
         eventId: 'l-other',
         payload: { issueNumber: 99 },
       }))
@@ -130,15 +128,14 @@ describe('useEventTimeline', () => {
     expect(result.current.entries).toHaveLength(0)
   })
 
-  it('matches live events by issueId when issueNumber differs', () => {
+  it('ignores a live event without canonical issue context', () => {
     const { result } = renderTimelineHook()
 
     act(() => {
-      dispatchTimelineEvent(makeLiveEvent({ issueNumber: null, issueId: 'issue-42', eventId: 'l-by-id' }))
+      dispatchTimelineEvent(makeLiveEvent({ issueNumber: null, eventId: 'l-without-context' }))
     })
 
-    expect(result.current.entries).toHaveLength(1)
-    expect(result.current.entries[0].id).toBe('l-by-id')
+    expect(result.current.entries).toHaveLength(0)
   })
 
   it('deduplicates live events against history by eventId', async () => {
@@ -194,7 +191,7 @@ describe('useEventTimeline', () => {
 
     expect(result.current.entries).toHaveLength(1)
 
-    rerender({ number: 43, issueId: 'issue-42', isEnabled: true })
+    rerender({ number: 43, isEnabled: true })
 
     expect(result.current.entries).toHaveLength(0)
   })
@@ -212,7 +209,7 @@ describe('useEventTimeline', () => {
 
     expect(requestedIssueNumbers).toEqual([])
 
-    rerender({ number: 42, issueId: 'issue-42', isEnabled: true })
+    rerender({ number: 42, isEnabled: true })
 
     await waitFor(() => {
       expect(requestedIssueNumbers).toEqual(['42'])
@@ -237,7 +234,7 @@ describe('useEventTimeline', () => {
     })
     expect(result.current.entries).toEqual([])
 
-    rerender({ number: 42, issueId: 'issue-42', isEnabled: true })
+    rerender({ number: 42, isEnabled: true })
 
     act(() => {
       dispatchTimelineEvent(makeLiveEvent({ issueNumber: 42, eventId: 'after-open' }))

@@ -19,7 +19,6 @@ const components: IssueDetailPageComponents = {
     <div
       data-testid="event-timeline-panel-mock"
       data-issue-number={props.issueNumber}
-      data-issue-id={props.issueId ?? ''}
       data-workflow-status={props.workflowStatus ?? ''}
       data-enabled={props.enabled === undefined ? '' : String(props.enabled)}
     />
@@ -522,7 +521,6 @@ describe('IssueDetailPage activity dialog', () => {
 
     const panel = await waitFor(() => screen.getByTestId('event-timeline-panel-mock'))
     expect(panel).toHaveAttribute('data-issue-number', '14')
-    expect(panel).toHaveAttribute('data-issue-id', 'issue-14')
     expect(panel).toHaveAttribute('data-workflow-status', 'running')
     expect(panel).toHaveAttribute('data-enabled', 'true')
 
@@ -589,7 +587,6 @@ describe('IssueDetailPage activity dialog', () => {
     const panel = await waitFor(() => screen.getByTestId('event-timeline-panel-mock'))
     expect(panel).toHaveAttribute('data-enabled', 'true')
     expect(panel).toHaveAttribute('data-issue-number', '14')
-    expect(panel).toHaveAttribute('data-issue-id', 'issue-14')
     expect(panel).toHaveAttribute('data-workflow-status', 'running')
 
     const dialogContent = screen.getByTestId('activity-dialog-content')

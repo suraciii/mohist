@@ -4,7 +4,6 @@ import { dispatchTimelineEvent, onTimelineEvent, type TimelineLiveEvent } from '
 function makeEvent(overrides: Partial<TimelineLiveEvent> = {}): TimelineLiveEvent {
   return {
     issueNumber: 42,
-    issueId: 'issue-1',
     type: 'com.mohist.workflow.run.started',
     time: '2026-06-18T00:00:00.000Z',
     eventId: 'evt-1',
@@ -60,7 +59,6 @@ describe('timeline-events pub/sub', () => {
 
     const sparse: TimelineLiveEvent = {
       issueNumber: null,
-      issueId: null,
       type: 'unknown.type',
       time: null,
       eventId: null,
