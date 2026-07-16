@@ -122,39 +122,6 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.ToTable("AgentSubscriptions", (string)null);
                 });
 
-            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Epic.EpicActiveIssueRow", b =>
-                {
-                    b.Property<string>("ProjectId")
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("IssueId")
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("EpicId")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("TEXT");
-
-                    b.Property<int>("EpicNumber")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<int>("IssueNumber")
-                        .HasColumnType("INTEGER");
-
-                    b.HasKey("ProjectId", "IssueId");
-
-                    b.HasIndex("ProjectId", "EpicId");
-
-                    b.HasIndex("ProjectId", "EpicNumber", "IssueNumber");
-
-                    b.ToTable("EpicActiveIssues");
-                });
-
             modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Epic.EpicCounterRow", b =>
                 {
                     b.Property<string>("ProjectId")
@@ -167,41 +134,6 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.HasKey("ProjectId");
 
                     b.ToTable("EpicCounters");
-                });
-
-            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Epic.EpicIssueRow", b =>
-                {
-                    b.Property<string>("EpicId")
-                        .HasMaxLength(64)
-                        .HasColumnType("TEXT");
-
-                    b.Property<int>("EpicNumber")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<string>("IssueId")
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<int>("IssueNumber")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<string>("ProjectId")
-                        .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
-                    b.HasKey("EpicId", "IssueId");
-
-                    b.HasIndex("ProjectId", "IssueId");
-
-                    b.HasIndex("ProjectId", "IssueNumber");
-
-                    b.HasIndex("ProjectId", "EpicNumber", "IssueNumber");
-
-                    b.ToTable("EpicIssues");
                 });
 
             modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Epic.EpicRow", b =>

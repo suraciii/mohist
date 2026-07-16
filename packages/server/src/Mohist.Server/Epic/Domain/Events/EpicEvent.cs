@@ -4,8 +4,6 @@ public union EpicEvent(
     EpicCreated,
     EpicUpdated,
     EpicPriorityChanged,
-    EpicIssueLinked,
-    EpicIssueUnlinked,
     EpicStatusChanged,
     EpicClosed,
     EpicReopened,
@@ -24,12 +22,6 @@ public sealed record EpicUpdated(
 public sealed record EpicPriorityChanged(
     string OldPriority,
     string NewPriority);
-
-public sealed record EpicIssueLinked(
-    int IssueNumber);
-
-public sealed record EpicIssueUnlinked(
-    int IssueNumber);
 
 public sealed record EpicStatusChanged(
     string OldStatus,

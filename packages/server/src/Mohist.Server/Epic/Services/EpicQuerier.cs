@@ -46,7 +46,6 @@ public class EpicQuerier : IScopedService
                 e."CreatedAt" AS "EpicCreatedAt",
                 e."UpdatedAt" AS "EpicUpdatedAt",
                 e."PauseReason" AS "EpicPauseReason",
-                li."IssueNumber" AS "IssueNumber",
                 i."Number" AS "IssueNumber",
                 i."Status" AS "IssueStatus",
                 i."Title" AS "IssueTitle",
@@ -54,10 +53,9 @@ public class EpicQuerier : IScopedService
                 i."IsDraft" AS "IssueIsDraft",
                 i."PrerequisiteNumbersJson" AS "IssuePrerequisiteNumbersJson",
                 i."IsArchived" AS "IssueIsArchived",
-                li."CreatedAt" AS "LinkCreatedAt"
+                i."Number" AS "IssueOrder"
             FROM "Epics" e
-            LEFT JOIN "EpicIssues" li ON li."ProjectId" = e."ProjectId" AND li."EpicNumber" = e."Number"
-            LEFT JOIN "Issues" i ON i."ProjectId" = li."ProjectId" AND i."Number" = li."IssueNumber"
+            LEFT JOIN "Issues" i ON i."ProjectId" = e."ProjectId" AND i."EpicNumber" = e."Number"
             WHERE e."ProjectId" = @projectId
             {{(normalizedSearch is null ? string.Empty : "AND LOWER(e.\"Title\") LIKE LOWER('%' || @search || '%') ESCAPE '\\'")}}
             ORDER BY {{orderBy}}
@@ -111,15 +109,15 @@ public class EpicQuerier : IScopedService
     // sort selector never reaches the SQL builder as an interpolated string.
     // New keys / directions must be added here explicitly; unknown inputs
     // fall back to the original hardcoded ordering.
-    internal const string DefaultOrderBy = "e.\"Priority\" ASC, e.\"UpdatedAt\" DESC, li.\"CreatedAt\"";
+    internal const string DefaultOrderBy = "e.\"Priority\" ASC, e.\"UpdatedAt\" DESC, i.\"Number\"";
 
     private static readonly Dictionary<(string Field, string Dir), string> OrderByMap =
         new()
         {
-            [("priority", "asc")] = "e.\"Priority\" ASC, e.\"UpdatedAt\" DESC, li.\"CreatedAt\"",
-            [("priority", "desc")] = "e.\"Priority\" DESC, e.\"UpdatedAt\" DESC, li.\"CreatedAt\"",
-            [("updated", "asc")] = "e.\"UpdatedAt\" ASC, e.\"Priority\" ASC, li.\"CreatedAt\"",
-            [("updated", "desc")] = "e.\"UpdatedAt\" DESC, e.\"Priority\" ASC, li.\"CreatedAt\"",
+            [("priority", "asc")] = "e.\"Priority\" ASC, e.\"UpdatedAt\" DESC, i.\"Number\"",
+            [("priority", "desc")] = "e.\"Priority\" DESC, e.\"UpdatedAt\" DESC, i.\"Number\"",
+            [("updated", "asc")] = "e.\"UpdatedAt\" ASC, e.\"Priority\" ASC, i.\"Number\"",
+            [("updated", "desc")] = "e.\"UpdatedAt\" DESC, e.\"Priority\" ASC, i.\"Number\"",
         };
 
     internal static string ResolveOrderBy(string? sortBy, string? sortDir)
@@ -251,7 +249,7 @@ public class EpicQuerier : IScopedService
     {
         var linkedRows = rows
             .Where(r => r.IssueNumber.HasValue && r.IssueIsArchived != true)
-            .OrderBy(r => r.LinkCreatedAt)
+            .OrderBy(r => r.IssueOrder)
             .ToList();
         if (linkedRows.Count == 0) return [];
 
@@ -328,18 +326,18 @@ public class EpicQuerier : IScopedService
 
     private async Task<List<LinkedIssueDto>> GetLinkedIssuesAsync(MohistDbContext db, EpicRow epic)
     {
-        var links = await db.EpicIssues.AsNoTracking()
-            .Where(link => link.ProjectId == epic.ProjectId && link.EpicNumber == epic.Number)
+        var memberNumbers = await db.Issues.AsNoTracking()
+            .Where(issue => issue.ProjectId == epic.ProjectId && issue.EpicNumber == epic.Number && issue.Number != null)
+            .OrderBy(issue => issue.Number)
+            .Select(issue => issue.Number!.Value)
             .ToListAsync();
-        links = links.OrderBy(link => link.CreatedAt).ToList();
-        if (links.Count == 0) return [];
+        if (memberNumbers.Count == 0) return [];
 
         var allIssues = await _issuesQuery.ListAsync(epic.ProjectId, all: true);
         var byNumber = allIssues.ToDictionary(i => i.Number);
-        var memberNumbers = new HashSet<int>(
-            links.Select(link => link.IssueNumber));
-        return links
-            .Select(link => byNumber.TryGetValue(link.IssueNumber, out var issue)
+        var memberNumberSet = memberNumbers.ToHashSet();
+        return memberNumbers
+            .Select(number => byNumber.TryGetValue(number, out var issue)
                 ? new LinkedIssueDto(
                     Number: issue.Number,
                     Title: issue.Title,
@@ -350,7 +348,7 @@ public class EpicQuerier : IScopedService
                     CanStart: issue.CanStart,
                     StartBlocker: issue.Blocker,
                     PrerequisiteNumbers: issue.PrerequisiteNumbers,
-                    ExternalPrerequisites: BuildExternalPrerequisites(issue, memberNumbers, byNumber))
+                    ExternalPrerequisites: BuildExternalPrerequisites(issue, memberNumberSet, byNumber))
                 : null)
             .Where(i => i is not null)
             .Cast<LinkedIssueDto>()
@@ -397,6 +395,6 @@ public class EpicQuerier : IScopedService
         public bool? IssueIsDraft { get; set; }
         public string? IssuePrerequisiteNumbersJson { get; set; }
         public bool? IssueIsArchived { get; set; }
-        public DateTimeOffset? LinkCreatedAt { get; set; }
+        public int? IssueOrder { get; set; }
     }
 }

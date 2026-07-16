@@ -1,5 +1,6 @@
 using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Issue.Domain;
+using Mohist.Server.Issue.Domain.Events;
 using Issue = Mohist.Server.Issue.Domain.Issue;
 using System.Text.Json;
 using Xunit;
@@ -220,53 +221,55 @@ public class IssueDomainTests
     }
 
     [Fact]
-    public void SetEpicNumber_StoresValueAndTouchesUpdatedAt_AndDoesNotEmitDomainEvent()
+    public void AssignEpic_StoresValueAndRecordsAffiliationChange()
     {
         var issue = Mohist.Server.Issue.Domain.Issue.Create(
             "project-1", 1, "Feature",
             now: new DateTime(2026, 6, 5, 1, 0, 0, DateTimeKind.Utc));
         issue.StartWorkflow("wr_1", new DateTime(2026, 6, 5, 1, 30, 0, DateTimeKind.Utc));
         var beforeTouch = issue.UpdatedAt;
-        var pendingBefore = issue.PendingEvents.Count;
-
-        issue.SetEpicNumber(42, new DateTime(2026, 6, 5, 1, 45, 0, DateTimeKind.Utc));
+        Assert.True(issue.AssignEpic(42, new DateTime(2026, 6, 5, 1, 45, 0, DateTimeKind.Utc)));
 
         Assert.Equal(42, issue.EpicNumber);
         Assert.Equal(new DateTime(2026, 6, 5, 1, 45, 0, DateTimeKind.Utc), issue.UpdatedAt);
         Assert.True(issue.UpdatedAt > beforeTouch);
-        Assert.Equal(pendingBefore, issue.PendingEvents.Count);
+        Assert.Equal(new IssueEpicChanged(null, 42), issue.PendingEvents.Last());
     }
 
     [Fact]
-    public void SetEpicNumber_NullClearsAffiliation()
+    public void RemoveEpic_OnlyClearsExpectedAffiliation()
     {
         var issue = Mohist.Server.Issue.Domain.Issue.Create("project-1", 1, "Feature");
-        issue.SetEpicNumber(42);
+        issue.AssignEpic(42);
 
+        Assert.False(issue.RemoveEpic(7));
         Assert.Equal(42, issue.EpicNumber);
 
-        issue.SetEpicNumber(null);
+        Assert.True(issue.RemoveEpic(42));
 
         Assert.Null(issue.EpicNumber);
+        Assert.Equal(new IssueEpicChanged(42, null), issue.PendingEvents.Last());
     }
 
     [Fact]
-    public void SetEpicNumber_NoOpWhenValueUnchanged()
+    public void AssignEpic_NoOpWhenValueUnchanged()
     {
         var issue = Mohist.Server.Issue.Domain.Issue.Create("project-1", 1, "Feature");
-        issue.SetEpicNumber(42, new DateTime(2026, 6, 5, 2, 0, 0, DateTimeKind.Utc));
+        issue.AssignEpic(42, new DateTime(2026, 6, 5, 2, 0, 0, DateTimeKind.Utc));
         var beforeTouch = issue.UpdatedAt;
+        var eventsBefore = issue.PendingEvents.Count;
 
-        issue.SetEpicNumber(42, new DateTime(2026, 6, 5, 3, 0, 0, DateTimeKind.Utc));
+        Assert.False(issue.AssignEpic(42, new DateTime(2026, 6, 5, 3, 0, 0, DateTimeKind.Utc)));
 
         Assert.Equal(beforeTouch, issue.UpdatedAt);
+        Assert.Equal(eventsBefore, issue.PendingEvents.Count);
     }
 
     [Fact]
     public void State_RoundTripsEpicNumber()
     {
         var issue = Mohist.Server.Issue.Domain.Issue.Create("project-1", 1, "Feature");
-        issue.SetEpicNumber(42);
+        issue.AssignEpic(42);
 
         var json = IssueStore.Serialize(issue);
         var reloaded = IssueStore.Deserialize(json);

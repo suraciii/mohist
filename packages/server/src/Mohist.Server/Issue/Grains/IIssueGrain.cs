@@ -23,12 +23,9 @@ public interface IIssueGrain : IGrainWithStringKey
     Task<IssueCommentResult> AddCommentAsync(string body, string[]? attachmentIds = null);
     Task DeactivateForTestAsync();
 
-    /// <summary>
-    /// Apply the affiliation resolved by durable Epic coordination. Issue
-    /// persists its own producer snapshot and propagates its revision to the
-    /// current WorkflowRun in a separate aggregate command.
-    /// </summary>
-    Task SetEpicAffiliationAsync(int? epicNumber);
+    Task<bool> AssignEpicAsync(int epicNumber);
+    Task<bool> RemoveEpicAsync(int expectedEpicNumber);
+    Task<bool> TryStartFromEpicAsync(int expectedEpicNumber);
 }
 
 [GenerateSerializer]

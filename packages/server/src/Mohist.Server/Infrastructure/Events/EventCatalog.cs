@@ -56,6 +56,7 @@ public static class EventCatalog
         ReverseDns.IssuePrerequisiteAdded,
         ReverseDns.IssuePrerequisiteRemoved,
         ReverseDns.IssueWorkflowProfileChanged,
+        ReverseDns.IssueEpicChanged,
         ReverseDns.IssueArchived,
         ReverseDns.IssueUnarchived,
         ReverseDns.IssueReopened,
@@ -63,8 +64,6 @@ public static class EventCatalog
         ReverseDns.EpicCreated,
         ReverseDns.EpicUpdated,
         ReverseDns.EpicPriorityChanged,
-        ReverseDns.EpicIssueLinked,
-        ReverseDns.EpicIssueUnlinked,
         ReverseDns.EpicStatusChanged,
         ReverseDns.EpicClosed,
         ReverseDns.EpicReopened,
@@ -180,6 +179,7 @@ public static class EventCatalog
         [ReverseDns.IssuePrerequisiteAdded] = [Lineage.ProjectId, Lineage.Issue],
         [ReverseDns.IssuePrerequisiteRemoved] = [Lineage.ProjectId, Lineage.Issue],
         [ReverseDns.IssueWorkflowProfileChanged] = [Lineage.ProjectId, Lineage.Issue],
+        [ReverseDns.IssueEpicChanged] = [Lineage.ProjectId, Lineage.Issue],
         [ReverseDns.IssueArchived] = [Lineage.ProjectId, Lineage.Issue],
         [ReverseDns.IssueUnarchived] = [Lineage.ProjectId, Lineage.Issue],
         [ReverseDns.IssueReopened] = [Lineage.ProjectId, Lineage.Issue],
@@ -188,8 +188,6 @@ public static class EventCatalog
         [ReverseDns.EpicCreated] = [Lineage.ProjectId, Lineage.Epic],
         [ReverseDns.EpicUpdated] = [Lineage.ProjectId, Lineage.Epic],
         [ReverseDns.EpicPriorityChanged] = [Lineage.ProjectId, Lineage.Epic],
-        [ReverseDns.EpicIssueLinked] = [Lineage.ProjectId, Lineage.Epic],
-        [ReverseDns.EpicIssueUnlinked] = [Lineage.ProjectId, Lineage.Epic],
         [ReverseDns.EpicStatusChanged] = [Lineage.ProjectId, Lineage.Epic],
         [ReverseDns.EpicClosed] = [Lineage.ProjectId, Lineage.Epic],
         [ReverseDns.EpicReopened] = [Lineage.ProjectId, Lineage.Epic],
@@ -318,6 +316,7 @@ public static class EventCatalog
         public const string IssuePrerequisiteAdded = "com.mohist.issue.prerequisite-added";
         public const string IssuePrerequisiteRemoved = "com.mohist.issue.prerequisite-removed";
         public const string IssueWorkflowProfileChanged = "com.mohist.issue.workflow-profile-changed";
+        public const string IssueEpicChanged = "com.mohist.issue.epic-changed";
         public const string IssueArchived = "com.mohist.issue.archived";
         public const string IssueUnarchived = "com.mohist.issue.unarchived";
         public const string IssueReopened = "com.mohist.issue.reopened";
@@ -325,8 +324,6 @@ public static class EventCatalog
         public const string EpicCreated = "com.mohist.epic.created";
         public const string EpicUpdated = "com.mohist.epic.updated";
         public const string EpicPriorityChanged = "com.mohist.epic.priority-changed";
-        public const string EpicIssueLinked = "com.mohist.epic.issue-linked";
-        public const string EpicIssueUnlinked = "com.mohist.epic.issue-unlinked";
         public const string EpicStatusChanged = "com.mohist.epic.status-changed";
         public const string EpicClosed = "com.mohist.epic.closed";
         public const string EpicReopened = "com.mohist.epic.reopened";

@@ -363,16 +363,20 @@ public class IssueQuerier : IScopedService
             issue.CanStart = blocker is null;
         }
 
-        var epicLinks = await db.EpicIssues.AsNoTracking()
-            .Where(link => link.ProjectId == projectId && numbers.Contains(link.IssueNumber))
+        var issueEpicNumbers = await db.Issues.AsNoTracking()
+            .Where(row => row.ProjectId == projectId
+                && row.Number != null
+                && numbers.Contains(row.Number.Value)
+                && row.EpicNumber != null)
+            .Select(row => new { IssueNumber = row.Number!.Value, EpicNumber = row.EpicNumber!.Value })
             .ToListAsync();
-        if (epicLinks.Count > 0)
+        if (issueEpicNumbers.Count > 0)
         {
-            var epicNumbers = epicLinks.Select(l => l.EpicNumber).Distinct().ToArray();
+            var epicNumbers = issueEpicNumbers.Select(link => link.EpicNumber).Distinct().ToArray();
             var epics = await db.Epics.AsNoTracking()
                 .Where(epic => epic.ProjectId == projectId && epicNumbers.Contains(epic.Number))
                 .ToDictionaryAsync(e => e.Number);
-            foreach (var link in epicLinks)
+            foreach (var link in issueEpicNumbers)
             {
                 if (byNumber.TryGetValue(link.IssueNumber, out var issue) && epics.TryGetValue(link.EpicNumber, out var epic))
                 {

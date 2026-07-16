@@ -45,8 +45,6 @@ public class MohistDbContext : DbContext
     public DbSet<AttachmentRow> Attachments { get; set; } = null!;
     public DbSet<IssuePrerequisiteRow> IssuePrerequisites { get; set; } = null!;
     public DbSet<EpicRow> Epics { get; set; } = null!;
-    public DbSet<EpicIssueRow> EpicIssues { get; set; } = null!;
-    public DbSet<EpicActiveIssueRow> EpicActiveIssues { get; set; } = null!;
     public DbSet<IssueRow> Issues { get; set; } = null!;
     public DbSet<AgentRow> Agents { get; set; } = null!;
     public DbSet<AgentSubscriptionRow> AgentSubscriptions { get; set; } = null!;
@@ -282,27 +280,6 @@ public class MohistDbContext : DbContext
             entity.HasIndex(e => new { e.ProjectId, e.Number }).IsUnique();
         });
 
-        modelBuilder.Entity<EpicIssueRow>(entity =>
-        {
-            entity.HasKey(e => new { e.ProjectId, e.EpicNumber, e.IssueNumber });
-            entity.Property(e => e.ProjectId).HasMaxLength(256).IsRequired();
-            // Issue-179: relax uniqueness - an issue may hold a terminal-epic
-            // membership (done/closed) AND a non-terminal membership
-            // (idle/running/paused) concurrently so it can be re-homed from a
-            // finished epic into a new active one. The active-membership slot
-            // table below enforces the "at most one non-terminal epic per issue"
-            // invariant at the database boundary.
-            entity.HasIndex(e => new { e.ProjectId, e.IssueNumber });
-            entity.HasIndex(e => new { e.ProjectId, e.EpicNumber, e.IssueNumber });
-        });
-
-        modelBuilder.Entity<EpicActiveIssueRow>(entity =>
-        {
-            entity.HasKey(e => new { e.ProjectId, e.IssueNumber });
-            entity.Property(e => e.ProjectId).HasMaxLength(256).IsRequired();
-            entity.HasIndex(e => new { e.ProjectId, e.EpicNumber, e.IssueNumber });
-        });
-
         modelBuilder.Entity<IssueRow>(entity =>
         {
             entity.ToTable("Issues");
@@ -311,9 +288,11 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.Risk).HasMaxLength(16);
             entity.Property(e => e.LineageVersion).HasDefaultValue(1L).IsConcurrencyToken();
             entity.Property(e => e.ProjectId)
-                .HasComputedColumnSql("COALESCE(json_extract(State, '$.projectId'), json_extract(State, '$.ProjectId'))", stored: true);
+                .HasComputedColumnSql("COALESCE(json_extract(State, '$.projectId'), json_extract(State, '$.ProjectId'))", stored: true)
+                .ValueGeneratedOnAdd();
             entity.Property(e => e.Number)
-                .HasComputedColumnSql("COALESCE(json_extract(State, '$.number'), json_extract(State, '$.Number'))", stored: true);
+                .HasComputedColumnSql("COALESCE(json_extract(State, '$.number'), json_extract(State, '$.Number'))", stored: true)
+                .ValueGeneratedOnAdd();
             entity.Property(e => e.Status)
                 .HasComputedColumnSql("COALESCE(json_extract(State, '$.status'), json_extract(State, '$.Status'))");
             entity.Property(e => e.WorkflowRunId)

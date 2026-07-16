@@ -100,7 +100,6 @@ public class EventCatalogTests
         var expected = new[] { EventCatalog.Lineage.ProjectId, EventCatalog.Lineage.Epic };
 
         Assert.Equal(expected, EventCatalog.RequiredAttributes(EventCatalog.ReverseDns.EpicCreated).ToArray());
-        Assert.Equal(expected, EventCatalog.RequiredAttributes(EventCatalog.ReverseDns.EpicIssueLinked).ToArray());
         Assert.Equal(expected, EventCatalog.RequiredAttributes(EventCatalog.ReverseDns.EpicClosed).ToArray());
     }
 

@@ -182,12 +182,28 @@ public sealed partial class Issue
         return true;
     }
 
-    public void SetEpicNumber(int? epicNumber, DateTime? now = null)
+    public bool AssignEpic(int epicNumber, DateTime? now = null)
     {
-        var next = epicNumber is > 0 ? epicNumber : null;
-        if (_epicNumber == next) return;
-        _epicNumber = next;
+        if (epicNumber <= 0)
+            throw new ArgumentOutOfRangeException(nameof(epicNumber));
+        return ChangeEpic(epicNumber, now);
+    }
+
+    public bool RemoveEpic(int expectedEpicNumber, DateTime? now = null)
+    {
+        if (expectedEpicNumber <= 0)
+            throw new ArgumentOutOfRangeException(nameof(expectedEpicNumber));
+        return _epicNumber == expectedEpicNumber && ChangeEpic(null, now);
+    }
+
+    private bool ChangeEpic(int? epicNumber, DateTime? now)
+    {
+        if (_epicNumber == epicNumber) return false;
+        var previous = _epicNumber;
+        _epicNumber = epicNumber;
         Touch(now);
+        RecordEvent(new IssueEpicChanged(previous, epicNumber));
+        return true;
     }
 
     public bool Complete(string workflowRunId, DateTime? now = null)

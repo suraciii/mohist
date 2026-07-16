@@ -151,25 +151,6 @@ public sealed partial class Epic
         RecordEvent(new EpicStatusChanged(EpicStatusName.ToName(oldStatus), EpicStatusName.ToName(_status)));
     }
 
-    public void LinkIssue(int issueNumber, DateTime? now = null)
-    {
-        if (issueNumber <= 0)
-            throw new ArgumentOutOfRangeException(nameof(issueNumber));
-        if (_status is EpicStatus.Closed)
-            throw new EpicClosedCannotLinkException(Number);
-        if (_linkedIssueNumbers.Contains(issueNumber)) return;
-        _linkedIssueNumbers.Add(issueNumber);
-        Touch(now);
-        RecordEvent(new EpicIssueLinked(issueNumber));
-    }
-
-    public void UnlinkIssue(int issueNumber, DateTime? now = null)
-    {
-        if (!_linkedIssueNumbers.Remove(issueNumber)) return;
-        Touch(now);
-        RecordEvent(new EpicIssueUnlinked(issueNumber));
-    }
-
     public void RecordStartAttemptFailure(int issueNumber, string reason, DateTime? now = null)
     {
         Touch(now);

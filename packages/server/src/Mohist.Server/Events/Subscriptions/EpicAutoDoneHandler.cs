@@ -192,61 +192,6 @@ public sealed class EpicPrerequisiteRemovedHandler : ICloudEventHandler<IssuePre
 }
 
 /// <summary>
-/// Subscribes to <c>com.mohist.epic.issue-linked</c> and triggers
-/// <see cref="IEpicGrain.RecomputeProgressAsync"/> on the epic that
-/// linked the issue. This is the durable convergence path for link
-/// operations: <c>LinkIssueAsync</c> commits the membership row then
-/// calls recompute inline, but a crash between commit and recompute
-/// would leave a linked-but-unadvanced epic. The event is durable
-/// (persisted to the event store before the grain returns), so the
-/// dispatcher redelivers it until the handler succeeds — closing the
-/// gap left by the removed poll-driven sweep.
-/// </summary>
-[Subscription(Type = EventCatalog.ReverseDns.EpicIssueLinked)]
-public sealed class EpicIssueLinkedHandler : ICloudEventHandler<Epic.Domain.Events.EpicIssueLinked>
-{
-    private readonly EpicEventRecomputeDispatcher _dispatcher;
-
-    [ActivatorUtilitiesConstructor]
-    public EpicIssueLinkedHandler(
-        IGrainFactory grains,
-        ILogger<EpicIssueLinkedHandler> log)
-    {
-        _dispatcher = new EpicEventRecomputeDispatcher(grains, log);
-    }
-
-    public bool Filter(CloudEvent<Epic.Domain.Events.EpicIssueLinked> evt) => true;
-
-    public Task HandleAsync(CloudEvent<Epic.Domain.Events.EpicIssueLinked> evt, CancellationToken ct) =>
-        _dispatcher.DispatchAsync(evt.Id, evt.Extensions, evtType: "issue-linked", ct);
-}
-
-/// <summary>
-/// Subscribes to <c>com.mohist.epic.issue-unlinked</c> and recomputes the
-/// owning epic after membership removal. The unlink command performs the
-/// same recompute inline; this durable path converges after a crash between
-/// the committed unlink and that inline call.
-/// </summary>
-[Subscription(Type = EventCatalog.ReverseDns.EpicIssueUnlinked)]
-public sealed class EpicIssueUnlinkedHandler : ICloudEventHandler<Epic.Domain.Events.EpicIssueUnlinked>
-{
-    private readonly EpicEventRecomputeDispatcher _dispatcher;
-
-    [ActivatorUtilitiesConstructor]
-    public EpicIssueUnlinkedHandler(
-        IGrainFactory grains,
-        ILogger<EpicIssueUnlinkedHandler> log)
-    {
-        _dispatcher = new EpicEventRecomputeDispatcher(grains, log);
-    }
-
-    public bool Filter(CloudEvent<Epic.Domain.Events.EpicIssueUnlinked> evt) => true;
-
-    public Task HandleAsync(CloudEvent<Epic.Domain.Events.EpicIssueUnlinked> evt, CancellationToken ct) =>
-        _dispatcher.DispatchAsync(evt.Id, evt.Extensions, evtType: "issue-unlinked", ct);
-}
-
-/// <summary>
 /// Subscribes to <c>com.mohist.epic.status-changed</c> transitions into
 /// <c>running</c> and re-drives <see cref="IEpicGrain.RecomputeProgressAsync"/>.
 /// This is the durable recovery intent for a command-path start: if a crash
@@ -432,10 +377,10 @@ internal sealed class EpicProgressRecomputeDispatcher
 
 /// <summary>
 /// Dispatch logic for epic-event → EpicGrain recompute-progress wiring.
-/// Epic events carry <c>projectid</c> + <c>epicid</c> on the envelope
+/// Epic events carry <c>projectid</c> + <c>epic</c> on the envelope
 /// (stamped by <c>EpicGrain.PersistEpicEventsAsync</c>), so no reverse
 /// lookup is needed — the epic identity is already known. Used by
-/// <see cref="EpicIssueLinkedHandler"/> and the start-retry handler.
+/// status and start-retry handlers.
 /// </summary>
 internal sealed class EpicEventRecomputeDispatcher
 {

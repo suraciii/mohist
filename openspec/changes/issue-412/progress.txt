@@ -67,7 +67,7 @@ membership authority each have a separately enforceable boundary. Do not reuse t
 | T-002 canonical Issue reference migration | done - every current-state owner classified; missing scoped columns, reconciliation, writer coverage and migration regressions landed |
 | T-003 canonical Epic reference migration | done - all current owners classified; scoped columns, guarded backfill, writer coverage and migration regressions landed |
 | T-004 number-only server model/APIs | in progress — production cutover and UnitTests compile; SpecTests fixture migration continues |
-| T-005 Issue-owned membership and Epic progression | pending |
+| T-005 Issue-owned membership and Epic progression | in progress — Issue-only affiliation commits and derived Epic runtime paths landed; focused SpecTests migration and migration-chain verification remain |
 | T-006 durable EnsureStarted Workflow handoff | pending |
 | T-007 canonical lineage and producer-family conformance | pending |
 | T-008 server lineage consumers/integrations | pending |
@@ -288,12 +288,40 @@ server cutover in T-004.
 
 - Issue/Epic domain, server routes, grains, event sources, inbox and Hermes test support now use
   `ProjectId` plus number without random Issue/Epic identity fields.
-- Server UnitTests build and pass: **1484 passed / 0 failed / 0 skipped**.
+- Server UnitTests build and pass: **1477 passed / 0 failed / 0 skipped**.
 - SpecTests fixture migration is in progress. Inbox projection and Issue metrics helpers now seed
   canonical sources and scoped rows; the remaining failures include stale Epic relation-row specs
   that are intentionally owned by T-005.
 - T-004 is not complete until the current-state server contracts and all affected specs compile
   without legacy identity aliases.
+
+## T-005 current progress
+
+- `Issue.AssignEpic` and expected-number `Issue.RemoveEpic` are the only affiliation mutations.
+  They save `Issue.EpicNumber` and `IssueEpicChanged(previous,current)` in the Issue store's
+  existing state-plus-event transaction. Repeated assign is a no-op; an unlink from an old Epic
+  cannot clear a later move.
+- `Epic.LinkIssue` now reads first for idempotence, rejects a new link to a closed Epic, then
+  commands Issue. A-to-B movement is one Issue commit. Batch operations follow the same command
+  path and do not open an Epic membership transaction.
+- `IssueEpicChangedHandler` opens a scoped read, re-reads the current Issue, recomputes the event
+  old/new/current Epics, and refreshes active Workflow lineage after the Issue commit. It has no
+  shared database transaction with Issue, Epic, or WorkflowRun.
+- Epic member list, progress, readiness, primary-Epic projection, and start candidates now query
+  `Issues.EpicNumber`. Candidate execution calls `Issue.TryStartFromEpic(expectedEpicNumber)` so
+  a stale read cannot start an Issue moved elsewhere. A done Epic with a newly affiliated open
+  Issue is revived by the durable recompute path.
+- `EpicIssueRow`, `EpicActiveIssueRow`, their resolver, Epic-owned member collection, link/unlink
+  domain events and subscriptions have been removed from the runtime model. Migration
+  `20260716170000_DropEpicMembershipTables` drops both former tables after the preceding
+  affiliation backfill; historical migrations remain upgrade history.
+- The Issue key's computed projections are generated on insert only, not on every update. This
+  preserves their immutable aggregate identity and restores EF design-time validation; the
+  migration chain discovers the new drop migration and generates the expected SQLite
+  `DROP TABLE "EpicActiveIssues"` / `DROP TABLE "EpicIssues"` script.
+- Validation so far: server build clean; UnitTests **1477 passed / 0 failed / 0 skipped**; current
+  SpecTests still contain pre-cutover relation-row fixtures and remain part of the T-004/T-005
+  fixture migration backlog.
 
 ## Validation of planning artifacts
 

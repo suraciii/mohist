@@ -12,7 +12,6 @@ public sealed partial class Epic
     private string? _pauseReason;
     private DateTime _createdAt;
     private DateTime _updatedAt;
-    private readonly HashSet<int> _linkedIssueNumbers = [];
     private readonly List<EpicEvent> _pendingEvents = new();
 
     public required string ProjectId { get; init; }
@@ -61,16 +60,11 @@ public sealed partial class Epic
     }
 
     [JsonIgnore]
-    public IReadOnlySet<int> LinkedIssueNumbers => _linkedIssueNumbers;
-
-    [JsonIgnore]
     public IReadOnlyList<EpicEvent> PendingEvents => _pendingEvents;
 
     public void ClearPendingEvents() => _pendingEvents.Clear();
 
     private void RecordEvent(EpicEvent evt) => _pendingEvents.Add(evt);
-
-    internal void SeedLink(int issueNumber) => _linkedIssueNumbers.Add(issueNumber);
 
     private static string RequireTitle(string title)
     {

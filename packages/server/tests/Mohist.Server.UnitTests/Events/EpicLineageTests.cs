@@ -59,8 +59,6 @@ public class EpicLineageTests
     [InlineData(EventCatalog.ReverseDns.EpicCreated)]
     [InlineData(EventCatalog.ReverseDns.EpicUpdated)]
     [InlineData(EventCatalog.ReverseDns.EpicPriorityChanged)]
-    [InlineData(EventCatalog.ReverseDns.EpicIssueLinked)]
-    [InlineData(EventCatalog.ReverseDns.EpicIssueUnlinked)]
     [InlineData(EventCatalog.ReverseDns.EpicStatusChanged)]
     [InlineData(EventCatalog.ReverseDns.EpicClosed)]
     [InlineData(EventCatalog.ReverseDns.EpicReopened)]
@@ -101,7 +99,7 @@ public class EpicLineageTests
         };
         var extensions = EpicLineage.BuildExtensions(state);
 
-        EnvelopeConformance.AssertRequired(extensions, EventCatalog.ReverseDns.EpicIssueLinked);
+        EnvelopeConformance.AssertRequired(extensions, EventCatalog.ReverseDns.EpicStatusChanged);
     }
 
     [Fact]
@@ -110,8 +108,8 @@ public class EpicLineageTests
         // Mirrors WorkflowRunLineage / IssueLineage: the helper takes only
         // the producing aggregate's state. Stamp source is the value-passed
         // fields — no DB context, no grain call. A future refactor that
-        // added a query against EpicIssues would change this constructor's
-        // arity and surface here.
+        // added a query against Issues would change this constructor's arity
+        // and surface here.
         var state = new Mohist.Server.Epic.Domain.Epic
         {
             ProjectId = "proj_pure_helper",

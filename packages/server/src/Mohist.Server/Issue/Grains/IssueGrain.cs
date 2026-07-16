@@ -90,35 +90,28 @@ public class IssueGrain : Grain, IIssueGrain
         return Task.CompletedTask;
     }
 
-    public async Task SetEpicAffiliationAsync(int? epicNumber)
+    public async Task<bool> AssignEpicAsync(int epicNumber)
     {
-        RejectIfReloadRequired();
-        if (_issue is null) return;
-        var changed = false;
-        if (epicNumber is not > 0)
-        {
-            if (_issue.EpicNumber is not null)
-            {
-                _issue.SetEpicNumber(null);
-                changed = true;
-            }
-        }
-        else if (_issue.EpicNumber != epicNumber)
-        {
-            _issue.SetEpicNumber(epicNumber);
-            changed = true;
-        }
-        if (changed)
-            await SaveIssueAsync();
-        if (!string.IsNullOrWhiteSpace(_issue.WorkflowRunId))
-        {
-            var workflow = GrainFactory.GetGrain<IWorkflowGrain>(_issue.WorkflowRunId);
-            await workflow.ApplyIssueLineageAsync(new WorkflowIssueLineage(
-                _issue.ProjectId,
-                _issue.Number,
-                _issue.EpicNumber,
-                _issue.LineageVersion));
-        }
+        EnsureIssue();
+        if (!_issue!.AssignEpic(epicNumber)) return false;
+        await SaveIssueAsync();
+        return true;
+    }
+
+    public async Task<bool> RemoveEpicAsync(int expectedEpicNumber)
+    {
+        EnsureIssue();
+        if (!_issue!.RemoveEpic(expectedEpicNumber)) return false;
+        await SaveIssueAsync();
+        return true;
+    }
+
+    public async Task<bool> TryStartFromEpicAsync(int expectedEpicNumber)
+    {
+        EnsureIssue();
+        if (_issue!.EpicNumber != expectedEpicNumber) return false;
+        await StartWorkAsync();
+        return true;
     }
 
     public async Task<string?> ResolveRepositoryRefAsync(string projectId, string? repositoryRef)
