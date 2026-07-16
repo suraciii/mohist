@@ -47,7 +47,7 @@ public class WorkflowArtifactPersistenceSpecs
             ContentHash = "sha256:abc",
             Size = 1024,
             ProjectId = "proj-1",
-            IssueId = "issue_1",
+            IssueNumber = 1,
             DisplayName = "review.md",
         };
 
@@ -337,7 +337,7 @@ public class WorkflowArtifactPersistenceSpecs
 
         Assert.Contains("WorkflowRunId,Path,RecordedAt", indexNames);
         Assert.Contains("WorkflowRunId,TaskRunId,RecordedAt", indexNames);
-        Assert.Contains("IssueId,RecordedAt", indexNames);
+        Assert.Contains("ProjectId,IssueNumber,RecordedAt", indexNames);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]

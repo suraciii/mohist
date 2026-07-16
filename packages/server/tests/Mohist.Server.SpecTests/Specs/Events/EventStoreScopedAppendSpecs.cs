@@ -220,9 +220,9 @@ public class EventStoreScopedAppendSpecs : IAsyncLifetime
         var events = new[]
         {
             BuildEvent(WorkflowRunEventPersistence.WorkflowRunSource("zeta"), "test.workflow", "evt-workflow-1"),
-            BuildEvent(IssueEventPersistence.IssueSource("alpha"), "test.issue", "evt-issue-1"),
-            BuildEvent(IssueEventPersistence.IssueSource("alpha"), "test.issue", "evt-issue-2"),
-            BuildEvent(EpicEventPersistence.EpicSource("middle"), "test.epic", "evt-epic-1"),
+            BuildEvent(IssueEventPersistence.IssueSource("alpha", 1), "test.issue", "evt-issue-1"),
+            BuildEvent(IssueEventPersistence.IssueSource("alpha", 1), "test.issue", "evt-issue-2"),
+            BuildEvent(EpicEventPersistence.EpicSource("middle", 1), "test.epic", "evt-epic-1"),
             BuildEvent(AgentSessionEventPersistence.AgentSessionSource("beta"), "test.agent", "evt-agent-1"),
         };
         foreach (var evt in events)

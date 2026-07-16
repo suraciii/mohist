@@ -81,7 +81,7 @@ public class WorkflowSessionSpecs
 
         await using var eventScope = _fixture.Services.CreateAsyncScope();
         var events = await eventScope.ServiceProvider.GetRequiredService<IEventStore>()
-            .ListIssueEventsAsync(issue.Id);
+            .ListIssueEventsAsync(project.Id, issue.Number);
         Assert.DoesNotContain(events, e => string.Equals(
             e.Envelope.Type,
             EventCatalog.ReverseDns.IssueWorkStarted,

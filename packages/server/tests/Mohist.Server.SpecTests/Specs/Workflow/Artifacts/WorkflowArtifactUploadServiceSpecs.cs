@@ -646,7 +646,6 @@ public class WorkflowArtifactUploadServiceSpecs
             [uploaded.Pending!.UploadId],
             declaredArtifacts: null,
             projectId: "proj_bind",
-            issueId: "issue_bind",
             issueNumber: 42);
         Assert.True(bindResult.IsSuccess, bindResult.Error);
         Assert.Single(bindResult.ArtifactRecordedEvents);
@@ -661,7 +660,6 @@ public class WorkflowArtifactUploadServiceSpecs
         Assert.Equal("specs", bound.Path);
         Assert.Equal(taskRunId, bound.TaskRunId);
         Assert.Equal("proj_bind", bound.ProjectId);
-        Assert.Equal("issue_bind", bound.IssueId);
         Assert.Equal(42, bound.IssueNumber);
         Assert.EndsWith("/files", bound.ArtifactStoragePath);
         Assert.Equal(fileA.LongLength + fileB.LongLength, bound.Size);
@@ -809,7 +807,7 @@ internal sealed class StubWorkContextResolver : IWorkflowArtifactUploadWorkConte
 
     public void Register(string workflowRunId, string workId, string taskRunId,
         string? stage = "build", string workType = "task", string? title = null,
-        string? projectId = null, string? issueId = null)
+        string? projectId = null, int? issueNumber = null)
     {
         _views[(workflowRunId, workId)] = new WorkflowActiveWorkView(
             WorkId: workId,
@@ -818,7 +816,7 @@ internal sealed class StubWorkContextResolver : IWorkflowArtifactUploadWorkConte
             TaskRunId: taskRunId,
             Title: title,
             ProjectId: projectId,
-            IssueId: issueId);
+            IssueNumber: issueNumber);
     }
 
     public Task<WorkflowActiveWorkView?> ResolveAsync(string workflowRunId, string workId, CancellationToken cancellationToken = default)
