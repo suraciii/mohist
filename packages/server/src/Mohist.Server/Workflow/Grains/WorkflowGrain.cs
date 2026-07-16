@@ -98,6 +98,7 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
 
     public async Task StartAsync(WorkflowStartInput? input = null)
     {
+        RejectIfRunReloadRequired();
         await EnsureCreatedRunAsync(input);
         var events = _run!.Start(Now());
 

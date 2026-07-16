@@ -2,93 +2,64 @@
 
 ## Result: FAIL
 
-Reviewed the live issue, proposal, design, tasks, all candidate changes through `fe33e8de6`, the new aggregate-coordination design, durable event handlers, and the affected server, runner, and web paths. The candidate correctly removes Epic transactions that write Issue/WorkflowRun state and makes the binding process recoverable. It nevertheless changes the issue's event-time affiliation contract to eventual propagation, and cancellation can strand an `AwaitingBinding` workflow permanently.
+Reviewed the live issue, proposal, design, tasks, delta specs, and the current candidate through `b685b1b94`, plus the local review repair below. The producer-side lineage snapshots, migration path, causal Epic propagation, binding recovery, catalog declarations, web reader, runner, and affected tests were inspected.
 
 ## Repaired Items
 
-(none)
+- [ID: item-1]
+  Severity: info
+  Scope: missing-obvious-guards
+  Evidence: After a state-only save failure, `WorkflowGrain` marks the activation reload-required. `StartAsync` did not enforce that guard, so a paused run could resume and persist the stale in-memory lineage. Added `RejectIfRunReloadRequired()` before `StartAsync` mutates the run and a regression spec covering the failed lineage save followed by `StartAsync`.
+  Verification: `dotnet test packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj --no-restore --filter "FullyQualifiedName~WorkflowGrainStateSaveFailureSpecs"` passed (3 tests); `npm test` passed.
+  Status: resolved
 
 ## Blocking Items
 
-- [ID: item-1]
-  Severity: blocking
-  Scope: acceptance criterion for affiliation at event time
-  Evidence: The issue requires lineage to record the affiliation when an event occurs. The candidate explicitly replaces that with causal, eventually consistent producer snapshots (`design.md:46-55`; `specs/event-lineage-stamping/spec.md:68-80`). Epic membership commits first, then only best-effort/direct and durable handler commands update Issue and WorkflowRun (`EpicGrain.cs:152-168`; `EpicAutoDoneHandler.cs:517-583`). In the interval, `IssueStore` and `WorkflowRunStore` stamp their still-local prior `EpicId` (`IssueStore.cs:58-75`; `WorkflowRunStore.cs:52-71`). Thus an Issue/workflow event produced after a committed link, unlink, terminalization, or reopen can permanently carry the old or absent `epicid`, contrary to the current issue's stated event-time affiliation rule. [disallowed:product behavior and consistency contract]
-  SuggestedAction: Obtain explicit product acceptance for causal lineage semantics and update the live issue acceptance criteria, or provide a design that meets the current event-time criterion without violating aggregate boundaries.
-  Verification: Commit an Epic affiliation change, deliberately hold its Issue propagation, emit an Issue/workflow event, and assert the expected `epicid` under the accepted contract.
-  Status: unresolved
-
 - [ID: item-2]
   Severity: blocking
-  Scope: cancellation during durable workflow binding
-  Evidence: `CancelAsync` rejects created/pending/ready/running/paused/approval workflows but omits `awaiting-binding` (`IssueGrain.cs:430-451`). `Close` then clears `WorkflowBindingPending` (`Issue.Transitions.cs:233-243`). The durable `IssueWorkStarted` reaction subsequently exits without creating or confirming the pending binding (`IssueGrain.cs:279-288`), leaving the prepared run non-terminal. After reopening, `StartWorkAsync` treats that run as reusable because it is not terminal and the pending marker is false (`IssueGrain.cs:320-359`), so the issue remains backlog while work never starts.
-  SuggestedAction: Reject cancellation while binding is pending, or stop/resolve the prepared run before clearing the marker and make the subsequent reopen/start path create a fresh binding.
-  Verification: Interrupt binding after Issue commit, cancel, redeliver `IssueWorkStarted`, reopen, and start again. Assert no awaiting-binding orphan remains and the resulting Issue/workflow pair reaches `InProgress`/`Pending` exactly once.
-  Status: unresolved
+  Scope: `packages/web/src/app/providers/model/event-envelope.ts`
+  Evidence: `mergeIssueLineage` uses stamped `extensions.issue` and `extensions.issueid` only when the payload lacks identity. The live timeline then routes on that merged payload. The regression test deliberately supplies payload issue `42` and stamped envelope issue `99`, and asserts that `42` wins. This violates the issue boundary that routing reads producer-stamped envelope lineage rather than `data`, and can place an event on the wrong issue timeline. [disallowed: public client-routing behavior]
+  SuggestedAction: Preserve the original payload for display, but derive timeline routing identity from envelope extensions first, with the legacy-key fallback limited to historical envelopes.
+  Verification: Send an envelope whose payload and extensions disagree; assert the timeline routes to the stamped issue while retaining the original payload unchanged.
+  Status: open
 
 - [ID: item-3]
   Severity: warning
-  Scope: user-visible awaiting-binding status
-  Evidence: The new workflow state maps to `awaiting-binding` (`WorkflowStatusMapper.cs:10-16`), but the Issue projection falls through to `active` (`MohistDefaultWorkflowProjection.cs:90-102`) and the runtime decision surface renders that as `Workflow running` (`derive-runtime-decision.ts:124-136`; `runtime-presentations.ts:200-212`). `WorkflowRunStatusPill` renders `Starting`, but it is not used by the production issue workflow surface. Users are told work is executing while the run is deliberately non-assignable.
-  SuggestedAction: Add an explicit starting/binding runtime projection and render it in the Issue decision surface, with no execution-only actions.
-  Verification: Load an Issue whose workflow is `awaiting-binding` in the full detail view and assert a starting/waiting state rather than running/executing text.
-  Status: unresolved
+  Scope: `packages/server/src/Mohist.Server/Api/WorkflowControlGuard.cs`
+  Evidence: The `awaiting-binding` case accepts every `ActiveOnly` action. Both issue-scoped and workflow-run-scoped routes therefore call `ResumeAsync`, `ApproveAsync`, `RequestChangesAsync`, or `PauseAsync`; each domain operation rejects that state, but those routes do not translate the exception to a conflict response. Only `StopAsync` catches `InvalidOperationException`. The added API coverage tests retry, rerun, rerun-from-stage, and stop, but omit these four invalid controls. [disallowed: public HTTP error contract]
+  SuggestedAction: Represent stop separately in the control guard, reject all other controls during binding, and add issue-scoped and workflow-run-scoped 409 assertions.
+  Verification: Exercise resume, approve, reject, and pause against an `awaiting-binding` run and assert conflict responses with no state or event changes.
+  Status: open
 
 - [ID: item-4]
   Severity: warning
-  Scope: specification and producer validation consistency
-  Evidence: The proposal and D6 say lineage is printed when present and absent labels are omitted (`proposal.md:7-13`; `design.md:60-61`), while workflow and session producers throw when `projectId` is absent (`WorkflowRunLineage.cs:55-88`; `AgentSessionLineage.cs:98-108`). The event-lineage spec treats conditional affiliations as omittable but does not state this mandatory-project rejection behavior. The documented contract and runtime behavior disagree.
-  SuggestedAction: State that `projectid` is mandatory and producer events without it are rejected, or relax the producers and catalog consistently.
-  Verification: Add producer specs for missing project annotations/labels that assert the selected contract.
-  Status: unresolved
+  Scope: Epic-to-Issue affiliation redelivery during workflow binding
+  Evidence: `IssueGrain.SetEpicAffiliationAsync` saves the Issue snapshot, then always calls `ApplyIssueLineageAsync` when `WorkflowRunId` exists. In the valid crash window after the Issue start commit but before workflow creation, that call targets a missing run and throws. Undelivered events are sorted by source, so `/mohist/epics/` events run before `/mohist/issues/` binding events; the dispatcher stops on the failed Epic handler and exhausts its retry budget before the binding event can create the run. The later binding event converges the lineage, but a routine recovery path creates a dead letter. [disallowed: durable retry behavior]
+  SuggestedAction: Do not propagate to a workflow while the Issue binding is pending, or otherwise recognize the missing prepared run as an expected transitional state. Add an end-to-end dispatcher regression with the production retry budget.
+  Verification: Seed an undelivered Epic affiliation event and `IssueWorkStarted` event with a pending binding and no workflow row; assert no dead letter and eventual Issue/Workflow lineage convergence.
+  Status: open
 
 - [ID: item-5]
   Severity: test-gap
-  Scope: durable Issue-to-Workflow binding and lineage propagation
-  Evidence: Binding integration specs directly invoke `EnsureWorkflowBindingAsync` (`IssueWorkflowLifecycleSpecs.cs:238-290`), while the subscription test only records a command invocation (`IssueWorkflowCompletionHandlerSpecs.cs:403-439`). There is no dispatcher-driven test for crashes between Issue prepare/confirm/marker-clear, cancellation while binding, or reopen after a failed binding. `ApplyIssueLineageAsync` has no duplicate, stale, or equal-revision conflict coverage despite implementing that protocol (`WorkflowGrain.cs:154-170`).
-  SuggestedAction: Add end-to-end dispatcher/redelivery specs for each binding boundary and revision ordering case.
-  Verification: Exercise duplicate, delayed, stale, and conflicting affiliation deliveries, asserting the workflow snapshot never regresses and the binding marker eventually converges.
-  Status: open
-
-- [ID: item-6]
-  Severity: test-gap
-  Scope: runner handling of `AwaitingBinding`
-  Evidence: The runner wire union includes `AwaitingBinding` (`workflow-terminal-status.ts:36-46`), but its terminal-status tests omit it (`workflow-terminal-status.spec.ts:14-89`), as do SignalR push and cleanup-convergence scenarios. The default currently treats unknown/nonterminal states conservatively, but the new server status has no explicit cross-plane regression coverage.
-  SuggestedAction: Add terminal-predicate, server-push, and cleanup convergence cases for `AwaitingBinding`.
-  Verification: Assert it preserves workspace ownership, never marks cleanup eligible, and transitions correctly after later `Pending`, `Stopped`, and `Completed` statuses.
-  Status: open
-
-- [ID: item-7]
-  Severity: test-gap
-  Scope: bounded batch affiliation persistence retries
-  Evidence: The candidate still lacks a spec that injects the changed `DbUpdateConcurrencyException` path for batch membership persistence. Existing coverage uses generic active-membership failures, so it does not prove the three-total-attempt contract.
-  SuggestedAction: Add link and unlink specs for one through four concurrency failures while preserving committed membership outcomes.
-  Verification: Assert success through attempt three and deterministic failure on attempt four.
+  Scope: `packages/server/src/Mohist.Server/Infrastructure/Events/EventCatalog.cs`
+  Evidence: `CatalogOnlyTypes` exempts `workflow.run.retrying` and `workflow.run.rerunning`, but `WorkflowEventSerializer` has no producer for either type. This makes the produced-types coverage assertion pass by excluding two unproduced workflow entries. The design and task specification allow only `runner.disconnected` and `workflow.repair-scheduled` as catalog-only protocol types, so the conformance check no longer detects this catalog/producer drift.
+  SuggestedAction: Remove the two unsupported catalog entries or introduce matching domain events, serializers, and production-path conformance coverage.
+  Verification: Keep the produced-types assertion exact with only the two documented catalog-only exceptions.
   Status: open
 
 ## Follow-up Items
 
-- [ID: item-8]
-  Severity: follow-up
-  Scope: Issue lineage revision scope
-  Evidence: `IssueStore` increments `LineageVersion` for every Issue save (`IssueStore.cs:92-114`), but WorkflowRun receives it only on binding and affiliation propagation. The revision name suggests a lineage-only ordering contract while the implementation uses a broader aggregate revision.
-  SuggestedAction: Either rename/document it as the Issue state revision or isolate a lineage-specific revision to reduce protocol ambiguity.
-  Status: follow-up
+(none)
 
 ## Pre-existing or Out-of-scope Items
 
-- [ID: item-9]
-  Severity: warning
-  Scope: rehomed retained links in epic progression
-  Evidence: Reopen retains a link that another active epic owns, while later progress selection evaluates retained membership without filtering active ownership. A restarted epic can attempt to start an Issue owned by another epic. This predates the lineage propagation redesign.
-  SuggestedAction: Track a separate epic-progression change to restrict execution candidates to active ownership or reclassify retained historical links.
-  Status: pre-existing
+(none)
 
 ## Verification
 
-- `npm test` passed: 865 CLI, 1,411 server unit, 2,802 server spec, 22 architecture, 4,654 web, and 1,014 runner tests.
+- `git diff --check` passed after the local repair and review report update.
+- `dotnet test packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj --no-restore --filter "FullyQualifiedName~WorkflowGrainStateSaveFailureSpecs"` passed: 3 tests.
+- `npm test` passed: 865 CLI, 1,412 server unit, 2,824 server spec, 22 architecture, 4,656 web, and 1,016 runner tests.
 - `npm run typecheck -w packages/web` passed.
-- `npm run test:run -w packages/web` passed: 333 files and 4,654 tests.
-- `git diff --check master...HEAD` passed.
 
 <promise>FAIL</promise>

@@ -104,6 +104,39 @@ public sealed class WorkflowGrainStateSaveFailureSpecs
         Assert.Equal(2, failingStore.StateOnlySaveAttempts);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public async Task Start_StateOnlySaveFailure_RejectsDirtyActivationBeforeItCanPersistStaleLineage()
+    {
+        const string workflowRunId = "wr-paused-lineage-save-failure";
+        const string projectId = "proj-paused-lineage-save-failure";
+        const string issueId = "issue-paused-lineage-save-failure";
+
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var store = scope.ServiceProvider.GetRequiredService<IWorkflowRunStore>();
+        var pausedRun = CreateBoundRun(workflowRunId, projectId, issueId);
+        pausedRun.Pause();
+        await store.SaveAsync(pausedRun);
+
+        var failingStore = new FailingWorkflowRunStore(store);
+        var failedActivation = CreateGrain(scope.ServiceProvider, failingStore, workflowRunId);
+        await failedActivation.OnActivateAsync(CancellationToken.None);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => failedActivation.ApplyIssueLineageAsync(
+            new WorkflowIssueLineage(issueId, "epic_2", 2)));
+
+        var rejected = await Assert.ThrowsAsync<InvalidOperationException>(() => failedActivation.StartAsync());
+        Assert.Contains("must reload", rejected.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(1, failingStore.StateOnlySaveAttempts);
+
+        var persisted = await store.LoadAsync(workflowRunId);
+        Assert.NotNull(persisted);
+        Assert.Equal(WorkflowRunStatus.Paused, persisted!.Status);
+        Assert.Equal(1, persisted.IssueLineageVersion);
+        Assert.False(persisted.Metadata.Annotations!.ContainsKey("epicId"));
+    }
+
     private static WorkflowGrain CreateGrain(
         IServiceProvider services,
         IWorkflowRunStore store,
