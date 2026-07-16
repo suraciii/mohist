@@ -28,7 +28,6 @@ public class EpicEventLineageSpecs
                 entry.Envelope.Source.ToString() == $"/mohist/projects/{ProjectId}/epics/{dto.Number}");
             Assert.Equal(ProjectId, created.Envelope.Extensions[EventCatalog.Lineage.ProjectId]);
             Assert.Equal(dto.Number.ToString(), created.Envelope.Extensions[EventCatalog.Lineage.Epic]);
-            EnvelopeConformance.AssertRequired(created.Envelope);
         }
     }
 
@@ -47,7 +46,6 @@ public class EpicEventLineageSpecs
                 entry.Envelope.Type == EventCatalog.ReverseDns.EpicStatusChanged);
             Assert.Equal(ProjectId, statusChanged.Envelope.Extensions[EventCatalog.Lineage.ProjectId]);
             Assert.Equal(EpicNumber.ToString(), statusChanged.Envelope.Extensions[EventCatalog.Lineage.Epic]);
-            EnvelopeConformance.AssertRequired(statusChanged.Envelope);
         }
     }
 

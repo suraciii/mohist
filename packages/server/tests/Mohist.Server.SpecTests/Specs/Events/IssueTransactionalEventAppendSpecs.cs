@@ -119,7 +119,6 @@ public class IssueTransactionalEventAppendSpecs : IAsyncLifetime
         Assert.Equal(ProjectId, stored.Envelope.Extensions[EventCatalog.Lineage.ProjectId]);
         Assert.Equal("4", stored.Envelope.Extensions[EventCatalog.Lineage.Issue]);
         Assert.Equal("7", stored.Envelope.Extensions[EventCatalog.Lineage.Epic]);
-        EnvelopeConformance.AssertRequired(stored.Envelope);
     }
 
     [Fact]

@@ -18,9 +18,8 @@ namespace Mohist.Server.SpecTests.Specs.Events.Inbox;
 /// "Server emits a project-scoped realtime hint strictly after an inbox
 /// item is persisted": exactly one hint per non-duplicate insert, no
 /// hint on deduplicated inserts, no hint on insert failure, identity-only
-/// payload, lineage extensions (projectid / issue) stamped,
-/// envelope satisfies <see cref="EventCatalog.RequiredAttributes"/> for
-/// <c>com.mohist.inbox.item-persisted</c>, and publish failure propagation.
+/// payload, canonical lineage extensions (projectid / issue), and publish
+/// failure propagation.
 /// Shared DB / scope / event-builder helpers live in
 /// <see cref="InboxProjectionTestSupport"/>.
 /// </summary>
@@ -225,7 +224,7 @@ public class InboxProjectionHandlerRealtimeHintSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
-    public async Task Hint_SatisfiesEventCatalogRequiredAttributesForInboxItemPersisted()
+    public async Task Hint_CarriesInboxProducerContext()
     {
         await using var database = InboxProjectionTestSupport.CreateDatabase();
         // Seed workflow-branch inputs first so the handler can resolve
@@ -269,20 +268,16 @@ public class InboxProjectionHandlerRealtimeHintSpecs
             EventCatalog.ReverseDns.IssueCompleted, "proj_conformance", 4, "evt-cf-completed"), CancellationToken.None);
 
         var hintType = EventCatalog.ReverseDns.InboxItemPersisted;
-        Assert.True(EventCatalog.HasLineageDeclaration(hintType));
-        var required = EventCatalog.RequiredAttributes(hintType);
-        Assert.Equal(new[] { EventCatalog.Lineage.ProjectId, EventCatalog.Lineage.Issue }, required.ToArray());
 
         Assert.Equal(4, publisher.Published.Count);
-        // Every emitted hint must satisfy the catalog's required-attribute
-        // declaration. AssertRequired throws if any required attribute is
-        // missing; Missing returns the empty list when conformance passes.
         foreach (var hint in publisher.Published)
         {
             Assert.Equal(hintType, hint.Type);
-            var extensions = hint.Extensions ?? new Dictionary<string, string>();
-            Assert.Empty(EnvelopeConformance.Missing(extensions, hintType));
-            EnvelopeConformance.AssertRequired(extensions, hintType);
+            var extensions = Assert.IsAssignableFrom<IReadOnlyDictionary<string, string>>(hint.Extensions);
+            Assert.True(extensions.TryGetValue(EventCatalog.Lineage.ProjectId, out var projectId));
+            Assert.False(string.IsNullOrWhiteSpace(projectId));
+            Assert.True(extensions.TryGetValue(EventCatalog.Lineage.Issue, out var issue));
+            Assert.False(string.IsNullOrWhiteSpace(issue));
         }
     }
 

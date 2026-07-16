@@ -146,42 +146,6 @@ public sealed class HermesIssueNotificationTests
     }
 
     [Fact]
-    public async Task IssueEvent_LegacyIssuenoFallback_ResolvesIdentity()
-    {
-        var fixture = CreateFixture();
-
-        await fixture.Handler.HandleAsync(IssueEventLegacy(
-            EventCatalog.ReverseDns.IssueCompleted,
-            new IssueCompleted("run_1")), CancellationToken.None);
-        await fixture.Dispatcher.RunAllAsync();
-
-        // Pre-change historical row stamped with the legacy `issueno`
-        // key. The dual-key read must still resolve identity — the
-        // Non-Goal forbids backfill.
-        var payload = Assert.Single(fixture.Client.Sent);
-        Assert.Equal(NotificationKinds.IssueCompleted, payload.NotificationType);
-        Assert.Equal(42, payload.IssueNumber);
-        Assert.Equal("Add Hermes outbound notifications", payload.IssueTitle);
-    }
-
-    [Fact]
-    public async Task IssueEvent_BothKeysPresent_PrefersUnifiedIssueKey()
-    {
-        var fixture = CreateFixture();
-
-        await fixture.Handler.HandleAsync(IssueEventBothKeys(
-            EventCatalog.ReverseDns.IssueCompleted,
-            new IssueCompleted("run_1")), CancellationToken.None);
-        await fixture.Dispatcher.RunAllAsync();
-
-        // Both keys stamped, but `issue` carries the right number and
-        // `issueno` disagrees. The unified key wins.
-        var payload = Assert.Single(fixture.Client.Sent);
-        Assert.Equal(42, payload.IssueNumber);
-        Assert.Equal("Add Hermes outbound notifications", payload.IssueTitle);
-    }
-
-    [Fact]
     public async Task IssueEvent_NoIssueNumberKey_SkipsWithoutSending()
     {
         var fixture = CreateFixture();
@@ -431,33 +395,6 @@ public sealed class HermesIssueNotificationTests
             {
                 [EventCatalog.Lineage.ProjectId] = "proj_1",
                 [EventCatalog.Lineage.Issue] = "42",
-            });
-
-    private static CloudEvent IssueEventLegacy<T>(string type, T data) where T : class =>
-        new(
-            id: "evt_legacy_" + type.Replace(".", "_", StringComparison.Ordinal),
-            source: new Uri("/mohist/projects/proj_1/issues/42", UriKind.Relative),
-            type: type,
-            time: new DateTimeOffset(2026, 7, 3, 12, 1, 0, TimeSpan.Zero),
-            data: JsonSerializer.SerializeToElement(data, CloudEvent.JsonOptions),
-            extensions: new Dictionary<string, string>(StringComparer.Ordinal)
-            {
-                [EventCatalog.Lineage.ProjectId] = "proj_1",
-                ["issueno"] = "42",
-            });
-
-    private static CloudEvent IssueEventBothKeys<T>(string type, T data) where T : class =>
-        new(
-            id: "evt_both_" + type.Replace(".", "_", StringComparison.Ordinal),
-            source: new Uri("/mohist/projects/proj_1/issues/42", UriKind.Relative),
-            type: type,
-            time: new DateTimeOffset(2026, 7, 3, 12, 1, 0, TimeSpan.Zero),
-            data: JsonSerializer.SerializeToElement(data, CloudEvent.JsonOptions),
-            extensions: new Dictionary<string, string>(StringComparer.Ordinal)
-            {
-                [EventCatalog.Lineage.ProjectId] = "proj_1",
-                [EventCatalog.Lineage.Issue] = "42",
-                ["issueno"] = "999",
             });
 
     private static CloudEvent IssueEventNoIssueNumber<T>(string type, T data) where T : class =>

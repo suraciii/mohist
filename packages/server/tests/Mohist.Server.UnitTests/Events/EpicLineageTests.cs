@@ -55,22 +55,9 @@ public class EpicLineageTests
         Assert.Equal(2, extensions.Count);
     }
 
-    [Theory]
-    [InlineData(EventCatalog.ReverseDns.EpicCreated)]
-    [InlineData(EventCatalog.ReverseDns.EpicUpdated)]
-    [InlineData(EventCatalog.ReverseDns.EpicPriorityChanged)]
-    [InlineData(EventCatalog.ReverseDns.EpicStatusChanged)]
-    [InlineData(EventCatalog.ReverseDns.EpicClosed)]
-    [InlineData(EventCatalog.ReverseDns.EpicReopened)]
-    [InlineData(EventCatalog.ReverseDns.EpicStartAttemptFailed)]
-    public void BuildExtensions_SatisfiesEventCatalogForEveryEpicType(string eventType)
+    [Fact]
+    public void BuildExtensions_CarriesEpicProducerContext()
     {
-        // The helper's output is the single source extensions a producer
-        // writes onto every epic.* envelope. For each registered epic
-        // event type, the helper's dictionary must satisfy the catalog's
-        // required-attribute matrix — no missing keys, no empty values.
-        // A failure here means the producer drifted from the registry:
-        // the conformance check would catch it on the live path too.
         var state = new Mohist.Server.Epic.Domain.Epic
         {
             ProjectId = "proj_conformance",
@@ -80,26 +67,8 @@ public class EpicLineageTests
 
         var extensions = EpicLineage.BuildExtensions(state);
 
-        var missing = EnvelopeConformance.Missing(extensions, eventType);
-        Assert.Empty(missing);
-    }
-
-    [Fact]
-    public void BuildExtensions_AssertRequiredDoesNotThrow_ForAnEpicType()
-    {
-        // The throwing variant must also accept the helper's output for a
-        // representative epic type (covers the protocol-named line: the
-        // dispatcher catches drift in CI rather than at the live call
-        // site).
-        var state = new Mohist.Server.Epic.Domain.Epic
-        {
-            ProjectId = "proj_assert_required",
-            Number = 1,
-            Title = "Any title",
-        };
-        var extensions = EpicLineage.BuildExtensions(state);
-
-        EnvelopeConformance.AssertRequired(extensions, EventCatalog.ReverseDns.EpicStatusChanged);
+        Assert.Equal("proj_conformance", extensions[EventCatalog.Lineage.ProjectId]);
+        Assert.Equal("5", extensions[EventCatalog.Lineage.Epic]);
     }
 
     [Fact]

@@ -434,28 +434,24 @@ public class InboxProjectionHandlerSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
-    public async Task IssueEvent_LegacyIssuenoKeyFallback_ResolvesIssueNumber()
+    public async Task IssueEvent_WithoutCanonicalIssueKey_Skips()
     {
         await using var database = InboxProjectionTestSupport.CreateDatabase();
-        await InboxProjectionTestSupport.SeedIssueAsync(database,
-            projectId: "proj_a",
-            issueNumber: 7,
-            title: "Legacy row");
-
         var handler = InboxProjectionTestSupport.CreateHandler(database);
-        // Historical pre-change row: stamped with the legacy `issueno`
-        // key instead of the unified `issue` key. The Non-Goal forbids
-        // backfill, so the read path must still resolve the issue number.
-        var evt = InboxProjectionTestSupport.BuildLegacyIssueEvent(
+        var evt = new CloudEvent(
+            id: "evt-without-canonical-issue",
+            source: new Uri("/mohist/projects/proj_a/issues/7", UriKind.Relative),
             type: EventCatalog.ReverseDns.IssueWorkStarted,
-            projectId: "proj_a",
-            issueNumber: 7,
-            eventId: "evt-legacy-issueno");
+            time: InboxProjectionTestSupport.FixedEventTime,
+            data: null,
+            extensions: new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [EventCatalog.Lineage.ProjectId] = "proj_a",
+            });
 
         await handler.HandleAsync(evt, CancellationToken.None);
 
-        var item = Assert.Single(await InboxProjectionTestSupport.GetInboxAsync(database, "proj_a"));
-        Assert.Equal(7, item.IssueNumber);
+        Assert.Empty(await InboxProjectionTestSupport.GetInboxAsync(database, "proj_a"));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]
@@ -491,7 +487,7 @@ public class InboxProjectionHandlerSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
-    public async Task IssueEvent_BothKeysPresent_PrefersUnifiedIssueKey()
+    public async Task IssueEvent_CanonicalIssueKey_Resolves()
     {
         await using var database = InboxProjectionTestSupport.CreateDatabase();
         await InboxProjectionTestSupport.SeedIssueAsync(database,
@@ -500,9 +496,6 @@ public class InboxProjectionHandlerSpecs
             title: "Both");
 
         var handler = InboxProjectionTestSupport.CreateHandler(database);
-        // Both `issue` and the legacy `issueno` are stamped, but the
-        // latter disagrees with the loaded issue. The unified key wins
-        // and resolves correctly to issue #9.
         var evt = new CloudEvent(
             id: "evt-both",
             source: new Uri("/mohist/projects/proj_a/issues/9", UriKind.Relative),
@@ -513,7 +506,6 @@ public class InboxProjectionHandlerSpecs
             {
                 [EventCatalog.Lineage.ProjectId] = "proj_a",
                 [EventCatalog.Lineage.Issue] = "9",
-                ["issueno"] = "999",
             });
 
         await handler.HandleAsync(evt, CancellationToken.None);

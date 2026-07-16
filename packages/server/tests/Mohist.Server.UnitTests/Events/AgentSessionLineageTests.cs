@@ -164,38 +164,26 @@ public class AgentSessionLineageTests
             new HashSet<string>(extensions.Keys, StringComparer.Ordinal));
     }
 
-    [Theory]
-    [InlineData(EventCatalog.ReverseDns.AgentSessionRuntimeBound)]
-    [InlineData(EventCatalog.ReverseDns.AgentSessionUsageRecorded)]
-    [InlineData(EventCatalog.ReverseDns.AgentSessionModelChanged)]
-    [InlineData(EventCatalog.ReverseDns.AgentSessionContextCompacted)]
-    [InlineData(EventCatalog.ReverseDns.AgentSessionContextExhausted)]
-    [InlineData(EventCatalog.ReverseDns.AgentSessionContextHealthUpdated)]
-    public void BuildExtensions_AgentLaunchSession_SatisfiesEventCatalogForEveryAgentSessionType(string eventType)
+    [Fact]
+    public void BuildExtensions_AgentLaunchSession_CarriesSessionProducerContext()
     {
-        // The matrix requires {projectid, sessionid} for every
-        // agent-session.* type. The helper's output must satisfy that
-        // for every registered event type — the conformance check
-        // would also fail on the live path.
         var session = BuildAgentLaunchSession();
 
         var extensions = AgentSessionLineage.BuildExtensions(session);
 
-        var missing = EnvelopeConformance.Missing(extensions, eventType);
-        Assert.Empty(missing);
+        Assert.Equal(ProjectId, extensions[EventCatalog.Lineage.ProjectId]);
+        Assert.Equal(SessionId, extensions[EventCatalog.Lineage.SessionId]);
     }
 
     [Fact]
-    public void BuildExtensions_WorkflowSession_SatisfiesEventCatalogForAgentSessionType()
+    public void BuildExtensions_WorkflowSession_CarriesSessionProducerContext()
     {
-        // A workflow-origin session still satisfies the
-        // {projectid, sessionid} matrix — the additional
-        // issue/workflowrunid/stage keys are conditional.
         var session = BuildWorkflowOriginSession();
 
         var extensions = AgentSessionLineage.BuildExtensions(session);
 
-        EnvelopeConformance.AssertRequired(extensions, EventCatalog.ReverseDns.AgentSessionRuntimeBound);
+        Assert.Equal(ProjectId, extensions[EventCatalog.Lineage.ProjectId]);
+        Assert.Equal(SessionId, extensions[EventCatalog.Lineage.SessionId]);
     }
 
     private static AgentSession BuildAgentLaunchSession(int? issueNumber = null)

@@ -31,7 +31,7 @@ namespace Mohist.Server.Events.Subscriptions;
 /// need a small number of fields from each. Branches dispatch through
 /// <see cref="WorkflowStageLockReleaseHandler.ExtractWorkflowRunId"/>
 /// for workflow events, or read the issue-event
-/// <c>projectid</c>/<c>issueid</c>/<c>issue</c> extensions
+/// <c>projectid</c>/<c>issue</c> extensions
 /// stamped by <c>IssueStore</c> when it appends the event row.
 ///
 /// Identity resolution starts from event metadata, then validates it
@@ -43,10 +43,8 @@ namespace Mohist.Server.Events.Subscriptions;
 ///         source <c>WorkflowGrain.GetProjectId</c> uses.</item>
 ///   <item>Issue events → extensions identify the candidate issue; the
 ///         loaded issue is the source of truth for project and number.
-///         The issue number is read from <c>issue</c> (the unified name
-///         stamped by IssueStore) with an <c>issueno</c> fallback so
-///         pre-change historical rows that were never backfilled still
-///         resolve — the Non-Goal forbids rewriting history.</item>
+///         The issue number is read from the canonical <c>issue</c>
+///         extension stamped by IssueStore.</item>
 /// </list>
 ///
 /// Idempotency is delegated to <see cref="InboxStore.InsertAsync"/>:
@@ -218,30 +216,14 @@ public sealed class InboxProjectionHandler : ICloudEventHandler
             return null;
         }
 
-        var issueNumberText = TryReadIssueNumber(extensions);
-        if (issueNumberText is null || !int.TryParse(issueNumberText, out var issueNumber))
+        if (!extensions.TryGetValue(EventCatalog.Lineage.Issue, out var issueNumberText)
+            || string.IsNullOrWhiteSpace(issueNumberText)
+            || !int.TryParse(issueNumberText, out var issueNumber))
         {
             return null;
         }
 
         return new ResolvedIdentity(projectId, issueNumber);
-    }
-
-    private static string? TryReadIssueNumber(IReadOnlyDictionary<string, string> extensions)
-    {
-        if (extensions.TryGetValue(EventCatalog.Lineage.Issue, out var issueNumberText)
-            && !string.IsNullOrWhiteSpace(issueNumberText))
-        {
-            return issueNumberText;
-        }
-
-        if (extensions.TryGetValue("issueno", out var legacyIssueNumberText)
-            && !string.IsNullOrWhiteSpace(legacyIssueNumberText))
-        {
-            return legacyIssueNumberText;
-        }
-
-        return null;
     }
 
     private async Task<DomainIssue?> ResolveIssueAsync(ResolvedIdentity resolved, IStateStore<DomainIssue> issueStore)

@@ -12,18 +12,17 @@ namespace Mohist.Server.Infrastructure.Data.Issue;
 /// <remarks>
 /// Lineage attribute names live on <see cref="EventCatalog.Lineage"/> and
 /// stay in sync with <c>design/event-protocol.md</c>. The user-visible
-/// issue number is stamped under the protocol name <c>issue</c> (replacing
-/// the legacy <c>issueno</c> key, D3). <c>epicid</c> is stamped when the
-/// issue's own state carries an <c>EpicNumber</c>; when it is null, the key is
+/// issue number is stamped under the protocol name <c>issue</c>. The current
+/// Epic number is stamped under <c>epic</c>; when it is null, the key is
 /// omitted entirely.
 /// </remarks>
 public static class IssueLineage
 {
     /// <summary>
     /// Build the <c>extensions</c> dictionary for an issue event. Always
-    /// stamps <c>projectid</c>, <c>issueid</c>, and <c>issue</c> (the
-    /// issue number). Additionally stamps <c>epicid</c> when
-    /// <see cref="DomainIssue.EpicId"/> is non-null; absent affiliation
+    /// stamps <c>projectid</c> and <c>issue</c> (the issue number).
+    /// Additionally stamps <c>epic</c> when
+    /// <see cref="DomainIssue.EpicNumber"/> is non-null; absent affiliation
     /// is omitted, never an empty string.
     /// </summary>
     public static IReadOnlyDictionary<string, string> BuildExtensions(DomainIssue state)

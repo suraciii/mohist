@@ -269,13 +269,10 @@ public class AgentSessionTransactionalEventAppendSpecs : IAsyncLifetime
     }
 
     [Fact]
-    public async Task SaveAsync_StampedEnvelopes_SatisfyEventCatalogRequiredAttributes()
+    public async Task SaveAsync_StampedEnvelopes_CarrySessionProducerContext()
     {
-        // T-005 / D8 conformance: every agent-session.* envelope
-        // produced through SaveAsync must satisfy the catalog's
-        // declared required lineage attributes (projectid, sessionid)
-        // for its type. Drives both an agent-launch and a workflow
-        // origin session through the production path.
+        // Drives both an agent-launch and a workflow-origin session through
+        // the production path. Each producer stamps its own session context.
         var store = new AgentSessionStore(_dbFactory, _eventStore, _grainFactory, NullLogger<AgentSessionStore>.Instance);
 
         var agentLaunch = BuildSession("agent_txn_conformance_agent", BuildAgentLaunchLabels(
@@ -304,9 +301,10 @@ public class AgentSessionTransactionalEventAppendSpecs : IAsyncLifetime
 
         foreach (var entry in agentEvents.Concat(workflowEvents))
         {
-            EnvelopeConformance.AssertRequired(entry.Envelope);
-            var missing = EnvelopeConformance.Missing(entry.Envelope);
-            Assert.Empty(missing);
+            Assert.True(entry.Envelope.Extensions.TryGetValue(EventCatalog.Lineage.ProjectId, out var projectId));
+            Assert.False(string.IsNullOrWhiteSpace(projectId));
+            Assert.True(entry.Envelope.Extensions.TryGetValue(EventCatalog.Lineage.SessionId, out var sessionId));
+            Assert.False(string.IsNullOrWhiteSpace(sessionId));
         }
     }
 

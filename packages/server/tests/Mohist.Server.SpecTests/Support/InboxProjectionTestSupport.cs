@@ -58,19 +58,6 @@ internal static class InboxProjectionTestSupport
                 [EventCatalog.Lineage.Issue] = issueNumber.ToString(),
             });
 
-    public static CloudEvent BuildLegacyIssueEvent(string type, string projectId, int issueNumber, string eventId) =>
-        new(
-            id: eventId,
-            source: new Uri($"/mohist/projects/{projectId}/issues/{issueNumber}", UriKind.Relative),
-            type: type,
-            time: FixedEventTime,
-            data: null,
-            extensions: new Dictionary<string, string>(StringComparer.Ordinal)
-            {
-                [EventCatalog.Lineage.ProjectId] = projectId,
-                ["issueno"] = issueNumber.ToString(),
-            });
-
     public static CloudEvent BuildWorkflowEvent(string type, string workflowRunId, string eventId) =>
         new(
             id: eventId,

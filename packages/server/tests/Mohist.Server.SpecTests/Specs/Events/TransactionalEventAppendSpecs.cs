@@ -335,31 +335,9 @@ public class TransactionalEventAppendSpecs : IAsyncLifetime
     }
 
     [Fact]
-    public async Task EventStore_RegisteredEnvelopeMissingRequiredLineage_FailsBeforePersistence()
+    public async Task SaveAsync_StampedEnvelopes_CarryWorkflowProducerContext()
     {
-        var envelope = new CloudEvent(
-            id: "evt_missing_project",
-            source: new Uri("/mohist/workflow-runs/wr_missing_project", UriKind.Relative),
-            type: EventCatalog.ReverseDns.WorkflowRunStarted,
-            time: FixedTime,
-            data: System.Text.Json.JsonSerializer.SerializeToElement(new WorkflowRunStarted(), CloudEvent.JsonOptions),
-            extensions: new Dictionary<string, string>(StringComparer.Ordinal)
-            {
-                [EventCatalog.Lineage.WorkflowRunId] = "wr_missing_project",
-            });
-
-        var ex = await Assert.ThrowsAsync<EnvelopeConformanceException>(() => _eventStore.AppendAsync(envelope));
-
-        Assert.Contains(EventCatalog.Lineage.ProjectId, ex.MissingAttributes);
-        Assert.Empty(await _eventStore.ListAsync("wr_missing_project"));
-    }
-
-    [Fact]
-    public async Task SaveAsync_StampedEnvelopes_SatisfyEventCatalogRequiredAttributes()
-    {
-        // Conformance check (D8): the producer must stamp every attribute
-        // the catalog says its type requires; absent affiliations stay
-        // absent. Drives every event family through the production path.
+        // Drives every workflow event family through the production path.
         var store = new WorkflowRunStore(_dbFactory, _eventStore, _grainFactory, NullLogger<WorkflowRunStore>.Instance);
         var run = BuildRun("wr_txn_conformance", includeAnnotations: true);
 
@@ -376,14 +354,8 @@ public class TransactionalEventAppendSpecs : IAsyncLifetime
         Assert.Equal(6, stored.Count);
         foreach (var entry in stored)
         {
-            // Each envelope satisfies the always-required attributes for
-            // its type. EnvelopeConformance throws when an attribute is
-            // missing or empty.
-            EnvelopeConformance.AssertRequired(entry.Envelope);
-
-            // Empty values also count as missing — confirm via Missing().
-            var missing = EnvelopeConformance.Missing(entry.Envelope);
-            Assert.Empty(missing);
+            Assert.Equal("wr_txn_conformance", entry.Envelope.Extensions[EventCatalog.Lineage.WorkflowRunId]);
+            Assert.Equal("proj_txn", entry.Envelope.Extensions[EventCatalog.Lineage.ProjectId]);
         }
     }
 

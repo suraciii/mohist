@@ -162,8 +162,9 @@ public sealed class HermesIssueNotificationHandler : ICloudEventHandler
             return null;
         }
 
-        var issueNumberText = TryReadIssueNumberText(extensions);
-        if (issueNumberText is null || !int.TryParse(issueNumberText, out var issueNumber))
+        if (!extensions.TryGetValue(EventCatalog.Lineage.Issue, out var issueNumberText)
+            || string.IsNullOrWhiteSpace(issueNumberText)
+            || !int.TryParse(issueNumberText, out var issueNumber))
         {
             return null;
         }
@@ -176,23 +177,6 @@ public sealed class HermesIssueNotificationHandler : ICloudEventHandler
         };
 
         return new ResolvedIdentity(projectId, issueNumber, workflowRunId);
-    }
-
-    private static string? TryReadIssueNumberText(IReadOnlyDictionary<string, string> extensions)
-    {
-        if (extensions.TryGetValue(EventCatalog.Lineage.Issue, out var unifiedText)
-            && !string.IsNullOrWhiteSpace(unifiedText))
-        {
-            return unifiedText;
-        }
-
-        if (extensions.TryGetValue("issueno", out var legacyText)
-            && !string.IsNullOrWhiteSpace(legacyText))
-        {
-            return legacyText;
-        }
-
-        return null;
     }
 
     private async Task<DomainIssue?> ResolveIssueAsync(ResolvedIdentity resolved, IStateStore<DomainIssue> issueStore)

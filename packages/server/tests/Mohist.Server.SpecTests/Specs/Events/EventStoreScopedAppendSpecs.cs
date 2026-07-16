@@ -161,15 +161,17 @@ public class EventStoreScopedAppendSpecs : IAsyncLifetime
     }
 
     [Fact]
-    public async Task AppendAsync_UnregisteredMohistType_IsRejectedAtStoreBoundary()
+    public async Task AppendAsync_CustomMohistType_IsPersistedAtStoreBoundary()
     {
         var envelope = BuildEvent(
             "/mohist/workflow-runs/wr_unregistered",
             "com.mohist.workflow.unregistered");
 
-        var ex = await Assert.ThrowsAsync<UnregisteredMohistEventTypeException>(() => _store.AppendAsync(envelope));
+        await _store.AppendAsync(envelope);
 
-        Assert.Equal(envelope.Type, ex.EventType);
+        await using var verify = new MohistDbContext(_options);
+        var stored = Assert.Single(await verify.WorkflowRunEvents.AsNoTracking().ToListAsync());
+        Assert.Equal(envelope.Type, stored.Type);
     }
 
     [Fact]
