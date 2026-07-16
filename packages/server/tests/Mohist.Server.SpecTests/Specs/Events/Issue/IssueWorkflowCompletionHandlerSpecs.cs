@@ -400,38 +400,6 @@ public class IssueWorkflowCompletionHandlerSpecs
         Assert.Equal(IssueStatus.Done, IssueStore.Deserialize(stored.State)!.Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
-    [Fact]
-    public async Task BindingHandler_RedrivesTheCommittedIssueBinding()
-    {
-        await using var database = CreateDatabase();
-        var grains = new RecordingIssueGrainFactory(database.Factory, new FakeTimeProvider(FixedNow));
-        var handler = new IssueWorkflowBindingHandler(grains);
-
-        await handler.HandleAsync(
-            BuildWorkStartedEvent("wr_binding", "project_1", 1),
-            CancellationToken.None);
-
-        Assert.Equal(new RecordedCall(new IssueWorkflowRef("project_1", 1), "wr_binding"), Assert.Single(grains.BindingCalls));
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
-    [Fact]
-    public async Task BindingHandler_MissingScopedIssueReferenceFailsForDurableRetry()
-    {
-        await using var database = CreateDatabase();
-        var grains = new RecordingIssueGrainFactory(database.Factory, new FakeTimeProvider(FixedNow));
-        var handler = new IssueWorkflowBindingHandler(grains);
-        var evt = BuildWorkStartedEvent("wr_binding", "project_1", issueNumber: null);
-
-        await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            handler.HandleAsync(evt, CancellationToken.None));
-
-        Assert.Empty(grains.BindingCalls);
-    }
-
     private static CloudEvent BuildCompletedEvent(
         string workflowRunId,
         string projectId = "project_1",

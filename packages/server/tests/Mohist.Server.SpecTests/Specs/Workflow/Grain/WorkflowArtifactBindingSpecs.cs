@@ -35,11 +35,10 @@ public class WorkflowArtifactBindingSpecs : WorkflowGrainSpecs
 
         var (work, runnerId) = await PollWorkAnyAsync();
         var uploadId = await SeedPendingUploadAsync(work.WorkflowRunId, work.WorkId, "task-1.1", "review.md");
-        await SeedEpicAsync(work.WorkflowRunId, "epic_artifact");
         var workflow = Grains.GetGrain<IWorkflowGrain>(work.WorkflowRunId);
-        await workflow.ApplyIssueLineageAsync(new WorkflowIssueLineage(
-            TestIssueId(work.WorkflowRunId),
-            "epic_artifact",
+        await workflow.RefreshIssueContextAsync(new WorkflowIssueContext(
+            TestProjectId(work.WorkflowRunId),
+            TestIssueNumber(work.WorkflowRunId),
             1));
 
         await ReportAsync(runnerId, work.WorkId, new WorkResult("completed", ArtifactUploadIds: [uploadId]));
@@ -64,51 +63,32 @@ public class WorkflowArtifactBindingSpecs : WorkflowGrainSpecs
         Assert.True(completedIndex > artifactIndex);
         Assert.Equal(work.WorkflowRunId, events[artifactIndex].Envelope.Extensions[EventCatalog.Lineage.WorkflowRunId]);
         Assert.Equal(TestProjectId(work.WorkflowRunId), events[artifactIndex].Envelope.Extensions[EventCatalog.Lineage.ProjectId]);
-        Assert.Equal(TestIssueId(work.WorkflowRunId), events[artifactIndex].Envelope.Extensions[EventCatalog.Lineage.Issue]);
-        Assert.Equal("epic_artifact", events[artifactIndex].Envelope.Extensions[EventCatalog.Lineage.Epic]);
+        Assert.Equal(TestIssueNumber(work.WorkflowRunId).ToString(), events[artifactIndex].Envelope.Extensions[EventCatalog.Lineage.Issue]);
+        Assert.Equal("1", events[artifactIndex].Envelope.Extensions[EventCatalog.Lineage.Epic]);
         Assert.False(events[artifactIndex].Envelope.Extensions.ContainsKey(EventCatalog.Lineage.Stage));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public async Task ApplyIssueLineageAsync_IgnoresStaleAndDuplicateRevisions_AndRejectsConflicts()
+    public async Task RefreshIssueContextAsync_OverwritesTheCurrentEpicWithoutARevision()
     {
         await StartWorkflowAsync(SingleStage(tasks: [new TaskDefinition("task-1", "Task 1", "spec/task")], checks: []));
         var (work, _) = await PollWorkAnyAsync();
         var workflow = Grains.GetGrain<IWorkflowGrain>(work.WorkflowRunId);
-        var issueId = TestIssueId(work.WorkflowRunId);
-        await SeedEpicAsync(work.WorkflowRunId, "epic_current");
-
-        await workflow.ApplyIssueLineageAsync(new WorkflowIssueLineage(issueId, "epic_current", 2));
-        await workflow.ApplyIssueLineageAsync(new WorkflowIssueLineage(issueId, "epic_stale", 1));
-        await workflow.ApplyIssueLineageAsync(new WorkflowIssueLineage(issueId, "epic_current", 2));
-        await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            workflow.ApplyIssueLineageAsync(new WorkflowIssueLineage(issueId, "epic_conflict", 2)));
+        var context = new WorkflowIssueContext(
+            TestProjectId(work.WorkflowRunId),
+            TestIssueNumber(work.WorkflowRunId),
+            1);
+        await workflow.RefreshIssueContextAsync(context);
+        await workflow.RefreshIssueContextAsync(context with { EpicNumber = 2 });
+        await workflow.RefreshIssueContextAsync(context with { EpicNumber = 2 });
 
         await workflow.PauseAsync("lineage assertion");
 
         var paused = Assert.Single((await EventStore.ListAsync(work.WorkflowRunId)), entry =>
             entry.Envelope.Type == EventCatalog.ReverseDns.WorkflowRunPaused);
-        Assert.Equal("epic_current", paused.Envelope.Extensions[EventCatalog.Lineage.Epic]);
-    }
-
-    private async Task SeedEpicAsync(string workflowRunId, string epicId)
-    {
-        await using var db = CreateDb();
-        db.Epics.Add(new EpicRow
-        {
-            Id = epicId,
-            ProjectId = TestProjectId(workflowRunId),
-            Number = 1,
-            Title = epicId,
-            Description = "",
-            Priority = "p2",
-            Status = "running",
-            CreatedAt = TestTime.UtcNow,
-            UpdatedAt = TestTime.UtcNow,
-        });
-        await db.SaveChangesAsync();
+        Assert.Equal("2", paused.Envelope.Extensions[EventCatalog.Lineage.Epic]);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]

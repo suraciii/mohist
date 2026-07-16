@@ -39,7 +39,16 @@ public static class WorkflowRunLineage
 
     internal static void ApplyContext(WorkflowRun run, string projectId, int issueNumber, int? epicNumber)
     {
-        run.Metadata = run.Metadata with { Annotations = AnnotationsFor(projectId, issueNumber, epicNumber) };
+        var annotations = run.Metadata.Annotations is null
+            ? new Dictionary<string, string>(StringComparer.Ordinal)
+            : new Dictionary<string, string>(run.Metadata.Annotations, StringComparer.Ordinal);
+        annotations["projectId"] = projectId;
+        annotations["issueNumber"] = issueNumber.ToString();
+        if (epicNumber is > 0)
+            annotations["epicNumber"] = epicNumber.Value.ToString();
+        else
+            annotations.Remove("epicNumber");
+        run.Metadata = run.Metadata with { Annotations = annotations };
     }
 
     internal static bool ContextEquals(WorkflowRun run, string projectId, int issueNumber, int? epicNumber) =>

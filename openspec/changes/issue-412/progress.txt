@@ -68,7 +68,7 @@ membership authority each have a separately enforceable boundary. Do not reuse t
 | T-003 canonical Epic reference migration | done - all current owners classified; scoped columns, guarded backfill, writer coverage and migration regressions landed |
 | T-004 number-only server model/APIs | in progress — production cutover and UnitTests compile; SpecTests fixture migration continues |
 | T-005 Issue-owned membership and Epic progression | in progress — Issue-only affiliation commits and derived Epic runtime paths landed; focused SpecTests migration and migration-chain verification remain |
-| T-006 durable EnsureStarted Workflow handoff | in progress — production protocol, migration, and UnitTests landed; SpecTests recovery fixtures are being replaced |
+| T-006 durable EnsureStarted Workflow handoff | in progress — production protocol, migration, UnitTests, and duplicate-delivery/save-failure recovery fixtures landed; remaining historical SpecTests fixtures are being migrated |
 | T-007 canonical lineage and producer-family conformance | pending |
 | T-008 server lineage consumers/integrations | pending |
 | T-009 CLI/Web cutover | pending |
@@ -296,7 +296,8 @@ server cutover in T-004.
   workflow-profile, activity-card, workflow-reference, event-append, issue-creation, and profile
   storage fixtures to scoped numbers. Full SpecTests compile diagnostics have reduced from 710 to
   183 before the T-006 protocol cutover. Its removal exposed 205 stale fixtures that still invoke
-  binding/revision APIs; they will be replaced without restoring random identity aliases.
+  binding/revision APIs; the first recovery and workflow-grain fixtures are now replaced, reducing
+  the current SpecTests compile backlog to 182 without restoring random identity aliases.
 - T-004 is not complete until the current-state server contracts and all affected specs compile
   without legacy identity aliases.
 
