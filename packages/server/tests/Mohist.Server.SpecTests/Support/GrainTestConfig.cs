@@ -186,27 +186,6 @@ public static class GrainTestConfig
             """);
     }
 
-    /// <summary>
-    /// Returns <c>true</c> if the WorkflowRuns table already has a
-    /// <c>Status</c> column. Used by <see cref="ApplyWorkflowRunsStatusSchemaFix"/>
-    /// to avoid emitting a duplicate-column error on a T-004 test DB
-    /// (whose schema already has the column materialized by the
-    /// migration) versus a T-002-only test DB that pre-created the
-    /// schema without applying migrations.
-    /// </summary>
-    private static bool HasWorkflowRunsStatusColumn(MohistDbContext db)
-    {
-        // Catch the duplicate-column error from the AddColumn itself —
-        // SQLite returns "duplicate column name: Status" when we try to
-        // add a column that already exists. On a T-004 DB the column is
-        // there (created by the migration), but in shared-cache mode
-        // pragma_table_info on a different connection can return stale
-        // results, so we let the actual DDL be the source of truth.
-        // This helper is therefore unused — see TryAddWorkflowRunsStatusColumn.
-        _ = db;
-        return false;
-    }
-
     public static void ConfigureSilo(
         ISiloBuilder siloBuilder,
         string connectionString,
