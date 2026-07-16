@@ -106,6 +106,49 @@ public class WorkflowArtifactBindingSpecs : WorkflowGrainSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
+    public async Task InvalidRecoveryFollowUp_AcksAndFailsTheRunWithoutBindingArtifacts()
+    {
+        var recovery = new RecoveryDefinition(
+            2,
+            [new RecoveryHandlerDefinition("promise=FAIL", [], RetrySelf: true)]);
+        var definition = SingleStage(
+            tasks:
+            [
+                new TaskDefinition(
+                    "task-1",
+                    "Task 1",
+                    "spec/task",
+                    Artifacts: new TaskArtifactCapture([new TaskArtifactDeclaration("review.md")]),
+                    Recovery: recovery)
+            ],
+            checks: []);
+        await StartWorkflowAsync(definition);
+
+        var (work, runnerId) = await PollWorkAnyAsync();
+        var uploadId = await SeedPendingUploadAsync(work.WorkflowRunId, work.WorkId, "task-1.1", "review.md");
+
+        // A permanently invalid recovery follow-up acks and fails the run
+        // terminally rather than throwing. The terminal failure path does not
+        // bind artifacts, so the upload remains pending (recoverable by retry).
+        await ReportAsync(runnerId, work.WorkId, new WorkResult(
+            "completed",
+            Output: "{}",
+            ArtifactUploadIds: [uploadId],
+            AddTasks: [new RuntimeTaskInput("task-1", "Task 1", "spec/task", Recovery: recovery)]));
+
+        var workflow = Grains.GetGrain<IWorkflowGrain>(work.WorkflowRunId);
+        Assert.Equal("Failed", await workflow.GetRunStatusAsync());
+
+        await using var db = CreateDb();
+        Assert.Empty(await db.WorkflowArtifacts.Where(a => a.WorkflowRunId == work.WorkflowRunId).ToListAsync());
+        Assert.Single(await db.WorkflowArtifactPendingUploads
+            .Where(p => p.WorkflowRunId == work.WorkflowRunId && p.UploadId == uploadId)
+            .ToListAsync());
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
     public async Task FailedTask_WithDiagnosticUploads_BindsArtifacts()
     {
         var definition = SingleStage(

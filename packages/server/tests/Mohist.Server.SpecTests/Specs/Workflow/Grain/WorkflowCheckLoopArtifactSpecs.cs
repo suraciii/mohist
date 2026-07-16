@@ -175,7 +175,6 @@ public class WorkflowCheckLoopArtifactSpecs : WorkflowGrainSpecs
             review1.WorkflowRunId, review1.WorkId, "ai-review.1", "review.md",
             "review-round-1: FAIL");
 
-        var retryRecovery = ReviewRecovery() with { Budget = 0 };
         await ReportAsync(r1, review1.WorkId, new WorkResult(
             "completed",
             Output: """{"promise":"FAIL"}""",
@@ -191,7 +190,8 @@ public class WorkflowCheckLoopArtifactSpecs : WorkflowGrainSpecs
                     "AI review",
                     "spec/review",
                     With: JsonSerializer.SerializeToElement(ReviewWith(), WorkflowYamlSerializer.JsonOptions),
-                    Recovery: retryRecovery,
+                    Recovery: ReviewRecovery(),
+                    RecoveryRemaining: 0,
                     Artifacts: ReviewArtifacts())
             ]));
 

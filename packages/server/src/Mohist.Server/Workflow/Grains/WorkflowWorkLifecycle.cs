@@ -1,8 +1,6 @@
 using System.Text.Json;
 using Mohist.Server.Workflow.Domain.Artifacts;
-using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Domain.Run;
-using Mohist.Server.Workflow.Services;
 
 namespace Mohist.Server.Workflow.Grains;
 
@@ -27,6 +25,10 @@ internal sealed class WorkflowWorkLifecycle
         var currentTask = currentStage?.Tasks.FirstOrDefault(t => t.Id == taskRunId);
         var events = new List<WorkflowEvent>();
 
+        var taskAttempts = report.Status == TaskReportStatus.Succeeded
+            ? RuntimeTaskFollowUps.Project(report.AddTasks)
+            : [];
+
         if (report.Artifacts is { Count: > 0 })
         {
             foreach (var a in report.Artifacts)
@@ -49,21 +51,16 @@ internal sealed class WorkflowWorkLifecycle
                         _owner.GrainKey, feedbackId, currentTask.Id);
                 }
             }
-            var hasFollowUpTasks = report.AddTasks is { Count: > 0 };
+            var hasFollowUpTasks = taskAttempts.Count > 0;
             events.AddRange(run.CompleteTask(now, advance: !hasFollowUpTasks));
 
-            if (hasFollowUpTasks && report.AddTasks is { Count: > 0 } addTasks)
+            if (hasFollowUpTasks)
             {
-                var taskDefs = addTasks.Select(t =>
-                {
-                    var with = WorkflowDispatchHelpers.ParseWith(t.With);
-                    return new TaskDefinition(t.Id, t.Title, t.Uses, with, t.Artifacts, t.SetVars, t.Recovery);
-                }).ToList();
-                var followUpEvents = run.AddRuntimeTasks(taskDefs, now);
+                var followUpEvents = run.AddRuntimeTaskAttempts(taskAttempts, now);
                 events.AddRange(followUpEvents);
                 _owner.Log.LogInformation(
                     "Workflow {Id} task {TaskId} produced {Count} follow-up tasks",
-                    _owner.GrainKey, taskRunId, addTasks.Count);
+                    _owner.GrainKey, taskRunId, taskAttempts.Count);
             }
         }
         else
@@ -164,7 +161,8 @@ internal sealed class WorkflowWorkLifecycle
                     with: t.With,
                     artifacts: t.Artifacts,
                     setVars: t.SetVars,
-                    recovery: t.Recovery);
+                    recovery: t.Recovery,
+                    recoveryRemaining: t.RecoveryRemaining);
             }
             case WorkflowChecksWork ch:
             {

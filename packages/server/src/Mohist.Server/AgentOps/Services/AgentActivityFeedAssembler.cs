@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Sessions;
@@ -51,17 +52,20 @@ public sealed class AgentActivityFeedAssembler : IScopedService
     private readonly AgentSessionQuery _sessionQuery;
     private readonly Mohist.Server.Workflow.Services.WorkflowQuerier _workflowQuerier;
     private readonly TimeProvider _timeProvider;
+    private readonly ILogger<AgentActivityFeedAssembler> _logger;
 
     public AgentActivityFeedAssembler(
         IDbContextFactory<MohistDbContext> dbFactory,
         AgentSessionQuery sessionQuery,
         Mohist.Server.Workflow.Services.WorkflowQuerier workflowQuerier,
-        TimeProvider timeProvider)
+        TimeProvider timeProvider,
+        ILogger<AgentActivityFeedAssembler> logger)
     {
         _dbFactory = dbFactory;
         _sessionQuery = sessionQuery;
         _workflowQuerier = workflowQuerier;
         _timeProvider = timeProvider;
+        _logger = logger;
     }
 
     /// <summary>
@@ -87,7 +91,7 @@ public sealed class AgentActivityFeedAssembler : IScopedService
                 AgentSessionQueryOrder.CreatedDescending,
                 take,
                 ct: ct);
-        sessions = await ActiveSessionReconciler.ReconcileAsync(db, sessions, ct);
+        sessions = await ActiveSessionReconciler.ReconcileAsync(db, sessions, _logger, ct);
 
         var sessionIds = sessions.Select(s => s.Session.Id).ToArray();
         var latestEvents = await LoadLatestEventsAsync(db, sessionIds, ct);
