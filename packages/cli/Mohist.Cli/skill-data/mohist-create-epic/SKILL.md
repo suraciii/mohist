@@ -24,6 +24,12 @@ frontmatter fields for an epic — they are ignored. An epic has only:
 The `description` follows the milestone template in `references/epic-templates.md`:
 Goal, Background, Non-goals, Scope (the issues it will contain).
 
+The description is agent context too — member issues are planned and built from it.
+The same writing rules as issue bodies apply (see `mohist-create-issue`'s universal
+writing rules): state the milestone goal in one sentence, record the decisions and
+the issue split with its dependency order, and cut anything the agent can cheaply
+look up in the code.
+
 ### Priority guidance for epics
 
 Epic priority rates the **milestone's** importance, not any single issue's. Use
