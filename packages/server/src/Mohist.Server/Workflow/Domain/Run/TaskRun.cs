@@ -24,6 +24,7 @@ public sealed class TaskRun
     public required string Title { get; init; }
     public string? Uses { get; init; }
     public Dictionary<string, JsonElement?>? WithInput { get; init; }
+    public Dictionary<string, JsonElement?>? ExpectInput { get; init; }
     public TaskRunStatus Status { get; set; }
     public DateTimeOffset? StartedAt { get; set; }
     public DateTimeOffset? FinishedAt { get; set; }
@@ -43,7 +44,6 @@ public sealed class TaskRun
 
 public static class TaskRunExtensions
 {
-    private const string ExpectKey = "expect";
     private const string FilesKey = "files";
     private const string MarkersKey = "markers";
     private const string SessionKey = "session";
@@ -58,19 +58,18 @@ public static class TaskRunExtensions
             : null;
     }
 
-    public static IReadOnlyList<WorkflowTaskRequiredFile> ExtractRequiredFiles(Dictionary<string, JsonElement?>? withInput)
+    public static IReadOnlyList<WorkflowTaskRequiredFile> ExtractRequiredFiles(Dictionary<string, JsonElement?>? expectInput)
     {
-        if (withInput is null) return [];
-
-        if (!withInput.TryGetValue(ExpectKey, out var expect) || !expect.HasValue || expect.Value.ValueKind != JsonValueKind.Object)
-            return [];
+        if (expectInput is null || expectInput.Count == 0) return [];
 
         var result = new List<WorkflowTaskRequiredFile>();
         var seenPaths = new HashSet<string>(StringComparer.Ordinal);
 
-        if (expect.Value.TryGetProperty(MarkersKey, out var markerEntries) && markerEntries.ValueKind == JsonValueKind.Array)
+        if (expectInput.TryGetValue(MarkersKey, out var markerEntries)
+            && markerEntries.HasValue
+            && markerEntries.Value.ValueKind == JsonValueKind.Array)
         {
-            foreach (var entry in markerEntries.EnumerateArray())
+            foreach (var entry in markerEntries.Value.EnumerateArray())
             {
                 if (entry.ValueKind != JsonValueKind.Object) continue;
 
@@ -101,9 +100,11 @@ public static class TaskRunExtensions
             }
         }
 
-        if (expect.Value.TryGetProperty(FilesKey, out var files) && files.ValueKind == JsonValueKind.Array)
+        if (expectInput.TryGetValue(FilesKey, out var files)
+            && files.HasValue
+            && files.Value.ValueKind == JsonValueKind.Array)
         {
-            foreach (var item in files.EnumerateArray())
+            foreach (var item in files.Value.EnumerateArray())
             {
                 if (item.ValueKind != JsonValueKind.Object) continue;
 
@@ -130,7 +131,7 @@ public static class TaskRunExtensions
 
     public static TaskClassification DeriveClassification(string? uses, IReadOnlyList<WorkflowTaskRequiredFile>? requiredFiles)
     {
-        if (uses is not null && (uses.StartsWith("core/") || uses.StartsWith("mohist/")) && !uses.Contains("acp-agent"))
+        if (uses is not null && (uses.StartsWith("core/") || uses.StartsWith("mohist/")) && !uses.Contains("acp-agent") && !uses.Contains("opencode"))
             return TaskClassification.Orchestration;
         return TaskClassification.UserFacing;
     }
@@ -177,7 +178,7 @@ public static class TaskRunExtensions
                               .Select(t => t.Attempt)
                               .DefaultIfEmpty(0)
                               .Max() + 1;
-            var requiredFiles = ExtractRequiredFiles(input.With);
+            var requiredFiles = ExtractRequiredFiles(input.Expect);
             var classification = DeriveClassification(input.Uses, requiredFiles);
             return new TaskRun
             {
@@ -187,6 +188,7 @@ public static class TaskRunExtensions
                 Title = input.Title,
                 Uses = input.Uses,
                 WithInput = input.With,
+                ExpectInput = input.Expect,
                 Status = TaskRunStatus.Pending,
                 RequiredFiles = requiredFiles.Count > 0 ? requiredFiles : null,
                 Artifacts = input.Artifacts,
@@ -205,6 +207,7 @@ public static class TaskRunExtensions
         task.Title,
         task.Uses,
         task.WithInput,
+        task.ExpectInput,
         task.Artifacts,
         task.SetVars,
         task.Recovery);

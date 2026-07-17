@@ -18,6 +18,7 @@ internal static class RuntimeTaskFollowUps
                 task.Title,
                 task.Uses,
                 WorkflowDispatchHelpers.ParseWith(task.With),
+                WorkflowDispatchHelpers.ParseWith(task.Expect),
                 task.Artifacts,
                 task.SetVars,
                 task.Recovery);

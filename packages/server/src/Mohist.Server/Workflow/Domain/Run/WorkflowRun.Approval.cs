@@ -71,6 +71,7 @@ public static partial class WorkflowRunExtensions
             {
                 ["session"] = JSON.SerializeToElement(stage),
                 ["prompt"] = JSON.SerializeToElement($"${{{{ prompts.{DefaultFeedbackTaskId} }}}}"),
+                ["options"] = JSON.SerializeToElement("${{ vars.agent }}"),
             };
             return new TaskDefinition(
                 Id: DefaultFeedbackTaskId,
@@ -79,7 +80,7 @@ public static partial class WorkflowRunExtensions
                 With: withInput);
         }
 
-        public static TaskDefinition ResolveFeedbackTask(FeedbackTaskConfig? config, string stage)
+        public static TaskDefinition ResolveFeedbackTask(TaskDefinition? config, string stage)
         {
             if (config is null)
                 return BuildDefaultFeedbackTask(stage);
@@ -92,7 +93,15 @@ public static partial class WorkflowRunExtensions
                     : new Dictionary<string, JsonElement?>(with, StringComparer.Ordinal);
                 with["session"] = JSON.SerializeToElement(stage);
             }
-            return new TaskDefinition(config.Id, config.Title, config.Uses, with);
+            return new TaskDefinition(
+                config.Id,
+                config.Title,
+                config.Uses,
+                with,
+                config.Expect,
+                config.Artifacts,
+                config.SetVars,
+                config.Recovery);
         }
     }
 

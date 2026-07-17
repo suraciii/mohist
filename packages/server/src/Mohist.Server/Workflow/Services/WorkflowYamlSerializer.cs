@@ -89,15 +89,37 @@ public static class WorkflowYamlSerializer
         if (string.IsNullOrWhiteSpace(title))
             throw new InvalidOperationException($"Workflow task {id} requires title");
 
+        var uses = NullIfEmpty(String(map, "uses"));
         var withMap = OptionalMap(map, "with");
+        var expectMap = OptionalMap(map, "expect");
+
         if (withMap is not null)
-            ValidateTaskExpectations(id, withMap);
+            ValidateTaskExpectations(id, uses, withMap);
+        ValidateExpectVerdictMarkers(id, expectMap);
 
         var artifacts = ParseTaskArtifacts(map);
         var setVars = ParseTaskSetVars(map, id);
         var recovery = ParseTaskRecovery(map, id);
 
-        return new TaskDefinition(id, title, NullIfEmpty(String(map, "uses")), JsonElementMap(withMap), artifacts, setVars, recovery);
+        return new TaskDefinition(id, title, uses, JsonElementMap(withMap), JsonElementMap(expectMap), artifacts, setVars, recovery);
+    }
+
+    private static void ValidateExpectVerdictMarkers(string taskId, Dictionary<string, object?>? expectMap)
+    {
+        if (expectMap is null) return;
+
+        var markers = List(expectMap, "markers");
+        foreach (var marker in markers)
+        {
+            var markerMap = Normalize(marker) as Dictionary<string, object?>;
+            if (markerMap is null) continue;
+
+            var contains = String(markerMap, "contains");
+            if (IsVerdictMarker(contains))
+                throw new InvalidOperationException(
+                    $"Workflow task '{taskId}' configures a verdict marker ({contains}) as an artifact expectation. " +
+                    "Move verdict marker requirements into a check definition.");
+        }
     }
 
     private static Dictionary<string, string>? ParseTaskSetVars(Dictionary<string, object?> taskMap, string taskId)
@@ -199,24 +221,45 @@ public static class WorkflowYamlSerializer
         return declarations.Count == 0 ? null : new TaskArtifactCapture(declarations);
     }
 
-    private static void ValidateTaskExpectations(string taskId, Dictionary<string, object?> withMap)
+    private static void ValidateTaskExpectations(string taskId, string? uses, Dictionary<string, object?> withMap)
     {
-        var expect = OptionalMap(withMap, "expect");
-        if (expect is null) return;
+        if (!IsInlineAgentUses(uses))
+            return;
 
-        var markers = List(expect, "markers");
-        foreach (var marker in markers)
+        if (withMap.TryGetValue("expect", out var expectValue) && expectValue is not null)
         {
-            var markerMap = Normalize(marker) as Dictionary<string, object?>;
-            if (markerMap is null) continue;
-
-            var contains = String(markerMap, "contains");
-            if (IsVerdictMarker(contains))
+            if (HasLegacyCompletionPolicyShape(expectValue))
                 throw new InvalidOperationException(
-                    $"Workflow task '{taskId}' configures a verdict marker ({contains}) as an artifact expectation. " +
-                    "Move verdict marker requirements into a check definition.");
+                    $"Workflow task '{taskId}' declares Workflow completion policy under 'with.expect'. " +
+                    "Move 'files', 'markers', and 'failIf' to task-level 'expect'. " +
+                    "'with.expect' is reserved for Action-owned input on the selected Action contract.");
+        }
+
+        if (withMap.ContainsKey("agent"))
+        {
+            throw new InvalidOperationException(
+                $"Workflow task '{taskId}' declares legacy agent configuration under 'with.agent'. " +
+                "Bind the selected Action's 'options' explicitly, e.g. 'options: ${{{{ vars.agent }}}}'.");
         }
     }
+
+    private static bool HasLegacyCompletionPolicyShape(object? expectValue)
+    {
+        var expect = Normalize(expectValue) as Dictionary<string, object?>;
+        if (expect is null) return false;
+
+        if (expect.TryGetValue("files", out var filesValue) && filesValue is not null) return true;
+        if (expect.TryGetValue("markers", out var markersValue) && markersValue is not null) return true;
+        if (expect.TryGetValue("failIf", out var failIfValue)
+            && failIfValue is not null
+            && !string.IsNullOrWhiteSpace(failIfValue.ToString()))
+            return true;
+        return false;
+    }
+
+    private static bool IsInlineAgentUses(string? uses) =>
+        string.Equals(uses, "mohist/opencode", StringComparison.Ordinal)
+        || string.Equals(uses, "mohist/acp-agent", StringComparison.Ordinal);
 
     private static bool IsVerdictMarker(string? value)
     {
@@ -238,7 +281,7 @@ public static class WorkflowYamlSerializer
         return new ApprovalConfig(new ApprovalFeedbackConfig(ToFeedbackTask(OptionalMap(feedbackMap, "task"))));
     }
 
-    private static FeedbackTaskConfig? ToFeedbackTask(Dictionary<string, object?>? map)
+    private static TaskDefinition? ToFeedbackTask(Dictionary<string, object?>? map)
     {
         if (map is null) return null;
         var id = String(map, "id");
@@ -247,7 +290,17 @@ public static class WorkflowYamlSerializer
         var title = String(map, "title");
         if (string.IsNullOrWhiteSpace(title))
             throw new InvalidOperationException($"Workflow approval.feedback.task {id} requires title");
-        return new FeedbackTaskConfig(id, title, NullIfEmpty(String(map, "uses")), JsonElementMap(OptionalMap(map, "with")));
+        var uses = NullIfEmpty(String(map, "uses"));
+        var withMap = OptionalMap(map, "with");
+        var expectMap = OptionalMap(map, "expect");
+        if (withMap is not null)
+            ValidateTaskExpectations(id, uses, withMap);
+        return new TaskDefinition(
+            id,
+            title,
+            uses,
+            JsonElementMap(withMap),
+            JsonElementMap(expectMap));
     }
 
     private static Dictionary<string, object?>? ToApprovalMap(ApprovalConfig? approval)
@@ -260,21 +313,10 @@ public static class WorkflowYamlSerializer
         return new Dictionary<string, object?> { ["feedback"] = feedbackMap };
     }
 
-    private static Dictionary<string, object?>? ToFeedbackTaskMap(FeedbackTaskConfig? task)
+    private static Dictionary<string, object?>? ToFeedbackTaskMap(TaskDefinition? task)
     {
         if (task is null) return null;
-        var map = new Dictionary<string, object?>
-        {
-            ["id"] = task.Id,
-            ["title"] = task.Title,
-        };
-        if (task.Uses is not null) map["uses"] = task.Uses;
-        if (task.With is not null)
-        {
-            var withObject = ObjectMap(task.With);
-            if (withObject is not null) map["with"] = withObject;
-        }
-        return map;
+        return ToTaskMap(task);
     }
 
     private static CheckDefinition ToCheck(object? value)
@@ -323,6 +365,7 @@ public static class WorkflowYamlSerializer
         };
         if (task.Uses is not null) map["uses"] = task.Uses;
         AddWith(map, task.With);
+        AddExpect(map, task.Expect);
         AddArtifacts(map, task.Artifacts);
         AddSetVars(map, task.SetVars);
         AddRecovery(map, task.Recovery);
@@ -373,6 +416,12 @@ public static class WorkflowYamlSerializer
     {
         var values = ObjectMap(with);
         if (values is not null) map["with"] = values;
+    }
+
+    private static void AddExpect(Dictionary<string, object?> map, Dictionary<string, JsonElement?>? expect)
+    {
+        var values = ObjectMap(expect);
+        if (values is not null) map["expect"] = values;
     }
 
     private static Dictionary<string, JsonElement?>? JsonElementMap(Dictionary<string, object?>? map)

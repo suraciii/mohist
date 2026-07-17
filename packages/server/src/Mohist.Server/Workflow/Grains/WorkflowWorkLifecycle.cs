@@ -157,7 +157,8 @@ internal sealed class WorkflowWorkLifecycle
                     artifacts: t.Artifacts,
                     setVars: t.SetVars,
                     recovery: t.Recovery,
-                    recoveryRemaining: t.RecoveryRemaining);
+                    recoveryRemaining: t.RecoveryRemaining,
+                    expect: t.Expect);
             }
             case WorkflowChecksWork ch:
             {

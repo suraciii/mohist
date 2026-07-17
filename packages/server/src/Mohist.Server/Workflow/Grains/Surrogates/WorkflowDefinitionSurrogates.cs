@@ -45,6 +45,7 @@ public struct TaskDefinitionSurrogate
     [Id(2)] public string? Uses;
     [Id(3)] public Dictionary<string, JsonElement?>? With;
     [Id(4)] public TaskArtifactCapture? Artifacts;
+    [Id(5)] public Dictionary<string, JsonElement?>? Expect;
     [Id(6)] public Dictionary<string, string>? SetVars;
     [Id(7)] public RecoveryDefinition? Recovery;
 }
@@ -53,7 +54,7 @@ public struct TaskDefinitionSurrogate
 public sealed class TaskDefinitionSurrogateConverter : IConverter<TaskDefinition, TaskDefinitionSurrogate>
 {
     public TaskDefinition ConvertFromSurrogate(in TaskDefinitionSurrogate surrogate) =>
-        new(surrogate.Id, surrogate.Title, surrogate.Uses, surrogate.With, surrogate.Artifacts, surrogate.SetVars, surrogate.Recovery);
+        new(surrogate.Id, surrogate.Title, surrogate.Uses, surrogate.With, surrogate.Expect, surrogate.Artifacts, surrogate.SetVars, surrogate.Recovery);
 
     public TaskDefinitionSurrogate ConvertToSurrogate(in TaskDefinition value) => new()
     {
@@ -61,6 +62,7 @@ public sealed class TaskDefinitionSurrogateConverter : IConverter<TaskDefinition
         Title = value.Title,
         Uses = value.Uses,
         With = value.With,
+        Expect = value.Expect,
         Artifacts = value.Artifacts,
         SetVars = value.SetVars,
         Recovery = value.Recovery,

@@ -120,8 +120,12 @@ public class WorkflowVariableSpecs : WorkflowGrainSpecs
             Assert.False(proposalWith.RootElement.TryGetProperty("changeDir", out _));
             Assert.False(proposalWith.RootElement.TryGetProperty("openspecChangeDir", out _));
             Assert.Equal("${{ prompts.proposal }}", proposalWith.RootElement.GetProperty("prompt").GetString());
-            Assert.Equal("${{ openspecChangeDir }}/proposal.md", proposalWith.RootElement.GetProperty("expect").GetProperty("files")[0].GetProperty("path").GetString());
-            Assert.False(proposalWith.RootElement.GetProperty("expect").TryGetProperty("markers", out _));
+        }
+        Assert.NotNull(proposal.Expect);
+        using (var proposalExpect = JsonDocument.Parse(proposal.Expect!))
+        {
+            Assert.Equal("${{ openspecChangeDir }}/proposal.md", proposalExpect.RootElement.GetProperty("files")[0].GetProperty("path").GetString());
+            Assert.False(proposalExpect.RootElement.TryGetProperty("markers", out _));
         }
         await ReportAsync(r1, proposal.WorkId, "completed");
 
@@ -180,14 +184,14 @@ public class WorkflowVariableSpecs : WorkflowGrainSpecs
 
         Assert.Equal("task", proposal.WorkType);
         Assert.Equal("plan", proposal.Stage);
-        Assert.Equal("mohist/acp-agent", proposal.Uses);
+        Assert.Equal("mohist/opencode", proposal.Uses);
         Assert.Contains("proposal", proposal.WorkId);
         Assert.Contains("\"prompt\"", proposal.With);
         Assert.DoesNotContain("\"stage\":", proposal.With);
         Assert.DoesNotContain("\"task\":", proposal.With);
         Assert.DoesNotContain("changeDir", proposal.With);
-        Assert.Contains("\"expect\"", proposal.With);
-        Assert.Contains("${{ openspecChangeDir }}/proposal.md", proposal.With);
+        Assert.DoesNotContain("\"expect\"", proposal.With);
+        Assert.Contains("${{ openspecChangeDir }}/proposal.md", proposal.Expect!);
     }
 
     private static WorkflowDefinition MohistPlanDefinitionWithoutArtifacts() =>
@@ -195,46 +199,41 @@ public class WorkflowVariableSpecs : WorkflowGrainSpecs
         [
             new StageDefinition("plan",
                 [
-                    new("proposal", "Generate proposal", "mohist/acp-agent", With("""
-                    {
-                      "session": "plan",
-                      "prompt": "${{ prompts.proposal }}",
-                      "agent": "${{ vars.agent }}",
-                      "expect": { "files": [ { "path": "${{ openspecChangeDir }}/proposal.md" } ] }
-                    }
-                    """)),
-                    new("specs", "Write specs", "mohist/acp-agent", With("""
-                    {
-                      "session": "plan",
-                      "prompt": "${{ prompts.specs }}",
-                      "agent": "${{ vars.agent }}",
-                      "expect": { "files": [ { "path": "${{ openspecChangeDir }}/specs" } ] }
-                    }
-                    """)),
-                    new("design", "Create design", "mohist/acp-agent", With("""
-                    {
-                      "session": "plan",
-                      "prompt": "${{ prompts.design }}",
-                      "agent": "${{ vars.agent }}",
-                      "expect": { "files": [ { "path": "${{ openspecChangeDir }}/design.md" } ] }
-                    }
-                    """)),
-                    new("tasks", "Generate tasks", "mohist/acp-agent", With("""
-                    {
-                      "session": "plan",
-                      "prompt": "${{ prompts.tasks }}",
-                      "agent": "${{ vars.agent }}",
-                      "expect": { "files": [ { "path": "${{ openspecChangeDir }}/tasks.json" } ] }
-                    }
-                    """)),
-                    new("self-review", "Self review", "mohist/acp-agent", With("""
-                    {
-                      "session": "plan",
-                      "prompt": "${{ prompts.self-review }}",
-                      "agent": "${{ vars.agent }}",
-                      "expect": { "files": [ { "path": "${{ openspecChangeDir }}/self-review.md" } ] }
-                    }
-                    """)),
+                    new("proposal", "Generate proposal", "mohist/opencode",
+                        With("""
+                        { "session": "plan", "prompt": "${{ prompts.proposal }}", "options": "${{ vars.agent }}" }
+                        """),
+                        Expect("""
+                        { "files": [ { "path": "${{ openspecChangeDir }}/proposal.md" } ] }
+                        """)),
+                    new("specs", "Write specs", "mohist/opencode",
+                        With("""
+                        { "session": "plan", "prompt": "${{ prompts.specs }}", "options": "${{ vars.agent }}" }
+                        """),
+                        Expect("""
+                        { "files": [ { "path": "${{ openspecChangeDir }}/specs" } ] }
+                        """)),
+                    new("design", "Create design", "mohist/opencode",
+                        With("""
+                        { "session": "plan", "prompt": "${{ prompts.design }}", "options": "${{ vars.agent }}" }
+                        """),
+                        Expect("""
+                        { "files": [ { "path": "${{ openspecChangeDir }}/design.md" } ] }
+                        """)),
+                    new("tasks", "Generate tasks", "mohist/opencode",
+                        With("""
+                        { "session": "plan", "prompt": "${{ prompts.tasks }}", "options": "${{ vars.agent }}" }
+                        """),
+                        Expect("""
+                        { "files": [ { "path": "${{ openspecChangeDir }}/tasks.json" } ] }
+                        """)),
+                    new("self-review", "Self review", "mohist/opencode",
+                        With("""
+                        { "session": "plan", "prompt": "${{ prompts.self-review }}", "options": "${{ vars.agent }}" }
+                        """),
+                        Expect("""
+                        { "files": [ { "path": "${{ openspecChangeDir }}/self-review.md" } ] }
+                        """)),
                 ],
                 [
                     new("plan-artifacts", "Plan artifacts complete", "mohist/openspec-artifacts", new Dictionary<string, JsonElement?> { ["changeDir"] = JsonDocument.Parse("\"${{ openspecChangeDir }}\"").RootElement.Clone() }),
@@ -244,5 +243,8 @@ public class WorkflowVariableSpecs : WorkflowGrainSpecs
         ]);
 
     private static new Dictionary<string, JsonElement?> With(string json) =>
+        JsonSerializer.Deserialize<Dictionary<string, JsonElement?>>(json)!;
+
+    private static Dictionary<string, JsonElement?>? Expect(string json) =>
         JsonSerializer.Deserialize<Dictionary<string, JsonElement?>>(json)!;
 }

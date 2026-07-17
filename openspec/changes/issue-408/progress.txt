@@ -1,0 +1,52 @@
+## T-001 Server task contract: Expect field, YAML parsing, legacy validation, and dispatch
+
+### Codebase patterns discovered
+
+- Workflow task definition surfaces in three places (definition, persistence, grain call):
+  - `TaskDefinition` record in `WorkflowDefinition.cs` (5 fields: `With, Artifacts, SetVars, Recovery` — added `Expect`).
+  - `TaskRun` class in `TaskRun.cs` carries runtime `WithInput` (added `ExpectInput`). Orleans serialization uses `GenerateSerializer` so no surrogate needed for the class (Orleans handles records / classes via attribute).
+  - `WorkflowTaskWork` and `WorkItem` Orleans-serialized records (or task-variant only). WorkItem now carries `[property: Id(11)] Dictionary<string, JsonElement?>? Expect`.
+- Tasks are stored on `TaskRun.WithInput` and `TaskRun.ExpectInput` — both `Dictionary<string, JsonElement?>?`.
+- Approval feedback task was previously a reduced `FeedbackTaskConfig` (id/title/uses/with) — promoted to full `TaskDefinition` so feedback tasks can carry `expect/artifacts/setVars/recovery`.
+- `WorkflowYamlSerializer` `With` is a `Dictionary<string, object?>` (yaml nodes, post-Normalize). `JsonElementMap` is the bridge into the `JsonElement` shape used everywhere else.
+- `mohist/github-pr-status` defines its own `expect` input that is **Action-owned**, not Workflow completion policy — must not be caught by the legacy validation.
+- The runner-side `WorkDispatch` envelope serializes every contract field as a JSON string (`With`, `Variables`, `Artifacts`, `SetVars`, `Recovery`). Orleans `[property: Id(N)]` slots are sequential; new fields extend the list.
+- `TaskRunExtensions.ExtractRequiredFiles` previously took a `withInput` and dived into `withInput["expect"]`. Now it takes the `expect` dict directly (`Dictionary<string, JsonElement?>`).
+
+### Gotchas
+
+- `WorkItem` uses `[property: Id(N)]`; consuming code reads via `Item.Expect`. `[property: Id]` slots must be sequential and unique; `TaskDispatch.Expect` lives at Id(18), `WorkItem.Expect` at Id(11).
+- `OptionalMap` (in `WorkflowYamlSerializer`) calls `Map(...)` which throws on non-dict values. Detection of `with.expect` must not route through `OptionalMap` because the value's structure is unknown until inspected; use `withMap.TryGetValue(key, out var value)` and normalize the value lazily.
+- The verdict-marker rule (reject `<promise>PASS</promise>` inside marker `contains`) now applies to **task-level `expect`**, not `with.expect`. It applies to all tasks regardless of `uses`. Action-owned `with.expect: merged` on `mohist/github-pr-status` is a string value, not a marker structure, so it doesn't trip the rule.
+- Tests that previously asserted `task.With["expect"]["files"]` must read `task.Expect["files"]` after the split. Several test files needed updates.
+- Removing the deep-merge branch is a behavior flip: tests that asserted `vars.agent` keys overlaid a literal `with.agent` object now need a literal `with.options` (or `options: ${{ vars.agent }}`) for binding.
+- The legacy-shape rejection (`with.expect`, `with.agent`) rejects `mohist/acp-agent` and `mohist/opencode` tasks. Built-in profile YAMLs (loaded as Lazy) had to migrate so the `MohistWorkflow.Definition` getter doesn't throw for every spec run.
+
+### Patterns established
+
+- Action-aware legacy validation lives in `WorkflowYamlSerializer.ValidateTaskExpectations(taskId, uses, withMap)`. Two triggers: `with.expect` containing completion-policy shapes (`files`/`markers`/`failIf`) and `with.agent` presence. Error message names the task id and directs the author to the replacement.
+- `WorkflowItemTranslator.BuildTaskDispatchAsync` now expands both `with` and `expect` via `WorkflowProfileManager.ExpandTaskWith` (whole-value template resolution only) and serializes them into `WorkDispatch` (`With` slot for Action input, new `Expect` slot at Id(18) for completion contract).
+- `WorkItem.Task` and `ResolveFeedbackTask` accept an `expect` parameter; `BuildDefaultFeedbackTask` always emits `options: ${{ vars.agent }}` so the default feedback task honors explicit model selection.
+- `TaskRun.Expect` is a separate field; `ExtractRequiredFiles(expect)` reads it directly; `ToDefinition()` includes it.
+- `TaskRun.ToDefinition` and `WorkflowRun.NextWork`/`ActiveTask` propagate `ExpectInput` so dispatch and rendering see the same expectation source.
+
+### Tests touched
+
+- Unit: `TaskRequiredFilesTests`, `ApprovalFeedbackTests`, `WorkflowProjectionTests` now construct `expect` dictionaries directly rather than via `withInput["expect"]`.
+- Unit: `WorkflowProjectionTests.WorkflowStatusMapper_MapTasks_FromDefinition` reads required files from `t.Expect`, not `t.With` (the chain was `WorkflowStatusMapper` → `ExtractRequiredFiles(t.With)`).
+- Spec: `WorkflowYamlSerializer_PreservesFailIfInTaskExpect` now parses top-level `expect`. `WorkflowProfileManagerSpecs.ExpandTaskWith_DeepMergesObjectKey` replaced by `ExpandTaskWith_ObjectKeyIsLeftVerbatim_NoDeepMerge` and added `ExpandTaskWith_WholeTemplateObjectPlaceholderResolvesToObject` to assert whole-value JSON type preservation.
+- Spec: tests using inline `mohist/acp-agent` with `with.agent` / `with.expect` updated to `mohist/opencode` + `options` + top-level `expect`. Built-in profile YAMLs (`mohist-local.workflow.yaml`, `mohist-github-pr.workflow.yaml`) migrated — they're shipped artifacts and tests assert their content.
+
+### Verification
+
+- Solution build: 0 warnings, 0 errors.
+- Server unit tests: 1399 / 1399 passing.
+- Server spec tests: 2869 / 2869 passing.
+- Server arch tests: 27 / 27 passing.
+- CLI tests: 933 / 933 passing.
+- Web typecheck: clean.
+
+### Decisions worth flagging for review
+
+- Migrating the built-in profile YAMLs was originally in T-005; T-001 picked them up because the legacy validation rejects `mohist/acp-agent` + `with.expect` shapes and the spec suite cannot survive the rejection at T-001 boundary. Migration is mechanical and matches D9 in `design.md`.
+- The verdict-marker rule now applies to top-level `expect`. The rule rejects `<promise>PASS</promise>` etc. inside marker `contains` for all tasks. This matches the spec's intent ("verdict marker requirements belong in a check definition"); a top-level `expect` with verdict markers fails just like `with.expect` did previously.

@@ -90,7 +90,10 @@ public sealed class WorkflowItemTranslator : IScopedService
         }
 
         var variables = JSON.Serialize(payload);
-        var withStr = ResolveWith(effectiveVarsJson, resolved, item.With, item.Stage, workId, workflowRunId);
+        var bundle = BuildVariableBundle(effectiveVarsJson);
+        var withStr = ExpandToJson(bundle, item.With);
+        var expectStr = ExpandToJson(bundle, item.Expect);
+        ValidateLegacyAgentTaskInput(item, workId, item.With, item.Expect);
 
         return new WorkDispatch(
             WorkflowRunId: workflowRunId,
@@ -108,7 +111,8 @@ public sealed class WorkflowItemTranslator : IScopedService
             AgentJobId: null,
             Recovery: item.Recovery is not null ? JSON.Serialize(item.Recovery) : null,
             RecoveryRemaining: item.RecoveryRemaining,
-            EpicNumber: ReadEpicNumber(run));
+EpicNumber: ReadEpicNumber(run),
+            Expect: expectStr);
     }
 
     private async Task<WorkDispatch> BuildChecksDispatchAsync(
@@ -146,7 +150,8 @@ public sealed class WorkflowItemTranslator : IScopedService
         }
 
         var variables = JSON.Serialize(payload);
-        var withStr = ResolveWith(effectiveVarsJson, resolved, with, item.Stage, workId, workflowRunId);
+        var bundle = BuildVariableBundle(effectiveVarsJson);
+        var withStr = ExpandToJson(bundle, with);
 
         return new WorkDispatch(
             WorkflowRunId: workflowRunId,
@@ -225,67 +230,57 @@ public sealed class WorkflowItemTranslator : IScopedService
         return (payload, effectiveVarsJson, resolved);
     }
 
-    private string? ResolveWith(
-        JsonElement effectiveVarsJson,
-        VariableBundle resolved,
-        Dictionary<string, JsonElement?>? with,
-        string stage,
-        string workId,
-        string workflowRunId)
+    private string? ExpandToJson(VariableBundle? effectiveBundle, Dictionary<string, JsonElement?>? values)
     {
-        var effectiveBundle = effectiveVarsJson.ValueKind == JsonValueKind.Object
+        var expanded = WorkflowProfileManager.ExpandTaskWith(effectiveBundle, values);
+        return expanded is not null && expanded.Count > 0 ? JSON.Serialize(expanded) : null;
+    }
+
+    private static VariableBundle BuildVariableBundle(JsonElement effectiveVarsJson) =>
+        effectiveVarsJson.ValueKind == JsonValueKind.Object
             ? new VariableBundle(effectiveVarsJson)
             : VariableBundle.Empty;
 
-        var dispatchWith = with is not null
-            ? new Dictionary<string, JsonElement?>(with, StringComparer.Ordinal)
-            : null;
-        dispatchWith = WorkflowProfileManager.ExpandTaskWith(effectiveBundle, dispatchWith);
+    private static void ValidateLegacyAgentTaskInput(
+        WorkItem item,
+        string workId,
+        Dictionary<string, JsonElement?>? with,
+        Dictionary<string, JsonElement?>? expect)
+    {
+        if (!IsInlineAgentUses(item.Uses))
+            return;
 
-        if ((dispatchWith is null || !dispatchWith.ContainsKey("agent"))
-            && effectiveVarsJson.ValueKind == JsonValueKind.Object
-            && effectiveVarsJson.TryGetProperty("agent", out var effectiveAgentEl)
-            && effectiveAgentEl.ValueKind == JsonValueKind.Object)
+        if (with is not null && with.TryGetValue("agent", out var legacyAgent) && legacyAgent.HasValue)
         {
-            dispatchWith ??= new Dictionary<string, JsonElement?>(StringComparer.Ordinal);
-            dispatchWith["agent"] = effectiveAgentEl.Clone();
+            throw new InvalidOperationException(
+                $"Workflow task '{workId}' declares legacy agent configuration under 'with.agent'. " +
+                "Bind the selected Action's 'options' explicitly, e.g. 'options: ${{ vars.agent }}'.");
         }
 
-        var withStr = dispatchWith is not null ? JSON.Serialize(dispatchWith) : null;
-        LogAgentDiagnostics(stage, workId, dispatchWith, effectiveVarsJson, resolved, workflowRunId);
-        return withStr;
+        if (with is not null && with.TryGetValue("expect", out var legacyExpect) && legacyExpect.HasValue
+            && HasWorkflowCompletionPolicy(legacyExpect.Value))
+        {
+            throw new InvalidOperationException(
+                $"Workflow task '{workId}' declares Workflow completion policy under 'with.expect'. " +
+                "Move 'files', 'markers', and 'failIf' to task-level 'expect'. " +
+                "'with.expect' is reserved for Action-owned input on the selected Action contract.");
+        }
+
+        _ = expect;
     }
 
-    private void LogAgentDiagnostics(
-        string stage,
-        string workId,
-        Dictionary<string, JsonElement?>? dispatchWith,
-        JsonElement effectiveVarsJson,
-        VariableBundle resolved,
-        string workflowRunId)
-    {
-        var withModel = WorkflowDispatchHelpers.TryReadNestedString(dispatchWith, "agent", "model");
-        var varsModel = WorkflowDispatchHelpers.TryReadNestedString(effectiveVarsJson, "agent", "model");
-        var stageModel = WorkflowDispatchHelpers.TryReadStageAgentModel(resolved, stage);
-        var source = !string.IsNullOrWhiteSpace(withModel)
-            ? "with.agent.model"
-            : !string.IsNullOrWhiteSpace(varsModel)
-                ? "vars.agent.model"
-                : !string.IsNullOrWhiteSpace(stageModel.Value)
-                    ? "stage.vars.agent.model"
-                    : "none";
+    private static bool IsInlineAgentUses(string? uses) =>
+        string.Equals(uses, "mohist/opencode", StringComparison.Ordinal)
+        || string.Equals(uses, "mohist/acp-agent", StringComparison.Ordinal);
 
-        _log.LogInformation(
-            "Workflow {WorkflowId} dispatch {WorkId} stage={Stage} agent model diagnostics: with={WithModel}, vars={VarsModel}, stageOverride={StageModel}, source={Source}",
-            workflowRunId,
-            workId,
-            stage,
-            withModel ?? "(null)",
-            varsModel ?? "(null)",
-            stageModel.Present
-                ? stageModel.Value ?? "(null override)"
-                : "(missing)",
-            source);
+    private static bool HasWorkflowCompletionPolicy(JsonElement expectElement)
+    {
+        if (expectElement.ValueKind != JsonValueKind.Object) return false;
+        return expectElement.TryGetProperty("files", out _)
+            || expectElement.TryGetProperty("markers", out _)
+            || (expectElement.TryGetProperty("failIf", out var failIf)
+                && failIf.ValueKind == JsonValueKind.String
+                && !string.IsNullOrWhiteSpace(failIf.GetString()));
     }
 
     private static bool TryGetAnnotation(WorkflowRun run, string key, out string value)

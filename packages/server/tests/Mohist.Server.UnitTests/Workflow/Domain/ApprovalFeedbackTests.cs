@@ -332,7 +332,7 @@ public class ApprovalFeedbackTests
     [Fact]
     public void ResolveFeedbackTask_ConfigWithoutSession_FillsSessionFromStage()
     {
-        var config = new FeedbackTaskConfig(
+        var config = new TaskDefinition(
             Id: "apply-feedback",
             Title: "Apply approval feedback",
             Uses: "mohist/acp-agent",
@@ -352,7 +352,7 @@ public class ApprovalFeedbackTests
     [Fact]
     public void ResolveFeedbackTask_ConfigWithSession_PreservesConfiguredSession()
     {
-        var config = new FeedbackTaskConfig(
+        var config = new TaskDefinition(
             Id: "apply-feedback",
             Title: "Apply approval feedback",
             Uses: "mohist/acp-agent",

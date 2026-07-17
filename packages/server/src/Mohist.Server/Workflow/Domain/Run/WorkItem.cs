@@ -37,14 +37,16 @@ public sealed record WorkItem(
     // ---- checks variant ----
     [property: Id(8)] IReadOnlyList<CheckItem>? Items,
     [property: Id(9)] RecoveryDefinition? Recovery = null,
-    [property: Id(10)] int? RecoveryRemaining = null)
+    [property: Id(10)] int? RecoveryRemaining = null,
+    [property: Id(11)] Dictionary<string, JsonElement?>? Expect = null)
 {
     public static WorkItem Task(string stage, string id, string title, string? uses,
         Dictionary<string, JsonElement?>? with, TaskArtifactCapture? artifacts = null,
         Dictionary<string, string>? setVars = null, RecoveryDefinition? recovery = null,
-        int? recoveryRemaining = null)
+        int? recoveryRemaining = null,
+        Dictionary<string, JsonElement?>? expect = null)
         => new(stage, WorkItemTypes.Task, id, title, uses, with, artifacts, setVars, Items: null,
-            Recovery: recovery, RecoveryRemaining: recoveryRemaining);
+            Recovery: recovery, RecoveryRemaining: recoveryRemaining, Expect: expect);
 
     public static WorkItem Checks(string stage, string workId, IReadOnlyList<CheckItem> items)
         => new(stage, WorkItemTypes.Checks, workId, Title: null, Uses: null, With: null,

@@ -119,7 +119,16 @@ public record WorkDispatch(
     /// </summary>
     [property: Id(16)] string? AgentSessionId = null,
     [property: Id(17)] [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] int? RecoveryRemaining = null,
-    [property: Id(18)] int? EpicNumber = null)
+[property: Id(18)] int? EpicNumber = null,
+    /// <summary>
+    /// Task-level completion contract (files, markers, failIf,
+    /// <c>path: _output</c>) carried as an expanded JSON string for
+    /// task-variant dispatches. The Workflow task executor reads and
+    /// evaluates this after the Action returns; the Action itself does
+    /// not see <c>expect</c>. Null for checks-variant dispatches and
+    /// tasks without a completion contract.
+    /// </summary>
+    [property: Id(19)] string? Expect = null)
 {
     public WorkDispatch() : this(string.Empty, string.Empty) { }
 }

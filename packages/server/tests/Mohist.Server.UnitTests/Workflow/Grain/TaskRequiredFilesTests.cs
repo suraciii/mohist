@@ -11,14 +11,14 @@ public class TaskRequiredFilesTests
     [Fact]
     public void ExtractRequiredFiles_WithExpectFiles_ReturnsRequiredFileEntries()
     {
-        var withInput = new Dictionary<string, JsonElement?>
+        var expect = new Dictionary<string, JsonElement?>
         {
-            ["expect"] = JsonSerializer.Deserialize<JsonElement>("""
-                {"files": [{"path": "proposal.md", "markers": ["<promise>PASS</promise>"]}]}
+            ["files"] = JsonSerializer.Deserialize<JsonElement>("""
+                [{"path": "proposal.md", "markers": ["<promise>PASS</promise>"]}]
                 """),
         };
 
-        var result = TaskRunExtensions.ExtractRequiredFiles(withInput);
+        var result = TaskRunExtensions.ExtractRequiredFiles(expect);
 
         Assert.Single(result);
         Assert.Equal("proposal.md", result[0].Path);
@@ -30,18 +30,18 @@ public class TaskRequiredFilesTests
     [Fact]
     public void ExtractRequiredFiles_WithMultipleFiles_ReturnsAllEntries()
     {
-        var withInput = new Dictionary<string, JsonElement?>
+        var expect = new Dictionary<string, JsonElement?>
         {
-            ["expect"] = JsonSerializer.Deserialize<JsonElement>("""
-                {"files": [
+            ["files"] = JsonSerializer.Deserialize<JsonElement>("""
+                [
                     {"path": "proposal.md"},
                     {"path": "design.md"},
                     {"path": "tasks.json"}
-                ]}
+                ]
                 """),
         };
 
-        var result = TaskRunExtensions.ExtractRequiredFiles(withInput);
+        var result = TaskRunExtensions.ExtractRequiredFiles(expect);
 
         Assert.Equal(3, result.Count);
         Assert.Equal("proposal.md", result[0].Path);
@@ -52,12 +52,12 @@ public class TaskRequiredFilesTests
     [Fact]
     public void ExtractRequiredFiles_WithNoExpect_ReturnsEmpty()
     {
-        var withInput = new Dictionary<string, JsonElement?>
+        var expect = new Dictionary<string, JsonElement?>
         {
             ["session"] = JsonSerializer.Deserialize<JsonElement>("\"plan\""),
         };
 
-        var result = TaskRunExtensions.ExtractRequiredFiles(withInput);
+        var result = TaskRunExtensions.ExtractRequiredFiles(expect);
 
         Assert.Empty(result);
     }
@@ -72,14 +72,14 @@ public class TaskRequiredFilesTests
     [Fact]
     public void ExtractRequiredFiles_WithEmptyPath_SkipsEntry()
     {
-        var withInput = new Dictionary<string, JsonElement?>
+        var expect = new Dictionary<string, JsonElement?>
         {
-            ["expect"] = JsonSerializer.Deserialize<JsonElement>("""
-                {"files": [{"path": ""}, {"path": "valid.md"}]}
+            ["files"] = JsonSerializer.Deserialize<JsonElement>("""
+                [{"path": ""}, {"path": "valid.md"}]
                 """),
         };
 
-        var result = TaskRunExtensions.ExtractRequiredFiles(withInput);
+        var result = TaskRunExtensions.ExtractRequiredFiles(expect);
 
         Assert.Single(result);
         Assert.Equal("valid.md", result[0].Path);
@@ -106,9 +106,12 @@ public class TaskRequiredFilesTests
     public void TaskRun_WithRequiredFiles_ContainsMetadata()
     {
         var withDict = JsonSerializer.Deserialize<Dictionary<string, JsonElement?>>("""
-            {"expect": {"files": [{"path": "proposal.md"}]}}
+            {"session": "plan"}
             """)!;
-        var requiredFiles = TaskRunExtensions.ExtractRequiredFiles(withDict);
+        var expectDict = JsonSerializer.Deserialize<Dictionary<string, JsonElement?>>("""
+            {"files": [{"path": "proposal.md"}]}
+            """)!;
+        var requiredFiles = TaskRunExtensions.ExtractRequiredFiles(expectDict);
 
         var taskRun = new TaskRun
         {
@@ -118,6 +121,7 @@ public class TaskRequiredFilesTests
             Title = "Generate proposal",
             Uses = "mohist/acp-agent",
             WithInput = withDict,
+            ExpectInput = expectDict,
             Status = TaskRunStatus.Pending,
             RequiredFiles = requiredFiles,
             Classification = TaskRunExtensions.DeriveClassification("mohist/acp-agent", requiredFiles)
@@ -133,9 +137,12 @@ public class TaskRequiredFilesTests
     public void TaskRun_StatusCanBeUpdated_WithoutRemovingRequiredFiles()
     {
         var withDict = JsonSerializer.Deserialize<Dictionary<string, JsonElement?>>("""
-            {"expect": {"files": [{"path": "design.md"}]}}
+            {"session": "plan"}
             """)!;
-        var requiredFiles = TaskRunExtensions.ExtractRequiredFiles(withDict);
+        var expectDict = JsonSerializer.Deserialize<Dictionary<string, JsonElement?>>("""
+            {"files": [{"path": "design.md"}]}
+            """)!;
+        var requiredFiles = TaskRunExtensions.ExtractRequiredFiles(expectDict);
         var taskRun = new TaskRun
         {
             Id = "design.1",
@@ -144,6 +151,7 @@ public class TaskRequiredFilesTests
             Title = "Create design",
             Uses = "mohist/acp-agent",
             WithInput = withDict,
+            ExpectInput = expectDict,
             Status = TaskRunStatus.Pending,
             RequiredFiles = requiredFiles
         };
@@ -161,9 +169,12 @@ public class TaskRequiredFilesTests
     public void TaskRun_NoFileContentStored()
     {
         var withDict = JsonSerializer.Deserialize<Dictionary<string, JsonElement?>>("""
-            {"expect": {"files": [{"path": "proposal.md"}]}}
+            {"session": "plan"}
             """)!;
-        var requiredFiles = TaskRunExtensions.ExtractRequiredFiles(withDict);
+        var expectDict = JsonSerializer.Deserialize<Dictionary<string, JsonElement?>>("""
+            {"files": [{"path": "proposal.md"}]}
+            """)!;
+        var requiredFiles = TaskRunExtensions.ExtractRequiredFiles(expectDict);
         var taskRun = new TaskRun
         {
             Id = "proposal.1",
@@ -172,6 +183,7 @@ public class TaskRequiredFilesTests
             Title = "Generate proposal",
             Uses = "mohist/acp-agent",
             WithInput = withDict,
+            ExpectInput = expectDict,
             Status = TaskRunStatus.Pending,
             RequiredFiles = requiredFiles
         };
