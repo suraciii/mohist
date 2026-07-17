@@ -1,6 +1,6 @@
 ---
 name: "Self Review"
-description: "5-dimension self review of plan artifacts"
+description: "Reviews the plan artifacts and reports problems"
 tags: [plan, openspec, review]
 stage: plan
 ---
@@ -10,110 +10,13 @@ Read the current Mohist issue details before interpreting this task:
 mo issue show ${{ issue.number }} --project-id ${{ project.id }}
 ```
 
-<artifact id="self-review">
+Review the plan artifacts under `${{ openspecChangeDir }}/` (`proposal.md`,
+`design.md`, `tasks.json`, `specs/`) against the issue, and write your findings
+to `${{ openspecChangeDir }}/self-review.md`.
 
-<task>
-Review the generated plan artifacts and repair issues directly when safe.
-Produce `self-review.md` with a machine-readable PASS or FAIL marker.
-</task>
+You are a reviewer, not a fixer: do not modify any file other than
+`self-review.md`. A separate task fixes every problem you report.
 
-<dependencies>
-Read `${{ openspecChangeDir }}/proposal.md`, `${{ openspecChangeDir }}/design.md`, `${{ openspecChangeDir }}/tasks.json`, and all specs under `${{ openspecChangeDir }}/specs/`.
-</dependencies>
-
-<review_criteria>
-<alignment>
-- Proposal addresses the actual issue.
-- Every "What Changes" entry traces back to an issue requirement.
-- No issue requirements are missing or misinterpreted.
-</alignment>
-
-<completeness>
-- All requirements are covered by specs.
-- All specs have tasks.
-- Important edge cases are considered.
-</completeness>
-
-<consistency>
-- Specs align with proposal Capabilities.
-- Tasks reference correct spec files.
-- Design aligns with specs.
-- Naming is consistent.
-</consistency>
-
-<feasibility>
-- Dependencies are available or created by earlier tasks.
-- No circular dependencies exist.
-- Task granularity is appropriate: each task is a complete feature slice.
-  
-  A task is too fine-grained when:
-  - Its title names a technical action such as "define interface",
-    "extract class", "register in DI", or "create file"
-  - It only moves or renames code without delivering functionality
-  - Lifecycle operations (install/start/stop/uninstall) are split into
-    separate tasks
-  - It is a standalone "test" task (e.g. "add tests for X") — tests belong
-    inside the implementation task
-
-  Repair: merge too-fine tasks into their feature-slice task instead of
-  patching them individually.
-</feasibility>
-
-<dependency_completeness>
-- Every non-first task has appropriate `dependsOn`.
-- All `dependsOn` entries point to existing IDs with lower priority.
-- No cycles exist.
-</dependency_completeness>
-</review_criteria>
-
-<repair_policy>
-If issues are found and the fix is safe, fix the affected files directly.
-Do not delete artifacts. Do not make broad product or architectural changes during self-review.
-</repair_policy>
-
-<output_format>
-# Self Review Report
-
-## Result: PASS / FAIL
-
-## Repaired Items
-
-- [ID: item-N]
-  Severity: info
-  Scope: alignment | completeness | consistency | feasibility | dependencies
-  Evidence: What was wrong and what was changed
-  Verification: How the fix was verified
-  Status: resolved
-
-## Blocking Items
-
-- [ID: item-N]
-  Severity: blocking
-  Scope: alignment | completeness | consistency | feasibility | dependencies
-  Evidence: What is wrong
-  SuggestedAction: What should be done
-  Status: open | unresolved
-
-## Follow-up Items
-
-- [ID: item-N]
-  Severity: follow-up
-  Scope: alignment | completeness | consistency | feasibility | dependencies
-  Evidence: Description
-  SuggestedAction: Suggested improvement
-  Status: follow-up
-</output_format>
-
-<verdict_marker>
 The final line of `self-review.md` MUST be exactly one of:
-- `<promise>PASS</promise>` if all checks pass.
-- `<promise>FAIL</promise>` if any check fails.
-
-Do NOT include more than one marker. Do NOT include markers in examples or quoted text.
-</verdict_marker>
-
-<output>
-Write to: `${{ openspecChangeDir }}/self-review.md`
-</output>
-
-</artifact>
+- `<promise>PASS</promise>` — the plan is ready to build.
+- `<promise>FAIL</promise>` — you found problems that must be fixed.

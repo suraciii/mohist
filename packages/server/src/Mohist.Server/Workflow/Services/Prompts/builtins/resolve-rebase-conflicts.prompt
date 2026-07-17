@@ -11,8 +11,8 @@ A rebase of `${{ workspace.branch }}` onto `${{ repository.baseBranch }}` is in
 progress and has stopped. Make it complete successfully: the rebased branch must
 build and typecheck green, and preserve the intent of both sides.
 
-The rebase is in progress — do not abort it. Do not push from this task; the
-workflow runs the explicit `recover:push` task once the rebase completes.
+The rebase is in progress — do not abort it. Do not push from this task; branch
+synchronization is an explicit workflow task.
 
 ## Principles
 
