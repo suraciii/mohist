@@ -68,3 +68,6 @@
 - `npm run test:run -w packages/runner` — 1177 tests pass, including 35 new `tests/opencode-runtime.spec.ts` cases.
 - `npm test` — full repo passes (4790 tests across server/cli/runner/web).
 - `npm run build -w packages/runner` — compiles cleanly.
+
+## T-001 re-dispatch note
+- The runner re-dispatched T-001 after T-002 already landed on the same branch (`mohist/run-wr_631a68e5fd9d4879b3c983d060b7a7c3`). The T-001 implementation (commit `b5d780a65`) is already on the branch — pinned `@opencode-ai/sdk@1.18.3`, retained `@agentclientprotocol/sdk@0.21.0`, smoke-verified call surface in `sdk-smoke-verification.json`, drift reconciled into `design/runtimes/opencode.md`. Re-ran the acceptance verification commands (`npm run typecheck -w packages/runner`, `npm run typecheck:tests -w packages/runner`, `npm run test:run -w packages/runner` — 1178/1178 pass) and confirm T-001's AC list is still satisfied. No source change required for T-001 itself; this note is recorded so the workflow runner has the re-dispatch context.
