@@ -36,10 +36,53 @@ public class RuntimeEntrySpecs
         var root = await _fixture.Client.GetStringAsync("/");
         var route = await _fixture.Client.GetStringAsync("/issues/1");
         var workflowSession = await _fixture.Client.GetStringAsync("/issues/1/workflow/sessions/plan");
+        var dottedSession = await _fixture.Client.GetStringAsync("/issues/12/workflow/sessions/T-001.1");
 
         Assert.Contains("Mohist Test Web", root);
         Assert.Contains("Mohist Test Web", route);
         Assert.Contains("Mohist Test Web", workflowSession);
+        Assert.Contains("Mohist Test Web", dottedSession);
+    }
+
+    [Fact]
+    public async Task SpaFallback_WhenDottedSessionDeepLink_ReturnsHtmlEntryPoint()
+    {
+        using var response = await _fixture.Client.GetAsync("/issues/12/workflow/sessions/T-001.1");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("text/html", response.Content.Headers.ContentType?.MediaType);
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.Contains("Mohist Test Web", body);
+    }
+
+    [Fact]
+    public async Task SpaFallback_WhenOtelV1Path_ReturnsNotFound()
+    {
+        using var response = await _fixture.Client.GetAsync("/otel/v1/traces");
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task SpaFallback_WhenRealStaticAsset_ServedAheadOfFallback()
+    {
+        using var response = await _fixture.Client.GetAsync("/assets/app.css");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("text/css", response.Content.Headers.ContentType?.MediaType);
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.Equal("body{color:red}", body);
+    }
+
+    [Fact]
+    public async Task SpaFallback_WhenFileLikePathMissing_ServesEntryPoint()
+    {
+        using var response = await _fixture.Client.GetAsync("/assets/missing.js");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("text/html", response.Content.Headers.ContentType?.MediaType);
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.Contains("Mohist Test Web", body);
     }
 
     [Fact]
