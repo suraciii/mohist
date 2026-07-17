@@ -172,9 +172,9 @@ describe('AssistantParts tool views — baseline render', () => {
     fireEvent.click(screen.getByRole('button'))
 
     expect(screen.getByText(/Changed files/)).toBeInTheDocument()
-    expect(screen.getByText('src/foo.ts')).toBeInTheDocument()
-    expect(screen.getByText('+2')).toBeInTheDocument()
-    expect(screen.getByText('-1')).toBeInTheDocument()
+    expect(screen.getAllByText('src/foo.ts').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('+2').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('-1').length).toBeGreaterThan(0)
   })
 
   it('renders context group header with title detail', () => {

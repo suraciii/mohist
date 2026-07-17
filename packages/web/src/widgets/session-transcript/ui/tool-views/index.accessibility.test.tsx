@@ -118,7 +118,7 @@ describe('ToolRowView accessibility', () => {
 
     render(<ToolRowView part={part} />)
 
-    const button = screen.getByRole('button', { name: 'echo hi' })
+    const button = screen.getByRole('button', { name: /\$ echo hi/ })
     expect(button).toBeInTheDocument()
     const name = button.textContent?.trim() ?? ''
     expect(name.length).toBeGreaterThan(0)

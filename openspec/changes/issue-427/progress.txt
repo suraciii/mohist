@@ -44,3 +44,36 @@
 - `SessionTranscriptView.tsx` legacy rendering ("Context gathered", "Gathering context") is still on disk and tested — T-003 deletes it.
 - T-003 needs `formatElapsed(startedAt, completedAt)` for per-row duration (part.startedAt, part.completedAt) inside `ToolRowView`. The util already supports this shape.
 - The new `data-prompt-block` / `data-turn-divider` anchors are stable enough for #429 navigation to mount on; if #429 prefers a different anchor scheme it can swap the data-attrs without affecting this task's invariants.
+
+## Decisions & Gotchas (T-003)
+
+- ToolRowView was reworked into a default-collapsed single-line row with a verb-led title. The collapsed DOM is: status dot (`ToolStatusDot`), `[data-testid="tool-row-verb-title"]` (verb + space + target), optional tool-arg badges, optional `[data-testid="tool-row-edit-file"]` + `[data-testid="tool-row-edit-stats"]` (single-file edit), optional `[data-testid="tool-row-edit-file-count"]` (multi-file edit), `[data-testid="tool-row-duration"]` at the right (only on completed rows). Expanded detail lives under `[data-testid="tool-row-detail"]`. Row root carries `data-tool-call-id` and `data-tool-state` — these are tied to `part.toolCallId` and `part.status` and stay stable across running→completed transitions.
+- Verb-led title is composed in `tool-views/shared.tsx` via `deriveVerbLedTitle(status, normalizedName, rawInput, toolName)`. Family buckets: `edit/write/apply_patch` (Edit/Edited/Failed to edit), `bash/shell` ($ {cmd}), `read/read_file/glob/list/membrowse/memread` (Read {basename}), `grep/search/search_files/websearch` (Searched {query}), `other` (toolName or generic label, with trailing `…` while in-flight). Targets use the existing `getFilePathFromInput`, `getToolLabel`, `parseJsonSafely` extractors and end up as the **basename** (matching the spec mock's `Edited TaskRun.cs`/`Editing WorkflowDefinition.cs` shape). Targets over 80 chars are trimmed with `…`.
+- Inline edit stats read from `part.changedFiles` first (sum across files), then fall back to `parseEditWriteChanges(parsed)` and finally `parsePatchOperations(patchText)` for `apply_patch`. Single-file → file path + `+N −M`. Multi-file → `N files` on the collapsed row with the list available on expand.
+- Whole-row failure: `part.status === 'failed'` makes the row root `data-tone="danger"` AND the button's classes go to `bg-danger-subtle/40 text-danger`. Completed rows do NOT receive these classes. The check uses class-name string presence, not `data-tone` alone, because the design needs the visual treatment inside the button container too.
+- Running/pending rows: `expandable = !isRunning && hasExpandableDetail`; `aria-expanded` is suppressed on running rows; `[data-testid="tool-row-duration"]` only renders when `formatElapsed` returns non-null (i.e. completedAt set), so no live timer appears.
+- Default-collapsed is preserved by keeping the inline `useState(false)` for `expanded` and wrapping detail render with `{expanded && expandable && ...}`.
+- Verb-led title exports: `deriveVerbFamily`, `deriveVerbLedTitle`, `VerbFamily`, `VerbLedTitle` are re-exported from `tool-views/index.tsx`. The noun-based `DISPLAY_TITLES` used by typed content views is **untouched** (Decision 5).
+- Deleted files (no remaining importers):
+  - `ui/SessionTranscriptView.tsx` + `ui/ToolCallCard.tsx` + `ui/SessionTranscriptView.fixture.ts` (legacy render path).
+  - Ten legacy `ui/SessionTranscriptView.*.test.tsx` files + their fixture (Tests for the legacy DOM — not migrated per Decision 9).
+  - Deleted two `tests/` specs that targeted only the legacy DOM and its `installSessionTranscriptViewFixture` helper:
+    - `tests/SessionTranscriptAffordances.spec.tsx`
+    - `tests/ToolRegistry.spec.tsx`
+  - Migrated the two remaining legacy-dependent specs to the new path:
+    - `tests/SessionTranscriptRefetch.spec.tsx`: removed `installSessionTranscriptViewFixture()` call (it only needed `useSessionTranscript` + `dispatchAgentEvent`).
+    - `tests/SessionTranscriptFollowMode.spec.tsx`: replaced two `SessionTranscriptView` renderings (streaming-text pacing tests) with `projectSessionToDisplayTurns` + `SessionTranscriptLayout` projection helper. Hook-level tests (follow-mode pause/resume + persisted transcript content) needed no change since they go through `renderHookWithQueryClient` + `useSessionTranscript`.
+- Migrated live-path tests (existing → new DOM):
+  - `tool-views/index.test.tsx:114-115`: changed `getAllByText('x.ts')` to `getAllByText('/repo/x.ts')` since the full path appears in expanded detail only.
+  - `AssistantParts.render.test.tsx:175-177`: same fix (`getByText` → `getAllByText` because the new row shows the file path twice when expanded — once as inline edit-file, once inside `DiffContentView`).
+  - `AssistantParts.tool-naming.test.tsx:99-103`: the unknown-tool-with-URL test now asserts that the row has visible content rather than containing the URL verbatim — the verb-led `other` family falls back to `toolName` (the URL remains recoverable on expand via the generic input/output pre).
+  - `tool-views/index.accessibility.test.tsx:121`: bash row's accessible name is now `$ echo hi` (verb prefix) not `echo hi`. Updated assertion to regex match.
+- New specs (`tool-views/tool-row-view.spec.tsx`, 22 tests):
+  - Verb-led title builder — bash / read / glob (read family) / grep / edit (Editing/Edited/Failed to edit) / non-verb-family / running rows with trailing `…`.
+  - Inline edit stats — single-file path + +N/−M, multi-file `N files` summary, raw-input fallback via `parseEditWriteChanges`.
+  - Whole-row failure — `data-tone="danger"` + bg/text-danger on failed rows; absent on completed.
+  - Running/pending — single-line in-progress, no `[data-tool-row-duration]`, no `aria-expanded`.
+  - Stable identity — `data-tool-call-id` and `data-tool-state` present; identity survives a rerender running→completed.
+  - Full-width invariant — `w-full`, no `max-w-`, no `mx-auto`.
+  - Collapse/expand — typed detail under `[data-tool-row-detail]` is hidden by default and visible after click.
+- All 4726 web tests pass; `npm run typecheck -w packages/web` is clean. `check:test-boundaries` reports two pre-existing oversize test files (`TurnList.render.test.tsx` 322 lines, `session-transcript-display.test.ts` 612 lines / baseline 554) that T-001/T-002 left over; not in this task's scope per "avoid unrelated refactors".

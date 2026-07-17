@@ -112,7 +112,7 @@ describe('ToolRowView dispatcher', () => {
     fireEvent.click(screen.getByRole('button'))
 
     expect(screen.getByText(/Changed files/)).toBeInTheDocument()
-    expect(screen.getAllByText('x.ts').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('/repo/x.ts').length).toBeGreaterThan(0)
   })
 
   it('renders error message above all content views', () => {

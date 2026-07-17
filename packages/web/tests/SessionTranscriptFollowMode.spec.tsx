@@ -1,14 +1,51 @@
 import { describe, it, expect, vi } from 'vitest'
 import { screen, waitFor, act } from './test-utils'
-import { SessionTranscriptView } from '../src/widgets/session-transcript/ui/SessionTranscriptView'
+import { SessionTranscriptLayout } from '../src/widgets/session-transcript/ui/SessionTranscriptLayout'
+import { projectSessionToDisplayTurns } from '../src/widgets/session-transcript/model/session-transcript-display'
 import { useSessionTranscript } from '../src/widgets/session-transcript/model/useSessionTranscript'
 import { dispatchAgentEvent } from '../src/entities/agent'
 import type { TextPart } from '../src/entities/coder-session'
 import { renderWithQueryClient, renderHookWithQueryClient, makeTurn } from './session-page-test-utils'
 import { setScopedValue } from './support/scoped-property'
-import { installSessionTranscriptViewFixture } from '../src/widgets/session-transcript/ui/SessionTranscriptView.fixture'
 
-installSessionTranscriptViewFixture()
+function renderTranscript(rawTurns: Parameters<typeof projectSessionToDisplayTurns>[0]['turns'], isRunning: boolean) {
+  const displayTurns = projectSessionToDisplayTurns({
+    id: 'session-1',
+    runtimeSessionId: 'acp-123',
+    executionId: null,
+    taskDescription: null,
+    status: 'live',
+    createdAt: '2024-01-01T10:00:00.000Z',
+    completedAt: null,
+    model: null,
+    runtime: null,
+    stage: null,
+    title: null,
+    metadata: {
+      sessionId: 'session-1',
+      runtimeSessionId: 'acp-123',
+      runtime: null,
+      executionId: null,
+      title: null,
+      status: 'live',
+      model: null,
+      stage: null,
+      createdAt: '2024-01-01T10:00:00.000Z',
+      completedAt: null,
+    },
+    turns: rawTurns,
+    incomplete: false,
+  })
+  return renderWithQueryClient(
+    <SessionTranscriptLayout
+      title="t"
+      turnCount={displayTurns.length}
+      turns={displayTurns}
+      statusKind="live"
+      isRunning={isRunning}
+    />,
+  )
+}
 
 describe('Follow-mode scrolling and streaming text pacing', () => {
   describe('follow-mode pause/resume', () => {
@@ -263,7 +300,7 @@ describe('Follow-mode scrolling and streaming text pacing', () => {
         } as TextPart],
       })]
 
-      renderWithQueryClient(<SessionTranscriptView turns={turns} isRunning={true} />)
+      renderTranscript(turns, true)
 
       await waitFor(() => {
         expect(screen.getByText('Streaming text')).toBeInTheDocument()
@@ -284,7 +321,7 @@ describe('Follow-mode scrolling and streaming text pacing', () => {
         } as TextPart],
       })]
 
-      renderWithQueryClient(<SessionTranscriptView turns={turns} isRunning={false} />)
+      renderTranscript(turns, false)
 
       await waitFor(() => {
         expect(screen.getByText('Completed text')).toBeInTheDocument()
