@@ -45,9 +45,13 @@ public class EventDispatcherImmediateTriggerSpecs
         // DispatcherSpecificHandler subscription well before the
         // reminder period elapses.
         var runId = $"wr_poke_latency_{Guid.NewGuid():N}";
-        var beforeCount = 0;
+        int beforeCount;
         lock (_fixture.SpecificInvocations)
             beforeCount = _fixture.SpecificInvocations.Count;
+        // Register the deterministic delivery signal before the producer
+        // commits so the awaited task resolves from the handler's own
+        // invocation rather than a wall-clock timeout.
+        var delivered = _fixture.WaitForSpecificBeyondAsync(beforeCount);
 
         await using (var scope = _fixture.Cluster.GetSiloServiceProvider(null).CreateAsyncScope())
         {
@@ -56,27 +60,32 @@ public class EventDispatcherImmediateTriggerSpecs
             await runStore.SaveAsync(run, [new WorkflowRunCompleted()]);
         }
 
-        await TestWait.ForAsync(
-            () =>
-            {
-                lock (_fixture.SpecificInvocations)
-                    return Task.FromResult(_fixture.SpecificInvocations.Count > beforeCount);
-            },
-            delivered => delivered,
-            timeout: TimeSpan.FromSeconds(5),
-            step: TimeSpan.FromMilliseconds(100),
-            description: $"dispatcher delivered WorkflowRunCompleted event via WorkflowRunStore poke within 5s; pendingCount={_fixture.EventStore.PendingCount}, catchAll={_fixture.CatchAllInvocations.Count}, specific={_fixture.SpecificInvocations.Count}",
-            advance: AdvanceClusterTurnAsync);
+        // Cross cluster turns so the dispatcher's DispatchNowAsync (queued
+        // by the producer's poke) runs to completion. The signal resolves
+        // the moment the specific handler records the delivery.
+        await AdvanceClusterTurnUntilSettledAsync(delivered);
     }
 
-    private async Task AdvanceClusterTurnAsync()
+    /// <summary>
+    /// Drives cluster turns until <paramref name="signal"/> completes. Each
+    /// turn pings a grain so the in-process silo scheduler processes queued
+    /// messages (the dispatcher's DispatchNowAsync from the producer's poke,
+    /// or the reminder tick's fan-out). Awaiting the signal is the
+    /// deterministic completion — it resolves from the handler's own
+    /// invocation, never from a wall-clock timeout. The bounded loop only
+    /// guards against an indefinite hang if the scheduler ever stalls.
+    /// </summary>
+    private async Task AdvanceClusterTurnUntilSettledAsync(Task signal)
     {
-        // Yields the test's CPU to the in-process silo scheduler and
-        // pings a grain so queued messages (the dispatcher's
-        // DispatchNowAsync from the producer's poke) get processed.
-        await _fixture.Grains
-            .GetGrain<IRunnerRegistryGrain>(Mohist.Server.Runner.Grains.RunnerRegistryKeys.Global)
-            .ListRunnerIdsAsync();
+        // The signal may already be resolved (handler ran synchronously
+        // during the producer's commit).
+        for (var i = 0; i < 200 && !signal.IsCompleted; i++)
+        {
+            await _fixture.Grains
+                .GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global)
+                .ListRunnerIdsAsync();
+        }
+        await signal;
     }
 
     [Fact]
@@ -87,9 +96,10 @@ public class EventDispatcherImmediateTriggerSpecs
         // before the reminder cadence elapses. The IssueCreated event
         // type matches the catch-all DispatcherCatchAllHandler
         // subscription (Type = "*").
-        var beforeCatchAll = 0;
+        int beforeCatchAll;
         lock (_fixture.CatchAllInvocations)
             beforeCatchAll = _fixture.CatchAllInvocations.Count;
+        var delivered = _fixture.WaitForCatchAllBeyondAsync(beforeCatchAll);
 
         await using (var scope = _fixture.Cluster.GetSiloServiceProvider(null).CreateAsyncScope())
         {
@@ -101,17 +111,7 @@ public class EventDispatcherImmediateTriggerSpecs
                 [new IssueCreated("poke", "p2", new Dictionary<string, string>(), null, null)]);
         }
 
-        await TestWait.ForAsync(
-            () =>
-            {
-                lock (_fixture.CatchAllInvocations)
-                    return Task.FromResult(_fixture.CatchAllInvocations.Count > beforeCatchAll);
-            },
-            delivered => delivered,
-            timeout: TimeSpan.FromSeconds(5),
-            step: TimeSpan.FromMilliseconds(100),
-            description: "dispatcher delivered IssueCreated event via IssueStore poke within 5s",
-            advance: AdvanceClusterTurnAsync);
+        await AdvanceClusterTurnUntilSettledAsync(delivered);
     }
 
     [Fact]
@@ -122,10 +122,11 @@ public class EventDispatcherImmediateTriggerSpecs
         // producer's poke path is wired. AgentSessionRuntimeBound
         // matches the catch-all subscription.
         var sessionId = $"agent_poke_{Guid.NewGuid():N}";
-        var beforeCatchAll = 0;
         var beforePending = _fixture.EventStore.PendingCount;
+        int beforeCatchAll;
         lock (_fixture.CatchAllInvocations)
             beforeCatchAll = _fixture.CatchAllInvocations.Count;
+        var delivered = _fixture.WaitForCatchAllBeyondAsync(beforeCatchAll);
 
         await using (var scope = _fixture.Cluster.GetSiloServiceProvider(null).CreateAsyncScope())
         {
@@ -138,21 +139,7 @@ public class EventDispatcherImmediateTriggerSpecs
         Assert.True(_fixture.EventStore.PendingCount > beforePending,
             $"Expected PendingCount to grow after AgentSessionStore.SaveAsync; was {beforePending}, now {_fixture.EventStore.PendingCount}");
 
-        // Diagnostic: print what was captured
-        var pendingRows = await _fixture.EventStore.ListUndeliveredAsync(int.MaxValue);
-        var pendingTypes = string.Join(", ", pendingRows.Select(r => r.Type));
-
-        await TestWait.ForAsync(
-            () =>
-            {
-                lock (_fixture.CatchAllInvocations)
-                    return Task.FromResult(_fixture.CatchAllInvocations.Count > beforeCatchAll);
-            },
-            delivered => delivered,
-            timeout: TimeSpan.FromSeconds(5),
-            step: TimeSpan.FromMilliseconds(100),
-            description: $"dispatcher delivered AgentSessionRuntimeBound event via AgentSessionStore poke within 5s; pending types: {pendingTypes}",
-            advance: AdvanceClusterTurnAsync);
+        await AdvanceClusterTurnUntilSettledAsync(delivered);
     }
 
     [Fact]
@@ -173,7 +160,7 @@ public class EventDispatcherImmediateTriggerSpecs
         var eventId = $"evt_lost_poke_{Guid.NewGuid():N}";
 
         var brokenFactory = new ThrowingDispatchGrainFactory();
-        var beforeSpecific = 0;
+        int beforeSpecific;
         lock (_fixture.SpecificInvocations)
             beforeSpecific = _fixture.SpecificInvocations.Count;
 
@@ -194,23 +181,17 @@ public class EventDispatcherImmediateTriggerSpecs
         lock (_fixture.SpecificInvocations)
             Assert.Equal(beforeSpecific, _fixture.SpecificInvocations.Count);
 
+        // Register the delivery signal before advancing the clock so the
+        // reminder tick's delivery resolves it deterministically.
+        var delivered = _fixture.WaitForSpecificBeyondAsync(beforeSpecific);
+
         // Advancing the fake clock past the reminder period lets the
         // dispatcher fire its next tick — the same path a real silo
         // takes. The query re-pulls the undelivered row and delivers
         // it through the normal fan-out.
         await AwaitReminderTickAsync();
 
-        await TestWait.ForAsync(
-            () =>
-            {
-                lock (_fixture.SpecificInvocations)
-                    return Task.FromResult(_fixture.SpecificInvocations.Count > beforeSpecific);
-            },
-            delivered => delivered,
-            timeout: TimeSpan.FromSeconds(5),
-            step: TimeSpan.FromMilliseconds(100),
-            description: "reminder tick recovered the lost poke and delivered the WorkflowRunCompleted event",
-            advance: AdvanceClusterTurnAsync);
+        await AdvanceClusterTurnUntilSettledAsync(delivered);
         Assert.Equal(0, _fixture.EventStore.PendingCount);
     }
 
