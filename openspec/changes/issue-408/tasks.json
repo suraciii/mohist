@@ -1,0 +1,132 @@
+{
+  "project": "mohist-local",
+  "description": "Separate Workflow task completion policy (expect) from Action Input (with), remove hidden variable injection, define the mohist/opencode Action contract, and migrate all built-in profiles.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Server task contract: Expect field, YAML parsing, legacy validation, and dispatch",
+      "spec": "specs/workflow-task-contract/spec.md",
+      "description": "Add the Expect field to every server-side shape that carries task definition data (TaskDefinition, TaskRun, WorkflowTaskWork, WorkItem, Orleans surrogates, RuntimeTaskInput, AddTasksBatchItem). Replace FeedbackTaskConfig with TaskDefinition in ApprovalFeedbackConfig. Update the YAML serializer to read and emit top-level expect alongside with. Add Action-aware legacy validation that rejects with.expect and with.agent on mohist/opencode and mohist/acp-agent tasks while leaving Action-owned fields (e.g. mohist/github-pr-status with.expect: merged) valid. Remove the deep-merge branch from TaskWithExpander.Expand and the with.agent synthesis from WorkflowItemTranslator.ResolveWith, keeping only whole-value variable resolution. Add Expect to WorkDispatch and expand it at dispatch time. Update TaskRunExtensions.ExtractRequiredFiles and TaskRun.ToDefinition() to use Expect.",
+      "acceptanceCriteria": [
+        "WorkflowYamlSerializer round-trips a task with top-level expect beside with, artifacts, setVars, and recovery without losing or merging fields",
+        "Loading a mohist/opencode or mohist/acp-agent task with with.expect containing files, markers, or failIf fails with an error naming the task and directing to task-level expect",
+        "Loading a mohist/opencode or mohist/acp-agent task with with.agent fails with an error directing to explicit options binding",
+        "A mohist/github-pr-status check declaring with.expect: merged loads and dispatches without rejection",
+        "TaskWithExpander.Expand performs whole-value ${{ vars.* }} resolution only; a literal with.options object is not deep-merged with a same-named variable object",
+        "WorkflowItemTranslator.ResolveWith does not synthesize with.agent from effective vars.agent when the task omits it",
+        "WorkDispatch carries Expect as a serialized JSON string; WorkflowItemTranslator.BuildTaskDispatchAsync expands and includes it for task-variant dispatches",
+        "TaskRunExtensions.ExtractRequiredFiles reads from the Expect field, not from WithInput['expect']",
+        "TaskRun.ToDefinition() includes Expect in the returned TaskDefinition",
+        "ApprovalFeedbackConfig uses TaskDefinition; ResolveFeedbackTask returns a TaskDefinition with the full canonical shape",
+        "All existing server spec and unit tests pass after updating assertions that locked the old with.expect or deep-merge behavior"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Server domain types, YAML serializer, TaskWithExpander, WorkflowItemTranslator, WorkDispatch, and related tests all reflect the separate Expect contract",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Key files: WorkflowDefinition.cs (TaskDefinition, FeedbackTaskConfig), TaskRun.cs (ExtractRequiredFiles, ToDefinition), WorkflowYamlSerializer.cs (ToTask, ToTaskMap, ValidateTaskExpectations), TaskWithExpander.cs (Expand), WorkflowItemTranslator.cs (ResolveWith, BuildTaskDispatchAsync), WorkflowRun.Work.cs (WorkflowTaskWork), WorkItem.cs, IWorkflowGrain.cs (RuntimeTaskInput, AddTasksBatchItem), IRunnerGrain.cs (WorkDispatch), WorkflowDefinitionSurrogates.cs, WorkflowRun.Approval.cs (ResolveFeedbackTask). Orleans Id slots: WorkItem [Id(11)], WorkDispatch [Id(18)]."
+    },
+    {
+      "id": "T-002",
+      "title": "Model config validation and writer convergence",
+      "spec": "specs/opencode-action-contract/spec.md#model-identifiers-split-only-at-the-first-slash",
+      "description": "Change the model ID validation regex in IssueModelMetadata from exactly-one-slash to first-slash-split, so model IDs containing additional slashes (e.g. openrouter/vendor/family/model) are accepted while missing provider or model-ID portions are rejected. Stop adding the type: opencode execution-backend key in MohistIssueWorkflowProfileBase and in the Web IssueModelSelector variable patch calls. These surfaces persist only the model and variant meaning of vars.agent.",
+      "acceptanceCriteria": [
+        "IssueModelMetadata.ValidateModel accepts 'openrouter/vendor/family/model' and returns null (success)",
+        "IssueModelMetadata.ValidateModel rejects 'model-only', '/model', and 'provider/' with an actionable provider/model error message",
+        "Per-stage model selectors in IssueModelMetadata.Validate apply the same multi-slash acceptance",
+        "MohistIssueWorkflowProfileBase no longer writes type: opencode into vars.agent defaults",
+        "IssueModelSelector.tsx patchIssueWorkflowDefinitionVar and patchIssueWorkflowStageDefinitionVar calls no longer include type: opencode",
+        "Existing IssueModelMetadata unit tests and IssueModelSelector web tests pass after updating assertions that expected the old regex or the type key"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "IssueModelMetadata.cs regex updated, MohistIssueWorkflowProfileBase.cs type key removed, IssueModelSelector.tsx type key removed, and all related tests updated",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Key files: IssueModelMetadata.cs (ProviderModelFormat regex line 50), Issue/Services/WorkflowProfiles/MohistIssueWorkflowProfileBase.cs (line 89), web/src/features/select-issue-model/ui/IssueModelSelector.tsx (lines 250, 268, 304, 347, 349). This task is independent of the task-contract work — it touches the Issue model-config surface, not the Workflow task declaration."
+    },
+    {
+      "id": "T-003",
+      "title": "Runner completion evaluator, output projection, and dispatch contract",
+      "spec": "specs/workflow-task-completion/spec.md",
+      "description": "Add expect to runner types (WorkDispatchResponse, RenderedWorkItem, AddTaskInput) and parse it in connection.ts. Add a private turnFact field to the internal ActionResult type for carrying the final assistant text without serializing it into WorkItemResult. Move the file/marker/failIf/_output completion evaluator from the acp-agent Action into the Workflow task executor as a new step between Action normalization and recovery. For mohist/opencode tasks, project the public output to null or { promise: value } based on whether a promise marker matched; preserve all other Actions' output unchanged. Update the executor step ordering so completion evaluation and output projection run before recovery. Update recovery.ts tryRecovery to copy expect into self-retry tasks. Update template.ts literal field paths for standalone expect rendering.",
+      "acceptanceCriteria": [
+        "RenderedWorkItem and AddTaskInput carry expect; connection.ts toWorkItem parses expect from the dispatch response",
+        "ActionResult has an optional turnFact field that is never serialized into WorkItemResult.output",
+        "The executor evaluates top-level expect after the Action returns and before recovery matching, reading from the expanded expect rather than from ActionContext.with",
+        "A task whose Action succeeds but whose expect.files entry is missing fails with a message identifying the missing path",
+        "A file-backed marker with oneOf [PASS, FAIL] matches the first present value in declaration order when the file contains both",
+        "An _output marker matches the last accepted occurrence in the final assistant text and generalizes beyond lowercase done/unfinished to arbitrary <promise>VALUE</promise> values",
+        "When no turnFact.finalAssistantText is available, an _output marker is unsatisfied and the executor does not fall back to Action Output",
+        "mohist/opencode task output is null when no promise marker matched, and { promise: VALUE } when one matched",
+        "A non-agent Action (e.g. mohist/rebase) returning structured output preserves that output unchanged through completion evaluation",
+        "tryRecovery copies expect into the self-retry AddTaskInput alongside with, recovery, and recoveryRemaining",
+        "template.ts LITERAL_FIELD_PATHS protects markers.*.contains and markers.*.oneOf.* when rendering expect as a standalone object",
+        "Runner spec and unit tests pass; tests that locked the old Action-private verifyExpectations or acp-agent output shape are updated"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Runner executor with Workflow-owned completion evaluation, _output private fact channel, promise output projection, updated recovery self-retry, and all related tests",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Key files: runner/src/core/types.ts (WorkDispatchResponse, RenderedWorkItem, AddTaskInput, ActionResult, WorkItemResult), runner/src/server/connection.ts (toWorkItem, report), runner/src/runtime/executor.ts (executeOne step ordering), runner/src/actions/expectations.ts (move to executor-owned, generalize parseLastMarker), runner/src/runtime/recovery.ts (tryRecovery self-retry), runner/src/core/template.ts (LITERAL_FIELD_PATHS). The turnFact is runner-internal only; it is dropped at the ActionResult→WorkItemResult boundary."
+    },
+    {
+      "id": "T-004",
+      "title": "mohist/opencode bridge handler and openspec task generator",
+      "spec": "specs/opencode-action-contract/spec.md",
+      "description": "Register a mohist/opencode Action handler in the runner that accepts the new input shape (prompt, session, options), validates it (non-empty prompt, string options.model/variant, first-slash model parsing), delegates turn execution to the existing ACP runtime underneath, populates turnFact.finalAssistantText, and does not evaluate expect or append variant as a slash segment. Remove expectation evaluation and implicit repair-turn logic from the acp-agent path. Update openspec.ts to default generated task uses to mohist/opencode and propagate expect from the task template through mergeTaskWith.",
+      "acceptanceCriteria": [
+        "mohist/opencode is registered in the Action registry and resolves to a handler function",
+        "The handler accepts with.prompt, with.session, and with.options and does not require agent, kind, or type",
+        "The handler rejects a missing or blank prompt before starting a turn",
+        "The handler validates that options.model and options.variant are strings when present and rejects non-string values",
+        "The handler splits options.model at the first slash to derive provider and model ID without appending variant as a segment",
+        "The handler populates turnFact.finalAssistantText from the completed turn and does not include expect evaluation",
+        "The acp-agent Action no longer calls verifyExpectations or performs an implicit expectation-repair turn",
+        "openspec.ts openspecTasksAction defaults to uses: mohist/opencode when the profile does not specify a uses",
+        "openspec.ts mergeTaskWith propagates expect from the task template into the generated AddTaskInput",
+        "Runner tests cover the opencode handler input validation, turn delegation, turnFact population, and openspec generator default uses"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Registered mohist/opencode bridge handler, cleaned acp-agent path, updated openspec task generator, and related runner tests",
+      "dependsOn": ["T-003"],
+      "passes": false,
+      "notes": "Key files: runner/src/actions/registry.ts (register mohist/opencode), runner/src/actions/acp-agent.ts (remove verifyExpectations call, remove implicit repair), runner/src/actions/acp/session-strategies.ts (remove expectationRepairLimit default turn), runner/src/actions/acp/agent-config.ts (accept options instead of agent), runner/src/actions/acp/model-resolution.ts (first-slash split, no variant append), runner/src/actions/openspec.ts (defaultUses, mergeTaskWith). The bridge handler delegates to the existing ACP runtime; native OpenCode SDK implementation is a sibling issue in epic 46."
+    },
+    {
+      "id": "T-005",
+      "title": "Built-in profile migration and design doc alignment",
+      "spec": "specs/workflow-task-contract/spec.md#requirement-built-in-profiles-conform-without-product-flow-drift",
+      "description": "Migrate both built-in workflow YAML profiles (mohist-local, mohist/github-pr) to the canonical task contract: switch all agent tasks from mohist/acp-agent to mohist/opencode, move with.expect declarations to top-level expect, change agent: ${{ vars.agent }} to options: ${{ vars.agent }}, remove variables.agent.type, and add options: ${{ vars.agent }} to the apply-feedback approval task. Apply the same transformation to all nested recovery and self-retry tasks. Update design/workflow/actions.md, design/workflow/task-dispatch.md, and design/workflow/builtin-workflows.md to reflect the migrated contract and remove stale current-state notes.",
+      "acceptanceCriteria": [
+        "Both built-in profiles load without legacy-validation errors after migration",
+        "No agent task in either profile uses mohist/acp-agent or contains with.agent",
+        "No agent task in either profile contains Workflow completion policy under with.expect",
+        "All former with.expect declarations appear as top-level expect beside with, artifacts, setVars, or recovery",
+        "All agent tasks bind options: ${{ vars.agent }} instead of agent: ${{ vars.agent }}",
+        "variables.agent in both profiles contains no type key or other execution-backend discriminator",
+        "The apply-feedback task in both profiles declares options: ${{ vars.agent }}",
+        "Stage order, approval points, Action-owned inputs (e.g. github-pr-status with.expect: merged), artifacts, setVars, recovery budgets, and handler ordering are unchanged",
+        "Previously discarded top-level expect declarations in mohist/github-pr (proposal, design, tasks) are retained and will be enforced",
+        "design/workflow/actions.md describes mohist/opencode input/output contract and task-level expect without stale ACP references",
+        "design/workflow/builtin-workflows.md reflects the migrated agent task shape",
+        "Profile loading and workflow spec tests pass after migration"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "MIGRATE",
+      "output": "Migrated mohist-local.workflow.yaml, mohist-github-pr.workflow.yaml, updated design docs, and passing profile tests",
+      "dependsOn": ["T-001", "T-004"],
+      "passes": false,
+      "notes": "Key files: server/src/Mohist.Server/Workflow/Services/Profiles/mohist-local.workflow.yaml, mohist-github-pr.workflow.yaml, design/workflow/actions.md, design/workflow/task-dispatch.md, design/workflow/builtin-workflows.md. The mohist/github-pr-status check's with.expect: merged is an Action-owned input and must NOT be moved to top-level expect. Recovery tasks (e.g. recover:fix-tests with _output marker) move their with.expect to top-level expect."
+    }
+  ]
+}
