@@ -1,13 +1,13 @@
 import '@testing-library/jest-dom'
-import { fireEvent, render, screen } from '@testing-library/react'
+import { render } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { TurnList } from './TurnList'
 import type {
   DisplayTurn,
   DisplayPrompt,
   DisplayAssistantPart,
-  DisplayChangedFile,
 } from '../model/session-transcript-display'
+import { promptKindLabel } from '../model/prompt-kind-labels'
 
 function makePrompt(overrides: Partial<DisplayPrompt> = {}): DisplayPrompt {
   return {
@@ -25,7 +25,6 @@ function makeTurn(overrides: {
   completedAt?: string | null
   prompt?: Partial<DisplayPrompt>
   assistantParts?: DisplayAssistantPart[]
-  changedFiles?: DisplayChangedFile[]
   state?: DisplayTurn['state']
 }): DisplayTurn {
   return {
@@ -34,13 +33,13 @@ function makeTurn(overrides: {
     completedAt: overrides.completedAt ?? null,
     prompt: makePrompt({ sentAt: overrides.startedAt, ...overrides.prompt }),
     assistantParts: overrides.assistantParts ?? [],
-    changedFiles: overrides.changedFiles ?? [],
+    changedFiles: [],
     state: overrides.state ?? 'idle',
   }
 }
 
-describe('TurnList turn header timestamps', () => {
-  it('renders a timestamp element for every turn in a multi-turn fixture with text matching each startedAt', () => {
+describe('TurnList divider bar — turn ordinal, prompt kind label, start time, duration', () => {
+  it('renders a divider bar for every turn in a multi-turn fixture with timestamp text matching each startedAt', () => {
     const turns: DisplayTurn[] = [
       makeTurn({ id: 't1', startedAt: '2024-05-15T10:00:00.000Z' }),
       makeTurn({ id: 't2', startedAt: '2024-05-15T10:30:00.000Z' }),
@@ -49,9 +48,11 @@ describe('TurnList turn header timestamps', () => {
 
     const { container } = render(<TurnList turns={turns} />)
 
+    const dividers = container.querySelectorAll('[data-turn-divider]')
+    expect(dividers).toHaveLength(3)
+
     const timestamps = container.querySelectorAll<HTMLTimeElement>('[data-turn-timestamp]')
     expect(timestamps).toHaveLength(3)
-
     expect(timestamps[0].textContent).toBe(new Date(turns[0].startedAt).toLocaleTimeString())
     expect(timestamps[1].textContent).toBe(new Date(turns[1].startedAt).toLocaleTimeString())
     expect(timestamps[2].textContent).toBe(new Date(turns[2].startedAt).toLocaleTimeString())
@@ -61,7 +62,7 @@ describe('TurnList turn header timestamps', () => {
     expect(timestamps[2].getAttribute('datetime')).toBe(turns[2].startedAt)
   })
 
-  it('numbers turn headers 1-based in document order', () => {
+  it('numbers turn dividers 1-based in document order', () => {
     const turns: DisplayTurn[] = [
       makeTurn({ id: 'a', startedAt: '2024-05-15T10:00:00.000Z' }),
       makeTurn({ id: 'b', startedAt: '2024-05-15T10:30:00.000Z' }),
@@ -77,24 +78,38 @@ describe('TurnList turn header timestamps', () => {
     expect(indexLabels[2].textContent).toBe('Turn 3')
   })
 
-  it('positions the turn header above the prompt block inside TurnItem', () => {
+  it('renders the prompt-kind label on each divider bar', () => {
+    const turns: DisplayTurn[] = [
+      makeTurn({ id: 't1', startedAt: '2024-05-15T10:00:00.000Z', prompt: { kind: 'initial' } }),
+      makeTurn({ id: 't2', startedAt: '2024-05-15T10:30:00.000Z', prompt: { kind: 'followup' } }),
+      makeTurn({ id: 't3', startedAt: '2024-05-15T11:00:00.000Z', prompt: { kind: 'task' } }),
+    ]
+
+    const { container } = render(<TurnList turns={turns} />)
+    const kindLabels = container.querySelectorAll('[data-turn-kind-label]')
+
+    expect(kindLabels).toHaveLength(3)
+    expect(kindLabels[0].textContent).toBe(promptKindLabel('initial'))
+    expect(kindLabels[1].textContent).toBe(promptKindLabel('followup'))
+    expect(kindLabels[2].textContent).toBe(promptKindLabel('task'))
+  })
+
+  it('positions the divider bar above the prompt block inside TurnItem', () => {
     const turn = makeTurn({ id: 't1', startedAt: '2024-05-15T10:00:00.000Z' })
 
     const { container } = render(<TurnList turns={[turn]} />)
 
-    const turnHeader = container.querySelector('[data-turn-index="1"]')
-    expect(turnHeader).toBeTruthy()
+    const divider = container.querySelector('[data-turn-divider]')
+    expect(divider).toBeTruthy()
 
-    const promptBubble = container.querySelector('.rounded-2xl')
-    expect(promptBubble).toBeTruthy()
+    const promptBlock = container.querySelector('[data-prompt-block]')
+    expect(promptBlock).toBeTruthy()
 
-    // The turn header appears before the prompt bubble in document order,
-    // so it lands in the normal reading flow above the prompt block.
-    const position = turnHeader!.compareDocumentPosition(promptBubble!)
+    const position = divider!.compareDocumentPosition(promptBlock!)
     expect(position & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 
-  it('uses toLocaleTimeString formatting consistent with AssistantParts formatTime helper', () => {
+  it('uses toLocaleTimeString formatting for the divider-bar timestamp', () => {
     const turn = makeTurn({ id: 't1', startedAt: '2024-05-15T10:00:00.000Z' })
 
     const { container } = render(<TurnList turns={[turn]} />)
@@ -104,29 +119,7 @@ describe('TurnList turn header timestamps', () => {
     expect(timestamp?.textContent).not.toBe(new Date(turn.startedAt).toLocaleString())
   })
 
-  it('does not duplicate the turn-level timestamp for legacy-missing prompt kinds', () => {
-    const turn = makeTurn({
-      id: 'legacy',
-      startedAt: '2024-05-15T10:00:00.000Z',
-      prompt: {
-        role: 'mohist',
-        text: '',
-        kind: 'legacy-missing',
-        sentAt: '2024-05-15T10:00:00.000Z',
-      },
-    })
-
-    const { container } = render(<TurnList turns={[turn]} />)
-
-    // Exactly one data-turn-timestamp per turn: the TurnHeader above the prompt block.
-    // PromptBlock still renders its internal prompt-level sentAt for legacy-missing,
-    // but the turn-level time is sourced from a single place: TurnHeader.
-    const turnTimestamps = container.querySelectorAll('[data-turn-timestamp]')
-    expect(turnTimestamps).toHaveLength(1)
-    expect(turnTimestamps[0].getAttribute('datetime')).toBe(turn.startedAt)
-  })
-
-  it('renders a TurnHeader for every prompt kind, not just legacy-missing', () => {
+  it('renders a divider bar for every prompt kind, not just legacy-missing', () => {
     const turns: DisplayTurn[] = [
       makeTurn({ id: 'initial', startedAt: '2024-05-15T09:00:00.000Z', prompt: { kind: 'initial', sentAt: '2024-05-15T09:00:00.000Z' } }),
       makeTurn({ id: 'task', startedAt: '2024-05-15T09:30:00.000Z', prompt: { kind: 'task', sentAt: '2024-05-15T09:30:00.000Z' } }),
@@ -145,87 +138,105 @@ describe('TurnList turn header timestamps', () => {
     })
   })
 
-  it('renders no timestamp elements for an empty turn list', () => {
+  it('renders no divider bar for an empty turn list', () => {
     const { container } = render(<TurnList turns={[]} />)
+    expect(container.querySelectorAll('[data-turn-divider]')).toHaveLength(0)
     expect(container.querySelectorAll('[data-turn-timestamp]')).toHaveLength(0)
   })
 })
 
-describe('TurnList — TurnDiffs accessibility', () => {
-  const changedFiles: DisplayChangedFile[] = [
-    { path: '/repo/src/foo.ts', operation: 'modified' as const, additions: 2, deletions: 1 },
-    { path: '/repo/src/bar.ts', operation: 'modified' as const, additions: 1, deletions: 0 },
-  ]
+describe('TurnList divider duration derivation', () => {
+  it('shows a duration on the divider bar of a completed turn (turn has completedAt)', () => {
+    const turn = makeTurn({
+      id: 't1',
+      startedAt: '2024-05-15T10:00:00.000Z',
+      completedAt: '2024-05-15T10:00:42.000Z',
+    })
 
-  it('exposes aria-expanded=false on the TurnDiffs disclosure button initially', () => {
-    const turns: DisplayTurn[] = [
-      makeTurn({ id: 't1', startedAt: '2024-05-15T10:00:00.000Z', changedFiles }),
-    ]
-
-    render(<TurnList turns={turns} />)
-
-    const button = screen.getByRole('button', { name: /2 files changed/ })
-    expect(button.getAttribute('aria-expanded')).toBe('false')
+    const { container } = render(<TurnList turns={[turn]} />)
+    const duration = container.querySelector('[data-turn-duration]')
+    expect(duration).toBeTruthy()
+    expect(duration?.textContent).toBe('42.0s')
   })
 
-  it('flips aria-expanded to true after the user expands TurnDiffs', () => {
-    const turns: DisplayTurn[] = [
-      makeTurn({ id: 't1', startedAt: '2024-05-15T10:00:00.000Z', changedFiles }),
-    ]
+  it('shows minutes-level duration when the turn spans more than a minute', () => {
+    const turn = makeTurn({
+      id: 't1',
+      startedAt: '2024-05-15T10:00:00.000Z',
+      completedAt: '2024-05-15T10:02:30.000Z',
+    })
 
-    render(<TurnList turns={turns} />)
-
-    const button = screen.getByRole('button', { name: /2 files changed/ })
-    fireEvent.click(button)
-
-    expect(button.getAttribute('aria-expanded')).toBe('true')
+    const { container } = render(<TurnList turns={[turn]} />)
+    const duration = container.querySelector('[data-turn-duration]')
+    expect(duration?.textContent).toBe('2m 30s')
   })
 
-  it('marks the file-icon and chevron svgs aria-hidden', () => {
+  it('does not render a finalized duration on a running turn (completedAt is null)', () => {
+    const turn = makeTurn({
+      id: 't1',
+      startedAt: '2024-05-15T10:00:00.000Z',
+      completedAt: null,
+    })
+
+    const { container } = render(<TurnList turns={[turn]} />)
+    expect(container.querySelector('[data-turn-duration]')).toBeNull()
+  })
+
+  it('does not render a finalized duration when completedAt is missing', () => {
+    const turn = makeTurn({
+      id: 't1',
+      startedAt: '2024-05-15T10:00:00.000Z',
+    })
+
+    const { container } = render(<TurnList turns={[turn]} />)
+    expect(container.querySelector('[data-turn-duration]')).toBeNull()
+  })
+
+  it('mixes completed and running turns: completed show duration, running do not', () => {
     const turns: DisplayTurn[] = [
-      makeTurn({ id: 't1', startedAt: '2024-05-15T10:00:00.000Z', changedFiles }),
+      makeTurn({ id: 't1', startedAt: '2024-05-15T10:00:00.000Z', completedAt: '2024-05-15T10:00:15.000Z' }),
+      makeTurn({ id: 't2', startedAt: '2024-05-15T10:01:00.000Z', completedAt: null }),
     ]
 
     const { container } = render(<TurnList turns={turns} />)
 
-    const svgs = container.querySelectorAll('svg')
-    expect(svgs.length).toBeGreaterThan(0)
-    for (const svg of Array.from(svgs)) {
-      expect(svg.getAttribute('aria-hidden')).toBe('true')
-    }
+    const durations = container.querySelectorAll('[data-turn-duration]')
+    expect(durations).toHaveLength(1)
+    expect(durations[0].textContent).toBe('15.0s')
+  })
+})
+
+describe('TurnList full-width timeline invariant', () => {
+  it('does not apply a max-width cap to the turn list container', () => {
+    const turn = makeTurn({ id: 't1', startedAt: '2024-05-15T10:00:00.000Z' })
+    const { container } = render(<TurnList turns={[turn]} />)
+
+    const log = container.querySelector('[role="log"]')
+    expect(log).toBeTruthy()
+    expect(log!.className).not.toContain('max-w-2xl')
+    expect(log!.className).not.toContain('mx-auto')
   })
 
-  it('exposes a readable accessible name from the "N files changed" text', () => {
-    const turns: DisplayTurn[] = [
-      makeTurn({ id: 't1', startedAt: '2024-05-15T10:00:00.000Z', changedFiles }),
-    ]
+  it('does not render the legacy rounded bubble classes on the prompt block', () => {
+    const turn = makeTurn({ id: 't1', startedAt: '2024-05-15T10:00:00.000Z' })
+    const { container } = render(<TurnList turns={[turn]} />)
 
-    render(<TurnList turns={turns} />)
-
-    const button = screen.getByRole('button', { name: /2 files changed/ })
-    const name = button.textContent?.trim() ?? ''
-    expect(name.length).toBeGreaterThan(0)
-    expect(name).not.toBe('unknown')
-    expect(name).toContain('2 files changed')
+    const promptBlock = container.querySelector('[data-prompt-block]')
+    expect(promptBlock).toBeTruthy()
+    expect(promptBlock!.className).not.toContain('rounded-2xl')
+    expect(promptBlock!.className).not.toContain('justify-end')
   })
 
-  it('exposes a readable accessible name on a single-file changed group', () => {
+  it('keeps turn-level data-turn-ref attributes on each turn for navigation anchoring', () => {
     const turns: DisplayTurn[] = [
-      makeTurn({
-        id: 't1',
-        startedAt: '2024-05-15T10:00:00.000Z',
-        changedFiles: [
-          { path: '/repo/src/foo.ts', operation: 'modified' as const, additions: 2, deletions: 1 },
-        ],
-      }),
+      makeTurn({ id: 'a', startedAt: '2024-05-15T10:00:00.000Z' }),
+      makeTurn({ id: 'b', startedAt: '2024-05-15T10:30:00.000Z' }),
     ]
 
-    render(<TurnList turns={turns} />)
-
-    const button = screen.getByRole('button', { name: /1 file changed/ })
-    const name = button.textContent?.trim() ?? ''
-    expect(name.length).toBeGreaterThan(0)
-    expect(name).not.toBe('unknown')
-    expect(name).toContain('1 file changed')
+    const { container } = render(<TurnList turns={turns} />)
+    const refs = container.querySelectorAll('[data-turn-ref]')
+    expect(refs).toHaveLength(2)
+    expect(refs[0].getAttribute('data-turn-id')).toBe('a')
+    expect(refs[1].getAttribute('data-turn-id')).toBe('b')
   })
 })

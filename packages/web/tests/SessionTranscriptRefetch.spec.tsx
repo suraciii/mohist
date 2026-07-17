@@ -4,9 +4,6 @@ import { useSessionTranscript } from '../src/widgets/session-transcript/model/us
 import { dispatchAgentEvent } from '../src/entities/agent'
 import type { TextPart, ToolPart } from '../src/entities/coder-session'
 import { renderHookWithQueryClient, makeTurn } from './session-page-test-utils'
-import { installSessionTranscriptViewFixture } from '../src/widgets/session-transcript/ui/SessionTranscriptView.fixture'
-
-installSessionTranscriptViewFixture()
 
 describe('Live-then-refetch transcript equivalence', () => {
   it('live tool grouping matches replayed context-group after refetch simulation', async () => {

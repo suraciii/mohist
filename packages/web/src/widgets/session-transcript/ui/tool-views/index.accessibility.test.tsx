@@ -118,7 +118,7 @@ describe('ToolRowView accessibility', () => {
 
     render(<ToolRowView part={part} />)
 
-    const button = screen.getByRole('button', { name: 'echo hi' })
+    const button = screen.getByRole('button', { name: /\$ echo hi/ })
     expect(button).toBeInTheDocument()
     const name = button.textContent?.trim() ?? ''
     expect(name.length).toBeGreaterThan(0)
@@ -161,7 +161,7 @@ describe('ContextGroupView accessibility', () => {
   it('exposes aria-expanded=false on the disclosure button initially', () => {
     render(
       <ContextGroupView
-        title="Gathering context · 2 reads"
+        title="Explored · 2 reads"
         tools={[makeReadTool({ id: 'a' }), makeReadTool({ id: 'b' })]}
         hasError={false}
       />,
@@ -174,7 +174,7 @@ describe('ContextGroupView accessibility', () => {
   it('flips aria-expanded to true after the user expands the group', () => {
     render(
       <ContextGroupView
-        title="Gathering context · 2 reads"
+        title="Explored · 2 reads"
         tools={[makeReadTool({ id: 'a' }), makeReadTool({ id: 'b' })]}
         hasError={false}
       />,
@@ -189,7 +189,7 @@ describe('ContextGroupView accessibility', () => {
   it('marks all decorative svgs aria-hidden (icon + chevron)', () => {
     const { container } = render(
       <ContextGroupView
-        title="Gathering context · 1 read"
+        title="Explored · 1 read"
         tools={[makeReadTool()]}
         hasError={false}
       />,
@@ -205,13 +205,13 @@ describe('ContextGroupView accessibility', () => {
   it('provides a readable accessible name from the title prefix', () => {
     render(
       <ContextGroupView
-        title="Gathering context · 2 reads"
+        title="Explored · 2 reads"
         tools={[makeReadTool({ id: 'a' }), makeReadTool({ id: 'b' })]}
         hasError={false}
       />,
     )
 
-    const button = screen.getByRole('button', { name: /Gathering context/ })
+    const button = screen.getByRole('button', { name: /Explored/ })
     expect(button).toBeInTheDocument()
     const name = button.textContent?.trim() ?? ''
     expect(name.length).toBeGreaterThan(0)
@@ -221,7 +221,7 @@ describe('ContextGroupView accessibility', () => {
   it('does not expose "unknown" as the accessible name even when group title is absent', () => {
     render(
       <ContextGroupView
-        title="Gathering context · details"
+        title="Explored · details"
         tools={[makeReadTool()]}
         hasError={false}
       />,

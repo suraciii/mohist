@@ -123,18 +123,6 @@ function isContextTool(normalizedName: string): boolean {
   return CONTEXT_TOOL_NAMES.has(normalizedName.toLowerCase())
 }
 
-function getToolPath(input?: string): string | undefined {
-  if (!input) return undefined
-  try {
-    const parsed = JSON.parse(input)
-    if (!parsed || typeof parsed !== 'object') return undefined
-    const path = parsed.file_path ?? parsed.filePath ?? parsed.path
-    return typeof path === 'string' && path ? path : undefined
-  } catch {
-    return undefined
-  }
-}
-
 function buildDisplayPrompt(turn: SessionTurn): DisplayPrompt {
   const { user } = turn
   const subtitle = user.summary?.subtitle
@@ -221,17 +209,6 @@ function buildDisplayToolPart(part: ToolPart): DisplayToolPart {
     hasError: tool.status === 'failed' || tool.status === 'cancelled' || !!tool.error,
     isContextTool: isContextTool(tool.normalizedName ?? tool.toolName),
   }
-}
-
-function readableSummary(value: string | undefined): string | undefined {
-  return value && value !== 'unknown' ? value : undefined
-}
-
-function getContextToolSummary(tool: DisplayToolPart): string | undefined {
-  return readableSummary(tool.displayTitle)
-    ?? readableSummary(tool.displaySubtitle)
-    ?? readableSummary(tool.target)
-    ?? getToolPath(tool.input)
 }
 
 function buildDisplayErrorPart(part: ErrorPart): DisplayErrorPart {
@@ -328,22 +305,21 @@ export function projectTurn(turn: SessionTurn): DisplayTurn {
   const flushContextGroup = () => {
     if (toolStack.length === 0) return
     const groupTools = toolStack.splice(0)
-    const hasError = groupTools.some(t => t.hasError)
-    const contextToolCount = groupTools.filter(t => t.isContextTool).length
-    let title: string
-    if (contextToolCount > 0 && groupTools.length > 1) {
-      const reads = groupTools.filter(t => t.normalizedName === 'read' || t.normalizedName === 'read_file').length
-      const searches = groupTools.filter(t => t.normalizedName === 'grep' || t.normalizedName === 'search' || t.normalizedName === 'search_files').length
-      const globs = groupTools.filter(t => t.normalizedName === 'glob').length
-      const parts: string[] = []
-      if (reads > 0) parts.push(`${reads} read${reads > 1 ? 's' : ''}`)
-      if (searches > 0) parts.push(`${searches} search${searches > 1 ? 'es' : ''}`)
-      if (globs > 0) parts.push(`${globs} glob${globs > 1 ? 's' : ''}`)
-      title = `Gathering context · ${parts.join(' · ')}`
-    } else {
-      const summary = getContextToolSummary(groupTools[0])
-      title = summary ? `Gathering context · ${summary}` : 'Gathering context'
+    if (groupTools.length === 1) {
+      displayParts.push(groupTools[0])
+      return
     }
+    const hasError = groupTools.some(t => t.hasError)
+    const reads = groupTools.filter(t => t.normalizedName === 'read' || t.normalizedName === 'read_file').length
+    const searches = groupTools.filter(t => t.normalizedName === 'grep' || t.normalizedName === 'search' || t.normalizedName === 'search_files').length
+    const globs = groupTools.filter(t => t.normalizedName === 'glob').length
+    const parts: string[] = []
+    if (reads > 0) parts.push(`${reads} read${reads > 1 ? 's' : ''}`)
+    if (searches > 0) parts.push(`${searches} search${searches > 1 ? 'es' : ''}`)
+    if (globs > 0) parts.push(`${globs} glob${globs > 1 ? 's' : ''}`)
+    const title = parts.length > 0
+      ? `Explored · ${parts.join(' · ')}`
+      : 'Explored'
     displayParts.push({
       id: `ctx-${groupTools[0].id}`,
       partType: 'context-group',

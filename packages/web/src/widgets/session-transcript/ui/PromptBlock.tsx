@@ -1,15 +1,7 @@
 import { useState } from 'react'
 import { Button } from '@/shared/ui/components/button'
 import type { DisplayPrompt } from '../model/session-transcript-display'
-
-const KIND_LABELS: Record<string, string> = {
-  initial: 'Initial Task',
-  task: 'Task',
-  retry: 'Retry',
-  followup: 'Follow-up',
-  recovery: 'Recovery',
-  'legacy-missing': 'Missing Prompt',
-}
+import { promptKindLabel } from '../model/prompt-kind-labels'
 
 function formatDateTime(iso: string): string {
   return new Date(iso).toLocaleString()
@@ -34,74 +26,78 @@ export function PromptBlock({ prompt }: PromptBlockProps) {
 
   if (isLegacy) {
     return (
-      <div className="flex justify-end min-w-0">
-        <div className="max-w-[90%] sm:max-w-[80%] min-w-0 rounded-2xl rounded-br-sm bg-gray-300 text-white px-4 py-2.5 text-sm">
-          <div className="flex items-center gap-2 text-xs text-gray-200 mb-1.5">
-            <span className="font-medium">{KIND_LABELS[prompt.kind] ?? prompt.kind}</span>
-            <span className="text-gray-300">·</span>
-            <span>{formatDateTime(prompt.sentAt)}</span>
-          </div>
-          <p className="text-sm italic text-gray-100">
-            Prompt was not recorded for this historical session
-          </p>
+      <div
+        data-prompt-block=""
+        data-prompt-kind={prompt.kind}
+        className="min-w-0 border-l-2 border-muted pl-3 py-1 italic text-sm text-muted-foreground"
+      >
+        <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-muted-foreground/80 mb-1">
+          <span className="font-medium">{promptKindLabel(prompt.kind)}</span>
+          <span aria-hidden="true">·</span>
+          <span>{formatDateTime(prompt.sentAt)}</span>
         </div>
+        <p className="text-sm italic text-muted-foreground">
+          Prompt was not recorded for this historical session
+        </p>
       </div>
     )
   }
 
   return (
-    <div className="flex justify-end min-w-0">
-      <div className="max-w-[90%] sm:max-w-[80%] min-w-0 rounded-2xl rounded-br-sm bg-gray-200 text-gray-800 px-4 py-2.5 text-sm">
-        <div className="flex items-center gap-2 text-xs text-gray-500 mb-1.5">
-          <span className="font-medium">{KIND_LABELS[prompt.kind] ?? prompt.kind}</span>
-          <span className="text-gray-400">·</span>
-          <span>{formatDateTime(prompt.sentAt)}</span>
-        </div>
+    <div
+      data-prompt-block=""
+      data-prompt-kind={prompt.kind}
+      className="min-w-0 border-l-2 border-muted pl-3 py-1"
+    >
+      <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-muted-foreground/80 mb-1">
+        <span className="font-medium">{promptKindLabel(prompt.kind)}</span>
+        <span aria-hidden="true">·</span>
+        <span>{formatDateTime(prompt.sentAt)}</span>
+      </div>
 
-        <div className="mb-2 space-y-1">
-          <p className="text-sm font-medium leading-relaxed">{prompt.title || 'Task prompt'}</p>
-          {prompt.subtitle && <p className="text-xs text-gray-500">{prompt.subtitle}</p>}
-          {prompt.outputPath && prompt.outputPath !== prompt.subtitle && !prompt.subtitle?.endsWith(prompt.outputPath) && (
-            <p className="text-xs text-gray-400">Output: {prompt.outputPath}</p>
-          )}
-          {prompt.contextFiles && prompt.contextFiles.length > 0 && (
-            <p className="text-xs text-gray-400">
-              Context: {prompt.contextFiles.join(', ')}
-            </p>
-          )}
-        </div>
-
-        {expanded && (
-          <pre className="whitespace-pre-wrap break-all text-sm leading-relaxed mt-2 border-t border-gray-300 pt-2 font-mono text-xs">{prompt.text}</pre>
+      <div className="mb-2 space-y-1">
+        <p className="text-sm font-medium leading-relaxed">{prompt.title || 'Task prompt'}</p>
+        {prompt.subtitle && <p className="text-xs text-muted-foreground">{prompt.subtitle}</p>}
+        {prompt.outputPath && prompt.outputPath !== prompt.subtitle && !prompt.subtitle?.endsWith(prompt.outputPath) && (
+          <p className="text-xs text-muted-foreground/80">Output: {prompt.outputPath}</p>
         )}
+        {prompt.contextFiles && prompt.contextFiles.length > 0 && (
+          <p className="text-xs text-muted-foreground/80">
+            Context: {prompt.contextFiles.join(', ')}
+          </p>
+        )}
+      </div>
 
-        <div className="flex items-center gap-2 mt-2">
-          {!expanded && prompt.text && (
-            <Button
-              variant="link"
-              onClick={() => setExpanded(true)}
-              className="h-auto p-0 text-xs text-gray-500 hover:text-gray-700 transition-colors"
-            >
-              Show full prompt
-            </Button>
-          )}
-          {expanded && (
-            <Button
-              variant="link"
-              onClick={() => setExpanded(false)}
-              className="h-auto p-0 text-xs text-gray-500 hover:text-gray-700 transition-colors"
-            >
-              Show less
-            </Button>
-          )}
+      {expanded && (
+        <pre className="whitespace-pre-wrap break-all text-sm leading-relaxed mt-2 border-t border-border pt-2 font-mono text-xs text-muted-foreground">{prompt.text}</pre>
+      )}
+
+      <div className="flex items-center gap-2 mt-2">
+        {!expanded && prompt.text && (
           <Button
             variant="link"
-            onClick={handleCopy}
-            className="h-auto p-0 text-xs text-gray-500 hover:text-gray-700 transition-colors"
+            onClick={() => setExpanded(true)}
+            className="h-auto p-0 text-xs text-muted-foreground hover:text-foreground transition-colors"
           >
-            {copied ? 'Copied!' : 'Copy'}
+            Show full prompt
           </Button>
-        </div>
+        )}
+        {expanded && (
+          <Button
+            variant="link"
+            onClick={() => setExpanded(false)}
+            className="h-auto p-0 text-xs text-muted-foreground hover:text-foreground transition-colors"
+          >
+            Show less
+          </Button>
+        )}
+        <Button
+          variant="link"
+          onClick={handleCopy}
+          className="h-auto p-0 text-xs text-muted-foreground hover:text-foreground transition-colors"
+        >
+          {copied ? 'Copied!' : 'Copy'}
+        </Button>
       </div>
     </div>
   )

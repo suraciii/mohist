@@ -51,9 +51,6 @@ describe('SessionTranscriptLayout activity indicators are gated on session liven
     render(
       <SessionTranscriptLayout
         turns={[makeRunningTurn()]}
-        turnCount={1}
-        title="t"
-        statusKind="live"
         isRunning
         isStreaming
         isThinking={false}
@@ -68,9 +65,6 @@ describe('SessionTranscriptLayout activity indicators are gated on session liven
     render(
       <SessionTranscriptLayout
         turns={[makeRunningTurn()]}
-        turnCount={1}
-        title="t"
-        statusKind="live"
         isRunning
         isStreaming={false}
         isThinking
@@ -85,9 +79,6 @@ describe('SessionTranscriptLayout activity indicators are gated on session liven
     render(
       <SessionTranscriptLayout
         turns={[makeRunningTurn()]}
-        turnCount={1}
-        title="t"
-        statusKind="completed"
         isRunning={false}
         isStreaming
         isThinking={false}
@@ -102,9 +93,6 @@ describe('SessionTranscriptLayout activity indicators are gated on session liven
     render(
       <SessionTranscriptLayout
         turns={[makeRunningTurn()]}
-        turnCount={1}
-        title="t"
-        statusKind="finalizing"
         isRunning={false}
         isStreaming={false}
         isThinking
@@ -131,9 +119,6 @@ describe('SessionTranscriptLayout activity indicators are gated on session liven
             ],
           }),
         ]}
-        turnCount={1}
-        title="t"
-        statusKind="completed"
         isRunning={false}
         isStreaming
         isThinking={false}
@@ -160,9 +145,6 @@ describe('SessionTranscriptLayout activity indicators are gated on session liven
             ],
           }),
         ]}
-        turnCount={1}
-        title="t"
-        statusKind="live"
         isRunning
         isStreaming
         isThinking={false}
@@ -190,9 +172,6 @@ describe('SessionTranscriptLayout activity indicators are gated on session liven
             ],
           }),
         ]}
-        turnCount={1}
-        title="t"
-        statusKind="completed"
         isRunning={false}
         isStreaming
         isThinking={false}
@@ -206,9 +185,6 @@ describe('SessionTranscriptLayout activity indicators are gated on session liven
     render(
       <SessionTranscriptLayout
         turns={[makeRunningTurn()]}
-        turnCount={1}
-        title="t"
-        statusKind="live"
         isRunning
         isStreaming
         isThinking={false}
@@ -223,9 +199,6 @@ describe('SessionTranscriptLayout activity indicators are gated on session liven
     render(
       <SessionTranscriptLayout
         turns={[makeRunningTurn()]}
-        turnCount={1}
-        title="t"
-        statusKind="live"
         isRunning
         isStreaming={false}
         isThinking
@@ -240,9 +213,6 @@ describe('SessionTranscriptLayout activity indicators are gated on session liven
     const { container } = render(
       <SessionTranscriptLayout
         turns={[makeRunningTurn()]}
-        turnCount={1}
-        title="t"
-        statusKind="live"
         isRunning
         isStreaming
         isThinking={false}
@@ -363,9 +333,6 @@ describe('useSessionTranscript clears streaming flag when session stops running'
       return (
         <SessionTranscriptLayout
           turns={displayTurns}
-          turnCount={displayTurns.length}
-          title="t"
-          statusKind={isRunning ? 'live' : 'completed'}
           isRunning={isRunning}
           isStreaming={t.isStreaming}
           isThinking={t.isThinking}

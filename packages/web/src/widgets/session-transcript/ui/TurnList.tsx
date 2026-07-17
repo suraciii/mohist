@@ -1,7 +1,9 @@
 import React from 'react'
 import { Button } from '@/shared/ui/components/button'
 import type { DisplayTurn, DisplayChangedFile } from '../model/session-transcript-display'
+import { formatElapsed } from '../model/format-duration'
 import type { TurnRefsMap } from '../model/turn-refs'
+import { promptKindLabel } from '../model/prompt-kind-labels'
 import { PromptBlock } from './PromptBlock'
 import { AssistantParts } from './AssistantParts'
 
@@ -19,7 +21,7 @@ export function TurnList({ turns, turnRefs, isRunning }: TurnListProps) {
   return (
     <div
       role="log"
-      className="space-y-6 max-w-2xl mx-auto min-w-0"
+      className="space-y-6 min-w-0"
       style={{ contentVisibility: 'auto' }}
     >
       {turns.map((turn, index) => (
@@ -56,7 +58,12 @@ export function TurnItem({ turn, index, registerRef, isRunning }: TurnItemProps)
       data-turn-ref=""
       className="space-y-3 min-w-0"
     >
-      <TurnHeader index={index} startedAt={turn.startedAt} />
+      <TurnDivider
+        index={index}
+        kind={turn.prompt.kind}
+        startedAt={turn.startedAt}
+        completedAt={turn.completedAt}
+      />
       <div className="min-w-0">
         <PromptBlock prompt={turn.prompt} />
       </div>
@@ -74,26 +81,42 @@ export function TurnItem({ turn, index, registerRef, isRunning }: TurnItemProps)
   )
 }
 
-interface TurnHeaderProps {
+interface TurnDividerProps {
   index: number
+  kind: DisplayTurn['prompt']['kind']
   startedAt: string
+  completedAt: string | null
 }
 
-function TurnHeader({ index, startedAt }: TurnHeaderProps) {
+function TurnDivider({ index, kind, startedAt, completedAt }: TurnDividerProps) {
+  const duration = formatElapsed(startedAt, completedAt)
   return (
     <div
+      data-turn-divider=""
       data-turn-index={index}
-      className="flex justify-end text-xs text-gray-400"
+      className="border-t border-border pt-2 mt-2 first:border-t-0 first:pt-0 first:mt-0"
     >
-      <span className="flex items-center gap-1.5">
-        <span data-turn-index-label="" className="font-medium text-gray-500">
+      <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-muted-foreground">
+        <span data-turn-index-label="" className="font-medium text-foreground/80">
           Turn {index}
+        </span>
+        <span aria-hidden="true">·</span>
+        <span data-turn-kind-label="" className="text-foreground/70">
+          {promptKindLabel(kind)}
         </span>
         <span aria-hidden="true">·</span>
         <time dateTime={startedAt} data-turn-timestamp="" title={startedAt}>
           {formatTime(startedAt)}
         </time>
-      </span>
+        {duration && (
+          <>
+            <span aria-hidden="true">·</span>
+            <span data-turn-duration="" className="text-muted-foreground/70">
+              {duration}
+            </span>
+          </>
+        )}
+      </div>
     </div>
   )
 }
@@ -107,7 +130,7 @@ export function TurnDiffs({ files }: TurnDiffsProps) {
   const count = files.length
 
   return (
-    <div className="max-w-[90%] sm:max-w-[80%] min-w-0 rounded-md border border-green-200 bg-green-50/50 overflow-hidden">
+    <div className="min-w-0 rounded-md border border-green-200 bg-green-50/50 overflow-hidden">
       <Button
         variant="ghost"
         size="sm"
