@@ -38,11 +38,11 @@ public class IssueRebaseRecoveryTests
         Assert.Equal("mohist/acp-agent", resolve.Uses);
 
         // The manual rebase recovery must reuse the builtin prompt by named
-        // reference (resolved by the runner at dispatch), not hand-roll an
+        // reference (resolved by the runner at dispatch), not handroll an
         // inline prompt that drifts from the workflow-profile version.
         Assert.NotNull(resolve.With);
         Assert.Equal("${{ prompts.resolve-rebase-conflicts }}", resolve.With!["prompt"]!.Value.GetString());
-        Assert.Equal("${{ vars.agent }}", resolve.With!["agent"]!.Value.GetString());
+        Assert.Equal("${{ vars.agent }}", resolve.With!["options"]!.Value.GetString());
         Assert.Equal("check", resolve.With!["session"]!.Value.GetString());
     }
 }
