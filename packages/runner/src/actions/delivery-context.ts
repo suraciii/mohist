@@ -66,7 +66,7 @@ export function resolveGitHubRepository(context: ActionContext): string | null |
 function toGitHubRepository(host: string, rawPath: string): string | null {
   const parts = rawPath.replace(/^\/+|\/+$/g, "").replace(/\.git$/i, "").split("/")
   if (parts.length !== 2 || parts.some((part) => !part)) return null
-  return `${host}/${parts.join("/")}`
+  return `${host.toLowerCase()}/${parts.join("/")}`
 }
 
 function numberAt(value: Record<string, unknown> | null | undefined, path: string[]): number | undefined {

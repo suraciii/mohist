@@ -119,6 +119,11 @@ public class IssueRepositoryCoordinatorGrain : Grain, IIssueRepositoryCoordinato
                 pending.CapturedRevision,
                 ex.Message);
         }
+        catch (Exception)
+        {
+            await ClearFenceAsync(commandId);
+            throw;
+        }
     }
 
     public async Task<IssueRepositoryBindingResult> ChangeRepositoryAsync(
@@ -179,6 +184,11 @@ public class IssueRepositoryCoordinatorGrain : Grain, IIssueRepositoryCoordinato
                 pending.CapturedRevision,
                 ex.Message);
         }
+        catch (Exception)
+        {
+            await ClearFenceAsync(commandId);
+            throw;
+        }
     }
 
     public async Task<IssueRepositoryBindingResult> ReopenAsync(
@@ -229,6 +239,11 @@ public class IssueRepositoryCoordinatorGrain : Grain, IIssueRepositoryCoordinato
                 payload.RepositoryName ?? string.Empty,
                 pending.CapturedRevision,
                 ex.Message);
+        }
+        catch (Exception)
+        {
+            await ClearFenceAsync(commandId);
+            throw;
         }
     }
 
@@ -418,7 +433,7 @@ public class IssueRepositoryCoordinatorGrain : Grain, IIssueRepositoryCoordinato
 
     private Task<long> CaptureIssueRevisionAsync(string issueId)
     {
-        return _grains.GetGrain<IIssueGrain>(issueId).GetRepositoryBindingRevisionAsync();
+        return _grains.GetGrain<IIssueBindingTarget>(issueId).GetRepositoryBindingRevisionAsync();
     }
 
     private Task<long> CaptureProjectRevisionAsync(string projectId)
@@ -467,20 +482,8 @@ public class IssueRepositoryCoordinatorGrain : Grain, IIssueRepositoryCoordinato
                 }
             }
         }
-        catch (Exception ex) when (
-            ex is IssueRepositoryStaleRevisionException
-                or IssueRepositoryUnknownException
-                or IssueRepositoryLockedException
-                or IssueRepositoryMissingOnReopenException
-                or ProjectRepositoryNotFoundException
-                or ProjectRepositoryStaleRevisionException
-                or RepositoryInUseException
-                or InvalidOperationException
-                or ArgumentException)
+        catch (Exception ex)
         {
-            // Replay-only failure: a definitive participant result
-            // (applied or rejected) clears the fence. We never
-            // resurrect the survivor.
             _log.LogInformation(
                 "IssueRepositoryCoordinator {ProjectId} replay of command {CommandId} ({Kind}) terminated with {Exception}",
                 ProjectId, pending.CommandId, pending.Kind, ex.GetType().Name);

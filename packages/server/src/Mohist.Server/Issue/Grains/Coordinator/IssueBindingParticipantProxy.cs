@@ -23,7 +23,7 @@ public class IssueBindingParticipantProxy : Grain, IIssueBindingParticipant
         _grains = grains;
     }
 
-    private IIssueGrain IssueGrain(string issueId) => _grains.GetGrain<IIssueGrain>(issueId);
+    private IIssueBindingTarget IssueTarget(string issueId) => _grains.GetGrain<IIssueBindingTarget>(issueId);
 
     public async Task<IssueBindingParticipantOutcome> CreateAsync(
         RepositoryCommandPayload.Create payload,
@@ -36,7 +36,7 @@ public class IssueBindingParticipantProxy : Grain, IIssueBindingParticipant
                 BindingParticipantProbeKind.Create,
                 payload.IssueId,
                 commandId);
-            return await IssueGrain(payload.IssueId).CreateWithReceiptAsync(
+            return await IssueTarget(payload.IssueId).CreateWithReceiptAsync(
                 payload.ProjectId,
                 payload.IssueNumber,
                 payload.Title,
@@ -74,7 +74,7 @@ public class IssueBindingParticipantProxy : Grain, IIssueBindingParticipant
                 BindingParticipantProbeKind.Change,
                 payload.IssueId,
                 commandId);
-            return await IssueGrain(payload.IssueId).ChangeRepositoryWithReceiptAsync(
+            return await IssueTarget(payload.IssueId).ChangeRepositoryWithReceiptAsync(
                 new IssueChangeRepositoryCommand(
                     payload.RepositoryName,
                     payload.Title,
@@ -113,7 +113,7 @@ public class IssueBindingParticipantProxy : Grain, IIssueBindingParticipant
                 BindingParticipantProbeKind.Reopen,
                 payload.IssueId,
                 commandId);
-            return await IssueGrain(payload.IssueId).ReopenWithReceiptAsync(commandId, expectedRevision);
+            return await IssueTarget(payload.IssueId).ReopenWithReceiptAsync(commandId, expectedRevision);
         }
         catch (IssueRepositoryStaleRevisionException)
         {

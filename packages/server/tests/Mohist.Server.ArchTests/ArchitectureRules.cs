@@ -321,6 +321,7 @@ public class ArchitectureRules
     {
         var participantInterfaces = Interfaces()
             .That().HaveNameEndingWith("BindingParticipant")
+            .Or().HaveNameEndingWith("BindingTarget")
             .And().ResideInNamespace("Mohist.Server.*.Grains.Coordinator", useRegularExpressions: true)
             .As("IssueRepositoryBindingParticipantInterfaces");
 
@@ -331,6 +332,7 @@ public class ArchitectureRules
 
         Classes().That().AreNot(coordinatorGrain)
             .And().DoNotHaveNameEndingWith("BindingParticipantProxy")
+            .And().DoNotHaveName("IssueGrain")
             .And().DoNotResideInNamespace("OrleansCodeGen", useRegularExpressions: true)
             .Should().NotDependOnAny(participantInterfaces)
             .Because("only the IssueRepositoryCoordinatorGrain and its binding-participant proxies may depend on the narrow binding-participant interfaces; production routes / services / other grains must call the coordinator instead")
@@ -349,6 +351,10 @@ public class ArchitectureRules
         Assert.DoesNotContain("ReopenWithTargetCheckAsync", names);
         Assert.DoesNotContain("ChangeRepositoryAsync", names);
         Assert.DoesNotContain("RecordRepositoryCommandReceiptAsync", names);
+        Assert.DoesNotContain("CreateWithReceiptAsync", names);
+        Assert.DoesNotContain("ChangeRepositoryWithReceiptAsync", names);
+        Assert.DoesNotContain("ReopenWithReceiptAsync", names);
+        Assert.DoesNotContain("GetRepositoryBindingRevisionAsync", names);
     }
 
     [Fact]

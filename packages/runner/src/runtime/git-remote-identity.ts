@@ -16,6 +16,17 @@ export function normalizeGitRemote(rawUrl: string | null | undefined): string | 
   }
   if (trimmed.startsWith("git@")) return composeScpRemote("ssh://", trimmed.slice(4))
   if (trimmed.toLowerCase().startsWith("ssh:")) return composeScpRemote("ssh://", trimmed.slice(4))
+
+  const atIndex = trimmed.indexOf("@")
+  if (atIndex > 0) {
+    const afterAt = trimmed.slice(atIndex + 1)
+    const colon = afterAt.indexOf(":")
+    const slash = afterAt.indexOf("/")
+    if (colon > 0 && (slash < 0 || colon < slash)) {
+      return composeScpRemote("ssh://", afterAt)
+    }
+  }
+
   return null
 }
 
@@ -37,16 +48,21 @@ function composeScpRemote(scheme: string, body: string): string | null {
 
 function composeRemote(scheme: string, remainder: string): string | null {
   const at = remainder.indexOf("@")
-  let authority = at >= 0 ? remainder.slice(at + 1) : remainder
+  const authority = at >= 0 ? remainder.slice(at + 1) : remainder
   const slash = authority.indexOf("/")
   let host = slash >= 0 ? authority.slice(0, slash) : authority
   let path = slash >= 0 ? authority.slice(slash) : ""
   if (!host) return null
-  if (host.startsWith("[") && host.endsWith("]")) host = host.slice(1, -1)
-  const port = host.indexOf(":")
-  const portValue = port >= 0 ? host.slice(port + 1) : ""
-  if ((scheme === "https://" && portValue === "443") || (scheme === "http://" && portValue === "80") || (scheme === "ssh://" && portValue === "22")) {
-    host = host.slice(0, port)
+  if (host.startsWith("[") && host.endsWith("]")) {
+    host = host.slice(1, -1)
+  } else {
+    const port = host.indexOf(":")
+    if (port >= 0) {
+      const portValue = host.slice(port + 1)
+      if ((scheme === "https://" && portValue === "443") || (scheme === "http://" && portValue === "80") || (scheme === "ssh://" && portValue === "22")) {
+        host = host.slice(0, port)
+      }
+    }
   }
   host = host.toLowerCase()
   const query = path.search(/[?#]/)

@@ -193,6 +193,7 @@ export class WorkspaceManager {
   private async bootstrap(workspacePath: string, gitUrl: string, baseBranch: string, expected: IssueWorkspaceMarker, signal: AbortSignal, log: TaskLogger | null, verifyBaseBranch: boolean): Promise<void> {
     const preparationPath = `${workspacePath}.preparing`
     if (await pathExists(preparationPath)) await deleteDirectory(preparationPath)
+    await assertNotSymlink(preparationPath)
     if (verifyBaseBranch) await this.verifyBaseBranch(gitUrl, baseBranch, signal, log)
     await this.cloneFresh(preparationPath, gitUrl, signal, log)
     await validateWorkspaceOrigin(preparationPath, expected, signal, log)
@@ -499,6 +500,16 @@ async function assertManagedWorkspaceEntry(managedWorkspacePath: string, workspa
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error
     if (requireFinal) throw new WorkspaceMissingError(`Workflow workspace ${workspacePath} is missing`, workspacePath)
+  }
+}
+
+async function assertNotSymlink(path: string): Promise<void> {
+  try {
+    if ((await lstat(path)).isSymbolicLink()) {
+      throw new WorkspaceIdentityMismatchError(`Preparation path ${path} is symlinked`, path)
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error
   }
 }
 

@@ -86,6 +86,18 @@ public static class GitRemoteUrlNormalizer
             return TryParseScpLike("ssh://", trimmed["ssh:".Length..], out canonical);
         }
 
+        var atIndex = trimmed.IndexOf('@');
+        if (atIndex > 0)
+        {
+            var afterAt = trimmed[(atIndex + 1)..];
+            var colonIndex = afterAt.IndexOf(':');
+            var slashIndex = afterAt.IndexOf('/');
+            if (colonIndex > 0 && (slashIndex < 0 || colonIndex < slashIndex))
+            {
+                return TryParseScpLike("ssh://", afterAt, out canonical);
+            }
+        }
+
         return false;
     }
 

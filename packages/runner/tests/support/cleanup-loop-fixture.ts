@@ -11,9 +11,14 @@ export class StubCleanupRunner implements CleanupRunner {
   public markerRunIds = new Map<string, string | null | undefined>()
   public outOfRootPaths = new Set<string>()
   public sizes = new Map<string, number>()
+  public missingPaths = new Set<string>()
 
   isUnderRunnerRoot(_root: string, candidate: string): boolean {
     return !this.outOfRootPaths.has(candidate)
+  }
+
+  pathExists(path: string): boolean {
+    return !this.missingPaths.has(path)
   }
 
   async readMarkerWorkflowRunId(workspacePath: string): Promise<string | null | undefined> {

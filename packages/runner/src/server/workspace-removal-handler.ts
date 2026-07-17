@@ -77,13 +77,9 @@ export function registerWorkspaceRemovalHandler(
     } catch (error) {
       return removal(false, "failed", workspacePath, "workspace_identity_mismatch", error instanceof Error ? error.message : String(error))
     }
-    // Pre-resolve any matching registry entry after the containment
-    // check. In-root missing directories still drop their registry entry
-    // so the registry stays consistent with disk reality, while refused
-    // outside-root paths leave registry state untouched.
-    await dropRegistryEntryForPath(deps.registry ?? null, workspacePath)
     try {
       await deleteDirectory(workspacePath)
+      await dropRegistryEntryForPath(deps.registry ?? null, workspacePath)
       return removal(true, "removed", workspacePath, null, "Workspace removed")
     } catch (error) {
       return removal(false, "failed", workspacePath, "workspace_cleanup_failed", error instanceof Error ? error.message : String(error))

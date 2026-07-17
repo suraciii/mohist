@@ -424,6 +424,45 @@ public class IssueRepositoryCoordinatorSpecs
         Assert.Equal(IssueRepositoryBindingResultCode.RepositoryMissingOnReopen, second.Code);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task CoordinatorCreate_WithInvalidAttachments_ClearsFenceAndAllowsSubsequentOperation()
+    {
+        var (projectId, _) = await SeedProjectAsync();
+        var issueId = $"issue_{Guid.NewGuid():N}";
+        var number = await _grains.GetGrain<IIssueCounterGrain>(projectId).NextAsync();
+
+        var createPayload = new RepositoryCommandPayload.Create(
+            ProjectId: projectId,
+            IssueNumber: number,
+            IssueId: issueId,
+            RepositoryName: "web",
+            Title: $"Issue #{number}",
+            Body: null,
+            Labels: null,
+            Priority: null,
+            Risk: null,
+            IsDraft: false,
+            AttachmentIds: new[] { "att_nonexistent" },
+            WorkflowProfileId: null,
+            PrerequisiteNumbers: null);
+
+        await Assert.ThrowsAnyAsync<Exception>(() => NewCoordinator(projectId).CreateIssueAsync(
+            createPayload,
+            commandId: $"create:{issueId}",
+            expectedRevision: null));
+
+        var secondIssueId = $"issue_{Guid.NewGuid():N}";
+        var secondNumber = await _grains.GetGrain<IIssueCounterGrain>(projectId).NextAsync();
+        var secondResult = await NewCoordinator(projectId).CreateIssueAsync(
+            BuildCreatePayload(projectId, secondIssueId, secondNumber, "web"),
+            commandId: $"create:{secondIssueId}",
+            expectedRevision: null);
+
+        Assert.Equal(IssueRepositoryBindingResultCode.Applied, secondResult.Code);
+    }
+
     /// <summary>
 /// Signals the test that the coordinator has reached the
 /// post-fence probe point, then blocks until the test releases

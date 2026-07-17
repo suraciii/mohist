@@ -24,7 +24,7 @@ using Mohist.Server.Workflow.Services;
 
 namespace Mohist.Server.Issue.Grains;
 
-public class IssueGrain : Grain, IIssueGrain
+public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
 {
     private Domain.Issue? _issue;
     private bool _issueReloadRequired;

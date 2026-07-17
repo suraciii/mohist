@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs"
 import { isUnderRunnerRoot } from "./workspace-query.js"
 import { defaultRunnerRoot, issueWorkspacePath, readMarkerWorkflowRunId, validateWorkspaceIdentity, withManagedWorkspacePath, type IssueWorkspaceMarker } from "./workspace.js"
 import { deleteDirectory } from "../system/process.js"
@@ -6,6 +7,7 @@ import type { WorkspaceRegistry, WorkspaceRegistryEntry } from "./workspace-regi
 
 export interface CleanupRunner {
   isUnderRunnerRoot(root: string, candidate: string): boolean
+  pathExists(path: string): boolean
   readMarkerWorkflowRunId(workspacePath: string): Promise<string | null | undefined>
   deleteDirectory(path: string): Promise<void>
   computeDirectorySize(path: string, signal: AbortSignal): Promise<number | null>
@@ -174,6 +176,12 @@ export class CleanupLoop {
       console.warn(`workspace cleanup: refused to remove ${entry.workspacePath} — ${verdict.message}`)
       return false
     }
+
+    if (!this.runner.pathExists(entry.workspacePath)) {
+      await this.registry.remove(entry.workflowRunId)
+      return true
+    }
+
     if (this.runner.validateAndDeleteWorkspace) {
       try {
         if (!(await this.runner.validateAndDeleteWorkspace(entry))) {
@@ -209,6 +217,10 @@ export class DefaultCleanupRunner implements CleanupRunner {
 
   isUnderRunnerRoot(root: string, candidate: string): boolean {
     return isUnderRunnerRoot(root, candidate)
+  }
+
+  pathExists(path: string): boolean {
+    return existsSync(path)
   }
 
   async readMarkerWorkflowRunId(workspacePath: string): Promise<string | null | undefined> {
