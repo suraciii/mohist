@@ -107,6 +107,17 @@ function installMoIssueShow(title = "Use GitHub PR workflow", body = "Open, revi
   return calls
 }
 
+function authoritativeRepository(gitUrl = "https://github.com/acme/repo.git"): JsonObject {
+  return {
+    repository: {
+      gitUrl,
+      baseBranch: "master",
+      remoteFingerprint: "authoritative-fingerprint",
+      remoteIdentityVersion: "git-remote-url/v1",
+    },
+  }
+}
+
 describe("mohist/create-github-pr registry", () => {
   it("registers create-github-pr and exposes it under the new id only", () => {
     const registry = createDefaultRegistry()
@@ -191,6 +202,38 @@ describe("mohist/create-github-pr action", () => {
       pushed: true,
       draft: true,
     })
+  })
+
+  it("scopes GitHub PR delivery to the authoritative Issue repository", async () => {
+    const prArguments: string[][] = []
+    installGit((_workDir, args) => {
+      if (args.join(" ") === "fetch origin master") return ok("")
+      if (args.join(" ") === "rev-parse origin/master") return ok("base-sha\n")
+      if (args.join(" ") === "push --force-with-lease origin mohist/run-wr-gh-pr-1") return ok("")
+      return fail(`unexpected git call: ${args.join(" ")}`)
+    })
+    installGh((_cmd, args) => {
+      if (args[0] === "--version" || args.join(" ") === "auth status") return ghOk("ok\n")
+      if (args[0] === "pr") prArguments.push(args)
+      if (args.join(" ").startsWith("pr list ")) return ghOk("[]\n")
+      if (args.join(" ").startsWith("pr create ")) return ghOk("https://github.com/acme/repo/pull/42\n")
+      return ghFail(`unexpected gh call: ${args.join(" ")}`)
+    })
+
+    const result = await createGitHubPrAction(context({ title: "Issue title", body: "Issue body" }, authoritativeRepository()))
+
+    expect(result.status).toBe("success")
+    expect(prArguments).toHaveLength(2)
+    expect(prArguments.every((args) => args.slice(-2).join(" ") === "--repo github.com/acme/repo")).toBe(true)
+  })
+
+  it("fails closed when the authoritative Issue repository URL is unparseable", async () => {
+    const result = await createGitHubPrAction(context({ title: "Issue title", body: "Issue body" }, authoritativeRepository("not a Git URL")))
+    const output = JSON.parse(result.output ?? "{}")
+
+    expect(result.status).toBe("failure")
+    expect(output.errorCode).toBe("config-error")
+    expect(output.message).toContain("authoritative GitHub repository URL")
   })
 
   it("forwards gh command output to the task log sink", async () => {

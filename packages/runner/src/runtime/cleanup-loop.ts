@@ -1,5 +1,5 @@
 import { isUnderRunnerRoot } from "./workspace-query.js"
-import { defaultRunnerRoot, issueWorkspacePath, readMarkerWorkflowRunId, validateWorkspaceIdentity, type IssueWorkspaceMarker } from "./workspace.js"
+import { defaultRunnerRoot, issueWorkspacePath, readMarkerWorkflowRunId, validateWorkspaceIdentity, withManagedWorkspacePath, type IssueWorkspaceMarker } from "./workspace.js"
 import { deleteDirectory } from "../system/process.js"
 import type { CleanupPolicy } from "../core/types.js"
 import type { WorkspaceRegistry, WorkspaceRegistryEntry } from "./workspace-registry.js"
@@ -10,6 +10,7 @@ export interface CleanupRunner {
   deleteDirectory(path: string): Promise<void>
   computeDirectorySize(path: string, signal: AbortSignal): Promise<number | null>
   validateWorkspace?(entry: WorkspaceRegistryEntry): Promise<boolean>
+  validateAndDeleteWorkspace?(entry: WorkspaceRegistryEntry): Promise<boolean>
 }
 
 export interface CleanupLoopResult {
@@ -173,6 +174,20 @@ export class CleanupLoop {
       console.warn(`workspace cleanup: refused to remove ${entry.workspacePath} — ${verdict.message}`)
       return false
     }
+    if (this.runner.validateAndDeleteWorkspace) {
+      try {
+        if (!(await this.runner.validateAndDeleteWorkspace(entry))) {
+          console.warn(`workspace cleanup: refused to remove ${entry.workspacePath} - workspace identity is invalid`)
+          return false
+        }
+        await this.registry.remove(entry.workflowRunId)
+        return true
+      } catch (error) {
+        console.error(`workspace cleanup: failed to remove ${entry.workspacePath}:`, error)
+        return false
+      }
+    }
+
     if (this.runner.validateWorkspace && !(await this.runner.validateWorkspace(entry))) {
       console.warn(`workspace cleanup: refused to remove ${entry.workspacePath} - workspace identity is invalid`)
       return false
@@ -218,6 +233,17 @@ export class DefaultCleanupRunner implements CleanupRunner {
   }
 
   async validateWorkspace(entry: WorkspaceRegistryEntry): Promise<boolean> {
+    return await this.withValidWorkspace(entry, async () => true)
+  }
+
+  async validateAndDeleteWorkspace(entry: WorkspaceRegistryEntry): Promise<boolean> {
+    return await this.withValidWorkspace(entry, async (workspacePath) => {
+      await deleteDirectory(workspacePath)
+      return true
+    })
+  }
+
+  private async withValidWorkspace(entry: WorkspaceRegistryEntry, operation: (workspacePath: string) => Promise<boolean>): Promise<boolean> {
     if (!entry.projectId || !entry.repositoryName || !entry.baseBranch || !entry.runBranch || !entry.remoteFingerprint || !entry.remoteIdentityVersion) return false
     if (entry.workspacePath !== issueWorkspacePath(this.runnerRoot, entry.workflowRunId)) return false
     const expected: IssueWorkspaceMarker = {
@@ -233,8 +259,12 @@ export class DefaultCleanupRunner implements CleanupRunner {
       remoteIdentityVersion: entry.remoteIdentityVersion!,
     }
     try {
-      await validateWorkspaceIdentity(entry.workspacePath, expected, new AbortController().signal, null, this.runnerRoot)
-      return true
+      return await withManagedWorkspacePath(this.runnerRoot, entry.workspacePath, true, async (workspacePath) => {
+        const markerRunId = await readMarkerWorkflowRunId(workspacePath)
+        if (markerRunId !== entry.workflowRunId) return false
+        await validateWorkspaceIdentity(workspacePath, expected, new AbortController().signal)
+        return await operation(workspacePath)
+      })
     } catch {
       return false
     }

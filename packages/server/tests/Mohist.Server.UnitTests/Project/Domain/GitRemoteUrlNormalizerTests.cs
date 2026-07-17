@@ -14,6 +14,7 @@ public class GitRemoteUrlNormalizerTests
     [Theory]
     [InlineData("git@example.com:owner/repo.git", "ssh://example.com/owner/repo")]
     [InlineData("git@example.com:owner/repo", "ssh://example.com/owner/repo")]
+    [InlineData("ssh:git@example.com:owner/repo", "ssh://example.com/owner/repo")]
     [InlineData("ssh://git@example.com/owner/repo.git", "ssh://example.com/owner/repo")]
     [InlineData("git+ssh://git@example.com/owner/repo.git", "git+ssh://example.com/owner/repo")]
     [InlineData("https://example.com/owner/repo.git", "https://example.com/owner/repo")]

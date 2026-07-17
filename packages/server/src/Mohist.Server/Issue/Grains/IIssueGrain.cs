@@ -6,7 +6,6 @@ namespace Mohist.Server.Issue.Grains;
 
 public interface IIssueGrain : IGrainWithStringKey
 {
-    Task<string> CreateAsync(string projectId, int number, string title, string? body, IReadOnlyDictionary<string, string>? labels, string? priority, string? repositoryRef = null, string? issueId = null, string? risk = null, bool isDraft = false, string[]? attachmentIds = null, string? workflowProfileId = null, int[]? prerequisiteNumbers = null, string? commandId = null, long? expectedRevision = null);
     Task<string> StartWorkAsync(WorkflowProjectContext? project = null);
     Task CompleteWorkAsync(string workflowRunId);
     Task CancelAsync();
@@ -14,10 +13,6 @@ public interface IIssueGrain : IGrainWithStringKey
     Task UpdateFullAsync(UpdateIssueData data);
     Task ArchiveAsync();
     Task UnarchiveAsync();
-    Task ReopenAsync();
-    Task ReopenWithTargetCheckAsync();
-    Task ChangeRepositoryAsync(string canonicalName, string commandId, long? expectedRevision);
-    Task RecordRepositoryCommandReceiptAsync(string commandId, string kind, long? expectedRevision);
     Task<IssueWorkflowStatus?> GetWorkflowStatusAsync();
 
     /// <summary>

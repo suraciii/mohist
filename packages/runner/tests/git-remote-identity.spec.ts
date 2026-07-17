@@ -4,6 +4,7 @@ import { fingerprintGitRemote, normalizeGitRemote, REMOTE_IDENTITY_VERSION } fro
 describe("git remote identity", () => {
   it.each([
     ["git@example.com:owner/repo.git", "ssh://example.com/owner/repo"],
+    ["ssh:git@example.com:owner/repo", "ssh://example.com/owner/repo"],
     ["ssh://git@example.com/owner/repo.git", "ssh://example.com/owner/repo"],
     ["https://user:pw@example.com/owner/repo.git", "https://example.com/owner/repo"],
     ["https://example.com:443/owner/repo", "https://example.com/owner/repo"],

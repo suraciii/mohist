@@ -117,13 +117,18 @@ public sealed partial class Issue
 
     public void SetDraft(bool isDraft, DateTime? now = null)
     {
-        if (_status == IssueStatus.InProgress || _status == IssueStatus.Done || _status == IssueStatus.Cancelled)
-            throw new InvalidOperationException($"Issue #{Number} has started and can no longer change draft state");
+        ValidateDraftTransition();
         if (_isDraft == isDraft) return;
         var oldIsDraft = _isDraft;
         _isDraft = isDraft;
         Touch(now);
         RecordEvent(new IssueDraftChanged(oldIsDraft, isDraft));
+    }
+
+    public void ValidateDraftTransition()
+    {
+        if (_status == IssueStatus.InProgress || _status == IssueStatus.Done || _status == IssueStatus.Cancelled)
+            throw new InvalidOperationException($"Issue #{Number} has started and can no longer change draft state");
     }
 
     public void StartWorkflow(string wrId, DateTime? now = null) =>

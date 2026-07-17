@@ -100,6 +100,11 @@ public static class GitRemoteUrlNormalizer
         if (firstSlash >= 0 && firstSlash < firstColon) return false;
 
         var host = body[..firstColon];
+        var atIndex = host.LastIndexOf('@');
+        if (atIndex >= 0)
+        {
+            host = host[(atIndex + 1)..];
+        }
         var path = firstColon == body.Length - 1 ? string.Empty : body[(firstColon + 1)..];
         return TryCompose(scheme, host, path, out canonical);
     }

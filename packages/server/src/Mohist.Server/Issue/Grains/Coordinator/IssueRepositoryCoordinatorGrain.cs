@@ -239,18 +239,21 @@ public class IssueRepositoryCoordinatorGrain : Grain, IIssueRepositoryCoordinato
         if (string.IsNullOrWhiteSpace(commandId))
             throw new ArgumentException("commandId is required", nameof(commandId));
 
-        var canonicalRepository = payload.RepositoryName ?? string.Empty;
+        var requestedRepository = payload.RepositoryName ?? string.Empty;
 
         var project = await _grains.GetGrain<IProjectGrain>(payload.ProjectId).GetAsync();
-        var repository = project?.GetRepository(canonicalRepository);
+        var repository = project?.GetRepository(requestedRepository);
         if (repository is null)
         {
             return new IssueRepositoryBindingResult(
                 IssueRepositoryBindingResultCode.RepositoryNotFound,
-                canonicalRepository,
+                requestedRepository,
                 expectedRevision ?? 0L,
-                $"Repository '{canonicalRepository}' not found in project '{payload.ProjectId}'");
+                $"Repository '{requestedRepository}' not found in project '{payload.ProjectId}'");
         }
+
+        var canonicalRepository = repository.Name;
+        var canonicalPayload = new RepositoryCommandPayload.Remove(payload.ProjectId, canonicalRepository);
 
         if (repository.IsDefault)
         {
@@ -278,7 +281,7 @@ public class IssueRepositoryCoordinatorGrain : Grain, IIssueRepositoryCoordinato
             canonicalRepository,
             commandId,
             expectedRevision,
-            payload,
+            canonicalPayload,
             issueId: null);
 
         if (pending.Replay is not null)
@@ -290,7 +293,7 @@ public class IssueRepositoryCoordinatorGrain : Grain, IIssueRepositoryCoordinato
         try
         {
             var participant = _grains.GetGrain<IProjectBindingParticipant>(payload.ProjectId);
-            var outcome = await participant.RemoveRepositoryAsync(payload, commandId, pending.CapturedRevision);
+            var outcome = await participant.RemoveRepositoryAsync(canonicalPayload, commandId, pending.CapturedRevision);
             await ClearFenceAsync(commandId);
             return new IssueRepositoryBindingResult(
                 Code: MapApplied(outcome),

@@ -81,16 +81,12 @@ public class RepositoryDeletionProtectionSpecs
     {
         var number = await _grains.GetGrain<IIssueCounterGrain>(projectId).NextAsync();
         var issueId = $"issue_{Guid.NewGuid():N}";
-        var grain = _grains.GetGrain<IIssueGrain>(issueId);
-        await grain.CreateAsync(
+        await _grains.CreateIssueThroughCoordinatorAsync(
             projectId,
             number,
+            issueId,
             $"Issue #{number}",
-            null,
-            null,
-            null,
-            repositoryRef: repositoryName,
-            issueId: issueId,
+            repositoryName: repositoryName,
             isDraft: isDraft);
         return number;
     }

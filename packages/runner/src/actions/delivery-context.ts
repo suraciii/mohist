@@ -49,10 +49,14 @@ export function resolveGitHubRepository(context: ActionContext): string | null |
   if (!hasAuthoritativeIssueRepository(context)) return undefined
   const gitUrl = stringAt(context.variables, ["repository", "gitUrl"])
   if (!gitUrl) return null
-  const scp = /^(?:[^@]+@)?([^:/]+):(.+)$/.exec(gitUrl.trim())
-  if (scp) return toGitHubRepository(scp[1]!, scp[2]!)
+  const trimmed = gitUrl.trim()
+  const scpBody = trimmed.toLowerCase().startsWith("ssh:") ? trimmed.slice("ssh:".length) : trimmed
+  if (!scpBody.includes("://")) {
+    const scp = /^(?:[^@]+@)?([^:/]+):(.+)$/.exec(scpBody)
+    if (scp) return toGitHubRepository(scp[1]!, scp[2]!)
+  }
   try {
-    const url = new URL(gitUrl)
+    const url = new URL(trimmed)
     return toGitHubRepository(url.hostname, url.pathname)
   } catch {
     return null

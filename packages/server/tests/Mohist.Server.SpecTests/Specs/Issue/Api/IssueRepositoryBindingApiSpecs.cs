@@ -2,6 +2,8 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Microsoft.Extensions.DependencyInjection;
+using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Project.Grains;
 using Mohist.Server.SpecTests.Support;
 using Xunit;
@@ -127,6 +129,57 @@ public class IssueRepositoryBindingApiSpecs
         Assert.NotNull(envelope);
         Assert.True(envelope!.Success);
         Assert.Equal("secondary", envelope.Data!.RepositoryName);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task PatchIssue_RepositoryAndInvalidDraftTransition_DoesNotLeakRepositoryIntoLaterSave()
+    {
+        var (projectId, _) = await SetupProjectWithRepositoriesAsync();
+        var created = await CreateIssueAsync(projectId, new { title = "Cancelled", repositoryName = "main" });
+        var grain = _fixture.Grains.GetGrain<Mohist.Server.Issue.Grains.IIssueGrain>(created.Data!.Id);
+        await grain.CancelAsync();
+
+        using (var rejected = await _client.PatchAsJsonAsync(
+                   $"/api/projects/{projectId}/issues/{created.Data.Number}",
+                   new { repositoryName = "secondary", isDraft = false },
+                   JsonOptions))
+        {
+            Assert.Equal(HttpStatusCode.Conflict, rejected.StatusCode);
+        }
+
+        using (var saved = await _client.PatchAsJsonAsync(
+                   $"/api/projects/{projectId}/issues/{created.Data.Number}",
+                   new { title = "Saved after rejection" },
+                   JsonOptions))
+        {
+            Assert.Equal(HttpStatusCode.OK, saved.StatusCode);
+        }
+
+        var persisted = await GetIssueAsync(projectId, created.Data.Number);
+        Assert.Equal("main", persisted!.RepositoryName);
+        Assert.Equal("Saved after rejection", persisted.Title);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task PatchIssue_SameRepository_RecordsReceiptWithoutRepositoryChangedEvent()
+    {
+        var (projectId, _) = await SetupProjectWithRepositoriesAsync();
+        var created = await CreateIssueAsync(projectId, new { title = "No-op target", repositoryName = "main" });
+
+        using var response = await _client.PatchAsJsonAsync(
+            $"/api/projects/{projectId}/issues/{created.Data!.Number}",
+            new { repositoryName = "MAIN" },
+            JsonOptions);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        using var scope = _fixture.Services.CreateScope();
+        var events = scope.ServiceProvider.GetRequiredService<IEventStore>();
+        var stored = await events.ListIssueEventsAsync(created.Data.Id);
+        Assert.DoesNotContain(stored, e => e.Envelope.Type == "com.mohist.issue.repository-changed");
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]

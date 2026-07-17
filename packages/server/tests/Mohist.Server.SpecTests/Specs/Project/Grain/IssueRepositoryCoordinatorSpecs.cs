@@ -127,16 +127,12 @@ public class IssueRepositoryCoordinatorSpecs
     {
         var number = await _grains.GetGrain<IIssueCounterGrain>(projectId).NextAsync();
         var issueId = $"issue_{Guid.NewGuid():N}";
-        var grain = _grains.GetGrain<IIssueGrain>(issueId);
-        await grain.CreateAsync(
+        await _grains.CreateIssueThroughCoordinatorAsync(
             projectId,
             number,
+            issueId,
             $"Issue #{number}",
-            null,
-            null,
-            null,
-            repositoryRef: repositoryName,
-            issueId: issueId,
+            repositoryName: repositoryName,
             isDraft: isDraft);
         return issueId;
     }
@@ -371,6 +367,61 @@ public class IssueRepositoryCoordinatorSpecs
 
         var projectAfter = await _grains.GetGrain<IProjectGrain>(projectId).GetAsync();
         Assert.Contains(projectAfter!.Repositories, r => r.Name == "web");
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
+    [Fact]
+    public async Task RepositoryRemoval_UsesDeclaredNonAsciiNameForBlockerLookup()
+    {
+        var (projectId, _) = await SeedProjectAsync(secondaryName: "Å");
+        await SeedIssueAsync(projectId, "Å");
+
+        var result = await NewCoordinator(projectId).RemoveRepositoryAsync(
+            new RepositoryCommandPayload.Remove(projectId, "å"),
+            commandId: $"remove:å:{Guid.NewGuid():N}",
+            expectedRevision: null);
+
+        Assert.Equal(IssueRepositoryBindingResultCode.RepositoryInUse, result.Code);
+        Assert.Equal("Å", result.RepositoryName);
+        var project = await _grains.GetGrain<IProjectGrain>(projectId).GetAsync();
+        Assert.Contains(project!.Repositories, repository => repository.Name == "Å");
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task CoordinatorCreate_WithUnknownRepository_IsRejectedWithoutCreatingAnIssue()
+    {
+        var (projectId, _) = await SeedProjectAsync();
+        var issueId = $"issue_{Guid.NewGuid():N}";
+        var result = await NewCoordinator(projectId).CreateIssueAsync(
+            BuildCreatePayload(projectId, issueId, 1, "ghost"),
+            commandId: $"create:{issueId}",
+            expectedRevision: null);
+
+        Assert.Equal(IssueRepositoryBindingResultCode.RepositoryUnknown, result.Code);
+        var issue = _grains.GetGrain<IIssueGrain>(issueId);
+        await Assert.ThrowsAsync<KeyNotFoundException>(() => issue.GetStartReadinessAsync());
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task CoordinatorReopen_AfterTargetDeletion_IsRejectedWithoutReopening()
+    {
+        var (projectId, _) = await SeedProjectAsync();
+        var issueId = await SeedIssueAsync(projectId, "web");
+        var issue = _grains.GetGrain<IIssueGrain>(issueId);
+        await issue.CancelAsync();
+        await _grains.GetGrain<IProjectGrain>(projectId).RemoveRepositoryAsync("web");
+
+        var coordinator = NewCoordinator(projectId);
+        var first = await coordinator.ReopenAsync(BuildReopenPayload(projectId, issueId, 0, "web"), $"reopen:{issueId}", null);
+        var second = await coordinator.ReopenAsync(BuildReopenPayload(projectId, issueId, 0, "web"), $"reopen:{issueId}:retry", null);
+
+        Assert.Equal(IssueRepositoryBindingResultCode.RepositoryMissingOnReopen, first.Code);
+        Assert.Equal(IssueRepositoryBindingResultCode.RepositoryMissingOnReopen, second.Code);
     }
 
     /// <summary>

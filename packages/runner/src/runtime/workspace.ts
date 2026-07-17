@@ -1,4 +1,5 @@
-import { lstat, readdir, rename } from "node:fs/promises"
+import { constants } from "node:fs"
+import { lstat, mkdir, open, readdir, rename } from "node:fs/promises"
 import { createHash } from "node:crypto"
 import { homedir, tmpdir } from "node:os"
 import { isAbsolute, join, relative, resolve } from "node:path"
@@ -109,17 +110,21 @@ export class WorkspaceManager {
     const runBranch = expected.runBranch
     const changeDir = stringAt(variables, ["openspecChangeDir"])
     const workspacePath = issueWorkspacePath(this.runnerRoot, runId)
-    await assertManagedWorkspacePath(this.runnerRoot, workspacePath, false)
-
-    if (await pathExists(workspacePath)) {
-      await validateWorkspaceIdentity(workspacePath, expected, signal, log, this.runnerRoot)
-      if (!await this.hasRunBranch(workspacePath, runBranch, signal, log)) {
-        throw new WorkspaceIdentityMismatchError(`Workflow workspace ${workspacePath} has no branch ${runBranch}; refusing to mutate an existing workspace.`, workspacePath, expected)
-      }
-      await this.reenterRunBranch(workspacePath, runBranch, signal, log)
-    } else {
-      await this.bootstrap(workspacePath, gitUrl, baseBranch, expected, signal, log)
+    const workspaceExistedBeforePreparation = pathExists(workspacePath)
+    if (!workspaceExistedBeforePreparation) {
+      await this.verifyBaseBranch(gitUrl, baseBranch, signal, log)
     }
+    await withManagedWorkspacePath(this.runnerRoot, workspacePath, false, async (managedWorkspacePath) => {
+      if (await pathExists(managedWorkspacePath)) {
+        await validateWorkspaceIdentity(managedWorkspacePath, expected, signal, log)
+        if (!await this.hasRunBranch(managedWorkspacePath, runBranch, signal, log)) {
+          throw new WorkspaceIdentityMismatchError(`Workflow workspace ${workspacePath} has no branch ${runBranch}; refusing to mutate an existing workspace.`, workspacePath, expected)
+        }
+        await this.reenterRunBranch(managedWorkspacePath, runBranch, signal, log)
+      } else {
+        await this.bootstrap(managedWorkspacePath, gitUrl, baseBranch, expected, signal, log, workspaceExistedBeforePreparation)
+      }
+    })
 
     if (this.registry) {
       await this.registry.register({
@@ -151,27 +156,28 @@ export class WorkspaceManager {
     const changeDir = stringAt(variables, ["openspecChangeDir"])
 
     const workspacePath = issueWorkspacePath(this.runnerRoot, runId)
-    await assertManagedWorkspacePath(this.runnerRoot, workspacePath, true)
-    await validateWorkspaceIdentity(workspacePath, expected, signal, log, this.runnerRoot)
+    await withManagedWorkspacePath(this.runnerRoot, workspacePath, true, async (managedWorkspacePath) => {
+      await validateWorkspaceIdentity(managedWorkspacePath, expected, signal, log)
 
-    // Health gate: every dispatch passes through verify(), so this is
-    // the per-task entry point. A residual rebase / merge / cherry-pick
-    // from a prior mid-flight crash is detected and aborted here, BEFORE
-    // the marker / branch checks below — otherwise a `git checkout` from
-    // the residual state would refuse with "resolve your current index
-    // first" (the #166 fatality). The gate is non-destructive: the
-    // `reset --hard <runBranch>` aligns the tree to the run branch ref,
-    // which has not moved because the failed rebase never advanced it.
-    await this.runHealthGate(workspacePath, runBranch, signal, log)
+      // Health gate: every dispatch passes through verify(), so this is
+      // the per-task entry point. A residual rebase / merge / cherry-pick
+      // from a prior mid-flight crash is detected and aborted here, BEFORE
+      // the marker / branch checks below — otherwise a `git checkout` from
+      // the residual state would refuse with "resolve your current index
+      // first" (the #166 fatality). The gate is non-destructive: the
+      // `reset --hard <runBranch>` aligns the tree to the run branch ref,
+      // which has not moved because the failed rebase never advanced it.
+      await this.runHealthGate(managedWorkspacePath, runBranch, signal, log)
 
-    if (!exists(workspacePath)) {
-      throw new WorkspaceMissingError(
-        `Workflow workspace ${workspacePath} is missing; workflow start materialization did not produce a bound workspace for this run.`,
-        workspacePath,
-      )
-    }
+      if (!exists(managedWorkspacePath)) {
+        throw new WorkspaceMissingError(
+          `Workflow workspace ${workspacePath} is missing; workflow start materialization did not produce a bound workspace for this run.`,
+          workspacePath,
+        )
+      }
 
-    await verifyWorkspaceBranch(workspacePath, runBranch, signal, log)
+      await verifyWorkspaceBranch(managedWorkspacePath, runBranch, signal, log)
+    })
 
     if (this.registry) {
       await this.registry.refreshMaterializedAt(runId)
@@ -184,17 +190,16 @@ export class WorkspaceManager {
     }
   }
 
-  private async bootstrap(workspacePath: string, gitUrl: string, baseBranch: string, expected: IssueWorkspaceMarker, signal: AbortSignal, log: TaskLogger | null): Promise<void> {
+  private async bootstrap(workspacePath: string, gitUrl: string, baseBranch: string, expected: IssueWorkspaceMarker, signal: AbortSignal, log: TaskLogger | null, verifyBaseBranch: boolean): Promise<void> {
     const preparationPath = `${workspacePath}.preparing`
-    await assertManagedWorkspacePath(this.runnerRoot, preparationPath, false)
     if (await pathExists(preparationPath)) await deleteDirectory(preparationPath)
-    await this.verifyBaseBranch(gitUrl, baseBranch, signal, log)
+    if (verifyBaseBranch) await this.verifyBaseBranch(gitUrl, baseBranch, signal, log)
     await this.cloneFresh(preparationPath, gitUrl, signal, log)
     await validateWorkspaceOrigin(preparationPath, expected, signal, log)
     await this.createRunBranch(preparationPath, baseBranch, expected.runBranch, signal, log)
     await ensureMarkerExcluded(preparationPath)
     await writeText(markerPath(preparationPath), JSON.stringify(expected, null, 2))
-    await validateWorkspaceIdentity(preparationPath, expected, signal, log, this.runnerRoot)
+    await validateWorkspaceIdentity(preparationPath, expected, signal, log)
     await rename(preparationPath, workspacePath)
   }
 
@@ -438,6 +443,62 @@ async function assertManagedWorkspacePath(runnerRoot: string, candidate: string,
   }
   if (requireFinal && !pathExists(target)) {
     throw new WorkspaceMissingError(`Workflow workspace ${target} is missing`, target)
+  }
+}
+
+export async function withManagedWorkspacePath<T>(
+  runnerRoot: string,
+  workspacePath: string,
+  requireFinal: boolean,
+  operation: (managedWorkspacePath: string) => Promise<T>,
+): Promise<T> {
+  const root = resolve(runnerRoot)
+  const workspaceParent = join(root, "workspaces")
+  const target = resolve(workspacePath)
+  const name = relative(workspaceParent, target)
+  if (!name || name.includes("/") || name.includes("\\") || isAbsolute(name)) {
+    throw new WorkspaceIdentityMismatchError(`Workspace path ${target} is outside managed workspace parent ${workspaceParent}`, target)
+  }
+
+  if (process.platform !== "linux") {
+    await assertManagedWorkspacePath(root, target, requireFinal)
+    return await operation(target)
+  }
+
+  await mkdir(root, { recursive: true })
+  let rootHandle: Awaited<ReturnType<typeof open>> | undefined
+  let workspaceHandle: Awaited<ReturnType<typeof open>> | undefined
+  let managedWorkspacePath: string
+  try {
+    rootHandle = await open(root, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW)
+    const stableRoot = `/proc/self/fd/${rootHandle.fd}`
+    await mkdir(join(stableRoot, "workspaces"), { recursive: true })
+    workspaceHandle = await open(join(stableRoot, "workspaces"), constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW)
+    managedWorkspacePath = join(`/proc/self/fd/${workspaceHandle.fd}`, name)
+    await assertManagedWorkspaceEntry(managedWorkspacePath, target, requireFinal)
+  } catch (error) {
+    await workspaceHandle?.close()
+    await rootHandle?.close()
+    if (error instanceof WorkspaceMissingError || error instanceof WorkspaceIdentityMismatchError) throw error
+    throw new WorkspaceIdentityMismatchError(`Managed workspace parent ${workspaceParent} is unavailable or symlinked`, target, undefined, undefined, error)
+  }
+
+  try {
+    return await operation(managedWorkspacePath!)
+  } finally {
+    await workspaceHandle?.close()
+    await rootHandle?.close()
+  }
+}
+
+async function assertManagedWorkspaceEntry(managedWorkspacePath: string, workspacePath: string, requireFinal: boolean): Promise<void> {
+  try {
+    if ((await lstat(managedWorkspacePath)).isSymbolicLink()) {
+      throw new WorkspaceIdentityMismatchError(`Workspace path ${workspacePath} is symlinked`, workspacePath)
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error
+    if (requireFinal) throw new WorkspaceMissingError(`Workflow workspace ${workspacePath} is missing`, workspacePath)
   }
 }
 

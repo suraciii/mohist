@@ -14,8 +14,8 @@ namespace Mohist.Server.Project.Services;
 /// A row is treated as a blocker when:
 /// <list type="bullet">
 ///   <item><c>ProjectId</c> equals the queried Project,</item>
-///   <item><c>RepositoryName</c> matches the queried repository name
-///     case-insensitively, and</item>
+    ///   <item><c>RepositoryName</c> exactly matches the declared canonical
+    ///     repository name, and</item>
 ///   <item><c>Status</c> is one of the non-terminal values.
 ///     The virtual <c>Status</c> computed column reflects the
 ///     JSON-serialized <c>IssueStatus</c> enum with the CamelCase
@@ -39,12 +39,11 @@ public sealed class RepositoryDeletionBlockerQuery : IScopedService
         if (string.IsNullOrWhiteSpace(projectId)) return false;
         if (string.IsNullOrWhiteSpace(repositoryName)) return false;
 
-        var canonical = repositoryName.Trim();
         await using var db = await _dbFactory.CreateDbContextAsync();
         return await db.Issues.AsNoTracking()
             .Where(r => r.ProjectId == projectId
                 && r.RepositoryName != null
-                && r.RepositoryName.ToLower() == canonical.ToLower()
+                && r.RepositoryName == repositoryName
                 && (r.Status == "backlog" || r.Status == "inProgress"))
             .AnyAsync();
     }

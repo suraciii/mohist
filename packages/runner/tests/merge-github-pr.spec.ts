@@ -108,6 +108,17 @@ function installMoIssueShow(title = "Use GitHub PR workflow", body = "body") {
   return calls
 }
 
+function authoritativeRepository(gitUrl = "https://github.com/acme/repo.git"): JsonObject {
+  return {
+    repository: {
+      gitUrl,
+      baseBranch: "master",
+      remoteFingerprint: "authoritative-fingerprint",
+      remoteIdentityVersion: "git-remote-url/v1",
+    },
+  }
+}
+
 describe("mohist/merge-github-pr registry", () => {
   it("registers merge-github-pr and exposes it under the new id only", () => {
     const registry = createDefaultRegistry()
@@ -173,6 +184,34 @@ describe("mohist/merge-github-pr action", () => {
       errorCode: null,
       message: null,
     })
+  })
+
+  it("scopes merge delivery to the authoritative Issue repository", async () => {
+    const commands: string[] = []
+    installGit(() => { throw new Error("git should not be called") })
+    installGh((cmd, args) => {
+      const full = [cmd, ...args].join(" ")
+      commands.push(full)
+      if (full === "gh --version" || full === "gh auth status") return ghOk("ok\n")
+      if (full === "gh pr view 42 --json state,mergeCommit,url,number,mergeStateStatus --repo github.com/acme/repo") {
+        return ghOk(JSON.stringify({ state: "MERGED", number: 42, url: "https://github.com/acme/repo/pull/42", mergeCommit: { oid: "merge-sha" } }))
+      }
+      return ghFail(`unexpected gh call: ${full}`)
+    })
+
+    const result = await mergeGitHubPrAction(context({ prNumber: 42, method: "squash", subject: "Issue title" }, authoritativeRepository()))
+
+    expect(result.status).toBe("success")
+    expect(commands).toContain("gh pr view 42 --json state,mergeCommit,url,number,mergeStateStatus --repo github.com/acme/repo")
+  })
+
+  it("fails closed when the authoritative Issue repository URL is unparseable", async () => {
+    const result = await mergeGitHubPrAction(context({ prNumber: 42, method: "squash", subject: "Issue title" }, authoritativeRepository("not a Git URL")))
+    const output = JSON.parse(result.output ?? "{}")
+
+    expect(result.status).toBe("failure")
+    expect(output.errorCode).toBe("config-error")
+    expect(output.message).toContain("authoritative GitHub repository URL")
   })
 
   it("forwards gh command output to the task log sink", async () => {

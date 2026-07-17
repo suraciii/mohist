@@ -338,6 +338,20 @@ public class ArchitectureRules
     }
 
     [Fact]
+    public void IssueGrain_DoesNotExposeDirectRepositoryBindingCommands()
+    {
+        var names = typeof(Mohist.Server.Issue.Grains.IIssueGrain)
+            .GetMethods()
+            .Select(method => method.Name);
+
+        Assert.DoesNotContain("CreateAsync", names);
+        Assert.DoesNotContain("ReopenAsync", names);
+        Assert.DoesNotContain("ReopenWithTargetCheckAsync", names);
+        Assert.DoesNotContain("ChangeRepositoryAsync", names);
+        Assert.DoesNotContain("RecordRepositoryCommandReceiptAsync", names);
+    }
+
+    [Fact]
     public void Api_ShouldNotDependOnOrleans()
     {
         Types().That().Are(ApiLayer)

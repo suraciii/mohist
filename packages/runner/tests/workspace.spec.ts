@@ -1,10 +1,12 @@
-import { mkdir, readFile, symlink, writeFile } from "node:fs/promises"
-import { join } from "node:path"
+import { mkdir, readFile, rename, symlink, writeFile } from "node:fs/promises"
+import { basename, join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { NETWORK_COMMAND_TIMEOUT_MS } from "../src/actions/git.js"
 import { issueWorkspacePath, WorkspaceManager, slugify } from "../src/runtime/workspace.js"
 import { fingerprintGitRemote } from "../src/runtime/git-remote-identity.js"
 import { WorkspaceRegistry } from "../src/runtime/workspace-registry.js"
+import { DefaultCleanupRunner } from "../src/runtime/cleanup-loop.js"
+import type { WorkspaceRegistryEntry } from "../src/runtime/workspace-registry.js"
 import * as processModule from "../src/system/process.js"
 import type { CommandLineOptions, CommandResult } from "../src/system/process.js"
 import { createTestTempDir } from "./support/temp-dir.js"
@@ -22,6 +24,7 @@ class FakeGitRunner {
   cloneResult: CommandResult | null = null
   lsRemoteResult: CommandResult | null = null
   failedCheckouts = 0
+  beforeClone: (() => Promise<void>) | null = null
   private readonly branches = new Map<string, Set<string>>()
 
   async run(
@@ -44,6 +47,11 @@ class FakeGitRunner {
     }
 
     if (args[0] === "clone") {
+      if (this.beforeClone) {
+        const beforeClone = this.beforeClone
+        this.beforeClone = null
+        await beforeClone()
+      }
       const workspacePath = args[2]
       if (!workspacePath) throw new Error("git clone needs a destination")
       if (this.cloneResult) {
@@ -137,8 +145,8 @@ describe("WorkspaceManager.prepare", () => {
       changeDir: join(expectedPath, "openspec/changes/issue-9"),
     })
     expect(gitRunner.commandArgs()).toContainEqual(["ls-remote", "--heads", "https://example.test/mohist.git", "master"])
-    expect(gitRunner.commandArgs()).toContainEqual(["clone", "https://example.test/mohist.git", `${expectedPath}.preparing`])
-    expect(gitRunner.commandArgs()).toContainEqual(["-C", `${expectedPath}.preparing`, "checkout", "-b", "mohist/run-wr-1", "origin/master"])
+    expect(gitRunner.commandArgs()).toContainEqual(["clone", "https://example.test/mohist.git", managedPath(`${expectedPath}.preparing`)])
+    expect(gitRunner.commandArgs()).toContainEqual(["-C", managedPath(`${expectedPath}.preparing`), "checkout", "-b", "mohist/run-wr-1", "origin/master"])
     expect(await readFile(join(workspace.path, ".mohist", "workspace.json"), "utf8")).toBe(JSON.stringify({
       issueNumber: 9,
       workflowRunId: "wr-1",
@@ -165,7 +173,7 @@ describe("WorkspaceManager.prepare", () => {
     expect(second.path).toBe(first.path)
     expect(await readFile(join(second.path, "draft.txt"), "utf8")).toBe("draft\n")
     expect(gitRunner.commandArgs()).not.toContainEqual(["clone", "https://example.test/mohist.git", first.path])
-    expect(gitRunner.commandArgs()).toContainEqual(["-C", first.path, "checkout", "mohist/run-wr-1"])
+    expect(gitRunner.commandArgs()).toContainEqual(["-C", managedPath(first.path), "checkout", "mohist/run-wr-1"])
   })
 
   it("RestartWithNewRun_UsesADistinctRunWorkspace", async () => {
@@ -181,7 +189,7 @@ describe("WorkspaceManager.prepare", () => {
     expect(second.path).not.toBe(first.path)
     expect(processModule.exists(join(first.path, "stale.txt"))).toBe(true)
     expect(second.branch).toBe("mohist/run-wr-new")
-    expect(gitRunner.commandArgs()).toContainEqual(["clone", "https://example.test/mohist.git", `${second.path}.preparing`])
+    expect(gitRunner.commandArgs()).toContainEqual(["clone", "https://example.test/mohist.git", managedPath(`${second.path}.preparing`)])
   })
 
   it("MissingBaseBranch_FailsBeforeClone", async () => {
@@ -246,7 +254,7 @@ describe("WorkspaceManager.prepare", () => {
       name: "WorkspaceNetworkTimeoutError",
       step: {
         name: "git-clone",
-        command: `clone https://example.test/mohist.git ${issueWorkspacePath(runnerRoot, "wr-timeout")}.preparing`,
+        command: expect.stringMatching(new RegExp(`^clone https://example\\.test/mohist\\.git ${managedPathPattern(`${issueWorkspacePath(runnerRoot, "wr-timeout")}.preparing`)}$`)),
         exitCode: 124,
         status: "timeout",
         timeoutMs: NETWORK_COMMAND_TIMEOUT_MS,
@@ -275,7 +283,7 @@ describe("WorkspaceManager.prepare", () => {
 
     expect(result.path).toBe(issueWorkspacePath(runnerRoot, "wr-supplied"))
     expect(result.branch).toBe("mohist/run-wr-supplied")
-    expect(gitRunner.commandArgs()).toContainEqual(["clone", "https://example.test/mohist.git", `${result.path}.preparing`])
+    expect(gitRunner.commandArgs()).toContainEqual(["clone", "https://example.test/mohist.git", managedPath(`${result.path}.preparing`)])
   })
 
   it("SymlinkedWorkspaceParent_IsRejectedBeforeClone", async () => {
@@ -289,6 +297,26 @@ describe("WorkspaceManager.prepare", () => {
 
     await expect(manager.prepare(work("wr-symlink", "issue-symlink"), new AbortController().signal)).rejects.toMatchObject({ kind: "workspace-identity-mismatch" })
     expect(gitRunner.commandArgs().some((args) => args[0] === "clone")).toBe(false)
+  })
+
+  it.runIf(process.platform === "linux")("WorkspaceParentReplacement_CloneRemainsInsideVerifiedDirectory", async () => {
+    const root = await createTestTempDir("mohist-workspace-")
+    const runnerRoot = join(root, "runner")
+    const workspaces = join(runnerRoot, "workspaces")
+    const heldWorkspaces = join(runnerRoot, "workspaces-held")
+    const outside = join(root, "outside")
+    await mkdir(outside, { recursive: true })
+    gitRunner.beforeClone = async () => {
+      await rename(workspaces, heldWorkspaces)
+      await symlink(outside, workspaces)
+    }
+
+    await new WorkspaceManager(runnerRoot).prepare(work("wr-parent-swap", "issue-parent-swap"), new AbortController().signal)
+
+    const publicPath = issueWorkspacePath(runnerRoot, "wr-parent-swap")
+    expect(processModule.exists(join(outside, basename(publicPath)))).toBe(false)
+    expect(processModule.exists(join(heldWorkspaces, basename(publicPath)))).toBe(true)
+    expect(gitRunner.commandArgs()).toContainEqual(["clone", "https://example.test/mohist.git", managedPath(`${publicPath}.preparing`)])
   })
 
   it("ExistingMarkerMismatch_IsRejectedBeforeBranchMutation", async () => {
@@ -341,10 +369,10 @@ describe("WorkspaceManager.prepare recovery", () => {
     const recovered = await manager.prepare(item, new AbortController().signal)
 
     expect(recovered).toMatchObject({ path: workspace.path, branch: "mohist/run-wr-recover" })
-    expect(gitRunner.commandArgs()).toContainEqual(["-C", workspace.path, "rebase", "--abort"])
-    expect(gitRunner.commandArgs()).toContainEqual(["-C", workspace.path, "merge", "--abort"])
-    expect(gitRunner.commandArgs()).toContainEqual(["-C", workspace.path, "cherry-pick", "--abort"])
-    expect(gitRunner.commandArgs()).toContainEqual(["-C", workspace.path, "reset", "--hard", "mohist/run-wr-recover"])
+    expect(gitRunner.commandArgs()).toContainEqual(["-C", managedPath(workspace.path), "rebase", "--abort"])
+    expect(gitRunner.commandArgs()).toContainEqual(["-C", managedPath(workspace.path), "merge", "--abort"])
+    expect(gitRunner.commandArgs()).toContainEqual(["-C", managedPath(workspace.path), "cherry-pick", "--abort"])
+    expect(gitRunner.commandArgs()).toContainEqual(["-C", managedPath(workspace.path), "reset", "--hard", "mohist/run-wr-recover"])
     expect(gitRunner.commandArgs().some((args) => args[0] === "clone")).toBe(false)
   })
 
@@ -359,10 +387,52 @@ describe("WorkspaceManager.prepare recovery", () => {
 
     expect(second).toMatchObject({ path: workspace.path, branch: "mohist/run-wr-clean" })
     expect(gitRunner.commandArgs()).toEqual([
-      ["-C", workspace.path, "remote", "get-url", "origin"],
-      ["-C", workspace.path, "rev-parse", "--verify", "refs/heads/mohist/run-wr-clean"],
-      ["-C", workspace.path, "checkout", "mohist/run-wr-clean"],
+      ["-C", managedPath(workspace.path), "remote", "get-url", "origin"],
+      ["-C", managedPath(workspace.path), "rev-parse", "--verify", "refs/heads/mohist/run-wr-clean"],
+      ["-C", managedPath(workspace.path), "checkout", "mohist/run-wr-clean"],
     ])
+  })
+})
+
+describe("DefaultCleanupRunner", () => {
+  it.runIf(process.platform === "linux")("WorkspaceParentReplacement_ValidationAndDeleteRemainInsideVerifiedDirectory", async () => {
+    const root = await createTestTempDir("mohist-workspace-")
+    const runnerRoot = join(root, "runner")
+    const workflowRunId = "wr-cleanup-parent-swap"
+    const workspacePath = issueWorkspacePath(runnerRoot, workflowRunId)
+    const workspaces = join(runnerRoot, "workspaces")
+    const heldWorkspaces = join(runnerRoot, "workspaces-held")
+    const outside = join(root, "outside")
+    const entry = cleanupEntry(workspacePath, workflowRunId)
+    await mkdir(join(workspacePath, ".mohist"), { recursive: true })
+    await writeFile(join(workspacePath, ".mohist", "workspace.json"), JSON.stringify({
+      version: 2,
+      issueId: entry.issueId,
+      issueNumber: entry.issueNumber,
+      workflowRunId,
+      projectId: entry.projectId,
+      repositoryName: entry.repositoryName,
+      baseBranch: entry.baseBranch,
+      runBranch: entry.runBranch,
+      remoteFingerprint: entry.remoteFingerprint,
+      remoteIdentityVersion: entry.remoteIdentityVersion,
+    }))
+    await mkdir(outside, { recursive: true })
+    let swapped = false
+    vi.spyOn(processModule, "runCommand").mockImplementation(async () => {
+      if (!swapped) {
+        swapped = true
+        await rename(workspaces, heldWorkspaces)
+        await symlink(outside, workspaces)
+      }
+      return commandResult(0, "https://example.test/mohist.git\n")
+    })
+
+    const removed = await new DefaultCleanupRunner(runnerRoot).validateAndDeleteWorkspace(entry)
+
+    expect(removed).toBe(true)
+    expect(processModule.exists(join(outside, basename(workspacePath)))).toBe(false)
+    expect(processModule.exists(join(heldWorkspaces, basename(workspacePath)))).toBe(false)
   })
 })
 
@@ -393,5 +463,31 @@ function work(workflowRunId: string, baseBranch = "master") {
       repository: { name: "master", gitUrl: "https://example.test/mohist.git", baseBranch, remoteFingerprint: fingerprintGitRemote("https://example.test/mohist.git")!.remoteFingerprint, remoteIdentityVersion: "git-remote-url/v1" },
       openspecChangeDir: "openspec/changes/issue-9",
     },
+  }
+}
+
+function managedPath(path: string) {
+  return process.platform === "linux" ? expect.stringMatching(new RegExp(`^${managedPathPattern(path)}$`)) : path
+}
+
+function managedPathPattern(path: string) {
+  return process.platform === "linux" ? `/proc/self/fd/\\d+/${basename(path)}` : path.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+}
+
+function cleanupEntry(workspacePath: string, workflowRunId: string): WorkspaceRegistryEntry {
+  return {
+    issueId: "issue-cleanup-parent-swap",
+    issueNumber: 9,
+    workflowRunId,
+    workspacePath,
+    projectId: "project-1",
+    repositoryName: "master",
+    baseBranch: "master",
+    runBranch: `mohist/run-${workflowRunId}`,
+    remoteFingerprint: fingerprintGitRemote("https://example.test/mohist.git")!.remoteFingerprint,
+    remoteIdentityVersion: "git-remote-url/v1",
+    phase: "eligible",
+    materializedAt: "2026-01-01T00:00:00.000Z",
+    terminalAt: "2026-01-02T00:00:00.000Z",
   }
 }
