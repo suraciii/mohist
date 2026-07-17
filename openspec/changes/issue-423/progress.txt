@@ -1,0 +1,31 @@
+## Codebase Patterns
+
+- Runner uses `WorkspacesRegistry` keyed by `workflowRunId`, persisted at `<runnerRoot>/.mohist/runner-state/workspaces.json` via atomic temp-file + rename.
+- Mutations are write-through: every in-memory change calls `await this.persist()` before returning. Idempotent mutations must NOT rewrite the file when the entry is already in the target state (assert via `beforeRewrite`/`afterRewrite` JSON deep-equality).
+- `now` is injected via the constructor options (`{ now: () => Date }`) and tests use `vi.fn(() => first)` / `mockReturnValue` to control timestamps — never `Date.now()`.
+- Tests follow `<Subject>_<Behavior>_<Expectation>` naming (Pascal-case style first segment) and live in `packages/runner/tests/<subject>.spec.ts` colocated near the contract boundary.
+- Manual `RemoveWorkspace` handler (`workspace-removal-handler.ts`) is phase-agnostic — it does `findByWorkspacePath` + `registry.remove` and does NOT call `safeRemove` (despite an earlier L72 comment that suggested otherwise). Stuck entries will be reclaimable through this path with no change (D6).
+- The convergence backstop (`cleanup-convergence.ts`) only queries `phase === "active"` entries by design (`QueriesOnlyActiveEntries_IgnoresEligible` test locks this). It will never try to `markEligible` a stuck entry.
+
+## Task T-001 Notes
+
+- `WorkspaceRegistryPhase` is now `"active" | "eligible" | "stuck"`. Type widening must happen in three places: the type alias (L25), `loadFromDisk` validation (L250), and anywhere that does `entry.phase === "active"` / `=== "eligible"` filtering (cleanup-loop's eligible-list filter, convergence's active filter — both already correct via strict equality).
+- `markStuck` is a single-direction transition `eligible -> stuck`. Returning `null` for unknown `workflowRunId` matches the existing `markEligible` shape so consumers can treat both uniformly.
+- D4 (`markEligible` guard) is a strict tightening: changed the idempotent-path guard from `phase === "eligible"` to `phase !== "active"`. This is strictly more correct for `markEligible` because:
+  - `eligible` → `eligible` is still no-op (preserves the existing test `MarkEligible_IsIdempotent_AlreadyEligibleEntryIsNotReStamped`)
+  - `stuck` → `eligible` is blocked (new behavior — no redelivered terminal status event can revive a stuck entry)
+  - The existing test for the idempotency invariant passes unchanged.
+- `loadFromDisk` validation was widened by adding a third OR-arm (`entry.phase !== "active" && entry.phase !== "eligible" && entry.phase !== "stuck"`). Pre-existing `workspaces.json` files containing only `active`/`eligible` reload unchanged.
+- 6 new tests added to `packages/runner/tests/workspace-registry.spec.ts`: `MarkStuck_TransitionsEligibleToStuckAndPersists`, `MarkStuck_IsIdempotent_AlreadyStuckEntryDoesNotRewriteFile`, `MarkStuck_OnUnknownRunId_ReturnsNull`, `Load_StuckEntry_RoundTripsThroughReload`, `MarkEligible_OnStuckEntry_LeavesEntryUnchanged`, `MarkEligible_OnAlreadyEligibleEntry_RemainsNoOp`. File is 442 lines, well under the 800-line spec budget.
+
+## Verification
+
+- `npm run typecheck` (in `packages/runner`) — passes.
+- `npm test` (in `packages/runner`) — 95 files, 1084 tests pass.
+- `npm run check:test-boundaries` (in `packages/runner`) — passes (test-file budgets and architectural rules).
+- The existing `cleanup-loop-guards.spec.ts` tests were intentionally NOT touched in T-001 — the loop's transition from "looping guard refusal" to "resolve to stuck" is T-002's job (the test at `cleanup-loop-guards.spec.ts:71` "after guard abort, directory and entry remain intact for next tick" is the one to update in T-002).
+
+## Decisions made during implementation
+
+- Did NOT add a `stuckAt` timestamp or `stuckReason` on the entry (kept the minimal-model principle per design Open Questions). The transition warning emitted by the cleanup-loop resolution pass in T-002 will carry the reason inline.
+- Did NOT change `register()` — a re-materialize of an entry currently `stuck` (same `workflowRunId`, e.g. an old run re-dispatched by accident) will set `phase: "active"` again. Per the design notes for T-001: "register() is intentionally left to set active on re-materialize (a re-dispatched run reusing a workflowRunId legitimately restarts the entry); do not change that behavior."

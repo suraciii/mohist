@@ -22,7 +22,7 @@ import { exists, readText } from "../system/process.js"
 // rename. The atomic rename keeps the on-disk file valid even if the
 // runner is killed mid-write.
 
-export type WorkspaceRegistryPhase = "active" | "eligible"
+export type WorkspaceRegistryPhase = "active" | "eligible" | "stuck"
 
 export interface WorkspaceRegistryEntry {
   issueNumber: number
@@ -147,13 +147,33 @@ export class WorkspaceRegistry {
   // `terminalAt`. Idempotent: an already-eligible entry is returned
   // unchanged and the on-disk file is not rewritten. Returns null when
   // no entry exists (the runner only tracks workspaces it materialized).
+  // The guard is `phase !== "active"` (not just `phase === "eligible"`)
+  // so a redelivered terminal workflow-status event cannot revive a
+  // `stuck` entry back into the eligible loop.
   async markEligible(workflowRunId: string): Promise<WorkspaceRegistryEntry | null> {
     this.ensureLoaded()
     const existing = this.entries.get(workflowRunId)
     if (!existing) return null
-    if (existing.phase === "eligible") return { ...existing }
+    if (existing.phase !== "active") return { ...existing }
     existing.phase = "eligible"
     existing.terminalAt = this.now().toISOString()
+    await this.persist()
+    return { ...existing }
+  }
+
+  // Transition an entry from `eligible` to `stuck`. Called by the
+  // cleanup loop's resolution pass when a pre-delete guard refuses an
+  // `eligible` entry — the entry leaves the eligible set so it is no
+  // longer re-evaluated or re-warned on subsequent ticks (the phase
+  // transition is the structural warning de-duplication). Idempotent:
+  // an already-stuck entry is returned unchanged and the on-disk file
+  // is not rewritten. Returns null when no entry exists.
+  async markStuck(workflowRunId: string): Promise<WorkspaceRegistryEntry | null> {
+    this.ensureLoaded()
+    const existing = this.entries.get(workflowRunId)
+    if (!existing) return null
+    if (existing.phase === "stuck") return { ...existing }
+    existing.phase = "stuck"
     await this.persist()
     return { ...existing }
   }
@@ -227,7 +247,7 @@ export class WorkspaceRegistry {
       const entry = value as Partial<WorkspaceRegistryEntry>
       if (typeof entry.workflowRunId !== "string" || entry.workflowRunId.length === 0) continue
       if (typeof entry.workspacePath !== "string" || entry.workspacePath.length === 0) continue
-      if (entry.phase !== "active" && entry.phase !== "eligible") continue
+      if (entry.phase !== "active" && entry.phase !== "eligible" && entry.phase !== "stuck") continue
       if (typeof entry.materializedAt !== "string") continue
       this.entries.set(key, {
         issueNumber: typeof entry.issueNumber === "number" ? entry.issueNumber : 0,

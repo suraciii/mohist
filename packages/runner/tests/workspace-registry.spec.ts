@@ -269,4 +269,174 @@ describe("WorkspaceRegistry", () => {
     expect(() => registry.get("wr-1")).toThrow(/has not been loaded/)
     expect(() => registry.findByWorkspacePath(join(root, "x"))).toThrow(/has not been loaded/)
   })
+
+  it("MarkStuck_TransitionsEligibleToStuckAndPersists", async () => {
+    const first = new Date("2026-06-01T00:00:00.000Z")
+    const terminal = new Date("2026-06-25T10:00:00.000Z")
+    const now = vi.fn(() => first)
+    const registry = new WorkspaceRegistry(root, { now })
+    await registry.load()
+
+    await registry.register({
+      issueNumber: 1,
+      workflowRunId: "wr-1",
+      workspacePath: join(root, "workspaces/issue-1"),
+    })
+
+    now.mockReturnValue(terminal)
+    await registry.markEligible("wr-1")
+
+    const stuck = await registry.markStuck("wr-1")
+
+    expect(stuck).not.toBeNull()
+    expect(stuck!.phase).toBe("stuck")
+    expect(stuck!.terminalAt).toBe(terminal.toISOString())
+
+    const persisted = JSON.parse(await readFile(defaultWorkspaceRegistryFilePath(root), "utf8"))
+    expect(persisted.entries["wr-1"]).toMatchObject({
+      phase: "stuck",
+      terminalAt: terminal.toISOString(),
+    })
+  })
+
+  it("MarkStuck_IsIdempotent_AlreadyStuckEntryDoesNotRewriteFile", async () => {
+    const first = new Date("2026-06-01T00:00:00.000Z")
+    const terminal = new Date("2026-06-25T10:00:00.000Z")
+    const later = new Date("2026-06-26T00:00:00.000Z")
+    const now = vi.fn(() => first)
+    const registry = new WorkspaceRegistry(root, { now })
+    await registry.load()
+
+    await registry.register({
+      issueNumber: 1,
+      workflowRunId: "wr-1",
+      workspacePath: join(root, "workspaces/issue-1"),
+    })
+
+    now.mockReturnValue(terminal)
+    await registry.markEligible("wr-1")
+    await registry.markStuck("wr-1")
+
+    const beforeRewrite = JSON.parse(await readFile(defaultWorkspaceRegistryFilePath(root), "utf8"))
+
+    now.mockReturnValue(later)
+    const again = await registry.markStuck("wr-1")
+
+    expect(again).not.toBeNull()
+    expect(again!.phase).toBe("stuck")
+    expect(again!.terminalAt).toBe(terminal.toISOString())
+
+    const afterRewrite = JSON.parse(await readFile(defaultWorkspaceRegistryFilePath(root), "utf8"))
+    expect(afterRewrite).toEqual(beforeRewrite)
+  })
+
+  it("MarkStuck_OnUnknownRunId_ReturnsNull", async () => {
+    const registry = new WorkspaceRegistry(root)
+    await registry.load()
+    expect(await registry.markStuck("wr-unknown")).toBeNull()
+  })
+
+  it("Load_StuckEntry_RoundTripsThroughReload", async () => {
+    const filePath = defaultWorkspaceRegistryFilePath(root)
+    await mkdir(join(root, ".mohist", "runner-state"), { recursive: true })
+    const staleAt = "2026-06-20T08:00:00.000Z"
+    const materialisedAt = "2026-06-15T08:00:00.000Z"
+    await writeFile(filePath, JSON.stringify({
+      version: 1,
+      entries: {
+        "wr-stuck": {
+          issueNumber: 33,
+          workflowRunId: "wr-stuck",
+          workspacePath: join(root, "workspaces/issue-33"),
+          phase: "stuck",
+          materializedAt: materialisedAt,
+          terminalAt: staleAt,
+        },
+        "wr-eligible": {
+          issueNumber: 9,
+          workflowRunId: "wr-eligible",
+          workspacePath: join(root, "workspaces/issue-9"),
+          phase: "eligible",
+          materializedAt: materialisedAt,
+          terminalAt: staleAt,
+        },
+      },
+    }, null, 2))
+
+    const registry = new WorkspaceRegistry(root)
+    await registry.load()
+
+    const stuck = registry.get("wr-stuck")
+    expect(stuck).toMatchObject({
+      phase: "stuck",
+      terminalAt: staleAt,
+      materializedAt: materialisedAt,
+    })
+
+    await registry.reload()
+    expect(registry.get("wr-stuck")).toMatchObject({
+      phase: "stuck",
+      terminalAt: staleAt,
+      materializedAt: materialisedAt,
+    })
+  })
+
+  it("MarkEligible_OnStuckEntry_LeavesEntryUnchanged", async () => {
+    const first = new Date("2026-06-01T00:00:00.000Z")
+    const terminal = new Date("2026-06-25T10:00:00.000Z")
+    const later = new Date("2026-06-26T00:00:00.000Z")
+    const now = vi.fn(() => first)
+    const registry = new WorkspaceRegistry(root, { now })
+    await registry.load()
+
+    await registry.register({
+      issueNumber: 1,
+      workflowRunId: "wr-1",
+      workspacePath: join(root, "workspaces/issue-1"),
+    })
+
+    now.mockReturnValue(terminal)
+    await registry.markEligible("wr-1")
+    await registry.markStuck("wr-1")
+
+    const beforeRewrite = JSON.parse(await readFile(defaultWorkspaceRegistryFilePath(root), "utf8"))
+
+    now.mockReturnValue(later)
+    const revived = await registry.markEligible("wr-1")
+
+    expect(revived).not.toBeNull()
+    expect(revived!.phase).toBe("stuck")
+    expect(revived!.terminalAt).toBe(terminal.toISOString())
+
+    const afterRewrite = JSON.parse(await readFile(defaultWorkspaceRegistryFilePath(root), "utf8"))
+    expect(afterRewrite).toEqual(beforeRewrite)
+  })
+
+  it("MarkEligible_OnAlreadyEligibleEntry_RemainsNoOp", async () => {
+    const first = new Date("2026-06-01T00:00:00.000Z")
+    const originalTerminal = new Date("2026-06-20T00:00:00.000Z")
+    const laterTerminal = new Date("2026-06-25T00:00:00.000Z")
+    const now = vi.fn(() => first)
+    const registry = new WorkspaceRegistry(root, { now })
+    await registry.load()
+
+    await registry.register({
+      issueNumber: 1,
+      workflowRunId: "wr-1",
+      workspacePath: join(root, "workspaces/issue-1"),
+    })
+
+    now.mockReturnValue(originalTerminal)
+    await registry.markEligible("wr-1")
+
+    const beforeRewrite = JSON.parse(await readFile(defaultWorkspaceRegistryFilePath(root), "utf8"))
+
+    now.mockReturnValue(laterTerminal)
+    const again = await registry.markEligible("wr-1")
+
+    expect(again).toMatchObject({ phase: "eligible", terminalAt: originalTerminal.toISOString() })
+
+    const afterRewrite = JSON.parse(await readFile(defaultWorkspaceRegistryFilePath(root), "utf8"))
+    expect(afterRewrite).toEqual(beforeRewrite)
+  })
 })
