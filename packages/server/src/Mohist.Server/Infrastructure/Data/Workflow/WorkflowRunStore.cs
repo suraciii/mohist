@@ -232,8 +232,7 @@ public class WorkflowRunStore : IWorkflowRunStore
                 continue;
             if (group.Value.Any(t => t.Recovery is null))
             {
-                throw new InvalidOperationException(
-                    $"Cannot normalize legacy recovery state for definition id '{group.Key.DefinitionId}' in stage index {group.Key.StageIndex}: some attempts have no recovery declaration");
+                continue;
             }
 
             var canonical = group.Value
