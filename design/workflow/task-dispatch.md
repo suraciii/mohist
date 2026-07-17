@@ -31,6 +31,10 @@ resource。`with` 内部不再做 same-key deep-merge，配置进入 Action 只�
 `expect` 单独展开并随 dispatch 发送，作为 Workflow 拥有的 task 完成契约。它不进入
 `with`，也不属于 Runtime-specific Action Input。
 
+持久 WorkItem 的 `uses` / `with` 若违反所选 Action 的静态输入契约，属于不可重试的
+dispatch 拒绝。工作一旦 claim，DispatchService 必须用精确的 `workerId + workId` 让
+WorkflowRun 将该 TaskRun 记为 Failed；只有普通渲染故障继续通过 poll redelivery 重试。
+
 ## Dispatch context
 
 作者可见的命名空间清单以 [docs 的模板表达式表](../../docs/workflow-definition.md#模板表达式)

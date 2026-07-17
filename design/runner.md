@@ -17,7 +17,7 @@ runner 是否存活           → RunnerGrain.lastSeen
 
 ```
 workflow run 本身就是 dispatch ledger
-Running ⟹ 一个 poll 内完成对账：reported ∨ re-dispatched ∨ closed out
+Running ⟹ 一个 poll 内完成对账：reported ∨ re-dispatched ∨ rejected as invalid ∨ closed out
 |assigned 给 runner 的 Running works| ≤ slots（claim 时检查）
 ```
 
@@ -164,6 +164,11 @@ PENDING --ClaimNext--> RUNNING --report(success|fail)--> COMPLETED|FAILED
 claim 失败（stage lock 竞争、状态已变）→ null → 本次 poll 的下一个候选。
 claim 成功但 dispatch 丢失 → 工作处于 Running 且未上报 → 下一次 poll 重投。
 
+渲染失败分两类。外部依赖或可变配置导致的普通失败保留 Running，由下一次 poll 重试；
+持久 WorkItem 自身违反 Action input 契约时，translator 返回明确的不可重试拒绝，
+DispatchService 用 `workerId + workId` 命令 WorkflowRun 将该工作记为 Failed。该命令必须
+核对当前 active work，不能用“失败当前任务”误伤已经推进后的新工作。
+
 ### 公平性
 
 工作（重新）进入 Ready 时打 `ReadySince` 时间戳。按 `ORDER BY ReadySince ASC`
@@ -224,7 +229,8 @@ WorkflowRun 状态。
 | poll 传输失败 | 同一 runner 进程重试；reported set 存续 |
 | dispatch 响应丢失 | 下一次 poll：desired − reported → 重投 |
 | 进程重启 | 空 report → 全量重投 |
-| claim 后渲染失败 | 每次 poll 重试 |
+| claim 后渲染发生普通失败 | 保持 Running；每次 poll 重试 |
+| 持久 WorkItem 违反 Action input 契约 | 按 `workerId + workId` 拒绝该工作；owner 记为 FAILED |
 | report 传输失败 | awaitingAck 重试；仍在上报中，绝不重投 |
 | 重复/迟到 report | owner 幂等 → Stale |
 | 工作卡死 | 进程 timeout → FAILED |

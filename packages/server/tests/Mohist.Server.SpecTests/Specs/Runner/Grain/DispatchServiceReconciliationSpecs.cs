@@ -63,6 +63,37 @@ public class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTests.Specs.
     }
 
     [Fact]
+    public async Task Redelivery_InvalidPersistedTaskInput_FailsClaimedWork()
+    {
+        var workflow = await StartWorkflowAsync(SingleStage(
+            tasks:
+            [
+                new TaskDefinition(
+                    "recover:fix-review-findings",
+                    "Fix review findings",
+                    "mohist/acp-agent",
+                    With("""{"session":"check","prompt":"fix","agent":"${{ vars.agent }}"}""")),
+            ],
+            checks: [],
+            stage: "check"));
+        var runnerId = _runnerId!;
+
+        var assignment = await workflow.AssignWorkerAsync(runnerId);
+        Assert.Equal(WorkflowAssignmentStatus.Assigned, assignment.Status);
+        var claimed = await workflow.ClaimNextAsync(runnerId);
+        Assert.NotNull(claimed);
+
+        var response = await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], []));
+
+        Assert.Empty(response.Dispatches);
+        var run = await LoadRunAsync(_workflowId!);
+        Assert.Equal(WorkflowRunStatus.Failed, run.Status);
+        var task = Assert.Single(run.CurrentStage().Tasks);
+        Assert.Equal(TaskRunStatus.Failed, task.Status);
+        Assert.Contains("with.agent", run.Failure?.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Redelivery_DoesNotRedeliver_WhenProcessReportsTheWorkInFlight()
     {
         await StartWorkflowAsync(SingleStage(checks: []));
