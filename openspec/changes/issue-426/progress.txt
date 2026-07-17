@@ -27,3 +27,23 @@
 - `tool-registry.test.tsx` (new): `FallbackEntry.getTitle` floor (via registry helper since FallbackEntry isn't exported).
 - `tool-views/shared.test.tsx` (extended): `getToolDisplayLabel` never returns 'unknown'; surfaces via semantic inference (bash/read/grep/apply_patch registry entries); url surfaces via FallbackEntry default branch.
 - `AssistantParts.render.test.tsx` (extended): no rendered tool row exposes visible 'unknown' label, including paths from semantic inference and last-resort generic label.
+- `transcript-state.test.ts` (extended, T-002): lossless concatenation across a multi-paragraph delta sequence (5 deltas including `\n`+`\n` split); character-by-character preservation across many small token-level deltas (split `split('')`); `appendTextToTurn` after a closed text part opens a fresh part (no fusion across the gap); reasoning.interrupt → `closeActiveTextPart` → `appendReasoningToTurn` → `appendTextToTurn` produces two distinct text blocks (different `id`); paragraph boundary (`\n\n`) survives the reasoning gap (`usage:` + `\n\n` + `Let me check.` — never `usage:Let me`).
+- `TranscriptMarkdown.render.test.tsx` (extended, T-002): `\n\n` renders as 2 distinct `<p>` blocks; 3 paragraphs render as 3 distinct `<p>` blocks; single `\n` collapses to 1 `<p>` per GFM. All assertions include `not.toContain('usage:Let me')` and `not.toContain('usage: Let me')` to pin the bug shape.
+- `useSessionTranscript.test.tsx` (extended, T-002): interleaved `message.delta` + `coder_text_chunk` events whose deltas contain `\n`+`\n` produce text `usage:\n\nLet me read the file.` (boundary preserved, no fusion); `reasoning.delta` interrupt closes the open text part and a subsequent `coder_text_chunk` opens a new text part containing `\n\nLet me check the docs.` (interrupted-and-resumed text rendered as distinct blocks).
+
+## T-002 Localization Outcome
+
+The web presentation contract is pinned and verified lossless. Three independent layers confirmed:
+
+1. **Model layer (`appendTextToTurn`, `transcript-state.ts:126`)** — `existing.text + text` is pure string concatenation, no `.trim()`, no whitespace stripping, no character dropping or reordering. Character-by-character lossless even across 60+ single-char deltas.
+2. **Dispatch layer (`useSessionTranscript.ts:338-369`)** — `message.delta` and `coder_text_chunk` both call `appendTextToTurn(lastTurn, detail.text)` with no preprocessing. The dual-name path exercises both handlers and concatenates into the same open text part, so interleaved event names are correctly folded into one lossless stream.
+3. **Render layer (`TranscriptMarkdown.tsx`)** — stock `react-markdown` + `remark-gfm`. `\n\n` in the input renders as separate `<p>` blocks (render test confirms 2 paragraphs → 2 `<p>`, 3 paragraphs → 3 `<p>`).
+
+**Localization conclusion:** the `usage:Let me` fusion cannot reproduce in the web live path when deltas carry `\n\n`. The bug only reproduces when:
+
+- **Deltas omit the inter-paragraph separator.** If the agent/runtime emits `["…usage", "Let me…"]` (no `\n\n`), the web faithfully concatenates to `usage:Let me` — correct behavior for the web layer, but not what the user expected. The gap is in the runtime/agent: it must emit `\n\n` across paragraph boundaries when tokenizing streamed text.
+- **Persisted turns have already lost the separator upstream.** `initialTurns` are a direct passthrough from `transcriptResponse.turns` (no reconstruction); if the persisted text is `usage:Let me`, the web renders `usage:Let me`.
+
+Per the issue non-goals ("if the gap roots upstream, record evidence and open a separate issue rather than touching the pipeline here"), **no web-path fix is applied in this task.** The web presentation contract is now pinned by regression tests at all three layers (model, dispatch, render). The upstream gap (agent/runtime token splitter dropping `\n\n`; or persisted transcript losing the separator) is escalated as a follow-up issue, not modified here.
+
+**Decision:** T-002 delivers the regression-test net (acceptance criteria 1, 2, 3 green via 9 new tests across 3 files) + the localization evidence/follow-up escalation. No code change to the web append/render path.

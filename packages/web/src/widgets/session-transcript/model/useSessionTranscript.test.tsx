@@ -154,4 +154,77 @@ describe('useSessionTranscript', () => {
 
     expect(screen.getByTestId('transcript').textContent).toBe('persisted live')
   })
+
+  it('preserves a \\n\\n paragraph boundary across interleaved message.delta and coder_text_chunk events', () => {
+    renderSessionTranscript([])
+
+    const deltas: Array<{ type: 'message.delta' | 'coder_text_chunk'; text: string }> = [
+      { type: 'message.delta', text: 'usage:' },
+      { type: 'coder_text_chunk', text: '\n' },
+      { type: 'message.delta', text: '\n' },
+      { type: 'coder_text_chunk', text: 'Let me read the file.' },
+    ]
+
+    for (const delta of deltas) {
+      act(() => {
+        const baseDetail = {
+          sessionId: 'session-84',
+          runtimeSessionId: 'acp-84',
+          runtime: 'opencode',
+          text: delta.text,
+        }
+        if (delta.type === 'coder_text_chunk') {
+          dispatchAgentEvent('coder_text_chunk', {
+            issueNumber: 84,
+            projectId: 'proj-test',
+            ...baseDetail,
+          })
+        } else {
+          dispatchAgentEvent('message.delta', baseDetail)
+        }
+      })
+    }
+
+    const transcript = screen.getByTestId('transcript').textContent ?? ''
+    expect(transcript).toBe('usage:\n\nLet me read the file.')
+    expect(transcript).not.toContain('usage:Let me')
+    expect(transcript).toContain('\n\n')
+  })
+
+  it('reasoning.delta interrupt closes the open text part and a later text delta opens a new part (distinct blocks)', () => {
+    renderSessionTranscript([])
+
+    act(() => {
+      dispatchAgentEvent('message.delta', {
+        sessionId: 'session-84',
+        runtimeSessionId: 'acp-84',
+        runtime: 'opencode',
+        text: 'usage:',
+      })
+    })
+    act(() => {
+      dispatchAgentEvent('reasoning.delta', {
+        sessionId: 'session-84',
+        runtimeSessionId: 'acp-84',
+        runtime: 'opencode',
+        text: 'thinking about it',
+      })
+    })
+    act(() => {
+      dispatchAgentEvent('coder_text_chunk', {
+        issueNumber: 84,
+        projectId: 'proj-test',
+        sessionId: 'session-84',
+        runtimeSessionId: 'acp-84',
+        runtime: 'opencode',
+        text: '\n\nLet me check the docs.',
+      })
+    })
+
+    const transcript = screen.getByTestId('transcript').textContent ?? ''
+    expect(transcript).toContain('usage:')
+    expect(transcript).toContain('thinking about it')
+    expect(transcript).toContain('Let me check the docs.')
+    expect(transcript).not.toContain('usage:Let me')
+  })
 })
