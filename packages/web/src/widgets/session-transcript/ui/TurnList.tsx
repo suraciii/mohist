@@ -12,9 +12,10 @@ function formatTime(iso: string): string {
 interface TurnListProps {
   turns: DisplayTurn[]
   turnRefs?: TurnRefsMap
+  isRunning?: boolean
 }
 
-export function TurnList({ turns, turnRefs }: TurnListProps) {
+export function TurnList({ turns, turnRefs, isRunning }: TurnListProps) {
   return (
     <div
       role="log"
@@ -33,6 +34,7 @@ export function TurnList({ turns, turnRefs }: TurnListProps) {
               turnRefs.delete(index + 1)
             }
           } : undefined}
+          isRunning={isRunning}
         />
       ))}
     </div>
@@ -43,9 +45,10 @@ interface TurnItemProps {
   turn: DisplayTurn
   index: number
   registerRef?: (el: HTMLDivElement | null) => void
+  isRunning?: boolean
 }
 
-export function TurnItem({ turn, index, registerRef }: TurnItemProps) {
+export function TurnItem({ turn, index, registerRef, isRunning }: TurnItemProps) {
   return (
     <div
       ref={registerRef}
@@ -60,7 +63,7 @@ export function TurnItem({ turn, index, registerRef }: TurnItemProps) {
 
       {turn.assistantParts.length > 0 && (
         <div className="min-w-0">
-          <AssistantParts parts={turn.assistantParts} />
+          <AssistantParts parts={turn.assistantParts} isRunning={isRunning} />
         </div>
       )}
 

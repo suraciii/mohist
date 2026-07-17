@@ -47,3 +47,25 @@ The web presentation contract is pinned and verified lossless. Three independent
 Per the issue non-goals ("if the gap roots upstream, record evidence and open a separate issue rather than touching the pipeline here"), **no web-path fix is applied in this task.** The web presentation contract is now pinned by regression tests at all three layers (model, dispatch, render). The upstream gap (agent/runtime token splitter dropping `\n\n`; or persisted transcript losing the separator) is escalated as a follow-up issue, not modified here.
 
 **Decision:** T-002 delivers the regression-test net (acceptance criteria 1, 2, 3 green via 9 new tests across 3 files) + the localization evidence/follow-up escalation. No code change to the web append/render path.
+
+## T-003 Liveness Gate — Decisions & Notes
+
+- **Render-site gate is the authoritative fix.** `SessionTranscriptLayout.tsx:91-92` now gates both indicators on `isRunning && (isStreaming|isThinking)`. The gate is strictly additive: it only suppresses on non-running sessions, never removes an indicator from a legitimately live one. `statusKind` is intentionally NOT used (it's coupled to wall-clock staleness in `getSessionStatusKind`).
+- **Defense-in-depth hook hygiene.** `useSessionTranscript.ts` extended the existing `[initialTurns, isRunning]` reset effect to call `clearStreaming()` (which clears the ref + state and cancels the 2s debounce `setTimeout` via `streamingTimerRef`). This prevents stale `isStreaming` from leaking to other consumers (#428).
+- **Per-part glyph liveness.** `AssistantTextPartView` derives `showStreamingGlyph = isRunning === true && (isIncomplete || isStreaming === true)`. The `isRunning` signal flows: `SessionTranscriptLayout` → `TurnList` → `TurnItem` → `AssistantParts` → `AssistantTextPartView`. Single prop addition (`isRunning?: boolean`) at each layer; no shape change to existing props.
+- **Flag semantics preserved.** `isStreaming` / `isThinking` are still mutated by the same event handlers; they remain consumable by #428 (which builds the real-time UI on top). Only the **render-time** gate was added.
+
+## T-003 Gotchas
+
+- `isRunning` flows through `TurnList` and `TurnItem` as an *optional* prop (`isRunning?: boolean`). The strict equality `isRunning === true` in `AssistantTextPartView` is defensive — without it, an undefined prop would let a stale flag render a glyph on a non-running session. This guarantees the gate never falls open.
+- `useSessionTranscript`'s `[initialTurns, isRunning]` reset effect previously called `setIsStreaming(false)` directly. Switching to `clearStreaming()` is functionally equivalent in the effect's context (no debounce timer is set on initial mount since `bumpTranscriptVersion` is not called there), but it correctly clears `isStreamingRef` too, so any future caller that reads the ref gets a consistent cleared value.
+- `vi.useFakeTimers()` does NOT block React state propagation inside `act()` — only `waitFor` (which uses an internal polling `setInterval`). For tests that need to verify hook state after rerender, prefer `await act(async () => { rerender(...) })` + synchronous `expect(latest.isStreaming)` over `await waitFor(...)`. The `fake time` requirement is satisfied: no real wall-clock wait occurs.
+
+## T-003 Test Coverage
+
+- `tests/SessionTranscriptActivityIndicators.spec.tsx` (new, 9 tests):
+  - Layout gating: streaming + thinking indicators render when live; hidden when not running (4 tests).
+  - Per-part glyph: hidden on completed part of non-running session; shown on incomplete part of live session; hidden on incomplete part of non-running session (3 tests).
+  - Hook hygiene: `clearStreaming` fires on `isRunning: true → false` transition (synchronous, fake-timer based, no wall-clock wait) (1 test).
+  - End-to-end: running session with visible streaming indicator → transition to not running → indicator disappears (1 test).
+- All 4759 existing tests still green; typecheck clean.

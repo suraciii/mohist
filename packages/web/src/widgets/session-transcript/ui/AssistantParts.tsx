@@ -12,11 +12,13 @@ interface AssistantTextPartViewProps {
   text: string
   completedAt: string | null | undefined
   isStreaming?: boolean
+  isRunning?: boolean
 }
 
-export function AssistantTextPartView({ text, completedAt, isStreaming }: AssistantTextPartViewProps) {
+export function AssistantTextPartView({ text, completedAt, isStreaming, isRunning }: AssistantTextPartViewProps) {
   const [copied, setCopied] = useState(false)
   const isIncomplete = completedAt === null || completedAt === undefined
+  const showStreamingGlyph = isRunning === true && (isIncomplete || isStreaming === true)
 
   const handleCopy = () => {
     navigator.clipboard.writeText(text).then(() => {
@@ -29,7 +31,7 @@ export function AssistantTextPartView({ text, completedAt, isStreaming }: Assist
     <div className="max-w-[90%] sm:max-w-[80%] min-w-0">
       <TranscriptMarkdown content={text} />
       <div className="mt-1 flex items-center gap-2">
-        {(isIncomplete || isStreaming) && (
+        {showStreamingGlyph && (
           <span
             data-testid="assistant-text-streaming-glyph"
             data-tone={isStreaming ? 'info' : 'warning'}
@@ -117,15 +119,16 @@ export function DividerPartView({ label }: DividerPartViewProps) {
 
 interface AssistantPartsProps {
   parts: DisplayAssistantPart[]
+  isRunning?: boolean
 }
 
-export function AssistantParts({ parts }: AssistantPartsProps) {
+export function AssistantParts({ parts, isRunning }: AssistantPartsProps) {
   return (
     <div className="space-y-2">
       {parts.map((part) => {
         switch (part.partType) {
           case 'text':
-            return <AssistantTextPartView key={part.id} text={part.text} completedAt={part.completedAt} isStreaming={part.isStreaming} />
+            return <AssistantTextPartView key={part.id} text={part.text} completedAt={part.completedAt} isStreaming={part.isStreaming} isRunning={isRunning} />
           case 'reasoning':
             return <ReasoningPartView key={part.id} text={part.text} startedAt={part.startedAt} />
           case 'tool':

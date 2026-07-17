@@ -87,9 +87,9 @@ export function SessionTranscriptLayout({
               entries={entries}
               rightSlot={<CopyFullTextButton turns={turns} />}
             />
-            <TurnList turns={turns} turnRefs={turnRefs} />
-            {isThinking && turns.length > 0 && <ThinkingPlaceholder />}
-            {isStreaming && <StreamingIndicator />}
+            <TurnList turns={turns} turnRefs={turnRefs} isRunning={isRunning} />
+            {isRunning && isThinking && turns.length > 0 && <ThinkingPlaceholder />}
+            {isRunning && isStreaming && <StreamingIndicator />}
           </div>
           <TurnTocRail
             entries={entries}
