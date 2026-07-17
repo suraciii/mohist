@@ -7,6 +7,9 @@
 - **Existing seams to mirror:** `setAcpProcessFactoryForTest` is the test factory seam pattern — `OpenCodeRuntime` will mirror it as `setOpenCodeRuntimeFactoryForTest` (T-002).
 - **`/v2` subpath import:** `@opencode-ai/sdk/v2` is the documented entry; `@opencode-ai/sdk/v2/client` is a secondary alias. The package `exports` field already declares both.
 - **`mohist/opencode` Action contract (from #408):** `parseOpencodeInput` already does first-slash model split + sibling variant + ignores unknown option keys; T-004 will reuse this for SDK DTO construction.
+- **`v2.model.list().data.data` shape:** the actual `v2.model.list()` response wrapper is `{ data: { location: LocationInfo, data: ModelV2Info[] } }` and each `ModelV2Info.variants` is `Array<{ id, headers, body }>`. The runtime's `CatalogClient` flattens this into Mohist-owned `RuntimeModelDescriptor[]` with `variants: string[]` (the `id` of each variant), so SDK shape never leaks across the boundary. The smoke note in T-001 about `v2.provider.list()` was about a different table; the **model** list is what feeds the runner registration catalog, and its variant shape is the one captured here.
+- **Fake-driven runner tests for the OpenCodeRuntime seam** must fake the entire Server/Client pair (not just the `OpencodeClient`) because the runtime calls `client.global.health()`, `client.v2.model.list()`, `client.v2.provider.list()`, and `client.session.create()` against the server, plus `client.global.event()` for the subscription. The `setOpenCodeRuntimeFactoryForTest` factory seam lets the test inject a `(directory, signal) => OpencodeServerHandle` factory that returns a fake handle whose `client` exposes the four namespaces the runtime touches (with `vi.fn()` spies for assertions).
+- **Test boundary enforces fake timers:** `check:test-boundaries` rejects any `await new Promise(r => setTimeout(...))` in runner tests, so the server-exit rebuild path must use `vi.useFakeTimers()` + `vi.advanceTimersByTimeAsync(delay)` instead of waiting on wall clock — even when the rebuild `delay` is small (50 ms in the rebuild test).
 
 ## T-001 findings
 
@@ -32,3 +35,36 @@
 ### Verification commands used
 - `npm install` — added `@opencode-ai/sdk@1.18.3` without conflict.
 - `npm run typecheck -w packages/runner` — passes with the `/v2` subpath import (`import { createOpencodeServer, createOpencodeClient } from "@opencode-ai/sdk/v2"`).
+
+## T-002 findings
+
+### Module shape
+- New module `packages/runner/src/runtime/opencode/` with seven files: `types.ts` (Mohist boundary types), `model-string.ts` (first-slash parsing), `errors.ts` (normalize + `isNonRecoverableProviderMessage` patterns), `server-process.ts` (the only file that imports the SDK at runtime — `createOpencodeServer`/`createOpencodeClient`), `catalog.ts` (v2 list-API loader), `event-subscription.ts` (one `client.global.event()` consumer), `runtime.ts` (`OpenCodeRuntime` class), `factory.ts` (seam), and `index.ts` (public surface).
+- `index.ts` re-exports ONLY Mohist-owned types/helpers; the SDK types are imported as `import type` only and never re-exported. The `tests/opencode-runtime.spec.ts` "boundary" suite asserts the runtime module's exports carry no SDK-prefixed names (`OpencodeClient`, `V2Model`, `ProviderV2`, `Session2`, `HeyApi`, …) and that `createOpencodeServer` / `createOpencodeClient` / `OpencodeClient` are not re-exported.
+
+### Boundary types
+- `RuntimeResult<T>` is a discriminated union `{ ok: true; value: T; diagnostics } | { ok: false; error: RuntimeError; diagnostics }` — tests use `if (!result.ok) throw ...` narrowing so `result.error.kind` and `result.value` are reachable without `?.`. This is the pattern later modules (T-004/T-005) will mirror.
+- `RuntimeErrorKind` is the small set: `invalid-input`, `unavailable-runtime`, `missing-session`, `incompatible-runtime`, `permission-required`, `interrupted`, `turn-failed` — matches design D8 and the spec exactly. Provider detail is carried only as `RuntimeDiagnostic[]`; `RuntimeError.message` stays generic ("OpenCode turn failed", "OpenCode runtime is not available", …).
+
+### Readiness contract
+- `start()` is idempotent and re-entrant: concurrent callers share a single in-flight attempt via `startInFlight`. After success, a second `start()` returns the cached ready state without re-spawning.
+- `ready()` is `false` until (1) the server factory returns a handle, (2) `client.global.health()` resolves with a non-empty body, AND (3) the catalog factory returns a catalog. Any failure along the way sets `diagnostic` and returns `ok: false` with `error.kind === "unavailable-runtime"`. The diagnostic `code` distinguishes the failure stage: `server-spawn-failed` / `health-failed` / `catalog-load-failed`.
+
+### Server-exit / rebuild path
+- A `server.disconnected` (or `server.heartbeat-failed`) event from the single `client.global.event()` subscription flips `ready()` to `false` and sets a `server-exit` diagnostic; an in-flight `createSession` immediately fails with `unavailable-runtime`. After the configured `rebuildDelayMs` the runtime tears down the previous handle, calls `start()` again, and re-passes readiness only when health + catalog both re-pass. The `shutdown({ clearDiagnostic: false })` option preserves the last diagnostic across the rebuild so callers can still inspect the failure during the gap.
+- The event listener is keyed on the live `OpencodeServerHandle` reference (`this.state.server !== server` check) so a stale listener from a torn-down handle cannot fire a phantom rebuild.
+
+### Permissions authoritative
+- No `permission-required` runtime path auto-approves. The error normalizer carries an `approve/grant/out-of-band` diagnostic that points the user at the recovery step, and the runtime has no `permission.respond` / `permission.reply` call site at all. Workflow Approval creation is left to higher-level code that never sees an OpenCode permission payload (the runtime never accepts one).
+
+### Factory seam
+- `setOpenCodeRuntimeFactoryForTest(factory | null)` mirrors `setAcpProcessFactoryForTest`. `null` restores the default factory. Tests inject a factory that returns an `OpenCodeRuntime` constructed with fake `(directory, signal) => OpencodeServerHandle` / `CatalogClient` / `RuntimeEventSubscription` factories — no real process, network, fs, or wall clock is touched.
+- `OpenCodeRuntimeDeps` is the Mohist-owned deps shape; `OpencodeServerHandle` is the only SDK-shaped type that crosses the boundary and it is consumed only by the runtime implementation (tests cast their fake through `as unknown as OpencodeClient`).
+
+### Verification commands used
+- `npm run typecheck -w packages/runner` — passes.
+- `npm run typecheck:tests -w packages/runner` — passes.
+- `npm run check:test-boundaries -w packages/runner` — passes (fake timers used in the rebuild test).
+- `npm run test:run -w packages/runner` — 1177 tests pass, including 35 new `tests/opencode-runtime.spec.ts` cases.
+- `npm test` — full repo passes (4790 tests across server/cli/runner/web).
+- `npm run build -w packages/runner` — compiles cleanly.
