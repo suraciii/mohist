@@ -1,6 +1,6 @@
 ---
 name: mohist-explore
-description: 把模糊的产品想法提炼成清晰的、有边界的 Mohist issue 需求澄清。当用户带着一句话、一个模糊念头或未沉淀的改进意图，需要探索当前产品形态和技术实现，最终产出一份想清楚的需求澄清时使用。触发词包括 "提炼需求"、"写 PRD"、"沉淀 issue"、"需求文档"、"探索"、"完善 issue"。
+description: Distill a fuzzy product idea into a clear, bounded requirement clarification for a Mohist issue. Use when the user arrives with a sentence, a vague hunch, or an unwritten improvement intent and needs to explore the current product form and technical implementation, ending in a well-thought-out requirement clarification. Trigger phrases include "distill the requirement", "write a PRD", "capture as an issue", "requirement doc", "explore", "flesh out an issue".
 ---
 
 # mohist-explore

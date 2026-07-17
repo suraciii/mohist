@@ -1,6 +1,6 @@
 ---
 name: mohist-create-issue
-description: 创建 Mohist issue 的机械执行：选模板、给内容加 frontmatter、推荐 workflow/risk、用 label 目录分类打标、确认后跑 mo issue create。当用户要把已探索好的需求落成 issue 时使用。触发词包括 "创建 issue"、"建 issue"、"new issue"、"mo issue create"、"给 issue 打标"。issue 还是 epic 的决策由 mohist-explore 完成。
+description: Mechanical execution of creating a Mohist issue: pick the template, wrap the content with frontmatter, recommend workflow/risk, classify with the label catalog, and run mo issue create after confirmation. Use when the user wants to turn an explored requirement into an issue. Trigger phrases include "create an issue", "new issue", "mo issue create", "label an issue". The issue-vs-epic decision is made by mohist-explore.
 ---
 
 # mohist-create-issue
