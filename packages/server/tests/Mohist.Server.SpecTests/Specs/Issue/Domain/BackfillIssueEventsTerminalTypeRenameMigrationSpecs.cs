@@ -345,6 +345,7 @@ public class BackfillIssueEventsTerminalTypeRenameMigrationSpecs
         string issueId,
         string stateJson)
     {
+        await ctx.Database.OpenConnectionAsync();
         using var command = ctx.Database.GetDbConnection().CreateCommand();
         command.CommandText = """
             INSERT INTO Issues (ProjectId, Number, State)
@@ -367,6 +368,7 @@ public class BackfillIssueEventsTerminalTypeRenameMigrationSpecs
         string type,
         string time)
     {
+        await ctx.Database.OpenConnectionAsync();
         using var command = ctx.Database.GetDbConnection().CreateCommand();
         command.CommandText = """
             INSERT INTO IssueEvents (Source, Id, EventId, Type, Time, SpecVersion, DataContentType, Data, ExtensionsJson)
@@ -397,6 +399,7 @@ public class BackfillIssueEventsTerminalTypeRenameMigrationSpecs
 
     private static async Task<string> ReadTypeAsync(MohistDbContext ctx, string source, long id)
     {
+        await ctx.Database.OpenConnectionAsync();
         using var command = ctx.Database.GetDbConnection().CreateCommand();
         command.CommandText = "SELECT Type FROM IssueEvents WHERE Source = $source AND Id = $id";
         var sourceParam = command.CreateParameter();
@@ -413,6 +416,7 @@ public class BackfillIssueEventsTerminalTypeRenameMigrationSpecs
 
     private static async Task<string> ReadStateAsync(MohistDbContext ctx, string issueId)
     {
+        await ctx.Database.OpenConnectionAsync();
         using var command = ctx.Database.GetDbConnection().CreateCommand();
         command.CommandText = "SELECT State FROM Issues WHERE json_extract(State, '$.id') = $id";
         var param = command.CreateParameter();
@@ -425,6 +429,7 @@ public class BackfillIssueEventsTerminalTypeRenameMigrationSpecs
 
     private static async Task<long> CountRowsAsync(MohistDbContext ctx, string table)
     {
+        await ctx.Database.OpenConnectionAsync();
         using var command = ctx.Database.GetDbConnection().CreateCommand();
         command.CommandText = $"SELECT COUNT(*) FROM {table}";
         var result = await command.ExecuteScalarAsync();
