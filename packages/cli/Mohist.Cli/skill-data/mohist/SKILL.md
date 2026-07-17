@@ -1,6 +1,6 @@
 ---
 name: mohist
-description: 执行 Mohist 当前 .NET 后端/API/Web 相关操作。当用户要求创建、查看、启动、审批、关闭 issue 或 epic，查看项目状态或日志，或任何涉及 Mohist issue/epic/workflow 的操作时使用。本 skill 是入口调度器：先判断场景，再加载对应的专题 skill；issue 与 epic 的完整生命周期命令面也由本 skill 承担（不另开专题 skill）。旧 Node CLI 已移除。
+description: Perform Mohist issue, epic, and workflow operations against the current .NET backend/API/Web. Use when the user asks to create, view, start, approve, or close issues or epics, check project status or logs, or do anything involving Mohist issues, epics, or workflows. This skill is the entry dispatcher: judge the scenario first, then load the matching scenario skill. The full issue/epic lifecycle command surface also lives here (no separate scenario skill covers it). The legacy Node CLI has been removed.
 ---
 
 # mohist
@@ -83,18 +83,18 @@ Key distinctions:
 Read-only and aux helpers (also useful while driving):
 
 ```bash
-mo issue show <number>            # 详情 + 当前 stage/health
-mo issue events <number>          # 事件流
-mo issue logs <number>            # 日志
-mo issue diff <number>            # 当前分支 vs base 的 diff
-mo issue commits <number>         # issue 分支上的 commit
-mo issue sessions <number>        # 列出 coder session（plan/build/check/integrate…）
-mo issue session transcript <number> <name>   # 某个 session 的对话
-mo issue session followup <number> <name> --text <t>  # 向运行中 session 推后续指令
-mo issue comment add <number> --body <text>   # 加评论
-mo issue prereq add <number> <prereq>         # 加启动前置
-mo issue workflow status <number>             # workflow 状态
-mo issue workflow timeline <number>           # workflow 时间线
+mo issue show <number>            # details + current stage/health
+mo issue events <number>          # event stream
+mo issue logs <number>            # logs
+mo issue diff <number>            # current branch vs base diff
+mo issue commits <number>         # commits on the issue branch
+mo issue sessions <number>        # list coder sessions (plan/build/check/integrate…)
+mo issue session transcript <number> <name>   # one session's conversation
+mo issue session followup <number> <name> --text <t>  # push a follow-up instruction into a running session
+mo issue comment add <number> --body <text>   # add a comment
+mo issue prereq add <number> <prereq>         # add a start prerequisite
+mo issue workflow status <number>             # workflow status
+mo issue workflow timeline <number>           # workflow timeline
 ```
 
 ## Epic lifecycle commands
@@ -118,16 +118,16 @@ auto-advancement). Below is the command surface only.
 Read-only and helpers:
 
 ```bash
-mo epic list                       # 当前 project 的 epic 列表
-mo epic update <id-or-number>      # 修改 title/description/priority
+mo epic list                       # list epics of the current project
+mo epic update <id-or-number>      # edit title/description/priority
 ```
 
 Project-wide listing (use sparingly — the project group also exposes workflow
 template/config which is unrelated to epics):
 
 ```bash
-mo project workflow profile list   # 列出 workflow profile
-mo label list                      # 当前 project 的可用标签
+mo project workflow profile list   # list workflow profiles
+mo label list                      # labels available in the current project
 ```
 
 ## Common flags

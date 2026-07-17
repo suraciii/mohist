@@ -66,6 +66,17 @@ TaskRun 被 redeliver 或 retry 产生新 TaskRun 时也重新读取。Action �
 Workflow 只依赖 Prompt key。Action 最终接收渲染后的 Prompt text，不能再次读取 Prompt
 resource 或 Variables resource。
 
+## Builtin Prompt 约定
+
+Builtin `.prompt` 是产品化内容，随产品分发、面向任意项目：
+
+- 一律使用英文。
+- 保持产品与技术栈通用：不引用 Mohist 仓库自身的命令面、目录结构或开发历史示例。
+- 可以引用 Mohist 产品面（`mo` CLI、`openspecChangeDir`、workflow 变量），它们在任何受管
+  项目中都成立。
+
+CLI skill-data 中随 nupkg 分发的 SKILL.md 适用同一约定。
+
 ## API
 
 Prompt collection 直接挂在 Project 下：
