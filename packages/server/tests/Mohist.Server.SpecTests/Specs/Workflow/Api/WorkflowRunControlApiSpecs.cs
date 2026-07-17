@@ -379,8 +379,6 @@ public class WorkflowRunControlApiSpecs
         AssertGuardDidNotReject(runPayload);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task TasksBatch_PostWithExpect_PropagatesExpectIntoMaterializedTaskRun()
     {

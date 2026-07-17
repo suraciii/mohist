@@ -39,7 +39,7 @@ public class WorkflowTaskInputExpansionTests
     }
 
     [Fact]
-    public void ExpandTaskWith_DeepMergesObjectKey()
+    public void ExpandTaskWith_PlainObjectValueStaysAsIs()
     {
         var resolved = new VariableBundle(
             Vars: JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(new
@@ -58,9 +58,9 @@ public class WorkflowTaskInputExpansionTests
 
         Assert.NotNull(result);
         using var doc = JsonDocument.Parse(JsonSerializer.Serialize(result["agent"]));
-        Assert.Equal("opencode", doc.RootElement.GetProperty("type").GetString());       // from task
-        Assert.Equal("gpt-4o", doc.RootElement.GetProperty("model").GetString());        // from vars
-        Assert.Equal(300000, doc.RootElement.GetProperty("timeoutMs").GetInt32());       // vars overrides task
+        Assert.Equal("opencode", doc.RootElement.GetProperty("type").GetString());
+        Assert.Equal(600000, doc.RootElement.GetProperty("timeoutMs").GetInt32());
+        Assert.False(doc.RootElement.TryGetProperty("model", out _), "vars must not deep-merge into plain with values");
     }
 
     [Fact]

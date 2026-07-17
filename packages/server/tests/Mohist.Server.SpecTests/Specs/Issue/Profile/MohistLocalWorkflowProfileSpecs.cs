@@ -1,8 +1,11 @@
+using System.Net;
 using System.Text.Json;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Services.WorkflowProfiles;
+using Mohist.Server.SpecTests.Support;
+using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Services;
 using Mohist.Server.Workflow.Services.Prompts;
 using Xunit;
@@ -41,9 +44,7 @@ public class MohistLocalWorkflowProfileSpecs
         Assert.Equal("openspec/changes/issue-154", state.ChangeDir);
     }
 
-[Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
-    [Fact]
+[Fact]
     public void DefaultWorkflowDefinition_LoadsFromYaml()
     {
         var definition = MohistWorkflow.Definition;
@@ -102,8 +103,6 @@ public class MohistLocalWorkflowProfileSpecs
         AssertRebaseConflictRecovery(rebaseRecovery, "check");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void DefaultWorkflowDefinition_IntegrateStageHasSinglePublishOwner()
     {
@@ -113,8 +112,6 @@ public class MohistLocalWorkflowProfileSpecs
         AssertSinglePushOwnerInvariant(integrate);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void DefaultWorkflowDefinition_IntegrateStageWithDuplicatePublishTask_FailsSinglePushOwnerInvariant()
     {
@@ -141,8 +138,6 @@ public class MohistLocalWorkflowProfileSpecs
         Assert.Contains("integrate:push", ex.Message);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void DefaultWorkflowDefinition_BuildStageTaskTemplateUsesAcpAgentWithPromptLoaderSpec()
     {
@@ -158,8 +153,6 @@ public class MohistLocalWorkflowProfileSpecs
         Assert.Contains("\"base\":\"${{ prompts.build }}\"", withJson);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void DefaultWorkflowDefinition_BuildStagePromptLoaderConfigExposesFileItemsAndBase()
     {
@@ -176,8 +169,6 @@ public class MohistLocalWorkflowProfileSpecs
         Assert.Equal("${{ prompts.build }}", promptWith.GetProperty("base").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void DefaultWorkflowDefinition_BuildStageRetainsExistingLoaderKeys()
     {
@@ -190,8 +181,6 @@ public class MohistLocalWorkflowProfileSpecs
         Assert.Equal("${{ openspecChangeDir }}/tasks.json", pathElement.GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void DefaultWorkflowDefinition_PlanCheckIntegrateStagesAreUnchanged()
     {
@@ -343,8 +332,6 @@ public class MohistLocalWorkflowProfileSpecs
         Assert.Equal(7, merged.Count);
     }
 
-[Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void DefaultPrompts_DefineWorkflowArtifactBoundaryForReviewAndAutoFix()
     {
@@ -368,8 +355,6 @@ public class MohistLocalWorkflowProfileSpecs
         Assert.Contains("${{ openspecChangeDir }}/", prompts["auto-fix"], StringComparison.Ordinal);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void DefaultPrompts_LoadIssueDetailsThroughMohistCli()
     {
@@ -377,10 +362,10 @@ public class MohistLocalWorkflowProfileSpecs
         var prompts = loader.LoadAll();
 
         const string command = "mo issue show ${{ issue.number }} --project-id ${{ project.id }}";
-        var executionPrompts = prompts.Keys.ToArray();
-        Assert.NotEmpty(executionPrompts);
+        var executionPrompts = new[] { "proposal", "specs", "design", "tasks", "self-review", "review", "build" };
         foreach (var key in executionPrompts)
         {
+            Assert.Contains(key, prompts.Keys);
             Assert.Contains(command, prompts[key], StringComparison.Ordinal);
             Assert.DoesNotContain("prompts.issue-context", prompts[key], StringComparison.Ordinal);
         }
@@ -399,8 +384,6 @@ public class MohistLocalWorkflowProfileSpecs
         Assert.DoesNotContain("prompts.issue-context", rendered, StringComparison.Ordinal);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void WorkflowYamlParser_CheckLevelRepairFieldsThrowSchemaDiagnostic()
     {
@@ -428,7 +411,6 @@ public class MohistLocalWorkflowProfileSpecs
         Assert.Contains("task-level recovery", ex.Message);
     }
 
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void WorkflowYamlParser_CheckRepairWithVerifyTaskStillThrows()
     {
@@ -460,8 +442,6 @@ public class MohistLocalWorkflowProfileSpecs
         Assert.Contains("obsolete check-level repair", ex.Message);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void WorkflowYamlSerializer_RoundTripsDomainDefinition()
     {
@@ -493,8 +473,6 @@ public class MohistLocalWorkflowProfileSpecs
         Assert.Equal("recover:fix-review-findings", fixReviewFindings.Id);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void WorkflowYamlParser_TaskWithNeutralArtifactMarker_ParsesSuccessfully()
     {
@@ -520,8 +498,6 @@ public class MohistLocalWorkflowProfileSpecs
         Assert.Equal("doc-task", task.Id);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Theory]
     [InlineData("PASS")]
     [InlineData("FAIL")]
@@ -553,8 +529,6 @@ public class MohistLocalWorkflowProfileSpecs
         Assert.Contains("bad-task", ex.Message);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Theory]
     [InlineData("kind")]
     [InlineData("type")]
@@ -582,8 +556,6 @@ public class MohistLocalWorkflowProfileSpecs
         Assert.Contains($"with.{field}", ex.Message);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void WorkflowYamlParser_NonInlineAgentWithKindAndType_IsAcceptedAsActionOwnedInput()
     {
@@ -611,8 +583,6 @@ public class MohistLocalWorkflowProfileSpecs
         Assert.Equal("full", task.With!["type"]!.Value.GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void DefaultWorkflowDefinition_TaskVerdictMarkersDeclareFailIf()
     {
@@ -660,8 +630,6 @@ public class MohistLocalWorkflowProfileSpecs
         return null;
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void WorkflowYamlParser_PreservesTaskArtifactCapturePaths()
     {
@@ -709,8 +677,6 @@ public class MohistLocalWorkflowProfileSpecs
             design.Artifacts!.Files.Select(f => f.Path).ToArray());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void WorkflowYamlParser_TaskArtifactsAreNotMergedIntoWith()
     {
@@ -739,8 +705,6 @@ public class MohistLocalWorkflowProfileSpecs
         Assert.Equal(new[] { "docs/out.md" }, task.Artifacts!.Files.Select(f => f.Path).ToArray());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void WorkflowYamlParser_WithExpectFilesAloneDoesNotCreateArtifactCapture()
     {
@@ -766,8 +730,6 @@ public class MohistLocalWorkflowProfileSpecs
         Assert.Null(task.Artifacts);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void WorkflowYamlParser_AcceptsSamePathInExpectMarkersAndArtifacts()
     {
@@ -800,8 +762,6 @@ public class MohistLocalWorkflowProfileSpecs
         Assert.DoesNotContain("expect", JsonSerializer.Serialize(task.With));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void WorkflowYamlParser_TaskArtifactFileEntryWithoutPathThrows()
     {
@@ -823,8 +783,6 @@ public class MohistLocalWorkflowProfileSpecs
         Assert.Contains("artifacts.files", ex.Message);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void WorkflowYamlParser_RecoveryTaskArtifactsAreIsolated()
     {
@@ -862,8 +820,6 @@ public class MohistLocalWorkflowProfileSpecs
         Assert.Null(recoveryTask.Artifacts);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void WorkflowYamlSerializer_RoundTripsTaskArtifactCapture()
     {
@@ -895,8 +851,6 @@ public class MohistLocalWorkflowProfileSpecs
         Assert.Contains("docs/a.md", yaml);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void DefaultWorkflowDefinition_DeclaresExpectedArtifactCapturePaths()
     {
@@ -913,8 +867,6 @@ public class MohistLocalWorkflowProfileSpecs
         AssertArtifactPaths(check.Tasks.Single(t => t.Id == "ai-review"), "review.md");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void DefaultWorkflowDefinition_AiReviewTaskDeclaresMarkerExpectationWithOneOf()
     {
@@ -930,8 +882,6 @@ public class MohistLocalWorkflowProfileSpecs
         AssertMarkerOneOf(aiReview);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void DefaultWorkflowDefinition_AiReviewRecoversOnFailPromiseWithRetrySelf()
     {
@@ -1032,8 +982,6 @@ public class MohistLocalWorkflowProfileSpecs
             Assert.Contains(actual, p => p.EndsWith(suffix, StringComparison.Ordinal));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void DefaultWorkflowDefinition_DescriptionIsParsedFromYamlBlockScalar()
     {
@@ -1048,8 +996,6 @@ public class MohistLocalWorkflowProfileSpecs
         Assert.DoesNotContain("use experiment", description);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void DefaultWorkflowDefinition_DescriptionPreservesMultilineLineBreaks()
     {
@@ -1060,8 +1006,6 @@ public class MohistLocalWorkflowProfileSpecs
         Assert.Contains("\n", description);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void WorkflowYamlSerializer_RoundTripsDescriptionField()
     {
@@ -1073,8 +1017,6 @@ public class MohistLocalWorkflowProfileSpecs
         Assert.Contains("description:", yaml);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void WorkflowYamlParser_ProfileWithoutDescriptionYieldsNullDescription()
     {
@@ -1088,8 +1030,6 @@ public class MohistLocalWorkflowProfileSpecs
         Assert.Null(definition.Description);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void WorkflowYamlParser_ProfileWithSingleLineDescription_ParsesItVerbatim()
     {
@@ -1173,8 +1113,6 @@ public class MohistLocalWorkflowProfileSpecs
         Assert.True(info.IsDefault);
     }
 
-[Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void DescriptionField_DoesNotInfluenceStageExecutionShape()
     {
@@ -1204,8 +1142,6 @@ public class MohistLocalWorkflowProfileSpecs
         Assert.Equal(parsed.Description, reparsed.Description);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void DefaultWorkflowYaml_OmitsStructuredMetadataFields()
     {
@@ -1234,8 +1170,6 @@ public class MohistLocalWorkflowProfileSpecs
             Assert.DoesNotContain(needle, yaml, StringComparison.Ordinal);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void WorkflowYamlParser_ParsesApprovalFeedbackTaskConfig()
     {
@@ -1269,8 +1203,6 @@ public class MohistLocalWorkflowProfileSpecs
         Assert.Equal("${{ prompts.apply-feedback }}", task.With["prompt"]?.GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void DefaultWorkflowDefinition_DeclaresApprovalFeedbackTaskConfig()
     {
@@ -1289,8 +1221,6 @@ public class MohistLocalWorkflowProfileSpecs
         Assert.Equal("${{ vars.agent }}", task.With["options"]?.GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void WorkflowYamlParser_ApprovalSectionAbsent_ReturnsNullApproval()
     {
@@ -1304,8 +1234,6 @@ public class MohistLocalWorkflowProfileSpecs
         Assert.Null(definition.Approval);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void WorkflowYamlParser_ApprovalFeedbackTaskMissingId_Throws()
     {
@@ -1325,8 +1253,6 @@ public class MohistLocalWorkflowProfileSpecs
         Assert.Contains("id", ex.Message);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void WorkflowYamlParser_ApprovalFeedbackTaskMissingTitle_Throws()
     {
@@ -1346,8 +1272,6 @@ public class MohistLocalWorkflowProfileSpecs
         Assert.Contains("title", ex.Message);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void WorkflowYamlSerializer_RoundTripsApprovalFeedbackTaskConfig()
     {
@@ -1372,8 +1296,6 @@ public class MohistLocalWorkflowProfileSpecs
         Assert.Equal("mohist/opencode", task.Uses);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void WorkflowYamlSerializer_RoundTripsWithoutApprovalSection_WhenAbsent()
     {
@@ -1391,8 +1313,6 @@ public class MohistLocalWorkflowProfileSpecs
         Assert.Null(reparsed.Approval);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void BuiltInApplyFeedbackPrompt_HasRequiredFrontmatterFields()
     {
@@ -1412,8 +1332,6 @@ public class MohistLocalWorkflowProfileSpecs
         Assert.Contains("resolution summary", body, StringComparison.OrdinalIgnoreCase);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void BuiltInApplyFeedbackPrompt_FrontmatterParsesCleanly()
     {
@@ -1452,7 +1370,7 @@ internal sealed class FakePromptFileStore : IPromptFileStore
     public string ReadAllText(string path) => _files[path];
 }
 
-[Collection("IntegrationIssue3")]
+[Collection("IntegrationIssue")]
 public class MohistLocalWorkflowProfileStartWorkSpecs
 {
     private readonly MohistIntegrationFixture _fixture;
@@ -1464,8 +1382,6 @@ public class MohistLocalWorkflowProfileStartWorkSpecs
         _client = fixture.Client;
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task StartWork_WithUnknownPromptReference_Returns400MissingPromptsWithMissingKeysDetails()
     {
@@ -1498,8 +1414,6 @@ public class MohistLocalWorkflowProfileStartWorkSpecs
         Assert.Contains("does-not-exist", missingKeys);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task StartWork_WithMultipleUnknownPromptReferences_ReturnsAllMissingKeysInDetails()
     {
@@ -1533,8 +1447,6 @@ public class MohistLocalWorkflowProfileStartWorkSpecs
         Assert.Contains("ghost-two", missingKeys);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task StartWork_WithKnownSystemPromptKey_DoesNotEmitMissingPromptsError()
     {
