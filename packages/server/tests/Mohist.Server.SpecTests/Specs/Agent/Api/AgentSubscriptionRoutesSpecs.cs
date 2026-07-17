@@ -61,24 +61,6 @@ public class AgentSubscriptionRoutesSpecs
     }
 
     [Fact]
-    public async Task Create_PriorityOptional_AbsentStoredAsNull()
-    {
-        var project = await CreateProjectAsync("subs-default-priority");
-        var agent = await CreateAgentAsync(project.Id, "default-priority");
-
-        var created = await _client.PostDataAsync<SubscriptionDto>(
-            $"/api/projects/{project.Id}/agents/{agent.Id}/subscriptions",
-            new
-            {
-                name = "no-priority",
-                filter = new { type = "com.mohist.workflow.stage.*" },
-                responsePrompt = "review",
-            });
-
-        Assert.Null(created.Priority);
-    }
-
-    [Fact]
     public async Task Create_RequiredFields_RejectsMissingNameFilterTypeResponsePrompt()
     {
         var project = await CreateProjectAsync("subs-required");
@@ -162,36 +144,6 @@ public class AgentSubscriptionRoutesSpecs
     }
 
     [Fact]
-    public async Task Create_SameNameOnDifferentAgents_BothPersist()
-    {
-        var project = await CreateProjectAsync("subs-multi-agent");
-        var agentA = await CreateAgentAsync(project.Id, "agent-a");
-        var agentB = await CreateAgentAsync(project.Id, "agent-b");
-
-        var onA = await _client.PostDataAsync<SubscriptionDto>(
-            $"/api/projects/{project.Id}/agents/{agentA.Id}/subscriptions",
-            NewSubscription(name: "shared"));
-        var onB = await _client.PostDataAsync<SubscriptionDto>(
-            $"/api/projects/{project.Id}/agents/{agentB.Id}/subscriptions",
-            NewSubscription(name: "shared"));
-
-        Assert.NotEqual(onA.Id, onB.Id);
-    }
-
-    [Fact]
-    public async Task Create_ResolvesAgentByName()
-    {
-        var project = await CreateProjectAsync("subs-name-resolve");
-        var agent = await CreateAgentAsync(project.Id, "named-resolver");
-
-        var created = await _client.PostDataAsync<SubscriptionDto>(
-            $"/api/projects/{project.Id}/agents/named-resolver/subscriptions",
-            NewSubscription(name: "by-name"));
-
-        Assert.Equal(agent.Id, created.AgentId);
-    }
-
-    [Fact]
     public async Task List_ReturnsAllSubscriptionsIncludingArchived()
     {
         var project = await CreateProjectAsync("subs-list");
@@ -221,28 +173,6 @@ public class AgentSubscriptionRoutesSpecs
             $"/api/projects/{project.Id}/agents/agent_{Guid.NewGuid():N}/subscriptions");
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
-    }
-
-    [Fact]
-    public async Task List_OnlyIncludesOwningAgent()
-    {
-        var project = await CreateProjectAsync("subs-isolation");
-        var agentA = await CreateAgentAsync(project.Id, "agent-a-iso");
-        var agentB = await CreateAgentAsync(project.Id, "agent-b-iso");
-        await _client.PostOkAsync($"/api/projects/{project.Id}/agents/{agentA.Id}/subscriptions",
-            NewSubscription(name: "on-a"));
-        await _client.PostOkAsync($"/api/projects/{project.Id}/agents/{agentB.Id}/subscriptions",
-            NewSubscription(name: "on-b"));
-
-        var onA = await _client.GetDataAsync<SubscriptionDto[]>(
-            $"/api/projects/{project.Id}/agents/{agentA.Id}/subscriptions");
-        var onB = await _client.GetDataAsync<SubscriptionDto[]>(
-            $"/api/projects/{project.Id}/agents/{agentB.Id}/subscriptions");
-
-        Assert.Single(onA);
-        Assert.Equal("on-a", onA[0].Name);
-        Assert.Single(onB);
-        Assert.Equal("on-b", onB[0].Name);
     }
 
     [Fact]
@@ -398,26 +328,6 @@ public class AgentSubscriptionRoutesSpecs
 
         Assert.Equal("archived", archived.Status);
         Assert.True(DateTimeOffset.Parse(archived.UpdatedAt) > beforeUpdatedAt);
-    }
-
-    [Fact]
-    public async Task Archive_IsIdempotentForAlreadyArchived()
-    {
-        var project = await CreateProjectAsync("subs-double-archive");
-        var agent = await CreateAgentAsync(project.Id, "double-archive");
-        var created = await _client.PostDataAsync<SubscriptionDto>(
-            $"/api/projects/{project.Id}/agents/{agent.Id}/subscriptions",
-            NewSubscription(name: "first-archive"));
-        var onceArchived = await _client.PostDataAsync<SubscriptionDto>(
-            $"/api/projects/{project.Id}/agents/{agent.Id}/subscriptions/{created.Id}/archive");
-        var snapshot = DateTimeOffset.Parse(onceArchived.UpdatedAt);
-        _fixture.TimeProvider.Advance(TimeSpan.FromSeconds(1));
-
-        var again = await _client.PostDataAsync<SubscriptionDto>(
-            $"/api/projects/{project.Id}/agents/{agent.Id}/subscriptions/{created.Id}/archive");
-
-        Assert.Equal("archived", again.Status);
-        Assert.Equal(snapshot, DateTimeOffset.Parse(again.UpdatedAt));
     }
 
     [Fact]

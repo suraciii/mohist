@@ -626,6 +626,9 @@ public class AgentJobGrainSpecs
         var with = JsonSerializer.Deserialize<JsonElement>(polled.With!);
         Assert.Equal(JsonValueKind.String, with.GetProperty("prompt").ValueKind);
         Assert.Equal("raw prompt only", with.GetProperty("prompt").GetString());
+
+        var variables = JsonSerializer.Deserialize<JsonElement>(polled.Variables!);
+        Assert.Equal("/tmp/agent-job-raw-only", variables.GetProperty("workspace").GetProperty("path").GetString());
     }
 
     [Fact]

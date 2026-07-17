@@ -128,6 +128,41 @@ public class AgentLauncherSpecs
     }
 
     [Fact]
+    public async Task Launch_WithContextRefs_RecordsThemAsSessionMetadataLabelsOnly()
+    {
+        var projectId = await CreateProjectAsync("launcher-context-refs");
+        var agent = await CreateAgentAsync(projectId, "context-refs-agent");
+
+        AgentLaunchResult result;
+        await using (var scope = _fixture.Services.CreateAsyncScope())
+        {
+            var launcher = scope.ServiceProvider.GetRequiredService<IAgentLauncher>();
+            result = await launcher.LaunchAsync(
+                agent,
+                prompt: "look at the issue",
+                new AgentLaunchContext(
+                    ProjectId: projectId,
+                    IssueNumber: 42,
+                    EpicNumber: 7,
+                    Repository: "feature-repo",
+                    WorkspacePath: "/tmp/launch-ctx",
+                    Title: null),
+                triggerLabels: null);
+        }
+
+        var record = await LoadSessionByIdAsync(result.SessionId);
+        Assert.NotNull(record);
+        Assert.Equal("42", record!.Session.Metadata.Label(GenericAgentSessionMetadata.IssueNumber));
+        Assert.Equal("7", record.Session.Metadata.Label(GenericAgentSessionMetadata.EpicNumber));
+        Assert.Equal("feature-repo", record.Session.Metadata.Label(GenericAgentSessionMetadata.Repository));
+        Assert.Equal("/tmp/launch-ctx", record.Session.Metadata.Label(GenericAgentSessionMetadata.WorkspacePath));
+
+        // Context refs are prompt context only — no lifecycle labels.
+        Assert.Null(record.Session.Metadata.Label(AgentSessionQueryMetadataKeys.WorkflowRunId));
+        Assert.Null(record.Session.Metadata.Label(AgentSessionQueryMetadataKeys.SessionName));
+    }
+
+    [Fact]
     public async Task Launch_TriggerReplayAfterJobDeactivation_ReusesDurableWork()
     {
         var projectId = await CreateProjectAsync("launcher-trigger-replay");

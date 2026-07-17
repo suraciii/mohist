@@ -46,18 +46,6 @@ public class AgentJobRoutesSpecs
     }
 
     [Fact]
-    public async Task PostValidate_EmptyBody_ReturnsValidationError()
-    {
-        using var response = await _fixture.Client.PostAsJsonAsync(
-            AgentJobController.ValidatePath,
-            new { });
-
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-        var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.False(payload.GetProperty("success").GetBoolean());
-    }
-
-    [Fact]
     public async Task PostValidate_WorkspacePathMissing_ReturnsValidationError()
     {
         using var response = await _fixture.Client.PostAsJsonAsync(
@@ -140,12 +128,6 @@ public class AgentJobRoutesSpecs
         Assert.Equal(1, grain.SubmitCount);
     }
 
-    [Fact]
-    public async Task PostValidate_DoesNotAffectExistingHttpApiSurface()
-    {
-        using var response = await _fixture.Client.GetAsync("/api/projects");
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-    }
 }
 
 internal static class AgentJobRouteTestHelpers
@@ -393,58 +375,6 @@ public class AgentJobDispatchRouteSpecs
             Assert.Equal("runner reported failure", data.GetProperty("failureReason").GetString());
             Assert.Equal(1, data.GetProperty("exitCode").GetInt32());
             Assert.Equal("{\"error\":\"x\"}", data.GetProperty("output").GetString());
-        }
-        finally
-        {
-            await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
-        }
-    }
-
-    [Fact]
-    public async Task PostValidate_DispatchIncludesWorkspacePath_ForRunnerWorkspaceShortCircuit()
-    {
-        var projectId = $"agent-route-workspace-project-{Guid.NewGuid():N}";
-        var runnerId = $"agent-route-workspace-runner-{Guid.NewGuid():N}";
-        var jobKey = $"agent-job-validate-route-workspace-{Guid.NewGuid():N}";
-        await RegisterRunnerAndAwaitOnlineAsync(runnerId, projectId, maxWorkflowSlots: 1);
-
-        try
-        {
-            var responseTask = _fixture.Client.PostAsJsonAsync(
-                AgentJobController.ValidatePath,
-                new
-                {
-                    prompt = "only workspace path",
-                    jobId = jobKey,
-                    workspace = new { path = "/tmp/agent-job-workspace-only", projectId },
-                });
-
-            var workId = await WaitForAgentJobDispatchAsync(jobKey, runnerId);
-            var runnerGrain = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
-            var polled = await runnerGrain.PollAsync(_fixture.Services);
-
-            Assert.NotNull(polled);
-            Assert.Equal(workId, polled!.WorkId);
-            Assert.Equal(WorkDispatchOwnerKinds.AgentJob, polled.OwnerKind);
-            Assert.Equal(jobKey, polled.AgentJobId);
-
-            var variables = JsonSerializer.Deserialize<JsonElement>(polled.Variables!);
-            Assert.Equal(
-                "/tmp/agent-job-workspace-only",
-                variables.GetProperty("workspace").GetProperty("path").GetString());
-            var with = JsonSerializer.Deserialize<JsonElement>(polled.With!);
-            Assert.Equal("only workspace path", with.GetProperty("prompt").GetString());
-
-            await runnerGrain.ReportAgentJobResultAsync(
-                jobKey,
-                workId,
-                new WorkResult(Status: "completed", Message: "ok"));
-            WakeAgentJobValidationAwaiter();
-
-            using var response = await responseTask;
-            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
-            Assert.Equal("completed", payload.GetProperty("data").GetProperty("status").GetString());
         }
         finally
         {

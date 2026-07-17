@@ -352,6 +352,13 @@ public class AgentUsageReporterSpecs
         }
         Assert.NotNull(result.CumulativeCostPerShip);
         Assert.Equal(7, result.CumulativeCostPerShip!.Count);
+        foreach (var point in result.CumulativeCostPerShip)
+        {
+            Assert.Null(point.CumulativeCost);
+            Assert.Null(point.Currency);
+            Assert.Equal(0, point.CumulativeShippedCount);
+            Assert.Null(point.CostPerShip);
+        }
     }
 
     [Fact]
@@ -416,6 +423,8 @@ public class AgentUsageReporterSpecs
         }
         var last = result.Buckets[^1];
         Assert.Equal(result.RangeTo, last.BucketEnd);
+        Assert.NotNull(result.CumulativeCostPerShip);
+        Assert.Equal(result.Buckets.Count, result.CumulativeCostPerShip!.Count);
     }
 
     [Fact]
@@ -483,6 +492,162 @@ public class AgentUsageReporterSpecs
         Assert.NotNull(result.CumulativeCostPerShip);
         Assert.Equal(result.Buckets.Count, result.CumulativeCostPerShip!.Count);
         Assert.Equal(30, result.CumulativeCostPerShip.Count);
+    }
+
+    [Fact]
+    public async Task GetUsageTimeseriesAsync_BucketsSumSessionsWithUsage_SkipSessionsWithoutUsage()
+    {
+        var project = await CreateProjectAsync();
+        var bucketDay = Today.AddDays(-2);
+        await InsertSessionAsync(project.Id, bucketDay.AddHours(8),
+            inputTokens: 100, outputTokens: 50, totalTokens: 150, costAmount: 0.02, costCurrency: "USD");
+        await InsertSessionAsync(project.Id, bucketDay.AddHours(12),
+            inputTokens: 200, outputTokens: 80, totalTokens: 280, costAmount: 0.05, costCurrency: "USD",
+            agentSessionId: "runtime-session-1");
+        await InsertSessionWithoutUsageAsync(project.Id, Today.AddDays(-3).AddHours(10));
+
+        var service = ResolveReporter();
+        var result = await service.GetUsageTimeseriesAsync(project.Id);
+
+        var bucket = result.Buckets.Single(b => b.BucketStart.Date == bucketDay.Date);
+        Assert.Equal(300, bucket.InputTokens);
+        Assert.Equal(130, bucket.OutputTokens);
+        Assert.Equal(430, bucket.TotalTokens);
+        Assert.Equal(0.07, bucket.CostAmount);
+        Assert.Equal("USD", bucket.CostCurrency);
+
+        var usagelessDay = result.Buckets.Single(b => b.BucketStart.Date == Today.AddDays(-3));
+        Assert.Equal(0, usagelessDay.InputTokens);
+        Assert.Equal(0.0, usagelessDay.CostAmount);
+    }
+
+    [Fact]
+    public async Task GetUsageTimeseriesAsync_SessionsOutsideRangeAreExcludedFromBuckets()
+    {
+        var project = await CreateProjectAsync();
+        // Before the 7-day window.
+        await InsertSessionAsync(project.Id, Today.AddDays(-10).AddHours(8),
+            inputTokens: 999, outputTokens: 999, totalTokens: 1998, costAmount: 9.99, costCurrency: "USD");
+        // At rangeTo (exclusive upper bound).
+        await InsertSessionAsync(project.Id, Today.AddDays(1),
+            inputTokens: 999, outputTokens: 999, totalTokens: 1998, costAmount: 9.99, costCurrency: "USD");
+
+        var service = ResolveReporter();
+        var result = await service.GetUsageTimeseriesAsync(project.Id);
+
+        Assert.Equal(0, result.Buckets.Sum(b => b.InputTokens));
+        Assert.Equal(0.0, result.Buckets.Sum(b => b.CostAmount));
+    }
+
+    [Fact]
+    public async Task GetUsageTimeseriesAsync_CumulativeCostPrefixSums_CostPerShipNullWithoutShipped()
+    {
+        var project = await CreateProjectAsync();
+        // Sessions land at bucket index 2 and 6 of the 7-day window.
+        await InsertSessionAsync(project.Id, Today.AddDays(-4).AddHours(10),
+            costAmount: 0.02, costCurrency: "USD");
+        await InsertSessionAsync(project.Id, Today.AddHours(10),
+            costAmount: 0.05, costCurrency: "USD");
+
+        var service = ResolveReporter();
+        var result = await service.GetUsageTimeseriesAsync(project.Id);
+
+        var points = result.CumulativeCostPerShip!;
+        Assert.Equal(7, points.Count);
+
+        // Before the first sample the cumulative cost is empty, not zero.
+        for (var i = 0; i < 2; i++)
+        {
+            Assert.Null(points[i].CumulativeCost);
+            Assert.Null(points[i].Currency);
+            Assert.Equal(0, points[i].CumulativeShippedCount);
+            Assert.Null(points[i].CostPerShip);
+        }
+
+        Assert.Equal(0.02, points[2].CumulativeCost);
+        Assert.Equal("USD", points[2].Currency);
+        for (var i = 3; i <= 5; i++)
+        {
+            Assert.Equal(0.02, points[i].CumulativeCost);
+        }
+        Assert.Equal(0.07, points[6].CumulativeCost);
+
+        // Nothing shipped anywhere: cost-per-ship stays empty.
+        Assert.All(points, point => Assert.Equal(0, point.CumulativeShippedCount));
+        Assert.All(points, point => Assert.Null(point.CostPerShip));
+    }
+
+    [Fact]
+    public async Task GetUsageTimeseriesAsync_CumulativeShippedPrefixSums_IncludePreWindowIssues()
+    {
+        var project = await CreateProjectAsync();
+        // Shipped before the window: carried into every point.
+        await InsertDoneIssueAsync(project.Id, number: 1, title: "pre",
+            completedAt: Today.AddDays(-8).AddHours(12));
+        // In-window spend at bucket index 0 so cost-per-ship is defined.
+        await InsertSessionAsync(project.Id, Today.AddDays(-6).AddHours(10),
+            costAmount: 0.60, costCurrency: "USD");
+        // Shipped at bucket index 2 and 5.
+        await InsertDoneIssueAsync(project.Id, number: 2, title: "mid",
+            completedAt: Today.AddDays(-4).AddHours(12));
+        await InsertDoneIssueAsync(project.Id, number: 3, title: "late",
+            completedAt: Today.AddDays(-1).AddHours(8));
+
+        var service = ResolveReporter();
+        var result = await service.GetUsageTimeseriesAsync(project.Id);
+
+        var points = result.CumulativeCostPerShip!;
+        Assert.Equal(1, points[0].CumulativeShippedCount);
+        Assert.Equal(0.60, points[0].CumulativeCost);
+        Assert.Equal(0.60, points[0].CostPerShip);
+        Assert.Equal(1, points[1].CumulativeShippedCount);
+        Assert.Equal(2, points[2].CumulativeShippedCount);
+        Assert.Equal(0.30, points[2].CostPerShip!.Value, precision: 5);
+        Assert.Equal(2, points[3].CumulativeShippedCount);
+        Assert.Equal(2, points[4].CumulativeShippedCount);
+        Assert.Equal(3, points[5].CumulativeShippedCount);
+        Assert.Equal(0.20, points[5].CostPerShip!.Value, precision: 5);
+        Assert.Equal(3, points[6].CumulativeShippedCount);
+    }
+
+    [Fact]
+    public async Task GetUsageTimeseriesAsync_CumulativeZeroCost_DefinedWhenShippedOrSampled()
+    {
+        var project = await CreateProjectAsync();
+        // Shipped (bucket index 2) before any usage sample exists.
+        await InsertDoneIssueAsync(project.Id, number: 1, title: "early-ship",
+            completedAt: Today.AddDays(-4).AddHours(12));
+        // Genuine zero-cost session at bucket index 5.
+        await InsertSessionAsync(project.Id, Today.AddDays(-1).AddHours(10),
+            inputTokens: 0, outputTokens: 0, totalTokens: 0, costAmount: 0.0, costCurrency: "USD");
+
+        var service = ResolveReporter();
+        var result = await service.GetUsageTimeseriesAsync(project.Id);
+
+        var points = result.CumulativeCostPerShip!;
+        for (var i = 0; i < 2; i++)
+        {
+            Assert.Null(points[i].CumulativeCost);
+            Assert.Null(points[i].CostPerShip);
+        }
+
+        // Shipped > 0 with no samples yet: cumulative cost is the defined
+        // genuine zero without currency, cost-per-ship a genuine 0.0.
+        for (var i = 2; i <= 4; i++)
+        {
+            Assert.Equal(0.0, points[i].CumulativeCost);
+            Assert.Null(points[i].Currency);
+            Assert.Equal(1, points[i].CumulativeShippedCount);
+            Assert.Equal(0.0, points[i].CostPerShip);
+        }
+
+        // After the zero-cost sample the currency resolves; values stay 0.0.
+        for (var i = 5; i <= 6; i++)
+        {
+            Assert.Equal(0.0, points[i].CumulativeCost);
+            Assert.Equal("USD", points[i].Currency);
+            Assert.Equal(0.0, points[i].CostPerShip);
+        }
     }
 
     private async Task<ProjectDto> CreateProjectAsync()
