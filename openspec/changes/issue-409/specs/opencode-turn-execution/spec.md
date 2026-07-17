@@ -25,9 +25,9 @@ The awaited `client.session.prompt()` response SHALL be the sole completion auth
 - **THEN** the runtime SHALL NOT treat the turn as complete
 - **AND** SHALL continue to await the prompt response
 
-### Requirement: The executor-owned deadline is the only backstop for a hanging turn
+### Requirement: The executor-owned deadline is the backstop for a silently hanging turn
 
-The caller's abort signal SHALL be the only execution deadline for a work turn. When no explicit deadline is supplied, a single prompt SHALL default to a 60-minute deadline that an explicit deadline MAY override. On deadline the runtime SHALL call `client.session.abort()` and return an `interrupted` result, and the work SHALL fail. The runtime MUST NOT run an ACP-style liveness probe or quiet-threshold detector; the executor deadline SHALL be the sole backstop for a hanging turn.
+The caller's abort signal SHALL be the execution deadline for a work turn. When no explicit deadline is supplied, a single prompt SHALL default to a 60-minute deadline that an explicit deadline MAY override. On deadline the runtime SHALL call `client.session.abort()` and return an `interrupted` result, and the work SHALL fail. The runtime MUST NOT run an ACP-style liveness probe or quiet-threshold detector. The deadline backstops a turn that hangs without producing provider-error retry events; provider errors that do produce retry events fail earlier per the provider-error failure policy.
 
 #### Scenario: A deadline aborts a hanging turn
 
@@ -41,6 +41,34 @@ The caller's abort signal SHALL be the only execution deadline for a work turn. 
 - **WHEN** a turn produces no visible activity for an extended period but stays within its deadline
 - **THEN** the runtime SHALL NOT send a liveness probe or classify a quiet threshold
 - **AND** SHALL continue until the prompt response arrives or the executor deadline aborts the turn
+
+### Requirement: A provider error fails the turn only when judged non-recoverable
+
+A provider error SHALL fail a work turn only when judged non-recoverable; a recoverable error (transient 429, 5xx, network jitter) SHALL be left to OpenCode to retry and SHALL NOT be failed by the runtime. The runtime SHALL judge recoverability from `session.status` retry events (`type: "retry"`, carrying `attempt`, `message`, `next`) and MUST NOT scan log files. Non-recoverability resolves to abort-and-fail in two cases: (a) non-recoverable by nature — the retry event `message` matches a non-recoverable pattern set (quota/credit/billing and equivalent wording, including non-English), matched on first occurrence; (b) non-recoverable by evidence — a recoverable error retries until `attempt` reaches threshold N (default 5) without the turn completing. A recoverable error that completes the turn within N SHALL continue without failing. Provider errors OpenCode itself judges non-recoverable (authentication, invalid-request, context-overflow, content-policy) reach the caller via the awaited prompt rejection and need no runtime override. On a non-recoverable judgement the runtime SHALL call `client.session.abort()` and return a `turn failed` result carrying the provider message as diagnostics. The non-recoverable pattern set and N SHALL be runner-level configurable with defaults covering common providers.
+
+#### Scenario: A quota-exhausted error fails on the first retry event
+
+- **WHEN** a `session.status` retry event's `message` matches a non-recoverable (quota/credit/billing) pattern
+- **THEN** the runtime SHALL call `client.session.abort()` and fail the turn on the first occurrence
+- **AND** SHALL surface the provider message as diagnostics
+
+#### Scenario: A recoverable transient error is retried, not failed
+
+- **WHEN** a transient provider error occurs and the turn completes within the consecutive-retry threshold N
+- **THEN** the runtime SHALL NOT fail the turn
+- **AND** SHALL let OpenCode retry until the turn completes
+
+#### Scenario: Consecutive failures are judged non-recoverable
+
+- **WHEN** a recoverable error retries and `attempt` reaches threshold N (default 5) without the turn completing
+- **THEN** the runtime SHALL call `client.session.abort()` and fail the turn
+- **AND** SHALL surface the provider message as diagnostics
+
+#### Scenario: Provider-error detection reads retry events, not logs or quiet detectors
+
+- **WHEN** the runtime judges provider-error recoverability
+- **THEN** it SHALL read `session.status` retry events only
+- **AND** SHALL NOT scan OpenCode log files or run a quiet-threshold/liveness detector
 
 ### Requirement: The turn supplies the final assistant text as a private turn fact
 

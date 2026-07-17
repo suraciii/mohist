@@ -66,11 +66,13 @@ Both Actions stay registered. `opencodeAction` (`actions/opencode.ts`) stops cal
 
 **Rationale:** preserves #407's stable identity and the `notStarted`/`unavailable`/`missing`/`conflict` taxonomy without re-specifying it. **Alternative considered:** a parallel session-command module per backend — partially adopted (source-keyed dispatch) but the request/result shape stays the single Mohist-owned one so the runtime handler needs no Workflow Action Input or Agent definition.
 
-### D6. Reuse the executor-owned deadline; remove liveness for the Workflow path
+### D6. Executor deadline for silent hangs; provider errors fail earlier via retry events
 
-Turn completion is the awaited `client.session.prompt()` response. The per-work abort signal the `WorkExecutor` already constructs is the sole deadline (default 60 min, overridable — the existing `DEFAULT_TIMEOUT_MS`). On deadline the runtime calls `client.session.abort()` and returns `interrupted`. The ACP liveness probe, quiet-threshold, and probe timeout are removed for the Workflow path (retained for the AgentJob ACP path until #410). `OpenCodeRuntime` performs no silent detection.
+Turn completion is the awaited `client.session.prompt()` response. The per-work abort signal the `WorkExecutor` already constructs is the deadline for a turn that hangs silently (default 60 min, overridable — the existing `DEFAULT_TIMEOUT_MS`). On deadline the runtime calls `client.session.abort()` and returns `interrupted`. The ACP liveness probe, quiet-threshold, and probe timeout are removed for the Workflow path (retained for the AgentJob ACP path until #410). `OpenCodeRuntime` performs no silent/quiet-threshold detection.
 
-**Rationale:** one backstop, matching the upstream decision. **Trade-off:** a silently hung provider now consumes the full deadline instead of being probed at 5 min — accepted; mitigated by stage-level timeout tuning, not by reintroducing detection. **Alternative considered:** an in-runtime quiet detector — rejected by the design.
+Provider errors fail earlier than the deadline, but only when judged non-recoverable (see `design/runtimes/opencode.md` 「Provider 错误失败策略」). The runtime watches `session.status` retry events (`type: "retry"`, `attempt`/`message`/`next`) and aborts the turn when (a) `message` matches a non-recoverable pattern (quota/credit/billing; runner-level configurable, defaults cover common providers including non-English wording) on first occurrence, or (b) a recoverable error retries until `attempt` reaches N (default 5) without the turn completing. Recoverable errors that complete within N are left to OpenCode. This is error-event-driven, not silent/quiet-time detection, so it does not reintroduce the liveness probe.
+
+**Rationale:** the deadline backstops genuinely silent hangs; actively-erroring providers surface via structured retry events and fail fast, avoiding the #408-class failure where a quota-exhausted model was retried for ~20 min and then reported as a misleading probe timeout. **Trade-off:** a non-recoverable error whose wording the pattern set misses degrades to the N-consecutive path rather than failing on the first occurrence — bounded, not a 60-min hang. **Alternative considered:** an in-runtime quiet detector — rejected (silent detection is retired); pure deadline-only with no provider-error override — rejected (OpenCode retries quota mis-classified as rate-limit indefinitely).
 
 ### D7. One global event subscription; idempotent projection; messages-snapshot reconciliation
 
@@ -80,7 +82,7 @@ The runtime maintains one `client.global.event()` subscription and routes by Ses
 
 ### D8. Normalize SDK errors to a small runtime result set; no global Workflow enum
 
-At the boundary, SDK errors map to a small `RuntimeTurnResult` discriminated set: `invalid input`, `unavailable runtime`, `missing Session`, `incompatible runtime`, `permission required`, `interrupted`, `turn failed`. Provider detail is diagnostics only. Each caller (`mohist/opencode` → TaskRun; later AgentJob executor → AgentJob contract) reports failure through its own channel; no global Workflow error enum is introduced. Unsatisfiable interactive permissions abort the turn with a `permission required` result; Mohist never auto-approves and never creates a Workflow Approval.
+At the boundary, SDK errors map to a small `RuntimeTurnResult` discriminated set: `invalid input`, `unavailable runtime`, `missing Session`, `incompatible runtime`, `permission required`, `interrupted`, `turn failed`. Provider detail is diagnostics only. A provider error judged non-recoverable per D6 surfaces as `turn failed` with the provider message as diagnostics. Each caller (`mohist/opencode` → TaskRun; later AgentJob executor → AgentJob contract) reports failure through its own channel; no global Workflow error enum is introduced. Unsatisfiable interactive permissions abort the turn with a `permission required` result; Mohist never auto-approves and never creates a Workflow Approval.
 
 **Rationale:** keeps the runtime backend-neutral and preserves the #408 rule that runtime/completion facts stay out of Action Output. **Alternative considered:** a shared cross-caller `ErrorKind` enum — rejected.
 
@@ -99,7 +101,7 @@ Following `design/testing.md`, default Runner tests inject a fake `OpenCodeRunti
 - **Two backends coexisting (ACP for AgentJob + OpenCode for Workflow) raises coupling risk** → source-keyed dispatch with a single Mohist-owned request/result shape; no shared mutable cross-backend state; the Workflow→Agent domain-dependency invariant is preserved.
 - **Duplicate turns on redelivery within the crash window** → accepted; in-process dispatch deduplication retained; no deterministic Prompt ID/replay state added.
 - **Event loss yields a stale transcript** → reconcile via `session.messages()` snapshot on completion and reconnect; idempotent projection by message/part ID.
-- **Removed liveness lets a hung provider occupy a slot for up to the 60-min default** → accepted trade-off (explicit design decision); tuned via per-stage timeouts, not by reintroducing detection.
+- **A provider error occupies a slot until judged non-recoverable or the deadline** → actively-erroring providers (retry events) fail at the non-recoverable pattern (first occurrence) or the N-consecutive threshold (default 5, ~1 min); only a truly silent hang (no retry events) reaches the 60-min default deadline. A mis-classified non-recoverable error whose wording the pattern set misses degrades to the N path, not a 60-min hang.
 - **Legacy persisted Workflow bindings carry `acpSessionId`** → treated as "current Runtime Session missing" → explicit Reset hint; no data rewrite, alias, or fallback.
 - **`client.session.create()`/model DTO shape assumptions may be wrong** → resolved by the D2 smoke verification before implementation; drift fixes the design table first.
 
