@@ -32,6 +32,15 @@ Once selected, `mo issue template get <id>` returns the raw body. It is markdown
 
 These cut across all three templates and all sections; do not restate them inside the body.
 
+An issue body is the working context for the agent that will plan and build it — usually the only context it gets. Write it as such:
+
+- **State what we want.** The need and the acceptance, unambiguous to a reader who never saw the conversation that produced it.
+- **Record the decisions.** Anything the agent cannot derive from the code — target shape, trade-offs already made, how sibling issues divide the work — must be written into the body, or it will be re-decided inconsistently.
+- **Provide decision-aiding context.** Evidence anchors, impact scope, and boundaries that change what the agent will do. Background that changes nothing is filler.
+- **Cut what the agent can look up.** Pixel measurements, field inventories, file lists — anything cheaply obtainable from the code or a quick check is noise, not context.
+
+Style rules:
+
 - **Literal, not figurative.** No metaphors, no anthropomorphism ("the CLI lies", "dead code", "silently drops"). Describe what actually happens in plain terms.
 - **Product source language.** Use the names the product already uses for its own concepts — issue, workflow, stage, label, prerequisite, comment, epic. Do not invent synonyms.
 - **No source paths in the body.** The body must not cite source paths, file names, line numbers, or symbol names. Mapping to code is the Plan stage's job.

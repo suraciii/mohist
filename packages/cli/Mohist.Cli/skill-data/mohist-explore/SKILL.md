@@ -38,6 +38,7 @@ These govern how you explore and how you record the user's thinking. They are no
 - **Literal, not figurative.** No metaphors and no anthropomorphism ("the CLI lies", "dead code", "silently drops", "wiring"). Describe what actually happens in plain terms.
 - **Product source language.** Use the names the product already uses for its own concepts — issue, workflow, stage, label, prerequisite, comment, feedback, epic, repository. Do not invent fancy synonyms or borrowed jargon.
 - **Explore code internally, record in product/domain terms.** You explore the codebase to ground your understanding, but what you record for the user is product- and domain-facing prose. Code paths are your evidence, never your output.
+- **Write for the implementing agent.** The clarification becomes the issue body, which is usually the only context the Plan/Build agent gets. Keep what aids its decisions — the need, the decisions already made, the boundary — and cut what it can cheaply look up in the code itself. The full body-writing rules live in `mohist-create-issue`'s universal writing rules.
 
 ## Workflow
 
