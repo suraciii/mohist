@@ -332,17 +332,20 @@ interface ContextGroupViewProps {
 
 export function ContextGroupView({ title, tools, hasError }: ContextGroupViewProps) {
   const [expanded, setExpanded] = useState(false)
-  const [titlePrefix, titleDetail] = title.split(' · ', 2)
-  const singleContextTool = tools.length === 1 ? tools[0] : undefined
-  const canExpandSingleContextTool = singleContextTool && singleContextTool.status !== 'running' && singleContextTool.status !== 'pending'
-  const singleContextToolLabel = singleContextTool ? getToolDisplayArgs(singleContextTool.normalizedName, singleContextTool.input) : []
+  const titleSegments = title.split(' · ')
+  const titlePrefix = titleSegments[0]
+  const titleDetail = titleSegments.length > 1 ? titleSegments.slice(1).join(' · ') : null
 
   const rowClass = hasError
     ? 'flex flex-wrap items-center gap-x-2 gap-y-1 px-2 py-1.5 min-w-0 bg-danger-subtle/40 text-danger rounded-sm hover:bg-danger-subtle/60'
     : 'flex flex-wrap items-center gap-x-2 gap-y-1 px-2 py-1.5 min-w-0 text-foreground/90 hover:bg-muted/40 rounded-sm transition-colors'
 
   return (
-    <div className="w-full min-w-0" data-tone={hasError ? 'danger' : 'neutral'}>
+    <div
+      className="w-full min-w-0"
+      data-testid="context-group-row"
+      data-tone={hasError ? 'danger' : 'neutral'}
+    >
       <Button
         variant="ghost"
         size="sm"
@@ -355,12 +358,16 @@ export function ContextGroupView({ title, tools, hasError }: ContextGroupViewPro
           className={`h-2 w-2 rounded-full shrink-0 ${hasError ? 'bg-danger' : 'bg-info'}`}
         />
         <span
+          data-testid="context-group-summary-prefix"
           className={`text-xs font-medium shrink-0 ${hasError ? 'text-danger' : 'text-foreground'}`}
         >
           {titlePrefix}
         </span>
         {titleDetail && (
-          <span className={`text-xs truncate min-w-0 max-w-[40ch] ${hasError ? 'text-danger/80' : 'text-muted-foreground'}`}>
+          <span
+            data-testid="context-group-summary-detail"
+            className={`text-xs truncate min-w-0 max-w-[40ch] ${hasError ? 'text-danger/80' : 'text-muted-foreground'}`}
+          >
             {titleDetail}
           </span>
         )}
@@ -383,38 +390,13 @@ export function ContextGroupView({ title, tools, hasError }: ContextGroupViewPro
         </svg>
       </Button>
       {expanded && (
-        <div data-testid="context-group-children" className="min-w-0 mt-1 space-y-0.5">
-          {singleContextTool && canExpandSingleContextTool ? (
-            <div className="px-3 py-2 text-xs text-muted-foreground">
-              <div className="font-medium text-xs text-muted-foreground mb-1">
-                {singleContextTool.normalizedName === 'read' || singleContextTool.normalizedName === 'read_file' ? 'Reading' : singleContextTool.normalizedName}
-              </div>
-              {singleContextToolLabel.length > 0 && (
-                <div className="flex flex-wrap gap-1 mb-2">
-                  {singleContextToolLabel.map((arg) => (
-                    <span key={arg} className="rounded bg-muted px-1 py-0.5 font-mono text-muted-foreground">{arg}</span>
-                  ))}
-                </div>
-              )}
-              {singleContextTool.output && (
-                <pre data-scrollable="" className="whitespace-pre-wrap break-all text-xs text-muted-foreground bg-muted rounded p-2 max-h-24 overflow-auto">
-                  {singleContextTool.output}
-                </pre>
-              )}
-              {singleContextTool.input && (
-                <div className="mt-2">
-                  <div className="font-medium text-xs text-muted-foreground mb-1">Input</div>
-                  <pre data-scrollable="" className="whitespace-pre-wrap break-all text-xs text-muted-foreground bg-muted rounded p-2 max-h-24 overflow-auto">
-                    {singleContextTool.input}
-                  </pre>
-                </div>
-              )}
-            </div>
-          ) : (
-            tools.map((tool) => (
-              <ToolRowView key={tool.id} part={tool} />
-            ))
-          )}
+        <div
+          data-testid="context-group-children"
+          className="min-w-0 mt-1 space-y-0.5"
+        >
+          {tools.map((tool) => (
+            <ToolRowView key={tool.id} part={tool} />
+          ))}
         </div>
       )}
     </div>

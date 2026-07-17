@@ -164,26 +164,6 @@ describe('ContextGroupView', () => {
     expect(screen.getByText('2 reads')).toBeInTheDocument()
   })
 
-  it('shows a single expanded read summary when the group has one completed context tool', () => {
-    const tool = makeToolPart({
-      id: 't1',
-      normalizedName: 'read',
-      isContextTool: true,
-      status: 'completed',
-      input: JSON.stringify({ filePath: '/repo/foo.ts' }),
-      output: 'file contents here',
-    })
-
-    const { container } = render(
-      <ContextGroupView title="Explored · /repo/foo.ts" tools={[tool]} hasError={false} />,
-    )
-
-    fireEvent.click(screen.getByRole('button'))
-
-    expect(container.textContent).toContain('Reading')
-    expect(container.textContent).toContain('file contents here')
-  })
-
   it('lists each tool via ToolRowView when the group has more than one tool', () => {
     const tools = [
       makeToolPart({ id: 't1', normalizedName: 'read', isContextTool: true, status: 'completed' }),
