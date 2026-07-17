@@ -213,9 +213,9 @@ describe("mohist/acp-agent cancelAndReturn bounded cleanup", () => {
 })
 
 describe("mohist/acp-agent monitorPrompt prompt_timeout diagnostics", () => {
-  it("PromptTimesOutWithProviderDiagnostic_ErrorMessageContainsDiagnostic_AndFailureCategoryIsPromptTimeout", async () => {
+  it("PromptTimesOutWithRecoverableProviderDiagnostic_ErrorContainsNoDiagnostic_AndFailureCategoryStaysPromptTimeout", async () => {
     useAcpFakeTimers()
-    useAcpProviderDiagnostic(tokenPlanLimitDiagnostic("2026-06-03T16:49:06.000Z"))
+    useAcpProviderDiagnostic(contextOverflowDiagnostic("2026-06-30T00:00:00.500Z"))
     const fixture = createFixture("cancel-hangs")
     setAcpProcessFactoryForTest(() => createFakeProcess(fixture.agent))
 
@@ -232,13 +232,10 @@ describe("mohist/acp-agent monitorPrompt prompt_timeout diagnostics", () => {
 
     expect(result.status).toBe("failure")
     expect(result.message ?? "").toContain("Timed out after")
-    expect(result.message ?? "").toContain("Opencode provider error: 2056 token_plan_limit_error on minimax-coding-plan/MiniMax-M3 - Token Plan usage limit reached")
+    expect(result.message ?? "").not.toContain("Opencode provider error")
 
     const output = JSON.parse(result.output ?? "{}") as Record<string, unknown>
-    const providerError = output.providerError as Record<string, unknown> | undefined
-    expect(providerError?.statusCode).toBe(2056)
-    expect(providerError?.errorType).toBe("token_plan_limit_error")
-    expect(providerError?.message).toContain("Token Plan usage limit reached")
+    expect(output.providerError).toBeUndefined()
 
     const failed = fixture.serverConnection.calls
       .filter((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "session.liveness")
@@ -246,14 +243,14 @@ describe("mohist/acp-agent monitorPrompt prompt_timeout diagnostics", () => {
       .find((payload) => payload.status === "failed")
     expect(failed).toBeTruthy()
     expect(failed?.failureReason).toBe("prompt_timeout")
-    expect((failed?.providerError as Record<string, unknown>)?.statusCode).toBe(2056)
+    expect(failed?.providerError).toBeUndefined()
 
     const terminal = fixture.serverConnection.calls
       .filter((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "session.closed")
       .map((entry) => entry.payload as Record<string, unknown>)
       .at(-1)
     expect(terminal?.failureCategory).toBe("prompt_timeout")
-    expect(String(terminal?.failureReason)).toContain("Opencode provider error: 2056 token_plan_limit_error")
+    expect(String(terminal?.failureReason)).not.toContain("Opencode provider error")
   })
 
   it("PromptTimesOutWithoutProviderDiagnostic_ErrorContainsNoDiagnostic_AndFailureCategoryStillPromptTimeout", async () => {
@@ -410,17 +407,14 @@ function socketDiagnostic(occurredAt: string): OpencodeProviderErrorDiagnostic {
   }
 }
 
-function tokenPlanLimitDiagnostic(occurredAt: string): OpencodeProviderErrorDiagnostic {
+function contextOverflowDiagnostic(occurredAt: string): OpencodeProviderErrorDiagnostic {
   return {
     sessionId: "fake-session-1",
-    summary: "Opencode provider error: 2056 token_plan_limit_error on minimax-coding-plan/MiniMax-M3 - Token Plan usage limit reached",
-    providerId: "minimax-coding-plan",
-    modelId: "MiniMax-M3",
-    statusCode: 2056,
+    summary: "Opencode provider error: AI_APICallError on openai/gpt-5.6-terra - Your input exceeds the context window of this model. Please adjust your input and try again.",
+    providerId: "openai",
+    modelId: "gpt-5.6-terra",
     errorName: "AI_APICallError",
-    errorType: "token_plan_limit_error",
-    message: "Token Plan usage limit reached",
-    retryable: true,
+    message: "Your input exceeds the context window of this model. Please adjust your input and try again.",
     occurredAt,
   }
 }

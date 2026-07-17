@@ -104,6 +104,15 @@ describe("opencode log diagnostics", () => {
     })).toBe(false)
   })
 
+  it("does not classify context-overflow errors as fail-fast (opencode auto-recovers via compaction)", () => {
+    expect(isFailFastOpencodeProviderError({
+      sessionId: "ses_overflow",
+      summary: "Opencode provider error: AI_APICallError on openai/gpt-5.6-terra - Your input exceeds the context window of this model. Please adjust your input and try again.",
+      errorName: "AI_APICallError",
+      message: "Your input exceeds the context window of this model. Please adjust your input and try again.",
+    })).toBe(false)
+  })
+
   it("reads tail of large log files", async () => {
     const largePrefix = `${"x".repeat(11 * 1024 * 1024)}\n`
     const errorLine = `timestamp=2026-06-14T10:12:32.370Z level=ERROR run=big message="stream error" providerID=kimi-for-coding modelID=k2p7 session.id=ses_big small=false agent=build mode=primary error.error="AI_APICallError: quota exceeded"\n`
