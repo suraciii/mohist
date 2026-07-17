@@ -81,6 +81,7 @@ describe("CleanupLoop", () => {
         retentionRemoved: 0,
         budgetRemoved: 0,
         guardAborted: 0,
+        stuckResolved: 0,
         workspaceUsageBytes: null,
       })
       expect(fixture.registry.get("wr-noterminal")).toMatchObject({ phase: "eligible", terminalAt: null })

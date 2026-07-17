@@ -15,6 +15,11 @@ export interface CleanupLoopResult {
   retentionRemoved: number
   budgetRemoved: number
   guardAborted: number
+  // Eligible entries resolved to the terminal `stuck` phase this tick
+  // because a pre-delete guard deterministically refused them. Such an
+  // entry leaves the eligible set, so it is neither re-evaluated nor
+  // re-warned on subsequent ticks (issue-423).
+  stuckResolved: number
   workspaceUsageBytes: number | null
 }
 
@@ -36,6 +41,7 @@ export class CleanupLoop {
       retentionRemoved: 0,
       budgetRemoved: 0,
       guardAborted: 0,
+      stuckResolved: 0,
       workspaceUsageBytes: null,
     }
 
@@ -45,14 +51,37 @@ export class CleanupLoop {
     const eligible = this.registry.list().filter((e) => e.phase === "eligible")
     if (eligible.length === 0) return result
 
+    // Resolution pass (issue-423): give a guard-refused eligible entry a
+    // deterministic exit so it is not re-evaluated and re-warned every
+    // tick. A guard refusal is deterministic (identical outcome on every
+    // tick), so it MUST NOT be retried indefinitely. This pass runs
+    // before the disabled-policy early-return, so resolution is
+    // independent of retention/budget — a stuck entry is resolved even
+    // when both policies are disabled. The directory is never deleted
+    // here: the safety refusal stands; only the registry's repeated
+    // re-evaluation ends.
+    for (const entry of eligible) {
+      if (signal.aborted) break
+      const verdict = await this.evaluateGuards(entry)
+      if (verdict.ok) continue
+      console.warn(`workspace cleanup: refused to remove ${entry.workspacePath} — ${verdict.message}`)
+      await this.registry.markStuck(entry.workflowRunId)
+      result.stuckResolved++
+    }
+    if (signal.aborted) return result
+
     const retentionDisabled = policy.retentionDays == null || policy.retentionDays <= 0
     const budgetDisabled = policy.storageBudgetBytes == null || policy.storageBudgetBytes <= 0
 
     if (retentionDisabled && budgetDisabled) return result
 
+    // Re-list after resolution: entries marked `stuck` above have left
+    // the eligible set, so the eviction passes only see entries whose
+    // guards passed (plus any that flipped back to eligible in a race).
     if (!retentionDisabled) {
+      const removable = this.registry.list().filter((e) => e.phase === "eligible")
       const cutoff = Date.now() - policy.retentionDays! * 24 * 60 * 60 * 1000
-      for (const entry of eligible) {
+      for (const entry of removable) {
         if (signal.aborted) break
         if (!entry.terminalAt) continue
         if (new Date(entry.terminalAt).getTime() > cutoff) continue
@@ -111,25 +140,36 @@ export class CleanupLoop {
     return bytes
   }
 
-  async safeRemove(entry: WorkspaceRegistryEntry): Promise<boolean> {
+  // The three pre-delete safety guards, shared by the resolution pass
+  // and `safeRemove`. Returns the refusal reason without logging so the
+  // caller controls warning emission. `safeRemove` keeps re-checking as
+  // a defensive race backstop (a marker could be deleted between the
+  // resolution pass and the eviction pass); in normal operation a guard
+  // refusal is already resolved to `stuck` before eviction, so this
+  // branch is unreachable outside that rare race.
+  private async evaluateGuards(
+    entry: WorkspaceRegistryEntry,
+  ): Promise<{ ok: true } | { ok: false; message: string }> {
     if (!this.runner.isUnderRunnerRoot(this.runnerRoot, entry.workspacePath)) {
-      console.warn(
-        `workspace cleanup: refused to remove ${entry.workspacePath} — path is outside runnerRoot`,
-      )
-      return false
+      return { ok: false, message: "path is outside runnerRoot" }
     }
-
     const markerRunId = await this.runner.readMarkerWorkflowRunId(entry.workspacePath)
     if (!markerRunId) {
-      console.warn(
-        `workspace cleanup: refused to remove ${entry.workspacePath} — marker is missing or unreadable`,
-      )
-      return false
+      return { ok: false, message: "marker is missing or unreadable" }
     }
     if (markerRunId !== entry.workflowRunId) {
-      console.warn(
-        `workspace cleanup: refused to remove ${entry.workspacePath} — marker workflowRunId (${markerRunId}) does not match registry (${entry.workflowRunId})`,
-      )
+      return {
+        ok: false,
+        message: `marker workflowRunId (${markerRunId}) does not match registry (${entry.workflowRunId})`,
+      }
+    }
+    return { ok: true }
+  }
+
+  async safeRemove(entry: WorkspaceRegistryEntry): Promise<boolean> {
+    const verdict = await this.evaluateGuards(entry)
+    if (!verdict.ok) {
+      console.warn(`workspace cleanup: refused to remove ${entry.workspacePath} — ${verdict.message}`)
       return false
     }
 

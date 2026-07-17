@@ -15,8 +15,8 @@ describe("CleanupLoop", () => {
     await fixture.dispose()
   })
 
-  describe("pre-delete guards", () => {
-    it("aborts removal when workspace path is outside runnerRoot", async () => {
+  describe("resolution pass", () => {
+    it("resolves an out-of-root eligible entry to stuck and leaves the directory intact", async () => {
       const past = new Date(fixture.now.getTime() - 10 * 24 * 60 * 60 * 1000)
       const outPath = join(tmpdir(), "outside-workspace")
       await fixture.registerEligible("wr-out", 1, past, outPath)
@@ -28,13 +28,14 @@ describe("CleanupLoop", () => {
         () => fixture.loop.runOnce(policy, new AbortController().signal),
       )
 
-      expect(result.guardAborted).toBe(1)
+      expect(result.stuckResolved).toBe(1)
+      expect(result.guardAborted).toBe(0)
       expect(result.retentionRemoved).toBe(0)
-      expect(fixture.registry.get("wr-out")).not.toBeNull()
+      expect(fixture.registry.get("wr-out")).toMatchObject({ phase: "stuck" })
       expect(fixture.runner.deletedPaths).not.toContain(outPath)
     })
 
-    it("aborts removal when marker is missing", async () => {
+    it("resolves a missing-marker eligible entry to stuck and leaves the directory intact", async () => {
       const past = new Date(fixture.now.getTime() - 10 * 24 * 60 * 60 * 1000)
       const path = fixture.workspacePath(1)
       await fixture.registerEligible("wr-missing-marker", 1, past, path)
@@ -46,12 +47,14 @@ describe("CleanupLoop", () => {
         () => fixture.loop.runOnce(policy, new AbortController().signal),
       )
 
-      expect(result.guardAborted).toBe(1)
+      expect(result.stuckResolved).toBe(1)
+      expect(result.guardAborted).toBe(0)
       expect(result.retentionRemoved).toBe(0)
-      expect(fixture.registry.get("wr-missing-marker")).not.toBeNull()
+      expect(fixture.registry.get("wr-missing-marker")).toMatchObject({ phase: "stuck" })
+      expect(fixture.runner.deletedPaths).not.toContain(path)
     })
 
-    it("aborts removal when marker workflowRunId mismatches registry", async () => {
+    it("resolves a marker-mismatch eligible entry to stuck and leaves the directory intact", async () => {
       const past = new Date(fixture.now.getTime() - 10 * 24 * 60 * 60 * 1000)
       const path = fixture.workspacePath(1)
       await fixture.registerEligible("wr-mismatch", 1, past, path)
@@ -63,31 +66,128 @@ describe("CleanupLoop", () => {
         () => fixture.loop.runOnce(policy, new AbortController().signal),
       )
 
-      expect(result.guardAborted).toBe(1)
+      expect(result.stuckResolved).toBe(1)
+      expect(result.guardAborted).toBe(0)
       expect(result.retentionRemoved).toBe(0)
-      expect(fixture.registry.get("wr-mismatch")).not.toBeNull()
+      expect(fixture.registry.get("wr-mismatch")).toMatchObject({ phase: "stuck" })
+      expect(fixture.runner.deletedPaths).not.toContain(path)
     })
 
-    it("after guard abort, directory and entry remain intact for next tick", async () => {
+    it("warns once for a stuck entry and does not re-warn or re-evaluate it on the next tick", async () => {
       const past = new Date(fixture.now.getTime() - 10 * 24 * 60 * 60 * 1000)
       const path = fixture.workspacePath(1)
       await fixture.registerEligible("wr-guard", 1, past, path)
       fixture.runner.outOfRootPaths.add(path)
 
       const policy: CleanupPolicy = { retentionDays: 5 }
-      let result = await fixture.expectWarnings(
-        [`workspace cleanup: refused to remove ${path} — path is outside runnerRoot`],
-        () => fixture.loop.runOnce(policy, new AbortController().signal),
-      )
-      expect(result.guardAborted).toBe(1)
-      expect(fixture.registry.get("wr-guard")).not.toBeNull()
 
-      result = await fixture.expectWarnings(
+      // Tick 1: guard refuses -> single warning -> entry resolved to stuck.
+      const tick1 = await fixture.expectWarnings(
         [`workspace cleanup: refused to remove ${path} — path is outside runnerRoot`],
         () => fixture.loop.runOnce(policy, new AbortController().signal),
       )
-      expect(result.guardAborted).toBe(1)
-      expect(fixture.registry.get("wr-guard")).not.toBeNull()
+      expect(tick1.stuckResolved).toBe(1)
+      expect(tick1.guardAborted).toBe(0)
+      expect(fixture.registry.get("wr-guard")).toMatchObject({ phase: "stuck" })
+
+      // Tick 2: entry is stuck -> excluded from the eligible set -> no
+      // per-entry work and no refusal warning.
+      const warningSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined)
+      let tick2: { stuckResolved: number; guardAborted: number } | undefined
+      try {
+        tick2 = await fixture.loop.runOnce(policy, new AbortController().signal)
+      } finally {
+        warningSpy.mockRestore()
+      }
+      expect(warningSpy).not.toHaveBeenCalled()
+      expect(tick2!.stuckResolved).toBe(0)
+      expect(tick2!.guardAborted).toBe(0)
+      expect(fixture.registry.get("wr-guard")).toMatchObject({ phase: "stuck" })
+      expect(fixture.runner.deletedPaths).not.toContain(path)
+    })
+
+    it("resolves a stuck entry even when both retention and budget are disabled", async () => {
+      const past = new Date(fixture.now.getTime() - 10 * 24 * 60 * 60 * 1000)
+      const path = fixture.workspacePath(1)
+      await fixture.registerEligible("wr-stuck", 1, past, path)
+      fixture.runner.markerRunIds.delete(path)
+
+      const policy: CleanupPolicy = {
+        retentionDays: null,
+        storageBudgetBytes: null,
+        storageTargetWatermarkBytes: null,
+      }
+      const result = await fixture.expectWarnings(
+        [`workspace cleanup: refused to remove ${path} — marker is missing or unreadable`],
+        () => fixture.loop.runOnce(policy, new AbortController().signal),
+      )
+
+      expect(result.stuckResolved).toBe(1)
+      expect(result.retentionRemoved).toBe(0)
+      expect(result.budgetRemoved).toBe(0)
+      expect(fixture.registry.get("wr-stuck")).toMatchObject({ phase: "stuck" })
+
+      // Subsequent tick performs no per-entry work for the resolved entry.
+      const warningSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined)
+      let tick2: { stuckResolved: number } | undefined
+      try {
+        tick2 = await fixture.loop.runOnce(policy, new AbortController().signal)
+      } finally {
+        warningSpy.mockRestore()
+      }
+      expect(warningSpy).not.toHaveBeenCalled()
+      expect(tick2!.stuckResolved).toBe(0)
+    })
+
+    it("a stuck resolution survives a registry reload and does not reappear as eligible after restart", async () => {
+      const past = new Date(fixture.now.getTime() - 10 * 24 * 60 * 60 * 1000)
+      const path = fixture.workspacePath(1)
+      await fixture.registerEligible("wr-restart", 1, past, path)
+      fixture.runner.markerRunIds.delete(path)
+
+      const policy: CleanupPolicy = { retentionDays: 5 }
+      const tick1 = await fixture.expectWarnings(
+        [`workspace cleanup: refused to remove ${path} — marker is missing or unreadable`],
+        () => fixture.loop.runOnce(policy, new AbortController().signal),
+      )
+      expect(tick1.stuckResolved).toBe(1)
+
+      // Simulate a runner restart: the persisted `stuck` phase is reloaded.
+      await fixture.registry.reload()
+      expect(fixture.registry.get("wr-restart")).toMatchObject({ phase: "stuck" })
+
+      // Post-restart tick: the stuck entry is not eligible, so it is
+      // neither re-evaluated nor re-warned.
+      const warningSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined)
+      let tick2: { stuckResolved: number } | undefined
+      try {
+        tick2 = await fixture.loop.runOnce(policy, new AbortController().signal)
+      } finally {
+        warningSpy.mockRestore()
+      }
+      expect(warningSpy).not.toHaveBeenCalled()
+      expect(tick2!.stuckResolved).toBe(0)
+      expect(fixture.registry.get("wr-restart")).toMatchObject({ phase: "stuck" })
+    })
+
+    it("still removes an eligible entry whose guards pass (resolution does not weaken normal eviction)", async () => {
+      const past = new Date(fixture.now.getTime() - 10 * 24 * 60 * 60 * 1000)
+      const path = fixture.workspacePath(1)
+      await fixture.registerEligible("wr-clean", 1, past, path)
+
+      const policy: CleanupPolicy = { retentionDays: 5 }
+      const warningSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined)
+      let result
+      try {
+        result = await fixture.loop.runOnce(policy, new AbortController().signal)
+      } finally {
+        warningSpy.mockRestore()
+      }
+      expect(warningSpy).not.toHaveBeenCalled()
+      expect(result!.stuckResolved).toBe(0)
+      expect(result!.retentionRemoved).toBe(1)
+      expect(fixture.registry.get("wr-clean")).toBeNull()
+      expect(fixture.runner.deletedPaths).toContain(path)
     })
   })
 
