@@ -5,7 +5,6 @@ import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import { ProjectProvider } from '../../../entities/project'
 import { SessionPage, type SessionPageDependencies } from './SessionPage'
 import type { AgentSessionMetadata } from '../../../entities/coder-session'
-
 let _issueData: unknown = null
 let _coderSessionsData: unknown[] = []
 let _metadataData: unknown = null
@@ -18,7 +17,6 @@ let _transcriptData: { turns: unknown[]; partCount: number; lastActivityAt: stri
   partCount: 2,
   lastActivityAt: '2026-06-15T10:29:55.000Z',
 }
-
 const mocks = {
   transcriptReturn: {
     turns: [] as any[],
@@ -31,7 +29,6 @@ const mocks = {
     isStreaming: false,
   },
 }
-
 const sessionPageDependencies: SessionPageDependencies = {
   dataSource: {
     useSessionTranscript: () => mocks.transcriptReturn as never,
@@ -82,7 +79,6 @@ const sessionPageDependencies: SessionPageDependencies = {
     ),
   },
 }
-
 const queryClients: QueryClient[] = []
 
 function createQueryClient() {

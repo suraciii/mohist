@@ -1,15 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import * as signalR from "@microsoft/signalr"
-import { resolveSessionTarget, RunnerSignalRClient, type ReceiveFollowupPayload, setRunnerSignalRExistsCheckerForTest, setRunnerSignalRGitRunnerForTest } from "../src/server/runner-signalr.js"
+import { RunnerSignalRClient, type ReceiveFollowupPayload, setRunnerSignalRExistsCheckerForTest, setRunnerSignalRGitRunnerForTest } from "../src/server/runner-signalr.js"
 import type { SessionTarget } from "../src/runtime/acp-connection.js"
 import { FOLLOWUP_TARGET_UNAVAILABLE } from "../src/server/session-target.js"
-
-
 interface CapturedBuilder {
   handlers: Map<string, (...args: unknown[]) => unknown>
   connection: FakeConnection
 }
-
 const builders: CapturedBuilder[] = []
 let nextConnectionId = 0
 
@@ -20,7 +17,6 @@ afterEach(() => {
   setRunnerSignalRGitRunnerForTest(null)
   setRunnerSignalRExistsCheckerForTest(null)
 })
-
 interface FakeConnection {
   state: signalR.HubConnectionState
   connectionId: string | null
@@ -31,7 +27,6 @@ interface FakeConnection {
   onreconnected: ((cb: (id?: string) => void) => void) | undefined
   _reconnectHandler?: (connectionId?: string) => void
 }
-
 function makeFakeConnection(): FakeConnection {
   const conn: FakeConnection = {
     state: signalR.HubConnectionState.Disconnected,
@@ -55,7 +50,6 @@ function makeFakeConnection(): FakeConnection {
   }) as FakeConnection["onreconnected"]
   return conn
 }
-
 vi.mock("@microsoft/signalr", () => {
   return {
     HubConnectionBuilder: class {
@@ -801,93 +795,5 @@ describe("RunnerSignalRClient routes follow-ups to generic sessions", () => {
     )
     expect(agentSessionRuntimeEvents).not.toHaveBeenCalled()
     expect(prompt).toHaveBeenCalledTimes(1)
-  })
-})
-
-describe("resolveSessionTarget", () => {
-  it("PrefersTargetField_WhenPresent", () => {
-    const payload: ReceiveFollowupPayload = {
-      workflowRunId: "wr-ignored",
-      sessionName: "name-ignored",
-      target: { kind: "generic", projectId: "proj-1", sessionId: "gen-1" },
-      text: "x",
-    }
-    expect(resolveSessionTarget(payload)).toEqual({
-      kind: "generic",
-      projectId: "proj-1",
-      sessionId: "gen-1",
-    })
-  })
-
-  it("CarriesPersistedBinding_WhenPresent", () => {
-    const payload: ReceiveFollowupPayload = {
-      target: {
-        kind: "generic",
-        projectId: "proj-1",
-        sessionId: "gen-1",
-        binding: {
-          runtime: "opencode",
-          runtimeSessionId: "runtime-1",
-          runnerId: "runner-1",
-          workDir: "/work/project",
-        },
-      },
-      text: "x",
-    }
-
-    expect(resolveSessionTarget(payload)).toEqual({
-      kind: "generic",
-      projectId: "proj-1",
-      sessionId: "gen-1",
-      binding: {
-        runtime: "opencode",
-        runtimeSessionId: "runtime-1",
-        runnerId: "runner-1",
-        workDir: "/work/project",
-      },
-    })
-  })
-
-  it("ReturnsNull_WhenGenericTargetMissingSessionId", () => {
-    const payload: ReceiveFollowupPayload = {
-      target: { kind: "generic", projectId: "proj-1" },
-      text: "x",
-    }
-    expect(resolveSessionTarget(payload)).toBeNull()
-  })
-
-  it("ReturnsNull_WhenWorkflowTargetMissingSessionName", () => {
-    const payload: ReceiveFollowupPayload = {
-      target: { kind: "workflow", projectId: "proj-1", workflowRunId: "wr-1" },
-      text: "x",
-    }
-    expect(resolveSessionTarget(payload)).toBeNull()
-  })
-
-  it("FallsBackToLegacyWorkflowTopLevelFields_WhenNoTarget", () => {
-    const payload: ReceiveFollowupPayload = {
-      workflowRunId: "wr-1",
-      sessionName: "work-1",
-      text: "x",
-    }
-    expect(resolveSessionTarget(payload)).toEqual({
-      kind: "workflow",
-      projectId: "",
-      workflowRunId: "wr-1",
-      sessionName: "work-1",
-    })
-  })
-
-  it("ReturnsNull_WhenNoTargetAndNoLegacyFields", () => {
-    const payload: ReceiveFollowupPayload = { text: "x" }
-    expect(resolveSessionTarget(payload)).toBeNull()
-  })
-
-  it("ReturnsNull_OnUnknownTargetKind", () => {
-    const payload: ReceiveFollowupPayload = {
-      target: { kind: "weird" as unknown as "workflow", projectId: "proj-1" },
-      text: "x",
-    }
-    expect(resolveSessionTarget(payload)).toBeNull()
   })
 })

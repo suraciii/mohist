@@ -67,40 +67,26 @@ const genericSessionPageDependencies: GenericSessionPageDependencies = {
     ),
   },
 }
-
-
 function createQueryClient() {
   return new QueryClient({ defaultOptions: { queries: { retry: false } } })
 }
 
 function baseSummary(overrides: Record<string, any> = {}) {
   return {
-    sessionId: 'sess-abc',
-    agentId: 'agent-1',
-    agentName: 'Test Agent',
-    runtimeSessionId: 'rt-abc',
-    runtime: 'opencode',
-    status: 'completed',
-    createdAt: '2026-06-15T10:00:00.000Z',
-    lastActivityAt: '2026-06-15T10:30:00.000Z',
-    resolvedModel: 'gpt-4',
-    failureCategory: null,
-    toolCallCount: 5,
-    toolErrorCount: 0,
-    contextRefs: null,
-    usage: null,
+    sessionId: 'sess-abc', agentId: 'agent-1', agentName: 'Test Agent',
+    runtimeSessionId: 'rt-abc', runtime: 'opencode', status: 'completed',
+    createdAt: '2026-06-15T10:00:00.000Z', lastActivityAt: '2026-06-15T10:30:00.000Z',
+    resolvedModel: 'gpt-4', failureCategory: null,
+    toolCallCount: 5, toolErrorCount: 0, contextRefs: null, usage: null,
     ...overrides,
   }
 }
 
 function makeTurn(overrides: Record<string, any> = {}) {
   return {
-    id: 'turn-1',
-    startedAt: '2026-01-01T00:00:00Z',
-    completedAt: null,
+    id: 'turn-1', startedAt: '2026-01-01T00:00:00Z', completedAt: null,
     user: { role: 'mohist', text: 'hi', kind: 'task', sentAt: '2026-01-01T00:00:00Z' },
-    assistant: [],
-    ...overrides,
+    assistant: [], ...overrides,
   }
 }
 
@@ -109,11 +95,8 @@ async function renderPage(initialEntry = '/agent-sessions/sess-abc') {
   const result = render(
     <QueryClientProvider client={queryClient}>
       <ProjectProvider initialProjectId="proj-1" initialProjects={[{
-        id: 'proj-1',
-        name: 'Test',
-        createdAt: '2026-01-01T00:00:00Z',
-        updatedAt: '2026-01-01T00:00:00Z',
-        repositories: [],
+        id: 'proj-1', name: 'Test', createdAt: '2026-01-01T00:00:00Z',
+        updatedAt: '2026-01-01T00:00:00Z', repositories: [],
       }]}>
         <MemoryRouter initialEntries={[initialEntry]}>
           <Routes>
@@ -321,7 +304,6 @@ describe('GenericSessionPage', () => {
         })
       },
     )
-
     it.each(['completed', 'failed', 'cancelled', 'stopped'])(
       'does not render the cancel trigger when the session is terminal (%s)',
       async (status) => {
@@ -334,7 +316,6 @@ describe('GenericSessionPage', () => {
         expect(screen.queryByTestId('session-cancel-trigger')).not.toBeInTheDocument()
       },
     )
-
     it('does not render the cancel trigger inside the followup composer', async () => {
       _summaryData = baseSummary({ status: 'running' })
       mocks.transcriptTurns = [makeTurn()]
@@ -346,7 +327,6 @@ describe('GenericSessionPage', () => {
       expect(composer.querySelector('[data-testid="session-cancel-trigger"]')).toBeNull()
       expect(composer.querySelector('[data-testid="session-cancel-alert"]')).toBeNull()
     })
-
     it('opens a destructive-toned AlertDialog without sending the cancel request', async () => {
       _summaryData = baseSummary({ status: 'running' })
       mocks.transcriptTurns = [makeTurn()]
@@ -354,19 +334,14 @@ describe('GenericSessionPage', () => {
       await waitFor(() => {
         expect(screen.getByTestId('session-cancel-trigger')).toBeInTheDocument()
       })
-
       expect(screen.queryByTestId('session-cancel-alert')).not.toBeInTheDocument()
       expect(_cancelHandler).not.toHaveBeenCalled()
-
       fireEvent.click(screen.getByTestId('session-cancel-trigger'))
-
       const dialog = screen.getByTestId('session-cancel-alert')
       expect(dialog).toBeInTheDocument()
       expect(dialog).toHaveAttribute('data-tone', 'destructive')
-
       expect(_cancelHandler).not.toHaveBeenCalled()
     })
-
     it('dismissing the dialog sends no cancel request and leaves the session running', async () => {
       _summaryData = baseSummary({ status: 'running' })
       mocks.transcriptTurns = [makeTurn()]
@@ -374,20 +349,15 @@ describe('GenericSessionPage', () => {
       await waitFor(() => {
         expect(screen.getByTestId('session-cancel-trigger')).toBeInTheDocument()
       })
-
       fireEvent.click(screen.getByTestId('session-cancel-trigger'))
       expect(screen.getByTestId('session-cancel-alert')).toBeInTheDocument()
-
       fireEvent.click(screen.getByTestId('session-cancel-alert-cancel'))
-
       await waitFor(() => {
         expect(screen.queryByTestId('session-cancel-alert')).not.toBeInTheDocument()
       })
       expect(_cancelHandler).not.toHaveBeenCalled()
-
       expect(screen.getByTestId('session-cancel-trigger')).toBeInTheDocument()
     })
-
     it('confirming the dialog calls the cancel endpoint with the session id', async () => {
       _summaryData = baseSummary({ status: 'running' })
       mocks.transcriptTurns = [makeTurn()]
@@ -404,7 +374,6 @@ describe('GenericSessionPage', () => {
         expect(screen.queryByTestId('session-cancel-alert')).not.toBeInTheDocument()
       })
     })
-
     it('closes the confirmation dialog after the cancel mutation settles while the session remains non-terminal', async () => {
       _summaryData = baseSummary({ status: 'running' })
       mocks.transcriptTurns = [makeTurn()]
@@ -421,7 +390,6 @@ describe('GenericSessionPage', () => {
       })
       expect(screen.getByTestId('session-cancel-trigger')).toBeInTheDocument()
     })
-
     it('AlertDialog confirm button reflects cancel.isPending (dismissing disabled while in flight)', async () => {
       _blockCancel = true
 

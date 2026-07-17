@@ -5,7 +5,6 @@ import type { ReactNode } from 'react'
 import type { WorkflowRunSession } from './types'
 import { useWorkflowRunSessions } from './useWorkflowRunSessions'
 import { dispatchAgentEvent } from '../../agent/model/events'
-
 let _sessionsData: WorkflowRunSession[] = []
 let _sessionsResponses: Array<WorkflowRunSession[] | 'never'> = []
 
