@@ -7,7 +7,7 @@ function makeEvent(overrides: Partial<TimelineLiveEvent> = {}): TimelineLiveEven
     type: 'com.mohist.workflow.run.started',
     time: '2026-06-18T00:00:00.000Z',
     eventId: 'evt-1',
-    payload: { issueNumber: 42 },
+    payload: { issueNumber: 42, },
     ...overrides,
   }
 }

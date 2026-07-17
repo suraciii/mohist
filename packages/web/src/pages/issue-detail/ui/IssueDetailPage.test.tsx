@@ -37,7 +37,6 @@ const projects: Project[] = [
 
 function makeIssue(overrides: Record<string, unknown> = {}) {
   return {
-    id: 'issue-1',
     number: 14,
     title: 'Test Issue',
     body: '',
@@ -79,7 +78,6 @@ describe('IssueDetailPage primaryEpic numbered display', () => {
   it('renders #N as the primary epic identifier on the issue detail page when number is present', async () => {
     mockIssue(makeIssue({
       primaryEpic: {
-        id: 'epic-uuid-aaaa-bbbb-cccccccccccc',
         number: 7,
         title: 'Numbered epic',
         status: 'active',
@@ -97,7 +95,6 @@ describe('IssueDetailPage primaryEpic numbered display', () => {
   it('does not display a truncated UUID as the primary epic identifier on the issue detail page when number is present', async () => {
     mockIssue(makeIssue({
       primaryEpic: {
-        id: 'epic-uuid-aaaa-bbbb-cccccccccccc',
         number: 7,
         title: 'Numbered epic',
         status: 'active',
@@ -115,10 +112,9 @@ describe('IssueDetailPage primaryEpic numbered display', () => {
     expect(text).not.toContain('cccccccccccc')
   })
 
-  it('falls back to the truncated UUID for the primary epic label when number is null', async () => {
+  it('uses the generic epic label when the epic has no number', async () => {
     mockIssue(makeIssue({
       primaryEpic: {
-        id: 'epic-legacy-1234567890',
         number: null,
         title: 'Legacy epic',
         status: 'active',
@@ -130,12 +126,11 @@ describe('IssueDetailPage primaryEpic numbered display', () => {
 
     await waitFor(() => expect(screen.getByTestId('primary-epic-label')).toBeTruthy())
     const label = screen.getByTestId('primary-epic-number')
-    expect(label).toHaveTextContent('#epic-leg')
+    expect(label).toHaveTextContent('Epic')
   })
 
   it('renders the activity dialog entry in the header without rendering the inline timeline panel', async () => {
     mockIssue(makeIssue({
-      id: 'issue-14',
       number: 14,
       workflowStatus: 'running',
     }))
@@ -480,7 +475,6 @@ describe('IssueDetailPage activity dialog', () => {
 
   it('does not render the inline activity panel in the main content column', async () => {
     mockIssue(makeIssue({
-      id: 'issue-14',
       number: 14,
       workflowStatus: 'running',
     }))
@@ -493,7 +487,6 @@ describe('IssueDetailPage activity dialog', () => {
 
   it('does not mount the timeline panel (and so does not enable the events fetch) before the dialog opens', async () => {
     mockIssue(makeIssue({
-      id: 'issue-14',
       number: 14,
       workflowStatus: 'running',
     }))
@@ -507,7 +500,6 @@ describe('IssueDetailPage activity dialog', () => {
 
   it('mounts the timeline panel only after the entry opens the dialog and the dialog is unmounted on close', async () => {
     mockIssue(makeIssue({
-      id: 'issue-14',
       number: 14,
       workflowStatus: 'running',
     }))
@@ -536,7 +528,6 @@ describe('IssueDetailPage activity dialog', () => {
 
   it('does not display a precise event count or fetch events before the dialog is first opened', async () => {
     mockIssue(makeIssue({
-      id: 'issue-14',
       number: 14,
       workflowStatus: 'running',
     }))
@@ -550,7 +541,6 @@ describe('IssueDetailPage activity dialog', () => {
 
   it('renders the dialog as a near-fullscreen sheet on mobile width', async () => {
     mockIssue(makeIssue({
-      id: 'issue-14',
       number: 14,
       workflowStatus: 'running',
     }))
@@ -572,7 +562,6 @@ describe('IssueDetailPage activity dialog', () => {
 
   it('passes enabled=true to the timeline panel only after the dialog opens, and unmounts the panel on close', async () => {
     mockIssue(makeIssue({
-      id: 'issue-14',
       number: 14,
       workflowStatus: 'running',
     }))
@@ -620,7 +609,7 @@ describe('IssueDetailPage density and whitespace rhythm', () => {
   }
 
   it('separates the main content column with a single group-level gap (no ad-hoc 5/7/9 values)', async () => {
-    mockIssue(makeIssue({ id: 'issue-14', number: 14 }))
+    mockIssue(makeIssue({ number: 14 }))
 
     renderPage()
 
@@ -643,7 +632,7 @@ describe('IssueDetailPage density and whitespace rhythm', () => {
   })
 
   it('separates right-rail cards with a group-level gap and no ad-hoc 5/7/9 values', async () => {
-    mockIssue(makeIssue({ id: 'issue-14', number: 14 }))
+    mockIssue(makeIssue({ number: 14 }))
 
     renderPage()
 
@@ -656,7 +645,6 @@ describe('IssueDetailPage density and whitespace rhythm', () => {
 
   it('gives the first-screen runtime decision surface breathing room rather than sitting flush against neighbors', async () => {
     mockIssue(makeIssue({
-      id: 'issue-14',
       number: 14,
       status: 'in_progress',
       workflowStage: 'build',
@@ -675,7 +663,7 @@ describe('IssueDetailPage density and whitespace rhythm', () => {
   })
 
   it('lets the header sit inside the spaced status-header tier so the next region is not flush', async () => {
-    mockIssue(makeIssue({ id: 'issue-14', number: 14 }))
+    mockIssue(makeIssue({ number: 14 }))
 
     renderPage()
 
@@ -686,7 +674,7 @@ describe('IssueDetailPage density and whitespace rhythm', () => {
   })
 
   it('keeps the data-testid of every major section stable for downstream density regression checks', async () => {
-    mockIssue(makeIssue({ id: 'issue-14', number: 14, body: 'Issue body content.' }))
+    mockIssue(makeIssue({ number: 14, body: 'Issue body content.' }))
 
     const { container } = renderPage()
 
@@ -708,7 +696,6 @@ describe('IssueDetailPage density and whitespace rhythm', () => {
 
   it('places the branch rebase status above the workflow view instead of burying it below long runtime details', async () => {
     mockIssue(makeIssue({
-      id: 'issue-14',
       number: 14,
       body: 'Issue body content.',
       status: 'in_progress',
@@ -744,7 +731,6 @@ describe('IssueDetailPage density and whitespace rhythm', () => {
 
   it('does not render an empty PR delivery summary frame when the workflow has no PR delivery metadata', async () => {
     mockIssue(makeIssue({
-      id: 'issue-14',
       number: 14,
       status: 'in_progress',
       workflowStage: 'build',
@@ -764,7 +750,6 @@ describe('IssueDetailPage density and whitespace rhythm', () => {
 
   it('removes decorative borders from plain section cards (Description, Comments, Commits) in favor of whitespace grouping', async () => {
     mockIssue(makeIssue({
-      id: 'issue-14',
       number: 14,
       body: 'Issue body content for the description test.',
       comments: [

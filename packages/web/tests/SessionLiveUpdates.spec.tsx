@@ -34,8 +34,7 @@ describe('Live tool updates merge in place', () => {
 
     act(() => {
       dispatchAgentEvent('coder_tool_call', {
-        issueId: '123',
-        projectId: 'project-1',
+        issueNumber: 123,        projectId: 'project-1',
         executionId: 'exec-123',
         runtimeSessionId: 'acp-123',
         sessionId: 'session-123',
@@ -61,8 +60,7 @@ describe('Live tool updates merge in place', () => {
 
     act(() => {
       dispatchAgentEvent('coder_tool_call', {
-        issueId: '123',
-        projectId: 'project-1',
+        issueNumber: 123,        projectId: 'project-1',
         executionId: 'exec-123',
         runtimeSessionId: 'acp-123',
         sessionId: 'session-123',
@@ -97,8 +95,7 @@ describe('Live tool updates merge in place', () => {
 
     act(() => {
       dispatchAgentEvent('coder_tool_call', {
-        issueId: '123',
-        projectId: 'project-1',
+        issueNumber: 123,        projectId: 'project-1',
         executionId: 'exec-123',
         runtimeSessionId: 'acp-123',
         sessionId: 'session-123',
@@ -119,8 +116,7 @@ describe('Live tool updates merge in place', () => {
 
     act(() => {
       dispatchAgentEvent('coder_tool_call', {
-        issueId: '123',
-        projectId: 'project-1',
+        issueNumber: 123,        projectId: 'project-1',
         executionId: 'exec-123',
         runtimeSessionId: 'acp-123',
         sessionId: 'session-123',
@@ -247,8 +243,7 @@ describe('Terminal session events trigger refetch', () => {
 
     act(() => {
       dispatchAgentEvent('coder_recovery_status', {
-        issueId: '123',
-        projectId: 'project-1',
+        issueNumber: 123,        projectId: 'project-1',
         executionId: 'exec-123',
         sessionId: 'session-123',
         runtimeSessionId: 'acp-123',
@@ -311,8 +306,7 @@ describe('Running session shows only real active tools', () => {
 
     act(() => {
       dispatchAgentEvent('coder_tool_call', {
-        issueId: '123',
-        projectId: 'project-1',
+        issueNumber: 123,        projectId: 'project-1',
         executionId: 'exec-123',
         runtimeSessionId: 'acp-123',
         sessionId: 'session-123',
@@ -333,8 +327,7 @@ describe('Running session shows only real active tools', () => {
 
     act(() => {
       dispatchAgentEvent('coder_tool_call', {
-        issueId: '123',
-        projectId: 'project-1',
+        issueNumber: 123,        projectId: 'project-1',
         executionId: 'exec-123',
         runtimeSessionId: 'acp-123',
         sessionId: 'session-123',
@@ -375,8 +368,7 @@ describe('Running session shows only real active tools', () => {
 
     act(() => {
       dispatchAgentEvent('coder_tool_call', {
-        issueId: '123',
-        projectId: 'project-1',
+        issueNumber: 123,        projectId: 'project-1',
         executionId: 'exec-123',
         runtimeSessionId: 'acp-123',
         sessionId: 'session-123',
@@ -409,8 +401,7 @@ describe('Running session shows only real active tools', () => {
 
     act(() => {
       dispatchAgentEvent('coder_tool_call', {
-        issueId: '123',
-        projectId: 'project-1',
+        issueNumber: 123,        projectId: 'project-1',
         executionId: 'exec-123',
         runtimeSessionId: 'acp-123',
         sessionId: 'session-123',
@@ -448,8 +439,7 @@ describe('Live convergence with refetch', () => {
 
     act(() => {
       dispatchAgentEvent('coder_tool_call', {
-        issueId: '123',
-        projectId: 'project-1',
+        issueNumber: 123,        projectId: 'project-1',
         executionId: 'exec-123',
         runtimeSessionId: 'acp-123',
         sessionId: 'session-123',
@@ -465,8 +455,7 @@ describe('Live convergence with refetch', () => {
 
     act(() => {
       dispatchAgentEvent('coder_tool_call', {
-        issueId: '123',
-        projectId: 'project-1',
+        issueNumber: 123,        projectId: 'project-1',
         executionId: 'exec-123',
         runtimeSessionId: 'acp-123',
         sessionId: 'session-123',
@@ -495,8 +484,7 @@ describe('Live convergence with refetch', () => {
 
     act(() => {
       dispatchAgentEvent('coder_text_chunk', {
-        issueId: '123',
-        projectId: 'project-1',
+        issueNumber: 123,        projectId: 'project-1',
         executionId: 'exec-123',
         runtimeSessionId: 'acp-123',
         text: 'Starting task...',
@@ -513,8 +501,7 @@ describe('Live convergence with refetch', () => {
 
     act(() => {
       dispatchAgentEvent('coder_tool_call', {
-        issueId: '123',
-        projectId: 'project-1',
+        issueNumber: 123,        projectId: 'project-1',
         executionId: 'exec-123',
         runtimeSessionId: 'acp-123',
         sessionId: 'session-123',
@@ -527,8 +514,7 @@ describe('Live convergence with refetch', () => {
 
     act(() => {
       dispatchAgentEvent('coder_text_chunk', {
-        issueId: '123',
-        projectId: 'project-1',
+        issueNumber: 123,        projectId: 'project-1',
         executionId: 'exec-123',
         runtimeSessionId: 'acp-123',
         text: 'Reading file...',
@@ -559,8 +545,7 @@ describe('Correlation-based tool merging', () => {
 
     act(() => {
       dispatchAgentEvent('coder_tool_call', {
-        issueId: '123',
-        projectId: 'project-1',
+        issueNumber: 123,        projectId: 'project-1',
         executionId: 'exec-123',
         runtimeSessionId: 'acp-123',
         sessionId: 'session-123',
@@ -581,8 +566,7 @@ describe('Correlation-based tool merging', () => {
 
     act(() => {
       dispatchAgentEvent('coder_tool_call', {
-        issueId: '123',
-        projectId: 'project-1',
+        issueNumber: 123,        projectId: 'project-1',
         executionId: 'exec-123',
         runtimeSessionId: 'acp-123',
         sessionId: 'session-123',
@@ -637,8 +621,7 @@ describe('Thinking state for live sessions', () => {
 
     act(() => {
       dispatchAgentEvent('coder_text_chunk', {
-        issueId: '123',
-        projectId: 'project-1',
+        issueNumber: 123,        projectId: 'project-1',
         executionId: 'exec-123',
         runtimeSessionId: 'acp-123',
         text: 'Hello world',
@@ -668,8 +651,7 @@ describe('Thinking state for live sessions', () => {
 
     act(() => {
       dispatchAgentEvent('coder_tool_call', {
-        issueId: '123',
-        projectId: 'project-1',
+        issueNumber: 123,        projectId: 'project-1',
         executionId: 'exec-123',
         runtimeSessionId: 'acp-123',
         sessionId: 'session-123',
@@ -735,8 +717,7 @@ describe('Scroll follow behavior', () => {
 
     act(() => {
       dispatchAgentEvent('coder_text_chunk', {
-        issueId: '123',
-        projectId: 'project-1',
+        issueNumber: 123,        projectId: 'project-1',
         executionId: 'exec-123',
         runtimeSessionId: 'acp-123',
         text: 'New content',
@@ -765,8 +746,7 @@ describe('Scroll follow behavior', () => {
 
     act(() => {
       dispatchAgentEvent('coder_text_chunk', {
-        issueId: '123',
-        projectId: 'project-1',
+        issueNumber: 123,        projectId: 'project-1',
         executionId: 'exec-123',
         runtimeSessionId: 'acp-123',
         text: 'New content',
@@ -800,8 +780,7 @@ describe('Live update convergence', () => {
 
     act(() => {
       dispatchAgentEvent('coder_tool_call', {
-        issueId: '123',
-        projectId: 'project-1',
+        issueNumber: 123,        projectId: 'project-1',
         executionId: 'exec-123',
         runtimeSessionId: 'acp-123',
         sessionId: 'session-123',
@@ -826,8 +805,7 @@ describe('Live update convergence', () => {
 
     act(() => {
       dispatchAgentEvent('coder_tool_call', {
-        issueId: '123',
-        projectId: 'project-1',
+        issueNumber: 123,        projectId: 'project-1',
         executionId: 'exec-123',
         runtimeSessionId: 'acp-123',
         sessionId: 'session-123',
@@ -862,8 +840,7 @@ describe('Live update convergence', () => {
 
     act(() => {
       dispatchAgentEvent('coder_text_chunk', {
-        issueId: '123',
-        projectId: 'project-1',
+        issueNumber: 123,        projectId: 'project-1',
         executionId: 'exec-123',
         runtimeSessionId: 'acp-123',
         text: 'First text',
@@ -873,8 +850,7 @@ describe('Live update convergence', () => {
 
     act(() => {
       dispatchAgentEvent('coder_tool_call', {
-        issueId: '123',
-        projectId: 'project-1',
+        issueNumber: 123,        projectId: 'project-1',
         executionId: 'exec-123',
         runtimeSessionId: 'acp-123',
         sessionId: 'session-123',
@@ -887,8 +863,7 @@ describe('Live update convergence', () => {
 
     act(() => {
       dispatchAgentEvent('coder_text_chunk', {
-        issueId: '123',
-        projectId: 'project-1',
+        issueNumber: 123,        projectId: 'project-1',
         executionId: 'exec-123',
         runtimeSessionId: 'acp-123',
         text: 'Second text',

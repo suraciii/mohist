@@ -94,7 +94,6 @@ describe('LiveTaskProvider reverse-DNS integration outcome (D2 test-first)', () 
     // rebase-completed has something to clear.
     act(() => {
       handleEvent(REVERSE_DNS_EVENT_TYPES.WorkflowRunFailed, {
-        issueId: 'iss-rebase',
         issueNumber: 7,
         outcome: 'rebase_conflict',
         conflicts: ['only-seeded'],
@@ -115,7 +114,6 @@ describe('LiveTaskProvider reverse-DNS integration outcome (D2 test-first)', () 
 
     act(() => {
       handleEvent(REVERSE_DNS_EVENT_TYPES.IssueCompleted, {
-        issueId: 'iss-rebase',
         issueNumber: 7,
         outcome: 'rebase_completed',
         rebased: true,
@@ -150,7 +148,6 @@ describe('LiveTaskProvider reverse-DNS integration outcome (D2 test-first)', () 
 
     act(() => {
       handleEvent(REVERSE_DNS_EVENT_TYPES.IssueCompleted, {
-        issueId: 'iss-merge',
         issueNumber: 13,
         outcome: 'merge_completed',
       })
@@ -175,7 +172,6 @@ describe('LiveTaskProvider reverse-DNS integration outcome (D2 test-first)', () 
 
     act(() => {
       handleEvent(REVERSE_DNS_EVENT_TYPES.WorkflowRunFailed, {
-        issueId: 'iss-conflict',
         issueNumber: 21,
         outcome: 'rebase_conflict',
         conflicts: ['src/a.ts', 'src/b.ts'],
@@ -217,7 +213,6 @@ describe('LiveTaskProvider reverse-DNS integration outcome (D2 test-first)', () 
 
     act(() => {
       handleEvent(REVERSE_DNS_EVENT_TYPES.StageFailed, {
-        issueId: 'iss-stage',
         issueNumber: 33,
         outcome: 'rebase_aborted',
         conflicts: [],
@@ -247,7 +242,6 @@ describe('LiveTaskProvider reverse-DNS integration outcome (D2 test-first)', () 
 
     act(() => {
       handleEvent(REVERSE_DNS_EVENT_TYPES.WorkflowRunFailed, {
-        issueId: 'iss-mf',
         issueNumber: 99,
         outcome: 'merge_failed',
       })
@@ -280,7 +274,6 @@ describe('LiveTaskProvider reverse-DNS integration outcome (D2 test-first)', () 
     // outcome handler did not silently fire any of its own.
     act(() => {
       handleEvent(REVERSE_DNS_EVENT_TYPES.IssueCompleted, {
-        issueId: 'iss-fall',
         issueNumber: 5,
         outcome: 'something_else',
       })
@@ -345,7 +338,6 @@ describe('LiveTaskProvider notifyRunLifecycleToast (D2 test-first)', () => {
 
     act(() => {
       handleEvent(REVERSE_DNS_EVENT_TYPES.WorkflowRunPaused, {
-        issueId: 'iss-pause',
         issueNumber: 42,
       })
     })
@@ -363,7 +355,6 @@ describe('LiveTaskProvider notifyRunLifecycleToast (D2 test-first)', () => {
 
     act(() => {
       handleEvent(REVERSE_DNS_EVENT_TYPES.WorkflowRunFailed, {
-        issueId: 'iss-err',
         issueNumber: 51,
       })
     })
@@ -382,7 +373,6 @@ describe('LiveTaskProvider notifyRunLifecycleToast (D2 test-first)', () => {
 
     act(() => {
       handleEvent(REVERSE_DNS_EVENT_TYPES.WorkflowRunPaused, {
-        issueId: 'iss-self-pause',
         issueNumber: 77,
       })
     })

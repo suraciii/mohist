@@ -144,7 +144,7 @@ function readString(data: unknown, keys: string[]): string | null {
 
 function readIssueNumber(event: ProjectEventDto): number | null {
   if (event.issueNumber != null && Number.isFinite(event.issueNumber)) return event.issueNumber
-  const raw = readString(event.data, ['issueNumber', 'issueNo', 'issue_number'])
+  const raw = readString(event.data, ['issueNumber'])
     ?? event.subject
   if (!raw) return null
   const n = Number(raw)
@@ -410,7 +410,7 @@ function buildWaitingEntry(waiting: AgentActivityWaiting): ActivityEvent {
   }
 
   return {
-    id: `waiting-${waiting.issueId}`,
+    id: `waiting-${waiting.issueNumber}`,
     type: 'workflow-stage',
     attention: 'approval',
     time: waiting.requestedAt ?? FALLBACK_EVENT_TIME,

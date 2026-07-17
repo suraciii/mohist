@@ -24,7 +24,6 @@ function makeProjectEvent(overrides: Partial<ProjectEventDto> = {}): ProjectEven
 
 function makeSession(overrides: Partial<AgentActivitySession> = {}): AgentActivitySession {
   return {
-    issueId: 'issue-1',
     issueNumber: 1,
     issueTitle: 'Test issue',
     issueStage: 'Build',
@@ -46,7 +45,6 @@ function makeSession(overrides: Partial<AgentActivitySession> = {}): AgentActivi
 
 function makeWaiting(overrides: Partial<AgentActivityWaiting> = {}): AgentActivityWaiting {
   return {
-    issueId: 'issue-1',
     issueNumber: 1,
     issueTitle: 'Test issue',
     stage: 'Review',
@@ -131,7 +129,7 @@ describe('buildActivityEvents', () => {
         makeProjectEvent({ origin: 'agent-session', sourceAggregateKind: 'agent-session', sourceAggregateId: 'session-1', source: '/mohist/agent-session/session-1', type: 'com.mohist.agent-session.runtime-bound', data: { agentRuntimeSessionId: 'acp-1' } }),
         makeProjectEvent({ origin: 'agent-session', sourceAggregateKind: 'agent-session', sourceAggregateId: 'session-1', source: '/mohist/agent-session/session-1', type: 'com.mohist.agent-session.context-exhausted', data: { failureCategory: 'context exhaustion', contextUsagePercent: 96 } }),
       ],
-      sessions: [makeSession({ sessionId: 'session-1', issueNumber: 42 })],
+      sessions: [makeSession({ sessionId: 'session-1', issueNumber: 42, })],
       waiting: [],
       runners: [],
     })
@@ -167,7 +165,7 @@ describe('buildActivityEvents', () => {
           time: '2026-01-01T02:00:00.000Z',
         }),
       ],
-      sessions: [makeSession({ sessionId: 'session-1', issueNumber: 42 })],
+      sessions: [makeSession({ sessionId: 'session-1', issueNumber: 42, })],
       waiting: [],
       runners: [],
     })
@@ -260,7 +258,7 @@ describe('buildActivityEvents', () => {
         makeProjectEvent({ id: 2, origin: 'workflow-run', sourceAggregateKind: 'workflow-run', sourceAggregateId: 'wr-1', source: '/mohist/workflow-runs/wr-1', type: 'com.mohist.workflow.stage.failed', data: { stage: 'Build' }, time: '2026-01-01T01:00:00.000Z' }),
         makeProjectEvent({ id: 3, origin: 'agent-session', sourceAggregateKind: 'agent-session', sourceAggregateId: 'session-1', source: '/mohist/agent-session/session-1', type: 'com.mohist.agent-session.context-exhausted', data: { failureCategory: 'context' }, time: '2026-01-01T02:00:00.000Z' }),
       ],
-      sessions: [makeSession({ sessionId: 'session-1', issueNumber: 42 })],
+      sessions: [makeSession({ sessionId: 'session-1', issueNumber: 42, })],
       waiting: [],
       runners: [],
     })

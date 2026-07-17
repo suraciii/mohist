@@ -36,7 +36,6 @@ describe('EditIssueDialog', () => {
 
 function makeIssue(): Issue {
   return {
-    id: 'issue_7',
     number: 7,
     title: 'Original title',
     body: 'Original body',

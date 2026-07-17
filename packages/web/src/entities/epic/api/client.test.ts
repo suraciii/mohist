@@ -105,7 +105,7 @@ describe('getEpicEvents', () => {
   it('requests GET /api/projects/{ref}/epics/{number}/events', async () => {
     const requests: Request[] = []
     server.use(
-      http.get('*/api/projects/:projectId/epics/:epicId/events', ({ request }) => {
+      http.get('*/api/projects/:projectId/epics/:number/events', ({ request }) => {
         requests.push(request)
         return successResponse([])
       }),
@@ -135,7 +135,7 @@ describe('getEpicEvents', () => {
       },
     ]
     server.use(
-      http.get('*/api/projects/:projectId/epics/:epicId/events', () => successResponse(payload)),
+      http.get('*/api/projects/:projectId/epics/:number/events', () => successResponse(payload)),
     )
 
     const result = await getEpicEvents(1, 'proj-1')

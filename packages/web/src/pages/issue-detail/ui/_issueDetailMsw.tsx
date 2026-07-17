@@ -63,7 +63,6 @@ function issueDetailHandlers({ issue }: IssueDetailFixture) {
         success: true,
         data: {
           running: false,
-          issueId: null,
           issueNumber: null,
           activeAgents: [],
           runnerAvailable: true,

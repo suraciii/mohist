@@ -34,7 +34,6 @@ function renderPage() {
 
 function archivedDoneIssue(overrides: Record<string, unknown> = {}) {
   return {
-    id: 'issue-264',
     number: 264,
     title: 'Archive preserves workflow run history',
     body: 'Issue body content.',
@@ -59,7 +58,6 @@ function archivedDoneIssue(overrides: Record<string, unknown> = {}) {
 
 function activeDoneIssue(overrides: Record<string, unknown> = {}) {
   return {
-    id: 'issue-264',
     number: 264,
     title: 'Issue completes normally without being archived',
     body: 'Issue body content.',
@@ -257,7 +255,6 @@ describe('IssueDetailPage archived Done issue — preserved history rendering', 
       comments: [
         {
           id: 'c1',
-          issueId: 'issue-264',
           body: 'Archived comment preserved.',
           createdAt: '2026-06-25T08:00:00Z',
         },

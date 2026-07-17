@@ -92,7 +92,7 @@ export function ArchivedPage() {
               const sortedLabels = sortLabels(issue.labels)
               return (
                 <a
-                  key={issue.id}
+                  key={`${issue.projectId}:${issue.number}`}
                   href={toProjectPath(`/issues/${issue.number}`)}
                   className="block rounded-lg border border-gray-200 bg-white shadow-sm hover:border-gray-300 hover:shadow-md transition-colors p-4"
                 >

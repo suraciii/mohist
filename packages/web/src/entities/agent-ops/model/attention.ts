@@ -12,17 +12,18 @@ export type AttentionItem = IssueAttentionItem | {
 }
 
 export function isIssueAttentionItem(item: AttentionItem): item is IssueAttentionItem {
-  return 'issueId' in item
+  return 'issueNumber' in item
 }
 
 export function deriveAttentionItems(issues: Issue[], agentStatus: AgentStatus): AttentionItem[] {
   const items: AttentionItem[] = []
   const seen = new Set<string>()
   for (const issue of issues) {
-    if (seen.has(issue.id)) continue
+    const issueKey = `${issue.projectId}:${issue.number}`
+    if (seen.has(issueKey)) continue
     const item = classifyIssueAttention(issue)
     if (item) {
-      seen.add(issue.id)
+      seen.add(issueKey)
       items.push(item)
     }
   }

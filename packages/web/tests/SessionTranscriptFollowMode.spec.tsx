@@ -38,8 +38,7 @@ describe('Follow-mode scrolling and streaming text pacing', () => {
 
       act(() => {
         dispatchAgentEvent('coder_text_chunk', {
-          issueId: '123',
-          projectId: 'project-1',
+          issueNumber: 123,          projectId: 'project-1',
           executionId: 'exec-123',
           runtimeSessionId: 'acp-123',
           text: ' More content',
@@ -80,8 +79,7 @@ describe('Follow-mode scrolling and streaming text pacing', () => {
 
       act(() => {
         dispatchAgentEvent('coder_text_chunk', {
-          issueId: '123',
-          projectId: 'project-1',
+          issueNumber: 123,          projectId: 'project-1',
           executionId: 'exec-123',
           runtimeSessionId: 'acp-123',
           text: ' More content',
@@ -136,8 +134,7 @@ describe('Follow-mode scrolling and streaming text pacing', () => {
 
       act(() => {
         dispatchAgentEvent('coder_text_chunk', {
-          issueId: '123',
-          projectId: 'project-1',
+          issueNumber: 123,          projectId: 'project-1',
           executionId: 'exec-123',
           runtimeSessionId: 'acp-123',
           text: 'New streaming content',
@@ -165,8 +162,7 @@ describe('Follow-mode scrolling and streaming text pacing', () => {
 
       act(() => {
         dispatchAgentEvent('coder_text_chunk', {
-          issueId: '123',
-          projectId: 'project-1',
+          issueNumber: 123,          projectId: 'project-1',
           executionId: 'exec-123',
           runtimeSessionId: 'acp-123',
           text: 'New streaming content',
@@ -193,8 +189,7 @@ describe('Follow-mode scrolling and streaming text pacing', () => {
 
       act(() => {
         dispatchAgentEvent('coder_text_chunk', {
-          issueId: '123',
-          projectId: 'project-1',
+          issueNumber: 123,          projectId: 'project-1',
           executionId: 'exec-123',
           runtimeSessionId: 'acp-123',
           text: 'New content',
@@ -241,8 +236,7 @@ describe('Follow-mode scrolling and streaming text pacing', () => {
 
       act(() => {
         dispatchAgentEvent('coder_text_chunk', {
-          issueId: '123',
-          projectId: 'project-1',
+          issueNumber: 123,          projectId: 'project-1',
           executionId: 'exec-123',
           runtimeSessionId: 'acp-123',
           text: ' More content',
@@ -317,8 +311,7 @@ describe('Follow-mode scrolling and streaming text pacing', () => {
 
       act(() => {
         dispatchAgentEvent('coder_text_chunk', {
-          issueId: '123',
-          projectId: 'project-1',
+          issueNumber: 123,          projectId: 'project-1',
           executionId: 'exec-123',
           runtimeSessionId: 'acp-123',
           text: 'First chunk',
@@ -328,8 +321,7 @@ describe('Follow-mode scrolling and streaming text pacing', () => {
 
       act(() => {
         dispatchAgentEvent('coder_text_chunk', {
-          issueId: '123',
-          projectId: 'project-1',
+          issueNumber: 123,          projectId: 'project-1',
           executionId: 'exec-123',
           runtimeSessionId: 'acp-123',
           text: ' second chunk',

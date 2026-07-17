@@ -58,7 +58,6 @@ function mockProjectDefault(templateId: string) {
 function resetCreateIssueResponse() {
   createRequests = []
   createdIssue = {
-    id: 'issue_1',
     number: 1,
     title: 'T',
     status: 'backlog',
@@ -276,7 +275,6 @@ describe('CreateIssueDialog -> issue detail workflow profile display round-trip'
 
   it('reflects the chosen profile on the resulting issue detail read model', async () => {
     createdIssue = {
-      id: 'issue_1',
       number: 1,
       title: 'PR work',
       status: 'backlog',

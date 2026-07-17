@@ -35,7 +35,7 @@ describe('deriveAdvancementState', () => {
           makeLinkedIssue({ number: 8, status: IssueStatus.Backlog, canStart: true, startBlocker: null }),
         ],
       })
-      expect(state).toEqual({ kind: 'waiting-for-in-progress', issueNumber: 7 })
+      expect(state).toEqual({ kind: 'waiting-for-in-progress', issueNumber: 7, })
     })
 
     it('prefers in-progress over startable backlog when both exist', () => {
@@ -46,7 +46,7 @@ describe('deriveAdvancementState', () => {
           makeLinkedIssue({ number: 11, status: IssueStatus.InProgress, stage: WorkflowStage.Build }),
         ],
       })
-      expect(state).toEqual({ kind: 'waiting-for-in-progress', issueNumber: 11 })
+      expect(state).toEqual({ kind: 'waiting-for-in-progress', issueNumber: 11, })
     })
 
     it('prefers in-progress over draft blocker for the candidate', () => {
@@ -57,7 +57,7 @@ describe('deriveAdvancementState', () => {
           makeLinkedIssue({ number: 11, status: IssueStatus.InProgress, stage: WorkflowStage.Build }),
         ],
       })
-      expect(state).toEqual({ kind: 'waiting-for-in-progress', issueNumber: 11 })
+      expect(state).toEqual({ kind: 'waiting-for-in-progress', issueNumber: 11, })
     })
   })
 
@@ -111,7 +111,7 @@ describe('deriveAdvancementState', () => {
           makeLinkedIssue({ number: 14, status: IssueStatus.Backlog, canStart: false, startBlocker: { kind: 'draft' } }),
         ],
       })
-      expect(state).toEqual({ kind: 'draft-blocker', issueNumber: 14 })
+      expect(state).toEqual({ kind: 'draft-blocker', issueNumber: 14, })
     })
   })
 
@@ -168,7 +168,7 @@ describe('deriveAdvancementState', () => {
           makeLinkedIssue({ number: 42, status: IssueStatus.Backlog, canStart: true, startBlocker: null }),
         ],
       })
-      expect(state).toEqual({ kind: 'has-next', issueNumber: 42 })
+      expect(state).toEqual({ kind: 'has-next', issueNumber: 42, })
     })
 
     it('does not let external prerequisite metadata override a startable candidate', () => {
@@ -185,7 +185,7 @@ describe('deriveAdvancementState', () => {
         ],
       })
 
-      expect(state).toEqual({ kind: 'has-next', issueNumber: 42 })
+      expect(state).toEqual({ kind: 'has-next', issueNumber: 42, })
     })
 
     it('uses priority rank then issue number instead of linked order for the display candidate', () => {
@@ -196,7 +196,7 @@ describe('deriveAdvancementState', () => {
           makeLinkedIssue({ number: 3, priority: 'p1', status: IssueStatus.Backlog, canStart: true, startBlocker: null }),
         ],
       })
-      expect(state).toEqual({ kind: 'has-next', issueNumber: 3 })
+      expect(state).toEqual({ kind: 'has-next', issueNumber: 3, })
     })
 
     it('breaks equal priority ties by issue number instead of linked order', () => {
@@ -207,7 +207,7 @@ describe('deriveAdvancementState', () => {
           makeLinkedIssue({ number: 10, priority: 'p1', status: IssueStatus.Backlog, canStart: false, startBlocker: { kind: 'draft' } }),
         ],
       })
-      expect(state).toEqual({ kind: 'draft-blocker', issueNumber: 10 })
+      expect(state).toEqual({ kind: 'draft-blocker', issueNumber: 10, })
     })
   })
 
@@ -256,7 +256,7 @@ describe('deriveAdvancementState', () => {
           }),
         ],
       })
-      expect(state).toEqual({ kind: 'draft-blocker', issueNumber: 12 })
+      expect(state).toEqual({ kind: 'draft-blocker', issueNumber: 12, })
     })
 
     it('an external-prereq candidate on a running epic returns external-prerequisite-blocker (not running-but-idle)', () => {
@@ -291,7 +291,7 @@ describe('deriveAdvancementState', () => {
           }),
         ],
       })
-      expect(state).toEqual({ kind: 'draft-blocker', issueNumber: 12 })
+      expect(state).toEqual({ kind: 'draft-blocker', issueNumber: 12, })
     })
   })
 
@@ -357,7 +357,7 @@ describe('deriveAdvancementState', () => {
           }),
         ],
       })
-      expect(state).toEqual({ kind: 'draft-blocker', issueNumber: 12 })
+      expect(state).toEqual({ kind: 'draft-blocker', issueNumber: 12, })
     })
 
     it('does not let an older lower-priority draft contradict a higher-priority startable next issue', () => {
@@ -368,7 +368,7 @@ describe('deriveAdvancementState', () => {
           makeLinkedIssue({ number: 9, priority: 'p0', status: IssueStatus.Backlog, canStart: true, startBlocker: null }),
         ],
       })
-      expect(state).toEqual({ kind: 'has-next', issueNumber: 9 })
+      expect(state).toEqual({ kind: 'has-next', issueNumber: 9, })
     })
   })
 
@@ -399,13 +399,13 @@ describe('deriveAdvancementState', () => {
 
 describe('advancementCopy', () => {
   it('returns copy and linkNumbers for waiting-for-in-progress', () => {
-    const copy = advancementCopy({ kind: 'waiting-for-in-progress', issueNumber: 7 })
+    const copy = advancementCopy({ kind: 'waiting-for-in-progress', issueNumber: 7, })
     expect(copy.text).toContain('Waiting for #7')
     expect(copy.linkNumbers).toEqual([7])
   })
 
   it('returns copy and linkNumbers for draft-blocker', () => {
-    const copy = advancementCopy({ kind: 'draft-blocker', issueNumber: 14 })
+    const copy = advancementCopy({ kind: 'draft-blocker', issueNumber: 14, })
     expect(copy.text).toContain('still a draft')
     expect(copy.text).toContain('#14')
     expect(copy.linkNumbers).toEqual([14])
@@ -448,7 +448,7 @@ describe('advancementCopy', () => {
   })
 
   it('returns copy and linkNumbers for has-next', () => {
-    const copy = advancementCopy({ kind: 'has-next', issueNumber: 42 })
+    const copy = advancementCopy({ kind: 'has-next', issueNumber: 42, })
     expect(copy.text).toContain('#42')
     expect(copy.linkNumbers).toEqual([42])
   })
@@ -463,11 +463,11 @@ describe('advancementCopy', () => {
   it('never returns an empty text for any state', () => {
     const cases: AdvancementState[] = [
       { kind: 'running-but-idle' },
-      { kind: 'waiting-for-in-progress', issueNumber: 1 },
-      { kind: 'draft-blocker', issueNumber: 2 },
+      { kind: 'waiting-for-in-progress', issueNumber: 1, },
+      { kind: 'draft-blocker', issueNumber: 2, },
       { kind: 'external-prerequisite-blocker', issueNumber: 3, prerequisiteNumbers: [4] },
       { kind: 'idle-no-next', reason: 'x' },
-      { kind: 'has-next', issueNumber: 5 },
+      { kind: 'has-next', issueNumber: 5, },
       { kind: 'nothing-pending' },
     ]
     for (const state of cases) {

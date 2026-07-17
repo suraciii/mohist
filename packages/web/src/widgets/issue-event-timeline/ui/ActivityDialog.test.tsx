@@ -70,7 +70,7 @@ describe('ActivityDialog', () => {
   })
 
   it('opens the timeline inside a Dialog and fetches persisted events', async () => {
-    renderDialog({ issueNumber: 42 })
+    renderDialog({ issueNumber: 42, })
 
     fireEvent.click(screen.getByTestId('activity-entry'))
 

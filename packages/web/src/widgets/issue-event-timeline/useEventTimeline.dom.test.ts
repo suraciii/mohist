@@ -121,7 +121,7 @@ describe('useEventTimeline', () => {
       dispatchTimelineEvent(makeLiveEvent({
         issueNumber: 99,
         eventId: 'l-other',
-        payload: { issueNumber: 99 },
+        payload: { issueNumber: 99, },
       }))
     })
 
@@ -147,7 +147,7 @@ describe('useEventTimeline', () => {
     })
 
     act(() => {
-      dispatchTimelineEvent(makeLiveEvent({ eventId: 'shared-1', issueNumber: 42 }))
+      dispatchTimelineEvent(makeLiveEvent({ eventId: 'shared-1', issueNumber: 42, }))
     })
 
     expect(result.current.entries).toHaveLength(1)

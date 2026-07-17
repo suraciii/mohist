@@ -139,7 +139,7 @@ describe('useWorkflowRunSessions', () => {
 
       act(() => {
         dispatchAgentEvent('com.mohist.agent-session.runtime-bound', {
-          issueId: 'issue-1',
+          issueNumber: 1,
           projectId: 'project-1',
         })
       })

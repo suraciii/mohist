@@ -313,7 +313,7 @@ describe('IssueWorkflowProfileEditor (custom mode)', () => {
 
     expect(state.deleteMutate).toHaveBeenCalledTimes(1)
     const call = state.deleteMutate.mock.calls[0]
-    expect(call[0]).toEqual({ issueNumber: 1 })
+    expect(call[0]).toEqual({ issueNumber: 1, })
   })
 
   it('surfaces revert errors without clearing the editor draft', async () => {

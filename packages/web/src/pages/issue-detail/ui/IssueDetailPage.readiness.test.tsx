@@ -23,7 +23,6 @@ const projects: Project[] = [
 
 function makeIssue(overrides: Record<string, unknown> = {}) {
   return {
-    id: 'issue-1',
     number: 201,
     title: 'Test Issue',
     body: '',

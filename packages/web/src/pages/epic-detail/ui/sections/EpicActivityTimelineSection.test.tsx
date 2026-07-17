@@ -151,7 +151,7 @@ describe('EpicActivityTimelineSection', () => {
       makeEvent({
         id: 4,
         type: 'com.mohist.epic.issue-linked',
-        data: { issueNumber: 42 },
+        data: { issueNumber: 42, },
         time: '2026-06-30T12:03:00+00:00',
       }),
     ])
@@ -168,7 +168,7 @@ describe('EpicActivityTimelineSection', () => {
       makeEvent({
         id: 5,
         type: 'com.mohist.epic.issue-unlinked',
-        data: { issueNumber: 17 },
+        data: { issueNumber: 17, },
         time: '2026-06-30T12:04:00+00:00',
       }),
     ])
@@ -236,7 +236,7 @@ describe('EpicActivityTimelineSection', () => {
       makeEvent({
         id: 4,
         type: 'com.mohist.epic.issue-linked',
-        data: { issueNumber: 5 },
+        data: { issueNumber: 5, },
         time: '2026-06-30T12:03:00+00:00',
       }),
       makeEvent({

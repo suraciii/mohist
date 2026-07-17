@@ -21,12 +21,13 @@ internal static class EpicCommands
         epic.Subcommands.Add(BuildResume(api));
         epic.Subcommands.Add(BuildDone(api));
         epic.Subcommands.Add(BuildClose(api));
+        epic.Subcommands.Add(BuildReopen(api));
 
         return epic;
     }
 
-    private static Argument<string> IdArg() =>
-        new("id") { Description = "Epic id or number" };
+    private static Argument<int> NumberArg() =>
+        new("number") { Description = "Epic number" };
 
     private static string ProjectEpicsPath(string? projectId, string path = "")
     {
@@ -115,16 +116,16 @@ internal static class EpicCommands
     private static Command BuildShow(MohistCliApi api)
     {
         var cmd = new Command("show", "Show epic details");
-        var idArg = IdArg();
+        var numberArg = NumberArg();
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
         var outputOpt = MohistCliCommands.OutputOption();
-        cmd.Arguments.Add(idArg);
+        cmd.Arguments.Add(numberArg);
         cmd.Options.Add(projectOpt);
         cmd.Options.Add(projectIdOpt);
         cmd.Options.Add(outputOpt);
         cmd.SetAction(ctx =>
         {
-            var id = ctx.GetValue(idArg);
+            var number = ctx.GetValue(numberArg);
             var project = ctx.GetValue(projectOpt);
             var projectId = ctx.GetValue(projectIdOpt);
             var output = ctx.GetValue(outputOpt);
@@ -138,7 +139,7 @@ internal static class EpicCommands
                 var (mode, exit) = api.ResolveOutputMode(output);
                 if (exit != 0) return exit;
                 return await api.PrintWithOutputAsync(
-                    ProjectEpicsPath(resolvedProjectId, $"/{MohistCliCommands.Escape(id!)}"),
+                    ProjectEpicsPath(resolvedProjectId, $"/{number}"),
                     mode,
                     nameof(MohistCliApi.TableShape.EpicShow));
             }
@@ -149,13 +150,13 @@ internal static class EpicCommands
     private static Command BuildUpdate(MohistCliApi api)
     {
         var cmd = new Command("update", "Update an epic");
-        var idArg = IdArg();
+        var numberArg = NumberArg();
         var titleOpt = new Option<string?>("--title") { Description = "New title" };
         var descriptionOpt = new Option<string?>("--description", "-d") { Description = "New description" };
         var priorityOpt = new Option<string?>("--priority", "-p") { Description = "New priority (p0|p1|p2|p3)" };
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
         var outputOpt = MohistCliCommands.OutputOption();
-        cmd.Arguments.Add(idArg);
+        cmd.Arguments.Add(numberArg);
         cmd.Options.Add(titleOpt);
         cmd.Options.Add(descriptionOpt);
         cmd.Options.Add(priorityOpt);
@@ -164,7 +165,7 @@ internal static class EpicCommands
         cmd.Options.Add(outputOpt);
         cmd.SetAction(ctx =>
         {
-            var id = ctx.GetValue(idArg);
+            var number = ctx.GetValue(numberArg);
             var title = ctx.GetValue(titleOpt);
             var description = ctx.GetValue(descriptionOpt);
             var priority = ctx.GetValue(priorityOpt);
@@ -188,7 +189,7 @@ internal static class EpicCommands
                 var (mode, exit) = api.ResolveOutputMode(output);
                 if (exit != 0) return exit;
                 return await api.PrintPatchWithOutputAsync(
-                    ProjectEpicsPath(resolvedProjectId, $"/{MohistCliCommands.Escape(id!)}"),
+                    ProjectEpicsPath(resolvedProjectId, $"/{number}"),
                     body,
                     mode,
                     nameof(MohistCliApi.TableShape.EpicShow));
@@ -200,8 +201,8 @@ internal static class EpicCommands
     private static Command BuildLink(MohistCliApi api)
     {
         var cmd = new Command("link", "Link an issue to an epic");
-        var epicArg = new Argument<string>("epic") { Description = "Epic id or number" };
-        var issueArg = new Argument<string>("issue") { Description = "Issue id or number" };
+        var epicArg = new Argument<int>("epic") { Description = "Epic number" };
+        var issueArg = new Argument<int>("issue") { Description = "Issue number" };
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
         var outputOpt = MohistCliCommands.OutputOption();
         cmd.Arguments.Add(epicArg);
@@ -226,8 +227,8 @@ internal static class EpicCommands
                 var (mode, exit) = api.ResolveOutputMode(output);
                 if (exit != 0) return exit;
                 return await api.PrintPostWithOutputAsync(
-                    ProjectEpicsPath(resolvedProjectId, $"/{MohistCliCommands.Escape(epic!)}/issues"),
-                    new { issueId = issue },
+                    ProjectEpicsPath(resolvedProjectId, $"/{epic}/issues"),
+                    new { issueNumber = issue },
                     mode,
                     nameof(MohistCliApi.TableShape.EpicLink));
             }
@@ -238,8 +239,8 @@ internal static class EpicCommands
     private static Command BuildUnlink(MohistCliApi api)
     {
         var cmd = new Command("unlink", "Unlink an issue from an epic");
-        var epicArg = new Argument<string>("epic") { Description = "Epic id or number" };
-        var issueArg = new Argument<string>("issue") { Description = "Issue id" };
+        var epicArg = new Argument<int>("epic") { Description = "Epic number" };
+        var issueArg = new Argument<int>("issue") { Description = "Issue number" };
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
         var outputOpt = MohistCliCommands.OutputOption();
         cmd.Arguments.Add(epicArg);
@@ -264,7 +265,7 @@ internal static class EpicCommands
                 var (mode, exit) = api.ResolveOutputMode(output);
                 if (exit != 0) return exit;
                 return await api.PrintDeleteWithOutputAsync(
-                    ProjectEpicsPath(resolvedProjectId, $"/{MohistCliCommands.Escape(epic!)}/issues/{MohistCliCommands.Escape(issue!)}"),
+                    ProjectEpicsPath(resolvedProjectId, $"/{epic}/issues/{issue}"),
                     mode,
                     nameof(MohistCliApi.TableShape.EpicUnlink));
             }
@@ -275,16 +276,16 @@ internal static class EpicCommands
     private static Command BuildDone(MohistCliApi api)
     {
         var cmd = new Command("done", "Mark an epic done");
-        var idArg = IdArg();
+        var numberArg = NumberArg();
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
         var outputOpt = MohistCliCommands.OutputOption();
-        cmd.Arguments.Add(idArg);
+        cmd.Arguments.Add(numberArg);
         cmd.Options.Add(projectOpt);
         cmd.Options.Add(projectIdOpt);
         cmd.Options.Add(outputOpt);
         cmd.SetAction(ctx =>
         {
-            var id = ctx.GetValue(idArg);
+            var number = ctx.GetValue(numberArg);
             var project = ctx.GetValue(projectOpt);
             var projectId = ctx.GetValue(projectIdOpt);
             var output = ctx.GetValue(outputOpt);
@@ -298,7 +299,7 @@ internal static class EpicCommands
                 var (mode, exit) = api.ResolveOutputMode(output);
                 if (exit != 0) return exit;
                 return await api.PrintPostWithOutputAsync(
-                    ProjectEpicsPath(resolvedProjectId, $"/{MohistCliCommands.Escape(id!)}/done"),
+                    ProjectEpicsPath(resolvedProjectId, $"/{number}/done"),
                     new { },
                     mode,
                     nameof(MohistCliApi.TableShape.EpicShow));
@@ -325,16 +326,16 @@ internal static class EpicCommands
     private static Command BuildLifecyclePost(MohistCliApi api, string name, string description, string action)
     {
         var cmd = new Command(name, description);
-        var idArg = IdArg();
+        var numberArg = NumberArg();
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
         var outputOpt = MohistCliCommands.OutputOption();
-        cmd.Arguments.Add(idArg);
+        cmd.Arguments.Add(numberArg);
         cmd.Options.Add(projectOpt);
         cmd.Options.Add(projectIdOpt);
         cmd.Options.Add(outputOpt);
         cmd.SetAction(ctx =>
         {
-            var id = ctx.GetValue(idArg);
+            var number = ctx.GetValue(numberArg);
             var project = ctx.GetValue(projectOpt);
             var projectId = ctx.GetValue(projectIdOpt);
             var output = ctx.GetValue(outputOpt);
@@ -348,7 +349,7 @@ internal static class EpicCommands
                 var (mode, exit) = api.ResolveOutputMode(output);
                 if (exit != 0) return exit;
                 return await api.PrintPostWithOutputAsync(
-                    ProjectEpicsPath(resolvedProjectId, $"/{MohistCliCommands.Escape(id!)}/{action}"),
+                    ProjectEpicsPath(resolvedProjectId, $"/{number}/{action}"),
                     new { },
                     mode,
                     nameof(MohistCliApi.TableShape.EpicShow));
@@ -360,16 +361,16 @@ internal static class EpicCommands
     private static Command BuildClose(MohistCliApi api)
     {
         var cmd = new Command("close", "Close an epic");
-        var idArg = IdArg();
+        var numberArg = NumberArg();
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
         var outputOpt = MohistCliCommands.OutputOption();
-        cmd.Arguments.Add(idArg);
+        cmd.Arguments.Add(numberArg);
         cmd.Options.Add(projectOpt);
         cmd.Options.Add(projectIdOpt);
         cmd.Options.Add(outputOpt);
         cmd.SetAction(ctx =>
         {
-            var id = ctx.GetValue(idArg);
+            var number = ctx.GetValue(numberArg);
             var project = ctx.GetValue(projectOpt);
             var projectId = ctx.GetValue(projectIdOpt);
             var output = ctx.GetValue(outputOpt);
@@ -383,12 +384,17 @@ internal static class EpicCommands
                 var (mode, exit) = api.ResolveOutputMode(output);
                 if (exit != 0) return exit;
                 return await api.PrintPostWithOutputAsync(
-                    ProjectEpicsPath(resolvedProjectId, $"/{MohistCliCommands.Escape(id!)}/close"),
+                    ProjectEpicsPath(resolvedProjectId, $"/{number}/close"),
                     new { },
                     mode,
                     nameof(MohistCliApi.TableShape.EpicShow));
             }
         });
         return cmd;
+    }
+
+    private static Command BuildReopen(MohistCliApi api)
+    {
+        return BuildLifecyclePost(api, "reopen", "Reopen an epic", "reopen");
     }
 }

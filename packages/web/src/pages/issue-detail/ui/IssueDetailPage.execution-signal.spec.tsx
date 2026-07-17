@@ -56,7 +56,6 @@ function renderPage() {
 
 function baseIssue(overrides: Record<string, unknown> = {}) {
   return {
-    id: 'issue-401',
     number: 401,
     title: 'Execution signal test issue',
     body: '',

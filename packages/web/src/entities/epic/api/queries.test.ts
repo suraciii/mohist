@@ -91,7 +91,7 @@ describe('pauseEpicMutationOptions', () => {
   it('calls pauseEpic(number, reason, projectId) in mutationFn', async () => {
     const captured: { url: string; method: string; body: unknown }[] = []
     server.use(
-      http.post('*/api/projects/:projectId/epics/:epicId/pause', async ({ request }) => {
+      http.post('*/api/projects/:projectId/epics/:number/pause', async ({ request }) => {
         captured.push({ url: new URL(request.url).pathname, method: request.method, body: await request.json() })
         return HttpResponse.json({ success: true, data: { number: 1, status: 'paused' } })
       }),
@@ -122,7 +122,7 @@ describe('resumeEpicMutationOptions', () => {
   it('calls resumeEpic(number, projectId) in mutationFn', async () => {
     const captured: { url: string; method: string }[] = []
     server.use(
-      http.post('*/api/projects/:projectId/epics/:epicId/resume', ({ request }) => {
+      http.post('*/api/projects/:projectId/epics/:number/resume', ({ request }) => {
         captured.push({ url: new URL(request.url).pathname, method: request.method })
         return HttpResponse.json({ success: true, data: { number: 1, status: 'running' } })
       }),
@@ -151,7 +151,7 @@ describe('startEpicMutationOptions', () => {
   it('calls startEpic(number, projectId) in mutationFn', async () => {
     const captured: { url: string; method: string }[] = []
     server.use(
-      http.post('*/api/projects/:projectId/epics/:epicId/start', ({ request }) => {
+      http.post('*/api/projects/:projectId/epics/:number/start', ({ request }) => {
         captured.push({ url: new URL(request.url).pathname, method: request.method })
         return HttpResponse.json({ success: true, data: { number: 1, status: 'running' } })
       }),
@@ -191,7 +191,7 @@ describe('reopenEpicMutationOptions', () => {
   it('calls reopenEpic(number, projectId) in mutationFn', async () => {
     const captured: { url: string; method: string }[] = []
     server.use(
-      http.post('*/api/projects/:projectId/epics/:epicId/reopen', ({ request }) => {
+      http.post('*/api/projects/:projectId/epics/:number/reopen', ({ request }) => {
         captured.push({ url: new URL(request.url).pathname, method: request.method })
         return HttpResponse.json({ success: true, data: { number: 1, status: 'idle' } })
       }),
@@ -241,7 +241,7 @@ describe('epicEventsQueryOptions', () => {
     ]
     const captured: string[] = []
     server.use(
-      http.get('*/api/projects/:projectId/epics/:epicId/events', ({ request }) => {
+      http.get('*/api/projects/:projectId/epics/:number/events', ({ request }) => {
         captured.push(new URL(request.url).pathname)
         return HttpResponse.json({ success: true, data: events })
       }),

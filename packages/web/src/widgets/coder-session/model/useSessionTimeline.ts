@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { getAgentStatus } from '../../../entities/agent'
 import { onAgentEvent } from '../../../entities/agent'
+import { useProject } from '../../../entities/project'
 import type {
   ToolCallEntry,
   CoderSessionItem,
@@ -37,6 +38,7 @@ function toToolCallEntryState(state: AgentDetailEventMap['tool_call.started']['s
 }
 
 export function useSessionTimeline(issueNumber: number, session?: CoderSessionItem) {
+  const { projectId } = useProject()
   const sessionRef = useRef(session)
   sessionRef.current = session
 
@@ -215,8 +217,9 @@ export function useSessionTimeline(issueNumber: number, session?: CoderSessionIt
 
   useEffect(() => {
     mountedRef.current = true
-    const issueId = String(issueNumber)
     const unsubs: Array<() => void> = []
+    const isCurrentIssueEvent = (detail: { issueNumber: number; projectId: string }) =>
+      detail.projectId === projectId && detail.issueNumber === issueNumber
     const isCurrentLogicalSessionEvent = (detail: { sessionId?: string | null; runtimeSessionId?: string | null }) => {
       if (!mountedRef.current) return false
       const s = sessionRef.current
@@ -257,7 +260,7 @@ export function useSessionTimeline(issueNumber: number, session?: CoderSessionIt
 
     unsubs.push(
       onAgentEvent('plan_round_start', (detail) => {
-        if (detail.issueId !== issueId || !mountedRef.current) return
+        if (!isCurrentIssueEvent(detail) || !mountedRef.current) return
         if (!isCurrentLogicalSessionEvent(detail)) return
         dispatch(planRoundStartReducer, detail)
       }),
@@ -265,7 +268,7 @@ export function useSessionTimeline(issueNumber: number, session?: CoderSessionIt
 
     unsubs.push(
       onAgentEvent('plan_session_update', (detail) => {
-        if (detail.issueId !== issueId || !mountedRef.current) return
+        if (!isCurrentIssueEvent(detail) || !mountedRef.current) return
         if (!isCurrentRuntimeSessionEvent(detail)) return
         planBufferRef.current.push(detail)
         scheduleFlush()
@@ -274,7 +277,7 @@ export function useSessionTimeline(issueNumber: number, session?: CoderSessionIt
 
     unsubs.push(
       onAgentEvent('plan_round_complete', (detail) => {
-        if (detail.issueId !== issueId || !mountedRef.current) return
+        if (!isCurrentIssueEvent(detail) || !mountedRef.current) return
         dispatch(planRoundCompleteReducer, detail)
       }),
     )
@@ -368,7 +371,7 @@ export function useSessionTimeline(issueNumber: number, session?: CoderSessionIt
 
     unsubs.push(
       onAgentEvent('coder_recovery_status', (detail) => {
-        if (detail.issueId !== issueId || !mountedRef.current) return
+        if (!isCurrentIssueEvent(detail) || !mountedRef.current) return
         if (!isCurrentRuntimeSessionEvent(detail)) return
         dispatch(coderRecoveryStatusReducer, detail)
       }),
@@ -404,14 +407,14 @@ export function useSessionTimeline(issueNumber: number, session?: CoderSessionIt
 
     unsubs.push(
       onAgentEvent('com.mohist.agent-session.context-compacted', (detail) => {
-        if (detail.issueId !== issueId || !mountedRef.current) return
+        if (!isCurrentIssueEvent(detail) || !mountedRef.current) return
         dispatch(contextCompactedReducer, detail)
       }),
     )
 
     unsubs.push(
       onAgentEvent('com.mohist.agent-session.context-health-updated', (detail) => {
-        if (detail.issueId !== issueId || !mountedRef.current) return
+        if (!isCurrentIssueEvent(detail) || !mountedRef.current) return
         dispatch(contextHealthUpdatedReducer, detail)
       }),
     )
@@ -428,7 +431,7 @@ export function useSessionTimeline(issueNumber: number, session?: CoderSessionIt
         timeoutRef.current = null
       }
     }
-  }, [issueNumber, scheduleFlush])
+  }, [issueNumber, projectId, scheduleFlush])
 
   return {
     rounds,

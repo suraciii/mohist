@@ -42,7 +42,7 @@ const events = [
     specVersion: '1.0',
     subject: 'session-42',
     dataContentType: 'application/json',
-    data: { issueNumber: 42 },
+    data: { issueNumber: 42, },
     extensions: { issue: '42' },
     runnerId: null,
     issueNumber: 42,

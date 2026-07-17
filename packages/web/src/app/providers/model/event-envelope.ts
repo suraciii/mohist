@@ -39,8 +39,6 @@ export function routeTranscriptEventName(name: string): string {
  */
 function hasIssueNumber(payload: Record<string, unknown>): boolean {
   return typeof payload.issueNumber === 'number'
-    || typeof payload.issueNo === 'number'
-    || typeof payload.number === 'number'
 }
 
 function isNonEmptyString(value: unknown): value is string {

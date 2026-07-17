@@ -212,7 +212,7 @@ describe('EpicDetailPage', () => {
 
     await waitFor(() => {
       expect(_addEpicIssueHandler).toHaveBeenCalledWith(
-        { epicNumber: 123, issueNumber: 3 },
+        { epicNumber: 123, issueNumber: 3, },
       )
     })
   })
@@ -251,7 +251,7 @@ describe('EpicDetailPage', () => {
     fireEvent.click(screen.getByTestId('linked-issue-remove-confirm'))
 
     await waitFor(() => {
-      expect(_removeEpicIssueHandler).toHaveBeenCalledWith({ epicNumber: 123, issueNumber: 1 })
+      expect(_removeEpicIssueHandler).toHaveBeenCalledWith({ epicNumber: 123, issueNumber: 1, })
     })
   })
 })

@@ -578,3 +578,18 @@ ArchTests pass (**27**), and the server build has zero errors. A full SpecTests 
 - Added regression coverage for session envelope disagreement/missing context, Hermes stage
   disagreement, typed lineage parsing, and Epic context validation. Final server verification:
   UnitTests **1470 passed**, SpecTests **2754 passed**, ArchTests **27 passed**.
+
+## T-009 final reconciliation (2026-07-17)
+
+- CLI Epic commands now accept Project-scoped Epic numbers for show/update/link/unlink/lifecycle
+  operations, send Issue numbers for membership changes, render number-only confirmations, and
+  expose `epic reopen`.
+- Web Issue/Epic DTOs, Agent/session event payloads, activity cards, attention items, cache keys,
+  routes, forms, fixtures, and displays now use ProjectId plus IssueNumber/EpicNumber. Legacy
+  `issueId`, `epicId`, `issueNo`, `epicNo`, `issue_number`, and `epic_number` paths were removed;
+  independent resource/event ids remain unchanged.
+- Live coder-session and transcript routing now requires matching ProjectId plus IssueNumber.
+  Envelope routing recognizes canonical `issueNumber` only and leaves event payloads unchanged.
+- Web typecheck passed; Web suite passed **4678/4678** tests across **335** files. CLI suite passed
+  **911/911** tests, and the CLI project build passed with zero warnings/errors.
+- `git diff --check` passed. T-010 remains pending for the broader aggregate recovery/model audit.

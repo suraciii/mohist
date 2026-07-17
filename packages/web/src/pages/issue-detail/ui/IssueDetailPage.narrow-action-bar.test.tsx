@@ -51,7 +51,6 @@ function renderPage() {
 
 function baseIssue(overrides: Record<string, unknown> = {}) {
   return {
-    id: 'issue-base',
     number: 14,
     title: 'Test issue',
     body: '',

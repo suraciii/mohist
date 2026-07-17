@@ -54,7 +54,7 @@ const TEMPLATE_FIXTURES = {
 }
 
 let _issuesData: Issue[] = []
-let _createIssueResponse: Issue = { id: 'issue_new', number: 42 } as Issue
+let _createIssueResponse: Pick<Issue, 'number'> = { number: 42 }
 const _repositoriesData = [{ name: 'main', isDefault: true }]
 const _modelsData = { models: [] as string[], modelVariants: {} as Record<string, string[]> }
 const _workflowProfilesData: { id: string; displayName: string; description: string; isDefault: boolean }[] = []
@@ -139,7 +139,7 @@ describe('CreateIssueDialog', () => {
     cleanup()
     vi.clearAllMocks()
     _issuesData = []
-    _createIssueResponse = { id: 'issue_1', number: 1 } as Issue
+    _createIssueResponse = { number: 1 }
     _modelsData.models = []
     _modelsData.modelVariants = {}
     _workflowProfilesData.length = 0
@@ -149,7 +149,7 @@ describe('CreateIssueDialog', () => {
   })
 
   it('creates issue with attachment ids from the composer body', async () => {
-    _createIssueResponse = { id: 'issue_1', number: 1 } as Issue
+    _createIssueResponse = { number: 1 }
     const { queryClient } = renderDialog()
 
     fireEvent.change(screen.getByPlaceholderText('Issue title'), { target: { value: 'New issue' } })
@@ -188,7 +188,7 @@ describe('CreateIssueDialog toast feedback', () => {
     cleanup()
     vi.clearAllMocks()
     _issuesData = []
-    _createIssueResponse = { id: 'issue_1', number: 1 } as Issue
+    _createIssueResponse = { number: 1 }
     _modelsData.models = []
     _modelsData.modelVariants = {}
     _workflowProfilesData.length = 0
@@ -198,7 +198,7 @@ describe('CreateIssueDialog toast feedback', () => {
   })
 
   it('shows a success toast with the new issue number on successful create', async () => {
-    _createIssueResponse = { id: 'issue_223', number: 223 } as Issue
+    _createIssueResponse = { number: 223 }
     renderDialog()
 
     fireEvent.change(screen.getByPlaceholderText('Issue title'), { target: { value: 'Toast test' } })
@@ -212,7 +212,7 @@ describe('CreateIssueDialog toast feedback', () => {
   })
 
   it('never reads the number from a { issue } wrapper (success path uses data.number)', async () => {
-    _createIssueResponse = { id: 'issue_9', number: 9 } as Issue
+    _createIssueResponse = { number: 9 }
     renderDialog()
 
     fireEvent.change(screen.getByPlaceholderText('Issue title'), { target: { value: 'No wrapper' } })
@@ -263,7 +263,7 @@ describe('CreateIssueDialog template selector', () => {
     cleanup()
     vi.clearAllMocks()
     _issuesData = []
-    _createIssueResponse = { id: 'issue_1', number: 1 } as Issue
+    _createIssueResponse = { number: 1 }
     _modelsData.models = []
     _modelsData.modelVariants = {}
     _workflowProfilesData.length = 0
@@ -376,7 +376,7 @@ describe('CreateIssueDialog model + variant chips', () => {
     cleanup()
     vi.clearAllMocks()
     _issuesData = []
-    _createIssueResponse = { id: 'issue_1', number: 1 } as Issue
+    _createIssueResponse = { number: 1 }
     _modelsData.models = []
     _modelsData.modelVariants = {}
     _workflowProfilesData.length = 0
@@ -545,7 +545,7 @@ describe('CreateIssueDialog workflow profile default', () => {
     cleanup()
     vi.clearAllMocks()
     _issuesData = []
-    _createIssueResponse = { id: 'issue_1', number: 1 } as Issue
+    _createIssueResponse = { number: 1 }
     _modelsData.models = []
     _modelsData.modelVariants = {}
     _workflowProfilesData.length = 0
@@ -624,7 +624,6 @@ describe('CreateIssueDialog workflow profile default', () => {
 describe('CreateIssueDialog prerequisites', () => {
   const PICKER_PROJECT_ISSUES: Issue[] = [
     {
-      id: 'issue_5',
       number: 5,
       title: 'Wire up auth',
       status: IssueStatus.InProgress,
@@ -638,7 +637,6 @@ describe('CreateIssueDialog prerequisites', () => {
       blocker: null,
     },
     {
-      id: 'issue_7',
       number: 7,
       title: 'Audit auth tokens',
       status: IssueStatus.Backlog,
@@ -652,7 +650,6 @@ describe('CreateIssueDialog prerequisites', () => {
       blocker: null,
     },
     {
-      id: 'issue_99',
       number: 99,
       title: 'Other issue',
       status: IssueStatus.Backlog,
@@ -675,7 +672,7 @@ describe('CreateIssueDialog prerequisites', () => {
     cleanup()
     vi.clearAllMocks()
     _issuesData = []
-    _createIssueResponse = { id: 'issue_1', number: 1 } as Issue
+    _createIssueResponse = { number: 1 }
     _modelsData.models = []
     _modelsData.modelVariants = {}
     _workflowProfilesData.length = 0
@@ -686,7 +683,7 @@ describe('CreateIssueDialog prerequisites', () => {
 
   it('renders the Prerequisites picker in buffer mode and sends the selected numbers on submit', async () => {
     setupPickerIssues()
-    _createIssueResponse = { id: 'issue_new', number: 42 } as Issue
+    _createIssueResponse = { number: 42 }
     const user = userEvent.setup()
     renderDialog()
 
@@ -721,7 +718,7 @@ describe('CreateIssueDialog prerequisites', () => {
 
   it('removes a buffered chip from the local selection without sending the removed number', async () => {
     setupPickerIssues()
-    _createIssueResponse = { id: 'issue_new', number: 42 } as Issue
+    _createIssueResponse = { number: 42 }
     const user = userEvent.setup()
     renderDialog()
 
@@ -762,7 +759,7 @@ describe('CreateIssueDialog prerequisites', () => {
 
   it('omits prerequisiteNumbers from the create body when no prerequisites are selected', async () => {
     setupPickerIssues()
-    _createIssueResponse = { id: 'issue_new', number: 42 } as Issue
+    _createIssueResponse = { number: 42 }
     const user = userEvent.setup()
     renderDialog()
 
@@ -780,7 +777,7 @@ describe('CreateIssueDialog prerequisites', () => {
 
   it('clears the prerequisite buffer after a successful create so reopening starts empty', async () => {
     setupPickerIssues()
-    _createIssueResponse = { id: 'issue_new', number: 42 } as Issue
+    _createIssueResponse = { number: 42 }
     const onClose = vi.fn()
     const user = userEvent.setup()
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
@@ -833,7 +830,7 @@ describe('CreateIssueDialog prerequisites', () => {
 
   it('create-issue mutation onSuccess still reads data.number off the bare Issue shape', async () => {
     setupPickerIssues()
-    _createIssueResponse = { id: 'issue_201', number: 201 } as Issue
+    _createIssueResponse = { number: 201 }
     const user = userEvent.setup()
     renderDialog()
 

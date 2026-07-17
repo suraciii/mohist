@@ -22,8 +22,7 @@ describe('Live-then-refetch transcript equivalence', () => {
 
     act(() => {
       dispatchAgentEvent('coder_tool_call', {
-        issueId: '123',
-        projectId: 'project-1',
+        issueNumber: 123,        projectId: 'project-1',
         executionId: 'exec-123',
         runtimeSessionId: 'acp-123',
         sessionId: 'session-123',
@@ -36,8 +35,7 @@ describe('Live-then-refetch transcript equivalence', () => {
 
     act(() => {
       dispatchAgentEvent('coder_tool_call', {
-        issueId: '123',
-        projectId: 'project-1',
+        issueNumber: 123,        projectId: 'project-1',
         executionId: 'exec-123',
         runtimeSessionId: 'acp-123',
         sessionId: 'session-123',
@@ -57,8 +55,7 @@ describe('Live-then-refetch transcript equivalence', () => {
 
     act(() => {
       dispatchAgentEvent('coder_tool_call', {
-        issueId: '123',
-        projectId: 'project-1',
+        issueNumber: 123,        projectId: 'project-1',
         executionId: 'exec-123',
         runtimeSessionId: 'acp-123',
         sessionId: 'session-123',
@@ -71,8 +68,7 @@ describe('Live-then-refetch transcript equivalence', () => {
 
     act(() => {
       dispatchAgentEvent('coder_tool_call', {
-        issueId: '123',
-        projectId: 'project-1',
+        issueNumber: 123,        projectId: 'project-1',
         executionId: 'exec-123',
         runtimeSessionId: 'acp-123',
         sessionId: 'session-123',
@@ -110,8 +106,7 @@ describe('Live-then-refetch transcript equivalence', () => {
 
     act(() => {
       dispatchAgentEvent('coder_tool_call', {
-        issueId: '123',
-        projectId: 'project-1',
+        issueNumber: 123,        projectId: 'project-1',
         executionId: 'exec-123',
         runtimeSessionId: 'acp-123',
         sessionId: 'session-123',
@@ -131,8 +126,7 @@ describe('Live-then-refetch transcript equivalence', () => {
 
     act(() => {
       dispatchAgentEvent('coder_tool_call', {
-        issueId: '123',
-        projectId: 'project-1',
+        issueNumber: 123,        projectId: 'project-1',
         executionId: 'exec-123',
         runtimeSessionId: 'acp-123',
         sessionId: 'session-123',
@@ -175,8 +169,7 @@ describe('Live-then-refetch transcript equivalence', () => {
     for (const item of toolSequence) {
       act(() => {
         dispatchAgentEvent('coder_tool_call', {
-          issueId: '123',
-          projectId: 'project-1',
+          issueNumber: 123,          projectId: 'project-1',
           executionId: 'exec-123',
           runtimeSessionId: 'acp-123',
           sessionId: 'session-123',
@@ -198,8 +191,7 @@ describe('Live-then-refetch transcript equivalence', () => {
     for (const item of toolSequence) {
       act(() => {
         dispatchAgentEvent('coder_tool_call', {
-          issueId: '123',
-          projectId: 'project-1',
+          issueNumber: 123,          projectId: 'project-1',
           executionId: 'exec-123',
           runtimeSessionId: 'acp-123',
           sessionId: 'session-123',
@@ -238,8 +230,7 @@ describe('Live-then-refetch transcript equivalence', () => {
 
     act(() => {
       dispatchAgentEvent('coder_text_chunk', {
-        issueId: '123',
-        projectId: 'project-1',
+        issueNumber: 123,        projectId: 'project-1',
         executionId: 'exec-123',
         runtimeSessionId: 'acp-123',
         text: 'Reading files...',
@@ -249,8 +240,7 @@ describe('Live-then-refetch transcript equivalence', () => {
 
     act(() => {
       dispatchAgentEvent('coder_tool_call', {
-        issueId: '123',
-        projectId: 'project-1',
+        issueNumber: 123,        projectId: 'project-1',
         executionId: 'exec-123',
         runtimeSessionId: 'acp-123',
         sessionId: 'session-123',
@@ -263,8 +253,7 @@ describe('Live-then-refetch transcript equivalence', () => {
 
     act(() => {
       dispatchAgentEvent('coder_text_chunk', {
-        issueId: '123',
-        projectId: 'project-1',
+        issueNumber: 123,        projectId: 'project-1',
         executionId: 'exec-123',
         runtimeSessionId: 'acp-123',
         text: 'Done reading.',
@@ -274,8 +263,7 @@ describe('Live-then-refetch transcript equivalence', () => {
 
     act(() => {
       dispatchAgentEvent('coder_tool_call', {
-        issueId: '123',
-        projectId: 'project-1',
+        issueNumber: 123,        projectId: 'project-1',
         executionId: 'exec-123',
         runtimeSessionId: 'acp-123',
         sessionId: 'session-123',

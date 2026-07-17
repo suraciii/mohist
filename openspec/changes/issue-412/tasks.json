@@ -192,8 +192,8 @@
       "type": "WRITE",
       "output": "Number-only CLI/Web contracts, Project-scoped routes/cache keys, reopen CLI and envelope-first timeline tests.",
       "dependsOn": ["T-008"],
-      "passes": false,
-      "notes": "No dual client cache keys or id compatibility aliases. Project scope remains explicit because numbers are not global."
+      "passes": true,
+      "notes": "Completed on 2026-07-17. No dual client cache keys or id compatibility aliases remain; Project scope remains explicit because numbers are not global. Web and CLI full suites pass."
     },
     {
       "id": "T-010",

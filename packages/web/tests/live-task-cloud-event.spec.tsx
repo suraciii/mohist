@@ -18,8 +18,6 @@ useMswServer(
       success: true,
       data: {
         running: false,
-        issueId: null,
-        issueNumber: null,
         activeAgents: [],
         runnerAvailable: true,
         capacity: { active: 0, max: 1 },
@@ -38,7 +36,7 @@ const { unwrapEnvelope, unwrapTranscriptEnvelope, routeTranscriptEventName } = _
 
 describe('unwrapEnvelope', () => {
   it('returns the data when given a CloudEvents 1.0.2 envelope', () => {
-    const data = { issueId: '42', projectId: 'mohist' }
+    const data = { issueNumber: 42, projectId: 'mohist' }
     const envelope = {
       type: 'stage_changed',
       data,
@@ -50,7 +48,7 @@ describe('unwrapEnvelope', () => {
   })
 
   it('returns the payload when given the server CloudEventEnvelope shape', () => {
-    const payload = { issueId: '42', projectId: 'mohist' }
+    const payload = { issueNumber: 42, projectId: 'mohist' }
     const envelope = {
       type: 'com.mohist.workflow.stage.started',
       payload,
@@ -64,7 +62,7 @@ describe('unwrapEnvelope', () => {
   })
 
   it('returns the raw object when given a back-compat raw payload', () => {
-    const raw = { issueId: '42', projectId: 'mohist' }
+    const raw = { issueNumber: 42, projectId: 'mohist' }
     expect(unwrapEnvelope(raw)).toBe(raw)
   })
 
@@ -90,7 +88,7 @@ describe('unwrapEnvelope', () => {
     // payload. We still support that for unmigrated producers. The
     // structural check above covers the new CloudEvents path; the
     // legacy path here is documented as a back-compat fallback.
-    const legacy = { type: 'tool_call', payload: { foo: 'bar' }, issueId: '42' }
+    const legacy = { type: 'tool_call', payload: { foo: 'bar' } }
     const result = unwrapEnvelope(legacy)
     expect(result).toEqual({ foo: 'bar' })
   })
@@ -230,7 +228,6 @@ describe('LiveTaskProvider transcript routing', () => {
     const connectionCall = eventsConnectionHook.mock.calls[0]
     const onTranscriptEvent = connectionCall[2] as (envelope: unknown) => void
     const payload = {
-      issueId: 'issue-1',
       projectId: 'project-1',
       executionId: 'execution-1',
       runtimeSessionId: 'acp-1',
@@ -284,7 +281,6 @@ describe('LiveTaskProvider transcript routing', () => {
     const connectionCall = eventsConnectionHook.mock.calls[0]
     const onTranscriptEvent = connectionCall[2] as (envelope: unknown) => void
     const payload = {
-      issueId: 'issue-1',
       projectId: 'project-1',
       executionId: 'execution-1',
       runtimeSessionId: 'acp-1',
@@ -339,7 +335,7 @@ describe('LiveTaskProvider transcript routing', () => {
       source: '/mohist/test',
       specVersion: '1.0',
       type: 'com.mohist.workflow.stage.approval-requested',
-      payload: { issueId: 'issue-1', projectId: 'project-1', issueNumber: 82, stage: 'review' },
+      payload: { projectId: 'project-1', issueNumber: 82, stage: 'review' },
     })
 
     await waitFor(() => {
@@ -373,7 +369,7 @@ describe('LiveTaskProvider transcript routing', () => {
       source: '/mohist/test',
       specVersion: '1.0',
       type: 'com.mohist.issue.completed',
-      payload: { issueId: 'issue-1', projectId: 'project-1', issueNumber: 82, operation: 'merge' },
+      payload: { projectId: 'project-1', issueNumber: 82, operation: 'merge' },
     })
 
     await waitFor(() => {
@@ -405,7 +401,7 @@ describe('LiveTaskProvider transcript routing', () => {
       source: '/mohist/test',
       specVersion: '1.0',
       type: 'com.mohist.workflow.run.failed',
-      payload: { issueId: 'issue-1', projectId: 'project-1', issueNumber: 82, operation: 'merge', error: 'boom' },
+      payload: { projectId: 'project-1', issueNumber: 82, operation: 'merge', error: 'boom' },
     })
 
     await waitFor(() => {
@@ -438,11 +434,11 @@ describe('LiveTaskProvider transcript routing', () => {
       source: '/mohist/test',
       specVersion: '1.0',
       type: 'com.mohist.issue.completed',
-      payload: { issueId: 'issue-1', projectId: 'project-1', issueNumber: 82, operation: 'rebase', rebased: true },
+      payload: { projectId: 'project-1', issueNumber: 82, operation: 'rebase', rebased: true },
     })
 
     await waitFor(() => {
-      expect(seen).toContainEqual({ type: 'rebase_completed', issueNumber: 82, rebased: true })
+       expect(seen).toContainEqual({ type: 'rebase_completed', issueNumber: 82, rebased: true })
     })
     off()
   })
@@ -472,7 +468,6 @@ describe('LiveTaskProvider transcript routing', () => {
         specVersion: '1.0',
         type: 'com.mohist.workflow.stage.failed',
         payload: {
-          issueId: 'issue-1',
           projectId: 'project-1',
           issueNumber: 82,
           operation: 'rebase',
@@ -501,7 +496,7 @@ describe('rebase events reach onRebaseEvent listeners', () => {
     // Drive the dispatch path the way LiveTaskProvider would
     const envelope = {
       type: 'rebase_started',
-      data: { issueId: 'i1', projectId: 'p1', issueNumber: 42 },
+      data: { projectId: 'p1', issueNumber: 42 },
       id: 'evt-rb-1',
       source: '/mohist/test',
       specVersion: '1.0',

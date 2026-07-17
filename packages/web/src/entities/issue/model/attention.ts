@@ -3,7 +3,6 @@ import { IssueHealth, WorkflowStage, type Issue } from './issue'
 export type IssueAttentionItem = {
   kind: 'approval-needed' | 'integration-failed' | 'blocked'
   issueNumber: number
-  issueId: string
   label: string
   detail?: string
 }
@@ -20,7 +19,6 @@ function classifyIssueAttention(issue: Issue): IssueAttentionItem | null {
     return {
       kind: 'approval-needed',
       issueNumber: issue.number,
-      issueId: issue.id,
       label: 'Approval needed',
       detail: issue.title,
     }
@@ -30,7 +28,6 @@ function classifyIssueAttention(issue: Issue): IssueAttentionItem | null {
     return {
       kind: 'integration-failed',
       issueNumber: issue.number,
-      issueId: issue.id,
       label: 'Integration failed',
       detail: issue.title,
     }
@@ -40,7 +37,6 @@ function classifyIssueAttention(issue: Issue): IssueAttentionItem | null {
     return {
       kind: 'blocked',
       issueNumber: issue.number,
-      issueId: issue.id,
       label: 'Needs action',
       detail: issue.blockedReason ?? issue.title,
     }

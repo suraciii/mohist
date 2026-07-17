@@ -24,7 +24,6 @@ function apiResponse(data: unknown) {
 
 function makeIssue(number: number, overrides: Record<string, unknown> = {}) {
   return {
-    id: `issue-${number}`,
     number,
     title: `Linked issue ${number}`,
     status: 'backlog',
@@ -52,7 +51,6 @@ function makeEpic(status: EpicStatus, overrides: Record<string, unknown> = {}) {
   ]
 
   return {
-    id: `epic-${status}`,
     number: status === 'running' ? 7 : status === 'idle' ? 8 : status === 'done' ? 9 : 10,
     title: LONG_TITLE,
     description: FULL_DESCRIPTION,
@@ -64,8 +62,8 @@ function makeEpic(status: EpicStatus, overrides: Record<string, unknown> = {}) {
       deliveredCount: status === 'done' || status === 'closed' ? 2 : 1,
       totalIssueCount: 2,
       blockedIssues: [],
-      activeIssues: status === 'running' ? [{ id: 'issue-2', number: 2, title: 'Dependent linked issue', health: 'active' }] : [],
-      nextIssue: status === 'done' || status === 'closed' ? null : { id: 'issue-2', number: 2, title: 'Dependent linked issue' },
+      activeIssues: status === 'running' ? [{ number: 2, title: 'Dependent linked issue', health: 'active' }] : [],
+      nextIssue: status === 'done' || status === 'closed' ? null : { number: 2, title: 'Dependent linked issue' },
       nextIssueReason: null,
       readyToMarkDone: status === 'done' || status === 'closed',
     },
