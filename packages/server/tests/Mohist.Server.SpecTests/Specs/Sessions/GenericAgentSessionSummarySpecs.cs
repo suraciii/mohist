@@ -150,7 +150,7 @@ public class GenericAgentSessionSummarySpecs
         Assert.NotNull(result);
         Assert.NotNull(result!.ContextRefs);
         Assert.Equal(int.Parse(AgentIssueNumber), result.ContextRefs!.IssueNumber);
-        Assert.Equal(AgentEpicNumber, result.ContextRefs.EpicNumber);
+        Assert.Equal(int.Parse(AgentEpicNumber), result.ContextRefs.EpicNumber);
         Assert.Equal(AgentRepository, result.ContextRefs.Repository);
         Assert.Equal(AgentWorkspacePath, result.ContextRefs.WorkspacePath);
     }

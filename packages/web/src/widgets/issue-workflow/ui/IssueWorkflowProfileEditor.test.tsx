@@ -12,7 +12,6 @@ const refetch = vi.fn()
 const customData = (): IssueWorkflowProfileYamlResponse => ({
   issueNumber: 1,
   projectId: 'test-project',
-  issueKey: 'mohist/test-project#1',
   yaml: 'id: baseline\nstages:\n  - stage: plan\n    tasks: []\n    checks: []\n',
   workflowRunId: null,
   profileId: 'mohist/local',

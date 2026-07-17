@@ -139,8 +139,8 @@ describe('AgentSessionComposerPage', () => {
 
   it('reads ?epic= to pre-fill an epic context ref', async () => {
     state.agentsData = [makeAgent('agent-1')]
-    renderPage(['/agent-sessions/new?epic=epic-1'])
-    expect(await screen.findByTestId('context-ref-chip-epic')).toHaveTextContent('Epic: epic-1')
+    renderPage(['/agent-sessions/new?epic=7'])
+    expect(await screen.findByTestId('context-ref-chip-epic')).toHaveTextContent('Epic: 7')
   })
 
   it('reads ?repo= to pre-fill a repo context ref', async () => {
@@ -157,10 +157,10 @@ describe('AgentSessionComposerPage', () => {
 
   it('pre-fills multiple context refs simultaneously', async () => {
     state.agentsData = [makeAgent('agent-1')]
-    renderPage(['/agent-sessions/new?issue=7&epic=epic-3&repo=my/repo'])
+    renderPage(['/agent-sessions/new?issue=7&epic=3&repo=my/repo'])
     await screen.findByTestId('context-ref-chip-repository')
     expect(screen.getByTestId('context-ref-chip-issue')).toHaveTextContent('Issue #7')
-    expect(screen.getByTestId('context-ref-chip-epic')).toHaveTextContent('Epic: epic-3')
+    expect(screen.getByTestId('context-ref-chip-epic')).toHaveTextContent('Epic: 3')
     expect(screen.getByTestId('context-ref-chip-repository')).toHaveTextContent('Repository: my/repo')
   })
 
@@ -230,7 +230,7 @@ describe('AgentSessionComposerPage', () => {
 
   it('passes context refs in launch body', async () => {
     state.agentsData = [makeAgent('agent-1')]
-    renderPage(['/agent-sessions/new?agent=agent-1&issue=42&epic=epic-1'])
+    renderPage(['/agent-sessions/new?agent=agent-1&issue=42&epic=7'])
     const textarea = await screen.findByTestId('prompt-textarea')
     fireEvent.change(textarea, { target: { value: 'Analyze this' } })
     fireEvent.click(screen.getByTestId('launch-button'))
@@ -240,7 +240,7 @@ describe('AgentSessionComposerPage', () => {
     })
     expect(state.launchCalls[0]).toMatchObject({
       agentRef: 'agent-1',
-      body: { prompt: 'Analyze this', context: { issueNumber: 42, epicNumber: 'epic-1' } },
+      body: { prompt: 'Analyze this', context: { issueNumber: 42, epicNumber: 7 } },
     })
   })
 

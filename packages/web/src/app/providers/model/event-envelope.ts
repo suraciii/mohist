@@ -37,27 +37,25 @@ export function routeTranscriptEventName(name: string): string {
  * not the CloudEvents-spec lowercase `specversion`. The structural
  * check here matches what the server actually emits.
  */
-function hasIssueNumber(payload: Record<string, unknown>): boolean {
-  return typeof payload.issueNumber === 'number'
-}
-
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0
 }
 
-function mergeIssueLineage(
+function mergeRoutingLineage(
   payload: Record<string, unknown>,
   extensions: Record<string, unknown> | null,
 ): Record<string, unknown> {
-  const extensionIssue = extensions?.issue
-  const shouldAddIssueNumber = !hasIssueNumber(payload) && isNonEmptyString(extensionIssue)
-  if (!shouldAddIssueNumber) return payload
+  let normalized = payload
+  const extensionProjectId = extensions?.projectid
+  if (isNonEmptyString(extensionProjectId) && payload.projectId !== extensionProjectId) {
+    normalized = { ...normalized, projectId: extensionProjectId }
+  }
 
-  const normalized = { ...payload }
-  if (shouldAddIssueNumber) {
+  const extensionIssue = extensions?.issue
+  if (isNonEmptyString(extensionIssue)) {
     const issueNumber = Number(extensionIssue)
-    if (Number.isFinite(issueNumber)) {
-      normalized.issueNumber = issueNumber
+    if (Number.isSafeInteger(issueNumber) && issueNumber > 0 && normalized.issueNumber !== issueNumber) {
+      normalized = { ...normalized, issueNumber }
     }
   }
   return normalized
@@ -80,7 +78,7 @@ export function unwrapEnvelope(rawData: unknown): Record<string, unknown> {
   ) {
     const payload = candidate.payload ?? candidate.data
     if (payload && typeof payload === 'object') {
-      return mergeIssueLineage(payload as Record<string, unknown>, asRecord(candidate.extensions))
+      return mergeRoutingLineage(payload as Record<string, unknown>, asRecord(candidate.extensions))
     }
     return {}
   }

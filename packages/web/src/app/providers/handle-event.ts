@@ -138,6 +138,15 @@ function issueHandler(ctx: HandlerContext): void {
   }
 }
 
+function issueEpicChangedHandler(ctx: HandlerContext): void {
+  const { issueNumber } = ctx.parsed as { issueNumber?: number }
+  ctx.queryClient.invalidateQueries({ queryKey: ['issues'] })
+  if (typeof issueNumber === 'number') {
+    ctx.queryClient.invalidateQueries({ queryKey: ['issues', issueNumber, ctx.projectId] })
+  }
+  ctx.queryClient.invalidateQueries({ queryKey: ['epics'] })
+}
+
 function workflowRunHandler(ctx: HandlerContext): void {
   if (applyReverseDnsOutcome(decideReverseDnsOutcome(ctx.eventName, ctx.parsed), ctx.queryClient, ctx.setRebaseConflict)) {
     return
@@ -220,6 +229,7 @@ export const ROUTE: Partial<Record<EventName, DomainHandler>> = {
   [REVERSE_DNS_EVENT_TYPES.StageFailed]: stageHandler,
 
   [REVERSE_DNS_EVENT_TYPES.IssueCreated]: issueHandler,
+  [REVERSE_DNS_EVENT_TYPES.IssueEpicChanged]: issueEpicChangedHandler,
   [REVERSE_DNS_EVENT_TYPES.IssueCancelled]: issueHandler,
   [REVERSE_DNS_EVENT_TYPES.IssueArchived]: issueHandler,
   [REVERSE_DNS_EVENT_TYPES.IssueUnarchived]: issueHandler,

@@ -19,10 +19,10 @@ namespace Mohist.Server.Infrastructure.Data.Sessions;
 /// their label / id is present.</item>
 /// <item><c>agentid</c> is stamped when the session originates from an
 /// agent launch (label <c>mohist.io/agent-id</c> present).</item>
-/// <item><c>issue</c>, <c>workflowrunid</c>, and <c>stage</c> are
-/// stamped only for workflow/issue-origin sessions (those whose
-/// <c>source-kind</c> label is <c>workflow</c>). Absent labels are
-/// omitted, never an empty value.</item>
+/// <item><c>issue</c> and <c>epic</c> are stamped whenever their local
+/// labels are present. <c>workflowrunid</c> and <c>stage</c> are stamped
+/// only for workflow-origin sessions. Absent labels are omitted, never an
+/// empty value.</item>
 /// </list>
 /// </remarks>
 public static class AgentSessionLineage
@@ -48,16 +48,25 @@ public static class AgentSessionLineage
 
         var sourceKind = TryGetNonEmpty(labels!, AgentSessionQueryMetadataKeys.SourceKind, out var kind) ? kind : null;
 
-        if (Equals(sourceKind, WorkflowSourceKind))
+        var workflowOrigin = Equals(sourceKind, WorkflowSourceKind);
+        var issueKey = workflowOrigin
+            ? AgentSessionQueryMetadataKeys.IssueNumber
+            : GenericAgentSessionMetadata.IssueNumber;
+        var epicKey = workflowOrigin
+            ? AgentSessionQueryMetadataKeys.EpicNumber
+            : GenericAgentSessionMetadata.EpicNumber;
+
+        if (TryGetNonEmpty(labels!, issueKey, out var issueNumber))
         {
-            if (TryGetNonEmpty(labels!, AgentSessionQueryMetadataKeys.IssueNumber, out var issueNumber))
-            {
-                extensions[EventCatalog.Lineage.Issue] = issueNumber;
-            }
-            if (TryGetNonEmpty(labels!, AgentSessionQueryMetadataKeys.EpicNumber, out var epicNumber))
-            {
-                extensions[EventCatalog.Lineage.Epic] = epicNumber;
-            }
+            extensions[EventCatalog.Lineage.Issue] = issueNumber;
+        }
+        if (TryGetNonEmpty(labels!, epicKey, out var epicNumber))
+        {
+            extensions[EventCatalog.Lineage.Epic] = epicNumber;
+        }
+
+        if (workflowOrigin)
+        {
             if (TryGetNonEmpty(labels!, AgentSessionQueryMetadataKeys.WorkflowRunId, out var workflowRunId))
             {
                 extensions[EventCatalog.Lineage.WorkflowRunId] = workflowRunId;

@@ -123,7 +123,6 @@ export interface Issue {
 export interface IssueWorkflowProfileYamlResponse {
   issueNumber: number
   projectId: string
-  issueKey: string
   sourceTemplateId?: string | null
   hasCustomTemplate: boolean
   yaml: string | null

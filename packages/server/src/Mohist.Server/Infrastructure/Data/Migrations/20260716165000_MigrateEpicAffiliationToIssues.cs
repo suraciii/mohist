@@ -38,41 +38,20 @@ public partial class MigrateEpicAffiliationToIssues : Migration
                 ) AS "EpicNumber"
             FROM "Issues" i;
 
-            DROP TABLE IF EXISTS "__IssueEpicAffiliationGuard";
-            CREATE TEMP TABLE "__IssueEpicAffiliationGuard" (
-                "Conflicts" INTEGER NOT NULL CONSTRAINT "CK_IssueEpicAffiliation_Conflicts" CHECK ("Conflicts" = 0)
-            );
-            INSERT INTO "__IssueEpicAffiliationGuard"
-            SELECT EXISTS (
-                SELECT 1
-                FROM "Issues" i
-                INNER JOIN "__IssueEpicAffiliation" affiliation
-                    ON affiliation."ProjectId" = i."ProjectId"
-                   AND affiliation."IssueNumber" = i."Number"
-                WHERE affiliation."EpicNumber" IS NOT NULL
-                  AND i."EpicNumber" IS NOT NULL
-                  AND i."EpicNumber" <> affiliation."EpicNumber"
-            );
-            DROP TABLE "__IssueEpicAffiliationGuard";
-
             UPDATE "Issues"
             SET "EpicNumber" = (
                 SELECT affiliation."EpicNumber"
                 FROM "__IssueEpicAffiliation" affiliation
                 WHERE affiliation."ProjectId" = "Issues"."ProjectId"
-                  AND affiliation."IssueNumber" = "Issues"."Number"
-            )
-            WHERE EXISTS (
-                SELECT 1
-                FROM "__IssueEpicAffiliation" affiliation
-                WHERE affiliation."ProjectId" = "Issues"."ProjectId"
-                  AND affiliation."IssueNumber" = "Issues"."Number"
-                  AND affiliation."EpicNumber" IS NOT NULL
+                   AND affiliation."IssueNumber" = "Issues"."Number"
             );
 
             UPDATE "Issues"
-            SET "State" = json_set("State", '$.epicNumber', "EpicNumber")
-            WHERE "EpicNumber" IS NOT NULL;
+            SET "State" = CASE
+                WHEN "EpicNumber" IS NULL THEN json_remove("State", '$.epicNumber', '$.EpicNumber')
+                ELSE json_set(json_remove("State", '$.EpicNumber'), '$.epicNumber', "EpicNumber")
+            END
+            WHERE json_type("State", '$') = 'object';
 
             DROP TABLE "__IssueEpicAffiliation";
             """);

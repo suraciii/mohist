@@ -76,7 +76,7 @@ describe("workspace preparation across stages", () => {
     )
 
     const result = await executor.execute(
-      buildWork("https://example.test/repository.git", "workflow-timeout", "issue-timeout", "plan", "plan:write"),
+      buildWork("https://example.test/repository.git", "workflow-timeout", "plan", "plan:write"),
       new AbortController().signal,
     )
     const output = JSON.parse(result.output ?? "{}")

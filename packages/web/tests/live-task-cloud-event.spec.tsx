@@ -10,6 +10,8 @@ import { RuntimeToastHost } from '../src/shared/ui/toast'
 import { ProjectProvider } from '../src/entities/project'
 import { useLiveTask } from '../src/entities/issue'
 import { onAgentEvent } from '../src/entities/agent'
+import { REVERSE_DNS_EVENT_TYPES } from '../src/shared/lib/canonical-event-types'
+import { SUBSCRIPTION_EVENT_TYPES } from '../src/shared/api/events-hub'
 import { useMswServer } from './support/msw'
 
 useMswServer(
@@ -59,6 +61,25 @@ describe('unwrapEnvelope', () => {
       extensions: { projectid: 'mohist' },
     }
     expect(unwrapEnvelope(envelope)).toBe(payload)
+  })
+
+  it('uses canonical routing extensions without mutating the display payload', () => {
+    const payload = { projectId: 'payload-project', issueNumber: 42, healthStatus: 'yellow' }
+    const envelope = {
+      type: REVERSE_DNS_EVENT_TYPES.AgentSessionContextHealthUpdated,
+      payload,
+      id: 'evt-routing-context',
+      source: '/mohist/agent-session/session-1',
+      specVersion: '1.0',
+      extensions: { projectid: 'canonical-project', issue: '99' },
+    }
+
+    expect(unwrapEnvelope(envelope)).toEqual({
+      projectId: 'canonical-project',
+      issueNumber: 99,
+      healthStatus: 'yellow',
+    })
+    expect(payload).toEqual({ projectId: 'payload-project', issueNumber: 42, healthStatus: 'yellow' })
   })
 
   it('returns the raw object when given a back-compat raw payload', () => {
@@ -343,6 +364,78 @@ describe('LiveTaskProvider transcript routing', () => {
     })
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['issues'] })
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['agent-activity'] })
+  })
+
+  it('forwards canonical AgentSession context from a CloudEvent envelope', async () => {
+    const queryClient = new QueryClient()
+    const received: unknown[] = []
+    const off = onAgentEvent(REVERSE_DNS_EVENT_TYPES.AgentSessionContextHealthUpdated, (detail) => received.push(detail))
+
+    rtlRender(
+      <QueryClientProvider client={queryClient}>
+        <ProjectProvider initialProjectId="project-1">
+          <RuntimeToastHost>
+            <LiveTaskProvider eventsConnectionHook={eventsConnectionHook}>
+              <LiveTaskProbe />
+            </LiveTaskProvider>
+          </RuntimeToastHost>
+        </ProjectProvider>
+      </QueryClientProvider>,
+    )
+
+    const onEvent = eventsConnectionHook.mock.calls[0][1] as (eventName: string, envelope: unknown) => void
+    onEvent(REVERSE_DNS_EVENT_TYPES.AgentSessionContextHealthUpdated, {
+      id: 'evt-health-1',
+      source: '/mohist/agent-session/session-1',
+      specVersion: '1.0',
+      type: REVERSE_DNS_EVENT_TYPES.AgentSessionContextHealthUpdated,
+      payload: { healthStatus: 'yellow', contextUsagePercent: 65 },
+      extensions: { projectid: 'project-1', issue: '82' },
+    })
+
+    await waitFor(() => {
+      expect(received).toEqual([{
+        projectId: 'project-1',
+        issueNumber: 82,
+        healthStatus: 'yellow',
+        contextUsagePercent: 65,
+      }])
+    })
+    off()
+  })
+
+  it('subscribes to affiliation changes and invalidates Issue and Epic caches', async () => {
+    const queryClient = new QueryClient()
+    const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
+    expect(SUBSCRIPTION_EVENT_TYPES).toContain(REVERSE_DNS_EVENT_TYPES.IssueEpicChanged)
+
+    rtlRender(
+      <QueryClientProvider client={queryClient}>
+        <ProjectProvider initialProjectId="project-1">
+          <RuntimeToastHost>
+            <LiveTaskProvider eventsConnectionHook={eventsConnectionHook}>
+              <LiveTaskProbe />
+            </LiveTaskProvider>
+          </RuntimeToastHost>
+        </ProjectProvider>
+      </QueryClientProvider>,
+    )
+
+    const onEvent = eventsConnectionHook.mock.calls[0][1] as (eventName: string, envelope: unknown) => void
+    onEvent(REVERSE_DNS_EVENT_TYPES.IssueEpicChanged, {
+      id: 'evt-epic-change-1',
+      source: '/mohist/projects/project-1/issues/82',
+      specVersion: '1.0',
+      type: REVERSE_DNS_EVENT_TYPES.IssueEpicChanged,
+      payload: {},
+      extensions: { projectid: 'project-1', issue: '82' },
+    })
+
+    await waitFor(() => {
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['issues'] })
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['issues', 82, 'project-1'] })
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['epics'] })
+    })
   })
 
   it('shows merge completion toast for reverse-DNS completed events', async () => {

@@ -20,7 +20,7 @@ public class DropEpicMembershipTablesMigrationSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
-    public async Task Migration_DropsLegacyMembershipTables_WithoutChangingIssueAffiliation()
+    public async Task Migration_DropsLegacyMembershipTables_PreservingAffiliationDerivedFromMembership()
     {
         await using var database = CreateDatabase(PreviousMigration);
         await using (var seed = database.CreateDbContext())
@@ -35,6 +35,10 @@ public class DropEpicMembershipTablesMigrationSpecs
                 EpicNumber = 7,
             };
             await InsertLegacyIssueAsync(seed, IssueStore.Serialize(issue), 7);
+            await seed.Database.ExecuteSqlRawAsync("""
+                INSERT INTO "EpicIssues" ("EpicId", "IssueId", "ProjectId", "IssueNumber", "EpicNumber", "CreatedAt")
+                VALUES ('epic_7', 'issue_42', 'project_1', 42, 7, '2026-07-17 00:00:00+00:00');
+                """);
             Assert.True(await TableExistsAsync(seed, "EpicIssues"));
             Assert.True(await TableExistsAsync(seed, "EpicActiveIssues"));
 
@@ -51,6 +55,35 @@ public class DropEpicMembershipTablesMigrationSpecs
         var materialized = IssueStore.Deserialize(row.State);
         Assert.NotNull(materialized);
         Assert.Equal(7, materialized!.EpicNumber);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task Migration_ClearsStaleIssueAffiliationWhenNoLegacyMembershipExists()
+    {
+        await using var database = CreateDatabase(PreviousMigration);
+        await using (var seed = database.CreateDbContext())
+        {
+            var issue = new DomainIssue
+            {
+                ProjectId = "project_1",
+                Number = 42,
+                Title = "Stale Issue",
+                Status = IssueStatus.Backlog,
+                Priority = "p2",
+                EpicNumber = 7,
+            };
+            await InsertLegacyIssueAsync(seed, IssueStore.Serialize(issue), 7);
+
+            await seed.GetService<IMigrator>().MigrateAsync("20260716190000_RemoveLegacyIssueEpicIdentity");
+        }
+
+        await using var verify = database.CreateDbContext();
+        var row = Assert.Single(await verify.Issues.AsNoTracking().ToListAsync());
+        Assert.Null(row.EpicNumber);
+        Assert.Null(IssueStore.Deserialize(row.State)!.EpicNumber);
+        Assert.DoesNotContain("epicNumber", row.State, StringComparison.OrdinalIgnoreCase);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]

@@ -215,7 +215,7 @@ public sealed record AgentSessionListItemDto(
 /// </summary>
 public sealed record AgentSessionListContextRefsDto(
     int? IssueNumber,
-    string? EpicNumber,
+    int? EpicNumber,
     string? Repository,
     string? WorkspacePath);
 
@@ -290,7 +290,7 @@ public sealed record AgentSessionContextAssociationDto(
 /// </summary>
 public sealed record GenericAgentSessionSummaryContextRefsDto(
     int? IssueNumber,
-    string? EpicNumber,
+    int? EpicNumber,
     string? Repository,
     string? WorkspacePath);
 

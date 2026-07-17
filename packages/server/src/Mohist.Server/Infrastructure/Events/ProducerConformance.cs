@@ -84,8 +84,8 @@ public static class ProducerConformance
                 else
                 {
                     Optional(family, extensions, EventCatalog.Lineage.AgentId, context.AgentId);
-                    Absent(family, extensions, EventCatalog.Lineage.Issue);
-                    Absent(family, extensions, EventCatalog.Lineage.Epic);
+                    Optional(family, extensions, EventCatalog.Lineage.Issue, context.Issue);
+                    Optional(family, extensions, EventCatalog.Lineage.Epic, context.Epic);
                     Absent(family, extensions, EventCatalog.Lineage.WorkflowRunId);
                     Absent(family, extensions, EventCatalog.Lineage.Stage);
                 }

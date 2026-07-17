@@ -191,20 +191,31 @@ public class AgentSessionTransactionalEventAppendSpecs : IAsyncLifetime
     }
 
     [Fact]
-    public async Task SaveAsync_AgentLaunchSessionWithIssueContext_OmitsIssueLineage()
+    public async Task SaveAsync_AgentLaunchSessionWithLocalContext_StampsIssueAndEpicLineage()
     {
         var store = new AgentSessionStore(_dbFactory, _eventStore, _grainFactory, NullLogger<AgentSessionStore>.Instance);
         var session = BuildSession("agent_txn_agent_launch_issue", BuildAgentLaunchLabels(
             projectId: "proj_agent_launch",
             agentId: "agent_lineage_1",
-            issueNumber: 42));
+            issueNumber: 42,
+            epicNumber: 7));
 
         await store.SaveAsync(session.Id, session, [new AgentSessionRuntimeBound("acp-1", null)]);
 
         var stored = Assert.Single(await _eventStore.ListAgentSessionEventsAsync(session.Id));
-        Assert.False(stored.Envelope.Extensions.ContainsKey(EventCatalog.Lineage.Issue));
+        Assert.Equal("42", stored.Envelope.Extensions[EventCatalog.Lineage.Issue]);
+        Assert.Equal("7", stored.Envelope.Extensions[EventCatalog.Lineage.Epic]);
         Assert.False(stored.Envelope.Extensions.ContainsKey(EventCatalog.Lineage.WorkflowRunId));
         Assert.False(stored.Envelope.Extensions.ContainsKey(EventCatalog.Lineage.Stage));
+        ProducerConformance.Assert(
+            EventProducerFamily.AgentSession,
+            stored.Envelope.Extensions,
+            new(
+                ProjectId: "proj_agent_launch",
+                Issue: "42",
+                Epic: "7",
+                AgentId: "agent_lineage_1",
+                SessionId: session.Id));
     }
 
     [Fact]
@@ -426,12 +437,17 @@ public class AgentSessionTransactionalEventAppendSpecs : IAsyncLifetime
         return session;
     }
 
-    private static AgentSessionMetadata BuildAgentLaunchLabels(string projectId, string agentId, int? issueNumber = null) =>
+    private static AgentSessionMetadata BuildAgentLaunchLabels(
+        string projectId,
+        string agentId,
+        int? issueNumber = null,
+        int? epicNumber = null) =>
         GenericAgentSessionMetadata.Metadata(new GenericAgentSessionContext(
             ProjectId: projectId,
             AgentId: agentId,
             AgentName: $"{agentId}-name",
-            IssueNumber: issueNumber));
+            IssueNumber: issueNumber,
+            EpicNumber: epicNumber));
 
     private static AgentSessionMetadata BuildWorkflowOriginLabels(
         string projectId,

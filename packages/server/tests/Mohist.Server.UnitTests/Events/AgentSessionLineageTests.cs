@@ -52,13 +52,14 @@ public class AgentSessionLineageTests
     }
 
     [Fact]
-    public void BuildExtensions_AgentLaunchSessionWithIssueContext_OmitsIssue()
+    public void BuildExtensions_AgentLaunchSessionWithLocalContext_StampsIssueAndEpic()
     {
-        var session = BuildAgentLaunchSession(issueNumber: IssueNumber);
+        var session = BuildAgentLaunchSession(issueNumber: IssueNumber, epicNumber: EpicNumber);
 
         var extensions = AgentSessionLineage.BuildExtensions(session);
 
-        Assert.False(extensions.ContainsKey(EventCatalog.Lineage.Issue));
+        Assert.Equal(IssueNumber.ToString(), extensions[EventCatalog.Lineage.Issue]);
+        Assert.Equal(EpicNumber.ToString(), extensions[EventCatalog.Lineage.Epic]);
     }
 
     [Fact]
@@ -197,7 +198,7 @@ public class AgentSessionLineageTests
         Assert.Equal(SessionId, extensions[EventCatalog.Lineage.SessionId]);
     }
 
-    private static AgentSession BuildAgentLaunchSession(int? issueNumber = null)
+    private static AgentSession BuildAgentLaunchSession(int? issueNumber = null, int? epicNumber = null)
     {
         var session = new AgentSession
         {
@@ -217,6 +218,8 @@ public class AgentSessionLineageTests
             .WithLabel(GenericAgentSessionMetadata.AgentName, AgentName);
         if (issueNumber is not null)
             session.Metadata = session.Metadata.WithLabel(GenericAgentSessionMetadata.IssueNumber, issueNumber.Value.ToString());
+        if (epicNumber is not null)
+            session.Metadata = session.Metadata.WithLabel(GenericAgentSessionMetadata.EpicNumber, epicNumber.Value.ToString());
         return session;
     }
 

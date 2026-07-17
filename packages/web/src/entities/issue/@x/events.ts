@@ -17,6 +17,7 @@ export type EventMap = {
   [REVERSE_DNS_EVENT_TYPES.WorkflowRunRetrying]: { issueNumber: number; projectId: string }
   [REVERSE_DNS_EVENT_TYPES.WorkflowRunRerunning]: { issueNumber: number; projectId: string }
   [REVERSE_DNS_EVENT_TYPES.IssueCreated]: { issueNumber: number; projectId: string }
+  [REVERSE_DNS_EVENT_TYPES.IssueEpicChanged]: { issueNumber: number; projectId: string }
   [REVERSE_DNS_EVENT_TYPES.IssueCancelled]: { issueNumber: number; projectId: string }
   [REVERSE_DNS_EVENT_TYPES.IssueArchived]: { issueNumber: number; projectId: string }
   [REVERSE_DNS_EVENT_TYPES.IssueUnarchived]: { issueNumber: number; projectId: string }
