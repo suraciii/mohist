@@ -12,6 +12,7 @@ using Mohist.Server.Project.Services;
 using Mohist.Server.Project.Grains;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.SpecTests.Support;
+using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Workflow.Services;
 using Xunit;
@@ -162,6 +163,7 @@ public class IssueCreationSpecs
 
         var grain = IssueGrain(project.Id, created.Number);
         var wrId = await grain.StartWorkAsync(new WorkflowProjectContext(project.Id, "My Project"));
+        await _grains.GetGrain<IWorkflowGrain>(wrId).EnsureStartedAsync(new WorkflowIssueContext(project.Id, created.Number, null));
 
         Assert.StartsWith("wr_", wrId);
         Assert.DoesNotContain(project.Id, wrId);

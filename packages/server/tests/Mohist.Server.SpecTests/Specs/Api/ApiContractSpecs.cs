@@ -4,6 +4,7 @@ using System.Net.Http.Json;
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Runner.Grains;
+using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Server.SpecTests.Support;
 using Xunit;
@@ -400,6 +401,7 @@ public class ApiContractSpecs
             var wrId = issueStatus!.WorkflowRunId!;
 
             var workflow = _fixture.Grains.GetGrain<IWorkflowGrain>(wrId);
+            await workflow.EnsureStartedAsync(new WorkflowIssueContext(projectId!, number, null));
             await workflow.AssignWorkerAsync(runnerId);
             var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
             await runner.PollAsync(_fixture.Services);
