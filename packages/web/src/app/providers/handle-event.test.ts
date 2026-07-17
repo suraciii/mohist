@@ -15,5 +15,6 @@ describe('routeEvent', () => {
     })
 
     expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['agent-session'] })
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['agent-sessions'] })
   })
 })

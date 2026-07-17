@@ -317,7 +317,8 @@ public sealed record AgentSessionFollowupLease(
     [property: Id(0)] string OperationId,
     [property: Id(1)] string RuntimeSessionId,
     [property: Id(2)] bool Accepted = false,
-    [property: Id(3)] DateTime? AcceptedAt = null);
+    [property: Id(3)] DateTime? AcceptedAt = null,
+    [property: Id(4)] DateTime? StartedAt = null);
 
 public sealed record AgentSessionTranscriptEvidence(
     string Id,

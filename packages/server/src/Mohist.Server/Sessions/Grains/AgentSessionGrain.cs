@@ -362,7 +362,8 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
 
         var lease = new AgentSessionFollowupLease(
             Guid.NewGuid().ToString("N"),
-            session.Status.AgentRuntimeSessionId!);
+            session.Status.AgentRuntimeSessionId!,
+            StartedAt: Now());
         SetPendingFollowups(session, pending.Append(lease).ToArray());
         await CommitAsync(session, []);
         return new AgentSessionFollowupReservation(lease.OperationId, StartsIdleTurn: true);
@@ -454,9 +455,12 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
     {
         var pending = GetPendingFollowups(session);
         var now = Now();
-        var remaining = pending.Where(lease => !lease.Accepted
-            || lease.AcceptedAt is { } acceptedAt
-                && now - acceptedAt <= AgentSessionJsonHelper.ActiveRuntimeEventWindow).ToArray();
+        var remaining = pending.Where(lease =>
+        {
+            var startedAt = lease.Accepted ? lease.AcceptedAt : lease.StartedAt;
+            return startedAt is { } timestamp
+                && now - timestamp <= AgentSessionJsonHelper.ActiveRuntimeEventWindow;
+        }).ToArray();
         if (remaining.Length == pending.Count) return;
         SetPendingFollowups(session, remaining);
         await CommitAsync(session, []);

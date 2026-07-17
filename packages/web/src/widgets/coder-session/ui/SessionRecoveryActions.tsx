@@ -103,6 +103,8 @@ export function SessionRecoveryActions({
   const active = recoveryAvailable === undefined ? isSessionActive(status) : !recoveryAvailable
   const [resetDialogOpen, setResetDialogOpen] = useState(false)
   const [inlineError, setInlineError] = useState<string | null>(null)
+  const [compactIdempotencyKey, setCompactIdempotencyKey] = useState<string | null>(null)
+  const [resetIdempotencyKey, setResetIdempotencyKey] = useState<string | null>(null)
 
   useEffect(() => {
     setInlineError(null)
@@ -118,6 +120,7 @@ export function SessionRecoveryActions({
         : clients.compact(issueNumber, sessionName, projectId, idempotencyKey)
     },
     onSuccess: () => {
+      setCompactIdempotencyKey(null)
       setInlineError(null)
       onSuccess?.()
     },
@@ -136,6 +139,7 @@ export function SessionRecoveryActions({
         : clients.reset(issueNumber, sessionName, projectId, idempotencyKey)
     },
     onSuccess: () => {
+      setResetIdempotencyKey(null)
       setResetDialogOpen(false)
       setInlineError(null)
       onSuccess?.()
@@ -149,7 +153,9 @@ export function SessionRecoveryActions({
 
   function handleCompact() {
     if (active || anyPending) return
-    compactMutation.mutate(crypto.randomUUID())
+    const idempotencyKey = compactIdempotencyKey ?? crypto.randomUUID()
+    setCompactIdempotencyKey(idempotencyKey)
+    compactMutation.mutate(idempotencyKey)
   }
 
   function openResetDialog() {
@@ -171,7 +177,9 @@ export function SessionRecoveryActions({
 
   function handleResetConfirm() {
     if (resetMutation.isPending) return
-    resetMutation.mutate(crypto.randomUUID())
+    const idempotencyKey = resetIdempotencyKey ?? crypto.randomUUID()
+    setResetIdempotencyKey(idempotencyKey)
+    resetMutation.mutate(idempotencyKey)
   }
 
   const compactButton = (

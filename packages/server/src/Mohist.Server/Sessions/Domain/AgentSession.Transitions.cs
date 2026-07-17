@@ -77,7 +77,7 @@ public static partial class AgentSessionExtensions
             if (string.IsNullOrWhiteSpace(model)) return [];
             var oldModel = session.Settings.Model;
             session.Settings = session.Settings with { Model = model };
-            session.Status = session.Status with { LastDataAt = now, CurrentTurnEndedAt = null };
+            session.Status = session.Status with { LastDataAt = now };
             return !string.Equals(oldModel, session.Settings.Model, StringComparison.Ordinal)
                 ? [new AgentSessionModelChanged(session.Settings.Model)]
                 : [];
