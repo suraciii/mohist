@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom'
-import { render } from '@testing-library/react'
+import { fireEvent, render } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import type { DisplayAssistantPart, DisplayToolPart } from '../model/session-transcript-display'
 import { AssistantParts } from './AssistantParts'
@@ -89,7 +89,7 @@ describe('AssistantParts — no rendered tool row exposes "unknown" as title', (
     expect(container.querySelector('[data-testid="tool-row"]')?.textContent).toContain('transcript gating')
   })
 
-  it('surfaces a url via FallbackEntry even when the unknown name is not semantically inferred', () => {
+  it('renders a non-empty row for an unknown tool with a url input; url is recoverable on expand', () => {
     const part = makeToolPart({
       id: 'gen-url',
       normalizedName: 'unknown',
@@ -99,7 +99,11 @@ describe('AssistantParts — no rendered tool row exposes "unknown" as title', (
 
     const { container } = renderAssistantParts([part])
     expect(visibleUnknownLabel(container)).toBeNull()
-    expect(container.querySelector('[data-testid="tool-row"]')?.textContent).toContain('example.com/page')
+    const row = container.querySelector('[data-testid="tool-row"]')
+    expect(row?.textContent?.length ?? 0).toBeGreaterThan(0)
+
+    fireEvent.click(row!.querySelector('button')!)
+    expect(row?.textContent).toContain('https://example.com/page')
   })
 
   it('falls back to a generic descriptive label when no recognizable content exists', () => {

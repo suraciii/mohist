@@ -1,10 +1,8 @@
-import { useEffect, useMemo, useRef, useState, type RefObject } from 'react'
+import { useEffect, useRef, useState, type RefObject } from 'react'
 import type { DisplayTurn } from '../model/session-transcript-display'
 import { useTurnKeyboardNav } from '../model/useTurnKeyboardNav'
 import type { TurnRefsMap } from '../model/turn-refs'
 import { TurnList } from './TurnList'
-import { TurnTocRail, buildTurnTocEntries } from './TurnToc'
-import { TranscriptToolbar } from './TranscriptToolbar'
 import { CopyFullTextButton } from './CopyFullTextButton'
 
 interface TranscriptEmptyStateProps {
@@ -39,10 +37,7 @@ export function TranscriptEmptyState({ isRunning }: TranscriptEmptyStateProps) {
 export type { TurnRefsMap } from '../model/turn-refs'
 
 interface SessionTranscriptLayoutProps {
-  title: string
-  turnCount: number
   turns: DisplayTurn[]
-  statusKind: 'loading' | 'live' | 'probing' | 'finalizing' | 'completed' | 'failed' | 'stale'
   isRunning: boolean
   isThinking?: boolean
   isStreaming?: boolean
@@ -57,16 +52,11 @@ export function SessionTranscriptLayout({
   scrollContainerRef,
 }: SessionTranscriptLayoutProps) {
   const turnRefs = useRef<TurnRefsMap>(new Map()).current
-  const [refsVersion, setRefsVersion] = useState(0)
+  const [, setRefsVersion] = useState(0)
 
   useEffect(() => {
     setRefsVersion((version) => version + 1)
   }, [turns.length])
-
-  const entries = useMemo(
-    () => buildTurnTocEntries(turns, turnRefs),
-    [turns, turnRefs, refsVersion],
-  )
 
   useTurnKeyboardNav({
     scrollContainerRef,
@@ -77,24 +67,15 @@ export function SessionTranscriptLayout({
   return (
     <div className="px-4 py-6 min-w-0" data-scrollable="">
       {turns.length === 0 ? (
-        <div className="max-w-2xl mx-auto">
-          <TranscriptEmptyState isRunning={isRunning} />
-        </div>
+        <TranscriptEmptyState isRunning={isRunning} />
       ) : (
-        <div className="lg:grid lg:grid-cols-[1fr_180px] lg:gap-6 lg:max-w-4xl lg:mx-auto">
-          <div className="min-w-0">
-            <TranscriptToolbar
-              entries={entries}
-              rightSlot={<CopyFullTextButton turns={turns} />}
-            />
-            <TurnList turns={turns} turnRefs={turnRefs} isRunning={isRunning} />
-            {isRunning && isThinking && turns.length > 0 && <ThinkingPlaceholder />}
-            {isRunning && isStreaming && <StreamingIndicator />}
+        <div className="min-w-0">
+          <div className="mb-3 flex items-center justify-end gap-2">
+            <CopyFullTextButton turns={turns} />
           </div>
-          <TurnTocRail
-            entries={entries}
-            actionSlot={<CopyFullTextButton turns={turns} label="Copy" />}
-          />
+          <TurnList turns={turns} turnRefs={turnRefs} isRunning={isRunning} />
+          {isRunning && isThinking && turns.length > 0 && <ThinkingPlaceholder />}
+          {isRunning && isStreaming && <StreamingIndicator />}
         </div>
       )}
     </div>

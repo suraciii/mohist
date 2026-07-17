@@ -186,7 +186,7 @@ describe('serializeTranscriptPlainText', () => {
           {
             id: 'cg1',
             partType: 'context-group',
-            title: 'Gathering context · 2 reads',
+            title: 'Explored · 2 reads',
             tools: [],
             hasError: false,
           },
@@ -194,7 +194,7 @@ describe('serializeTranscriptPlainText', () => {
       }),
     ]
     const out = serializeTranscriptPlainText(turns)
-    expect(out).toContain('[context-group] Gathering context · 2 reads')
+    expect(out).toContain('[context-group] Explored · 2 reads')
   })
 
   it('copies visible tool details including input, output, error, changed files, and nested context-group tools', () => {
@@ -230,7 +230,7 @@ describe('serializeTranscriptPlainText', () => {
           {
             id: 'cg1',
             partType: 'context-group',
-            title: 'Gathering context · 1 read',
+            title: 'Explored · 1 read',
             hasError: false,
             tools: [
               {
@@ -265,7 +265,7 @@ describe('serializeTranscriptPlainText', () => {
     expect(out).toContain('  [changed-file] modified src/a.ts (+2 -1)')
     expect(out).toContain('  [changed-file] created src/new.ts (+12)')
     expect(out).toContain('  [changed-file] moved src/renamed.ts from src/old.ts')
-    expect(out).toContain('[context-group] Gathering context · 1 read')
+    expect(out).toContain('[context-group] Explored · 1 read')
     expect(out).toContain('  [tool read] src/context.ts')
     expect(out).toContain('    input:\n  {"filePath":"src/context.ts"}')
     expect(out).toContain('    output:\n  export const context = true')

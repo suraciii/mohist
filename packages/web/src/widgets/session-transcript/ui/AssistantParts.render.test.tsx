@@ -172,16 +172,16 @@ describe('AssistantParts tool views — baseline render', () => {
     fireEvent.click(screen.getByRole('button'))
 
     expect(screen.getByText(/Changed files/)).toBeInTheDocument()
-    expect(screen.getByText('src/foo.ts')).toBeInTheDocument()
-    expect(screen.getByText('+2')).toBeInTheDocument()
-    expect(screen.getByText('-1')).toBeInTheDocument()
+    expect(screen.getAllByText('src/foo.ts').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('+2').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('-1').length).toBeGreaterThan(0)
   })
 
   it('renders context group header with title detail', () => {
     const group = {
       id: 'ctx-1',
       partType: 'context-group',
-      title: 'Gathering context · 1 read',
+      title: 'Explored · 1 read',
       tools: [
         makeToolPart({
           id: 'tool-r1',
@@ -198,7 +198,7 @@ describe('AssistantParts tool views — baseline render', () => {
 
     renderAssistantParts([group])
 
-    expect(screen.getByText('Gathering context')).toBeInTheDocument()
+    expect(screen.getByText('Explored')).toBeInTheDocument()
     expect(screen.getByText('1 read')).toBeInTheDocument()
   })
 

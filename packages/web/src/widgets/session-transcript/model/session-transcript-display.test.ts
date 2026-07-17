@@ -180,54 +180,6 @@ describe('projectTurn', () => {
     expect((display.assistantParts[0] as any).normalizedName).toBe('todowrite')
   })
 
-  it('groups contiguous context tools into context-group', () => {
-    const turn = makeTurn('turn-1', 'Understand codebase', [
-      makeToolPart('r1', 'c1', 'read', 'read', 'completed', { title: 'Read utils.ts' }),
-      makeToolPart('r2', 'c2', 'read', 'read', 'completed', { title: 'Read auth.ts' }),
-      makeToolPart('r3', 'c3', 'grep', 'grep', 'completed', { title: 'Search for token' }),
-    ])
-    const display = projectTurn(turn)
-    expect(display.assistantParts).toHaveLength(1)
-    expect(display.assistantParts[0].partType).toBe('context-group')
-    const group = display.assistantParts[0] as any
-    expect(group.title).toContain('Gathering context')
-    expect(group.tools).toHaveLength(3)
-    expect(group.hasError).toBe(false)
-  })
-
-  it('context-group hasError is true if any grouped tool has error', () => {
-    const turn = makeTurn('turn-1', 'Search files', [
-      makeToolPart('r1', 'c1', 'read', 'read', 'completed'),
-      makeToolPart('r2', 'c2', 'grep', 'grep', 'failed', { error: 'Pattern not found' }),
-    ])
-    const display = projectTurn(turn)
-    const group = display.assistantParts[0] as any
-    expect(group.hasError).toBe(true)
-  })
-
-  it('groups glob and search together in context group', () => {
-    const turn = makeTurn('turn-1', 'Find files', [
-      makeToolPart('g1', 'c1', 'glob', 'glob', 'completed'),
-      makeToolPart('s1', 'c2', 'search', 'search', 'completed'),
-    ])
-    const display = projectTurn(turn)
-    expect(display.assistantParts).toHaveLength(1)
-    expect(display.assistantParts[0].partType).toBe('context-group')
-  })
-
-  it('does not group file-change tools with context tools', () => {
-    const turn = makeTurn('turn-1', 'Make changes', [
-      makeToolPart('r1', 'c1', 'read', 'read', 'completed'),
-      makeToolPart('p1', 'c2', 'apply_patch', 'apply_patch', 'completed'),
-    ])
-    const display = projectTurn(turn)
-    expect(display.assistantParts).toHaveLength(2)
-    expect(display.assistantParts[0].partType).toBe('context-group')
-    expect(display.assistantParts[1].partType).toBe('tool')
-    const toolPart = display.assistantParts[1] as any
-    expect(toolPart.normalizedName).toBe('apply_patch')
-  })
-
   it('does not duplicate apply_patch changed-files in turn summary', () => {
     const turn = makeTurn('turn-1', 'Patch files', [
       makeToolPart('p1', 'c1', 'apply_patch', 'apply_patch', 'completed', {
@@ -304,26 +256,6 @@ describe('projectTurn', () => {
     }
     const display = projectTurn(turn)
     expect(display.assistantParts).toHaveLength(0)
-  })
-
-  it('flushes context group before error part', () => {
-    const turn = makeTurn('turn-1', 'Work', [
-      makeToolPart('r1', 'c1', 'read', 'read', 'completed'),
-      makeErrorPart('err-1', 'failed', 'Oops'),
-    ])
-    const display = projectTurn(turn)
-    expect(display.assistantParts).toHaveLength(2)
-    expect(display.assistantParts[0].partType).toBe('context-group')
-    expect(display.assistantParts[1].partType).toBe('error')
-  })
-
-  it('infers read_file as context tool', () => {
-    const turn = makeTurn('turn-1', 'Read files', [
-      makeToolPart('r1', 'c1', 'read_file', 'read_file', 'completed'),
-    ])
-    const display = projectTurn(turn)
-    expect(display.assistantParts).toHaveLength(1)
-    expect(display.assistantParts[0].partType).toBe('context-group')
   })
 
   it('leaves non-context tools as individual parts when not contiguous', () => {

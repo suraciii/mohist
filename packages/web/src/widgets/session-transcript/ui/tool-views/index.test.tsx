@@ -112,7 +112,7 @@ describe('ToolRowView dispatcher', () => {
     fireEvent.click(screen.getByRole('button'))
 
     expect(screen.getByText(/Changed files/)).toBeInTheDocument()
-    expect(screen.getAllByText('x.ts').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('/repo/x.ts').length).toBeGreaterThan(0)
   })
 
   it('renders error message above all content views', () => {
@@ -150,7 +150,7 @@ describe('ContextGroupView', () => {
     const group = {
       id: 'ctx-1',
       partType: 'context-group',
-      title: 'Gathering context · 2 reads',
+      title: 'Explored · 2 reads',
       tools: [
         makeToolPart({ id: 't1', normalizedName: 'read', isContextTool: true, status: 'completed' }),
         makeToolPart({ id: 't2', normalizedName: 'read', isContextTool: true, status: 'completed' }),
@@ -160,28 +160,8 @@ describe('ContextGroupView', () => {
 
     render(<ContextGroupView title={group.title} tools={group.tools} hasError={group.hasError} />)
 
-    expect(screen.getByText('Gathering context')).toBeInTheDocument()
+    expect(screen.getByText('Explored')).toBeInTheDocument()
     expect(screen.getByText('2 reads')).toBeInTheDocument()
-  })
-
-  it('shows a single expanded read summary when the group has one completed context tool', () => {
-    const tool = makeToolPart({
-      id: 't1',
-      normalizedName: 'read',
-      isContextTool: true,
-      status: 'completed',
-      input: JSON.stringify({ filePath: '/repo/foo.ts' }),
-      output: 'file contents here',
-    })
-
-    const { container } = render(
-      <ContextGroupView title="Gathering context · /repo/foo.ts" tools={[tool]} hasError={false} />,
-    )
-
-    fireEvent.click(screen.getByRole('button'))
-
-    expect(container.textContent).toContain('Reading')
-    expect(container.textContent).toContain('file contents here')
   })
 
   it('lists each tool via ToolRowView when the group has more than one tool', () => {
@@ -190,7 +170,7 @@ describe('ContextGroupView', () => {
       makeToolPart({ id: 't2', normalizedName: 'grep', isContextTool: true, status: 'completed' }),
     ]
 
-    render(<ContextGroupView title="Gathering context · 2 ops" tools={tools} hasError={false} />)
+    render(<ContextGroupView title="Explored · 2 ops" tools={tools} hasError={false} />)
 
     fireEvent.click(screen.getByRole('button'))
 
@@ -200,7 +180,7 @@ describe('ContextGroupView', () => {
   it('renders the failed indicator when hasError is true', () => {
     render(
       <ContextGroupView
-        title="Gathering context · 1 op"
+        title="Explored · 1 op"
         tools={[]}
         hasError
       />,

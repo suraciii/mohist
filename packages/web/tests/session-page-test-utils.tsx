@@ -1,4 +1,4 @@
-import { TEST_PROJECT, baseRender, screen, fireEvent, renderHook } from './test-utils'
+import { TEST_PROJECT, baseRender, renderHook } from './test-utils'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ProjectProvider } from '../src/entities/project/model/ProjectContext'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
@@ -91,16 +91,4 @@ export function convertLegacyToAgentMetadata(detail: CoderSessionDetail): AgentS
       toolCount: legacy.toolCount ?? 0,
     },
   }
-}
-
-export function getAssistantCopyButton() {
-  const buttons = screen.getAllByText('Copy')
-  return buttons[buttons.length - 1] as HTMLButtonElement
-}
-
-export function expandChangedFilesTool() {
-  const labels = screen.getAllByText('1 file changed')
-  const toggle = labels[0]?.closest('button')
-  if (!toggle) throw new Error('Changed files toggle not found')
-  fireEvent.click(toggle)
 }
