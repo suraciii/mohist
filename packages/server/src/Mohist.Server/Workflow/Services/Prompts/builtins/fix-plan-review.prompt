@@ -1,41 +1,11 @@
 ---
 name: "Fix Plan Review"
-description: "Fixes plan-stage self-review findings within scope"
+description: "Fixes the problems reported by the plan self-review"
 tags: [plan, review]
 stage: plan
 ---
+`${{ openspecChangeDir }}/self-review.md` lists the problems found by the plan
+review. Fix every one of them in the plan artifacts under
+`${{ openspecChangeDir }}/`.
 
-## Input
-
-Read `${{ openspecChangeDir }}/self-review.md` directly. It is the authoritative source for what needs to be fixed in the plan artifacts.
-
-## Process
-
-1. Read the issue context and plan artifacts:
-   - `${{ openspecChangeDir }}/proposal.md`
-   - `${{ openspecChangeDir }}/specs/`
-   - `${{ openspecChangeDir }}/design.md`
-   - `${{ openspecChangeDir }}/tasks.json`
-2. Read `${{ openspecChangeDir }}/self-review.md`.
-3. Fix every finding in `self-review.md`.
-4. Do not skip small issues. Do not skip test issues. Do not leave follow-ups.
-5. Read the full self-review first, then fix all findings in one pass.
-6. Re-run any plan-stage verification the findings reference.
-7. Verify that every finding from `self-review.md` is resolved.
-
-## Rules
-
-- Do not rely on marker-check output or server-provided summaries to decide what to fix.
-- Apply all repairs described in `self-review.md`.
-- Do not make unrelated changes.
-- Do not edit `self-review.md`; the next self-review task will regenerate it.
-
-## Output
-
-```markdown
-## Applied Plan Review Repairs
-1. [file:line] What changed
-
-## Verification
-- Re-verifications run and result
-```
+Do not edit `self-review.md` — the next self-review task regenerates it.

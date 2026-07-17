@@ -74,6 +74,10 @@ Builtin `.prompt` 是产品化内容，随产品分发、面向任意项目：
 - 保持产品与技术栈通用：不引用 Mohist 仓库自身的命令面、目录结构或开发历史示例。
 - 可以引用 Mohist 产品面（`mo` CLI、`openspecChangeDir`、workflow 变量），它们在任何受管
   项目中都成立。
+- 只声明任务、输入输出与机器可校验的契约（产出路径、marker）；不规定过程细节、问题
+  分类或报告模板——执行者是足够聪明的 agent，报告的读者主要是下一个任务的 agent。
+- review 类 prompt 只诊断不修复；修复由独立的 fix 类 prompt 承担，review 报告是两者
+  之间的交接面。
 
 CLI skill-data 中随 nupkg 分发的 SKILL.md 适用同一约定。
 

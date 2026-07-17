@@ -1,42 +1,10 @@
 ---
 name: "Auto Fix"
-description: "Fixes review findings within scope"
+description: "Fixes the problems reported by the review"
 tags: [check, review]
 stage: check
 ---
+`${{ openspecChangeDir }}/review.md` lists the problems found by the review.
+Fix every one of them, then verify with the relevant build and test commands.
 
-## Input
-
-Read `${{ openspecChangeDir }}/review.md` directly. It is the authoritative source for what needs to be fixed.
-
-## Process
-
-1. Read the issue context and plan artifacts:
-   - `${{ openspecChangeDir }}/proposal.md`
-   - `${{ openspecChangeDir }}/design.md`
-   - `${{ openspecChangeDir }}/tasks.json`
-   - `${{ openspecChangeDir }}/specs/`
-2. Read `${{ openspecChangeDir }}/review.md`.
-3. Fix every finding in `review.md`.
-4. Do not skip small issues. Do not skip test issues. Do not leave follow-ups.
-5. Read the full review first, then fix all findings in one pass.
-6. Add or update focused tests for the fixed behavior.
-7. Run the smallest relevant verification commands.
-8. Verify that every finding from `review.md` is resolved.
-
-## Rules
-
-- Do not rely on marker-check output or server-provided summaries to decide what to fix.
-- Apply all repairs described in `review.md`.
-- Do not make unrelated changes.
-- Do not edit `review.md`; the next review task will regenerate it.
-
-## Output
-
-```markdown
-## Applied Review Repairs
-1. [file:line] What changed
-
-## Verification
-- Build/tests run and result
-```
+Do not edit `review.md` — the next review task regenerates it.

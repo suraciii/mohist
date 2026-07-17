@@ -1,6 +1,6 @@
 ---
 name: "AI Code Review"
-description: "5-dimension review of build artifacts"
+description: "Reviews the built change and reports problems"
 tags: [check, review]
 stage: check
 ---
@@ -10,131 +10,18 @@ Read the current Mohist issue details before interpreting this task:
 mo issue show ${{ issue.number }} --project-id ${{ project.id }}
 ```
 
-<artifact id="review">
+Review the current change and write your findings to
+`${{ openspecChangeDir }}/review.md`.
 
-<task>
-Perform a comprehensive code review of the current change and write `review.md`.
-Review the post-build candidate snapshot, not the intended plan.
-</task>
+You are a reviewer, not a fixer: do not modify any file other than `review.md`.
+A separate task fixes every problem you report, so describe each finding with
+enough context (what is wrong, where) for that task to act on.
 
-<candidate_boundary>
-Mohist workflow artifacts under `${{ openspecChangeDir }}/` are review context and evidence, not product deliverables by themselves.
-They are expected to exist during Plan, Build, Check, and Integrate.
+Review the changed files as they are now, against the issue's acceptance criteria
+and the plan artifacts under `${{ openspecChangeDir }}/`. Judge only this change —
+files under `${{ openspecChangeDir }}/` are this workflow's own artifacts, not
+product deliverables.
 
-When the issue asks for a "documentation-only" or similarly scoped product change:
-- Treat files outside `${{ openspecChangeDir }}/` as the candidate deliverable.
-- Do not fail solely because `${{ openspecChangeDir }}/proposal.md`, `design.md`, `tasks.json`, `self-review.md`, `review.md`, or delta specs exist.
-- Do not remove workflow artifacts as a review repair.
-- You may report workflow artifact quality only when it causes an actual workflow, merge, or traceability risk.
-</candidate_boundary>
-
-<dependencies>
-Read the issue, proposal, specs, design, tasks, and all changed files before producing the final review.
-</dependencies>
-
-<instruction>
-Review the full change thoroughly.
-
-Find as many problems as possible. Do not stop after the first problem.
-Include all issues you find: large, small, tests, edge cases, cleanup, consistency, and sibling problems in nearby code.
-Write every finding in the final review.
-
-Inspect:
-1. Current issue acceptance criteria with concrete evidence.
-2. All changed files.
-3. Adjacent retry, recovery, and artifact paths.
-4. Regression coverage gaps.
-5. Cross-cutting concerns: security, data safety, public contracts, migration impact.
-</instruction>
-
-<review_dimensions>
-- Correctness: logic errors, bugs, edge cases.
-- Complexity: unnecessary coupling, overly large functions, confusing flow.
-- Test Coverage: new code has meaningful tests and all relevant tests pass.
-- Security: input validation, no injection risks, no exposed secrets.
-- Spec Compliance: acceptance criteria are verified with file paths, lines, or actual values.
-</review_dimensions>
-
-<repair_policy>
-You MAY repair small, local, low-risk issues directly during review:
-- formatting
-- typos
-- obvious missing guards
-- small test expectation updates
-- import cleanup
-- dead code removal
-
-You MUST NOT repair issues involving:
-- product behavior changes
-- public contract changes
-- data safety or security posture changes
-- architectural judgment
-- broad refactoring
-- ambiguous trade-offs
-
-If unsure, report the issue as unresolved instead of fixing it.
-</repair_policy>
-
-<output_format>
-# Review Report
-
-## Result: PASS / FAIL
-
-## Repaired Items
-
-- [ID: item-N]
-  Severity: info
-  Scope: formatting | typos | missing-obvious-guards | ...
-  Evidence: What was wrong and what was changed
-  Verification: Command run to verify the fix
-  Status: resolved
-
-## Blocking Items
-
-- [ID: item-N]
-  Severity: blocking | warning | minor | test-gap | cleanup
-  Scope: file path or area
-  Evidence: What is wrong [disallowed:reason] if repair was considered but disallowed
-  SuggestedAction: What should be done
-  Verification: How to verify the fix
-  Status: open | unresolved
-
-## Follow-up Items
-
-- [ID: item-N]
-  Severity: follow-up
-  Scope: file path or area
-  Evidence: Description of a useful improvement that is not a problem in the reviewed change
-  SuggestedAction: Suggested improvement
-  Status: follow-up
-
-## Pre-existing or Out-of-scope Items
-
-- [ID: item-N]
-  Severity: info | warning
-  Scope: file path or area
-  Evidence: Description
-  SuggestedAction: Optional future action
-  Status: pre-existing | out-of-scope
-</output_format>
-
-<verdict_rules>
-- The verdict MUST reflect the post-repair candidate snapshot.
-- Do not PASS if any finding in Blocking Items remains unresolved.
-- Do not PASS if repaired items lack verification evidence.
-- Pre-existing failures do not block the current change but must be reported.
-</verdict_rules>
-
-<verdict_marker>
 The final line of `review.md` MUST be exactly one of:
-- `<promise>PASS</promise>` if review passes.
-- `<promise>FAIL</promise>` if review fails.
-
-Do NOT include more than one marker. Do NOT include markers in examples or quoted text.
-</verdict_marker>
-
-<output>
-Write to: `${{ openspecChangeDir }}/review.md`
-</output>
-
-</artifact>
+- `<promise>PASS</promise>` — no problems that must be fixed before merge.
+- `<promise>FAIL</promise>` — you found problems that must be fixed.
