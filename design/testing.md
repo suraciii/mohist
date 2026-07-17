@@ -101,7 +101,7 @@ The lowest useful layer owns the behavior matrix. API/integration specs assert r
 
 xUnit collection = scheduling unit; classes inside a collection run serially, so wall time = the longest class chain.
 
-- Parallel by default. `DisableParallelization` only for true process-global state (today only OtelTracing: shared `Microsoft.AspNetCore` ActivitySource). Cluster-scoped state (`RunnerRegistryKeys.Global`, `ForceActivationCollection`, fixture `FakeTimeProvider`) is per-fixture, never a reason to serialize.
+- Parallel by default. `DisableParallelization` only for true process-global state (today `OtelTracing` for shared `Microsoft.AspNetCore` ActivitySource, and `Dispatcher` for shared instrumentation capture). Cluster-scoped state (`RunnerRegistryKeys.Global`, `ForceActivationCollection`, fixture `FakeTimeProvider`) is per-fixture, never a reason to serialize.
 - Ports: WebApplicationFactory fixtures must allocate via TestClusterPortAllocator. InProcessTestCluster is in-memory transport — no ports, safe anywhere.
 - Collections express shared fixture lifetime and isolation needs only — never speed or cost. No custom test orderer and no `xunit.runner.json` thread tuning: both were measured to sit within run-to-run noise and were removed. No runtime traits either; the track is expressed by naming + directory alone.
 - Schema: tests never run `Migrate()` / `EnsureCreated()` from empty — clone via `MigratedSqliteTemplate.CopyTo` / `CopyTo(target)` / `CopyModelSchemaTo`. Sole exception: DatabaseInitializationSpecs (its subject is the chain itself).
