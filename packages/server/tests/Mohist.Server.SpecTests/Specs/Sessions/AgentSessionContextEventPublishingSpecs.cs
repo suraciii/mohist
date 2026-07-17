@@ -5,6 +5,7 @@ using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Infrastructure.Events;
+using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Sessions.Services;
 using Mohist.Server.SpecTests.Specs.Events;
@@ -202,7 +203,6 @@ public class AgentSessionContextEventPublishingSpecs
         Assert.Equal("green", health.Envelope.Data!.Value.GetProperty("healthStatus").GetString());
         Assert.Equal(50d, health.Envelope.Data!.Value.GetProperty("contextUsagePercent").GetDouble());
     }
-
     private OpenAgentSessionCommand OpenCommand() => new(
         _runnerId,
         "opencode",

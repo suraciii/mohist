@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Project;
+using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Services;
 using Mohist.Server.Project.Grains;
@@ -45,9 +46,8 @@ public class IssueWorkflowRepositoryResolutionSpecs
             "develop");
 
         var number = await _grains.GetGrain<IIssueCounterGrain>(projectId).NextAsync();
-        var issueId = $"issue_{Guid.NewGuid():N}";
-        var issueGrain = _grains.GetGrain<IIssueGrain>(issueId);
-        await issueGrain.CreateAsync(projectId, number, "Use secondary repo", body: null, labels: null, priority: null, "secondary", issueId);
+        var issueGrain = _grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(projectId, number)));
+        await issueGrain.CreateAsync(projectId, number, "Use secondary repo", body: null, labels: null, priority: null, "secondary");
 
         var wrId = await issueGrain.StartWorkAsync();
 
@@ -72,9 +72,8 @@ public class IssueWorkflowRepositoryResolutionSpecs
             "develop");
 
         var number = await _grains.GetGrain<IIssueCounterGrain>(projectId).NextAsync();
-        var issueId = $"issue_{Guid.NewGuid():N}";
-        var issueGrain = _grains.GetGrain<IIssueGrain>(issueId);
-        await issueGrain.CreateAsync(projectId, number, "Repo metadata drifts", body: null, labels: null, priority: null, "secondary", issueId);
+        var issueGrain = _grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(projectId, number)));
+        await issueGrain.CreateAsync(projectId, number, "Repo metadata drifts", body: null, labels: null, priority: null, "secondary");
 
         await projectGrain.RemoveRepositoryAsync("secondary");
         await projectGrain.AddRepositoryAsync(
@@ -109,9 +108,8 @@ public class IssueWorkflowRepositoryResolutionSpecs
             "main");
 
         var number = await _grains.GetGrain<IIssueCounterGrain>(projectId).NextAsync();
-        var issueId = $"issue_{Guid.NewGuid():N}";
-        var issueGrain = _grains.GetGrain<IIssueGrain>(issueId);
-        await issueGrain.CreateAsync(projectId, number, "Repo gets removed", body: null, labels: null, priority: null, "secondary", issueId);
+        var issueGrain = _grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(projectId, number)));
+        await issueGrain.CreateAsync(projectId, number, "Repo gets removed", body: null, labels: null, priority: null, "secondary");
 
         await projectGrain.RemoveRepositoryAsync("secondary");
 
@@ -141,9 +139,8 @@ public class IssueWorkflowRepositoryResolutionSpecs
         await projectGrain.AddRepositoryAsync("main", "git@main.example:repo.git", "main");
 
         var number = await _grains.GetGrain<IIssueCounterGrain>(projectId).NextAsync();
-        var issueId = $"issue_{Guid.NewGuid():N}";
-        var issueGrain = _grains.GetGrain<IIssueGrain>(issueId);
-        await issueGrain.CreateAsync(projectId, number, "Ghost repo", body: null, labels: null, priority: null, "ghost", issueId);
+        var issueGrain = _grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(projectId, number)));
+        await issueGrain.CreateAsync(projectId, number, "Ghost repo", body: null, labels: null, priority: null, "ghost");
 
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => issueGrain.StartWorkAsync());
         Assert.Contains("RepositoryNotFound", ex.Message);
@@ -172,10 +169,9 @@ public class IssueWorkflowRepositoryResolutionSpecs
                 IsDefault = true,
             });
         var number = await _grains.GetGrain<IIssueCounterGrain>(projectId).NextAsync();
-        var issueId = $"issue_{Guid.NewGuid():N}";
-        var issueGrain = _grains.GetGrain<IIssueGrain>(issueId);
-        await issueGrain.CreateAsync(projectId, number, "Existing issue", body: null, labels: null, priority: null, repositoryRef: null, issueId);
-        var issueBeforeUpgrade = await LoadIssueStateAsync(issueId);
+        var issueGrain = _grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(projectId, number)));
+        await issueGrain.CreateAsync(projectId, number, "Existing issue", body: null, labels: null, priority: null, repositoryRef: null);
+        var issueBeforeUpgrade = await LoadIssueStateAsync(projectId, number);
 
         await projectGrain.AsReference<IGrainManagementExtension>().DeactivateOnIdle();
         using (var scope = _services.CreateScope())
@@ -194,9 +190,9 @@ public class IssueWorkflowRepositoryResolutionSpecs
         Assert.Equal("server", repository.GetProperty("name").GetString());
         Assert.Equal("git@example.com:server.git", repository.GetProperty("gitUrl").GetString());
         Assert.Equal("release", repository.GetProperty("baseBranch").GetString());
-        var issueAfterUpgrade = await LoadIssueStateAsync(issueId);
-        Assert.Equal(issueBeforeUpgrade.GetProperty("id").GetString(), issueAfterUpgrade.GetProperty("id").GetString());
+        var issueAfterUpgrade = await LoadIssueStateAsync(projectId, number);
         Assert.Equal(issueBeforeUpgrade.GetProperty("projectId").GetString(), issueAfterUpgrade.GetProperty("projectId").GetString());
+        Assert.Equal(issueBeforeUpgrade.GetProperty("number").GetInt32(), issueAfterUpgrade.GetProperty("number").GetInt32());
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -216,9 +212,8 @@ public class IssueWorkflowRepositoryResolutionSpecs
                 IsDefault = true,
             });
         var number = await _grains.GetGrain<IIssueCounterGrain>(projectId).NextAsync();
-        var issueId = $"issue_{Guid.NewGuid():N}";
-        var issueGrain = _grains.GetGrain<IIssueGrain>(issueId);
-        await issueGrain.CreateAsync(projectId, number, "In-flight issue", body: null, labels: null, priority: null, repositoryRef: null, issueId);
+        var issueGrain = _grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(projectId, number)));
+        await issueGrain.CreateAsync(projectId, number, "In-flight issue", body: null, labels: null, priority: null, repositoryRef: null);
         var workflowRunId = await issueGrain.StartWorkAsync();
         using var variablesBeforeUpgrade = await LoadWorkflowVariablesAsync(workflowRunId);
         var statusBeforeUpgrade = (await issueGrain.GetWorkflowStatusAsync())!;
@@ -263,12 +258,12 @@ public class IssueWorkflowRepositoryResolutionSpecs
         Assert.Equal(workflowRunId, await issueGrain.StartWorkAsync());
     }
 
-    private async Task<JsonElement> LoadIssueStateAsync(string issueId)
+    private async Task<JsonElement> LoadIssueStateAsync(string projectId, int issueNumber)
     {
         using var scope = _services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
         var state = await db.Issues
-            .Where(issue => issue.IssueId == issueId)
+            .Where(issue => issue.ProjectId == projectId && issue.Number == issueNumber)
             .Select(issue => issue.State)
             .SingleAsync();
         return JsonDocument.Parse(state).RootElement.Clone();

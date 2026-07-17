@@ -18,7 +18,6 @@ function apiResponse(data: unknown) {
 
 function makeEpic(overrides: Record<string, unknown>) {
   return {
-    id: 'epic-id',
     number: 1,
     title: 'Epic',
     description: 'desc',
@@ -41,7 +40,6 @@ function makeEpic(overrides: Record<string, unknown>) {
 
 const epics = [
   makeEpic({
-    id: 'epic-running-mobile',
     number: 101,
     title: 'Running Epic With A Long Title That Needs To Wrap On Mobile',
     status: 'running',
@@ -49,14 +47,13 @@ const epics = [
       deliveredCount: 1,
       totalIssueCount: 4,
       blockedIssues: [],
-      activeIssues: [{ id: 'issue-12345', number: 12345, title: LONG_RUNNING_TITLE, health: 'active' }],
+      activeIssues: [{ number: 12345, title: LONG_RUNNING_TITLE, health: 'active' }],
       nextIssue: null,
       nextIssueReason: 'Waiting for #12345 to complete',
       readyToMarkDone: false,
     },
   }),
   makeEpic({
-    id: 'epic-ready-mobile',
     number: 102,
     title: 'Ready Epic With A Long Title That Needs To Wrap On Mobile',
     progress: {
@@ -64,13 +61,12 @@ const epics = [
       totalIssueCount: 3,
       blockedIssues: [],
       activeIssues: [],
-      nextIssue: { id: 'issue-67890', number: 67890, title: LONG_NEXT_TITLE },
+      nextIssue: { number: 67890, title: LONG_NEXT_TITLE },
       nextIssueReason: null,
       readyToMarkDone: false,
     },
   }),
   makeEpic({
-    id: 'epic-waiting-mobile',
     number: 103,
     title: 'Waiting Epic With A Long Title That Needs To Wrap On Mobile',
     progress: {
@@ -84,7 +80,6 @@ const epics = [
     },
   }),
   makeEpic({
-    id: 'epic-idle-mobile',
     number: 104,
     title: 'Idle Empty Epic With A Long Title That Needs To Wrap On Mobile',
     progress: {

@@ -89,13 +89,8 @@ function extractDetail(type: string, payload: Record<string, unknown>): string |
   return null
 }
 
-function belongsToIssue(event: TimelineLiveEvent, issueNumber: number, issueId: string | null | undefined): boolean {
-  if (event.issueNumber === issueNumber) return true
-  if (issueId && event.issueId === issueId) return true
-  const payload = event.payload
-  if (typeof payload.issueNumber === 'number' && payload.issueNumber === issueNumber) return true
-  if (typeof payload.issueId === 'string' && payload.issueId === issueId) return true
-  return false
+function belongsToIssue(event: TimelineLiveEvent, issueNumber: number): boolean {
+  return event.issueNumber === issueNumber
 }
 
 function dedupeKey(entry: TimelineEntry): string {
@@ -104,7 +99,6 @@ function dedupeKey(entry: TimelineEntry): string {
 
 export function useEventTimeline(
   issueNumber: number,
-  issueId: string | null | undefined,
   enabled: boolean = true,
   historyHook: EventTimelineHistoryHook = useDefaultHistory,
 ): {
@@ -123,12 +117,12 @@ export function useEventTimeline(
   useEffect(() => {
     if (!enabled) return
     return onTimelineEvent((event) => {
-      if (!belongsToIssue(event, issueNumber, issueId)) return
+      if (!belongsToIssue(event, issueNumber)) return
       const entry = liveToEntry(event)
       liveRef.current = [entry, ...liveRef.current].slice(0, MAX_LIVE_EVENTS)
       setLiveTick((n) => n + 1)
     })
-  }, [issueNumber, issueId, enabled])
+  }, [issueNumber, enabled])
 
   const entries = useMemo(() => {
     const historyEntries = (history ?? []).map(historyToEntry)

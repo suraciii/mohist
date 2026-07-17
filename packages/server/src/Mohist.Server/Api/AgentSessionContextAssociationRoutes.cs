@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Mohist.Server.Epic.Services;
+using Mohist.Server.Issue.Services;
 using Mohist.Server.Sessions.Services;
 
 namespace Mohist.Server.Api;
@@ -34,10 +35,13 @@ public static class AgentSessionContextAssociationRoutes
             HttpContext context,
             string projectRef,
             int number,
+            IssueQuerier issues,
             AgentSessionQuerier sessions,
             CancellationToken ct) =>
         {
             var project = context.GetResolvedProject();
+            if (await issues.GetAsync(project.Id, number) is null)
+                return ApiResults.NotFound($"Issue #{number} not found");
             var items = await sessions.ListSessionsByContextRefAsync(
                 project.Id,
                 projectRef,
@@ -52,36 +56,26 @@ public static class AgentSessionContextAssociationRoutes
 
     private static WebApplication MapEpicAgentSessions(this WebApplication app)
     {
-        var group = app.MapGroup("/api/projects/{projectRef}/epics/{epicRef}/agent-sessions")
+        var group = app.MapGroup("/api/projects/{projectRef}/epics/{number:int}/agent-sessions")
             .AddEndpointFilter<ProjectResolutionEndpointFilter>();
 
         group.MapGet("/", async (
             HttpContext context,
             string projectRef,
-            string epicRef,
-            EpicQuerier epicQuerier,
+            int number,
+            EpicQuerier epics,
             AgentSessionQuerier sessions,
             CancellationToken ct) =>
         {
             var project = context.GetResolvedProject();
-
-            // Resolve {epicRef} by number-then-id, mirroring the existing
-            // EpicRoutes inline resolver (EpicRoutes.cs:37-41).
-            var resolved = int.TryParse(epicRef, out var number)
-                ? await epicQuerier.GetByNumberAsync(project.Id, number)
-                : await epicQuerier.GetAsync(project.Id, epicRef);
-            if (resolved is null)
-                return ApiResults.NotFound($"Epic '{epicRef}' not found");
-
-            var epicNumber = resolved.Number?.ToString();
-            if (string.IsNullOrWhiteSpace(epicNumber))
-                return ApiResults.NotFound($"Epic '{epicRef}' has no number");
+            if (await epics.GetAsync(project.Id, number) is null)
+                return ApiResults.NotFound($"Epic #{number} not found");
 
             var items = await sessions.ListSessionsByContextRefAsync(
                 project.Id,
                 projectRef,
                 GenericAgentSessionMetadata.EpicNumber,
-                epicNumber,
+                number.ToString(),
                 ct);
             return ApiResults.Ok(items);
         });

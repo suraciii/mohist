@@ -6,6 +6,7 @@ using Mohist.Server.Infrastructure.Data;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Infrastructure.Events;
+using Mohist.Server.Infrastructure.Orleans;
 using Orleans;
 using DomainIssue = Mohist.Server.Issue.Domain.Issue;
 using DomainIssueEvent = Mohist.Server.Issue.Domain.Events.IssueEvent;
@@ -40,39 +41,29 @@ public class IssueStore : IIssueStore
 
     public async Task<DomainIssue?> LoadAsync(string key)
     {
+        var (projectId, issueNumber) = ParseKey(key);
         await using var db = await _dbFactory.CreateDbContextAsync();
-        var row = await db.Issues.FindAsync(key);
+        var row = await db.Issues.FindAsync(projectId, issueNumber);
         return row is null ? null : Deserialize(row.State);
     }
 
     public async Task SaveAsync(string key, DomainIssue state)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
-        var row = await db.Issues.FindAsync(state.Id);
-        var json = Serialize(state);
-        if (row is null)
-        {
-            db.Issues.Add(new IssueRow { IssueId = state.Id, State = json, Risk = state.Risk });
-        }
-        else
-        {
-            row.State = json;
-            row.Risk = state.Risk;
-        }
+        await StageIssueAsync(db, state, CancellationToken.None);
         await db.SaveChangesAsync();
     }
 
     public async Task SaveAsync(string key, DomainIssue state, IReadOnlyList<DomainIssueEvent> events, CancellationToken ct = default)
     {
-        var source = IssueEventPersistence.IssueSource(state.Id);
+        var source = IssueEventPersistence.IssueSource(state.ProjectId, state.Number);
         var subject = state.Number.ToString();
-        var extensions = BuildIdentityExtensions(state);
-
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
         try
         {
             await StageIssueAsync(db, state, ct);
+            var extensions = IssueLineage.BuildExtensions(state);
             foreach (var evt in events)
             {
                 if (evt is null) continue;
@@ -97,18 +88,28 @@ public class IssueStore : IIssueStore
 
     public Task<IReadOnlyList<DomainIssue>> ListAsync() => throw new NotImplementedException();
 
-    private static async Task StageIssueAsync(MohistDbContext db, DomainIssue state, CancellationToken ct)
+    private static async Task StageIssueAsync(
+        MohistDbContext db,
+        DomainIssue state,
+        CancellationToken ct)
     {
-        var row = await db.Issues.FindAsync(new object[] { state.Id }, ct);
-        var json = Serialize(state);
+        var row = await db.Issues.FindAsync(new object[] { state.ProjectId, state.Number }, ct);
         if (row is null)
         {
-            db.Issues.Add(new IssueRow { IssueId = state.Id, State = json, Risk = state.Risk });
+            db.Issues.Add(new IssueRow
+            {
+                ProjectId = state.ProjectId,
+                Number = state.Number,
+                State = Serialize(state),
+                Risk = state.Risk,
+                EpicNumber = state.EpicNumber,
+            });
         }
         else
         {
-            row.State = json;
+            row.State = Serialize(state);
             row.Risk = state.Risk;
+            row.EpicNumber = state.EpicNumber;
         }
     }
 
@@ -127,19 +128,15 @@ public class IssueStore : IIssueStore
             extensions: extensions);
     }
 
-    private static Dictionary<string, string> BuildIdentityExtensions(DomainIssue state)
-    {
-        return new Dictionary<string, string>(StringComparer.Ordinal)
-        {
-            ["projectid"] = state.ProjectId,
-            ["issueid"] = state.Id,
-            ["issueno"] = state.Number.ToString(),
-        };
-    }
-
     public static DomainIssue? Deserialize(string json) =>
         string.IsNullOrEmpty(json) ? null : JSON.Deserialize<DomainIssue>(json);
 
     public static string Serialize(DomainIssue issue) =>
         JSON.Serialize(issue);
+
+    private static (string ProjectId, int IssueNumber) ParseKey(string key)
+    {
+        ScopedGrainKeyCodec.Parse(key, out var projectId, out var issueNumber);
+        return (projectId, issueNumber);
+    }
 }

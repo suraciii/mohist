@@ -25,9 +25,11 @@ export function routeTranscriptEventName(name: string): string {
 /**
  * Wire shape from the SignalR bus. The server now sends the full CloudEvents
  * 1.0.2 envelope; the Web reads {@link payload} for the original event body
- * and {@link extensions} for routing metadata (projectid, workflowrunid,
- * issueno). Falls back to the legacy raw-payload shape (where the event
- * body sits in a top-level `payload` field) for any unmigrated producers.
+ * and merges {@link extensions} routing metadata (projectid, issue, epic,
+ * workflowrunid, stage, agentid, sessionid, runnerid). The user-visible
+ * issue number rides under the `issue` key. Falls back to the
+ * legacy raw-payload shape (where the event body sits in a top-level
+ * `payload` field) for any unmigrated producers.
  *
  * Note on field casing: the server-side `CloudEventEnvelope` record uses
  * PascalCase property names (SpecVersion, DataContentType, ...) when
@@ -35,6 +37,38 @@ export function routeTranscriptEventName(name: string): string {
  * not the CloudEvents-spec lowercase `specversion`. The structural
  * check here matches what the server actually emits.
  */
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0
+}
+
+function mergeRoutingLineage(
+  payload: Record<string, unknown>,
+  extensions: Record<string, unknown> | null,
+): Record<string, unknown> {
+  let normalized = payload
+  const extensionProjectId = extensions?.projectid
+  if (isNonEmptyString(extensionProjectId) && payload.projectId !== extensionProjectId) {
+    normalized = { ...normalized, projectId: extensionProjectId }
+  }
+
+  const extensionIssue = extensions?.issue
+  if (isNonEmptyString(extensionIssue)) {
+    const issueNumber = Number(extensionIssue)
+    if (Number.isSafeInteger(issueNumber) && issueNumber > 0 && normalized.issueNumber !== issueNumber) {
+      normalized = { ...normalized, issueNumber }
+    }
+  }
+  const extensionSessionId = extensions?.sessionid
+  if (isNonEmptyString(extensionSessionId) && normalized.sessionId !== extensionSessionId) {
+    normalized = { ...normalized, sessionId: extensionSessionId }
+  }
+  const extensionAgentId = extensions?.agentid
+  if (isNonEmptyString(extensionAgentId) && normalized.agentId !== extensionAgentId) {
+    normalized = { ...normalized, agentId: extensionAgentId }
+  }
+  return normalized
+}
+
 export function unwrapEnvelope(rawData: unknown): Record<string, unknown> {
   if (!rawData || typeof rawData !== 'object') {
     return {}
@@ -52,7 +86,7 @@ export function unwrapEnvelope(rawData: unknown): Record<string, unknown> {
   ) {
     const payload = candidate.payload ?? candidate.data
     if (payload && typeof payload === 'object') {
-      return payload as Record<string, unknown>
+      return mergeRoutingLineage(payload as Record<string, unknown>, asRecord(candidate.extensions))
     }
     return {}
   }

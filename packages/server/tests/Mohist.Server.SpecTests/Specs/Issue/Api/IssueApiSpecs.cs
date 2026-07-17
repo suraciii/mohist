@@ -61,7 +61,7 @@ public class IssueApiSpecs
 
         var detail = await _client.GetDataAsync<IssueDto>($"/api/projects/{project.Id}/issues/{issue.Number}");
 
-        Assert.Equal(issue.Id, detail.Id);
+        Assert.Equal(issue.Number, detail.Number);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -74,7 +74,7 @@ public class IssueApiSpecs
         await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", setDefault = true });
 
         var epic = await _client.PostDataAsync<EpicDto>($"/api/projects/{project.Id}/epics", new { title = "Project scoped epic", description = "Runtime model", priority = "p2" });
-        var detail = await _client.GetDataAsync<EpicDetailDto>($"/api/projects/{project.Id}/epics/{epic.Id}");
+        var detail = await _client.GetDataAsync<EpicDetailDto>($"/api/projects/{project.Id}/epics/{epic.Number}");
 
         Assert.NotNull(detail);
     }
@@ -95,8 +95,8 @@ public class IssueApiSpecs
 
         var issues = await _client.GetDataAsync<IssueDto[]>($"/api/projects/{firstProject.Id}/issues?all=true");
 
-        Assert.Contains(issues, issue => issue.Id == firstIssue.Id);
-        Assert.DoesNotContain(issues, issue => issue.Id == secondIssue.Id);
+        var listed = Assert.Single(issues);
+        Assert.Equal(firstIssue.Number, listed.Number);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -273,15 +273,15 @@ public class IssueApiSpecs
         var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Epic issue", projectId = project.Id });
         var epic = await _client.PostDataAsync<EpicDto>($"/api/projects/{project.Id}/epics", new { title = "Runtime model", description = "Ship runtime", priority = "p1", projectId = project.Id });
 
-        await _client.PostOkAsync($"/api/projects/{project.Id}/epics/{epic.Id}/issues", new { issueId = issue.Id });
-        var detail = await _client.GetDataAsync<EpicDetailDto>($"/api/projects/{project.Id}/epics/{epic.Id}");
+        await _client.PostOkAsync($"/api/projects/{project.Id}/epics/{epic.Number}/issues", new { issueNumber = issue.Number });
+        var detail = await _client.GetDataAsync<EpicDetailDto>($"/api/projects/{project.Id}/epics/{epic.Number}");
         var issueDetail = await _client.GetDataAsync<IssueDto>($"/api/projects/{project.Id}/issues/{issue.Number}");
 
-        Assert.Contains(detail.LinkedIssues, i => i.Id == issue.Id);
-        Assert.Equal(epic.Id, issueDetail.PrimaryEpic?.Id);
+        Assert.Contains(detail.LinkedIssues, i => i.Number == issue.Number);
+        Assert.Equal(epic.Number, issueDetail.PrimaryEpic?.Number);
     }
 
-    private sealed record IssueDto(int Number, string Id, CommentDto[] Comments, PrerequisiteDto[] Prerequisites, bool IsDraft, bool CanStart, BlockerDto? Blocker, PrimaryEpicDto? PrimaryEpic, string WorkflowProfileId);
+    private sealed record IssueDto(int Number, CommentDto[] Comments, PrerequisiteDto[] Prerequisites, bool IsDraft, bool CanStart, BlockerDto? Blocker, PrimaryEpicDto? PrimaryEpic, string WorkflowProfileId);
     private sealed record WorkflowProfileDto(string Id, string Name, string Description);
     private sealed record WorkflowProfileDescriptionDto(string Id, string DisplayName, string Description);
     private sealed record ProjectDto(string Id);
@@ -289,7 +289,7 @@ public class IssueApiSpecs
     private sealed record PrerequisiteDto(int Number, bool Completed);
     private sealed record BlockerDto(string Kind, BlockerIssueDto? Issue);
     private sealed record BlockerIssueDto(int Number, string Title);
-    private sealed record PrimaryEpicDto(string Id, string Title);
+    private sealed record PrimaryEpicDto(int Number, string Title);
     private sealed record ProjectStatusDto(int Issues, Dictionary<string, int> IssuesByStatus);
     private sealed record SystemInfoDto(
         RunningInfoDto Running,
@@ -306,7 +306,7 @@ public class IssueApiSpecs
     private sealed record PathsInfoDto(string? Db, string? Config, string? Logs, string? Opencode);
     private sealed record SystemUpdateStatusEnvelopeDto(bool HasJob, SystemUpdateStatusDto? Job);
     private sealed record SystemUpdateStatusDto(string JobId, string Status, string Stage);
-    private sealed record EpicDto(string Id);
+    private sealed record EpicDto(int Number);
     private sealed record EpicDetailDto(LinkedIssueDto[] LinkedIssues);
-    private sealed record LinkedIssueDto(string Id);
+    private sealed record LinkedIssueDto(int Number);
 }

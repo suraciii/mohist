@@ -78,8 +78,7 @@ public static partial class IssueRoutes
 
             var counter = grains.GetGrain<IIssueCounterGrain>(GrainKey.IssueCounter(project.Id));
             var number = await counter.NextAsync();
-            var issueId = $"issue_{Guid.NewGuid():N}";
-            var issueGrain = grains.GetGrain<IIssueGrain>(GrainKey.Issue(issueId));
+            var issueGrain = grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(project.Id, number)));
             try
             {
                 await issueGrain.CreateAsync(
@@ -90,7 +89,6 @@ public static partial class IssueRoutes
                     req.Labels,
                     req.Priority,
                     resolution.Repository!.Name,
-                    issueId,
                     req.Risk,
                     req.IsDraft ?? true,
                     req.AttachmentIds,
@@ -120,7 +118,7 @@ public static partial class IssueRoutes
                 return ApiResults.BadRequest(ex.Message, code);
             }
 
-            await ApplyCreateModelMetadataAsync(issueProfileManager, issueId, req);
+            await ApplyCreateModelMetadataAsync(issueProfileManager, project.Id, number, req);
 
             var issue = await issuesQuery.GetAsync(project.Id, number, project);
             return Results.Json(new { success = true, data = issue }, statusCode: 201);
@@ -143,7 +141,6 @@ public static partial class IssueRoutes
             int number,
             UpdateIssueRequest req,
             IGrainFactory grains,
-            IssueIdentityResolver issueIdentityResolver,
             IssueQuerier issuesQuery,
             IssueWorkflowProfileRegistry profileRegistry,
             ProjectWorkflowProfileManager projectProfileManager,
@@ -178,7 +175,7 @@ public static partial class IssueRoutes
                 workflowProfileIdForUpdate = requestedWorkflowProfileId;
             }
 
-            var grain = await GetIssueGrainAsync(grains, issueIdentityResolver, project.Id, number);
+            var grain = await GetIssueGrainAsync(grains, issuesQuery, project.Id, number);
             if (grain is null) return ApiResults.NotFound($"Issue #{number} not found");
             try
             {
@@ -209,9 +206,7 @@ public static partial class IssueRoutes
                 return ApiResults.BadRequest(ex.Message, "invalid_attachment");
             }
 
-            var issueId = await ResolveIssueIdAsync(issueIdentityResolver, project.Id, number);
-            if (issueId is not null)
-                await ApplyUpdateModelMetadataAsync(issueProfileManager, issueId, req, req.Raw);
+            await ApplyUpdateModelMetadataAsync(issueProfileManager, project.Id, number, req, req.Raw);
 
             var info = await issuesQuery.GetAsync(project.Id, number);
             return ApiResults.Ok(info);
@@ -325,36 +320,32 @@ public static partial class IssueRoutes
         return true;
     }
 
-    private static async Task<string?> ResolveIssueIdAsync(
-        IssueIdentityResolver resolver,
-        string projectId,
-        int number) =>
-        await resolver.GetIdAsync(projectId, number);
-
     private static async Task ApplyCreateModelMetadataAsync(
         IssueWorkflowProfileManager profileManager,
-        string issueId,
+        string projectId,
+        int issueNumber,
         CreateIssueRequest req)
     {
         var patch = BuildCreatePatch(req);
         if (!patch.TouchesAnyField) return;
 
         var seed = IssueModelMetadata.ApplyModelMetadata(VariableBundle.Empty, patch);
-        await profileManager.SetVariablesAsync(issueId, seed);
+        await profileManager.SetVariablesAsync(projectId, issueNumber, seed);
     }
 
     private static async Task ApplyUpdateModelMetadataAsync(
         IssueWorkflowProfileManager profileManager,
-        string issueId,
+        string projectId,
+        int issueNumber,
         UpdateIssueRequest req,
         JsonElement rawPatch)
     {
         var patch = BuildUpdatePatch(req, rawPatch);
         if (!patch.TouchesAnyField) return;
 
-        var current = await profileManager.GetVariablesAsync(issueId);
+        var current = await profileManager.GetVariablesAsync(projectId, issueNumber);
         var patched = IssueModelMetadata.ApplyModelMetadata(current, patch);
-        await profileManager.SetVariablesAsync(issueId, patched);
+        await profileManager.SetVariablesAsync(projectId, issueNumber, patched);
     }
 
     /// <summary>

@@ -60,10 +60,9 @@ public class ProjectEventFeedAssembler : IScopedService
         var allowedTypes = filter?.CandidateTypes(ProjectEventOrigin.Issue);
         if (allowedTypes is { Length: 0 }) return [];
 
-        var query = from row in db.IssueEvents.AsNoTracking()
-                    join issue in db.Issues.AsNoTracking().Where(issue => issue.ProjectId == projectId)
-                        on row.Source equals IssueEventPersistence.SourcePrefix + issue.IssueId
-                    select row;
+        var sourcePrefix = IssueEventPersistence.ProjectSourcePrefix(projectId);
+        var query = db.IssueEvents.AsNoTracking()
+            .Where(row => row.Source.StartsWith(sourcePrefix));
         if (allowedTypes is not null) query = query.Where(row => allowedTypes.Contains(row.Type));
 
         var rows = await query
@@ -91,7 +90,7 @@ public class ProjectEventFeedAssembler : IScopedService
         var query = from row in db.WorkflowRunEvents.AsNoTracking()
                     join workflowRun in db.WorkflowRuns.AsNoTracking().Where(run => run.MetadataProjectId == projectId)
                         on row.Source equals WorkflowRunEventPersistence.SourcePrefix + workflowRun.WorkflowRunId
-                    select new { Event = row, workflowRun.WorkflowRunId, workflowRun.State };
+                    select new { Event = row };
         if (allowedTypes is not null) query = query.Where(row => allowedTypes.Contains(row.Event.Type));
 
         var rows = await query
@@ -103,22 +102,8 @@ public class ProjectEventFeedAssembler : IScopedService
             .Take(limit)
             .ToListAsync(ct);
 
-        var runIds = rows.Select(row => row.WorkflowRunId).Distinct().ToArray();
-        var issueNumbers = runIds.Length == 0
-            ? new Dictionary<string, int>(StringComparer.Ordinal)
-            : await db.Issues.AsNoTracking()
-                .Where(issue => issue.ProjectId == projectId && issue.WorkflowRunId != null && runIds.Contains(issue.WorkflowRunId))
-                .Select(issue => new { issue.WorkflowRunId, issue.Number })
-                .ToDictionaryAsync(issue => issue.WorkflowRunId!, issue => issue.Number ?? 0, StringComparer.Ordinal, ct);
-
         return rows
-            .Select(row =>
-            {
-                var issueNumber = ReadWorkflowIssueNumber(row.State);
-                if (issueNumber is null && issueNumbers.TryGetValue(row.WorkflowRunId, out var mappedNumber) && mappedNumber > 0)
-                    issueNumber = mappedNumber;
-                return ProjectEventEnvelope.FromWorkflowRun(row.Event, issueNumber);
-            })
+            .Select(row => ProjectEventEnvelope.FromWorkflowRun(row.Event))
             .ToList();
     }
 
@@ -209,29 +194,6 @@ public class ProjectEventFeedAssembler : IScopedService
             .ToList();
     }
 
-    private static int? ReadWorkflowIssueNumber(string state)
-    {
-        try
-        {
-            using var document = JsonDocument.Parse(state);
-            if (!document.RootElement.TryGetProperty("metadata", out var metadata)
-                || !metadata.TryGetProperty("annotations", out var annotations)
-                || !annotations.TryGetProperty("issueNumber", out var issueNumber))
-                return null;
-
-            return issueNumber.ValueKind switch
-            {
-                JsonValueKind.Number when issueNumber.TryGetInt32(out var number) => number,
-                JsonValueKind.String when int.TryParse(issueNumber.GetString(), out var number) => number,
-                _ => null,
-            };
-        }
-        catch (JsonException)
-        {
-            return null;
-        }
-    }
-
 }
 
 public sealed record ProjectEventEnvelope(
@@ -250,6 +212,7 @@ public sealed record ProjectEventEnvelope(
     IReadOnlyDictionary<string, string> Extensions,
     string? RunnerId,
     int? IssueNumber,
+    int? EpicNumber,
     string? SessionSourceKind,
     string? WorkflowRunId,
     string? AgentId,
@@ -258,8 +221,8 @@ public sealed record ProjectEventEnvelope(
     internal static ProjectEventEnvelope FromIssue(IssueEventRow row) =>
         Build(row.Id, row.Source, ProjectEventOrigin.Issue, "issue", row.Type, row.Time, row.EventId, row.SpecVersion, row.Subject, row.DataContentType, row.Data, row.ExtensionsJson);
 
-    internal static ProjectEventEnvelope FromWorkflowRun(WorkflowRunEventRow row, int? issueNumber) =>
-        Build(row.Id, row.Source, ProjectEventOrigin.WorkflowRun, "workflow-run", row.Type, row.Time, row.EventId, row.SpecVersion, row.Subject, row.DataContentType, row.Data, row.ExtensionsJson, issueNumber: issueNumber);
+    internal static ProjectEventEnvelope FromWorkflowRun(WorkflowRunEventRow row) =>
+        Build(row.Id, row.Source, ProjectEventOrigin.WorkflowRun, "workflow-run", row.Type, row.Time, row.EventId, row.SpecVersion, row.Subject, row.DataContentType, row.Data, row.ExtensionsJson);
 
     internal static ProjectEventEnvelope FromAgentSession(AgentSessionEventRow row, ProjectEventSessionContext? session) =>
         Build(
@@ -276,7 +239,6 @@ public sealed record ProjectEventEnvelope(
             row.Data,
             row.ExtensionsJson,
             runnerId: session?.RunnerId,
-            issueNumber: session?.IssueNumber,
             sessionSourceKind: session?.SourceKind,
             workflowRunId: session?.WorkflowRunId,
             agentId: session?.AgentId,
@@ -287,10 +249,6 @@ public sealed record ProjectEventEnvelope(
 
     internal static ProjectEventEnvelope SessionClosed(ProjectEventSessionContext session, AgentSessionTranscriptPartRow part) =>
         SessionLifecycle(session, part.Id, "session.closed", ToData(part.PayloadJson), ToOffset(part.LastSeenAt), $"{session.SessionId}:closed:{part.Id}");
-
-    internal static string ExtractWorkflowRunId(string source) => ExtractAggregateId(source, "workflow-run");
-
-    internal static string ExtractAgentSessionId(string source) => ExtractAggregateId(source, "agent-session");
 
     private static ProjectEventEnvelope SessionLifecycle(
         ProjectEventSessionContext session,
@@ -315,6 +273,7 @@ public sealed record ProjectEventEnvelope(
             new Dictionary<string, string>(),
             session.RunnerId,
             session.IssueNumber,
+            session.EpicNumber,
             session.SourceKind,
             session.WorkflowRunId,
             session.AgentId,
@@ -334,12 +293,13 @@ public sealed record ProjectEventEnvelope(
         JsonElement data,
         string extensionsJson,
         string? runnerId = null,
-        int? issueNumber = null,
         string? sessionSourceKind = null,
         string? workflowRunId = null,
         string? agentId = null,
-        string? agentName = null) =>
-        new(
+        string? agentName = null)
+    {
+        var extensions = DeserializeExtensions(extensionsJson);
+        return new(
             id,
             origin,
             aggregateKind,
@@ -352,19 +312,27 @@ public sealed record ProjectEventEnvelope(
             subject,
             dataContentType,
             data,
-            DeserializeExtensions(extensionsJson),
-            runnerId ?? ResolveRunnerId(extensionsJson),
-            issueNumber,
+            extensions,
+            runnerId ?? CloudEventLineage.ReadValue(extensions, EventCatalog.Lineage.RunnerId),
+            ReadPositiveNumber(extensions, EventCatalog.Lineage.Issue),
+            ReadPositiveNumber(extensions, EventCatalog.Lineage.Epic),
             sessionSourceKind,
             workflowRunId,
             agentId,
             agentName);
+    }
 
     private static string ExtractAggregateId(string source, string aggregateKind)
     {
+        if (aggregateKind == "issue")
+        {
+            var issueMarker = "/issues/";
+            var index = source.LastIndexOf(issueMarker, StringComparison.Ordinal);
+            return index >= 0 ? source[(index + issueMarker.Length)..] : source;
+        }
+
         var prefix = aggregateKind switch
         {
-            "issue" => IssueEventPersistence.SourcePrefix,
             "workflow-run" => WorkflowRunEventPersistence.SourcePrefix,
             "agent-session" => AgentSessionEventPersistence.SourcePrefix,
             _ => null,
@@ -387,26 +355,14 @@ public sealed record ProjectEventEnvelope(
         }
     }
 
-    private static string? ResolveRunnerId(string extensionsJson)
-    {
-        if (string.IsNullOrWhiteSpace(extensionsJson)) return null;
-        try
-        {
-            using var document = JsonDocument.Parse(extensionsJson);
-            if (document.RootElement.ValueKind != JsonValueKind.Object) return null;
-            foreach (var name in new[] { "runnerid", "runnerId", "runner_id", "runner" })
-            {
-                if (document.RootElement.TryGetProperty(name, out var property)
-                    && property.ValueKind == JsonValueKind.String
-                    && !string.IsNullOrWhiteSpace(property.GetString()))
-                    return property.GetString();
-            }
-        }
-        catch (JsonException)
-        {
-        }
-        return null;
-    }
+    private static int? ReadPositiveNumber(
+        IReadOnlyDictionary<string, string> extensions,
+        string key) =>
+        extensions.TryGetValue(key, out var value)
+            && int.TryParse(value, out var number)
+            && number > 0
+                ? number
+                : null;
 
     private static JsonElement ToData(object value) => JsonSerializer.SerializeToElement(value, CloudEvent.JsonOptions);
 
@@ -452,7 +408,7 @@ public sealed class ProjectEventFilter
         "com.mohist.workflow.stage.completed", "com.mohist.workflow.stage.approval-resolved",
         "com.mohist.workflow.stage.failed", "com.mohist.workflow.stage.approval-requested",
         "com.mohist.workflow.feedback.requested", "com.mohist.workflow.task.started",
-        "com.mohist.workflow.task.completed", "com.mohist.workflow.task.failed", "com.mohist.workflow.check.started",
+        "com.mohist.workflow.task.completed", "com.mohist.workflow.task.failed",
         "com.mohist.workflow.check.passed", "com.mohist.workflow.check.failed", "com.mohist.workflow.check.pending",
         "com.mohist.workflow.repair-scheduled", "com.mohist.workflow.artifact.recorded",
     ];
@@ -582,6 +538,7 @@ internal sealed record ProjectEventSessionContext(
     string? SourceKind,
     string? WorkflowRunId,
     int? IssueNumber,
+    int? EpicNumber,
     string? AgentId,
     string? AgentName,
     string? RunnerId)
@@ -595,10 +552,35 @@ internal sealed record ProjectEventSessionContext(
             sourceKind,
             string.Equals(sourceKind, "workflow", StringComparison.Ordinal) ? row.LabelSourceId : null,
             ReadNumber(row.LabelIssueNumber) ?? ReadNumber(row.LabelAgentLaunchIssueNumber),
+            ReadNumber(ReadStateLabel(row.State, AgentSessionQueryMetadataKeys.EpicNumber))
+                ?? ReadNumber(row.LabelAgentLaunchEpicNumber),
             row.LabelAgentId,
             row.LabelAgentName,
             row.RunnerId);
     }
 
-    private static int? ReadNumber(string? value) => int.TryParse(value, out var number) ? number : null;
+    private static int? ReadNumber(string? value) =>
+        int.TryParse(value, out var number) && number > 0 ? number : null;
+
+    private static string? ReadStateLabel(string state, string key)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(state);
+            if (!document.RootElement.TryGetProperty("metadata", out var metadata)
+                || !metadata.TryGetProperty("labels", out var labels)
+                || labels.ValueKind != JsonValueKind.Object
+                || !labels.TryGetProperty(key, out var value)
+                || value.ValueKind != JsonValueKind.String)
+            {
+                return null;
+            }
+
+            return value.GetString();
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
 }

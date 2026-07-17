@@ -15,7 +15,6 @@ let _createResponse: Epic | null = null
 
 function makeEpic(overrides: Partial<Epic> = {}): Epic {
   return {
-    id: 'epic-new-id',
     number: 42,
     title: 'Created Epic',
     description: '',
@@ -24,6 +23,7 @@ function makeEpic(overrides: Partial<Epic> = {}): Epic {
     createdAt: '2026-01-01T00:00:00Z',
     updatedAt: '2026-01-01T00:00:00Z',
     ...overrides,
+    projectId: overrides.projectId ?? 'proj-create',
   }
 }
 
@@ -181,7 +181,7 @@ describe('EpicCreateDialog submit flow', () => {
 describe('EpicCreateDialog success state', () => {
   it('transitions to a success state on mutate success and does not auto-close the dialog', async () => {
     const onClose = vi.fn()
-    _createResponse = makeEpic({ id: 'epic-new-id', number: 42, title: 'Created Epic' })
+    _createResponse = makeEpic({ number: 42, title: 'Created Epic' })
 
     renderDialog({ onClose })
 
@@ -193,7 +193,7 @@ describe('EpicCreateDialog success state', () => {
   })
 
   it('renders the idle-aware success message and never uses started/running wording', async () => {
-    _createResponse = makeEpic({ id: 'epic-idle', number: 7, title: 'Idle wording' })
+    _createResponse = makeEpic({ number: 7, title: 'Idle wording' })
 
     renderDialog()
 
@@ -209,9 +209,9 @@ describe('EpicCreateDialog success state', () => {
     expect(text.toLowerCase()).not.toContain('running')
   })
 
-  it('navigates to /epics/<id> via useProjectPath when Open Epic is chosen', async () => {
+  it('navigates to /epics/<number> via useProjectPath when Open Epic is chosen', async () => {
     const onClose = vi.fn()
-    _createResponse = makeEpic({ id: 'epic-open-target', number: 9, title: 'Open flow' })
+    _createResponse = makeEpic({ number: 9, title: 'Open flow' })
 
     renderDialog({ onClose })
 
@@ -224,12 +224,12 @@ describe('EpicCreateDialog success state', () => {
 
     fireEvent.click(openButton)
 
-    await waitFor(() => expect(screen.getByTestId('current-path').textContent).toBe('/Project/epics/epic-open-target'))
+    await waitFor(() => expect(screen.getByTestId('current-path').textContent).toBe('/Project/epics/9'))
     expect(onClose).toHaveBeenCalledTimes(1)
   })
 
   it('shows both Stay and Open Epic choices and never hides or disables either', async () => {
-    _createResponse = makeEpic({ id: 'epic-both', number: 3, title: 'Both choices' })
+    _createResponse = makeEpic({ number: 3, title: 'Both choices' })
 
     renderDialog()
 
@@ -246,7 +246,7 @@ describe('EpicCreateDialog success state', () => {
 
   it('treating Stay as the dialog close keeps the user on the current page and does not navigate', async () => {
     const onClose = vi.fn()
-    _createResponse = makeEpic({ id: 'epic-stay', number: 11, title: 'Stay flow' })
+    _createResponse = makeEpic({ number: 11, title: 'Stay flow' })
 
     renderDialog({ onClose })
 
@@ -271,7 +271,7 @@ describe('EpicCreateDialog success state', () => {
   })
 
   it('does not fire any create-success toast (useCreateEpic slimmed) and the dialog owns all success UX', async () => {
-    _createResponse = makeEpic({ id: 'epic-no-toast', number: 1, title: 'No toast' })
+    _createResponse = makeEpic({ number: 1, title: 'No toast' })
 
     renderDialog()
 
@@ -284,7 +284,7 @@ describe('EpicCreateDialog success state', () => {
 
   it('still closes cleanly when an X-style cancel happens from the success state (treat as Stay)', async () => {
     const onClose = vi.fn()
-    _createResponse = makeEpic({ id: 'epic-cancel-success', number: 2, title: 'Cancel after success' })
+    _createResponse = makeEpic({ number: 2, title: 'Cancel after success' })
 
     renderDialog({ onClose })
 
@@ -333,7 +333,7 @@ describe('EpicCreateDialog footer structure', () => {
   })
 
   it('places both success actions in the same footer after a successful create', async () => {
-    _createResponse = makeEpic({ id: 'epic-reach', number: 4, title: 'Reachability' })
+    _createResponse = makeEpic({ number: 4, title: 'Reachability' })
 
     renderDialog()
 

@@ -820,8 +820,8 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
 
     /// <summary>
     /// Resolves the issue reference carried on a workflow run's metadata
-    /// annotations (projectId / issueId / issueNumber). Returns null when the
-    /// run has no issue annotation triplet. Used to project the issue ref for
+    /// annotations (projectId / issueNumber). Returns null when the run has no
+    /// issue annotation pair. Used to project the issue ref for
     /// active workflow work — issue metadata lives on the run, not the work
     /// item, so without this the read model would lose the issue reference.
     /// </summary>
@@ -829,10 +829,9 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
     {
         if (run.Metadata?.Annotations is not { } annotations) return null;
         if (!annotations.TryGetValue("projectId", out var projectId)
-            || !annotations.TryGetValue("issueId", out var issueId)
             || !annotations.TryGetValue("issueNumber", out var numberStr)
             || !int.TryParse(numberStr, out var number))
             return null;
-        return new WorkIssueRef(projectId, issueId, number);
+        return new WorkIssueRef(projectId, number);
     }
 }

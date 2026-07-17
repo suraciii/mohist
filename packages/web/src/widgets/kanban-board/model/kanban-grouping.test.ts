@@ -6,7 +6,7 @@ import {
 } from './kanban-grouping'
 import { IssueStatus, WorkflowStage, IssueHealth, type Issue } from '../../../entities/issue'
 
-function makeIssue(overrides: Partial<Issue> & { id: string }): Issue {
+function makeIssue(overrides: Partial<Issue> = {}): Issue {
   return {
     number: 1,
     title: 'Test issue',
@@ -34,9 +34,9 @@ describe('groupIssuesByStage', () => {
 
   it('groups active issues by their stage', () => {
     const issues = [
-      makeIssue({ id: '1', status: IssueStatus.Backlog }),
-      makeIssue({ id: '2', status: IssueStatus.Backlog }),
-      makeIssue({ id: '3', status: IssueStatus.InProgress, workflowStage: WorkflowStage.Build }),
+      makeIssue({ number: 1, status: IssueStatus.Backlog }),
+      makeIssue({ number: 2, status: IssueStatus.Backlog }),
+      makeIssue({ number: 3, status: IssueStatus.InProgress, workflowStage: WorkflowStage.Build }),
     ]
     const cols = groupIssuesByStage(issues)
     expect(cols.find((c) => c.key === IssueStatus.Backlog)!.issues).toHaveLength(2)
@@ -45,9 +45,9 @@ describe('groupIssuesByStage', () => {
 
   it('groups cancelled issues by their issue stage', () => {
     const issues = [
-      makeIssue({ id: '1', status: IssueStatus.Cancelled, health: IssueHealth.Cancelled }),
-      makeIssue({ id: '2', status: IssueStatus.Cancelled, health: IssueHealth.Cancelled }),
-      makeIssue({ id: '3', status: IssueStatus.Cancelled, health: IssueHealth.Cancelled }),
+      makeIssue({ number: 1, status: IssueStatus.Cancelled, health: IssueHealth.Cancelled }),
+      makeIssue({ number: 2, status: IssueStatus.Cancelled, health: IssueHealth.Cancelled }),
+      makeIssue({ number: 3, status: IssueStatus.Cancelled, health: IssueHealth.Cancelled }),
     ]
     const cols = groupIssuesByStage(issues)
     const cancelledCol = cols.find((c) => c.key === IssueStatus.Cancelled)!
@@ -57,8 +57,8 @@ describe('groupIssuesByStage', () => {
 
   it('keeps active and blocked issues in their issue lifecycle stage', () => {
     const issues = [
-      makeIssue({ id: '1', status: IssueStatus.InProgress, health: IssueHealth.Blocked, workflowStage: WorkflowStage.Build }),
-      makeIssue({ id: '2', status: IssueStatus.InProgress, health: IssueHealth.Active, workflowStage: WorkflowStage.Check }),
+      makeIssue({ number: 1, status: IssueStatus.InProgress, health: IssueHealth.Blocked, workflowStage: WorkflowStage.Build }),
+      makeIssue({ number: 2, status: IssueStatus.InProgress, health: IssueHealth.Active, workflowStage: WorkflowStage.Check }),
     ]
     const cols = groupIssuesByStage(issues)
     expect(cols.find((c) => c.key === IssueStatus.InProgress)!.issues).toHaveLength(2)
@@ -67,9 +67,9 @@ describe('groupIssuesByStage', () => {
 
   it('mixes done, cancelled, and in-progress issues correctly', () => {
     const issues = [
-      makeIssue({ id: '1', status: IssueStatus.InProgress, health: IssueHealth.Active }),
-      makeIssue({ id: '2', status: IssueStatus.Cancelled, health: IssueHealth.Cancelled }),
-      makeIssue({ id: '3', status: IssueStatus.Done, health: IssueHealth.Done }),
+      makeIssue({ number: 1, status: IssueStatus.InProgress, health: IssueHealth.Active }),
+      makeIssue({ number: 2, status: IssueStatus.Cancelled, health: IssueHealth.Cancelled }),
+      makeIssue({ number: 3, status: IssueStatus.Done, health: IssueHealth.Done }),
     ]
     const cols = groupIssuesByStage(issues)
     expect(cols.find((c) => c.key === IssueStatus.InProgress)!.issues).toHaveLength(1)
@@ -80,9 +80,9 @@ describe('groupIssuesByStage', () => {
 
 describe('filterCancelledFromColumns', () => {
   const columns = groupIssuesByStage([
-    makeIssue({ id: '1', status: IssueStatus.Done, health: IssueHealth.Done }),
-    makeIssue({ id: '2', status: IssueStatus.Cancelled, health: IssueHealth.Cancelled }),
-    makeIssue({ id: '3', status: IssueStatus.Cancelled, health: IssueHealth.Cancelled }),
+    makeIssue({ number: 1, status: IssueStatus.Done, health: IssueHealth.Done }),
+    makeIssue({ number: 2, status: IssueStatus.Cancelled, health: IssueHealth.Cancelled }),
+    makeIssue({ number: 3, status: IssueStatus.Cancelled, health: IssueHealth.Cancelled }),
   ])
 
   it('is an identity function when showCancelled is true', () => {
@@ -125,9 +125,9 @@ describe('getCancelledColumnCount', () => {
 
   it('counts cancelled and completed issues in terminal columns', () => {
     const cols = groupIssuesByStage([
-      makeIssue({ id: '1', status: IssueStatus.Done, health: IssueHealth.Done }),
-      makeIssue({ id: '2', status: IssueStatus.Cancelled, health: IssueHealth.Cancelled }),
-      makeIssue({ id: '3', status: IssueStatus.Cancelled, health: IssueHealth.Cancelled }),
+      makeIssue({ number: 1, status: IssueStatus.Done, health: IssueHealth.Done }),
+      makeIssue({ number: 2, status: IssueStatus.Cancelled, health: IssueHealth.Cancelled }),
+      makeIssue({ number: 3, status: IssueStatus.Cancelled, health: IssueHealth.Cancelled }),
     ])
     const counts = getCancelledColumnCount(cols)
     expect(counts.cancelledCount).toBe(2)
@@ -136,8 +136,8 @@ describe('getCancelledColumnCount', () => {
 
   it('returns zero cancelled when all issues in Done are completed', () => {
     const cols = groupIssuesByStage([
-      makeIssue({ id: '1', status: IssueStatus.Done, health: IssueHealth.Done }),
-      makeIssue({ id: '2', status: IssueStatus.Done, health: IssueHealth.Done }),
+      makeIssue({ number: 1, status: IssueStatus.Done, health: IssueHealth.Done }),
+      makeIssue({ number: 2, status: IssueStatus.Done, health: IssueHealth.Done }),
     ])
     const counts = getCancelledColumnCount(cols)
     expect(counts.cancelledCount).toBe(0)
@@ -146,10 +146,10 @@ describe('getCancelledColumnCount', () => {
 
   it('reflects the real Cancelled column size even when showCancelled toggle would hide them', () => {
     const cols = groupIssuesByStage([
-      makeIssue({ id: '1', status: IssueStatus.Done, health: IssueHealth.Done }),
-      makeIssue({ id: '2', status: IssueStatus.Cancelled, health: IssueHealth.Cancelled }),
-      makeIssue({ id: '3', status: IssueStatus.Cancelled, health: IssueHealth.Cancelled }),
-      makeIssue({ id: '4', status: IssueStatus.Cancelled, health: IssueHealth.Cancelled }),
+      makeIssue({ number: 1, status: IssueStatus.Done, health: IssueHealth.Done }),
+      makeIssue({ number: 2, status: IssueStatus.Cancelled, health: IssueHealth.Cancelled }),
+      makeIssue({ number: 3, status: IssueStatus.Cancelled, health: IssueHealth.Cancelled }),
+      makeIssue({ number: 4, status: IssueStatus.Cancelled, health: IssueHealth.Cancelled }),
     ])
     const filtered = filterCancelledFromColumns(cols, false)
     const counts = getCancelledColumnCount(filtered)

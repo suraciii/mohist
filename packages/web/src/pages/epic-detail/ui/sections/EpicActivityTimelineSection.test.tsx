@@ -31,24 +31,24 @@ function makeEvent(overrides: Partial<StoredCloudEventDto> & { type: string; dat
   return {
     id: overrides.id ?? 1,
     eventId: overrides.eventId ?? 'evt-1',
-    source: overrides.source ?? '/mohist/epics/epic-1',
+    source: overrides.source ?? '/mohist/projects/proj-1/epics/1',
     type: overrides.type,
     specVersion: overrides.specVersion ?? '1.0',
     subject: overrides.subject ?? '1',
     time: overrides.time ?? '2026-06-30T12:00:00+00:00',
     dataContentType: overrides.dataContentType ?? 'application/json',
     data: overrides.data ?? {},
-    extensions: overrides.extensions ?? { projectid: 'proj-1', epicid: 'epic-1', epicno: '1' },
+    extensions: overrides.extensions ?? { projectid: 'proj-1', epic: '1' },
   }
 }
 
-function renderSection(epicId: string) {
+function renderSection(epicNumber: number) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
   const result = render(
     <QueryClientProvider client={queryClient}>
       <ProjectProvider initialProjectId={TEST_PROJECT.id} initialProjects={[TEST_PROJECT]}>
         <MemoryRouter>
-          <EpicActivityTimelineSection epicId={epicId} eventsHook={eventsHook} />
+          <EpicActivityTimelineSection epicNumber={epicNumber} eventsHook={eventsHook} />
         </MemoryRouter>
       </ProjectProvider>
     </QueryClientProvider>,
@@ -66,7 +66,7 @@ afterEach(() => {
 
 describe('EpicActivityTimelineSection', () => {
   it('renders an empty state when useEpicEvents returns an empty list', async () => {
-    renderSection('epic-1')
+    renderSection(1)
 
     const section = await screen.findByTestId('epic-activity-timeline')
     expect(section.getAttribute('data-empty')).toBe('true')
@@ -77,7 +77,7 @@ describe('EpicActivityTimelineSection', () => {
   it('renders the loading state without throwing while the query is in flight', () => {
     mockEventsPending()
 
-    renderSection('epic-1')
+    renderSection(1)
 
     const section = screen.getByTestId('epic-activity-timeline-loading')
     expect(section.getAttribute('data-empty')).toBe('false')
@@ -86,7 +86,7 @@ describe('EpicActivityTimelineSection', () => {
   it('renders the error state without throwing when the query fails', async () => {
     mockEventsError()
 
-    renderSection('epic-1')
+    renderSection(1)
 
     await waitFor(() => {
       expect(screen.getByTestId('epic-activity-timeline-error')).toBeInTheDocument()
@@ -103,7 +103,7 @@ describe('EpicActivityTimelineSection', () => {
       }),
     ])
 
-    renderSection('epic-1')
+    renderSection(1)
 
     await waitFor(() => {
       expect(screen.getByTestId('epic-activity-entry-created')).toBeInTheDocument()
@@ -122,7 +122,7 @@ describe('EpicActivityTimelineSection', () => {
       }),
     ])
 
-    renderSection('epic-1')
+    renderSection(1)
 
     const entry = await screen.findByTestId('epic-activity-entry-status')
     expect(entry).toBeInTheDocument()
@@ -139,7 +139,7 @@ describe('EpicActivityTimelineSection', () => {
       }),
     ])
 
-    renderSection('epic-1')
+    renderSection(1)
 
     const entry = await screen.findByTestId('epic-activity-entry-priority')
     expect(entry).toBeInTheDocument()
@@ -151,12 +151,12 @@ describe('EpicActivityTimelineSection', () => {
       makeEvent({
         id: 4,
         type: 'com.mohist.epic.issue-linked',
-        data: { issueId: 'issue-1', issueNumber: 42 },
+        data: { issueNumber: 42, },
         time: '2026-06-30T12:03:00+00:00',
       }),
     ])
 
-    renderSection('epic-1')
+    renderSection(1)
 
     const entry = await screen.findByTestId('epic-activity-entry-issue-linked')
     expect(entry).toBeInTheDocument()
@@ -168,12 +168,12 @@ describe('EpicActivityTimelineSection', () => {
       makeEvent({
         id: 5,
         type: 'com.mohist.epic.issue-unlinked',
-        data: { issueId: 'issue-1', issueNumber: 17 },
+        data: { issueNumber: 17, },
         time: '2026-06-30T12:04:00+00:00',
       }),
     ])
 
-    renderSection('epic-1')
+    renderSection(1)
 
     const entry = await screen.findByTestId('epic-activity-entry-issue-unlinked')
     expect(entry).toBeInTheDocument()
@@ -189,7 +189,7 @@ describe('EpicActivityTimelineSection', () => {
       }),
     ])
 
-    renderSection('epic-1')
+    renderSection(1)
 
     const entry = await screen.findByTestId('epic-activity-entry-reopened')
     expect(entry).toBeInTheDocument()
@@ -206,7 +206,7 @@ describe('EpicActivityTimelineSection', () => {
       }),
     ])
 
-    renderSection('epic-1')
+    renderSection(1)
 
     const entry = await screen.findByTestId('epic-activity-entry-closed')
     expect(entry).toBeInTheDocument()
@@ -236,7 +236,7 @@ describe('EpicActivityTimelineSection', () => {
       makeEvent({
         id: 4,
         type: 'com.mohist.epic.issue-linked',
-        data: { issueId: 'issue-1', issueNumber: 5 },
+        data: { issueNumber: 5, },
         time: '2026-06-30T12:03:00+00:00',
       }),
       makeEvent({
@@ -246,7 +246,7 @@ describe('EpicActivityTimelineSection', () => {
       }),
     ])
 
-    renderSection('epic-1')
+    renderSection(1)
 
     await waitFor(() => {
       expect(screen.getByTestId('epic-activity-entry-created')).toBeInTheDocument()
@@ -273,12 +273,12 @@ describe('EpicActivityTimelineSection', () => {
       makeEvent({
         id: 2,
         type: 'com.mohist.epic.issue-linked',
-        data: { issueId: 'issue-1' },
+        data: { issueNumber: 'issue-1' },
         time: '2026-06-30T12:01:00+00:00',
       }),
     ])
 
-    renderSection('epic-1')
+    renderSection(1)
 
     await waitFor(() => {
       expect(screen.getByTestId('epic-activity-entry-created')).toBeInTheDocument()

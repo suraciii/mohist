@@ -44,12 +44,15 @@ public sealed class EventDispatcherService
     public async Task DispatchAsync(CancellationToken ct)
     {
         var batch = await _events.ListUndeliveredAsync(_options.BatchSize, ct).ConfigureAwait(false);
+        var blockedSources = new HashSet<string>(StringComparer.Ordinal);
         foreach (var evt in batch)
         {
             ct.ThrowIfCancellationRequested();
+            if (blockedSources.Contains(evt.Source))
+                continue;
             var settled = await DispatchOneAsync(evt, ct).ConfigureAwait(false);
             if (!settled)
-                break;
+                blockedSources.Add(evt.Source);
         }
     }
 

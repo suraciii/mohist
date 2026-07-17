@@ -5,7 +5,11 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.AspNetCore.SignalR;
 using Mohist.Server.Api;
+using Mohist.Server.Events.Grains;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Orleans;
+using Mohist.Server.Issue.Domain;
+using Mohist.Server.Issue.Grains;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Runner.Services.SignalR;
 using Mohist.Server.Sessions.Domain;
@@ -822,8 +826,9 @@ public class GenericAgentSessionFollowupApiSpecs : IAsyncLifetime
         var runnerGrain = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
         await runnerGrain.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], $"{runnerId}-host", project.Id));
 
-        var issueGrain = _fixture.Grains.GetGrain<Mohist.Server.Issue.Grains.IIssueGrain>(issue.Id);
+        var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(project.Id, issue.Number)));
         await issueGrain.StartWorkAsync();
+        await DispatchEventsAsync();
         var status = await issueGrain.GetWorkflowStatusAsync();
         var workflowRunId = status!.WorkflowRunId!;
         const string sessionName = "plan";
@@ -856,8 +861,11 @@ public class GenericAgentSessionFollowupApiSpecs : IAsyncLifetime
         Assert.Equal(WorkDirFor(project.Id), attached.WorkDir);
         Assert.Equal("opencode", attached.Runtime);
 
-        return (project, new IssueRef(issue.Id, issue.Number), workflowRunId, sessionName, sessionId);
+        return (project, new IssueRef(issue.Number), workflowRunId, sessionName, sessionId);
     }
+
+    private Task DispatchEventsAsync() =>
+        _fixture.Grains.GetGrain<IEventDispatcherGrain>(EventDispatcherGrain.Global).DispatchNowAsync();
 
     private async Task<ProjectRef> CreateProjectAsync(string name)
     {
@@ -896,7 +904,7 @@ public class GenericAgentSessionFollowupApiSpecs : IAsyncLifetime
 
     private sealed record ProjectRef(string Id);
     private sealed record AgentRef(string Id, string Name);
-    private sealed record IssueRef(string Id, int Number);
+    private sealed record IssueRef(int Number);
     private sealed record ProjectDto(string Id, string Name);
-    private sealed record IssueDto(string Id, int Number, string Title);
+    private sealed record IssueDto(int Number, string Title);
 }

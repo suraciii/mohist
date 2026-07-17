@@ -13,7 +13,7 @@ import { projectApiPath, request } from '../../../shared/api/client'
 
 export interface AgentSessionListContextRefsDto {
   issueNumber?: number | null
-  epicNumber?: string | null
+  epicNumber?: number | null
   repository?: string | null
   workspacePath?: string | null
 }
@@ -58,7 +58,7 @@ export interface AgentSessionLaunchResponse {
 
 export interface AgentSessionLaunchContext {
   issueNumber?: number | null
-  epicNumber?: string | null
+  epicNumber?: number | null
   repository?: string | null
   workspacePath?: string | null
 }

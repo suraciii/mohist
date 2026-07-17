@@ -58,7 +58,6 @@ public sealed class InboxQuerier : IScopedService
     {
         Id = row.Id,
         ProjectId = row.ProjectId,
-        IssueId = row.IssueId,
         IssueNumber = row.IssueNumber,
         IssueTitle = row.IssueTitle,
         NotificationKind = row.NotificationKind,

@@ -49,7 +49,6 @@ export interface InboxSubscriptionResponse {
 export interface InboxItem {
   itemId: string
   notificationKind: NotificationKind
-  issueId: string
   issueNumber: number
   issueTitle: string
   createdAt: string

@@ -79,9 +79,9 @@ public class EpicListQueryApiSpecs
         var list = await _client.GetDataAsync<EpicRowDto[]>($"/api/projects/{project.Id}/epics?sort=priority&dir=asc");
 
         Assert.Equal(2, list.Length);
-        Assert.Equal(p0.Id, list[0].Id);
+        Assert.Equal(p0.Number, list[0].Number);
         Assert.Equal("p0", list[0].Priority);
-        Assert.Equal(p2.Id, list[1].Id);
+        Assert.Equal(p2.Number, list[1].Number);
         Assert.Equal("p2", list[1].Priority);
     }
 
@@ -96,14 +96,14 @@ public class EpicListQueryApiSpecs
 
         _fixture.TimeProvider.Advance(TimeSpan.FromSeconds(1));
         await _client.PatchAsJsonAsync(
-            $"/api/projects/{project.Id}/epics/{p2Later.Id}",
+            $"/api/projects/{project.Id}/epics/{p2Later.Number}",
             new { title = "P2 renamed for bump" });
 
         var list = await _client.GetDataAsync<EpicRowDto[]>($"/api/projects/{project.Id}/epics");
 
         Assert.Equal(2, list.Length);
-        Assert.Equal(p2Later.Id, list[0].Id);
-        Assert.Equal(p2Earlier.Id, list[1].Id);
+        Assert.Equal(p2Later.Number, list[0].Number);
+        Assert.Equal(p2Earlier.Number, list[1].Number);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -117,15 +117,15 @@ public class EpicListQueryApiSpecs
 
         var unknownSort = await _client.GetDataAsync<EpicRowDto[]>($"/api/projects/{project.Id}/epics?sort=garbage&dir=asc");
         Assert.Equal(2, unknownSort.Length);
-        Assert.Equal(p0.Id, unknownSort[0].Id);
+        Assert.Equal(p0.Number, unknownSort[0].Number);
 
         var unknownDir = await _client.GetDataAsync<EpicRowDto[]>($"/api/projects/{project.Id}/epics?sort=priority&dir=sideways");
         Assert.Equal(2, unknownDir.Length);
-        Assert.Equal(p0.Id, unknownDir[0].Id);
+        Assert.Equal(p0.Number, unknownDir[0].Number);
 
         var bothUnknown = await _client.GetDataAsync<EpicRowDto[]>($"/api/projects/{project.Id}/epics?sort=banana&dir=totally-not-a-direction");
         Assert.Equal(2, bothUnknown.Length);
-        Assert.Equal(p0.Id, bothUnknown[0].Id);
+        Assert.Equal(p0.Number, bothUnknown[0].Number);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -141,9 +141,9 @@ public class EpicListQueryApiSpecs
         var matched = await _client.GetDataAsync<EpicRowDto[]>($"/api/projects/{project.Id}/epics?search=auth&sort=priority&dir=asc");
 
         Assert.Equal(2, matched.Length);
-        Assert.Equal(authP0.Id, matched[0].Id);
-        Assert.Equal(authP2.Id, matched[1].Id);
-        Assert.DoesNotContain(matched, e => e.Id == billing.Id);
+        Assert.Equal(authP0.Number, matched[0].Number);
+        Assert.Equal(authP2.Number, matched[1].Number);
+        Assert.DoesNotContain(matched, e => e.Number == billing.Number);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -158,11 +158,11 @@ public class EpicListQueryApiSpecs
 
         var percentMatches = await _client.GetDataAsync<EpicRowDto[]>($"/api/projects/{project.Id}/epics?search=%25");
         Assert.Single(percentMatches);
-        Assert.Equal(percent.Id, percentMatches[0].Id);
+        Assert.Equal(percent.Number, percentMatches[0].Number);
 
         var underscoreMatches = await _client.GetDataAsync<EpicRowDto[]>($"/api/projects/{project.Id}/epics?search=_");
         Assert.Single(underscoreMatches);
-        Assert.Equal(underscore.Id, underscoreMatches[0].Id);
+        Assert.Equal(underscore.Number, underscoreMatches[0].Number);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -199,5 +199,5 @@ public class EpicListQueryApiSpecs
     }
 
     private sealed record ProjectDto(string Id);
-    private sealed record EpicRowDto(string Id, int? Number, string Title, string Description, string Priority, string Status, string CreatedAt, string UpdatedAt);
+    private sealed record EpicRowDto(int Number, string Title, string Description, string Priority, string Status, string CreatedAt, string UpdatedAt);
 }

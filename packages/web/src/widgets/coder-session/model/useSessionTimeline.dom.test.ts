@@ -4,12 +4,13 @@ import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
 import { createElement, type ReactNode } from 'react'
 import { http, HttpResponse } from 'msw'
 import { dispatchAgentEvent } from '../../../entities/agent'
+import { ProjectProvider } from '../../../entities/project'
 import { reconstructRoundsFromEvents, useSessionTimeline } from './useSessionTimeline'
 import { useMswServer } from '../../../../tests/support/msw'
 
 useMswServer(
   http.get('*/agent/status', () =>
-    HttpResponse.json({ success: true, data: { running: true, issueNumber: 123 } }),
+    HttpResponse.json({ success: true, data: { running: true, issueNumber: 123, } }),
   ),
 )
 
@@ -43,7 +44,13 @@ function renderTimelineHook() {
     }),
     {
       wrapper: ({ children }: { children: ReactNode }) => (
-        createElement(QueryClientProvider, { client: queryClient }, children)
+        createElement(
+          ProjectProvider,
+          {
+            initialProjectId: 'proj-1',
+            children: createElement(QueryClientProvider, { client: queryClient }, children),
+          },
+        )
       ),
     },
   )
@@ -333,8 +340,7 @@ describe('useSessionTimeline event-wiring integration', () => {
 
     act(() => {
       dispatchAgentEvent('plan_round_start', {
-        issueId: '123',
-        projectId: 'proj-1',
+        issueNumber: 123,        projectId: 'proj-1',
         roundType: 'proposal',
         roundLabel: 'Proposal',
         roundIndex: 0,
@@ -365,8 +371,7 @@ describe('useSessionTimeline event-wiring integration', () => {
 
     act(() => {
       dispatchAgentEvent('plan_round_start', {
-        issueId: '123',
-        projectId: 'proj-1',
+        issueNumber: 123,        projectId: 'proj-1',
         roundType: 'custom-step',
         roundLabel: 'Custom Step',
         roundIndex: 7,
@@ -383,13 +388,12 @@ describe('useSessionTimeline event-wiring integration', () => {
     })
   })
 
-  it('plan_round_start drops events for the wrong issueId or session', () => {
+  it('plan_round_start drops events for the wrong issue number or session', () => {
     const hook = renderTimelineHook()
 
     act(() => {
       dispatchAgentEvent('plan_round_start', {
-        issueId: '999',
-        projectId: 'proj-1',
+        issueNumber: 999,        projectId: 'proj-1',
         roundType: 'proposal',
         roundLabel: 'Should be dropped',
         roundIndex: 0,
@@ -402,8 +406,7 @@ describe('useSessionTimeline event-wiring integration', () => {
 
     act(() => {
       dispatchAgentEvent('plan_round_start', {
-        issueId: '123',
-        projectId: 'proj-1',
+        issueNumber: 123,        projectId: 'proj-1',
         roundType: 'proposal',
         roundLabel: 'Should also be dropped',
         roundIndex: 0,
@@ -419,7 +422,7 @@ describe('useSessionTimeline event-wiring integration', () => {
 
     act(() => {
       dispatchAgentEvent('plan_round_start', {
-        issueId: '123',
+        issueNumber: 123,
         projectId: 'proj-1',
         roundType: 'proposal',
         roundLabel: 'Stale runtime',
@@ -437,7 +440,7 @@ describe('useSessionTimeline event-wiring integration', () => {
 
     act(() => {
       dispatchAgentEvent('plan_round_start', {
-        issueId: '123',
+        issueNumber: 123,
         projectId: 'proj-1',
         roundType: 'proposal',
         roundLabel: 'Proposal',
@@ -458,8 +461,7 @@ describe('useSessionTimeline event-wiring integration', () => {
 
     act(() => {
       dispatchAgentEvent('plan_round_start', {
-        issueId: '123',
-        projectId: 'proj-1',
+        issueNumber: 123,        projectId: 'proj-1',
         roundType: 'self-review',
         roundLabel: 'Self Review',
         roundIndex: 4,
@@ -469,8 +471,7 @@ describe('useSessionTimeline event-wiring integration', () => {
 
     act(() => {
       dispatchAgentEvent('plan_round_complete', {
-        issueId: '123',
-        projectId: 'proj-1',
+        issueNumber: 123,        projectId: 'proj-1',
         roundType: 'self-review',
         roundIndex: 4,
         duration: 1234,
@@ -494,8 +495,7 @@ describe('useSessionTimeline event-wiring integration', () => {
 
     act(() => {
       dispatchAgentEvent('plan_round_start', {
-        issueId: '123',
-        projectId: 'proj-1',
+        issueNumber: 123,        projectId: 'proj-1',
         roundType: 'specs',
         roundLabel: 'Specs',
         roundIndex: 1,
@@ -505,8 +505,7 @@ describe('useSessionTimeline event-wiring integration', () => {
 
     act(() => {
       dispatchAgentEvent('plan_round_complete', {
-        issueId: '123',
-        projectId: 'proj-1',
+        issueNumber: 123,        projectId: 'proj-1',
         roundType: 'specs',
         roundIndex: 1,
         duration: 500,
@@ -527,8 +526,7 @@ describe('useSessionTimeline event-wiring integration', () => {
 
     act(() => {
       dispatchAgentEvent('plan_round_start', {
-        issueId: '123',
-        projectId: 'proj-1',
+        issueNumber: 123,        projectId: 'proj-1',
         roundType: 'self-review',
         roundLabel: 'Self Review',
         roundIndex: 4,
@@ -538,8 +536,7 @@ describe('useSessionTimeline event-wiring integration', () => {
 
     act(() => {
       dispatchAgentEvent('plan_round_complete', {
-        issueId: '123',
-        projectId: 'proj-1',
+        issueNumber: 123,        projectId: 'proj-1',
         roundType: 'self-review',
         roundIndex: 4,
         duration: 1234,
@@ -549,8 +546,7 @@ describe('useSessionTimeline event-wiring integration', () => {
 
     act(() => {
       dispatchAgentEvent('plan_round_complete', {
-        issueId: '123',
-        projectId: 'proj-1',
+        issueNumber: 123,        projectId: 'proj-1',
         roundType: 'self-review',
         roundIndex: 4,
         duration: 999,
@@ -570,8 +566,7 @@ describe('useSessionTimeline event-wiring integration', () => {
 
     act(() => {
       dispatchAgentEvent('plan_round_start', {
-        issueId: '123',
-        projectId: 'proj-1',
+        issueNumber: 123,        projectId: 'proj-1',
         roundType: 'proposal',
         roundLabel: 'Proposal',
         roundIndex: 0,
@@ -581,8 +576,7 @@ describe('useSessionTimeline event-wiring integration', () => {
 
     act(() => {
       dispatchAgentEvent('coder_recovery_status', {
-        issueId: '123',
-        projectId: 'proj-1',
+        issueNumber: 123,        projectId: 'proj-1',
         executionId: 'exec-1',
         runtimeSessionId: 'acp-1',
         status: 'recovering',
@@ -605,8 +599,7 @@ describe('useSessionTimeline event-wiring integration', () => {
 
     act(() => {
       dispatchAgentEvent('coder_recovery_status', {
-        issueId: '123',
-        projectId: 'proj-1',
+        issueNumber: 123,        projectId: 'proj-1',
         executionId: 'exec-1',
         runtimeSessionId: 'acp-1',
         status: 'recovered',
@@ -624,8 +617,7 @@ describe('useSessionTimeline event-wiring integration', () => {
 
     act(() => {
       dispatchAgentEvent('plan_round_start', {
-        issueId: '123',
-        projectId: 'proj-1',
+        issueNumber: 123,        projectId: 'proj-1',
         roundType: 'proposal',
         roundLabel: 'Proposal',
         roundIndex: 0,
@@ -660,8 +652,7 @@ describe('useSessionTimeline event-wiring integration', () => {
 
     act(() => {
       dispatchAgentEvent('plan_round_start', {
-        issueId: '123',
-        projectId: 'proj-1',
+        issueNumber: 123,        projectId: 'proj-1',
         roundType: 'proposal',
         roundLabel: 'Proposal',
         roundIndex: 0,
@@ -711,8 +702,7 @@ describe('useSessionTimeline event-wiring integration', () => {
 
     act(() => {
       dispatchAgentEvent('plan_round_start', {
-        issueId: '123',
-        projectId: 'proj-1',
+        issueNumber: 123,        projectId: 'proj-1',
         roundType: 'proposal',
         roundLabel: 'Proposal',
         roundIndex: 0,
@@ -745,8 +735,7 @@ describe('useSessionTimeline event-wiring integration', () => {
 
     act(() => {
       dispatchAgentEvent('plan_round_start', {
-        issueId: '123',
-        projectId: 'proj-1',
+        issueNumber: 123,        projectId: 'proj-1',
         roundType: 'proposal',
         roundLabel: 'Proposal',
         roundIndex: 0,
@@ -789,8 +778,7 @@ describe('useSessionTimeline event-wiring integration', () => {
 
     act(() => {
       dispatchAgentEvent('plan_round_start', {
-        issueId: '123',
-        projectId: 'proj-1',
+        issueNumber: 123,        projectId: 'proj-1',
         roundType: 'proposal',
         roundLabel: 'Proposal',
         roundIndex: 0,
@@ -800,8 +788,8 @@ describe('useSessionTimeline event-wiring integration', () => {
 
     act(() => {
       dispatchAgentEvent('com.mohist.agent-session.context-compacted', {
-        issueId: '123',
-        projectId: 'proj-1',
+        issueNumber: 123,        projectId: 'proj-1',
+        sessionId: 'coder-1',
         strategy: 'summary',
         contextWindowUsedBefore: 800_000,
         contextWindowUsedAfter: 200_000,
@@ -833,8 +821,8 @@ describe('useSessionTimeline event-wiring integration', () => {
 
     act(() => {
       dispatchAgentEvent('com.mohist.agent-session.context-compacted', {
-        issueId: '123',
-        projectId: 'proj-1',
+        issueNumber: 123,        projectId: 'proj-1',
+        sessionId: 'coder-1',
         contextWindowUsedAfter: 100_000,
         recordedAt: '2024-01-01T00:00:01.000Z',
       })
@@ -851,8 +839,8 @@ describe('useSessionTimeline event-wiring integration', () => {
 
     act(() => {
       dispatchAgentEvent('com.mohist.agent-session.context-health-updated', {
-        issueId: '123',
-        projectId: 'proj-1',
+        issueNumber: 123,        projectId: 'proj-1',
+        sessionId: 'coder-1',
         healthStatus: 'yellow',
         contextUsagePercent: 65,
         contextWindowUsed: 65_000,
@@ -874,8 +862,7 @@ describe('useSessionTimeline event-wiring integration', () => {
 
     act(() => {
       dispatchAgentEvent('plan_round_start', {
-        issueId: '123',
-        projectId: 'proj-1',
+        issueNumber: 123,        projectId: 'proj-1',
         roundType: 'proposal',
         roundLabel: 'Proposal',
         roundIndex: 0,
@@ -943,8 +930,7 @@ describe('useSessionTimeline event-wiring integration', () => {
 
     act(() => {
       dispatchAgentEvent('plan_round_start', {
-        issueId: '123',
-        projectId: 'proj-1',
+        issueNumber: 123,        projectId: 'proj-1',
         roundType: 'proposal',
         roundLabel: 'Proposal',
         roundIndex: 0,
@@ -954,8 +940,7 @@ describe('useSessionTimeline event-wiring integration', () => {
 
     act(() => {
       dispatchAgentEvent('plan_session_update', {
-        issueId: '123',
-        projectId: 'proj-1',
+        issueNumber: 123,        projectId: 'proj-1',
         roundType: 'proposal',
         roundIndex: 0,
         sessionUpdate: 'message.delta',
@@ -964,8 +949,7 @@ describe('useSessionTimeline event-wiring integration', () => {
         runtimeSessionId: 'acp-1',
       })
       dispatchAgentEvent('plan_session_update', {
-        issueId: '123',
-        projectId: 'proj-1',
+        issueNumber: 123,        projectId: 'proj-1',
         roundType: 'proposal',
         roundIndex: 0,
         sessionUpdate: 'message.delta',
@@ -996,8 +980,7 @@ describe('useSessionTimeline event-wiring integration', () => {
 
     act(() => {
       dispatchAgentEvent('plan_round_start', {
-        issueId: '123',
-        projectId: 'proj-1',
+        issueNumber: 123,        projectId: 'proj-1',
         roundType: 'proposal',
         roundLabel: 'Proposal',
         roundIndex: 0,
@@ -1007,8 +990,7 @@ describe('useSessionTimeline event-wiring integration', () => {
 
     act(() => {
       dispatchAgentEvent('plan_session_update', {
-        issueId: '123',
-        projectId: 'proj-1',
+        issueNumber: 123,        projectId: 'proj-1',
         roundType: 'proposal',
         roundIndex: 0,
         sessionUpdate: 'message.delta',
@@ -1033,8 +1015,7 @@ describe('useSessionTimeline event-wiring integration', () => {
 
     act(() => {
       dispatchAgentEvent('plan_session_update', {
-        issueId: '123',
-        projectId: 'proj-1',
+        issueNumber: 123,        projectId: 'proj-1',
         roundType: 'proposal',
         roundIndex: 0,
         sessionUpdate: 'message.delta',

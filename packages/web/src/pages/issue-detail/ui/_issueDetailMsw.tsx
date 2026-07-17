@@ -50,7 +50,6 @@ function issueDetailHandlers({ issue }: IssueDetailFixture) {
         data: {
           issueNumber: 14,
           projectId: 'proj-1',
-          issueKey: '14',
           hasCustomTemplate: false,
           yaml: null,
           workflowRunId: null,
@@ -63,7 +62,6 @@ function issueDetailHandlers({ issue }: IssueDetailFixture) {
         success: true,
         data: {
           running: false,
-          issueId: null,
           issueNumber: null,
           activeAgents: [],
           runnerAvailable: true,

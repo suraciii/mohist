@@ -7,9 +7,8 @@ import { deriveCompletionSnapshot, useCompletionSnapshot } from './completion-sn
 
 type StatusLiteral = 'backlog' | 'in_progress' | 'done' | 'cancelled'
 
-function makeIssue(overrides: { status: StatusLiteral; createdAt: string; updatedAt: string; id?: string; number?: number }): Issue {
+function makeIssue(overrides: { status: StatusLiteral; createdAt: string; updatedAt: string; number?: number }): Issue {
   return {
-    id: overrides.id ?? `id-${overrides.number ?? 1}-${overrides.status}-${overrides.createdAt}`,
     number: overrides.number ?? 1,
     title: 'title',
     status: overrides.status as IssueStatus,
@@ -214,7 +213,6 @@ describe('deriveCompletionSnapshot', () => {
   it('handles a large list correctly', () => {
     const issues: Issue[] = Array.from({ length: 500 }, (_, i) =>
       makeIssue({
-        id: `issue-${i}`,
         status: i % 3 === 0 ? 'done' : i % 3 === 1 ? 'cancelled' : 'in_progress',
         createdAt: daysAgo((i % 10) + 1),
         updatedAt: daysAgo(i % 5),

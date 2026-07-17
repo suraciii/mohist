@@ -8,10 +8,10 @@ import { EditEpicDialog } from './EditEpicDialog'
 import type { EpicDetail, EpicPriority, EpicStatus } from '../../../entities/epic'
 import { EPIC_DESCRIPTION_TEMPLATE } from '@/shared/lib/epic-description-template'
 
-const updateHandler = vi.fn(async ({ id, data }: {
-  id: string
+const updateHandler = vi.fn(async ({ number, data }: {
+  number: number
   data: { title: string; description: string; priority: EpicPriority }
-}) => makeEpic({ id, ...data }))
+}) => makeEpic({ number, ...data }))
 
 const updateHook = () => useMutation({
   mutationFn: (variables: Parameters<typeof updateHandler>[0]) => updateHandler(variables),
@@ -28,7 +28,6 @@ const project = {
 
 function makeEpic(overrides: Partial<EpicDetail> = {}): EpicDetail {
   return {
-    id: 'epic-edit-1',
     number: 17,
     title: 'Existing milestone',
     description: 'Pre-existing markdown body.\n\nWith paragraphs.',
@@ -48,6 +47,7 @@ function makeEpic(overrides: Partial<EpicDetail> = {}): EpicDetail {
       readyToMarkDone: false,
     },
     ...overrides,
+    projectId: overrides.projectId ?? 'proj-edit',
   }
 }
 
@@ -114,8 +114,8 @@ describe('EditEpicDialog verbatim load', () => {
   })
 
   it('reloads state when a different epic is passed in (e.g. reopened for another epic)', () => {
-    const first = makeEpic({ id: 'epic-A', description: 'A body' })
-    const second = makeEpic({ id: 'epic-B', description: 'B body' })
+    const first = makeEpic({ description: 'A body' })
+    const second = makeEpic({ description: 'B body' })
 
     const { rerender } = render(
       <QueryClientProvider
@@ -159,8 +159,8 @@ describe('EditEpicDialog save preserves content', () => {
     fireEvent.click(screen.getByTestId('edit-epic-submit'))
 
     await waitFor(() => expect(updateHandler).toHaveBeenCalledTimes(1))
-    const { id, data: body } = updateHandler.mock.calls[0]![0]
-    expect(id).toBe('epic-edit-1')
+    const { number, data: body } = updateHandler.mock.calls[0]![0]
+    expect(number).toBe(17)
     expect(body.description).toBe(existing)
     expect(body.description).not.toContain('## Goal')
     expect(body.description).not.toContain('## Background')

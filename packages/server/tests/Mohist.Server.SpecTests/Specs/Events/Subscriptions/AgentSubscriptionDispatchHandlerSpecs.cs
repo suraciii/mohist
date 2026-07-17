@@ -545,11 +545,13 @@ public class AgentSubscriptionDispatchHandlerSpecs
             type: type,
             time: DateTimeOffset.UnixEpoch,
             data: data,
-            extensions: BuildExtensions(extensions, projectId));
+            extensions: BuildExtensions(extensions, projectId, workflowRunId, data));
 
     private static IReadOnlyDictionary<string, string>? BuildExtensions(
         IReadOnlyDictionary<string, string>? extra,
-        string? projectId)
+        string? projectId,
+        string workflowRunId,
+        JsonElement? data)
     {
         if (projectId is null && extra is null) return null;
         var dict = extra is null
@@ -557,6 +559,16 @@ public class AgentSubscriptionDispatchHandlerSpecs
             : new Dictionary<string, string>(extra, StringComparer.Ordinal);
         if (projectId is not null && !dict.ContainsKey("projectid"))
             dict["projectid"] = projectId;
+        if (!dict.ContainsKey(EventCatalog.Lineage.WorkflowRunId))
+            dict[EventCatalog.Lineage.WorkflowRunId] = workflowRunId;
+        if (!dict.ContainsKey(EventCatalog.Lineage.Stage)
+            && data is { ValueKind: JsonValueKind.Object }
+            && data.Value.TryGetProperty("stage", out var stage)
+            && stage.ValueKind == JsonValueKind.String
+            && !string.IsNullOrWhiteSpace(stage.GetString()))
+        {
+            dict[EventCatalog.Lineage.Stage] = stage.GetString()!;
+        }
         return dict.Count == 0 ? null : dict;
     }
 

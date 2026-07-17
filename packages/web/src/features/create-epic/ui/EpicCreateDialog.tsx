@@ -76,7 +76,7 @@ export function EpicCreateDialog({ open, onClose }: EpicCreateDialogProps) {
     }
     setCreatedEpic(null)
     onClose()
-    navigate(toProjectPath(`/epics/${createdEpic.id}`))
+    navigate(toProjectPath(`/epics/${createdEpic.number}`))
   }
 
   function handleStay() {

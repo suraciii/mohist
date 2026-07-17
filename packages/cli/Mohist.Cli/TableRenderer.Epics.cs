@@ -103,10 +103,10 @@ internal sealed partial class TableRenderer
             return;
         }
 
-        var epicId = StringOf(data, "epicId");
-        var issueId = StringOf(data, "issueId");
-        if (!string.IsNullOrEmpty(epicId) && !string.IsNullOrEmpty(issueId))
-            _out.WriteLine($"{verb} issue {issueId} {(verb == "Linked" ? "to" : "from")} epic {epicId}");
+        var epicNumber = NumberOf(data, "epicNumber");
+        var issueNumber = NumberOf(data, "issueNumber");
+        if (!string.IsNullOrEmpty(epicNumber) && !string.IsNullOrEmpty(issueNumber))
+            _out.WriteLine($"{verb} issue #{issueNumber} {(verb == "Linked" ? "to" : "from")} epic #{epicNumber}");
         else
             _out.WriteLine("OK");
     }

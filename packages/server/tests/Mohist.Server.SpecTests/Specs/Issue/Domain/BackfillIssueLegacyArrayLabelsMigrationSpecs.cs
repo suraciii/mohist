@@ -193,9 +193,9 @@ public class BackfillIssueLegacyArrayLabelsMigrationSpecs
         // 2. Seed legacy array-form labels the way the pre-#149 era persisted them.
         await using (var seed = database.CreateDbContext())
         {
-            await SeedIssueAsync(seed, "issue_real_arr",
+            await SeedHistoricalIssueAsync(seed, "issue_real_arr",
                 """{"id":"issue_real_arr","number":100,"labels":["bug","workflow"],"status":"backlog"}""");
-            await SeedIssueAsync(seed, "issue_real_dict",
+            await SeedHistoricalIssueAsync(seed, "issue_real_dict",
                 """{"id":"issue_real_dict","number":101,"labels":{"kind":"feature"},"status":"backlog"}""");
         }
 
@@ -252,9 +252,26 @@ public class BackfillIssueLegacyArrayLabelsMigrationSpecs
     {
         using var command = ctx.Database.GetDbConnection().CreateCommand();
         command.CommandText = """
-            INSERT INTO Issues (IssueId, State)
-            VALUES ($id, $state);
+            INSERT INTO Issues (ProjectId, Number, State)
+            VALUES (
+                COALESCE(json_extract($state, '$.projectId'), json_extract($state, '$.ProjectId'), 'migration-test'),
+                CAST(COALESCE(json_extract($state, '$.number'), json_extract($state, '$.Number')) AS INTEGER),
+                $state);
             """;
+        var stateParam = command.CreateParameter();
+        stateParam.ParameterName = "$state";
+        stateParam.Value = stateJson;
+        command.Parameters.Add(stateParam);
+        await command.ExecuteNonQueryAsync();
+    }
+
+    private static async Task SeedHistoricalIssueAsync(
+        MohistDbContext ctx,
+        string issueId,
+        string stateJson)
+    {
+        using var command = ctx.Database.GetDbConnection().CreateCommand();
+        command.CommandText = "INSERT INTO Issues (IssueId, State) VALUES ($id, $state);";
         var idParam = command.CreateParameter();
         idParam.ParameterName = "$id";
         idParam.Value = issueId;
@@ -269,7 +286,7 @@ public class BackfillIssueLegacyArrayLabelsMigrationSpecs
     private static async Task<string> ReadStateAsync(MohistDbContext ctx, string issueId)
     {
         using var command = ctx.Database.GetDbConnection().CreateCommand();
-        command.CommandText = "SELECT State FROM Issues WHERE IssueId = $id";
+        command.CommandText = "SELECT State FROM Issues WHERE json_extract(State, '$.id') = $id";
         var param = command.CreateParameter();
         param.ParameterName = "$id";
         param.Value = issueId;
@@ -281,7 +298,7 @@ public class BackfillIssueLegacyArrayLabelsMigrationSpecs
     private static async Task<string> ReadLabelsRawAsync(MohistDbContext ctx, string issueId)
     {
         using var command = ctx.Database.GetDbConnection().CreateCommand();
-        command.CommandText = "SELECT json_extract(State, '$.labels') FROM Issues WHERE IssueId = $id";
+        command.CommandText = "SELECT json_extract(State, '$.labels') FROM Issues WHERE json_extract(State, '$.id') = $id";
         var param = command.CreateParameter();
         param.ParameterName = "$id";
         param.Value = issueId;
@@ -293,7 +310,7 @@ public class BackfillIssueLegacyArrayLabelsMigrationSpecs
     private static async Task<string> ReadLabelsTokenAsync(MohistDbContext ctx, string issueId)
     {
         using var command = ctx.Database.GetDbConnection().CreateCommand();
-        command.CommandText = "SELECT json_type(State, '$.labels') FROM Issues WHERE IssueId = $id";
+        command.CommandText = "SELECT json_type(State, '$.labels') FROM Issues WHERE json_extract(State, '$.id') = $id";
         var param = command.CreateParameter();
         param.ParameterName = "$id";
         param.Value = issueId;

@@ -147,6 +147,8 @@ public class AgentSessionLaunchRoutesSpecs
         var projectId = await CreateProjectAsync("launch-ctx");
         var runnerId = $"launch-ctx-runner-{Guid.NewGuid():N}";
         var agent = await CreateAgentAsync(projectId, "ctx-agent");
+        var issueNumber = await CreateIssueAsync(projectId, "Context issue");
+        var epicNumber = await CreateEpicAsync(projectId, "Context epic");
         await RegisterRunnerAndAwaitOnlineAsync(runnerId, projectId);
 
         try
@@ -158,8 +160,8 @@ public class AgentSessionLaunchRoutesSpecs
                     prompt = "look at the issue",
                     context = new
                     {
-                        issueNumber = 42,
-                        epicNumber = "epic-7",
+                        issueNumber,
+                        epicNumber,
                         repository = "feature-repo",
                         workspacePath = "/tmp/launch-ctx",
                     },
@@ -178,8 +180,8 @@ public class AgentSessionLaunchRoutesSpecs
                 });
 
             Assert.NotNull(record);
-            Assert.Equal("42", record!.Session.Metadata.Label(GenericAgentSessionMetadata.IssueNumber));
-            Assert.Equal("epic-7", record.Session.Metadata.Label(GenericAgentSessionMetadata.EpicNumber));
+            Assert.Equal(issueNumber.ToString(), record!.Session.Metadata.Label(GenericAgentSessionMetadata.IssueNumber));
+            Assert.Equal(epicNumber.ToString(), record.Session.Metadata.Label(GenericAgentSessionMetadata.EpicNumber));
             Assert.Equal("feature-repo", record.Session.Metadata.Label(GenericAgentSessionMetadata.Repository));
             Assert.Equal("/tmp/launch-ctx", record.Session.Metadata.Label(GenericAgentSessionMetadata.WorkspacePath));
 
@@ -191,6 +193,84 @@ public class AgentSessionLaunchRoutesSpecs
         {
             await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
         }
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public async Task Launch_NonPositiveEpicContext_Returns400WithoutCreatingSession(int epicNumber)
+    {
+        var projectId = await CreateProjectAsync("launch-invalid-epic");
+        var agent = await CreateAgentAsync(projectId, "invalid-epic-agent");
+        var sessionCountBefore = await CountAgentLaunchSessionsAsync(projectId);
+
+        using var response = await _fixture.Client.PostAsJsonAsync(
+            $"/api/projects/{projectId}/agents/{agent.Id}/sessions",
+            new { prompt = "invalid context", context = new { epicNumber } });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(sessionCountBefore, await CountAgentLaunchSessionsAsync(projectId));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public async Task Launch_NonPositiveIssueContext_Returns400WithoutCreatingSession(int issueNumber)
+    {
+        var projectId = await CreateProjectAsync("launch-invalid-issue");
+        var agent = await CreateAgentAsync(projectId, "invalid-issue-agent");
+        var sessionCountBefore = await CountAgentLaunchSessionsAsync(projectId);
+
+        using var response = await _fixture.Client.PostAsJsonAsync(
+            $"/api/projects/{projectId}/agents/{agent.Id}/sessions",
+            new { prompt = "invalid context", context = new { issueNumber } });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(sessionCountBefore, await CountAgentLaunchSessionsAsync(projectId));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
+    [Fact]
+    public async Task Launch_OpaqueEpicContext_Returns400WithoutCreatingSession()
+    {
+        var projectId = await CreateProjectAsync("launch-opaque-epic");
+        var agent = await CreateAgentAsync(projectId, "opaque-epic-agent");
+        var sessionCountBefore = await CountAgentLaunchSessionsAsync(projectId);
+
+        using var response = await _fixture.Client.PostAsJsonAsync(
+            $"/api/projects/{projectId}/agents/{agent.Id}/sessions",
+            new { prompt = "invalid context", context = new { epicNumber = "epic-7" } });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(sessionCountBefore, await CountAgentLaunchSessionsAsync(projectId));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
+    [Fact]
+    public async Task Launch_EpicContextFromAnotherProject_Returns404WithoutCreatingSession()
+    {
+        var projectId = await CreateProjectAsync("launch-local-epic");
+        var otherProjectId = await CreateProjectAsync("launch-other-epic");
+        var agent = await CreateAgentAsync(projectId, "cross-project-agent");
+        var otherEpicNumber = await CreateEpicAsync(otherProjectId, "Other project epic");
+        var sessionCountBefore = await CountAgentLaunchSessionsAsync(projectId);
+
+        using var response = await _fixture.Client.PostAsJsonAsync(
+            $"/api/projects/{projectId}/agents/{agent.Id}/sessions",
+            new { prompt = "cross project context", context = new { epicNumber = otherEpicNumber } });
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        Assert.Equal(sessionCountBefore, await CountAgentLaunchSessionsAsync(projectId));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -683,6 +763,26 @@ public class AgentSessionLaunchRoutesSpecs
         response.EnsureSuccessStatusCode();
         var body = await response.Content.ReadFromJsonAsync<JsonElement>();
         return new AgentRef(body.GetProperty("data").GetProperty("id").GetString()!, name);
+    }
+
+    private async Task<int> CreateIssueAsync(string projectId, string title)
+    {
+        using var response = await _fixture.Client.PostAsJsonAsync(
+            $"/api/projects/{projectId}/issues",
+            new { title, isDraft = true });
+        response.EnsureSuccessStatusCode();
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        return body.GetProperty("data").GetProperty("number").GetInt32();
+    }
+
+    private async Task<int> CreateEpicAsync(string projectId, string title)
+    {
+        using var response = await _fixture.Client.PostAsJsonAsync(
+            $"/api/projects/{projectId}/epics",
+            new { title, description = "context epic", priority = "p2" });
+        response.EnsureSuccessStatusCode();
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        return body.GetProperty("data").GetProperty("number").GetInt32();
     }
 
     private async Task RegisterRunnerAndAwaitOnlineAsync(string runnerId, string projectId)

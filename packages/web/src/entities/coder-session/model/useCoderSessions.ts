@@ -76,12 +76,11 @@ export function useCoderSessions(
 
   useEffect(() => {
     mountedRef.current = true
-    const issueId = String(issueNumber)
     const unsubs: Array<() => void> = []
 
     unsubs.push(
       onAgentEvent('coder_session_started', (detail) => {
-        if (detail.issueId !== issueId || !mountedRef.current) return
+        if (detail.projectId !== projectId || detail.issueNumber !== issueNumber || !mountedRef.current) return
         const newSession: CoderSessionSummary = {
           id: detail.sessionId,
           runtimeSessionId: detail.runtimeSessionId,
@@ -106,7 +105,7 @@ export function useCoderSessions(
 
     unsubs.push(
       onAgentEvent('coder_session_completed', (detail) => {
-        if (detail.issueId !== issueId || !mountedRef.current) return
+        if (detail.projectId !== projectId || detail.issueNumber !== issueNumber || !mountedRef.current) return
         setLiveSessions((prev) => {
           const next = prev.map((s) =>
             s.id === detail.sessionId
@@ -122,7 +121,7 @@ export function useCoderSessions(
 
     unsubs.push(
       onAgentEvent('coder_session_status_changed', (detail) => {
-        if (!mountedRef.current) return
+        if (detail.projectId !== projectId || detail.issueNumber !== issueNumber || !mountedRef.current) return
         setLiveSessions((prev) => {
           const idx = prev.findIndex((s) => s.id === detail.sessionId)
           if (idx === -1) return prev
@@ -181,7 +180,7 @@ export function useCoderSessions(
       for (const unsub of unsubs) unsub()
       stopTimer()
     }
-  }, [issueNumber, startTimer, stopTimer])
+  }, [issueNumber, projectId, startTimer, stopTimer])
 
   return {
     sessions: liveSessions,

@@ -37,7 +37,7 @@ public class EpicQuerier : IScopedService
 
         var sql = $$"""
             SELECT
-                e."Id" AS "EpicId",
+                e."ProjectId" AS "EpicProjectId",
                 e."Number" AS "EpicNumber",
                 e."Title" AS "EpicTitle",
                 e."Description" AS "EpicDescription",
@@ -46,7 +46,6 @@ public class EpicQuerier : IScopedService
                 e."CreatedAt" AS "EpicCreatedAt",
                 e."UpdatedAt" AS "EpicUpdatedAt",
                 e."PauseReason" AS "EpicPauseReason",
-                li."IssueId" AS "IssueId",
                 i."Number" AS "IssueNumber",
                 i."Status" AS "IssueStatus",
                 i."Title" AS "IssueTitle",
@@ -54,10 +53,9 @@ public class EpicQuerier : IScopedService
                 i."IsDraft" AS "IssueIsDraft",
                 i."PrerequisiteNumbersJson" AS "IssuePrerequisiteNumbersJson",
                 i."IsArchived" AS "IssueIsArchived",
-                li."CreatedAt" AS "LinkCreatedAt"
+                i."Number" AS "IssueOrder"
             FROM "Epics" e
-            LEFT JOIN "EpicIssues" li ON li."EpicId" = e."Id"
-            LEFT JOIN "Issues" i ON i."IssueId" = li."IssueId"
+            LEFT JOIN "Issues" i ON i."ProjectId" = e."ProjectId" AND i."EpicNumber" = e."Number"
             WHERE e."ProjectId" = @projectId
             {{(normalizedSearch is null ? string.Empty : "AND LOWER(e.\"Title\") LIKE LOWER('%' || @search || '%') ESCAPE '\\'")}}
             ORDER BY {{orderBy}}
@@ -72,7 +70,7 @@ public class EpicQuerier : IScopedService
             .ToListAsync();
 
         var allIssueRows = rows
-            .Where(r => !string.IsNullOrEmpty(r.IssueId) && r.IssueNumber.HasValue && r.IssueIsArchived != true)
+            .Where(r => r.IssueNumber.HasValue && r.IssueIsArchived != true)
             .ToList();
         var allIssuesByNumber = allIssueRows
             .DistinctBy(r => r.IssueNumber!.Value)
@@ -89,7 +87,7 @@ public class EpicQuerier : IScopedService
         EpicIssueListItem? currentEpic = null;
         foreach (var row in rows)
         {
-            if (currentEpic is null || currentEpic.EpicId != row.EpicId)
+            if (currentEpic is null || currentEpic.EpicNumber != row.EpicNumber)
             {
                 if (currentEpic is not null)
                     result.Add(BuildEpicWithProgress(currentEpic, currentEpicRows!, allIssuesByNumber, allUndeliveredNumbers));
@@ -111,15 +109,15 @@ public class EpicQuerier : IScopedService
     // sort selector never reaches the SQL builder as an interpolated string.
     // New keys / directions must be added here explicitly; unknown inputs
     // fall back to the original hardcoded ordering.
-    internal const string DefaultOrderBy = "e.\"Priority\" ASC, e.\"UpdatedAt\" DESC, li.\"CreatedAt\"";
+    internal const string DefaultOrderBy = "e.\"Priority\" ASC, e.\"UpdatedAt\" DESC, i.\"Number\"";
 
     private static readonly Dictionary<(string Field, string Dir), string> OrderByMap =
         new()
         {
-            [("priority", "asc")] = "e.\"Priority\" ASC, e.\"UpdatedAt\" DESC, li.\"CreatedAt\"",
-            [("priority", "desc")] = "e.\"Priority\" DESC, e.\"UpdatedAt\" DESC, li.\"CreatedAt\"",
-            [("updated", "asc")] = "e.\"UpdatedAt\" ASC, e.\"Priority\" ASC, li.\"CreatedAt\"",
-            [("updated", "desc")] = "e.\"UpdatedAt\" DESC, e.\"Priority\" ASC, li.\"CreatedAt\"",
+            [("priority", "asc")] = "e.\"Priority\" ASC, e.\"UpdatedAt\" DESC, i.\"Number\"",
+            [("priority", "desc")] = "e.\"Priority\" DESC, e.\"UpdatedAt\" DESC, i.\"Number\"",
+            [("updated", "asc")] = "e.\"UpdatedAt\" ASC, e.\"Priority\" ASC, i.\"Number\"",
+            [("updated", "desc")] = "e.\"UpdatedAt\" DESC, e.\"Priority\" ASC, i.\"Number\"",
         };
 
     internal static string ResolveOrderBy(string? sortBy, string? sortDir)
@@ -152,10 +150,10 @@ public class EpicQuerier : IScopedService
             .Replace("%", @"\%")
             .Replace("_", @"\_");
 
-    public async Task<EpicDetailDto?> GetAsync(string projectId, string epicId)
+    public async Task<EpicDetailDto?> GetAsync(string projectId, int epicNumber)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
-        var epic = await db.Epics.AsNoTracking().FirstOrDefaultAsync(e => e.ProjectId == projectId && e.Id == epicId);
+        var epic = await db.Epics.AsNoTracking().FirstOrDefaultAsync(e => e.ProjectId == projectId && e.Number == epicNumber);
         return epic is null ? null : await ToDetailAsync(db, epic);
     }
 
@@ -167,26 +165,27 @@ public class EpicQuerier : IScopedService
         return epic is null ? null : await ToDetailAsync(db, epic);
     }
 
-    public async Task<string?> GetEpicIdForIssueAsync(string projectId, string issueId)
+    public async Task<int?> GetEpicNumberForIssueAsync(string projectId, int issueNumber)
     {
-        if (string.IsNullOrWhiteSpace(projectId) || string.IsNullOrWhiteSpace(issueId))
+        if (string.IsNullOrWhiteSpace(projectId) || issueNumber <= 0)
             return null;
         await using var db = await _dbFactory.CreateDbContextAsync();
         var activeOwner = await (
-            from active in db.EpicActiveIssues.AsNoTracking()
+            from issue in db.Issues.AsNoTracking()
             join epic in db.Epics.AsNoTracking()
-                on active.EpicId equals epic.Id
-            where active.ProjectId == projectId
-                && active.IssueId == issueId
+                on new { issue.ProjectId, EpicNumber = issue.EpicNumber } equals new { epic.ProjectId, EpicNumber = (int?)epic.Number }
+            where issue.ProjectId == projectId
+                && issue.Number == issueNumber
+                && issue.EpicNumber != null
                 && epic.ProjectId == projectId
                 && epic.Status != EpicStatusName.Done
                 && epic.Status != EpicStatusName.Closed
-            select active.EpicId
+            select issue.EpicNumber
         ).FirstOrDefaultAsync();
         return activeOwner;
     }
 
-    public async Task<List<string>> GetEpicIdsDependentOnPrerequisiteAsync(
+    public async Task<List<int>> GetEpicNumbersDependentOnPrerequisiteAsync(
         string projectId,
         int prerequisiteNumber)
     {
@@ -195,10 +194,10 @@ public class EpicQuerier : IScopedService
         await using var db = await _dbFactory.CreateDbContextAsync();
         var projectIdParam = new SqliteParameter("@projectId", projectId);
         var prereqParam = new SqliteParameter("@prereqNumber", prerequisiteNumber);
-        var issueIdRows = await db.Database
-            .SqlQueryRaw<string>(
+        var issueNumberRows = await db.Database
+            .SqlQueryRaw<int>(
                 """
-                SELECT "IssueId" FROM "Issues"
+                SELECT "Number" FROM "Issues"
                 WHERE "ProjectId" = @projectId
                   AND EXISTS (
                     SELECT 1 FROM json_each("PrerequisiteNumbersJson")
@@ -208,20 +207,22 @@ public class EpicQuerier : IScopedService
                 projectIdParam, prereqParam)
             .ToListAsync();
 
-        if (issueIdRows.Count == 0) return [];
+        if (issueNumberRows.Count == 0) return [];
 
-        var epicIds = await (
-            from active in db.EpicActiveIssues.AsNoTracking()
+        var epicNumbers = await (
+            from issue in db.Issues.AsNoTracking()
             join epic in db.Epics.AsNoTracking()
-                on active.EpicId equals epic.Id
-            where active.ProjectId == projectId
-                && issueIdRows.Contains(active.IssueId)
+                on new { issue.ProjectId, EpicNumber = issue.EpicNumber } equals new { epic.ProjectId, EpicNumber = (int?)epic.Number }
+            where issue.ProjectId == projectId
+                && issue.Number != null
+                && issueNumberRows.Contains(issue.Number.Value)
+                && issue.EpicNumber != null
                 && epic.ProjectId == projectId
                 && epic.Status != EpicStatusName.Done
                 && epic.Status != EpicStatusName.Closed
-            select active.EpicId
+            select issue.EpicNumber.GetValueOrDefault()
         ).Distinct().ToListAsync();
-        return epicIds;
+        return epicNumbers;
     }
 
     private static EpicWithProgressDto BuildEpicWithProgress(
@@ -230,8 +231,8 @@ public class EpicQuerier : IScopedService
         Dictionary<int, IssueReadModel> allIssuesByNumber,
         HashSet<int> allUndeliveredNumbers) =>
         new(
-            epicRow.EpicId,
-            epicRow.EpicNumber,
+            epicRow.EpicProjectId,
+            epicRow.EpicNumber!.Value,
             epicRow.EpicTitle,
             epicRow.EpicDescription,
             epicRow.EpicPriority,
@@ -247,8 +248,8 @@ public class EpicQuerier : IScopedService
         HashSet<int> allUndeliveredNumbers)
     {
         var linkedRows = rows
-            .Where(r => !string.IsNullOrEmpty(r.IssueId) && r.IssueNumber.HasValue && r.IssueIsArchived != true)
-            .OrderBy(r => r.LinkCreatedAt)
+            .Where(r => r.IssueNumber.HasValue && r.IssueIsArchived != true)
+            .OrderBy(r => r.IssueOrder)
             .ToList();
         if (linkedRows.Count == 0) return [];
 
@@ -260,7 +261,6 @@ public class EpicQuerier : IScopedService
                 var issue = allIssuesByNumber[row.IssueNumber!.Value];
                 var blocker = ComputeStartBlocker(issue, allUndeliveredNumbers);
                 return new LinkedIssueDto(
-                    Id: issue.Id,
                     Number: issue.Number,
                     Title: issue.Title,
                     Status: issue.Status,
@@ -280,7 +280,6 @@ public class EpicQuerier : IScopedService
         var status = CanonicalIssueStatus(row.IssueStatus);
         return new()
         {
-            Id = row.IssueId!,
             Number = row.IssueNumber!.Value,
             Title = row.IssueTitle ?? "",
             Status = status,
@@ -322,27 +321,24 @@ public class EpicQuerier : IScopedService
     {
         var linked = await GetLinkedIssuesAsync(db, epic);
         var progress = BuildProgress(linked);
-        return new EpicDetailDto(epic.Id, epic.Number, epic.Title, epic.Description, epic.Priority, epic.Status, epic.CreatedAt.ToString("o"), epic.UpdatedAt.ToString("o"), linked, progress, epic.PauseReason);
+        return new EpicDetailDto(epic.ProjectId, epic.Number, epic.Title, epic.Description, epic.Priority, epic.Status, epic.CreatedAt.ToString("o"), epic.UpdatedAt.ToString("o"), linked, progress, epic.PauseReason);
     }
 
     private async Task<List<LinkedIssueDto>> GetLinkedIssuesAsync(MohistDbContext db, EpicRow epic)
     {
-        var links = await db.EpicIssues.AsNoTracking()
-            .Where(link => link.ProjectId == epic.ProjectId && link.EpicId == epic.Id)
+        var memberNumbers = await db.Issues.AsNoTracking()
+            .Where(issue => issue.ProjectId == epic.ProjectId && issue.EpicNumber == epic.Number && issue.Number != null)
+            .OrderBy(issue => issue.Number)
+            .Select(issue => issue.Number!.Value)
             .ToListAsync();
-        links = links.OrderBy(link => link.CreatedAt).ToList();
-        if (links.Count == 0) return [];
+        if (memberNumbers.Count == 0) return [];
 
         var allIssues = await _issuesQuery.ListAsync(epic.ProjectId, all: true);
-        var byId = allIssues.ToDictionary(i => i.Id);
         var byNumber = allIssues.ToDictionary(i => i.Number);
-        var memberNumbers = new HashSet<int>(
-            links.Select(link => byId.TryGetValue(link.IssueId, out var member) ? member.Number : 0)
-                .Where(n => n != 0));
-        return links
-            .Select(link => byId.TryGetValue(link.IssueId, out var issue)
+        var memberNumberSet = memberNumbers.ToHashSet();
+        return memberNumbers
+            .Select(number => byNumber.TryGetValue(number, out var issue)
                 ? new LinkedIssueDto(
-                    Id: issue.Id,
                     Number: issue.Number,
                     Title: issue.Title,
                     Status: issue.Status,
@@ -352,7 +348,7 @@ public class EpicQuerier : IScopedService
                     CanStart: issue.CanStart,
                     StartBlocker: issue.Blocker,
                     PrerequisiteNumbers: issue.PrerequisiteNumbers,
-                    ExternalPrerequisites: BuildExternalPrerequisites(issue, memberNumbers, byNumber))
+                    ExternalPrerequisites: BuildExternalPrerequisites(issue, memberNumberSet, byNumber))
                 : null)
             .Where(i => i is not null)
             .Cast<LinkedIssueDto>()
@@ -383,7 +379,7 @@ public class EpicQuerier : IScopedService
 
     private sealed class EpicIssueListItem
     {
-        public string EpicId { get; set; } = "";
+        public string EpicProjectId { get; set; } = "";
         public int? EpicNumber { get; set; }
         public string EpicTitle { get; set; } = "";
         public string EpicDescription { get; set; } = "";
@@ -392,7 +388,6 @@ public class EpicQuerier : IScopedService
         public DateTimeOffset EpicCreatedAt { get; set; }
         public DateTimeOffset EpicUpdatedAt { get; set; }
         public string? EpicPauseReason { get; set; }
-        public string? IssueId { get; set; }
         public int? IssueNumber { get; set; }
         public string? IssueStatus { get; set; }
         public string? IssueTitle { get; set; }
@@ -400,6 +395,6 @@ public class EpicQuerier : IScopedService
         public bool? IssueIsDraft { get; set; }
         public string? IssuePrerequisiteNumbersJson { get; set; }
         public bool? IssueIsArchived { get; set; }
-        public DateTimeOffset? LinkCreatedAt { get; set; }
+        public int? IssueOrder { get; set; }
     }
 }

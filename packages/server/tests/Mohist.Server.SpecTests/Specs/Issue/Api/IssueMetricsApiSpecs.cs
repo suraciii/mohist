@@ -108,7 +108,8 @@ public class IssueMetricsApiSpecs
 
         // The completion event is in week 1 (early June 2026).
         await SeedEventAsync(
-            issue.Id,
+            project.Id,
+            issue.Number,
             EventCatalog.ReverseDns.IssueCompleted,
             new DateTimeOffset(2026, 6, 8, 10, 0, 0, TimeSpan.Zero));
 
@@ -116,7 +117,7 @@ public class IssueMetricsApiSpecs
         // it). The metric MUST keep the issue in the week-1 bucket
         // because bucketing reads `IssueEvents.Time`, not
         // issue `updatedAt`.
-        await UpdateIssueUpdatedAtAsync(issue.Id, new DateTimeOffset(2026, 6, 15, 10, 0, 0, TimeSpan.Zero));
+        await UpdateIssueUpdatedAtAsync(project.Id, issue.Number, new DateTimeOffset(2026, 6, 15, 10, 0, 0, TimeSpan.Zero));
 
         using var response = await _client.GetAsync(
             $"/api/projects/{project.Id}/issues/metrics/completion?bucket=week");
@@ -140,8 +141,8 @@ public class IssueMetricsApiSpecs
         var issueA = await CreateIssueAsync(projectA.Id, "A issue");
         var issueB = await CreateIssueAsync(projectB.Id, "B issue");
 
-        await SeedEventAsync(issueA.Id, EventCatalog.ReverseDns.IssueCompleted, new DateTimeOffset(2026, 6, 17, 8, 0, 0, TimeSpan.Zero));
-        await SeedEventAsync(issueB.Id, EventCatalog.ReverseDns.IssueCompleted, new DateTimeOffset(2026, 6, 17, 9, 0, 0, TimeSpan.Zero));
+        await SeedEventAsync(projectA.Id, issueA.Number, EventCatalog.ReverseDns.IssueCompleted, new DateTimeOffset(2026, 6, 17, 8, 0, 0, TimeSpan.Zero));
+        await SeedEventAsync(projectB.Id, issueB.Number, EventCatalog.ReverseDns.IssueCompleted, new DateTimeOffset(2026, 6, 17, 9, 0, 0, TimeSpan.Zero));
 
         using var responseA = await _client.GetAsync(
             $"/api/projects/{projectA.Id}/issues/metrics/completion?bucket=day");
@@ -169,8 +170,8 @@ public class IssueMetricsApiSpecs
 
         // Two same-type terminal events for the same issue on the
         // same day: must count as 1, not 2.
-        await SeedEventAsync(issue.Id, EventCatalog.ReverseDns.IssueCompleted, new DateTimeOffset(2026, 6, 17, 8, 0, 0, TimeSpan.Zero));
-        await SeedEventAsync(issue.Id, EventCatalog.ReverseDns.IssueCompleted, new DateTimeOffset(2026, 6, 17, 16, 0, 0, TimeSpan.Zero));
+        await SeedEventAsync(project.Id, issue.Number, EventCatalog.ReverseDns.IssueCompleted, new DateTimeOffset(2026, 6, 17, 8, 0, 0, TimeSpan.Zero));
+        await SeedEventAsync(project.Id, issue.Number, EventCatalog.ReverseDns.IssueCompleted, new DateTimeOffset(2026, 6, 17, 16, 0, 0, TimeSpan.Zero));
 
         using var response = await _client.GetAsync(
             $"/api/projects/{project.Id}/issues/metrics/completion?bucket=day");
@@ -189,9 +190,9 @@ public class IssueMetricsApiSpecs
         var project = await CreateProjectAsync($"metrics-recomplete-{Guid.NewGuid():N}");
         var issue = await CreateIssueAsync(project.Id, "Recompleted");
 
-        await SeedEventAsync(issue.Id, EventCatalog.ReverseDns.IssueCompleted, new DateTimeOffset(2026, 6, 17, 8, 0, 0, TimeSpan.Zero));
-        await SeedEventAsync(issue.Id, "com.mohist.issue.reopened", new DateTimeOffset(2026, 6, 18, 8, 0, 0, TimeSpan.Zero));
-        await SeedEventAsync(issue.Id, EventCatalog.ReverseDns.IssueCompleted, new DateTimeOffset(2026, 6, 19, 8, 0, 0, TimeSpan.Zero));
+        await SeedEventAsync(project.Id, issue.Number, EventCatalog.ReverseDns.IssueCompleted, new DateTimeOffset(2026, 6, 17, 8, 0, 0, TimeSpan.Zero));
+        await SeedEventAsync(project.Id, issue.Number, "com.mohist.issue.reopened", new DateTimeOffset(2026, 6, 18, 8, 0, 0, TimeSpan.Zero));
+        await SeedEventAsync(project.Id, issue.Number, EventCatalog.ReverseDns.IssueCompleted, new DateTimeOffset(2026, 6, 19, 8, 0, 0, TimeSpan.Zero));
 
         using var response = await _client.GetAsync(
             $"/api/projects/{project.Id}/issues/metrics/completion?bucket=day");
@@ -217,8 +218,8 @@ public class IssueMetricsApiSpecs
         var currentIssue = await CreateIssueAsync(project.Id, "Current window issue");
         var previousIssue = await CreateIssueAsync(project.Id, "Previous window issue");
 
-        await SeedEventAsync(currentIssue.Id, EventCatalog.ReverseDns.IssueCompleted, new DateTimeOffset(2026, 6, 15, 8, 0, 0, TimeSpan.Zero));
-        await SeedEventAsync(previousIssue.Id, EventCatalog.ReverseDns.IssueCancelled, new DateTimeOffset(2026, 5, 20, 9, 0, 0, TimeSpan.Zero));
+        await SeedEventAsync(project.Id, currentIssue.Number, EventCatalog.ReverseDns.IssueCompleted, new DateTimeOffset(2026, 6, 15, 8, 0, 0, TimeSpan.Zero));
+        await SeedEventAsync(project.Id, previousIssue.Number, EventCatalog.ReverseDns.IssueCancelled, new DateTimeOffset(2026, 5, 20, 9, 0, 0, TimeSpan.Zero));
 
         using var response = await _client.GetAsync(
             $"/api/projects/{project.Id}/issues/metrics/completion?bucket=day");
@@ -253,7 +254,7 @@ public class IssueMetricsApiSpecs
         // genuine zero-completion window.
         var project = await CreateProjectAsync($"metrics-empty-prev-{Guid.NewGuid():N}");
         var currentIssue = await CreateIssueAsync(project.Id, "Current only");
-        await SeedEventAsync(currentIssue.Id, EventCatalog.ReverseDns.IssueCompleted, new DateTimeOffset(2026, 6, 15, 8, 0, 0, TimeSpan.Zero));
+        await SeedEventAsync(project.Id, currentIssue.Number, EventCatalog.ReverseDns.IssueCompleted, new DateTimeOffset(2026, 6, 15, 8, 0, 0, TimeSpan.Zero));
 
         using var response = await _client.GetAsync(
             $"/api/projects/{project.Id}/issues/metrics/completion?bucket=day");
@@ -277,8 +278,8 @@ public class IssueMetricsApiSpecs
         var project = await CreateProjectAsync($"metrics-zero-prev-{Guid.NewGuid():N}");
         var p1 = await CreateIssueAsync(project.Id, "Cancelled prev 1");
         var p2 = await CreateIssueAsync(project.Id, "Cancelled prev 2");
-        await SeedEventAsync(p1.Id, EventCatalog.ReverseDns.IssueCancelled, new DateTimeOffset(2026, 5, 10, 9, 0, 0, TimeSpan.Zero));
-        await SeedEventAsync(p2.Id, EventCatalog.ReverseDns.IssueCancelled, new DateTimeOffset(2026, 5, 25, 11, 0, 0, TimeSpan.Zero));
+        await SeedEventAsync(project.Id, p1.Number, EventCatalog.ReverseDns.IssueCancelled, new DateTimeOffset(2026, 5, 10, 9, 0, 0, TimeSpan.Zero));
+        await SeedEventAsync(project.Id, p2.Number, EventCatalog.ReverseDns.IssueCancelled, new DateTimeOffset(2026, 5, 25, 11, 0, 0, TimeSpan.Zero));
 
         using var response = await _client.GetAsync(
             $"/api/projects/{project.Id}/issues/metrics/completion?bucket=day");
@@ -304,7 +305,7 @@ public class IssueMetricsApiSpecs
         // remain intact when totals are populated.
         var project = await CreateProjectAsync($"metrics-additive-{Guid.NewGuid():N}");
         var issue = await CreateIssueAsync(project.Id, "Additive check");
-        await SeedEventAsync(issue.Id, EventCatalog.ReverseDns.IssueCompleted, new DateTimeOffset(2026, 6, 15, 8, 0, 0, TimeSpan.Zero));
+        await SeedEventAsync(project.Id, issue.Number, EventCatalog.ReverseDns.IssueCompleted, new DateTimeOffset(2026, 6, 15, 8, 0, 0, TimeSpan.Zero));
 
         using var response = await _client.GetAsync(
             $"/api/projects/{project.Id}/issues/metrics/completion?bucket=day");
@@ -335,9 +336,9 @@ public class IssueMetricsApiSpecs
         var previousIssue = await CreateIssueAsync(project.Id, "Previous window issue");
 
         // 2026-06-29 (Monday) → current week window.
-        await SeedEventAsync(currentIssue.Id, EventCatalog.ReverseDns.IssueCompleted, new DateTimeOffset(2026, 6, 29, 10, 0, 0, TimeSpan.Zero));
+        await SeedEventAsync(project.Id, currentIssue.Number, EventCatalog.ReverseDns.IssueCompleted, new DateTimeOffset(2026, 6, 29, 10, 0, 0, TimeSpan.Zero));
         // 2026-03-30 (Monday) → previous 12-week window.
-        await SeedEventAsync(previousIssue.Id, EventCatalog.ReverseDns.IssueCompleted, new DateTimeOffset(2026, 3, 30, 10, 0, 0, TimeSpan.Zero));
+        await SeedEventAsync(project.Id, previousIssue.Number, EventCatalog.ReverseDns.IssueCompleted, new DateTimeOffset(2026, 3, 30, 10, 0, 0, TimeSpan.Zero));
 
         using var response = await _client.GetAsync(
             $"/api/projects/{project.Id}/issues/metrics/completion?bucket=week");
@@ -361,15 +362,12 @@ public class IssueMetricsApiSpecs
         var requestedAt = _fixture.TimeProvider.GetUtcNow().AddDays(-1);
         var approvedWait = TimeSpan.FromHours(3.2);
         var rejectedWait = TimeSpan.FromHours(1.4);
-        var issueId = $"issue_approval_present_{Guid.NewGuid():N}";
         var workflowRunId = $"wr_approval_present_{Guid.NewGuid():N}";
-        var rejectedIssueId = $"issue_approval_rejected_{Guid.NewGuid():N}";
         var rejectedWorkflowRunId = $"wr_approval_rejected_{Guid.NewGuid():N}";
 
         await SeedIssueWithCompletedApprovalAsync(
             project.Id,
             number: 1,
-            issueId,
             workflowRunId,
             requestedAt,
             approvedWait,
@@ -377,7 +375,6 @@ public class IssueMetricsApiSpecs
         await SeedIssueWithCompletedApprovalAsync(
             project.Id,
             number: 2,
-            rejectedIssueId,
             rejectedWorkflowRunId,
             requestedAt,
             rejectedWait,
@@ -409,13 +406,11 @@ public class IssueMetricsApiSpecs
         var requestedAt = _fixture.TimeProvider.GetUtcNow().AddDays(-1);
         var planWait = TimeSpan.FromHours(1);
         var checkWait = TimeSpan.FromHours(4);
-        var issueId = $"issue_approval_multi_{Guid.NewGuid():N}";
         var workflowRunId = $"wr_approval_multi_{Guid.NewGuid():N}";
 
         await SeedIssueWithCompletedApprovalsAsync(
             project.Id,
             number: 1,
-            issueId,
             workflowRunId,
             requestedAt,
             planWait,
@@ -459,13 +454,11 @@ public class IssueMetricsApiSpecs
         var project = await CreateProjectAsync($"quality-present-{Guid.NewGuid():N}");
         var now = _fixture.TimeProvider.GetUtcNow();
         var requestedAt = now.AddDays(-1);
-        var issueId = $"issue_quality_present_{Guid.NewGuid():N}";
         var workflowRunId = $"wr_quality_present_{Guid.NewGuid():N}";
 
         await SeedIssueWithQualityRunAsync(
             project.Id,
             number: 1,
-            issueId,
             workflowRunId,
             requestedAt,
             [
@@ -517,13 +510,11 @@ public class IssueMetricsApiSpecs
         var now = _fixture.TimeProvider.GetUtcNow();
         var firstBoundary = DateOnly.FromDateTime(now.UtcDateTime.Date).AddDays(-29);
         var shipTime = new DateTimeOffset(firstBoundary.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
-        var issueId = $"issue_quality_trend_present_{Guid.NewGuid():N}";
         var workflowRunId = $"wr_quality_trend_present_{Guid.NewGuid():N}";
 
         await SeedIssueWithQualityRunAsync(
             project.Id,
             number: 1,
-            issueId,
             workflowRunId,
             shipTime,
             [
@@ -604,7 +595,6 @@ public class IssueMetricsApiSpecs
         await SeedIssueWithQualityRunAsync(
             project.Id,
             number: 1,
-            $"issue_quality_both_current_{Guid.NewGuid():N}",
             $"wr_quality_both_current_{Guid.NewGuid():N}",
             currentShipTime,
             [
@@ -616,7 +606,6 @@ public class IssueMetricsApiSpecs
         await SeedIssueWithQualityRunAsync(
             project.Id,
             number: 2,
-            $"issue_quality_both_previous_{Guid.NewGuid():N}",
             $"wr_quality_both_previous_{Guid.NewGuid():N}",
             previousShipTime,
             [
@@ -659,7 +648,6 @@ public class IssueMetricsApiSpecs
         await SeedIssueWithQualityRunAsync(
             project.Id,
             number: 1,
-            $"issue_quality_prev_empty_{Guid.NewGuid():N}",
             $"wr_quality_prev_empty_{Guid.NewGuid():N}",
             shipTime,
             [
@@ -700,7 +688,6 @@ public class IssueMetricsApiSpecs
         await SeedIssueWithQualityRunAsync(
             project.Id,
             number: 1,
-            $"issue_quality_prev_zero_{Guid.NewGuid():N}",
             $"wr_quality_prev_zero_{Guid.NewGuid():N}",
             zeroShipTime,
             [
@@ -713,7 +700,6 @@ public class IssueMetricsApiSpecs
         await SeedIssueWithQualityRunAsync(
             project.Id,
             number: 2,
-            $"issue_quality_prev_one_{Guid.NewGuid():N}",
             $"wr_quality_prev_one_{Guid.NewGuid():N}",
             oneShipTime,
             [
@@ -755,7 +741,6 @@ public class IssueMetricsApiSpecs
         await SeedIssueWithQualityRunAsync(
             project.Id,
             number: 1,
-            $"issue_quality_additive_{Guid.NewGuid():N}",
             $"wr_quality_additive_{Guid.NewGuid():N}",
             shipTime,
             [
@@ -810,11 +795,9 @@ public class IssueMetricsApiSpecs
         var workStartedAt = new DateTimeOffset(completedAt, TimeSpan.Zero)
             .AddDays(-2)
             .AddHours(-4);
-        var issueId = $"issue_dt_present_{Guid.NewGuid():N}";
         await SeedDeliveredIssueWithCyclesAsync(
             project.Id,
             number: 1,
-            issueId,
             createdAt,
             completedAt,
             [workStartedAt]);
@@ -857,11 +840,9 @@ public class IssueMetricsApiSpecs
         var project = await CreateProjectAsync($"delivery-time-noStart-{Guid.NewGuid():N}");
         var completedAt = DeliveryTimeCompletedAt();
         var createdAt = completedAt.AddDays(-3).AddHours(-6);
-        var issueId = $"issue_dt_nostart_{Guid.NewGuid():N}";
         await SeedDeliveredIssueWithCyclesAsync(
             project.Id,
             number: 1,
-            issueId,
             createdAt,
             completedAt,
             Array.Empty<DateTimeOffset>());
@@ -886,11 +867,9 @@ public class IssueMetricsApiSpecs
         var project = await CreateProjectAsync($"delivery-time-zero-{Guid.NewGuid():N}");
         var zeroMoment = DeliveryTimeCompletedAt();
         var createdAt = zeroMoment.AddDays(-4).AddHours(-6);
-        var issueId = $"issue_dt_zero_{Guid.NewGuid():N}";
         await SeedDeliveredIssueWithCyclesAsync(
             project.Id,
             number: 1,
-            issueId,
             createdAt,
             zeroMoment,
             [new DateTimeOffset(zeroMoment, TimeSpan.Zero)]);
@@ -915,19 +894,15 @@ public class IssueMetricsApiSpecs
         var now = _fixture.TimeProvider.GetUtcNow();
         var insideCompletedAt = new DateTimeOffset(DeliveryTimeCompletedAt(), TimeSpan.Zero);
         var outsideCompletedAt = now.AddDays(-40);
-        var insideIssueId = $"issue_dt_clock_inside_{Guid.NewGuid():N}";
         await SeedDeliveredIssueWithCyclesAsync(
             project.Id,
             number: 1,
-            insideIssueId,
             insideCompletedAt.UtcDateTime.AddDays(-4).AddHours(-6),
             insideCompletedAt.UtcDateTime,
             [insideCompletedAt.AddDays(-2).AddHours(-4)]);
-        var outsideIssueId = $"issue_dt_clock_outside_{Guid.NewGuid():N}";
         await SeedDeliveredIssueWithCyclesAsync(
             project.Id,
             number: 2,
-            outsideIssueId,
             outsideCompletedAt.UtcDateTime.AddDays(-10),
             outsideCompletedAt.UtcDateTime,
             [outsideCompletedAt.AddDays(-9)]);
@@ -969,7 +944,6 @@ public class IssueMetricsApiSpecs
         await SeedDeliveredIssueWithCyclesAsync(
             project.Id,
             number: 1,
-            $"issue_dt_both_current_{Guid.NewGuid():N}",
             currentCompletedAt.UtcDateTime.AddDays(-4).AddHours(-6),
             currentCompletedAt.UtcDateTime,
             [currentWorkStart]);
@@ -979,7 +953,6 @@ public class IssueMetricsApiSpecs
         await SeedDeliveredIssueWithCyclesAsync(
             project.Id,
             number: 2,
-            $"issue_dt_both_previous_{Guid.NewGuid():N}",
             previousCompletedAt.UtcDateTime.AddDays(-10),
             previousCompletedAt.UtcDateTime,
             [previousWorkStart]);
@@ -1012,7 +985,6 @@ public class IssueMetricsApiSpecs
         await SeedDeliveredIssueWithCyclesAsync(
             project.Id,
             number: 1,
-            $"issue_dt_prev_empty_{Guid.NewGuid():N}",
             completedAt.AddDays(-4).AddHours(-6),
             completedAt,
             [new DateTimeOffset(completedAt, TimeSpan.Zero).AddDays(-2).AddHours(-4)]);
@@ -1043,7 +1015,6 @@ public class IssueMetricsApiSpecs
         await SeedDeliveredIssueWithCyclesAsync(
             project.Id,
             number: 1,
-            $"issue_dt_curr_empty_outside_{Guid.NewGuid():N}",
             outsideCompletedAt.UtcDateTime.AddDays(-10),
             outsideCompletedAt.UtcDateTime,
             [outsideCompletedAt.AddDays(-3)]);
@@ -1078,7 +1049,6 @@ public class IssueMetricsApiSpecs
         await SeedDeliveredIssueWithCyclesAsync(
             project.Id,
             number: 1,
-            $"issue_dt_add_first_{Guid.NewGuid():N}",
             firstCompletedAt.AddDays(-2).AddHours(-6),
             firstCompletedAt,
             [firstWorkStart]);
@@ -1089,7 +1059,6 @@ public class IssueMetricsApiSpecs
         await SeedDeliveredIssueWithCyclesAsync(
             project.Id,
             number: 2,
-            $"issue_dt_add_second_{Guid.NewGuid():N}",
             secondCompletedAt.AddDays(-5),
             secondCompletedAt,
             [secondWorkStart]);
@@ -1118,7 +1087,6 @@ public class IssueMetricsApiSpecs
         var project = await CreateProjectAsync($"stage-duration-present-{Guid.NewGuid():N}");
         var now = _fixture.TimeProvider.GetUtcNow();
         var shipTime = now.AddDays(-2);
-        var issueId = $"issue_sd_present_{Guid.NewGuid():N}";
         var workflowRunId = $"wr_sd_present_{Guid.NewGuid():N}";
         var createdAt = shipTime.AddHours(-10).UtcDateTime;
         var completedAt = shipTime.UtcDateTime;
@@ -1126,7 +1094,6 @@ public class IssueMetricsApiSpecs
         await SeedDeliveredIssueWithStageRunAsync(
             project.Id,
             number: 1,
-            issueId,
             workflowRunId,
             createdAt,
             completedAt,
@@ -1177,14 +1144,12 @@ public class IssueMetricsApiSpecs
         var project = await CreateProjectAsync($"stage-duration-event-run-{Guid.NewGuid():N}");
         var now = _fixture.TimeProvider.GetUtcNow();
         var shipTime = now.AddDays(-2);
-        var issueId = $"issue_sd_event_run_{Guid.NewGuid():N}";
         var workflowRunId = $"wr_sd_event_run_{Guid.NewGuid():N}";
         var staleRunId = $"wr_sd_event_run_stale_{Guid.NewGuid():N}";
 
         await SeedDeliveredIssueWithStageRunAsync(
             project.Id,
             number: 1,
-            issueId,
             workflowRunId,
             shipTime.AddHours(-6).UtcDateTime,
             shipTime.UtcDateTime,
@@ -1233,12 +1198,10 @@ public class IssueMetricsApiSpecs
         var project = await CreateProjectAsync($"stage-duration-clock-{Guid.NewGuid():N}");
         var now = _fixture.TimeProvider.GetUtcNow();
 
-        var insideIssueId = $"issue_sd_clock_inside_{Guid.NewGuid():N}";
         var insideRunId = $"wr_sd_clock_inside_{Guid.NewGuid():N}";
         await SeedDeliveredIssueWithStageRunAsync(
             project.Id,
             number: 1,
-            insideIssueId,
             insideRunId,
             now.AddDays(-3).UtcDateTime,
             now.AddDays(-1).UtcDateTime,
@@ -1246,12 +1209,10 @@ public class IssueMetricsApiSpecs
             [("plan", now.AddDays(-1).AddHours(-2), now.AddDays(-1))],
             approvalWait: TimeSpan.Zero);
 
-        var outsideIssueId = $"issue_sd_clock_outside_{Guid.NewGuid():N}";
         var outsideRunId = $"wr_sd_clock_outside_{Guid.NewGuid():N}";
         await SeedDeliveredIssueWithStageRunAsync(
             project.Id,
             number: 2,
-            outsideIssueId,
             outsideRunId,
             now.AddDays(-100).UtcDateTime,
             now.AddDays(-60).UtcDateTime,
@@ -1603,11 +1564,11 @@ public class IssueMetricsApiSpecs
         return await ReadDataAsync<IssueDto>(response);
     }
 
-    private async Task SeedEventAsync(string issueId, string type, DateTimeOffset time)
+    private async Task SeedEventAsync(string projectId, int issueNumber, string type, DateTimeOffset time)
     {
         await using var scope = _fixture.Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-        var source = IssueMetricsQuerier.IssueSourcePrefix + issueId;
+        var source = IssueEventPersistence.IssueSource(projectId, issueNumber);
         var dbMax = await db.IssueEvents
             .AsNoTracking()
             .Where(e => e.Source == source)
@@ -1622,7 +1583,7 @@ public class IssueMetricsApiSpecs
             Type = type,
             Time = time,
             SpecVersion = "1.0",
-            Subject = "1",
+            Subject = issueNumber.ToString(),
             DataContentType = "application/json",
             Data = JsonDocument.Parse("null").RootElement,
             ExtensionsJson = "{}",
@@ -1630,18 +1591,17 @@ public class IssueMetricsApiSpecs
         await db.SaveChangesAsync();
     }
 
-    private async Task UpdateIssueUpdatedAtAsync(string issueId, DateTimeOffset updatedAt)
+    private async Task UpdateIssueUpdatedAtAsync(string projectId, int issueNumber, DateTimeOffset updatedAt)
     {
         await using var scope = _fixture.Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
         var issue = await db.Issues.AsNoTracking()
-            .FirstOrDefaultAsync(r => r.IssueId == issueId)
-            ?? throw new InvalidOperationException($"Issue {issueId} not found");
+            .FirstOrDefaultAsync(r => r.ProjectId == projectId && r.Number == issueNumber)
+            ?? throw new InvalidOperationException($"Issue {projectId}/{issueNumber} not found");
         var state = IssueStore.Deserialize(issue.State)
-            ?? throw new InvalidOperationException($"Issue {issueId} state could not be deserialized");
+            ?? throw new InvalidOperationException($"Issue {projectId}/{issueNumber} state could not be deserialized");
         var updated = new DomainIssue
         {
-            Id = state.Id,
             ProjectId = state.ProjectId,
             Number = state.Number,
             Title = state.Title,
@@ -1665,7 +1625,6 @@ public class IssueMetricsApiSpecs
     private async Task SeedIssueWithCompletedApprovalAsync(
         string projectId,
         int number,
-        string issueId,
         string workflowRunId,
         DateTimeOffset requestedAt,
         TimeSpan wait,
@@ -1676,7 +1635,6 @@ public class IssueMetricsApiSpecs
 
         var issue = new DomainIssue
         {
-            Id = issueId,
             ProjectId = projectId,
             Number = number,
             Title = "Approval metric issue",
@@ -1687,7 +1645,8 @@ public class IssueMetricsApiSpecs
         };
         db.Issues.Add(new IssueRow
         {
-            IssueId = issue.Id,
+            ProjectId = projectId,
+            Number = number,
             State = IssueStore.Serialize(issue),
         });
         await db.SaveChangesAsync();
@@ -1735,7 +1694,6 @@ public class IssueMetricsApiSpecs
     private async Task SeedIssueWithCompletedApprovalsAsync(
         string projectId,
         int number,
-        string issueId,
         string workflowRunId,
         DateTimeOffset requestedAt,
         TimeSpan planWait,
@@ -1746,7 +1704,6 @@ public class IssueMetricsApiSpecs
 
         var issue = new DomainIssue
         {
-            Id = issueId,
             ProjectId = projectId,
             Number = number,
             Title = "Approval metric issue",
@@ -1757,7 +1714,8 @@ public class IssueMetricsApiSpecs
         };
         db.Issues.Add(new IssueRow
         {
-            IssueId = issue.Id,
+            ProjectId = projectId,
+            Number = number,
             State = IssueStore.Serialize(issue),
         });
         await db.SaveChangesAsync();
@@ -1827,7 +1785,6 @@ public class IssueMetricsApiSpecs
     private async Task SeedIssueWithQualityRunAsync(
         string projectId,
         int number,
-        string issueId,
         string workflowRunId,
         DateTimeOffset shipTime,
         (string Stage, (string Name, string Title, int ReworkCount)[] Checks)[] stages)
@@ -1837,7 +1794,6 @@ public class IssueMetricsApiSpecs
 
         var issue = new DomainIssue
         {
-            Id = issueId,
             ProjectId = projectId,
             Number = number,
             Title = "Quality metric issue",
@@ -1848,12 +1804,13 @@ public class IssueMetricsApiSpecs
         };
         db.Issues.Add(new IssueRow
         {
-            IssueId = issue.Id,
+            ProjectId = projectId,
+            Number = number,
             State = IssueStore.Serialize(issue),
         });
         await db.SaveChangesAsync();
 
-        var source = IssueMetricsQuerier.IssueSourcePrefix + issueId;
+        var source = IssueEventPersistence.IssueSource(projectId, number);
         var dbMax = await db.IssueEvents
             .AsNoTracking()
             .Where(e => e.Source == source)
@@ -1919,7 +1876,6 @@ public class IssueMetricsApiSpecs
     private async Task SeedDeliveredIssueWithCyclesAsync(
         string projectId,
         int number,
-        string issueId,
         DateTime createdAt,
         DateTime completedAt,
         IReadOnlyList<DateTimeOffset> workStartTimes)
@@ -1928,7 +1884,6 @@ public class IssueMetricsApiSpecs
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
         var issue = new DomainIssue
         {
-            Id = issueId,
             ProjectId = projectId,
             Number = number,
             Title = "Delivery time metric issue",
@@ -1939,12 +1894,13 @@ public class IssueMetricsApiSpecs
         };
         db.Issues.Add(new IssueRow
         {
-            IssueId = issue.Id,
+            ProjectId = projectId,
+            Number = number,
             State = IssueStore.Serialize(issue),
         });
         await db.SaveChangesAsync();
 
-        var source = IssueMetricsQuerier.IssueSourcePrefix + issueId;
+        var source = IssueEventPersistence.IssueSource(projectId, number);
         var dbMax = await db.IssueEvents
             .AsNoTracking()
             .Where(e => e.Source == source)
@@ -1973,7 +1929,6 @@ public class IssueMetricsApiSpecs
     private async Task SeedDeliveredIssueWithStageRunAsync(
         string projectId,
         int number,
-        string issueId,
         string workflowRunId,
         DateTime createdAt,
         DateTime completedAt,
@@ -1986,7 +1941,6 @@ public class IssueMetricsApiSpecs
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
         var issue = new DomainIssue
         {
-            Id = issueId,
             ProjectId = projectId,
             Number = number,
             Title = "Stage duration metric issue",
@@ -1998,7 +1952,8 @@ public class IssueMetricsApiSpecs
         };
         db.Issues.Add(new IssueRow
         {
-            IssueId = issue.Id,
+            ProjectId = projectId,
+            Number = number,
             State = IssueStore.Serialize(issue),
         });
         await db.SaveChangesAsync();
@@ -2006,7 +1961,7 @@ public class IssueMetricsApiSpecs
         // IssueWorkStarted event anchoring the cycle time. The earliest
         // stage's StageStarted timestamp is the natural candidate.
         var firstStageStart = stageSpans[0].StartedAt;
-        var source = IssueMetricsQuerier.IssueSourcePrefix + issueId;
+        var source = IssueEventPersistence.IssueSource(projectId, number);
         var dbMax = await db.IssueEvents.AsNoTracking()
             .Where(e => e.Source == source)
             .Select(e => (long?)e.Id)
@@ -2126,7 +2081,7 @@ public class IssueMetricsApiSpecs
 
     private sealed record ApiEnvelope<T>(bool Success, T? Data, string? Error = null, string? Code = null, object? Details = null);
     private sealed record ProjectDto(string Id, string Name);
-    private sealed record IssueDto(string Id, int Number, string Title);
+    private sealed record IssueDto(int Number, string Title);
 
     private sealed record CompletionMetricsBucketDto(string Boundary, int Completed, int Failed);
     private sealed record CompletionMetricsWindowDto(string From, string To);

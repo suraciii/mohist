@@ -8,7 +8,6 @@ import type { EpicDetail } from '../../../entities/epic'
 import { renderPage } from './_epicDetailPageTestUtils'
 
 const epic = {
-  id: 'epic-12345678',
   number: 7,
   title: 'Fixture epic',
   description: 'Fixture description',
@@ -21,13 +20,13 @@ const epic = {
     totalIssueCount: 2,
     blockedIssues: [],
     activeIssues: [],
-    nextIssue: { id: 'issue-fixture-2', number: 2, title: 'Fixture backlog issue' },
+    nextIssue: { number: 2, title: 'Fixture backlog issue' },
     readyToMarkDone: false,
   },
   linkedIssues: [
-    { id: 'issue-fixture-1', number: 1, title: 'Fixture done issue', status: 'done', stage: 'done', health: 'done', priority: 'p2', canStart: false, prerequisiteNumbers: [], externalPrerequisites: [] },
+    { number: 1, title: 'Fixture done issue', status: 'done', stage: 'done', health: 'done', priority: 'p2', canStart: false, prerequisiteNumbers: [], externalPrerequisites: [] },
     // backlog, startable, and startBlocker is OMITTED (the regression trigger)
-    { id: 'issue-fixture-2', number: 2, title: 'Fixture backlog issue', status: 'backlog', stage: '', health: 'active', priority: 'p2', canStart: true, prerequisiteNumbers: [], externalPrerequisites: [] },
+    { number: 2, title: 'Fixture backlog issue', status: 'backlog', stage: '', health: 'active', priority: 'p2', canStart: true, prerequisiteNumbers: [], externalPrerequisites: [] },
   ],
 } as unknown as EpicDetail
 

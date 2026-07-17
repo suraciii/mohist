@@ -9,7 +9,6 @@ const project = {
 }
 
 const epic = {
-  id: 'epic-dialog-mobile',
   number: 201,
   title: 'Epic edit dialog with a title that remains readable on narrow screens',
   description: Array.from(
@@ -25,7 +24,7 @@ const epic = {
     totalIssueCount: 1,
     blockedIssues: [],
     activeIssues: [],
-    nextIssue: { id: 'issue-201', number: 201, title: 'Ready issue' },
+      nextIssue: { number: 201, title: 'Ready issue' },
     nextIssueReason: null,
     readyToMarkDone: false,
   },
@@ -55,10 +54,10 @@ async function mockEpicDialogApi(page: Page) {
     if (method === 'GET' && path === `/projects/${project.id}/epics`) {
       return route.fulfill({ json: apiResponse([epic]) })
     }
-    if (method === 'GET' && path === `/projects/${project.id}/epics/${epic.id}`) {
+    if (method === 'GET' && path === `/projects/${project.id}/epics/${epic.number}`) {
       return route.fulfill({ json: apiResponse(epic) })
     }
-    if (method === 'GET' && path === `/projects/${project.id}/epics/${epic.id}/events`) {
+    if (method === 'GET' && path === `/projects/${project.id}/epics/${epic.number}/events`) {
       return route.fulfill({ json: apiResponse([]) })
     }
 
@@ -121,7 +120,7 @@ test.describe('Epic dialogs mobile overflow', () => {
       await page.getByTestId('epic-create-cancel').click()
       await expect(page.getByTestId('epic-create-dialog')).toBeHidden()
 
-      await page.goto(`/${project.name}/epics/${epic.id}`)
+      await page.goto(`/${project.name}/epics/${epic.number}`)
       await expect(page.getByRole('heading', { name: epic.title })).toBeVisible()
       await page.getByTestId('edit-epic-button').click()
       await expect(page.getByTestId('edit-epic-dialog')).toBeVisible()

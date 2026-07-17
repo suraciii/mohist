@@ -78,7 +78,6 @@ describe('reverse-dns-outcome: decideReverseDnsOutcome (no-match fallthrough)', 
 
   it('returns { handled: false } for IssueCompleted that is neither rebase nor merge', () => {
     const outcome = decideReverseDnsOutcome(REVERSE_DNS_EVENT_TYPES.IssueCompleted, {
-      issueId: 'iss-fall',
       issueNumber: 5,
       outcome: 'something_else',
     })
@@ -97,7 +96,6 @@ describe('reverse-dns-outcome: decideReverseDnsOutcome (no-match fallthrough)', 
 describe('reverse-dns-outcome: decideReverseDnsOutcome (rebase-completed arm)', () => {
   it('returns handled=true with rebaseConflict=null (clear) and rebase_completed event for IssueCompleted + rebase payload', () => {
     const outcome = decideReverseDnsOutcome(REVERSE_DNS_EVENT_TYPES.IssueCompleted, {
-      issueId: 'iss-rebase',
       issueNumber: 7,
       outcome: 'rebase_completed',
       rebased: true,
@@ -147,7 +145,6 @@ describe('reverse-dns-outcome: decideReverseDnsOutcome (rebase-completed arm)', 
 describe('reverse-dns-outcome: decideReverseDnsOutcome (merge-success arm)', () => {
   it('returns handled=true with toast.success message and ["issues"] invalidation for IssueCompleted + merge payload', () => {
     const outcome = decideReverseDnsOutcome(REVERSE_DNS_EVENT_TYPES.IssueCompleted, {
-      issueId: 'iss-merge',
       issueNumber: 13,
       outcome: 'merge_completed',
     })
@@ -175,7 +172,6 @@ describe('reverse-dns-outcome: decideReverseDnsOutcome (merge-success arm)', () 
 describe('reverse-dns-outcome: decideReverseDnsOutcome (rebase-conflict arm)', () => {
   it('returns handled=true with state, rebase_conflict event, error toast for WorkflowRunFailed + rebase payload', () => {
     const outcome = decideReverseDnsOutcome(REVERSE_DNS_EVENT_TYPES.WorkflowRunFailed, {
-      issueId: 'iss-conflict',
       issueNumber: 21,
       outcome: 'rebase_conflict',
       conflicts: ['src/a.ts', 'src/b.ts'],
@@ -247,7 +243,6 @@ describe('reverse-dns-outcome: decideReverseDnsOutcome (rebase-conflict arm)', (
 describe('reverse-dns-outcome: decideReverseDnsOutcome (merge-failure arm)', () => {
   it('returns handled=true with toast.error message for WorkflowRunFailed + merge payload', () => {
     const outcome = decideReverseDnsOutcome(REVERSE_DNS_EVENT_TYPES.WorkflowRunFailed, {
-      issueId: 'iss-mf',
       issueNumber: 99,
       outcome: 'merge_failed',
     })

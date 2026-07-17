@@ -284,7 +284,6 @@ public class AgentSessionDtoMapperCrossConsumerIdentitySpecs
     {
         var issue = new Mohist.Server.Issue.Domain.Issue
         {
-            Id = $"issue_{projectId}_{number}",
             ProjectId = projectId,
             Number = number,
             Title = title,
@@ -295,7 +294,7 @@ public class AgentSessionDtoMapperCrossConsumerIdentitySpecs
         };
 
         await using var db = await dbFactory.CreateDbContextAsync();
-        db.Issues.Add(new IssueRow { IssueId = issue.Id, State = IssueStore.Serialize(issue) });
+        db.Issues.Add(new IssueRow { ProjectId = projectId, Number = number, State = IssueStore.Serialize(issue) });
         await db.SaveChangesAsync();
     }
 

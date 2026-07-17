@@ -39,49 +39,49 @@ public class EpicProgressTests
     [Fact]
     public void IsCompleted_OnDoneStatus_ReturnsTrue()
     {
-        var dto = new LinkedIssueDto(Id: "i", Number: 1, Title: "t", Status: "done", Stage: "", Health: "active", Priority: "p2");
+        var dto = new LinkedIssueDto(Number: 1, Title: "t", Status: "done", Stage: "", Health: "active", Priority: "p2");
         Assert.True(EpicProgress.IsCompleted(dto));
     }
 
     [Fact]
     public void IsCompleted_OnCompletedStatus_ReturnsTrue()
     {
-        var dto = new LinkedIssueDto(Id: "i", Number: 1, Title: "t", Status: "completed", Stage: "", Health: "blocked", Priority: "p2");
+        var dto = new LinkedIssueDto(Number: 1, Title: "t", Status: "completed", Stage: "", Health: "blocked", Priority: "p2");
         Assert.True(EpicProgress.IsCompleted(dto));
     }
 
     [Fact]
     public void IsCompleted_OnActiveStatus_ReturnsFalse()
     {
-        var dto = new LinkedIssueDto(Id: "i", Number: 1, Title: "t", Status: "active", Stage: "", Health: "active", Priority: "p2");
+        var dto = new LinkedIssueDto(Number: 1, Title: "t", Status: "active", Stage: "", Health: "active", Priority: "p2");
         Assert.False(EpicProgress.IsCompleted(dto));
     }
 
     [Fact]
     public void IsTerminal_OnLinkedIssueDone_ReturnsTrue()
     {
-        var dto = new LinkedIssueDto(Id: "i", Number: 1, Title: "t", Status: "done", Stage: "", Health: "active", Priority: "p2");
+        var dto = new LinkedIssueDto(Number: 1, Title: "t", Status: "done", Stage: "", Health: "active", Priority: "p2");
         Assert.True(EpicProgress.IsTerminal(dto));
     }
 
     [Fact]
     public void IsTerminal_OnLinkedIssueCancelled_ReturnsTrue()
     {
-        var dto = new LinkedIssueDto(Id: "i", Number: 1, Title: "t", Status: "cancelled", Stage: "", Health: "cancelled", Priority: "p2");
+        var dto = new LinkedIssueDto(Number: 1, Title: "t", Status: "cancelled", Stage: "", Health: "cancelled", Priority: "p2");
         Assert.True(EpicProgress.IsTerminal(dto));
     }
 
     [Fact]
     public void IsTerminal_OnLinkedIssueInProgress_ReturnsFalse()
     {
-        var dto = new LinkedIssueDto(Id: "i", Number: 1, Title: "t", Status: "in_progress", Stage: "", Health: "active", Priority: "p2");
+        var dto = new LinkedIssueDto(Number: 1, Title: "t", Status: "in_progress", Stage: "", Health: "active", Priority: "p2");
         Assert.False(EpicProgress.IsTerminal(dto));
     }
 
     [Fact]
     public void IsTerminal_OnLinkedIssueBacklog_ReturnsFalse()
     {
-        var dto = new LinkedIssueDto(Id: "i", Number: 1, Title: "t", Status: "backlog", Stage: "", Health: "queued", Priority: "p2");
+        var dto = new LinkedIssueDto(Number: 1, Title: "t", Status: "backlog", Stage: "", Health: "queued", Priority: "p2");
         Assert.False(EpicProgress.IsTerminal(dto));
     }
 
@@ -90,10 +90,10 @@ public class EpicProgressTests
     {
         var samples = new[]
         {
-            new LinkedIssueDto("i1", 1, "Done", "done", "", "active", "p2"),
-            new LinkedIssueDto("i2", 2, "Cancelled", "cancelled", "", "cancelled", "p2"),
-            new LinkedIssueDto("i3", 3, "Backlog", "backlog", "", "queued", "p2"),
-            new LinkedIssueDto("i4", 4, "InProgress", "in_progress", "", "active", "p2"),
+            new LinkedIssueDto(1, "Done", "done", "", "active", "p2"),
+            new LinkedIssueDto(2, "Cancelled", "cancelled", "", "cancelled", "p2"),
+            new LinkedIssueDto(3, "Backlog", "backlog", "", "queued", "p2"),
+            new LinkedIssueDto(4, "InProgress", "in_progress", "", "active", "p2"),
         };
         foreach (var dto in samples)
             Assert.Equal(!EpicProgress.IsTerminal(dto), EpicProgress.IsOpen(dto));
@@ -104,8 +104,8 @@ public class EpicProgressTests
     {
         var linked = new[]
         {
-            new LinkedIssueDto("i1", 1, "Done", "done", "", "active", "p2"),
-            new LinkedIssueDto("i2", 2, "Cancelled", "cancelled", "", "cancelled", "p2"),
+            new LinkedIssueDto(1, "Done", "done", "", "active", "p2"),
+            new LinkedIssueDto(2, "Cancelled", "cancelled", "", "cancelled", "p2"),
         };
         Assert.True(EpicProgress.IsReadyToComplete(linked));
     }
@@ -121,8 +121,8 @@ public class EpicProgressTests
     {
         var linked = new[]
         {
-            new LinkedIssueDto("i1", 1, "Done", "done", "", "active", "p2"),
-            new LinkedIssueDto("i2", 2, "Backlog", "backlog", "", "queued", "p2"),
+            new LinkedIssueDto(1, "Done", "done", "", "active", "p2"),
+            new LinkedIssueDto(2, "Backlog", "backlog", "", "queued", "p2"),
         };
         Assert.False(EpicProgress.IsReadyToComplete(linked));
     }
@@ -130,7 +130,7 @@ public class EpicProgressTests
     [Fact]
     public void IsCompleted_IgnoresHealth()
     {
-        var dto = new LinkedIssueDto(Id: "i", Number: 1, Title: "t", Status: "done", Stage: "", Health: "blocked", Priority: "p2");
+        var dto = new LinkedIssueDto(Number: 1, Title: "t", Status: "done", Stage: "", Health: "blocked", Priority: "p2");
         Assert.True(EpicProgress.IsCompleted(dto));
     }
 
@@ -149,8 +149,8 @@ public class EpicProgressTests
     {
         var linked = new[]
         {
-            new LinkedIssueDto("i1", 1, "A", "done", "", "active", "p2"),
-            new LinkedIssueDto("i2", 2, "B", "done", "", "active", "p2"),
+            new LinkedIssueDto(1, "A", "done", "", "active", "p2"),
+            new LinkedIssueDto(2, "B", "done", "", "active", "p2"),
         };
         var progress = EpicProgress.Build(linked);
         Assert.Equal(2, progress.DeliveredCount);
@@ -163,8 +163,8 @@ public class EpicProgressTests
     {
         var linked = new[]
         {
-            new LinkedIssueDto("i1", 1, "A", "done", "", "active", "p2"),
-            new LinkedIssueDto("i2", 2, "B", "active", "", "active", "p2"),
+            new LinkedIssueDto(1, "A", "done", "", "active", "p2"),
+            new LinkedIssueDto(2, "B", "active", "", "active", "p2"),
         };
         var progress = EpicProgress.Build(linked);
         Assert.Equal(1, progress.DeliveredCount);

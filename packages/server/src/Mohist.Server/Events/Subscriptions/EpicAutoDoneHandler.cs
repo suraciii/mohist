@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 using Mohist.Server.Epic.Grains;
 using Mohist.Server.Epic.Services;
 using Mohist.Server.Infrastructure.Events;
+using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Domain.Events;
 
 namespace Mohist.Server.Events.Subscriptions;
@@ -191,61 +192,6 @@ public sealed class EpicPrerequisiteRemovedHandler : ICloudEventHandler<IssuePre
 }
 
 /// <summary>
-/// Subscribes to <c>com.mohist.epic.issue-linked</c> and triggers
-/// <see cref="IEpicGrain.RecomputeProgressAsync"/> on the epic that
-/// linked the issue. This is the durable convergence path for link
-/// operations: <c>LinkIssueAsync</c> commits the membership row then
-/// calls recompute inline, but a crash between commit and recompute
-/// would leave a linked-but-unadvanced epic. The event is durable
-/// (persisted to the event store before the grain returns), so the
-/// dispatcher redelivers it until the handler succeeds — closing the
-/// gap left by the removed poll-driven sweep.
-/// </summary>
-[Subscription(Type = EventCatalog.ReverseDns.EpicIssueLinked)]
-public sealed class EpicIssueLinkedHandler : ICloudEventHandler<Epic.Domain.Events.EpicIssueLinked>
-{
-    private readonly EpicEventRecomputeDispatcher _dispatcher;
-
-    [ActivatorUtilitiesConstructor]
-    public EpicIssueLinkedHandler(
-        IGrainFactory grains,
-        ILogger<EpicIssueLinkedHandler> log)
-    {
-        _dispatcher = new EpicEventRecomputeDispatcher(grains, log);
-    }
-
-    public bool Filter(CloudEvent<Epic.Domain.Events.EpicIssueLinked> evt) => true;
-
-    public Task HandleAsync(CloudEvent<Epic.Domain.Events.EpicIssueLinked> evt, CancellationToken ct) =>
-        _dispatcher.DispatchAsync(evt.Id, evt.Extensions, evtType: "issue-linked", ct);
-}
-
-/// <summary>
-/// Subscribes to <c>com.mohist.epic.issue-unlinked</c> and recomputes the
-/// owning epic after membership removal. The unlink command performs the
-/// same recompute inline; this durable path converges after a crash between
-/// the committed unlink and that inline call.
-/// </summary>
-[Subscription(Type = EventCatalog.ReverseDns.EpicIssueUnlinked)]
-public sealed class EpicIssueUnlinkedHandler : ICloudEventHandler<Epic.Domain.Events.EpicIssueUnlinked>
-{
-    private readonly EpicEventRecomputeDispatcher _dispatcher;
-
-    [ActivatorUtilitiesConstructor]
-    public EpicIssueUnlinkedHandler(
-        IGrainFactory grains,
-        ILogger<EpicIssueUnlinkedHandler> log)
-    {
-        _dispatcher = new EpicEventRecomputeDispatcher(grains, log);
-    }
-
-    public bool Filter(CloudEvent<Epic.Domain.Events.EpicIssueUnlinked> evt) => true;
-
-    public Task HandleAsync(CloudEvent<Epic.Domain.Events.EpicIssueUnlinked> evt, CancellationToken ct) =>
-        _dispatcher.DispatchAsync(evt.Id, evt.Extensions, evtType: "issue-unlinked", ct);
-}
-
-/// <summary>
 /// Subscribes to <c>com.mohist.epic.status-changed</c> transitions into
 /// <c>running</c> and re-drives <see cref="IEpicGrain.RecomputeProgressAsync"/>.
 /// This is the durable recovery intent for a command-path start: if a crash
@@ -309,8 +255,8 @@ public sealed class EpicStartRetryHandler : ICloudEventHandler<Epic.Domain.Event
 /// wiring. <see cref="EpicAutoDoneHandler"/> (completed),
 /// <see cref="EpicCancelledHandler"/> (cancelled), and
 /// <see cref="EpicDraftChangedHandler"/> (undraft) funnel here so the
-/// CloudEvent <c>projectid</c>/<c>issueid</c> extension parsing, epic
-/// lookup, and grain dispatch stay in one place. When
+/// CloudEvent <c>projectid</c>/<c>issue</c> extension parsing, epic lookup,
+/// and grain dispatch stay in one place. When
 /// <paramref name="includePrerequisiteLookup"/> is set, also reverse-looks-up
 /// epics whose members depend on the event's issue as an external
 /// prerequisite — the owning-epic lookup misses those because the
@@ -350,53 +296,46 @@ internal sealed class EpicProgressRecomputeDispatcher
         bool includePrerequisiteLookup,
         CancellationToken ct)
     {
-        if (!extensions.TryGetValue("projectid", out var projectId) || string.IsNullOrWhiteSpace(projectId))
+        if (!CloudEventLineage.TryReadIssueContext(extensions, out var context))
         {
             _log.LogDebug(
-                "{EvtType} event missing projectid extension; skipping (event {EventId})",
-                evtType, eventId);
-            return;
-        }
-        if (!extensions.TryGetValue("issueid", out var issueId) || string.IsNullOrWhiteSpace(issueId))
-        {
-            _log.LogDebug(
-                "{EvtType} event missing issueid extension; skipping (event {EventId})",
+                "{EvtType} event missing canonical Issue context; skipping (event {EventId})",
                 evtType, eventId);
             return;
         }
 
-        var epicIds = new HashSet<string>(StringComparer.Ordinal);
+        var epicNumbers = new HashSet<int>();
 
         if (_epicQuerier is not null)
         {
-            var direct = await _epicQuerier.GetEpicIdForIssueAsync(projectId, issueId).ConfigureAwait(false);
-            if (direct is not null) epicIds.Add(direct);
-            if (includePrerequisiteLookup && int.TryParse(extensions.GetValueOrDefault("issueno"), out var issueNo))
+            var direct = await _epicQuerier.GetEpicNumberForIssueAsync(context.ProjectId, context.IssueNumber).ConfigureAwait(false);
+            if (direct is not null) epicNumbers.Add(direct.Value);
+            if (includePrerequisiteLookup)
             {
                 var dependent = await _epicQuerier
-                    .GetEpicIdsDependentOnPrerequisiteAsync(projectId, issueNo)
+                    .GetEpicNumbersDependentOnPrerequisiteAsync(context.ProjectId, context.IssueNumber)
                     .ConfigureAwait(false);
-                foreach (var id in dependent) epicIds.Add(id);
+                foreach (var number in dependent) epicNumbers.Add(number);
             }
         }
         else
         {
             await using var scope = _scopes!.CreateAsyncScope();
             var epicQuerier = scope.ServiceProvider.GetRequiredService<EpicQuerier>();
-            var direct = await epicQuerier.GetEpicIdForIssueAsync(projectId, issueId).ConfigureAwait(false);
-            if (direct is not null) epicIds.Add(direct);
-            if (includePrerequisiteLookup && int.TryParse(extensions.GetValueOrDefault("issueno"), out var issueNo))
+            var direct = await epicQuerier.GetEpicNumberForIssueAsync(context.ProjectId, context.IssueNumber).ConfigureAwait(false);
+            if (direct is not null) epicNumbers.Add(direct.Value);
+            if (includePrerequisiteLookup)
             {
                 var dependent = await epicQuerier
-                    .GetEpicIdsDependentOnPrerequisiteAsync(projectId, issueNo)
+                    .GetEpicNumbersDependentOnPrerequisiteAsync(context.ProjectId, context.IssueNumber)
                     .ConfigureAwait(false);
-                foreach (var id in dependent) epicIds.Add(id);
+                foreach (var number in dependent) epicNumbers.Add(number);
             }
         }
 
-        foreach (var epicId in epicIds)
+        foreach (var epicNumber in epicNumbers)
         {
-            var grain = _grains.GetGrain<IEpicGrain>($"{projectId}:{epicId}");
+            var grain = _grains.GetGrain<IEpicGrain>(GrainKey.Epic(new EpicKey(context.ProjectId, epicNumber)));
             await grain.RecomputeProgressAsync().ConfigureAwait(false);
         }
     }
@@ -404,10 +343,10 @@ internal sealed class EpicProgressRecomputeDispatcher
 
 /// <summary>
 /// Dispatch logic for epic-event → EpicGrain recompute-progress wiring.
-/// Epic events carry <c>projectid</c> + <c>epicid</c> on the envelope
+/// Epic events carry <c>projectid</c> + <c>epic</c> on the envelope
 /// (stamped by <c>EpicGrain.PersistEpicEventsAsync</c>), so no reverse
 /// lookup is needed — the epic identity is already known. Used by
-/// <see cref="EpicIssueLinkedHandler"/> and the start-retry handler.
+/// status and start-retry handlers.
 /// </summary>
 internal sealed class EpicEventRecomputeDispatcher
 {
@@ -426,22 +365,15 @@ internal sealed class EpicEventRecomputeDispatcher
         string evtType,
         CancellationToken ct)
     {
-        if (!extensions.TryGetValue("projectid", out var projectId) || string.IsNullOrWhiteSpace(projectId))
+        if (!CloudEventLineage.TryReadEpicContext(extensions, out var context))
         {
             _log.LogDebug(
-                "{EvtType} event missing projectid extension; skipping (event {EventId})",
-                evtType, eventId);
-            return;
-        }
-        if (!extensions.TryGetValue("epicid", out var epicId) || string.IsNullOrWhiteSpace(epicId))
-        {
-            _log.LogDebug(
-                "{EvtType} event missing epicid extension; skipping (event {EventId})",
+                "{EvtType} event missing canonical Epic context; skipping (event {EventId})",
                 evtType, eventId);
             return;
         }
 
-        var grain = _grains.GetGrain<IEpicGrain>($"{projectId}:{epicId}");
+        var grain = _grains.GetGrain<IEpicGrain>(GrainKey.Epic(new EpicKey(context.ProjectId, context.EpicNumber)));
         await grain.RecomputeProgressAsync().ConfigureAwait(false);
     }
 }

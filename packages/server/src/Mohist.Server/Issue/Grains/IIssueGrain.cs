@@ -6,7 +6,7 @@ namespace Mohist.Server.Issue.Grains;
 
 public interface IIssueGrain : IGrainWithStringKey
 {
-    Task<string> CreateAsync(string projectId, int number, string title, string? body, IReadOnlyDictionary<string, string>? labels, string? priority, string? repositoryRef = null, string? issueId = null, string? risk = null, bool isDraft = false, string[]? attachmentIds = null, string? workflowProfileId = null, int[]? prerequisiteNumbers = null);
+    Task<int> CreateAsync(string projectId, int number, string title, string? body, IReadOnlyDictionary<string, string>? labels, string? priority, string? repositoryRef = null, string? risk = null, bool isDraft = false, string[]? attachmentIds = null, string? workflowProfileId = null, int[]? prerequisiteNumbers = null);
     Task<string> StartWorkAsync(WorkflowProjectContext? project = null);
     Task CompleteWorkAsync(string workflowRunId);
     Task CancelAsync();
@@ -21,11 +21,14 @@ public interface IIssueGrain : IGrainWithStringKey
     Task<IssueStartReadiness> GetStartReadinessAsync();
     Task<IssueCommentResult> AddCommentAsync(string body, string[]? attachmentIds = null);
     Task DeactivateForTestAsync();
+
+    Task<bool> AssignEpicAsync(int epicNumber);
+    Task<bool> RemoveEpicAsync(int expectedEpicNumber);
+    Task<bool> TryStartFromEpicAsync(int expectedEpicNumber);
 }
 
 [GenerateSerializer]
 public sealed record IssueWorkflowStatus(
-    string IssueId,
     int IssueNumber,
     string Title,
     string Stage,

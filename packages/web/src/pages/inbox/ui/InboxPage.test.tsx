@@ -15,7 +15,6 @@ function makeItem(overrides: Partial<InboxItem> = {}): InboxItem {
   return {
     itemId: 'inb-1',
     notificationKind: NOTIFICATION_KINDS.WorkflowFailed,
-    issueId: 'issue-42',
     issueNumber: 42,
     issueTitle: 'Snapshot me',
     createdAt: '2026-06-29T00:00:00.000Z',

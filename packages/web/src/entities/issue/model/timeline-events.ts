@@ -1,6 +1,5 @@
 export interface TimelineLiveEvent {
   issueNumber: number | null
-  issueId: string | null
   type: string
   time: string | null
   eventId: string | null

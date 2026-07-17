@@ -18,7 +18,7 @@ function DigestSection({ testId, label, issues, timestampFor }: DigestSectionPro
       </h3>
       <div className="space-y-0.5">
         {issues.map((issue) => (
-          <DigestRow key={issue.id} issue={issue} timestamp={timestampFor(issue)} />
+          <DigestRow key={`${issue.projectId}:${issue.number}`} issue={issue} timestamp={timestampFor(issue)} />
         ))}
       </div>
     </div>

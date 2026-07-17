@@ -2,7 +2,10 @@ namespace Mohist.Server.Infrastructure.Data.Events;
 
 internal static class EpicEventPersistence
 {
-    // CloudEvents 1.0.2 source URI-reference. Format: /{context}/{aggregate}/{id}.
-    public const string SourcePrefix = "/mohist/epics/";
-    public static string EpicSource(string epicId) => $"{SourcePrefix}{epicId}";
+    public static string EpicSource(string projectId, int epicNumber) =>
+        $"/mohist/projects/{projectId}/epics/{epicNumber}";
+
+    public static bool IsEpicSource(string source) =>
+        source.StartsWith("/mohist/projects/", StringComparison.Ordinal)
+        && source.Contains("/epics/", StringComparison.Ordinal);
 }

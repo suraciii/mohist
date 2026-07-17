@@ -94,4 +94,3 @@ export interface WorkflowStageRun {
   completedAt: string | null
   updatedAt?: string
 }
-

@@ -18,7 +18,7 @@ public interface IWorkflowArtifactBindService
         TaskArtifactCapture? declaredArtifacts,
         JsonElement? variables = null,
         string? projectId = null,
-        string? issueId = null,
+        int? issueNumber = null,
         CancellationToken cancellationToken = default);
 }
 
@@ -53,7 +53,7 @@ public sealed class WorkflowArtifactBindService : IWorkflowArtifactBindService
         TaskArtifactCapture? declaredArtifacts,
         JsonElement? variables = null,
         string? projectId = null,
-        string? issueId = null,
+        int? issueNumber = null,
         CancellationToken cancellationToken = default)
     {
         if (artifactUploadIds is null || artifactUploadIds.Length == 0)
@@ -105,7 +105,7 @@ public sealed class WorkflowArtifactBindService : IWorkflowArtifactBindService
                 ContentHash = pending.ContentHash,
                 Size = pending.Size,
                 ProjectId = projectId,
-                IssueId = issueId,
+                IssueNumber = issueNumber,
                 DisplayName = DeriveDisplayName(pending.Path),
             };
 

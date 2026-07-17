@@ -485,7 +485,6 @@ function makeBranchViolationTimeline(): WorkflowTimeline {
 
 function makeBlockedIssue(blockedReason: string | undefined): Issue {
   return {
-    id: 'issue-1',
     number: 1,
     title: 'Split Integrate delivery',
     body: '',

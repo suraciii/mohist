@@ -46,7 +46,6 @@ useMswServer(
 
 function makeIssue(overrides: Partial<Issue> = {}): Issue {
   return {
-    id: `issue-${Math.random().toString(36).slice(2, 8)}`,
     number: 100,
     title: 'Default issue title',
     status: IssueStatus.Backlog,
@@ -65,7 +64,6 @@ function makeIssue(overrides: Partial<Issue> = {}): Issue {
 function makeAgentStatus(overrides: Partial<AgentStatus> = {}): AgentStatus {
   return {
     running: false,
-    issueId: null,
     issueNumber: null,
     activeAgents: [],
     capacity: { active: 0, max: 8 },
@@ -136,10 +134,10 @@ describe('FactoryStatusHeadline rendering', () => {
 
   it('reflects live field values from injected data', async () => {
     mockIssues([
-      makeIssue({ id: 'run-1', status: IssueStatus.InProgress, health: IssueHealth.Active }),
-      makeIssue({ id: 'run-2', status: IssueStatus.InProgress, health: IssueHealth.Active }),
-      makeIssue({ id: 'approve-1', approvalState: { status: 'awaiting', requestedAt: todayIso } }),
-      makeIssue({ id: 'ship-1', status: IssueStatus.Done, health: IssueHealth.Done, completedAt: todayIso, updatedAt: todayIso }),
+      makeIssue({ status: IssueStatus.InProgress, health: IssueHealth.Active }),
+      makeIssue({ status: IssueStatus.InProgress, health: IssueHealth.Active }),
+      makeIssue({ approvalState: { status: 'awaiting', requestedAt: todayIso } }),
+      makeIssue({ status: IssueStatus.Done, health: IssueHealth.Done, completedAt: todayIso, updatedAt: todayIso }),
     ])
     mockAgentStatus(makeAgentStatus({ runnerAvailable: true }))
 
@@ -165,7 +163,7 @@ describe('FactoryStatusHeadline rendering', () => {
   })
 
   it('uses injected props over query data when provided', async () => {
-    mockIssues([makeIssue({ id: 'ignored', status: IssueStatus.InProgress, health: IssueHealth.Active })])
+    mockIssues([makeIssue({ status: IssueStatus.InProgress, health: IssueHealth.Active })])
     mockAgentStatus(makeAgentStatus({ runnerAvailable: false }))
 
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -249,9 +247,9 @@ describe('FactoryStatusHeadline today-cost', () => {
       todayCost: makeTodayCost({ amount: 1.25, currency: 'USD', sampleCount: 3 }),
     })
     mockIssues([
-      makeIssue({ id: 'run-1', status: IssueStatus.InProgress, health: IssueHealth.Active }),
-      makeIssue({ id: 'approve-1', approvalState: { status: 'awaiting', requestedAt: todayIso } }),
-      makeIssue({ id: 'ship-1', status: IssueStatus.Done, health: IssueHealth.Done, completedAt: todayIso, updatedAt: todayIso }),
+      makeIssue({ status: IssueStatus.InProgress, health: IssueHealth.Active }),
+      makeIssue({ approvalState: { status: 'awaiting', requestedAt: todayIso } }),
+      makeIssue({ status: IssueStatus.Done, health: IssueHealth.Done, completedAt: todayIso, updatedAt: todayIso }),
     ])
 
     renderHeadline()

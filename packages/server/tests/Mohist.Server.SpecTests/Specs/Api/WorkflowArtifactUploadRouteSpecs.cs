@@ -6,6 +6,8 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Workflow;
+using Mohist.Server.Infrastructure.Events;
+using Mohist.Server.Events.Grains;
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Issue.Grains;
@@ -339,13 +341,13 @@ public class WorkflowArtifactUploadRouteSpecs
             new { title = "needs upload", isDraft = false });
         var issueJson = await issueResponse.Content.ReadFromJsonAsync<JsonElement>();
         var issueNumber = issueJson.GetProperty("data").GetProperty("number").GetInt32();
-        var issueId = issueJson.GetProperty("data").GetProperty("id").GetString()!;
 
         using (var startResp = await _fixture.Client.PostAsJsonAsync(
             $"/api/projects/{projectId}/issues/{issueNumber}/start", new { }))
         {
             Assert.Equal(HttpStatusCode.OK, startResp.StatusCode);
         }
+        await DispatchEventsAsync();
 
         var runnerId = $"upload-test-{Guid.NewGuid():N}";
         await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new
@@ -355,7 +357,7 @@ public class WorkflowArtifactUploadRouteSpecs
             projectId,
         });
 
-        var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(issueId));
+        var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(projectId, issueNumber)));
         var issueStatus = await issueGrain.GetWorkflowStatusAsync();
         var workflowRunId = issueStatus!.WorkflowRunId!;
         Assert.False(string.IsNullOrEmpty(workflowRunId));
@@ -375,5 +377,10 @@ public class WorkflowArtifactUploadRouteSpecs
         // would break the subsequent upload assertions that require an active
         // task. The runner is short-lived and torn down with the silo.
         return (workflowRunId, work!.WorkId, runnerId);
+    }
+
+    private async Task DispatchEventsAsync()
+    {
+        await _fixture.Grains.GetGrain<IEventDispatcherGrain>(EventDispatcherGrain.Global).DispatchNowAsync();
     }
 }

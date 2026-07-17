@@ -161,12 +161,26 @@ public class EventStoreScopedAppendSpecs : IAsyncLifetime
     }
 
     [Fact]
+    public async Task AppendAsync_CustomMohistType_IsPersistedAtStoreBoundary()
+    {
+        var envelope = BuildEvent(
+            "/mohist/workflow-runs/wr_unregistered",
+            "com.mohist.workflow.unregistered");
+
+        await _store.AppendAsync(envelope);
+
+        await using var verify = new MohistDbContext(_options);
+        var stored = Assert.Single(await verify.WorkflowRunEvents.AsNoTracking().ToListAsync());
+        Assert.Equal(envelope.Type, stored.Type);
+    }
+
+    [Fact]
     public async Task AppendAsync_AgentSessionSource_LandsInAgentSessionEventsTable()
     {
         await using var db = new MohistDbContext(_options);
         var sessionId = "sess_scoped_1";
 
-        await _store.AppendAsync(db, BuildEvent(AgentSessionEventPersistence.AgentSessionSource(sessionId), "com.mohist.agent.session.bound"));
+        await _store.AppendAsync(db, BuildEvent(AgentSessionEventPersistence.AgentSessionSource(sessionId), "test.agent-session.bound"));
 
         Assert.Empty(await db.WorkflowRunEvents.AsNoTracking().ToListAsync());
         Assert.Empty(await db.IssueEvents.AsNoTracking().ToListAsync());
@@ -182,7 +196,7 @@ public class EventStoreScopedAppendSpecs : IAsyncLifetime
         var stored = Assert.Single(await verify.AgentSessionEvents.AsNoTracking()
             .Where(r => r.Source == AgentSessionEventPersistence.AgentSessionSource(sessionId))
             .ToListAsync());
-        Assert.Equal("com.mohist.agent.session.bound", stored.Type);
+        Assert.Equal("test.agent-session.bound", stored.Type);
         Assert.Equal(sessionId, stored.Subject);
     }
 
@@ -192,14 +206,14 @@ public class EventStoreScopedAppendSpecs : IAsyncLifetime
         var sessionId = "sess_scoped_undelivered";
         await _store.AppendAsync(BuildEvent(
             AgentSessionEventPersistence.AgentSessionSource(sessionId),
-            "com.mohist.agent.session.bound"));
+            "test.agent-session.bound"));
 
         var undelivered = await _store.ListUndeliveredAsync();
         var fromSession = Assert.Single(undelivered, r => r.Origin == EventOrigin.AgentSession);
         Assert.Equal(1, fromSession.Id);
         Assert.Equal(AgentSessionEventPersistence.AgentSessionSource(sessionId), fromSession.Source);
         Assert.Equal(sessionId, fromSession.Subject);
-        Assert.Equal("com.mohist.agent.session.bound", fromSession.Type);
+        Assert.Equal("test.agent-session.bound", fromSession.Type);
     }
 
     [Fact]
@@ -208,9 +222,9 @@ public class EventStoreScopedAppendSpecs : IAsyncLifetime
         var events = new[]
         {
             BuildEvent(WorkflowRunEventPersistence.WorkflowRunSource("zeta"), "test.workflow", "evt-workflow-1"),
-            BuildEvent(IssueEventPersistence.IssueSource("alpha"), "test.issue", "evt-issue-1"),
-            BuildEvent(IssueEventPersistence.IssueSource("alpha"), "test.issue", "evt-issue-2"),
-            BuildEvent(EpicEventPersistence.EpicSource("middle"), "test.epic", "evt-epic-1"),
+            BuildEvent(IssueEventPersistence.IssueSource("alpha", 1), "test.issue", "evt-issue-1"),
+            BuildEvent(IssueEventPersistence.IssueSource("alpha", 1), "test.issue", "evt-issue-2"),
+            BuildEvent(EpicEventPersistence.EpicSource("middle", 1), "test.epic", "evt-epic-1"),
             BuildEvent(AgentSessionEventPersistence.AgentSessionSource("beta"), "test.agent", "evt-agent-1"),
         };
         foreach (var evt in events)
@@ -246,7 +260,7 @@ public class EventStoreScopedAppendSpecs : IAsyncLifetime
         var sessionId = "sess_scoped_dispatched";
         await _store.AppendAsync(BuildEvent(
             AgentSessionEventPersistence.AgentSessionSource(sessionId),
-            "com.mohist.agent.session.bound"));
+            "test.agent-session.bound"));
 
         await _store.MarkDispatchedAsync(
             EventOrigin.AgentSession,
@@ -292,7 +306,7 @@ public class EventStoreScopedAppendSpecs : IAsyncLifetime
         var sessionId = "sess_nonscoped_routing";
         await _store.AppendAsync(BuildEvent(
             AgentSessionEventPersistence.AgentSessionSource(sessionId),
-            "com.mohist.agent.session.bound"));
+            "test.agent-session.bound"));
 
         await using var verify = new MohistDbContext(_options);
         Assert.Empty(await verify.WorkflowRunEvents.AsNoTracking().ToListAsync());
@@ -309,7 +323,13 @@ public class EventStoreScopedAppendSpecs : IAsyncLifetime
             type: type,
             time: FixedTime,
             data: JsonDocument.Parse("{}").RootElement,
-            subject: source.Split('/').Last());
+            subject: source.Split('/').Last(),
+            extensions: new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [EventCatalog.Lineage.ProjectId] = "proj_event_store",
+                [EventCatalog.Lineage.WorkflowRunId] = source.Split('/').Last(),
+                [EventCatalog.Lineage.Stage] = "test",
+            });
 
     private sealed class Factory : IDbContextFactory<MohistDbContext>
     {

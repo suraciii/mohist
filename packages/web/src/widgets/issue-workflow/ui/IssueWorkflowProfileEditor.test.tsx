@@ -12,7 +12,6 @@ const refetch = vi.fn()
 const customData = (): IssueWorkflowProfileYamlResponse => ({
   issueNumber: 1,
   projectId: 'test-project',
-  issueKey: 'mohist/test-project#1',
   yaml: 'id: baseline\nstages:\n  - stage: plan\n    tasks: []\n    checks: []\n',
   workflowRunId: null,
   profileId: 'mohist/local',
@@ -313,7 +312,7 @@ describe('IssueWorkflowProfileEditor (custom mode)', () => {
 
     expect(state.deleteMutate).toHaveBeenCalledTimes(1)
     const call = state.deleteMutate.mock.calls[0]
-    expect(call[0]).toEqual({ issueNumber: 1 })
+    expect(call[0]).toEqual({ issueNumber: 1, })
   })
 
   it('surfaces revert errors without clearing the editor draft', async () => {

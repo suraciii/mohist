@@ -15,7 +15,6 @@ import {
 
 function makeIssue(overrides: Partial<Issue> = {}): Issue {
   return {
-    id: `issue-${Math.random().toString(36).slice(2)}`,
     number: 1,
     title: 'Test Issue',
     status: IssueStatus.Backlog,
@@ -34,7 +33,6 @@ function makeIssue(overrides: Partial<Issue> = {}): Issue {
 
 const mockAgentStatus: AgentStatus = {
   running: false,
-  issueId: null,
   issueNumber: null,
   activeAgents: [],
   capacity: { active: 0, max: 2 },

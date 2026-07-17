@@ -38,7 +38,6 @@ const dataHook: WorkflowProfileControlDataHook = () => ({
 
 function makeIssue(overrides: Partial<Issue> = {}): Issue {
   return {
-    id: 'issue-1',
     number: 14,
     title: 'Test Issue',
     body: '',

@@ -70,7 +70,7 @@ public class IssueQuerier : IScopedService
     }
 
     /// <summary>
-    /// Reverse lookup: returns the <c>issueId</c> of the in-progress issue
+    /// Reverse lookup: returns the project-scoped issue reference
     /// bound to <paramref name="workflowRunId"/>, or <c>null</c> when no
     /// in-progress issue is bound. Used by
     /// <c>Events/Subscriptions/IssueWorkflowCompletionHandler</c> to
@@ -89,16 +89,18 @@ public class IssueQuerier : IScopedService
     /// the grain guard.
     /// </para>
     /// </summary>
-    public async Task<string?> GetIssueIdForWorkflowRunAsync(string workflowRunId)
+    public async Task<IssueWorkflowRef?> GetIssueForWorkflowRunAsync(string workflowRunId)
     {
         if (string.IsNullOrWhiteSpace(workflowRunId)) return null;
 
         await using var db = await _dbFactory.CreateDbContextAsync();
         var row = await db.Issues.AsNoTracking()
             .Where(r => r.WorkflowRunId == workflowRunId && r.Status == "inProgress")
-            .Select(r => new { r.IssueId })
+            .Select(r => new { r.ProjectId, r.Number })
             .FirstOrDefaultAsync();
-        return row?.IssueId;
+        return row?.ProjectId is { Length: > 0 } && row.Number is > 0
+            ? new IssueWorkflowRef(row.ProjectId, row.Number.Value)
+            : null;
     }
 
     /// <summary>
@@ -111,8 +113,7 @@ public class IssueQuerier : IScopedService
     /// minimal — number + title only — so the read surface does not
     /// grow into a full <see cref="IssueReadModel"/> companion.
     /// <para>
-    /// Unlike <see cref="GetIssueIdForWorkflowRunAsync"/>, this lookup is
-    /// intentionally status-independent: the detail read model is
+    /// This lookup is intentionally status-independent: the detail read model is
     /// correlation context for scripts and agents, so completed issues with
     /// preserved run history still need to resolve to their issue handle.
     /// </para>
@@ -124,10 +125,14 @@ public class IssueQuerier : IScopedService
         await using var db = await _dbFactory.CreateDbContextAsync();
         var row = await db.Issues.AsNoTracking()
             .Where(r => r.WorkflowRunId == workflowRunId)
-            .Select(r => new { r.Number, r.Title })
+            .Select(r => new { r.ProjectId, r.Number, r.Title })
             .FirstOrDefaultAsync();
-        if (row is null || row.Number is null || row.Title is null) return null;
-        return new WorkflowRunIssueRef(row.Number.Value, row.Title);
+        if (row is null
+            || string.IsNullOrWhiteSpace(row.ProjectId)
+            || row.Number is null
+            || row.Title is null)
+            return null;
+        return new WorkflowRunIssueRef(row.ProjectId, row.Number.Value, row.Title);
     }
 
     private static async Task<Domain.Issue?> LoadIssueAsync(MohistDbContext db, string projectId, int number)
@@ -254,9 +259,7 @@ public class IssueQuerier : IScopedService
 
         var projectId = issues[0].ProjectId;
         var numbers = issues.Select(i => i.Number).ToArray();
-        var issueIds = issues.Select(i => i.Id).ToArray();
         var byNumber = issues.ToDictionary(i => i.Number);
-        var byId = issues.ToDictionary(i => i.Id);
 
         var comments = await db.IssueComments.AsNoTracking()
             .Where(c => c.ProjectId == projectId && numbers.Contains(c.IssueNumber))
@@ -267,14 +270,13 @@ public class IssueQuerier : IScopedService
         var attachmentRows = await db.Attachments.AsNoTracking()
             .Where(a => a.ProjectId == projectId
                 && a.OwnerKind != null
-                && a.OwnerId != null
-                && ((a.OwnerKind == AttachmentService.OwnerKindIssue && issueIds.Contains(a.OwnerId))
-                    || (a.OwnerKind == AttachmentService.OwnerKindComment && commentIds.Contains(a.OwnerId))))
+                && ((a.OwnerKind == AttachmentService.OwnerKindIssue && a.OwnerIssueNumber.HasValue && numbers.Contains(a.OwnerIssueNumber.Value))
+                    || (a.OwnerKind == AttachmentService.OwnerKindComment && a.OwnerId != null && commentIds.Contains(a.OwnerId))))
             .ToListAsync();
 
         var issueAttachments = attachmentRows
-            .Where(a => a.OwnerKind == AttachmentService.OwnerKindIssue && a.OwnerId is not null)
-            .GroupBy(a => a.OwnerId!)
+            .Where(a => a.OwnerKind == AttachmentService.OwnerKindIssue && a.OwnerIssueNumber.HasValue)
+            .GroupBy(a => a.OwnerIssueNumber!.Value)
             .ToDictionary(group => group.Key, group => group.Select(ToAttachmentInfo).ToArray());
         var commentAttachments = attachmentRows
             .Where(a => a.OwnerKind == AttachmentService.OwnerKindComment && a.OwnerId is not null)
@@ -283,7 +285,7 @@ public class IssueQuerier : IScopedService
 
         foreach (var issue in issues)
         {
-            if (issueAttachments.TryGetValue(issue.Id, out var attachments))
+            if (issueAttachments.TryGetValue(issue.Number, out var attachments))
                 issue.Attachments = attachments;
         }
 
@@ -296,8 +298,8 @@ public class IssueQuerier : IScopedService
         }
 
         var profileRows = await db.IssueWorkflowProfiles.AsNoTracking()
-            .Where(profile => issueIds.Contains(profile.IssueId))
-            .ToDictionaryAsync(profile => profile.IssueId, profile => profile.Variables);
+            .Where(profile => profile.ProjectId == projectId && numbers.Contains(profile.IssueNumber))
+            .ToDictionaryAsync(profile => profile.IssueNumber, profile => profile.Variables);
 
         // Resolve the effective agent config for display by merging the live
         // global + project layers with each issue's snapshot (which now holds
@@ -315,7 +317,7 @@ public class IssueQuerier : IScopedService
 
         foreach (var issue in issues)
         {
-            profileRows.TryGetValue(issue.Id, out var variablesJson);
+            profileRows.TryGetValue(issue.Number, out var variablesJson);
             ApplyIssueWorkflowVariables(issue, variablesJson, globalBundle, projectBundle);
         }
 
@@ -364,18 +366,22 @@ public class IssueQuerier : IScopedService
             issue.CanStart = blocker is null;
         }
 
-        var epicLinks = await db.EpicIssues.AsNoTracking()
-            .Where(link => link.ProjectId == projectId && issueIds.Contains(link.IssueId))
+        var issueEpicNumbers = await db.Issues.AsNoTracking()
+            .Where(row => row.ProjectId == projectId
+                && row.Number != null
+                && numbers.Contains(row.Number.Value)
+                && row.EpicNumber != null)
+            .Select(row => new { IssueNumber = row.Number!.Value, EpicNumber = row.EpicNumber!.Value })
             .ToListAsync();
-        if (epicLinks.Count > 0)
+        if (issueEpicNumbers.Count > 0)
         {
-            var epicIds = epicLinks.Select(l => l.EpicId).Distinct().ToArray();
+            var epicNumbers = issueEpicNumbers.Select(link => link.EpicNumber).Distinct().ToArray();
             var epics = await db.Epics.AsNoTracking()
-                .Where(epic => epic.ProjectId == projectId && epicIds.Contains(epic.Id))
-                .ToDictionaryAsync(e => e.Id);
-            foreach (var link in epicLinks)
+                .Where(epic => epic.ProjectId == projectId && epicNumbers.Contains(epic.Number))
+                .ToDictionaryAsync(e => e.Number);
+            foreach (var link in issueEpicNumbers)
             {
-                if (byId.TryGetValue(link.IssueId, out var issue) && epics.TryGetValue(link.EpicId, out var epic))
+                if (byNumber.TryGetValue(link.IssueNumber, out var issue) && epics.TryGetValue(link.EpicNumber, out var epic))
                 {
                     // Issue-179: primaryEpic reflects the issue's NON-TERMINAL
                     // epic membership. After T-001, an issue may belong to at
@@ -387,7 +393,6 @@ public class IssueQuerier : IScopedService
                     if (EpicProgress.IsTerminal(epic.Status)) continue;
                     issue.PrimaryEpic = new IssuePrimaryEpic
                     {
-                        Id = epic.Id,
                         Number = epic.Number,
                         Title = epic.Title,
                         Status = epic.Status,
@@ -414,7 +419,8 @@ public class IssueQuerier : IScopedService
         IReadOnlyDictionary<string, AttachmentInfo[]> attachmentsByComment) =>
         new(
             comment.Id,
-            comment.IssueId,
+            comment.ProjectId,
+            comment.IssueNumber,
             comment.Body,
             comment.CreatedAt.ToString("o"),
             attachmentsByComment.TryGetValue(comment.Id, out var attachments) ? attachments : []);
@@ -510,3 +516,5 @@ public class IssueQuerier : IScopedService
     }
 
 }
+
+public sealed record IssueWorkflowRef(string ProjectId, int Number);

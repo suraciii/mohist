@@ -10,7 +10,8 @@ public static partial class WorkflowRunExtensions
         public IReadOnlyList<WorkflowEvent> InitializeStage(
             IReadOnlyList<TaskDefinition> tasks,
             List<CheckDefinition> checks,
-            DateTimeOffset now)
+            DateTimeOffset now,
+            bool advance = true)
         {
             var current = run.CurrentStage();
             if (current.Initialized) return [];
@@ -32,7 +33,7 @@ public static partial class WorkflowRunExtensions
                 .ToList();
             current.Initialized = true;
             current.Status = StageRunStatus.Running;
-            return run.Advance(now);
+            return advance ? run.Advance(now) : [];
         }
 
         private IReadOnlyList<WorkflowEvent> Advance(DateTimeOffset now)

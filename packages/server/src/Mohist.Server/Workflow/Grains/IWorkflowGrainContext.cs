@@ -22,6 +22,5 @@ internal interface IWorkflowGrainContext
     Task ReleaseCurrentStageLocks(string reason);
 
     string GetProjectId();
-    string? GetIssueId();
-    string? GetIssueNumber();
+    int? GetIssueNumber();
 }

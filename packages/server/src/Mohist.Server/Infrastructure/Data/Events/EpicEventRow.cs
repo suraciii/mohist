@@ -5,7 +5,8 @@ namespace Mohist.Server.Infrastructure.Data.Events;
 /// <summary>
 /// CloudEvents 1.0.2 envelope persisted for each epic domain event.
 /// One row per (Source, Id) where Source identifies the epic
-/// (<c>/mohist/epics/{epicId}</c>) and Id is the per-source sequence.
+/// (<c>/mohist/projects/{projectId}/epics/{epicNumber}</c>) and Id is the
+/// per-source sequence.
 /// Mirrors <see cref="IssueEventRow"/>; the two are kept as separate
 /// tables so issue and epic remain distinct bounded contexts at the
 /// storage layer.
@@ -14,6 +15,7 @@ public sealed class EpicEventRow : IEventRow
 {
     public required long Id { get; init; }
     public required string Source { get; init; }
+    public string TimelineSource { get; init; } = "";
     public required string EventId { get; init; }
     public required string Type { get; init; }
     public required DateTimeOffset Time { get; init; }

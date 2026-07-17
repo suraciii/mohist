@@ -12,7 +12,6 @@ const PROJECT_ID = 'proj_test_001'
 
 function buildIssue(overrides: Partial<Issue> & Pick<Issue, 'number' | 'title'>): Issue {
   return {
-    id: `issue_${overrides.number}`,
     status: IssueStatus.Backlog,
     health: IssueHealth.Active,
     projectId: PROJECT_ID,
@@ -404,7 +403,6 @@ describe('IssuePrerequisitePicker', () => {
         excludeNumbers: [99],
         selectedIssueSummaries: [
           {
-            issueId: 'issue_99',
             number: 99,
             title: 'Authoritative prerequisite',
             completed: false,

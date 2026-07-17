@@ -244,6 +244,7 @@ function baseContext(work: RenderedWorkItem, variables: JsonObject, signal: Abor
     recovery: work.recovery,
     projectId: work.projectId,
     issueNumber: work.issueNumber,
+    epicNumber: work.epicNumber,
     ownerKind: work.ownerKind,
     agentJobId: work.agentJobId,
     agentSessionId: work.agentSessionId,

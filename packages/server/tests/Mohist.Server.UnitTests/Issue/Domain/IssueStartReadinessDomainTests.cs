@@ -11,7 +11,7 @@ public class IssueStartReadinessDomainTests
     [Fact]
     public void NewIssue_DefaultsToDraft()
     {
-        var issue = Mohist.Server.Issue.Domain.Issue.Create("issue_1", "project-1", 1, "Build the feature");
+        var issue = Mohist.Server.Issue.Domain.Issue.Create("project-1", 1, "Build the feature");
 
         Assert.True(issue.IsDraft);
         Assert.IsType<IssueStartBlocker.Draft>(issue.StartBlocker(null));
@@ -22,7 +22,7 @@ public class IssueStartReadinessDomainTests
     public void NewIssue_CanBeCreatedAsReady()
     {
         var issue = Mohist.Server.Issue.Domain.Issue.Create(
-            "issue_1", "project-1", 1, "Build the feature", isDraft: false);
+            "project-1", 1, "Build the feature", isDraft: false);
 
         Assert.False(issue.IsDraft);
         Assert.Null(issue.StartBlocker(null));
@@ -32,7 +32,7 @@ public class IssueStartReadinessDomainTests
     [Fact]
     public void SetDraft_MarksReadyOnDraftIssue_AndRecordsEvent()
     {
-        var issue = Mohist.Server.Issue.Domain.Issue.Create("issue_1", "project-1", 1, "Build the feature");
+        var issue = Mohist.Server.Issue.Domain.Issue.Create("project-1", 1, "Build the feature");
         Assert.True(issue.IsDraft);
 
         var now = new DateTime(2026, 6, 5, 1, 5, 0, DateTimeKind.Utc);
@@ -52,7 +52,7 @@ public class IssueStartReadinessDomainTests
     public void SetDraft_MarksDraftOnReadyIssue_AndRecordsEvent()
     {
         var issue = Mohist.Server.Issue.Domain.Issue.Create(
-            "issue_1", "project-1", 1, "Build the feature", isDraft: false);
+            "project-1", 1, "Build the feature", isDraft: false);
         Assert.False(issue.IsDraft);
 
         issue.SetDraft(true);
@@ -69,7 +69,7 @@ public class IssueStartReadinessDomainTests
     [Fact]
     public void SetDraft_SameValue_IsNoop()
     {
-        var issue = Mohist.Server.Issue.Domain.Issue.Create("issue_1", "project-1", 1, "Build the feature");
+        var issue = Mohist.Server.Issue.Domain.Issue.Create("project-1", 1, "Build the feature");
 
         issue.SetDraft(true);
 
@@ -107,7 +107,7 @@ public class IssueStartReadinessDomainTests
     [Fact]
     public void SetDraft_AfterStart_Throws()
     {
-        var issue = Mohist.Server.Issue.Domain.Issue.Create("issue_1", "project-1", 1, "Build the feature", isDraft: false);
+        var issue = Mohist.Server.Issue.Domain.Issue.Create("project-1", 1, "Build the feature", isDraft: false);
         issue.Start("wr_1", null);
 
         Assert.Throws<InvalidOperationException>(() => issue.SetDraft(true));
@@ -116,7 +116,7 @@ public class IssueStartReadinessDomainTests
     [Fact]
     public void StartBlocker_DraftIssue_ReturnsDraft_RegardlessOfPrerequisites()
     {
-        var issue = Mohist.Server.Issue.Domain.Issue.Create("issue_1", "project-1", 1, "Build the feature");
+        var issue = Mohist.Server.Issue.Domain.Issue.Create("project-1", 1, "Build the feature");
         issue.AddPrerequisite(42);
 
         var blocker = issue.StartBlocker(new HashSet<int> { 42 });
@@ -127,7 +127,7 @@ public class IssueStartReadinessDomainTests
     [Fact]
     public void StartBlocker_ReadyIssueWaitingForPrereq_ReturnsWaitingFor_ForFirstUndelivered()
     {
-        var issue = Mohist.Server.Issue.Domain.Issue.Create("issue_1", "project-1", 1, "Build the feature", isDraft: false);
+        var issue = Mohist.Server.Issue.Domain.Issue.Create("project-1", 1, "Build the feature", isDraft: false);
         issue.AddPrerequisite(7);
         issue.AddPrerequisite(9);
 
@@ -140,7 +140,7 @@ public class IssueStartReadinessDomainTests
     [Fact]
     public void StartBlocker_ReadyIssue_AllPrereqsDelivered_ReturnsNull()
     {
-        var issue = Mohist.Server.Issue.Domain.Issue.Create("issue_1", "project-1", 1, "Build the feature", isDraft: false);
+        var issue = Mohist.Server.Issue.Domain.Issue.Create("project-1", 1, "Build the feature", isDraft: false);
         issue.AddPrerequisite(7);
 
         Assert.Null(issue.StartBlocker(new HashSet<int>()));
@@ -151,7 +151,7 @@ public class IssueStartReadinessDomainTests
     [Fact]
     public void StartBlocker_ReadyIssue_OnlyDeliveredPrereqs_ReturnsNull()
     {
-        var issue = Mohist.Server.Issue.Domain.Issue.Create("issue_1", "project-1", 1, "Build the feature", isDraft: false);
+        var issue = Mohist.Server.Issue.Domain.Issue.Create("project-1", 1, "Build the feature", isDraft: false);
         issue.AddPrerequisite(7);
         issue.AddPrerequisite(9);
 
@@ -163,7 +163,7 @@ public class IssueStartReadinessDomainTests
     [Fact]
     public void CanStart_DerivesFromStartBlocker_AndIsNeverAuthored()
     {
-        var issue = Mohist.Server.Issue.Domain.Issue.Create("issue_1", "project-1", 1, "Build the feature", isDraft: false);
+        var issue = Mohist.Server.Issue.Domain.Issue.Create("project-1", 1, "Build the feature", isDraft: false);
 
         Assert.True(issue.CanStart(null));
 
@@ -176,7 +176,7 @@ public class IssueStartReadinessDomainTests
     [Fact]
     public void Start_OnDraftIssue_ThrowsBlockedException_WithDraftBlocker()
     {
-        var issue = Mohist.Server.Issue.Domain.Issue.Create("issue_1", "project-1", 1, "Build the feature");
+        var issue = Mohist.Server.Issue.Domain.Issue.Create("project-1", 1, "Build the feature");
 
         var ex = Assert.Throws<IssueStartBlockedException>(() => issue.Start("wr_1", null));
 
@@ -187,7 +187,7 @@ public class IssueStartReadinessDomainTests
     [Fact]
     public void Start_OnReadyIssueWaitingForPrereq_ThrowsBlockedException_WithWaitingForBlocker()
     {
-        var issue = Mohist.Server.Issue.Domain.Issue.Create("issue_1", "project-1", 1, "Build the feature", isDraft: false);
+        var issue = Mohist.Server.Issue.Domain.Issue.Create("project-1", 1, "Build the feature", isDraft: false);
         issue.AddPrerequisite(11);
 
         var ex = Assert.Throws<IssueStartBlockedException>(
@@ -201,7 +201,7 @@ public class IssueStartReadinessDomainTests
     [Fact]
     public void Start_OnReadyUnblockedIssue_EntersPipeline()
     {
-        var issue = Mohist.Server.Issue.Domain.Issue.Create("issue_1", "project-1", 1, "Build the feature", isDraft: false);
+        var issue = Mohist.Server.Issue.Domain.Issue.Create("project-1", 1, "Build the feature", isDraft: false);
         var now = new DateTime(2026, 6, 5, 1, 10, 0, DateTimeKind.Utc);
 
         issue.Start("wr_1", null, now);
@@ -221,7 +221,7 @@ public class IssueStartReadinessDomainTests
     [Fact]
     public void Start_OnTerminalIssue_ThrowsInvalidOperation_AndDoesNotEnqueue()
     {
-        var issue = Mohist.Server.Issue.Domain.Issue.Create("issue_1", "project-1", 1, "Build the feature", isDraft: false);
+        var issue = Mohist.Server.Issue.Domain.Issue.Create("project-1", 1, "Build the feature", isDraft: false);
         issue.Start("wr_1", null);
         issue.Complete("wr_1");
 
@@ -235,7 +235,7 @@ public class IssueStartReadinessDomainTests
     [Fact]
     public void Start_OnAlreadyRunningIssue_ThrowsInvalidOperation()
     {
-        var issue = Mohist.Server.Issue.Domain.Issue.Create("issue_1", "project-1", 1, "Build the feature", isDraft: false);
+        var issue = Mohist.Server.Issue.Domain.Issue.Create("project-1", 1, "Build the feature", isDraft: false);
         issue.Start("wr_1", null);
 
         Assert.Throws<InvalidOperationException>(() => issue.Start("wr_2", null));
@@ -245,7 +245,7 @@ public class IssueStartReadinessDomainTests
     [Fact]
     public void State_RoundTripsIsDraftForNewIssue()
     {
-        var issue = Mohist.Server.Issue.Domain.Issue.Create("issue_1", "project-1", 1, "Build the feature");
+        var issue = Mohist.Server.Issue.Domain.Issue.Create("project-1", 1, "Build the feature");
 
         var json = IssueStore.Serialize(issue);
         using var document = JsonDocument.Parse(json);
@@ -262,7 +262,6 @@ public class IssueStartReadinessDomainTests
     {
         var legacyJson = """
         {
-          "id": "issue_legacy",
           "projectId": "project-1",
           "number": 42,
           "title": "Legacy issue",
@@ -289,7 +288,7 @@ public class IssueStartReadinessDomainTests
     [Fact]
     public void State_RoundTripsIsDraft_AfterSetDraft()
     {
-        var issue = Mohist.Server.Issue.Domain.Issue.Create("issue_1", "project-1", 1, "Build the feature");
+        var issue = Mohist.Server.Issue.Domain.Issue.Create("project-1", 1, "Build the feature");
         issue.SetDraft(false);
 
         var json = IssueStore.Serialize(issue);
@@ -302,7 +301,7 @@ public class IssueStartReadinessDomainTests
     [Fact]
     public void IsDraft_OrthogonalToStatus_AndMarkingReadyDoesNotChangeStatus()
     {
-        var issue = Mohist.Server.Issue.Domain.Issue.Create("issue_1", "project-1", 1, "Build the feature");
+        var issue = Mohist.Server.Issue.Domain.Issue.Create("project-1", 1, "Build the feature");
         Assert.Equal(Mohist.Server.Issue.Domain.IssueStatus.Backlog, issue.Status);
 
         issue.SetDraft(false);

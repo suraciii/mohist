@@ -26,7 +26,6 @@ internal sealed class WorkflowReadModel
             return null;
 
         var projectId = _owner.GetProjectId();
-        var issueId = _owner.GetIssueId();
         var stage = run.CurrentStageId ?? string.Empty;
         return new WorkflowActiveWorkView(
             WorkId: workId,
@@ -35,8 +34,7 @@ internal sealed class WorkflowReadModel
             TaskRunId: activeTask?.Id ?? WorkflowRunExtensions.ChecksWorkIdFor(stage),
             Title: activeTask?.Title ?? "Stage checks",
             ProjectId: string.IsNullOrWhiteSpace(projectId) ? null : projectId,
-            IssueId: issueId,
-            IssueNumber: ResolveIssueNumber());
+            IssueNumber: _owner.GetIssueNumber());
     }
 
     public WorkflowFeedbackRecord? GetFeedback(string feedbackId)
@@ -84,9 +82,5 @@ internal sealed class WorkflowReadModel
                 ResolutionSummary: feedback.ResolutionSummary)
             : null;
 
-    private int? ResolveIssueNumber()
-    {
-        var raw = _owner.GetIssueNumber();
-        return int.TryParse(raw, out var number) ? number : null;
-    }
+    private int? ResolveIssueNumber() => _owner.GetIssueNumber();
 }

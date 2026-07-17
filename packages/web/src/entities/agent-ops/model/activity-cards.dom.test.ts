@@ -56,7 +56,6 @@ function renderActivityCards(data?: AgentActivity) {
 
 function makeSession(overrides: Partial<AgentActivitySession> = {}): AgentActivitySession {
   return {
-    issueId: 'issue-1',
     issueNumber: 12,
     issueTitle: 'Fix project selector',
     issueStage: 'Build',

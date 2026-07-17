@@ -75,7 +75,6 @@ public class MohistLocalWorkflowProfileSpecs
         var profile = new MohistLocalIssueWorkflowProfile(new FakePromptLoader(), new FakeDbContextFactory());
         var issue = new Mohist.Server.Issue.Domain.Issue
         {
-            Id = "issue-154",
             ProjectId = "project-1",
             Number = 154,
             Title = "支持中文标题 🚀",
@@ -274,7 +273,6 @@ public class MohistLocalWorkflowProfileSpecs
         var profile = new MohistLocalIssueWorkflowProfile(new FakePromptLoader(), new FakeDbContextFactory());
         var issue = new Mohist.Server.Issue.Domain.Issue
         {
-            Id = "issue-1",
             ProjectId = "project-1",
             Number = 1,
             Title = "Agent config",
@@ -304,7 +302,6 @@ public class MohistLocalWorkflowProfileSpecs
         var profile = new MohistLocalIssueWorkflowProfile(new FakePromptLoader(), new FakeDbContextFactory());
         var issue = new Mohist.Server.Issue.Domain.Issue
         {
-            Id = "issue-variant",
             ProjectId = "project-1",
             Number = 1,
             Title = "Variant in agent config",
@@ -334,7 +331,6 @@ public class MohistLocalWorkflowProfileSpecs
         var profile = new MohistLocalIssueWorkflowProfile(new FakePromptLoader(), new FakeDbContextFactory());
         var issue = new Mohist.Server.Issue.Domain.Issue
         {
-            Id = "issue-1",
             ProjectId = "project-1",
             Number = 1,
             Title = "Stage vars",
@@ -360,7 +356,6 @@ public class MohistLocalWorkflowProfileSpecs
         var profile = new MohistLocalIssueWorkflowProfile(loader, new FakeDbContextFactory());
         var issue = new Mohist.Server.Issue.Domain.Issue
         {
-            Id = "issue-1",
             ProjectId = "project-1",
             Number = 1,
             Title = "Test",
@@ -390,7 +385,6 @@ public class MohistLocalWorkflowProfileSpecs
         var profile = new MohistLocalIssueWorkflowProfile(loader, dbFactory);
         var issue = new Mohist.Server.Issue.Domain.Issue
         {
-            Id = "issue-1",
             ProjectId = "project-1",
             Number = 1,
             Title = "Merge test",

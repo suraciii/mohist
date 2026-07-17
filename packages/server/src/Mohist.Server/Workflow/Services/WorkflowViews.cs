@@ -128,9 +128,10 @@ public sealed record ApprovalStatusView(
 
 /// <summary>
 /// Minimal associated-issue reference surfaced by the
-/// <c>GET /api/workflow-runs/{workflowRunId}</c> read model: a human-numbered
-/// handle plus the title, without full issue details.
+/// <c>GET /api/workflow-runs/{workflowRunId}</c> read model: a project-scoped
+/// human-numbered handle plus the title, without full issue details.
 /// </summary>
 public sealed record WorkflowRunIssueRef(
+    string ProjectId,
     int Number,
     string Title);

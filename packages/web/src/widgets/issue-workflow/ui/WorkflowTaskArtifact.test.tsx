@@ -42,7 +42,6 @@ beforeEach(() => {
 
 function makeIssue(overrides: Partial<Issue> = {}): Issue {
   return {
-    id: 'issue-1',
     number: 1,
     title: 'Implement workflow naming',
     body: '',
@@ -192,7 +191,6 @@ function makeTimelineNoRequiredFiles(): WorkflowTimeline {
 
 const mockAgentStatus: AgentStatus = {
   running: false,
-  issueId: null,
   issueNumber: null,
   activeAgents: [],
   capacity: { active: 0, max: 2 },

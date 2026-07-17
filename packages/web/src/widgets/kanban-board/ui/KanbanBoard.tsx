@@ -433,7 +433,7 @@ function NeedsAttentionSummary({
             const text = family === 'danger' ? 'text-danger' : 'text-warning'
             return (
               <a
-                key={item.issueId}
+                key={item.issueNumber}
                 href={toProjectPath(`/issues/${item.issueNumber}`)}
                 data-testid={`attention-link-${item.issueNumber}`}
                 data-family={family}
@@ -643,7 +643,7 @@ export function KanbanBoard({
             </div>
           ) : (
             visibleSelectedColumn.issues.map((issue) => (
-              <IssueCard key={issue.id} issue={issue} agentStatus={agentStatus} />
+              <IssueCard key={`${issue.projectId}:${issue.number}`} issue={issue} agentStatus={agentStatus} />
             ))
           )}
         </div>

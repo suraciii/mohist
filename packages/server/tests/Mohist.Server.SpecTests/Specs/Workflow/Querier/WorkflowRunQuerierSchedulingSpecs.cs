@@ -424,7 +424,7 @@ public class WorkflowRunQuerierSchedulingSpecs
             Annotations: new Dictionary<string, string>(StringComparer.Ordinal)
             {
                 ["projectId"] = projectId,
-                ["issueId"] = $"issue-{id}",
+                ["issueNumber"] = "1",
             });
 
         var run = WorkflowRun.Create(id, BuildMinimalDefinition(), DateTimeOffset.UnixEpoch, metadata);

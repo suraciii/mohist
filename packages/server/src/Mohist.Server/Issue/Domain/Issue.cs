@@ -14,6 +14,7 @@ public sealed partial class Issue
     private DateTime? _archivedAt;
     private DateTime? _completedAt;
     private string? _workflowRunId;
+    private int? _epicNumber;
     private IssueStatus _status = IssueStatus.Backlog;
     private int[] _prerequisiteNumbers = [];
     private IssueRepositoryRef? _repositoryRef;
@@ -21,7 +22,6 @@ public sealed partial class Issue
     private string? _workflowProfileId;
     private readonly List<IssueEvent> _pendingEvents = new();
 
-    public required string Id { get; init; }
     public required string ProjectId { get; init; }
     public required int Number { get; init; }
 
@@ -87,6 +87,12 @@ public sealed partial class Issue
     {
         get => _workflowRunId;
         init => _workflowRunId = NormalizeOptional(value);
+    }
+
+    public int? EpicNumber
+    {
+        get => _epicNumber;
+        init => _epicNumber = value is > 0 ? value : null;
     }
 
     public IssueStatus Status

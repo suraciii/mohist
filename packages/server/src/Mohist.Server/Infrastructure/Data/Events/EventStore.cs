@@ -67,13 +67,14 @@ public class EventStore : IEventStore
             return;
         }
 
-        if (source.StartsWith(IssueEventPersistence.SourcePrefix, StringComparison.Ordinal))
+        if (IssueEventPersistence.IsIssueSource(source))
         {
-            var nextId = await NextIssueIdAsync(db, source, ct);
+            var nextSequence = await NextIssueSequenceAsync(db, source, ct);
             db.IssueEvents.Add(new IssueEventRow
             {
-                Id = nextId,
+                Id = nextSequence,
                 Source = source,
+                TimelineSource = source,
                 EventId = envelope.Id,
                 Type = envelope.Type,
                 Time = envelope.Time,
@@ -86,13 +87,14 @@ public class EventStore : IEventStore
             return;
         }
 
-        if (source.StartsWith(EpicEventPersistence.SourcePrefix, StringComparison.Ordinal))
+        if (EpicEventPersistence.IsEpicSource(source))
         {
-            var nextId = await NextEpicIdAsync(db, source, ct);
+            var nextSequence = await NextEpicSequenceAsync(db, source, ct);
             db.EpicEvents.Add(new EpicEventRow
             {
-                Id = nextId,
+                Id = nextSequence,
                 Source = source,
+                TimelineSource = source,
                 EventId = envelope.Id,
                 Type = envelope.Type,
                 Time = envelope.Time,
@@ -135,32 +137,42 @@ public class EventStore : IEventStore
         return rows.Select(ToStored).ToList();
     }
 
-    public async Task<IReadOnlyList<StoredCloudEvent>> ListIssueEventsAsync(string issueId, int limit = 200, CancellationToken ct = default)
+    public async Task<IReadOnlyList<StoredCloudEvent>> ListIssueEventsAsync(string projectId, int issueNumber, int limit = 200, CancellationToken ct = default)
     {
-        var source = IssueEventPersistence.IssueSource(issueId);
+        var source = IssueEventPersistence.IssueSource(projectId, issueNumber);
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var rows = await db.IssueEvents.AsNoTracking()
-            .Where(e => e.Source == source)
-            .OrderByDescending(e => e.Id)
-            .Take(limit)
-            .OrderBy(e => e.Id)
+            .Where(e => e.TimelineSource == source)
             .ToListAsync(ct);
 
-        return rows.Select(ToIssueStored).ToList();
+        return rows.OrderByDescending(e => e.Time)
+            .ThenByDescending(e => e.Source)
+            .ThenByDescending(e => e.Id)
+            .Take(limit)
+            .OrderBy(e => e.Time)
+            .ThenBy(e => e.Source)
+            .ThenBy(e => e.Id)
+            .Select(ToIssueStored)
+            .ToList();
     }
 
-    public async Task<IReadOnlyList<StoredCloudEvent>> ListEpicEventsAsync(string epicId, int limit = 200, CancellationToken ct = default)
+    public async Task<IReadOnlyList<StoredCloudEvent>> ListEpicEventsAsync(string projectId, int epicNumber, int limit = 200, CancellationToken ct = default)
     {
-        var source = EpicEventPersistence.EpicSource(epicId);
+        var source = EpicEventPersistence.EpicSource(projectId, epicNumber);
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var rows = await db.EpicEvents.AsNoTracking()
-            .Where(e => e.Source == source)
-            .OrderByDescending(e => e.Id)
-            .Take(limit)
-            .OrderBy(e => e.Id)
+            .Where(e => e.TimelineSource == source)
             .ToListAsync(ct);
 
-        return rows.Select(ToEpicStored).ToList();
+        return rows.OrderByDescending(e => e.Time)
+            .ThenByDescending(e => e.Source)
+            .ThenByDescending(e => e.Id)
+            .Take(limit)
+            .OrderBy(e => e.Time)
+            .ThenBy(e => e.Source)
+            .ThenBy(e => e.Id)
+            .Select(ToEpicStored)
+            .ToList();
     }
 
     public async Task<IReadOnlyList<StoredCloudEvent>> ListAgentSessionEventsAsync(string sessionId, int limit = 200, CancellationToken ct = default)
@@ -325,10 +337,10 @@ public class EventStore : IEventStore
     private static Task<long> NextWorkflowIdAsync(MohistDbContext db, string source, CancellationToken ct) =>
         NextIdAsync(db.WorkflowRunEvents, source, ct);
 
-    private static Task<long> NextIssueIdAsync(MohistDbContext db, string source, CancellationToken ct) =>
+    private static Task<long> NextIssueSequenceAsync(MohistDbContext db, string source, CancellationToken ct) =>
         NextIdAsync(db.IssueEvents, source, ct);
 
-    private static Task<long> NextEpicIdAsync(MohistDbContext db, string source, CancellationToken ct) =>
+    private static Task<long> NextEpicSequenceAsync(MohistDbContext db, string source, CancellationToken ct) =>
         NextIdAsync(db.EpicEvents, source, ct);
 
     private static Task<long> NextAgentSessionIdAsync(MohistDbContext db, string source, CancellationToken ct) =>

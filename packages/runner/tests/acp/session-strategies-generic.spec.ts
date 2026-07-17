@@ -376,7 +376,6 @@ describe("runAcpAgentSession — generic session dispatch", () => {
     await runDefaultModelAction(fixture.context({ ownerKind: "workflow", agentSessionId: undefined, workflowRunId: "wf-1", with: { session: "build", prompt: "do the work" } as never }))
 
     const events = fixture.serverConnection.calls.map((entry) => entry.event)
-    expect(events).toContain("getWorkflowAgentSession")
     expect(events).toContain("openWorkflowAgentSession")
     expect(events).toContain("attachWorkflowAgentSession")
     expect(events).toContain("workflowAgentSessionRuntimeEvents")

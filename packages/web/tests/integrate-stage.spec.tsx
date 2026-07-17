@@ -92,7 +92,6 @@ describe('Integration event types', () => {
   it('should include integration_started event', () => {
     const event = {
       integration_started: {
-        issueId: 'issue-1',
         projectId: 'project-1',
         issueNumber: 1,
       },
@@ -103,7 +102,6 @@ describe('Integration event types', () => {
   it('should include integration_step_updated event', () => {
     const event = {
       integration_step_updated: {
-        issueId: 'issue-1',
         projectId: 'project-1',
         issueNumber: 1,
         step: 'integrate:archive-change',
@@ -118,7 +116,6 @@ describe('Integration event types', () => {
   it('should include integration_failed event', () => {
     const event = {
       integration_failed: {
-        issueId: 'issue-1',
         projectId: 'project-1',
         issueNumber: 1,
         failingStep: 'integrate:merge',
@@ -133,7 +130,6 @@ describe('Integration event types', () => {
   it('should include integration_completed event', () => {
     const event = {
       integration_completed: {
-        issueId: 'issue-1',
         projectId: 'project-1',
         issueNumber: 1,
         steps: [

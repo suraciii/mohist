@@ -24,7 +24,6 @@ function makeProjectEvent(overrides: Partial<ProjectEventDto> = {}): ProjectEven
 
 function makeSession(overrides: Partial<AgentActivitySession> = {}): AgentActivitySession {
   return {
-    issueId: 'issue-1',
     issueNumber: 1,
     issueTitle: 'Test issue',
     issueStage: 'Build',
@@ -68,7 +67,7 @@ describe('activity event targets', () => {
   it('links workflow-bound sessions through their issue route', () => {
     const events = buildActivityEvents({
       recordedEvents: [],
-      sessions: [makeSession({ issueNumber: 42 })],
+      sessions: [makeSession({ issueNumber: 42, })],
       waiting: [],
       runners: [],
     })

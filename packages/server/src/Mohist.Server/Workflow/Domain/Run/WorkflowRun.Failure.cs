@@ -61,6 +61,7 @@ public static partial class WorkflowRunExtensions
 
         public IReadOnlyList<WorkflowEvent> Retry(DateTimeOffset now)
         {
+            EnsureRecoveryControlAllowed(run);
             if (run.Status != WorkflowRunStatus.Failed)
                 throw new InvalidOperationException($"WorkflowRun is {run.Status}, retry requires failed");
 
@@ -112,6 +113,7 @@ public static partial class WorkflowRunExtensions
 
         public IReadOnlyList<WorkflowEvent> Rerun(DateTimeOffset now)
         {
+            EnsureRecoveryControlAllowed(run);
             var current = run.CurrentStage();
             var stageIdx = run.Stages.FindIndex(s => s.Id == current.Id);
             var newStage = new StageRun
@@ -132,6 +134,7 @@ public static partial class WorkflowRunExtensions
 
         public IReadOnlyList<WorkflowEvent> RerunFromStage(string stageId, DateTimeOffset now)
         {
+            EnsureRecoveryControlAllowed(run);
             var targetIdx = run.Stages.FindIndex(s => s.Id == stageId);
             var currentIdx = run.Stages.FindIndex(s => s.Id == run.CurrentStageId);
             var eligibleStages = run.Stages
@@ -206,5 +209,8 @@ public static partial class WorkflowRunExtensions
             var current = run.CurrentStage();
             current.Failure = null;
         }
+
     }
+
+    private static void EnsureRecoveryControlAllowed(WorkflowRun run) { }
 }

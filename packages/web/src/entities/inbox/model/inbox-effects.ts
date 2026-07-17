@@ -12,11 +12,10 @@ export interface InboxItemPersistedHintPayload {
   itemId: string
   projectId: string
   kind: string
-  issueId: string
   issueNumber: number
 }
 
-const KNOWN_IDENTITY_KEYS = ['itemId', 'projectId', 'kind', 'issueId', 'issueNumber'] as const
+const KNOWN_IDENTITY_KEYS = ['itemId', 'projectId', 'kind', 'issueNumber'] as const
 
 /**
  * Narrow an unknown realtime payload into the hint shape. Returns `null` when
@@ -30,14 +29,12 @@ export function parseInboxItemPersistedHint(value: unknown): InboxItemPersistedH
   const itemId = candidate.itemId
   const projectId = candidate.projectId
   const kind = candidate.kind
-  const issueId = candidate.issueId
   const issueNumber = candidate.issueNumber
   if (typeof itemId !== 'string' || !itemId) return null
   if (typeof projectId !== 'string' || !projectId) return null
   if (typeof kind !== 'string' || !kind) return null
-  if (typeof issueId !== 'string' || !issueId) return null
-  if (typeof issueNumber !== 'number' || !Number.isFinite(issueNumber)) return null
-  return { itemId, projectId, kind, issueId, issueNumber }
+  if (typeof issueNumber !== 'number' || !Number.isFinite(issueNumber) || issueNumber <= 0) return null
+  return { itemId, projectId, kind, issueNumber }
 }
 
 /**

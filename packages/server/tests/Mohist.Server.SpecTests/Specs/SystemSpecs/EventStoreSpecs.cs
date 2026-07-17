@@ -31,7 +31,12 @@ public class EventStoreSpecs
             source: source,
             type: "com.mohist.workflow.run.started",
             time: TestTime.UtcNow,
-            data: null));
+            data: null,
+            extensions: new Dictionary<string, string>
+            {
+                [EventCatalog.Lineage.ProjectId] = "proj",
+                [EventCatalog.Lineage.WorkflowRunId] = workflowRunId,
+            }));
 
         var events = await store.ListAsync(workflowRunId);
         var first = Assert.Single(events);
@@ -52,6 +57,7 @@ public class EventStoreSpecs
         {
             ["projectid"] = "proj",
             ["workflowrunid"] = workflowRunId,
+            ["stage"] = "test",
         };
         await store.AppendAsync(new CloudEvent(
             id: Guid.NewGuid().ToString(),

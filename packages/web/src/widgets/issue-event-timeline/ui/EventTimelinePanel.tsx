@@ -10,7 +10,6 @@ import type { TimelineCategory, TimelineEntry } from '../model/types'
 
 export interface EventTimelinePanelProps {
   issueNumber: number
-  issueId: string | null | undefined
   workflowStatus?: string | null
   enabled?: boolean
   className?: string
@@ -39,14 +38,13 @@ function startOfDay(iso: string): string {
 
 export function EventTimelinePanel({
   issueNumber,
-  issueId,
   workflowStatus,
   enabled = true,
   className,
   showHeader = true,
   historyHook,
 }: EventTimelinePanelProps) {
-  const { entries, isLoading } = useEventTimeline(issueNumber, issueId, enabled, historyHook)
+  const { entries, isLoading } = useEventTimeline(issueNumber, enabled, historyHook)
 
   return (
     <EventTimelinePanelView

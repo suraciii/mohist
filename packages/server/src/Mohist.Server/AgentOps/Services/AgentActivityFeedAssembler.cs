@@ -176,9 +176,8 @@ public sealed class AgentActivityFeedAssembler : IScopedService
     /// <summary>
     /// Projects a single session into its <see cref="ActivityCardDto"/>.
     /// The shape diverges by source-kind: <c>agent-launch</c> sessions
-    /// carry an <c>agent_{agentId}</c> synthetic issue id and the agent's
-    /// id/name; workflow sessions carry an <c>issue_{projectId}_{number}</c>
-    /// id and no agent attribution. The two branches agree on every other
+    /// carry agent id/name; workflow sessions carry no agent attribution.
+    /// The two branches agree on every other
     /// field (status, model, timestamps, work-item, task-progress, last
     /// activity preview, event-summary, usage). Status, usage and
     /// event-summary projections are sourced from the shared
@@ -195,7 +194,6 @@ public sealed class AgentActivityFeedAssembler : IScopedService
         var s = record.Session;
         var lastActivityAt = AgentSessionJsonHelper.LastActivityAt(s).ToString("o");
         var issueNumber = record.IssueNumber();
-        var projectId = record.Label(AgentSessionQueryMetadataKeys.ProjectId) ?? string.Empty;
         var sessionName = record.Label(AgentSessionQueryMetadataKeys.SessionName) ?? s.Id;
         var stage = record.Label(AgentSessionQueryMetadataKeys.Stage);
         var workId = record.Label(AgentSessionQueryMetadataKeys.WorkId);
@@ -207,7 +205,6 @@ public sealed class AgentActivityFeedAssembler : IScopedService
             var agentId = record.Label(GenericAgentSessionMetadata.AgentId) ?? string.Empty;
             var agentName = record.Label(GenericAgentSessionMetadata.AgentName) ?? string.Empty;
             return new ActivityCardDto(
-                $"agent_{agentId}",
                 issueNumber,
                 issueTitle,
                 stage ?? string.Empty,
@@ -230,7 +227,6 @@ public sealed class AgentActivityFeedAssembler : IScopedService
         }
 
         return new ActivityCardDto(
-            $"issue_{projectId}_{issueNumber}",
             issueNumber,
             issueTitle,
             stage ?? string.Empty,

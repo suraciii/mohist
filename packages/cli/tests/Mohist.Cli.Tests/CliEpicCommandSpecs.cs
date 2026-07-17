@@ -102,7 +102,7 @@ public class CliEpicCommandSpecs
         Assert.Equal(HttpMethod.Post, request.Method);
         Assert.Equal($"/api/projects/{ActiveProjectId}/epics/8/issues", request.RequestUri?.PathAndQuery);
         var body = JsonNode.Parse(request.Body!);
-        Assert.Equal("5", body!["issueId"]?.GetValue<string>());
+        Assert.Equal(5, body!["issueNumber"]?.GetValue<int>());
     }
 
     [Fact]
@@ -216,18 +216,18 @@ public class CliEpicCommandSpecs
             Task.FromResult(RecordingHttpHandler.Json(new
             {
                 success = true,
-                data = new { epicId = "epic_8", issueId = "issue_5" },
+                data = new { epicNumber = 8, issueNumber = 5 },
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["epic", "unlink", "8", "issue_5", "-o", "table"], output, error, fileSystem, executor);
+            http, ["epic", "unlink", "8", "5", "-o", "table"], output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
-        Assert.Contains("Unlinked issue issue_5 from epic epic_8", output.ToString(), StringComparison.Ordinal);
+        Assert.Contains("Unlinked issue #5 from epic #8", output.ToString(), StringComparison.Ordinal);
         Assert.DoesNotContain("Linked issue", output.ToString(), StringComparison.Ordinal);
         var request = handler.Requests.Single();
         Assert.Equal(HttpMethod.Delete, request.Method);
-        Assert.Equal($"/api/projects/{ActiveProjectId}/epics/8/issues/issue_5", request.RequestUri?.PathAndQuery);
+        Assert.Equal($"/api/projects/{ActiveProjectId}/epics/8/issues/5", request.RequestUri?.PathAndQuery);
     }
 
     [Fact]
@@ -324,7 +324,7 @@ public class CliEpicCommandSpecs
 
         var stdout = output.ToString();
         Assert.Equal(0, exitCode);
-        foreach (var command in new[] { "list", "create", "show", "update", "link", "unlink", "start", "pause", "resume", "done", "close" })
+        foreach (var command in new[] { "list", "create", "show", "update", "link", "unlink", "start", "pause", "resume", "done", "close", "reopen" })
             Assert.Contains(command, stdout, StringComparison.Ordinal);
         Assert.Empty(handler.Requests);
     }
@@ -348,12 +348,12 @@ public class CliEpicCommandSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["epic", "start", "epic_8", "-o", "table"], output, error, fileSystem, executor);
+            http, ["epic", "start", "8", "-o", "table"], output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
         var request = handler.Requests.Single();
         Assert.Equal(HttpMethod.Post, request.Method);
-        Assert.Equal($"/api/projects/{ActiveProjectId}/epics/epic_8/start", request.RequestUri?.PathAndQuery);
+        Assert.Equal($"/api/projects/{ActiveProjectId}/epics/8/start", request.RequestUri?.PathAndQuery);
         Assert.Equal("{}", request.Body);
         var stdout = output.ToString();
         Assert.Contains("status:     running", stdout, StringComparison.Ordinal);
@@ -532,12 +532,12 @@ public class CliEpicCommandSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["epic", "pause", "epic_8", "-o", "table"], output, error, fileSystem, executor);
+            http, ["epic", "pause", "8", "-o", "table"], output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
         var request = handler.Requests.Single();
         Assert.Equal(HttpMethod.Post, request.Method);
-        Assert.Equal($"/api/projects/{ActiveProjectId}/epics/epic_8/pause", request.RequestUri?.PathAndQuery);
+        Assert.Equal($"/api/projects/{ActiveProjectId}/epics/8/pause", request.RequestUri?.PathAndQuery);
         Assert.Equal("{}", request.Body);
         Assert.Contains("status:     paused", output.ToString(), StringComparison.Ordinal);
     }
@@ -620,12 +620,12 @@ public class CliEpicCommandSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["epic", "resume", "epic_8", "-o", "table"], output, error, fileSystem, executor);
+            http, ["epic", "resume", "8", "-o", "table"], output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
         var request = handler.Requests.Single();
         Assert.Equal(HttpMethod.Post, request.Method);
-        Assert.Equal($"/api/projects/{ActiveProjectId}/epics/epic_8/resume", request.RequestUri?.PathAndQuery);
+        Assert.Equal($"/api/projects/{ActiveProjectId}/epics/8/resume", request.RequestUri?.PathAndQuery);
         Assert.Equal("{}", request.Body);
         Assert.Contains("status:     running", output.ToString(), StringComparison.Ordinal);
     }

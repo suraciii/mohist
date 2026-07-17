@@ -232,7 +232,7 @@ function EpicCard({
           ? 'opacity-60 hover:opacity-80'
           : 'hover:border-muted-foreground/30'
       }`}
-      onClick={() => navigate(toProjectPath(`/epics/${epic.id}`))}
+      onClick={() => navigate(toProjectPath(`/epics/${epic.number}`))}
     >
       <div className="flex items-start justify-between gap-3">
         <div className="flex-1 min-w-0">
@@ -241,7 +241,7 @@ function EpicCard({
               className="text-sm font-medium text-muted-foreground"
               data-testid="epic-number"
             >
-              {epic.number != null ? `#${epic.number}` : `#${epic.id.slice(0, 8)}`}
+              #{epic.number}
             </span>
             <StatusBadge status={epic.status} />
             <PriorityBadge priority={epic.priority} />
@@ -331,7 +331,7 @@ function EpicSection({
         <div className="grid gap-4">
           {epics.map(epic => (
             <EpicCard
-              key={epic.id}
+              key={epic.number}
               epic={epic}
               group={group ?? (epic.status === EpicStatus.Done ? 'done' : epic.status === EpicStatus.Closed ? 'closed' : 'paused')}
               onStartNextIssue={onStartNextIssue}
@@ -546,7 +546,7 @@ export function EpicListPage() {
               <div className="grid gap-4">
                 {pausedEpics.map(epic => (
                   <EpicCard
-                    key={epic.id}
+                    key={epic.number}
                     epic={epic}
                     group="paused"
                     onStartNextIssue={handleStartNextIssue}

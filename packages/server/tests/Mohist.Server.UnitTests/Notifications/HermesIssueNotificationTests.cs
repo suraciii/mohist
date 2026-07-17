@@ -9,6 +9,7 @@ using Mohist.Server.Events.Subscriptions;
 using Mohist.Server.Infrastructure.Data;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Events;
+using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Inbox;
 using Mohist.Server.Issue.Domain.Events;
 using Mohist.Server.Notifications;
@@ -100,6 +101,53 @@ public sealed class HermesIssueNotificationTests
     }
 
     [Fact]
+    public async Task IssueEvent_RoutesByEnvelopeAndPreservesPayloadWorkflowRunId()
+    {
+        var fixture = CreateFixture();
+        var payload = new IssueCompleted("payload-run");
+        var evt = new CloudEvent(
+            id: "evt-envelope-context",
+            source: new Uri("/mohist/projects/proj_1/issues/99", UriKind.Relative),
+            type: EventCatalog.ReverseDns.IssueCompleted,
+            time: new DateTimeOffset(2026, 7, 3, 12, 1, 0, TimeSpan.Zero),
+            data: JsonSerializer.SerializeToElement(payload, CloudEvent.JsonOptions),
+            extensions: new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [EventCatalog.Lineage.ProjectId] = "proj_1",
+                [EventCatalog.Lineage.Issue] = "42",
+                [EventCatalog.Lineage.Epic] = "7",
+            });
+
+        await fixture.Handler.HandleAsync(evt, CancellationToken.None);
+        await fixture.Dispatcher.RunAllAsync();
+
+        var sent = Assert.Single(fixture.Client.Sent);
+        Assert.Equal(42, sent.IssueNumber);
+        Assert.Equal(7, sent.EpicNumber);
+        Assert.Equal("payload-run", sent.WorkflowRunId);
+        Assert.Equal("payload-run", evt.Data!.Value.GetProperty("workflowRunId").GetString());
+    }
+
+    [Fact]
+    public async Task ApprovalRequested_UsesEnvelopeStageWithoutMutatingPayload()
+    {
+        var fixture = CreateFixture();
+        var payload = new StageApprovalRequested("payload-stage");
+        var evt = WorkflowEvent(
+            EventCatalog.ReverseDns.StageApprovalRequested,
+            "run_1",
+            payload,
+            envelopeStage: "envelope-stage");
+
+        await fixture.Handler.HandleAsync(evt, CancellationToken.None);
+        await fixture.Dispatcher.RunAllAsync();
+
+        var sent = Assert.Single(fixture.Client.Sent);
+        Assert.Equal("envelope-stage", sent.Stage);
+        Assert.Equal("payload-stage", evt.Data!.Value.GetProperty("stage").GetString());
+    }
+
+    [Fact]
     public async Task IssueStarted_IsDisabledByDefaultAndCanBeEnabled()
     {
         var defaultFixture = CreateFixture();
@@ -122,6 +170,41 @@ public sealed class HermesIssueNotificationTests
         var payload = Assert.Single(enabledFixture.Client.Sent);
         Assert.Equal(NotificationKinds.IssueStarted, payload.NotificationType);
         Assert.Contains("Issue #42 started", payload.Body, StringComparison.Ordinal);
+    }
+
+    // --- T-007: issueno -> issue rename; dual-key read for historical rows ---
+
+    [Fact]
+    public async Task IssueEvent_UnifiedIssueKey_ResolvesIdentity()
+    {
+        var fixture = CreateFixture();
+
+        await fixture.Handler.HandleAsync(IssueEventUnified(
+            EventCatalog.ReverseDns.IssueCompleted,
+            new IssueCompleted("run_1")), CancellationToken.None);
+        await fixture.Dispatcher.RunAllAsync();
+
+        // Post-change row stamped with the unified `issue` key. The
+        // handler must resolve identity from `issue` directly.
+        var payload = Assert.Single(fixture.Client.Sent);
+        Assert.Equal(NotificationKinds.IssueCompleted, payload.NotificationType);
+        Assert.Equal(42, payload.IssueNumber);
+        Assert.Equal("Add Hermes outbound notifications", payload.IssueTitle);
+    }
+
+    [Fact]
+    public async Task IssueEvent_NoIssueNumberKey_SkipsWithoutSending()
+    {
+        var fixture = CreateFixture();
+
+        await fixture.Handler.HandleAsync(IssueEventNoIssueNumber(
+            EventCatalog.ReverseDns.IssueCompleted,
+            new IssueCompleted("run_1")), CancellationToken.None);
+        await fixture.Dispatcher.RunAllAsync();
+
+        // Neither `issue` nor `issueno` is present: identity cannot be
+        // resolved, the handler skips silently.
+        Assert.Empty(fixture.Client.Sent);
     }
 
     [Fact]
@@ -248,10 +331,10 @@ public sealed class HermesIssueNotificationTests
             EventCatalog.ReverseDns.StageApprovalRequested,
             "evt_1",
             new DateTimeOffset(2026, 7, 3, 12, 0, 0, TimeSpan.Zero),
-            "proj_1",
-            "issue_1",
-            42,
-            "Title",
+             "proj_1",
+             42,
+             null,
+             "Title",
             "run_1",
             "plan",
             null,
@@ -290,9 +373,8 @@ public sealed class HermesIssueNotificationTests
         options ??= new HermesNotificationOptions { WebhookUrl = "https://hermes.local/webhooks/mohist" };
         var issues = new FakeIssueStore();
         var workflowRuns = new FakeWorkflowRunStore();
-        issues.Items["issue_1"] = new DomainIssue
+        issues.Items[GrainKey.Issue(new IssueKey("proj_1", 42))] = new DomainIssue
         {
-            Id = "issue_1",
             ProjectId = "proj_1",
             Number = 42,
             Title = "Add Hermes outbound notifications",
@@ -306,7 +388,6 @@ public sealed class HermesIssueNotificationTests
                 Annotations: new Dictionary<string, string>(StringComparer.Ordinal)
                 {
                     ["projectId"] = "proj_1",
-                    ["issueId"] = "issue_1",
                     ["issueNumber"] = "42",
                 }),
             Status = WorkflowRunStatus.Running,
@@ -330,26 +411,68 @@ public sealed class HermesIssueNotificationTests
         return new NotificationFixture(handler, client, dispatcher, issues, workflowRuns, provider);
     }
 
-    private static CloudEvent WorkflowEvent<T>(string type, string workflowRunId, T data) where T : class =>
-        new(
+    private static CloudEvent WorkflowEvent<T>(
+        string type,
+        string workflowRunId,
+        T data,
+        string? envelopeStage = null) where T : class
+    {
+        var extensions = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            [EventCatalog.Lineage.ProjectId] = "proj_1",
+            [EventCatalog.Lineage.Issue] = "42",
+            [EventCatalog.Lineage.WorkflowRunId] = workflowRunId,
+        };
+        if (envelopeStage is not null)
+            extensions[EventCatalog.Lineage.Stage] = envelopeStage;
+        else if (data is StageApprovalRequested approval)
+            extensions[EventCatalog.Lineage.Stage] = approval.Stage;
+
+        return new(
             id: "evt_" + type.Replace(".", "_", StringComparison.Ordinal),
             source: new Uri("/mohist/workflow-runs/" + workflowRunId, UriKind.Relative),
             type: type,
             time: new DateTimeOffset(2026, 7, 3, 12, 1, 0, TimeSpan.Zero),
-            data: JsonSerializer.SerializeToElement(data, CloudEvent.JsonOptions));
+            data: JsonSerializer.SerializeToElement(data, CloudEvent.JsonOptions),
+            extensions: extensions);
+    }
 
     private static CloudEvent IssueEvent<T>(string type, T data) where T : class =>
         new(
             id: "evt_" + type.Replace(".", "_", StringComparison.Ordinal),
-            source: new Uri("/mohist/issues/issue_1", UriKind.Relative),
+            source: new Uri("/mohist/projects/proj_1/issues/42", UriKind.Relative),
             type: type,
             time: new DateTimeOffset(2026, 7, 3, 12, 1, 0, TimeSpan.Zero),
             data: JsonSerializer.SerializeToElement(data, CloudEvent.JsonOptions),
             extensions: new Dictionary<string, string>(StringComparer.Ordinal)
             {
                 ["projectid"] = "proj_1",
-                ["issueid"] = "issue_1",
-                ["issueno"] = "42",
+                [EventCatalog.Lineage.Issue] = "42",
+            });
+
+    private static CloudEvent IssueEventUnified<T>(string type, T data) where T : class =>
+        new(
+            id: "evt_unified_" + type.Replace(".", "_", StringComparison.Ordinal),
+            source: new Uri("/mohist/projects/proj_1/issues/42", UriKind.Relative),
+            type: type,
+            time: new DateTimeOffset(2026, 7, 3, 12, 1, 0, TimeSpan.Zero),
+            data: JsonSerializer.SerializeToElement(data, CloudEvent.JsonOptions),
+            extensions: new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [EventCatalog.Lineage.ProjectId] = "proj_1",
+                [EventCatalog.Lineage.Issue] = "42",
+            });
+
+    private static CloudEvent IssueEventNoIssueNumber<T>(string type, T data) where T : class =>
+        new(
+            id: "evt_nonum_" + type.Replace(".", "_", StringComparison.Ordinal),
+            source: new Uri("/mohist/projects/proj_1/issues/42", UriKind.Relative),
+            type: type,
+            time: new DateTimeOffset(2026, 7, 3, 12, 1, 0, TimeSpan.Zero),
+            data: JsonSerializer.SerializeToElement(data, CloudEvent.JsonOptions),
+            extensions: new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [EventCatalog.Lineage.ProjectId] = "proj_1",
             });
 
     private static HermesIssueNotificationPayload SamplePayload() =>
@@ -358,10 +481,10 @@ public sealed class HermesIssueNotificationTests
             EventCatalog.ReverseDns.IssueCompleted,
             "evt_1",
             new DateTimeOffset(2026, 7, 3, 12, 0, 0, TimeSpan.Zero),
-            "proj_1",
-            "issue_1",
-            42,
-            "Title",
+             "proj_1",
+             42,
+             null,
+             "Title",
             "run_1",
             null,
             null,
@@ -471,6 +594,7 @@ public sealed class HermesIssueNotificationTests
             Items.TryGetValue(workflowRunId, out var run);
             return Task.FromResult(run);
         }
+
     }
 
     private sealed class TestOptionsMonitor<T> : IOptionsMonitor<T>

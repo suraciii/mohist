@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Runner.Grains;
@@ -33,7 +34,7 @@ public class IssueSessionApiSpecs
     public async Task IssueSessionMetadataEndpoint_ExposesRequiredMetadataAndOmitsProjectedFields()
     {
         var (project, issue, work, session) = await CreateStartedAgentSessionAsync("metadata-shape", sessionName: "plan");
-        var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(issue.Id);
+        var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(project.Id, issue.Number)));
         await issueGrain.StartWorkAsync();
 
         var currentWorkflowRunId = (await issueGrain.GetWorkflowStatusAsync())!.WorkflowRunId!;
@@ -150,7 +151,7 @@ public class IssueSessionApiSpecs
     public async Task IssueSessionMetadataEndpoint_ExposesContextExhaustionFailureCategory()
     {
         var (project, issue, work, session) = await CreateStartedAgentSessionAsync("exhaustion-shape", sessionName: "plan");
-        var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(issue.Id);
+        var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(project.Id, issue.Number)));
         await issueGrain.StartWorkAsync();
 
         var currentWorkflowRunId = (await issueGrain.GetWorkflowStatusAsync())!.WorkflowRunId!;
@@ -203,7 +204,7 @@ public class IssueSessionApiSpecs
     public async Task IssueSessionEventsEndpoint_ReturnsTranscriptSegmentsInAscendingSequenceAcrossBatches()
     {
         var (project, issue, work, session) = await CreateStartedAgentSessionAsync("raw-events-ordering", sessionName: "build");
-        var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(issue.Id);
+        var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(project.Id, issue.Number)));
         await issueGrain.StartWorkAsync();
 
         var currentWorkflowRunId = (await issueGrain.GetWorkflowStatusAsync())!.WorkflowRunId!;
@@ -283,7 +284,7 @@ public class IssueSessionApiSpecs
     public async Task IssueSessionApis_DoNotReturnServerProjectedTurns()
     {
         var (project, issue, work, session) = await CreateStartedAgentSessionAsync("removal-assertion", sessionName: "plan");
-        var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(issue.Id);
+        var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(project.Id, issue.Number)));
         await issueGrain.StartWorkAsync();
 
         var currentWorkflowRunId = (await issueGrain.GetWorkflowStatusAsync())!.WorkflowRunId!;
@@ -363,7 +364,7 @@ var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/i
             WorkType: "task",
             Stage: "Build",
             Title: issueTitle,
-            Issue: new WorkIssueRef(project.Id, issue.Number.ToString(), issue.Number));
+            Issue: new WorkIssueRef(project.Id, issue.Number));
         sessionName ??= work.WorkId;
         var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(Guid.NewGuid().ToString("N"));
         var info = await grain.OpenAsync(new OpenAgentSessionCommand(

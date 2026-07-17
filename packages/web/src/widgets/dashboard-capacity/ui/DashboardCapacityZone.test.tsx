@@ -11,7 +11,6 @@ import { DashboardCapacityZone } from './DashboardCapacityZone'
 function makeAgentStatus(overrides: Partial<AgentStatus> = {}): AgentStatus {
   return {
     running: false,
-    issueId: null,
     issueNumber: null,
     activeAgents: [],
     capacity: { active: 0, max: 8 },

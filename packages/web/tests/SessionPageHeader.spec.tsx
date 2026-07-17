@@ -129,7 +129,6 @@ describe('SessionPage header and states', () => {
   function makeMockMetadata(overrides: Partial<SessionMetadata> = {}): SessionMetadata {
     return {
       sessionId: 'session-123',
-      issueId: 'issue-1',
       runtimeSessionId: 'acp-123',
       executionId: 'exec-123',
       title: 'Test Session',

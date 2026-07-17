@@ -18,12 +18,13 @@ public sealed class WorkflowEventQuerier : IScopedService
     }
 
     public async Task<IReadOnlyList<StoredCloudEvent>> ListIssueEventsAsync(
-        string issueId,
+        string projectId,
+        int issueNumber,
         string? workflowRunId,
         int limit,
         CancellationToken ct = default)
     {
-        var issueEvents = await _events.ListIssueEventsAsync(issueId, limit, ct);
+        var issueEvents = await _events.ListIssueEventsAsync(projectId, issueNumber, limit, ct);
         if (workflowRunId is null)
             return issueEvents;
 
@@ -109,7 +110,6 @@ public sealed class WorkflowEventQuerier : IScopedService
             or EventCatalog.ReverseDns.TaskStarted
             or EventCatalog.ReverseDns.TaskCompleted
             or EventCatalog.ReverseDns.TaskFailed
-            or EventCatalog.ReverseDns.CheckStarted
             or EventCatalog.ReverseDns.CheckPassed
             or EventCatalog.ReverseDns.CheckFailed
             or EventCatalog.ReverseDns.CheckPending

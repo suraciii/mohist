@@ -227,10 +227,9 @@ public sealed class DispatchService : IScopedService
         if (dispatch.Issue is not null) return dispatch;
         if (run.Metadata?.Annotations is not { } annotations) return dispatch;
         if (!annotations.TryGetValue("projectId", out var projectId)
-            || !annotations.TryGetValue("issueId", out var issueId)
             || !annotations.TryGetValue("issueNumber", out var numberStr)
             || !int.TryParse(numberStr, out var number))
             return dispatch;
-        return dispatch with { Issue = new WorkIssueRef(projectId, issueId, number) };
+        return dispatch with { Issue = new WorkIssueRef(projectId, number) };
     }
 }

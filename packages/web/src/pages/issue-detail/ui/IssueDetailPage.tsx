@@ -260,7 +260,6 @@ export function IssueDetailPage({
                 <div className="flex shrink-0 items-center gap-2">
                   <ActivityDialog
                     issueNumber={issueNumber}
-                    issueId={issue?.id}
                     workflowStatus={issue?.workflowStatus}
                     TimelinePanel={components?.EventTimelinePanel}
                   />
@@ -297,7 +296,11 @@ export function IssueDetailPage({
               {issue.primaryEpic && (
                 <button
                   type="button"
-                  onClick={() => navigate(toProjectPath(`/epics/${issue.primaryEpic!.id}`))}
+                  onClick={() => {
+                    if (issue.primaryEpic?.number != null) {
+                      navigate(toProjectPath(`/epics/${issue.primaryEpic.number}`))
+                    }
+                  }}
                   className="mt-3 inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
                   data-testid="primary-epic-label"
                 >
@@ -308,7 +311,7 @@ export function IssueDetailPage({
                   >
                     {issue.primaryEpic.number != null
                       ? `#${issue.primaryEpic.number}`
-                      : `#${issue.primaryEpic.id.slice(0, 8)}`}
+                      : 'Epic'}
                   </span>
                   <span className="font-medium text-foreground/90">
                     {issue.primaryEpic.title}

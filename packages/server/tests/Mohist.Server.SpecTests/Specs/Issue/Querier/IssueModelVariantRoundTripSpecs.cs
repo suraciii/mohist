@@ -36,7 +36,6 @@ public class IssueModelVariantRoundTripSpecs
 
         var issue = new IssueEntity
         {
-            Id = $"issue_variant_rt_{Guid.NewGuid():N}",
             ProjectId = project.Id,
             Number = 1,
             Title = "Variant round-trip",
@@ -47,7 +46,6 @@ public class IssueModelVariantRoundTripSpecs
 
         db.Issues.Add(new IssueRow
         {
-            IssueId = issue.Id,
             State = IssueStore.Serialize(issue),
         });
 
@@ -62,7 +60,8 @@ public class IssueModelVariantRoundTripSpecs
 
         db.IssueWorkflowProfiles.Add(new IssueWorkflowProfile
         {
-            IssueId = issue.Id,
+            ProjectId = issue.ProjectId,
+            IssueNumber = issue.Number,
             Variables = patched.ToJson(),
         });
         await db.SaveChangesAsync();
@@ -86,7 +85,6 @@ public class IssueModelVariantRoundTripSpecs
 
         var issue = new IssueEntity
         {
-            Id = $"issue_variant_stage_{Guid.NewGuid():N}",
             ProjectId = project.Id,
             Number = 1,
             Title = "Per-stage variant",
@@ -97,7 +95,6 @@ public class IssueModelVariantRoundTripSpecs
 
         db.Issues.Add(new IssueRow
         {
-            IssueId = issue.Id,
             State = IssueStore.Serialize(issue),
         });
 
@@ -120,7 +117,8 @@ public class IssueModelVariantRoundTripSpecs
 
         db.IssueWorkflowProfiles.Add(new IssueWorkflowProfile
         {
-            IssueId = issue.Id,
+            ProjectId = issue.ProjectId,
+            IssueNumber = issue.Number,
             Variables = patched.ToJson(),
         });
         await db.SaveChangesAsync();
@@ -156,7 +154,6 @@ public class IssueModelVariantRoundTripSpecs
 
         var issue = new IssueEntity
         {
-            Id = $"issue_variant_nomodel_{Guid.NewGuid():N}",
             ProjectId = project.Id,
             Number = 1,
             Title = "Variant without model",
@@ -167,7 +164,6 @@ public class IssueModelVariantRoundTripSpecs
 
         db.Issues.Add(new IssueRow
         {
-            IssueId = issue.Id,
             State = IssueStore.Serialize(issue),
         });
 
@@ -185,7 +181,8 @@ public class IssueModelVariantRoundTripSpecs
         """;
         db.IssueWorkflowProfiles.Add(new IssueWorkflowProfile
         {
-            IssueId = issue.Id,
+            ProjectId = issue.ProjectId,
+            IssueNumber = issue.Number,
             Variables = rawJson,
         });
         await db.SaveChangesAsync();
@@ -217,7 +214,6 @@ public class IssueModelVariantRoundTripSpecs
 
         var issue = new IssueEntity
         {
-            Id = $"issue_variant_malformed_{Guid.NewGuid():N}",
             ProjectId = project.Id,
             Number = 1,
             Title = "Malformed stage JSON",
@@ -228,7 +224,6 @@ public class IssueModelVariantRoundTripSpecs
 
         db.Issues.Add(new IssueRow
         {
-            IssueId = issue.Id,
             State = IssueStore.Serialize(issue),
         });
 
@@ -242,7 +237,8 @@ public class IssueModelVariantRoundTripSpecs
         """;
         db.IssueWorkflowProfiles.Add(new IssueWorkflowProfile
         {
-            IssueId = issue.Id,
+            ProjectId = issue.ProjectId,
+            IssueNumber = issue.Number,
             Variables = rawJson,
         });
         await db.SaveChangesAsync();

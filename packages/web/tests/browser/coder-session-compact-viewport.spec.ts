@@ -20,7 +20,6 @@ function apiResponse(data: unknown) {
 
 function makeIssue() {
   return {
-    id: 'issue-compact-viewport',
     number: issueNumber,
     title: 'Compact viewport integration issue',
     body: 'Mock issue for compact-viewport pixel verification.',

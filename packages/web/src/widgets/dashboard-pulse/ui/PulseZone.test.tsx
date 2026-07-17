@@ -87,7 +87,6 @@ function renderZone() {
 
 function makeRunningIssue(overrides: Partial<Issue> = {}): Issue {
   return {
-    id: 'issue-1',
     number: 12,
     title: 'Fix project selector',
     status: IssueStatus.InProgress,
@@ -107,7 +106,6 @@ function makeRunningIssue(overrides: Partial<Issue> = {}): Issue {
 function makeAgentStatus(overrides: Partial<AgentStatus> = {}): AgentStatus {
   return {
     running: false,
-    issueId: null,
     issueNumber: null,
     activeAgents: [],
     capacity: { active: 0, max: 8 },
@@ -118,7 +116,6 @@ function makeAgentStatus(overrides: Partial<AgentStatus> = {}): AgentStatus {
 
 function makeSession(overrides: Partial<AgentActivitySession> = {}): AgentActivitySession {
   return {
-    issueId: 'issue-1',
     issueNumber: 12,
     issueTitle: 'Fix project selector',
     issueStage: 'Build',
@@ -171,7 +168,6 @@ describe('PulseZone — issue-led active production', () => {
   it('keeps an in-progress issue visible with its workflow stage even when no agent session is active', async () => {
     mockIssuesResponse([
       makeRunningIssue({
-        id: 'paused-issue',
         number: 50,
         title: 'Refactor the dashboard',
         workflowStage: WorkflowStage.Build,
@@ -194,7 +190,6 @@ describe('PulseZone — issue-led active production', () => {
   it('renders the stage chip with the categorical stage-identity palette', async () => {
     mockIssuesResponse([
       makeRunningIssue({
-        id: 'plan-issue',
         number: 60,
         title: 'Draft implementation plan',
         workflowStage: WorkflowStage.Plan,
@@ -212,7 +207,6 @@ describe('PulseZone — issue-led active production', () => {
   it('shows the owner-action cue for a blocked in-progress issue', async () => {
     mockIssuesResponse([
       makeRunningIssue({
-        id: 'blocked-issue',
         number: 70,
         title: 'Stuck on auth bug',
         workflowStage: WorkflowStage.Build,
@@ -234,7 +228,6 @@ describe('PulseZone — issue-led active production', () => {
   it('hides the owner-action cue for a normally-running issue', async () => {
     mockIssuesResponse([
       makeRunningIssue({
-        id: 'normal-issue',
         number: 80,
         title: 'Running normally',
         workflowStage: WorkflowStage.Build,
@@ -255,7 +248,6 @@ describe('PulseZone — issue-led active production', () => {
   it('shows the cue for an awaiting-approval issue', async () => {
     mockIssuesResponse([
       makeRunningIssue({
-        id: 'await-issue',
         number: 90,
         title: 'Approve the plan',
         workflowStage: WorkflowStage.Plan,
@@ -280,7 +272,6 @@ describe('PulseZone — issue-led active production', () => {
   it('shows the cue for an Integrate-stage Blocked issue (integration-failed)', async () => {
     mockIssuesResponse([
       makeRunningIssue({
-        id: 'integrate-blocked',
         number: 100,
         title: 'Merge blocked',
         workflowStage: WorkflowStage.Integrate,
@@ -299,7 +290,6 @@ describe('PulseZone — issue-led active production', () => {
   it('shows the cue for a non-integrate blocked issue', async () => {
     mockIssuesResponse([
       makeRunningIssue({
-        id: 'build-blocked',
         number: 110,
         title: 'Build halted',
         workflowStage: WorkflowStage.Build,
@@ -318,7 +308,6 @@ describe('PulseZone — issue-led active production', () => {
   it('joins active session telemetry into the matching running-issue row by issue number', async () => {
     mockIssuesResponse([
       makeRunningIssue({
-        id: 'with-session',
         number: 120,
         title: 'Issue with active session',
         workflowStage: WorkflowStage.Build,
@@ -329,7 +318,6 @@ describe('PulseZone — issue-led active production', () => {
       makeActivity([
         makeSession({
           sessionId: 'session-120',
-          issueId: 'with-session',
           issueNumber: 120,
           issueTitle: 'Issue with active session',
           issueStage: 'Build',
@@ -357,7 +345,6 @@ describe('PulseZone — issue-led active production', () => {
       makeActivity([
         makeSession({
           sessionId: 'session-only-999',
-          issueId: 'session-only-issue',
           issueNumber: 999,
           issueTitle: 'Session-only active work',
           issueStage: 'Check',
@@ -384,7 +371,6 @@ describe('PulseZone — issue-led active production', () => {
       makeAgentStatus({
         activeAgents: [
           {
-            issueId: 'agent-only-issue',
             issueNumber: 432,
             projectId: TEST_PROJECT.id,
             progress: {
@@ -422,7 +408,6 @@ describe('PulseZone — issue-led active production', () => {
   it('uses the current issue title and workflow stage when session telemetry is stale', async () => {
     mockIssuesResponse([
       makeRunningIssue({
-        id: 'authoritative-issue',
         number: 125,
         title: 'Current issue title',
         workflowStage: WorkflowStage.Check,
@@ -433,7 +418,6 @@ describe('PulseZone — issue-led active production', () => {
       makeActivity([
         makeSession({
           sessionId: 'session-125',
-          issueId: 'authoritative-issue',
           issueNumber: 125,
           issueTitle: 'Stale session issue title',
           issueStage: 'Plan',
@@ -463,7 +447,6 @@ describe('PulseZone — issue-led active production', () => {
   it('does NOT hide an in-progress issue that lacks an active session', async () => {
     mockIssuesResponse([
       makeRunningIssue({
-        id: 'no-session',
         number: 130,
         title: 'Work paused between stages',
         workflowStage: WorkflowStage.Check,
@@ -471,7 +454,7 @@ describe('PulseZone — issue-led active production', () => {
       }),
     ])
     mockAgentActivityResponse(
-      makeActivity([makeSession({ sessionId: 'unrelated', issueNumber: 999 })]),
+      makeActivity([makeSession({ sessionId: 'unrelated', issueNumber: 999, })]),
     )
 
     renderZone()
@@ -486,7 +469,6 @@ describe('PulseZone — issue-led active production', () => {
   it('renders the cue on a session-enriched row when the issue also needs owner action', async () => {
     mockIssuesResponse([
       makeRunningIssue({
-        id: 'session-blocked',
         number: 140,
         title: 'Blocked AND active session',
         workflowStage: WorkflowStage.Build,
@@ -498,7 +480,6 @@ describe('PulseZone — issue-led active production', () => {
       makeActivity([
         makeSession({
           sessionId: 'session-140',
-          issueId: 'session-blocked',
           issueNumber: 140,
           issueStage: 'Build',
         }),
@@ -516,7 +497,6 @@ describe('PulseZone — issue-led active production', () => {
   it('does not render the removed pulse-capacity-header or pulse-slots (capacity relocated to its own level)', async () => {
     mockIssuesResponse([
       makeRunningIssue({
-        id: 'i-1',
         number: 150,
         title: 'With capacity data present',
         workflowStage: WorkflowStage.Build,
@@ -536,7 +516,6 @@ describe('PulseZone — issue-led active production', () => {
   it('caps at 4 cards and shows a +N more overflow link when running issues exceed the cap', async () => {
     const issues = Array.from({ length: 6 }, (_, i) =>
       makeRunningIssue({
-        id: `overflow-${i}`,
         number: 200 + i,
         title: `Running issue ${i}`,
         workflowStage: WorkflowStage.Build,
@@ -558,7 +537,6 @@ describe('PulseZone — issue-led active production', () => {
   it('shows the overflow link as +1 more when only one card is over the cap', async () => {
     const issues = Array.from({ length: 5 }, (_, i) =>
       makeRunningIssue({
-        id: `overflow2-${i}`,
         number: 300 + i,
         title: `Running issue ${i}`,
         workflowStage: WorkflowStage.Build,
@@ -578,19 +556,16 @@ describe('PulseZone — issue-led active production', () => {
   it('renders an empty-state affordance when there are no running issues or active sessions', async () => {
     mockIssuesResponse([
       makeRunningIssue({
-        id: 'done-issue',
         number: 400,
         status: IssueStatus.Done,
         health: IssueHealth.Done,
       }),
       makeRunningIssue({
-        id: 'cancelled-issue',
         number: 401,
         status: IssueStatus.Cancelled,
         health: IssueHealth.Cancelled,
       }),
       makeRunningIssue({
-        id: 'backlog-issue',
         number: 402,
         status: IssueStatus.Backlog,
         health: IssueHealth.Active,
@@ -608,7 +583,6 @@ describe('PulseZone — issue-led active production', () => {
   it('preserves existing pulse-compact-* test-ids', async () => {
     mockIssuesResponse([
       makeRunningIssue({
-        id: 'i-testids',
         number: 500,
         title: 'Verify testids',
         workflowStage: WorkflowStage.Build,
@@ -627,9 +601,9 @@ describe('PulseZone — issue-led active production', () => {
 
   it('lists multiple running issues and ranks them by issue number ascending', async () => {
     mockIssuesResponse([
-      makeRunningIssue({ id: 'big', number: 30, title: 'Thirty', workflowStage: WorkflowStage.Build }),
-      makeRunningIssue({ id: 'small', number: 5, title: 'Five', workflowStage: WorkflowStage.Plan }),
-      makeRunningIssue({ id: 'mid', number: 12, title: 'Twelve', workflowStage: WorkflowStage.Check }),
+      makeRunningIssue({ number: 30, title: 'Thirty', workflowStage: WorkflowStage.Build }),
+      makeRunningIssue({ number: 5, title: 'Five', workflowStage: WorkflowStage.Plan }),
+      makeRunningIssue({ number: 12, title: 'Twelve', workflowStage: WorkflowStage.Check }),
     ])
     mockAgentActivityResponse(makeActivity([]))
 
@@ -642,13 +616,11 @@ describe('PulseZone — issue-led active production', () => {
   it('lists active sessions that do not have a matching running issue row', async () => {
     mockIssuesResponse([
       makeRunningIssue({
-        id: 'done-with-session',
         number: 600,
         status: IssueStatus.Done,
         health: IssueHealth.Done,
       }),
       makeRunningIssue({
-        id: 'in-progress-no-session',
         number: 601,
         title: 'In progress, no session',
         workflowStage: WorkflowStage.Build,
@@ -658,7 +630,6 @@ describe('PulseZone — issue-led active production', () => {
       makeActivity([
         makeSession({
           sessionId: 'session-600',
-          issueId: 'done-with-session',
           issueNumber: 600,
           issueStatus: 'done',
         }),
@@ -675,14 +646,12 @@ describe('PulseZone — issue-led active production', () => {
   it('renders both a session-enriched row and a session-less row side by side (mixed state)', async () => {
     mockIssuesResponse([
       makeRunningIssue({
-        id: 'with-session',
         number: 700,
         title: 'With session',
         workflowStage: WorkflowStage.Build,
         health: IssueHealth.Active,
       }),
       makeRunningIssue({
-        id: 'no-session',
         number: 701,
         title: 'Paused between stages',
         workflowStage: WorkflowStage.Check,
@@ -693,7 +662,6 @@ describe('PulseZone — issue-led active production', () => {
       makeActivity([
         makeSession({
           sessionId: 'session-700',
-          issueId: 'with-session',
           issueNumber: 700,
           issueStage: 'Build',
         }),

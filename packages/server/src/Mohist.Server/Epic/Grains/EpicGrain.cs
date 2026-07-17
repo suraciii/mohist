@@ -45,16 +45,15 @@ public class EpicGrain : Grain, IEpicGrain
 
     private DateTimeOffset Now() => _timeProvider.GetUtcNow();
 
-    public async Task<EpicDto> CreateAsync(string projectId, string title, string? description, string? priority)
+    public async Task<EpicDto> CreateAsync(string projectId, int number, string title, string? description, string? priority)
     {
-        var number = await _grains.GetGrain<IEpicCounterGrain>(Mohist.Server.Infrastructure.Orleans.GrainKey.EpicCounter(projectId)).NextAsync();
-
+        var key = ParseEpicKey();
+        EnsureIdentityMatches(key, projectId, number);
         await using var db = await _dbFactory.CreateDbContextAsync();
         var now = Now();
         var epic = EpicAggregate.Create(
-            id: $"epic_{Guid.NewGuid():N}",
-            projectId: projectId,
-            number: number,
+            projectId: key.ProjectId,
+            number: key.EpicNumber,
             title: title,
             description: description,
             priority: priority,
@@ -62,453 +61,109 @@ public class EpicGrain : Grain, IEpicGrain
         var row = MapToRow(epic, now);
         db.Epics.Add(row);
         var pending = DrainPendingEvents(epic);
+        await PersistEpicEventsAsync(db, epic, pending, now);
         await db.SaveChangesAsync();
-        await PersistEpicEventsAsync(epic, pending, now);
         return ToDto(row);
     }
 
-    public async Task LinkIssueAsync(string issueId, int issueNumber, string projectId)
+    public async Task LinkIssueAsync(int issueNumber, string projectId)
     {
+        var (scopedProjectId, epicNumber) = ParseGrainKey();
+        EnsureProjectScope(scopedProjectId, projectId);
         await using var db = await _dbFactory.CreateDbContextAsync();
-        var parts = GrainKey.Split(':');
-        var epicId = parts.Length > 1 ? parts[1] : parts[0];
+        var epic = await db.Epics.AsNoTracking()
+            .FirstOrDefaultAsync(row => row.ProjectId == scopedProjectId && row.Number == epicNumber);
+        if (epic is null) throw new InvalidOperationException($"Epic #{epicNumber} not found");
 
-        var row = await db.Epics.FirstOrDefaultAsync(e => e.ProjectId == projectId && e.Id == epicId);
-        if (row is null) throw new InvalidOperationException($"Epic {epicId} not found");
+        var issue = await db.Issues.AsNoTracking()
+            .FirstOrDefaultAsync(row => row.ProjectId == scopedProjectId && row.Number == issueNumber);
+        if (issue?.EpicNumber == epicNumber) return;
+        if (epic.Status == EpicStatusName.Closed)
+            throw new EpicClosedCannotLinkException(epicNumber);
 
-        var alreadyLinkedToThisEpic = await db.EpicIssues.AsNoTracking()
-            .AnyAsync(link => link.ProjectId == projectId && link.EpicId == epicId && link.IssueId == issueId);
-        if (alreadyLinkedToThisEpic) return;
-
-        // Closed is a hard-stop for new links: the domain LinkIssue guard
-        // throws EpicClosedCannotLinkException before any row is added, and
-        // the HTTP layer maps it to 409 EPIC_CLOSED_CANNOT_LINK.
-        if (row.Status == EpicStatusName.Closed)
-        {
-            throw new EpicClosedCannotLinkException(epicId);
-        }
-
-        // Cross-aggregate uniqueness invariant: an issue may belong to at
-        // most one non-terminal epic (idle/running/paused). For a done
-        // target, the wake below flips the epic to running, so the active
-        // row we are about to insert will be a real non-terminal owner;
-        // the check therefore MUST run before the wake-up so we never
-        // create a duplicate row against another non-terminal epic.
-        if (await GetActiveMembershipOwnerAsync(db, projectId, issueId, epicId) is { } conflict)
-        {
-            throw new InvalidOperationException(
-                $"Issue already belongs to Epic '{conflict.EpicId}' ({conflict.Title})");
-        }
-
-        var links = await db.EpicIssues.AsNoTracking()
-            .Where(link => link.ProjectId == projectId && link.EpicId == epicId)
-            .ToListAsync();
-        var domain = Materialize(row, links);
-        var now = Now();
-        domain.LinkIssue(issueId, issueNumber, now.UtcDateTime);
-
-        db.EpicIssues.Add(new EpicIssueRow
-        {
-            EpicId = epicId,
-            ProjectId = projectId,
-            IssueId = issueId,
-            IssueNumber = issueNumber,
-        });
-
-        // Done + open issue wakes the epic to running in the same commit
-        // as the link row; the active-membership row is also created in
-        // that commit so autopilot sees the newly linked issue.
-        var wakeUpEpic = row.Status == EpicStatusName.Done
-            && await IsIssueOpenAsync(db, projectId, issueNumber);
-        if (wakeUpEpic)
-        {
-            domain.WakeFromDone(now.UtcDateTime);
-        }
-
-        if (row.Status != EpicStatusName.Done || wakeUpEpic)
-        {
-            db.EpicActiveIssues.Add(new EpicActiveIssueRow
-            {
-                ProjectId = projectId,
-                IssueId = issueId,
-                EpicId = epicId,
-                IssueNumber = issueNumber,
-            });
-        }
-        MapToRow(domain, row, now);
-        var pending = DrainPendingEvents(domain);
-        // Append the EpicIssueLinked event into the same transaction so the
-        // durable recompute trigger (EpicIssueLinkedHandler) is committed
-        // atomically with the membership row — a crash or failed append
-        // between commit and event persistence would otherwise lose the only
-        // convergence path for a link whose inline recompute never ran.
-        await PersistEpicEventsAsync(db, domain, pending, now);
-        try
-        {
-            await db.SaveChangesAsync();
-        }
-        catch (DbUpdateException)
-        {
-            var owner = await GetActiveMembershipOwnerAsync(projectId, issueId, epicId);
-            if (owner is not null)
-            {
-                throw new InvalidOperationException(
-                    $"Issue already belongs to Epic '{owner.EpicId}' ({owner.Title})");
-            }
-            throw;
-        }
-
-        if (wakeUpEpic)
-        {
-            await TryStartNextAsync(db, projectId, epicId, row, await db.EpicIssues.AsNoTracking()
-                .Where(link => link.ProjectId == projectId && link.EpicId == epicId)
-                .ToListAsync());
-        }
-        else if (row.Status != EpicStatusName.Done && row.Status != EpicStatusName.Closed)
-        {
-            // Link-time recompute: after a non-wake link to a non-terminal
-            // epic, recompute progress so a startable issue linked to a
-            // running epic is advanced via TryStartNext, and an epic whose
-            // members are all complete at link time is marked done. This
-            // preserves the readiness behavior previously supplied by the
-            // poll-driven sweep, deleted in #363.
-            await RecomputeProgressInternalAsync(db, projectId, epicId, row,
-                await db.EpicIssues.AsNoTracking()
-                    .Where(link => link.ProjectId == projectId && link.EpicId == epicId)
-                    .ToListAsync(),
-                StartFailureMode.PreserveRunning);
-        }
+        var target = _grains.GetGrain<IIssueGrain>(
+            Mohist.Server.Infrastructure.Orleans.GrainKey.Issue(new IssueKey(scopedProjectId, issueNumber)));
+        await target.AssignEpicAsync(epicNumber);
     }
 
     public async Task<IReadOnlyList<BatchMembershipOutcome>> LinkIssuesAsync(
         IReadOnlyList<BatchMembershipRequestItem> issues,
         string projectId)
     {
-        if (issues.Count == 0)
-            return Array.Empty<BatchMembershipOutcome>();
-
+        if (issues.Count == 0) return [];
+        var (scopedProjectId, epicNumber) = ParseGrainKey();
+        EnsureProjectScope(scopedProjectId, projectId);
         await using var db = await _dbFactory.CreateDbContextAsync();
-        var parts = GrainKey.Split(':');
-        var epicId = parts.Length > 1 ? parts[1] : parts[0];
+        var epic = await db.Epics.AsNoTracking()
+            .FirstOrDefaultAsync(row => row.ProjectId == scopedProjectId && row.Number == epicNumber);
+        if (epic is null) throw new InvalidOperationException($"Epic #{epicNumber} not found");
 
-        var row = await db.Epics.FirstOrDefaultAsync(e => e.ProjectId == projectId && e.Id == epicId);
-        if (row is null) throw new InvalidOperationException($"Epic {epicId} not found");
-
-        // Closed is a hard-stop for the whole batch: the domain LinkIssue
-        // guard throws EpicClosedCannotLinkException before any row is
-        // added, and the HTTP layer maps it to 409 EPIC_CLOSED_CANNOT_LINK.
-        // Rejecting before the loop (rather than per-item) matches the
-        // spec scenario "Batch link to a closed epic is rejected as a
-        // whole" — no per-item outcomes are produced.
-        if (row.Status == EpicStatusName.Closed)
+        var results = new List<BatchMembershipOutcome>();
+        foreach (var item in issues.Where(item => item.IssueNumber > 0).DistinctBy(item => item.IssueNumber))
         {
-            throw new EpicClosedCannotLinkException(epicId);
-        }
-
-        // De-duplicate the input by canonical internal issue id while
-        // preserving the first occurrence's caller-supplied identifier so
-        // the per-identifier response matches the request one-to-one.
-        // Per the spec, a duplicate identifier is "linked at most once,
-        // not treated as an error" — hence the dedup key is the internal
-        // id, not the identifier string.
-        var dedupByIssueId = new Dictionary<string, BatchMembershipRequestItem>(StringComparer.Ordinal);
-        foreach (var item in issues)
-        {
-            if (string.IsNullOrWhiteSpace(item.IssueId)) continue;
-            dedupByIssueId.TryAdd(item.IssueId, item);
-        }
-        if (dedupByIssueId.Count == 0)
-            return Array.Empty<BatchMembershipOutcome>();
-
-        // Snapshot the existing link set ONCE — every successful link
-        // mutates the in-memory aggregate only, persisting per-issue (so a
-        // single failure does not roll back later successes). Replaying
-        // the snapshot on each iteration keeps the per-issue invariant
-        // check consistent with what is currently in the DB.
-        var existingLinks = await db.EpicIssues.AsNoTracking()
-            .Where(link => link.ProjectId == projectId && link.EpicId == epicId)
-            .Select(link => link.IssueId)
-            .ToHashSetAsync(StringComparer.Ordinal);
-
-        // Tracks whether THIS batch woke the epic from done to running
-        // (per the live row.Status observation). Once flipped, MapToRow
-        // updates row.Status in memory so subsequent items in the same
-        // batch take the normal non-terminal path — preventing a second
-        // WakeFromDone call (which would throw on a non-done epic).
-        var wasDoneAtEntry = row.Status == EpicStatusName.Done;
-
-        var outcomes = new List<BatchMembershipOutcome>(dedupByIssueId.Count);
-        // Tracks whether at least one item in this batch was actually
-        // linked (not deduped, not rejected by the cross-aggregate
-        // uniqueness check, not lost to a save-conflict). The link-time
-        // recompute below only fires when a link was committed; a
-        // batch where every item was rejected must not trigger a
-        // MarkDone event from the recompute.
-        var hasLinkedAny = false;
-        foreach (var item in dedupByIssueId.Values)
-        {
-            // Already a member of this epic — idempotent, no duplicate.
-            if (existingLinks.Contains(item.IssueId))
+            var issue = await db.Issues.AsNoTracking()
+                .FirstOrDefaultAsync(row => row.ProjectId == scopedProjectId && row.Number == item.IssueNumber);
+            if (issue is null)
             {
-                outcomes.Add(BatchMembershipOutcome.AlreadyLinked(item.Identifier, item.IssueId, item.IssueNumber));
+                results.Add(BatchMembershipOutcome.NotFound(item.Identifier));
                 continue;
             }
-
-            // Live per-item decision: row.Status is refreshed by MapToRow
-            // after every commit, so the second item sees the wake-up
-            // applied by the first and takes the non-terminal branch
-            // without re-invoking WakeFromDone. Per design D4 we do NOT
-            // pre-classify the batch or wake before any durable commit.
-            var targetIsTerminal = IsTerminalEpicStatus(row.Status);
-            var wakeUpEpic = row.Status == EpicStatusName.Done
-                && await IsIssueOpenAsync(db, projectId, item.IssueNumber);
-
-            // Cross-aggregate uniqueness invariant: an issue may belong to
-            // at most one non-terminal epic. For a done + open link, the
-            // wake-up below flips the epic to running, so the active row
-            // we are about to insert will be a real non-terminal owner —
-            // the check therefore MUST run before the wake-up so we never
-            // create a duplicate row against another non-terminal epic.
-            // For done + terminal-issue links and for non-terminal targets,
-            // we follow the same rule: only check when an active row would
-            // actually be inserted.
-            var willInsertActiveRow = wakeUpEpic || !targetIsTerminal;
-            if (willInsertActiveRow
-                && await GetActiveMembershipOwnerAsync(db, projectId, item.IssueId, epicId) is { } conflict)
+            if (issue.EpicNumber == epicNumber)
             {
-                outcomes.Add(BatchMembershipOutcome.Conflict(
-                    item.Identifier, item.IssueId, item.IssueNumber, conflict.EpicId, conflict.Title));
+                results.Add(BatchMembershipOutcome.AlreadyLinked(item.Identifier, item.IssueNumber));
                 continue;
             }
+            if (epic.Status == EpicStatusName.Closed)
+                throw new EpicClosedCannotLinkException(epicNumber);
 
-            var newLinks = await db.EpicIssues.AsNoTracking()
-                .Where(link => link.ProjectId == projectId && link.EpicId == epicId)
-                .ToListAsync();
-            var domain = Materialize(row, newLinks);
-            var now = Now();
-            domain.LinkIssue(item.IssueId, item.IssueNumber, now.UtcDateTime);
-
-            db.EpicIssues.Add(new EpicIssueRow
-            {
-                EpicId = epicId,
-                ProjectId = projectId,
-                IssueId = item.IssueId,
-                IssueNumber = item.IssueNumber,
-            });
-
-            // Done + open issue wakes the epic to running in the same
-            // commit as the link row; the active-membership row is also
-            // created in that commit so autopilot sees the new open work.
-            if (wakeUpEpic)
-            {
-                domain.WakeFromDone(now.UtcDateTime);
-            }
-
-            if (willInsertActiveRow)
-            {
-                db.EpicActiveIssues.Add(new EpicActiveIssueRow
-                {
-                    ProjectId = projectId,
-                    IssueId = item.IssueId,
-                    EpicId = epicId,
-                    IssueNumber = item.IssueNumber,
-                });
-            }
-            MapToRow(domain, row, now);
-            var pending = DrainPendingEvents(domain);
-            // Append EpicIssueLinked atomically with the membership row so
-            // the durable recompute trigger is never lost on crash/append
-            // failure (same rationale as the single-link path above).
-            await PersistEpicEventsAsync(db, domain, pending, now);
-            try
-            {
-                await db.SaveChangesAsync();
-            }
-            catch (DbUpdateException) when (willInsertActiveRow)
-            {
-                // Concurrent claim won the race — surface as conflict and
-                // continue with the remaining batch items so the rest of
-                // the request still processes. Re-fetch the epic row so
-                // subsequent iterations see the committed DB state (not the
-                // detached in-memory snapshot left by ChangeTracker.Clear()).
-                db.ChangeTracker.Clear();
-                row = await db.Epics.FirstOrDefaultAsync(e => e.ProjectId == projectId && e.Id == epicId)
-                    ?? throw new InvalidOperationException($"Epic {epicId} not found");
-                var owner = await GetActiveMembershipOwnerAsync(projectId, item.IssueId, epicId);
-                if (owner is not null)
-                {
-                    outcomes.Add(BatchMembershipOutcome.Conflict(
-                        item.Identifier, item.IssueId, item.IssueNumber, owner.EpicId, owner.Title));
-                    continue;
-                }
-                outcomes.Add(BatchMembershipOutcome.Conflict(
-                    item.Identifier, item.IssueId, item.IssueNumber, epicId, row.Title));
-                continue;
-            }
-
-            existingLinks.Add(item.IssueId);
-            outcomes.Add(BatchMembershipOutcome.Linked(item.Identifier, item.IssueId, item.IssueNumber));
-            hasLinkedAny = true;
+            var target = _grains.GetGrain<IIssueGrain>(
+                Mohist.Server.Infrastructure.Orleans.GrainKey.Issue(new IssueKey(scopedProjectId, item.IssueNumber)));
+            await target.AssignEpicAsync(epicNumber);
+            results.Add(BatchMembershipOutcome.Linked(item.Identifier, item.IssueNumber));
         }
-
-        // Per design D4: if this batch woke the epic from done to running,
-        // invoke TryStartNextAsync exactly once so autopilot advances the
-        // newly linked open issue with no caller-issued start. The live
-        // row.Status check at the top of TryStartNextAsync is a no-op for
-        // non-running epics; the wasDoneAtEntry gate guards the intent.
-        if (wasDoneAtEntry && row.Status == EpicStatusName.Running)
-        {
-            var finalLinks = await db.EpicIssues.AsNoTracking()
-                .Where(link => link.ProjectId == projectId && link.EpicId == epicId)
-                .ToListAsync();
-            await TryStartNextAsync(db, projectId, epicId, row, finalLinks);
-        }
-        else if (hasLinkedAny && !wasDoneAtEntry && row.Status != EpicStatusName.Done && row.Status != EpicStatusName.Closed)
-        {
-            // Link-time recompute for non-wake batches to non-terminal
-            // epics: covers startable-issue-linked-to-running-epic
-            // (TryStartNext advance) and all-complete-at-link-time
-            // (MarkDone). Preserves the readiness behavior previously
-            // supplied by the poll-driven sweep, deleted in #363. Only
-            // fires when at least one item in the batch was actually
-            // linked — a batch where every item was rejected must not
-            // trigger a MarkDone event from the recompute.
-            var finalLinks = await db.EpicIssues.AsNoTracking()
-                .Where(link => link.ProjectId == projectId && link.EpicId == epicId)
-                .ToListAsync();
-            await RecomputeProgressInternalAsync(db, projectId, epicId, row, finalLinks,
-                StartFailureMode.PreserveRunning);
-        }
-
-        return outcomes;
+        return results;
     }
 
-    public async Task UnlinkIssueAsync(string issueId, string projectId)
+    public async Task UnlinkIssueAsync(int issueNumber, string projectId)
     {
-        await using var db = await _dbFactory.CreateDbContextAsync();
-        var parts = GrainKey.Split(':');
-        var epicId = parts.Length > 1 ? parts[1] : parts[0];
-
-        var row = await db.Epics.FirstOrDefaultAsync(e => e.ProjectId == projectId && e.Id == epicId);
-        if (row is null) return;
-
-        var links = await db.EpicIssues.AsNoTracking()
-            .Where(link => link.ProjectId == projectId && link.EpicId == epicId)
-            .ToListAsync();
-        var domain = Materialize(row, links);
-        var now = Now();
-        domain.UnlinkIssue(issueId, now.UtcDateTime);
-
-        var link = await db.EpicIssues.FirstOrDefaultAsync(
-            l => l.ProjectId == projectId && l.EpicId == epicId && l.IssueId == issueId);
-        if (link is not null) db.EpicIssues.Remove(link);
-        await ReleaseActiveMembershipAsync(db, projectId, epicId, issueId);
-        MapToRow(domain, row, now);
-        var pending = DrainPendingEvents(domain);
-        await PersistEpicEventsAsync(db, domain, pending, now);
-        await db.SaveChangesAsync();
-        await RecomputeProgressInternalAsync(
-            db,
-            projectId,
-            epicId,
-            row,
-            await db.EpicIssues.AsNoTracking()
-                .Where(link => link.ProjectId == projectId && link.EpicId == epicId)
-                .ToListAsync(),
-            StartFailureMode.PreserveRunning);
+        var (scopedProjectId, epicNumber) = ParseGrainKey();
+        EnsureProjectScope(scopedProjectId, projectId);
+        var target = _grains.GetGrain<IIssueGrain>(
+            Mohist.Server.Infrastructure.Orleans.GrainKey.Issue(new IssueKey(scopedProjectId, issueNumber)));
+        await target.RemoveEpicAsync(epicNumber);
     }
 
     public async Task<IReadOnlyList<BatchMembershipOutcome>> UnlinkIssuesAsync(
         IReadOnlyList<BatchMembershipRequestItem> issues,
         string projectId)
     {
-        if (issues.Count == 0)
-            return Array.Empty<BatchMembershipOutcome>();
-
-        await using var db = await _dbFactory.CreateDbContextAsync();
-        var parts = GrainKey.Split(':');
-        var epicId = parts.Length > 1 ? parts[1] : parts[0];
-
-        var row = await db.Epics.FirstOrDefaultAsync(e => e.ProjectId == projectId && e.Id == epicId);
-        if (row is null) throw new InvalidOperationException($"Epic {epicId} not found");
-
-        // De-duplicate by canonical internal issue id; preserve first
-        // identifier for the response.
-        var dedupByIssueId = new Dictionary<string, BatchMembershipRequestItem>(StringComparer.Ordinal);
-        foreach (var item in issues)
+        if (issues.Count == 0) return [];
+        var (scopedProjectId, epicNumber) = ParseGrainKey();
+        EnsureProjectScope(scopedProjectId, projectId);
+        var results = new List<BatchMembershipOutcome>();
+        foreach (var item in issues.Where(item => item.IssueNumber > 0).DistinctBy(item => item.IssueNumber))
         {
-            if (string.IsNullOrWhiteSpace(item.IssueId)) continue;
-            dedupByIssueId.TryAdd(item.IssueId, item);
+            var target = _grains.GetGrain<IIssueGrain>(
+                Mohist.Server.Infrastructure.Orleans.GrainKey.Issue(new IssueKey(scopedProjectId, item.IssueNumber)));
+            var removed = await target.RemoveEpicAsync(epicNumber);
+            results.Add(removed
+                ? BatchMembershipOutcome.Unlinked(item.Identifier, item.IssueNumber)
+                : BatchMembershipOutcome.WasNotAMember(item.Identifier, item.IssueNumber));
         }
-        if (dedupByIssueId.Count == 0)
-            return Array.Empty<BatchMembershipOutcome>();
-
-        var existingLinks = await db.EpicIssues.AsNoTracking()
-            .Where(link => link.ProjectId == projectId && link.EpicId == epicId)
-            .Select(link => link.IssueId)
-            .ToHashSetAsync(StringComparer.Ordinal);
-
-        var outcomes = new List<BatchMembershipOutcome>(dedupByIssueId.Count);
-        var hasUnlinkedAny = false;
-        foreach (var item in dedupByIssueId.Values)
-        {
-            if (!existingLinks.Contains(item.IssueId))
-            {
-                // Idempotent: not-a-member is a non-error outcome.
-                outcomes.Add(BatchMembershipOutcome.WasNotAMember(item.Identifier, item.IssueId, item.IssueNumber));
-                continue;
-            }
-
-            var links = await db.EpicIssues.AsNoTracking()
-                .Where(link => link.ProjectId == projectId && link.EpicId == epicId)
-                .ToListAsync();
-            var domain = Materialize(row, links);
-            var now = Now();
-            domain.UnlinkIssue(item.IssueId, now.UtcDateTime);
-
-            var link = await db.EpicIssues.FirstOrDefaultAsync(
-                l => l.ProjectId == projectId && l.EpicId == epicId && l.IssueId == item.IssueId);
-            if (link is not null) db.EpicIssues.Remove(link);
-            await ReleaseActiveMembershipAsync(db, projectId, epicId, item.IssueId);
-            MapToRow(domain, row, now);
-            var pending = DrainPendingEvents(domain);
-            await PersistEpicEventsAsync(db, domain, pending, now);
-            await db.SaveChangesAsync();
-            existingLinks.Remove(item.IssueId);
-            outcomes.Add(BatchMembershipOutcome.Unlinked(item.Identifier, item.IssueId, item.IssueNumber));
-            hasUnlinkedAny = true;
-        }
-
-        if (hasUnlinkedAny)
-        {
-            await RecomputeProgressInternalAsync(
-                db,
-                projectId,
-                epicId,
-                row,
-                await db.EpicIssues.AsNoTracking()
-                    .Where(link => link.ProjectId == projectId && link.EpicId == epicId)
-                    .ToListAsync(),
-                StartFailureMode.PreserveRunning);
-        }
-
-        return outcomes;
+        return results;
     }
+
 
     public async Task<EpicDto> PauseAsync(string? reason)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
-        var parts = GrainKey.Split(':');
-        var epicId = parts.Length > 1 ? parts[1] : parts[0];
-        var projectId = parts[0];
+        var (projectId, epicNumber) = ParseGrainKey();
 
-        var row = await db.Epics.FirstOrDefaultAsync(e => e.ProjectId == projectId && e.Id == epicId);
-        if (row is null) throw new InvalidOperationException($"Epic {epicId} not found");
+        var row = await db.Epics.FirstOrDefaultAsync(e => e.ProjectId == projectId && e.Number == epicNumber);
+        if (row is null) throw new InvalidOperationException($"Epic #{epicNumber} not found");
 
-        var links = await db.EpicIssues.AsNoTracking()
-            .Where(link => link.ProjectId == projectId && link.EpicId == epicId)
-            .ToListAsync();
-        var domain = Materialize(row, links);
+        var links = await LoadLinkedIssueNumbersAsync(db, projectId, epicNumber);
+        var domain = Materialize(row);
         // Idempotency at the boundary is owned by the domain's status
         // checks (e.g. Pause-from-Paused short-circuits without throwing).
         // Invalid non-target transitions (Pause-from-Idle raises
@@ -518,28 +173,22 @@ public class EpicGrain : Grain, IEpicGrain
         var now = Now();
         domain.Pause(reason, now.UtcDateTime);
         MapToRow(domain, row, now);
-        if (row.Status is EpicStatusName.Done or EpicStatusName.Closed)
-            await ReleaseActiveMembershipsAsync(db, projectId, epicId);
         var pending = DrainPendingEvents(domain);
+        await PersistEpicEventsAsync(db, domain, pending, now);
         await db.SaveChangesAsync();
-        await PersistEpicEventsAsync(domain, pending, now);
         return ToDto(row);
     }
 
     public async Task<EpicDto> StartAsync()
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
-        var parts = GrainKey.Split(':');
-        var epicId = parts.Length > 1 ? parts[1] : parts[0];
-        var projectId = parts[0];
+        var (projectId, epicNumber) = ParseGrainKey();
 
-        var row = await db.Epics.FirstOrDefaultAsync(e => e.ProjectId == projectId && e.Id == epicId);
-        if (row is null) throw new InvalidOperationException($"Epic {epicId} not found");
+        var row = await db.Epics.FirstOrDefaultAsync(e => e.ProjectId == projectId && e.Number == epicNumber);
+        if (row is null) throw new InvalidOperationException($"Epic #{epicNumber} not found");
 
-        var links = await db.EpicIssues.AsNoTracking()
-            .Where(link => link.ProjectId == projectId && link.EpicId == epicId)
-            .ToListAsync();
-        var domain = Materialize(row, links);
+        var links = await LoadLinkedIssueNumbersAsync(db, projectId, epicNumber);
+        var domain = Materialize(row);
         // Idempotency at the boundary is owned by the domain's status
         // checks (Start-from-Running short-circuits without throwing).
         // Invalid non-target transitions (Start-from-Paused raises
@@ -560,7 +209,7 @@ public class EpicGrain : Grain, IEpicGrain
 
         if (row.Status == EpicStatusName.Running && !wasAlreadyRunning)
         {
-            return await TryStartNextAsync(db, projectId, epicId, row, links);
+            return await TryStartNextAsync(db, projectId, epicNumber, row, links);
         }
         return ToDto(row);
     }
@@ -568,17 +217,13 @@ public class EpicGrain : Grain, IEpicGrain
     public async Task<EpicDto> ResumeAsync()
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
-        var parts = GrainKey.Split(':');
-        var epicId = parts.Length > 1 ? parts[1] : parts[0];
-        var projectId = parts[0];
+        var (projectId, epicNumber) = ParseGrainKey();
 
-        var row = await db.Epics.FirstOrDefaultAsync(e => e.ProjectId == projectId && e.Id == epicId);
-        if (row is null) throw new InvalidOperationException($"Epic {epicId} not found");
+        var row = await db.Epics.FirstOrDefaultAsync(e => e.ProjectId == projectId && e.Number == epicNumber);
+        if (row is null) throw new InvalidOperationException($"Epic #{epicNumber} not found");
 
-        var links = await db.EpicIssues.AsNoTracking()
-            .Where(link => link.ProjectId == projectId && link.EpicId == epicId)
-            .ToListAsync();
-        var domain = Materialize(row, links);
+        var links = await LoadLinkedIssueNumbersAsync(db, projectId, epicNumber);
+        var domain = Materialize(row);
         // Idempotency at the boundary is owned by the domain's status
         // checks (Resume-from-Running short-circuits without throwing).
         // Invalid non-target transitions (Resume-from-Idle raises
@@ -595,7 +240,7 @@ public class EpicGrain : Grain, IEpicGrain
 
         if (row.Status == EpicStatusName.Running && !wasAlreadyRunning)
         {
-            return await RecomputeProgressInternalAsync(db, projectId, epicId, row, links);
+            return await RecomputeProgressInternalAsync(db, projectId, epicNumber, row, links);
         }
         return ToDto(row);
     }
@@ -603,17 +248,13 @@ public class EpicGrain : Grain, IEpicGrain
     public async Task<EpicDto> SetStatusAsync(string status)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
-        var parts = GrainKey.Split(':');
-        var epicId = parts.Length > 1 ? parts[1] : parts[0];
-        var projectId = parts[0];
+        var (projectId, epicNumber) = ParseGrainKey();
 
-        var row = await db.Epics.FirstOrDefaultAsync(e => e.ProjectId == projectId && e.Id == epicId);
-        if (row is null) throw new InvalidOperationException($"Epic {epicId} not found");
+        var row = await db.Epics.FirstOrDefaultAsync(e => e.ProjectId == projectId && e.Number == epicNumber);
+        if (row is null) throw new InvalidOperationException($"Epic #{epicNumber} not found");
 
-        var links = await db.EpicIssues.AsNoTracking()
-            .Where(link => link.ProjectId == projectId && link.EpicId == epicId)
-            .ToListAsync();
-        var domain = Materialize(row, links);
+        var links = await LoadLinkedIssueNumbersAsync(db, projectId, epicNumber);
+        var domain = Materialize(row);
         var now = Now();
 
         switch (status?.ToLowerInvariant())
@@ -632,28 +273,22 @@ public class EpicGrain : Grain, IEpicGrain
         }
 
         MapToRow(domain, row, now);
-        if (row.Status is EpicStatusName.Done or EpicStatusName.Closed)
-            await ReleaseActiveMembershipsAsync(db, projectId, epicId);
         var pending = DrainPendingEvents(domain);
+        await PersistEpicEventsAsync(db, domain, pending, now);
         await db.SaveChangesAsync();
-        await PersistEpicEventsAsync(domain, pending, now);
         return ToDto(row);
     }
 
     public async Task<EpicDto> ReopenAsync()
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
-        var parts = GrainKey.Split(':');
-        var epicId = parts.Length > 1 ? parts[1] : parts[0];
-        var projectId = parts[0];
+        var (projectId, epicNumber) = ParseGrainKey();
 
-        var row = await db.Epics.FirstOrDefaultAsync(e => e.ProjectId == projectId && e.Id == epicId);
-        if (row is null) throw new InvalidOperationException($"Epic {epicId} not found");
+        var row = await db.Epics.FirstOrDefaultAsync(e => e.ProjectId == projectId && e.Number == epicNumber);
+        if (row is null) throw new InvalidOperationException($"Epic #{epicNumber} not found");
 
-        var links = await db.EpicIssues.AsNoTracking()
-            .Where(link => link.ProjectId == projectId && link.EpicId == epicId)
-            .ToListAsync();
-        var domain = Materialize(row, links);
+        var links = await LoadLinkedIssueNumbersAsync(db, projectId, epicNumber);
+        var domain = Materialize(row);
         // Reopen only accepts terminal epics; non-terminal attempts raise
         // EpicNotTerminalException so the HTTP layer can return 409
         // EPIC_NOT_TERMINAL. EnsureNotTerminal remains in place for the
@@ -663,82 +298,53 @@ public class EpicGrain : Grain, IEpicGrain
         domain.Reopen(now.UtcDateTime);
         MapToRow(domain, row, now);
 
-        // Re-establish active memberships in the same database commit
-        // as the terminal-to-idle transition. If that commit fails, the
-        // epic remains terminal and a retry can perform the full reopen
-        // again instead of getting stuck in an idle-without-active-rows
-        // partial state.
-        foreach (var link in links)
-        {
-            var owner = await GetActiveMembershipOwnerAsync(db, projectId, link.IssueId, epicId);
-            if (owner is not null) continue;
-
-            db.EpicActiveIssues.Add(new EpicActiveIssueRow
-            {
-                ProjectId = projectId,
-                IssueId = link.IssueId,
-                EpicId = epicId,
-                IssueNumber = link.IssueNumber,
-            });
-        }
-
         var pending = DrainPendingEvents(domain);
+        await PersistEpicEventsAsync(db, domain, pending, now);
         await db.SaveChangesAsync();
-        await PersistEpicEventsAsync(domain, pending, now);
         return ToDto(row);
     }
 
     public async Task<EpicDto?> UpdateAsync(string? title, string? description, string? priority)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
-        var parts = GrainKey.Split(':');
-        var epicId = parts.Length > 1 ? parts[1] : parts[0];
-        var projectId = parts[0];
+        var (projectId, epicNumber) = ParseGrainKey();
 
-        var row = await db.Epics.FirstOrDefaultAsync(e => e.ProjectId == projectId && e.Id == epicId);
+        var row = await db.Epics.FirstOrDefaultAsync(e => e.ProjectId == projectId && e.Number == epicNumber);
         if (row is null) return null;
 
-        var links = await db.EpicIssues.AsNoTracking()
-            .Where(link => link.ProjectId == projectId && link.EpicId == epicId)
-            .ToListAsync();
-        var domain = Materialize(row, links);
+        var links = await LoadLinkedIssueNumbersAsync(db, projectId, epicNumber);
+        var domain = Materialize(row);
         var now = Now();
         domain.Update(title, description, priority, now.UtcDateTime);
         MapToRow(domain, row, now);
         var pending = DrainPendingEvents(domain);
+        await PersistEpicEventsAsync(db, domain, pending, now);
         await db.SaveChangesAsync();
-        await PersistEpicEventsAsync(domain, pending, now);
         return ToDto(row);
     }
 
     public async Task<EpicDto?> AutoMarkDoneIfReadyAsync()
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
-        var parts = GrainKey.Split(':');
-        var epicId = parts.Length > 1 ? parts[1] : parts[0];
-        var projectId = parts[0];
+        var (projectId, epicNumber) = ParseGrainKey();
 
-        var row = await db.Epics.FirstOrDefaultAsync(e => e.ProjectId == projectId && e.Id == epicId);
+        var row = await db.Epics.FirstOrDefaultAsync(e => e.ProjectId == projectId && e.Number == epicNumber);
         if (row is null) return null;
 
-        return await TryAutoMarkDoneAsync(db, projectId, epicId, row);
+        return await TryAutoMarkDoneAsync(db, projectId, epicNumber, row);
     }
 
     public async Task<EpicDto?> RecomputeProgressAsync()
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
-        var parts = GrainKey.Split(':');
-        var epicId = parts.Length > 1 ? parts[1] : parts[0];
-        var projectId = parts[0];
+        var (projectId, epicNumber) = ParseGrainKey();
 
-        var row = await db.Epics.FirstOrDefaultAsync(e => e.ProjectId == projectId && e.Id == epicId);
+        var row = await db.Epics.FirstOrDefaultAsync(e => e.ProjectId == projectId && e.Number == epicNumber);
         if (row is null) return null;
 
-        var links = await db.EpicIssues.AsNoTracking()
-            .Where(link => link.ProjectId == projectId && link.EpicId == epicId)
-            .ToListAsync();
+        var links = await LoadLinkedIssueNumbersAsync(db, projectId, epicNumber);
 
-        return await RecomputeProgressInternalAsync(db, projectId, epicId, row, links, StartFailureMode.Propagate);
+        return await RecomputeProgressInternalAsync(db, projectId, epicNumber, row, links, StartFailureMode.Propagate);
     }
 
     /// <summary>
@@ -763,31 +369,42 @@ public class EpicGrain : Grain, IEpicGrain
     /// running-but-idle so the next event-driven recompute can re-evaluate.
     /// </param>
     private async Task<EpicDto> RecomputeProgressInternalAsync(
-        MohistDbContext db, string projectId, string epicId, EpicRow row, IReadOnlyList<EpicIssueRow> links,
+        MohistDbContext db, string projectId, int epicNumber, EpicRow row, IReadOnlyList<int> links,
         StartFailureMode startFailureMode = StartFailureMode.PreserveRunning)
     {
-        if (row.Status is EpicStatusName.Done or EpicStatusName.Closed)
+        if (row.Status == EpicStatusName.Closed)
             return ToDto(row);
         if (row.Status == EpicStatusName.Paused)
             return ToDto(row);
 
         var open = await ComputeOpenLinkedNumbersAsync(db, projectId, links);
+        if (row.Status == EpicStatusName.Done)
+        {
+            if (open.Count == 0) return ToDto(row);
+            var domain = Materialize(row);
+            var now = Now();
+            domain.WakeFromDone(now.UtcDateTime);
+            MapToRow(domain, row, now);
+            var pending = DrainPendingEvents(domain);
+            await PersistEpicEventsAsync(db, domain, pending, now);
+            await db.SaveChangesAsync();
+            return await TryStartNextAsync(db, projectId, epicNumber, row, links, startFailureMode);
+        }
         if (open.Count == 0)
         {
-            var domain = Materialize(row, links);
+            var domain = Materialize(row);
             var now = Now();
             domain.MarkDone(open, now.UtcDateTime);
             MapToRow(domain, row, now);
-            await ReleaseActiveMembershipsAsync(db, projectId, epicId);
             var pending = DrainPendingEvents(domain);
+            await PersistEpicEventsAsync(db, domain, pending, now);
             await db.SaveChangesAsync();
-            await PersistEpicEventsAsync(domain, pending, now);
             return ToDto(row);
         }
 
         if (row.Status == EpicStatusName.Running)
         {
-            return await TryStartNextAsync(db, projectId, epicId, row, links, startFailureMode);
+            return await TryStartNextAsync(db, projectId, epicNumber, row, links, startFailureMode);
         }
 
         // idle: not self-driving; do not advance.
@@ -816,7 +433,7 @@ public class EpicGrain : Grain, IEpicGrain
     /// </list>
     /// </summary>
     private async Task<EpicDto> TryStartNextAsync(
-        MohistDbContext db, string projectId, string epicId, EpicRow row, IReadOnlyList<EpicIssueRow> links,
+        MohistDbContext db, string projectId, int epicNumber, EpicRow row, IReadOnlyList<int> links,
         StartFailureMode startFailureMode = StartFailureMode.PreserveRunning)
     {
         if (row.Status != EpicStatusName.Running)
@@ -842,19 +459,20 @@ public class EpicGrain : Grain, IEpicGrain
 
         try
         {
-            var issueGrain = _grains.GetGrain<IIssueGrain>(Mohist.Server.Infrastructure.Orleans.GrainKey.Issue(next.Id));
-            await issueGrain.StartWorkAsync();
+            var issueGrain = _grains.GetGrain<IIssueGrain>(
+                Mohist.Server.Infrastructure.Orleans.GrainKey.Issue(new IssueKey(projectId, next.Number)));
+            await issueGrain.TryStartFromEpicAsync(epicNumber);
         }
         catch (Exception ex)
         {
             if (startFailureMode == StartFailureMode.PreserveRunning)
             {
                 _log.LogWarning(ex,
-                    "Epic {EpicId} ({ProjectId}) failed to start next linked issue {IssueId}; epic remains running-but-idle, emitting start-attempt-failed for durable retry",
-                    epicId, projectId, next.Id);
+                    "Epic #{EpicNumber} ({ProjectId}) failed to start next linked issue #{IssueNumber}; epic remains running-but-idle, emitting start-attempt-failed for durable retry",
+                    epicNumber, projectId, next.Number);
                 var now = _timeProvider.GetUtcNow();
-                var domain = Materialize(row, links);
-                domain.RecordStartAttemptFailure(next.Id, next.Number, "start-failed", now.UtcDateTime);
+                var domain = Materialize(row);
+                domain.RecordStartAttemptFailure(next.Number, "start-failed", now.UtcDateTime);
                 MapToRow(domain, row, now);
                 var pending = DrainPendingEvents(domain);
                 await PersistEpicEventsAsync(db, domain, pending, now);
@@ -873,78 +491,30 @@ public class EpicGrain : Grain, IEpicGrain
         Propagate,
     }
 
-    private async Task<EpicDto> TryAutoMarkDoneAsync(MohistDbContext db, string projectId, string epicId, EpicRow row)
+    private async Task<EpicDto> TryAutoMarkDoneAsync(MohistDbContext db, string projectId, int epicNumber, EpicRow row)
     {
         if (row.Status is "done" or "closed")
             return ToDto(row);
         if (row.Status == "paused")
             return ToDto(row);
 
-        var links = await db.EpicIssues.AsNoTracking()
-            .Where(link => link.ProjectId == projectId && link.EpicId == epicId)
-            .ToListAsync();
+        var links = await LoadLinkedIssueNumbersAsync(db, projectId, epicNumber);
         var open = await ComputeOpenLinkedNumbersAsync(db, projectId, links);
         if (open.Count > 0)
             return ToDto(row);
 
-        var domain = Materialize(row, links);
+        var domain = Materialize(row);
         var now = Now();
         domain.MarkDone(open, now.UtcDateTime);
         MapToRow(domain, row, now);
-        await ReleaseActiveMembershipsAsync(db, projectId, epicId);
         var pending = DrainPendingEvents(domain);
+        await PersistEpicEventsAsync(db, domain, pending, now);
         await db.SaveChangesAsync();
-        await PersistEpicEventsAsync(domain, pending, now);
         return ToDto(row);
     }
 
-    private async Task<ActiveMembershipOwner?> GetActiveMembershipOwnerAsync(string projectId, string issueId, string currentEpicId)
-    {
-        await using var db = await _dbFactory.CreateDbContextAsync();
-        return await GetActiveMembershipOwnerAsync(db, projectId, issueId, currentEpicId);
-    }
-
-    private static async Task<ActiveMembershipOwner?> GetActiveMembershipOwnerAsync(
-        MohistDbContext db, string projectId, string issueId, string currentEpicId)
-    {
-        return await (
-            from active in db.EpicActiveIssues.AsNoTracking()
-            join epic in db.Epics.AsNoTracking()
-                on active.EpicId equals epic.Id
-            where active.ProjectId == projectId
-                && active.IssueId == issueId
-                && active.EpicId != currentEpicId
-            select new ActiveMembershipOwner(active.EpicId, epic.Title)
-        ).FirstOrDefaultAsync();
-    }
-
-    private static async Task<bool> IsIssueOpenAsync(MohistDbContext db, string projectId, int issueNumber)
-    {
-        var rows = await db.Issues.AsNoTracking()
-            .Where(row => row.ProjectId == projectId && row.Number == issueNumber)
-            .ToListAsync();
-        var byNumber = IssueRowMapper.ByNumber(rows, projectId, new[] { issueNumber });
-        if (!byNumber.TryGetValue(issueNumber, out var issue)) return false;
-        return issue.Status is not (IssueStatus.Done or IssueStatus.Cancelled);
-    }
-
-    private static async Task ReleaseActiveMembershipsAsync(MohistDbContext db, string projectId, string epicId)
-    {
-        var active = await db.EpicActiveIssues
-            .Where(row => row.ProjectId == projectId && row.EpicId == epicId)
-            .ToListAsync();
-        db.EpicActiveIssues.RemoveRange(active);
-    }
-
-    private static async Task ReleaseActiveMembershipAsync(MohistDbContext db, string projectId, string epicId, string issueId)
-    {
-        var active = await db.EpicActiveIssues.FirstOrDefaultAsync(row =>
-            row.ProjectId == projectId && row.EpicId == epicId && row.IssueId == issueId);
-        if (active is not null) db.EpicActiveIssues.Remove(active);
-    }
-
     private async Task<HashSet<int>> ComputeOpenLinkedNumbersAsync(
-        MohistDbContext db, string projectId, IReadOnlyList<EpicIssueRow> links)
+        MohistDbContext db, string projectId, IReadOnlyList<int> links)
     {
         if (links.Count == 0) return new HashSet<int>();
         var linked = await BuildLinkedIssueDtosAsync(db, projectId, links);
@@ -957,10 +527,10 @@ public class EpicGrain : Grain, IEpicGrain
         return open;
     }
 
-    private static async Task<List<LinkedIssueDto>> BuildLinkedIssueDtosAsync(MohistDbContext db, string projectId, IReadOnlyList<EpicIssueRow> links)
+    private static async Task<List<LinkedIssueDto>> BuildLinkedIssueDtosAsync(MohistDbContext db, string projectId, IReadOnlyList<int> links)
     {
         if (links.Count == 0) return [];
-        var issueNumbers = links.Select(l => l.IssueNumber).Distinct().ToArray();
+        var issueNumbers = links.Distinct().ToArray();
         var rows = await db.Issues.AsNoTracking()
             .Where(row => row.ProjectId == projectId && row.Number != null && issueNumbers.Contains(row.Number.Value))
             .ToListAsync();
@@ -1000,11 +570,10 @@ public class EpicGrain : Grain, IEpicGrain
             }
         }
 
-        return links
-            .OrderBy(l => l.CreatedAt)
-            .Select(link => byNumber.TryGetValue(link.IssueNumber, out var issue)
+        return issueNumbers
+            .OrderBy(number => number)
+            .Select(number => byNumber.TryGetValue(number, out var issue)
                 ? new LinkedIssueDto(
-                    Id: issue.Id,
                     Number: issue.Number,
                     Title: issue.Title,
                     Status: MohistDefaultWorkflowProjection.IssueStatusName(issue.Status),
@@ -1019,13 +588,22 @@ public class EpicGrain : Grain, IEpicGrain
             .ToList();
     }
 
-    private static EpicAggregate Materialize(EpicRow row, IReadOnlyList<EpicIssueRow> links)
+    private static Task<List<int>> LoadLinkedIssueNumbersAsync(
+        MohistDbContext db,
+        string projectId,
+        int epicNumber) =>
+        db.Issues.AsNoTracking()
+            .Where(row => row.ProjectId == projectId && row.EpicNumber == epicNumber && row.Number != null)
+            .OrderBy(row => row.Number)
+            .Select(row => row.Number!.Value)
+            .ToListAsync();
+
+    private static EpicAggregate Materialize(EpicRow row)
     {
         var epic = new EpicAggregate
         {
-            Id = row.Id,
             ProjectId = row.ProjectId,
-            Number = row.Number ?? 0,
+            Number = row.Number,
             Title = row.Title,
             Description = row.Description,
             Priority = row.Priority,
@@ -1034,14 +612,11 @@ public class EpicGrain : Grain, IEpicGrain
             CreatedAt = row.CreatedAt.UtcDateTime,
             UpdatedAt = row.UpdatedAt.UtcDateTime,
         };
-        foreach (var link in links)
-            epic.SeedLink(link.IssueId, link.IssueNumber);
         return epic;
     }
 
     private static EpicRow MapToRow(EpicAggregate epic, DateTimeOffset now) => new()
     {
-        Id = epic.Id,
         ProjectId = epic.ProjectId,
         Number = epic.Number,
         Title = epic.Title,
@@ -1068,10 +643,35 @@ public class EpicGrain : Grain, IEpicGrain
 
     private static EpicStatusEnum ParseStatus(string status) => EpicStatusName.Parse(status);
 
-    private static bool IsTerminalEpicStatus(string status) =>
-        status is EpicStatusName.Done or EpicStatusName.Closed;
+    private (string ProjectId, int EpicNumber) ParseGrainKey()
+    {
+        ScopedGrainKeyCodec.Parse(GrainKey, out var projectId, out var epicNumber);
+        return (projectId, epicNumber);
+    }
 
-    private sealed record ActiveMembershipOwner(string EpicId, string Title);
+    private static void EnsureIdentityMatches(EpicKey key, string projectId, int number)
+    {
+        if (key.ProjectId != projectId || key.EpicNumber != number)
+        {
+            throw new InvalidOperationException(
+                $"Epic command identity '{projectId}#{number}' does not match grain identity '{key.ProjectId}#{key.EpicNumber}'.");
+        }
+    }
+
+    private static void EnsureProjectScope(string scopedProjectId, string requestedProjectId)
+    {
+        if (!string.Equals(scopedProjectId, requestedProjectId, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                $"Epic command project '{requestedProjectId}' does not match grain project '{scopedProjectId}'.");
+        }
+    }
+
+    private EpicKey ParseEpicKey()
+    {
+        var (projectId, epicNumber) = ParseGrainKey();
+        return new EpicKey(projectId, epicNumber);
+    }
 
     private static IReadOnlyList<Epic.Domain.Events.EpicEvent> DrainPendingEvents(EpicAggregate epic)
     {
@@ -1081,60 +681,8 @@ public class EpicGrain : Grain, IEpicGrain
     }
 
     /// <summary>
-    /// Post-commit, best-effort persistence of every domain event the
-    /// aggregate recorded since the last drain. Epic event persistence is
-    /// intentionally still outside the transaction for this issue: a crash or
-    /// store error between state commit and event append loses that mutation's
-    /// events, while authoritative epic state remains in <c>EpicRow</c>.
-    /// </summary>
-    private async Task PersistEpicEventsAsync(
-        EpicAggregate epic,
-        IReadOnlyList<Epic.Domain.Events.EpicEvent> events,
-        DateTimeOffset now)
-    {
-        if (events.Count == 0) return;
-        var source = EpicEventPersistence.EpicSource(epic.Id);
-        var subject = epic.Number.ToString();
-        var extensions = new Dictionary<string, string>
-        {
-            ["projectid"] = epic.ProjectId,
-            ["epicid"] = epic.Id,
-            ["epicno"] = subject,
-        };
-
-        try
-        {
-            foreach (var evt in events)
-            {
-                var type = EpicEventSerializer.BusType(evt);
-                var dataJson = EpicEventSerializer.ToData(evt);
-                var envelope = new CloudEvent(
-                    id: Guid.NewGuid().ToString(),
-                    source: new Uri(source, UriKind.Relative),
-                    type: type,
-                    time: now,
-                    data: dataJson,
-                    subject: subject,
-                    extensions: extensions);
-
-                await _eventStore.AppendAsync(envelope, CancellationToken.None);
-            }
-        }
-        catch (Exception ex)
-        {
-            _log.LogError(ex,
-                "Post-commit epic event persistence failed for epic {EpicId} ({ProjectId})",
-                epic.Id, epic.ProjectId);
-        }
-    }
-
-    /// <summary>
-    /// Atomically persists events into the caller's <paramref name="db"/>
-    /// context, so they survive or roll back with the epic state transition
-    /// in the same <c>SaveChangesAsync</c> call. Used for recovery-critical
-    /// events (<c>EpicIssueLinked</c>, <c>EpicStartAttemptFailed</c>) whose
-    /// loss would leave an epic stuck running-but-idle with no durable
-    /// recompute trigger.
+    /// Stages every Epic domain event in the aggregate's database context so
+    /// state and events commit or roll back together in one SaveChanges call.
     /// </summary>
     private async Task PersistEpicEventsAsync(
         MohistDbContext db,
@@ -1143,14 +691,9 @@ public class EpicGrain : Grain, IEpicGrain
         DateTimeOffset now)
     {
         if (events.Count == 0) return;
-        var source = EpicEventPersistence.EpicSource(epic.Id);
+        var source = EpicEventPersistence.EpicSource(epic.ProjectId, epic.Number);
         var subject = epic.Number.ToString();
-        var extensions = new Dictionary<string, string>
-        {
-            ["projectid"] = epic.ProjectId,
-            ["epicid"] = epic.Id,
-            ["epicno"] = subject,
-        };
+        var extensions = EpicLineage.BuildExtensions(epic);
 
         foreach (var evt in events)
         {
@@ -1170,5 +713,6 @@ public class EpicGrain : Grain, IEpicGrain
     }
 
     private static EpicDto ToDto(EpicRow epic) =>
-        new(epic.Id, epic.Number, epic.Title, epic.Description, epic.Priority, epic.Status, epic.CreatedAt.ToString("o"), epic.UpdatedAt.ToString("o"), epic.PauseReason);
+        new(epic.ProjectId, epic.Number, epic.Title, epic.Description, epic.Priority, epic.Status, epic.CreatedAt.ToString("o"), epic.UpdatedAt.ToString("o"), epic.PauseReason);
+
 }

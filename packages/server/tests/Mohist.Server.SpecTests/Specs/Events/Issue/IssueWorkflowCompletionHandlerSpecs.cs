@@ -8,6 +8,7 @@ using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Issue.Domain;
+using Mohist.Server.Issue.Domain.Events;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Services;
 using Mohist.Server.SpecTests.Support;
@@ -42,89 +43,89 @@ public class IssueWorkflowCompletionHandlerSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
-    public async Task Querier_GetIssueIdForWorkflowRunAsync_ReturnsInProgressIssueId()
+    public async Task Querier_GetIssueForWorkflowRunAsync_ReturnsInProgressIssueReference()
     {
         await using var database = CreateDatabase();
-        await SeedIssueAsync(database, projectId: "project_1", issueId: "issue_active", issueNumber: 1,
+        await SeedIssueAsync(database, projectId: "project_1", issueNumber: 1,
             status: IssueStatus.InProgress, workflowRunId: "wr_completed");
 
         var querier = NewIssueQuerier(database.Factory);
 
-        var issueId = await querier.GetIssueIdForWorkflowRunAsync("wr_completed");
+        var issue = await querier.GetIssueForWorkflowRunAsync("wr_completed");
 
-        Assert.Equal("issue_active", issueId);
+        Assert.Equal(new IssueWorkflowRef("project_1", 1), issue);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
-    public async Task Querier_GetIssueIdForWorkflowRunAsync_DoneIssueWithPreservedReference_ReturnsNull()
+    public async Task Querier_GetIssueForWorkflowRunAsync_DoneIssueWithPreservedReference_ReturnsNull()
     {
         // Done issues keep their workflowRunId as historical execution
         // data — the lookup must filter to in_progress so a stale
-        // binding doesn't drive a redundant transition.
+        // workflow reference doesn't drive a redundant transition.
         await using var database = CreateDatabase();
-        await SeedIssueAsync(database, projectId: "project_1", issueId: "issue_done", issueNumber: 1,
+        await SeedIssueAsync(database, projectId: "project_1", issueNumber: 1,
             status: IssueStatus.Done, workflowRunId: "wr_completed");
 
         var querier = NewIssueQuerier(database.Factory);
 
-        var issueId = await querier.GetIssueIdForWorkflowRunAsync("wr_completed");
+        var issue = await querier.GetIssueForWorkflowRunAsync("wr_completed");
 
-        Assert.Null(issueId);
+        Assert.Null(issue);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
-    public async Task Querier_GetIssueIdForWorkflowRunAsync_MixedRows_ReturnsOnlyInProgressMatch()
+    public async Task Querier_GetIssueForWorkflowRunAsync_MixedRows_ReturnsOnlyInProgressMatch()
     {
         await using var database = CreateDatabase();
-        await SeedIssueAsync(database, projectId: "project_1", issueId: "issue_done", issueNumber: 1,
+        await SeedIssueAsync(database, projectId: "project_1", issueNumber: 1,
             status: IssueStatus.Done, workflowRunId: "wr_completed");
-        await SeedIssueAsync(database, projectId: "project_1", issueId: "issue_archived", issueNumber: 2,
+        await SeedIssueAsync(database, projectId: "project_1", issueNumber: 2,
             status: IssueStatus.Done, workflowRunId: "wr_completed",
             archivedAt: new DateTime(2026, 6, 25, 12, 0, 0, DateTimeKind.Utc));
-        await SeedIssueAsync(database, projectId: "project_1", issueId: "issue_active", issueNumber: 3,
+        await SeedIssueAsync(database, projectId: "project_1", issueNumber: 3,
             status: IssueStatus.InProgress, workflowRunId: "wr_completed");
-        await SeedIssueAsync(database, projectId: "project_1", issueId: "issue_other_run", issueNumber: 4,
+        await SeedIssueAsync(database, projectId: "project_1", issueNumber: 4,
             status: IssueStatus.InProgress, workflowRunId: "wr_other");
 
         var querier = NewIssueQuerier(database.Factory);
 
-        var issueId = await querier.GetIssueIdForWorkflowRunAsync("wr_completed");
+        var issue = await querier.GetIssueForWorkflowRunAsync("wr_completed");
 
-        Assert.Equal("issue_active", issueId);
+        Assert.Equal(new IssueWorkflowRef("project_1", 3), issue);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
-    public async Task Querier_GetIssueIdForWorkflowRunAsync_NoMatch_ReturnsNull()
+    public async Task Querier_GetIssueForWorkflowRunAsync_NoMatch_ReturnsNull()
     {
         await using var database = CreateDatabase();
-        await SeedIssueAsync(database, projectId: "project_1", issueId: "issue_active", issueNumber: 1,
+        await SeedIssueAsync(database, projectId: "project_1", issueNumber: 1,
             status: IssueStatus.InProgress, workflowRunId: "wr_other");
 
         var querier = NewIssueQuerier(database.Factory);
 
-        var issueId = await querier.GetIssueIdForWorkflowRunAsync("wr_completed");
+        var issue = await querier.GetIssueForWorkflowRunAsync("wr_completed");
 
-        Assert.Null(issueId);
+        Assert.Null(issue);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
-    public async Task Querier_GetIssueIdForWorkflowRunAsync_NullOrEmpty_ReturnsNull()
+    public async Task Querier_GetIssueForWorkflowRunAsync_NullOrEmpty_ReturnsNull()
     {
         await using var database = CreateDatabase();
 
         var querier = NewIssueQuerier(database.Factory);
 
-        Assert.Null(await querier.GetIssueIdForWorkflowRunAsync(null!));
-        Assert.Null(await querier.GetIssueIdForWorkflowRunAsync(""));
-        Assert.Null(await querier.GetIssueIdForWorkflowRunAsync("   "));
+        Assert.Null(await querier.GetIssueForWorkflowRunAsync(null!));
+        Assert.Null(await querier.GetIssueForWorkflowRunAsync(""));
+        Assert.Null(await querier.GetIssueForWorkflowRunAsync("   "));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
@@ -133,18 +134,18 @@ public class IssueWorkflowCompletionHandlerSpecs
     public async Task HandleAsync_CompletedEventForInProgressIssue_TransitionsIssueToDone()
     {
         await using var database = CreateDatabase();
-        await SeedIssueAsync(database, projectId: "project_1", issueId: "issue_1", issueNumber: 1,
+        await SeedIssueAsync(database, projectId: "project_1", issueNumber: 1,
             status: IssueStatus.InProgress, workflowRunId: "wr_completed");
 
         var grains = new RecordingIssueGrainFactory(database.Factory, new FakeTimeProvider(FixedNow));
         var handler = new IssueWorkflowCompletionHandler(grains,
             NullLogger<IssueWorkflowCompletionHandler>.Instance);
 
-        var evt = BuildCompletedEvent(workflowRunId: "wr_completed", issueId: "issue_1");
+        var evt = BuildCompletedEvent(workflowRunId: "wr_completed");
         await handler.HandleAsync(evt, CancellationToken.None);
 
         var call = Assert.Single(grains.Calls);
-        Assert.Equal("issue_1", call.IssueId);
+        Assert.Equal(new IssueWorkflowRef("project_1", 1), call.Issue);
         Assert.Equal("wr_completed", call.WorkflowRunId);
 
         await using var verify = database.CreateDbContext();
@@ -181,12 +182,10 @@ public class IssueWorkflowCompletionHandlerSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
-    public async Task HandleAsync_NoIssueIdExtension_NoOpsAndDoesNotInvokeGrain()
+    public async Task HandleAsync_MissingScopedIssueExtension_NoOpsAndDoesNotInvokeGrain()
     {
-        // The owning issue is now recovered from extensions["issueid"]
-        // stamped at write time; an event that lacks the stamp is
-        // equivalent to the legacy "no in-progress issue bound" case
-        // and must no-op without a grain call.
+        // A completion event without the project-scoped issue reference
+        // cannot identify an aggregate and must not invoke a grain.
         await using var database = CreateDatabase();
         var grains = new RecordingIssueGrainFactory(database.Factory, new FakeTimeProvider(FixedNow));
         var handler = new IssueWorkflowCompletionHandler(grains,
@@ -215,22 +214,22 @@ public class IssueWorkflowCompletionHandlerSpecs
         // one effective transition occurs. No throw, no field mutation.
         // This is the documented idempotent path.
         await using var database = CreateDatabase();
-        await SeedIssueAsync(database, projectId: "project_1", issueId: "issue_1", issueNumber: 1,
+        await SeedIssueAsync(database, projectId: "project_1", issueNumber: 1,
             status: IssueStatus.InProgress, workflowRunId: "wr_completed");
 
         var grains = new RecordingIssueGrainFactory(database.Factory, new FakeTimeProvider(FixedNow));
         var handler = new IssueWorkflowCompletionHandler(grains,
             NullLogger<IssueWorkflowCompletionHandler>.Instance);
 
-        var evt1 = BuildCompletedEvent(workflowRunId: "wr_completed", issueId: "issue_1");
-        var evt2 = BuildCompletedEvent(workflowRunId: "wr_completed", issueId: "issue_1");
+        var evt1 = BuildCompletedEvent(workflowRunId: "wr_completed");
+        var evt2 = BuildCompletedEvent(workflowRunId: "wr_completed");
         await handler.HandleAsync(evt1, CancellationToken.None);
         await handler.HandleAsync(evt2, CancellationToken.None);
 
         Assert.Equal(2, grains.Calls.Count);
         Assert.All(grains.Calls, c =>
         {
-            Assert.Equal("issue_1", c.IssueId);
+            Assert.Equal(new IssueWorkflowRef("project_1", 1), c.Issue);
             Assert.Equal("wr_completed", c.WorkflowRunId);
         });
 
@@ -252,7 +251,7 @@ public class IssueWorkflowCompletionHandlerSpecs
         // with a stale workflowRunId — the Issue.Complete guard rejects
         // it (no change).
         await using var database = CreateDatabase();
-        await SeedIssueAsync(database, projectId: "project_1", issueId: "issue_1", issueNumber: 1,
+        await SeedIssueAsync(database, projectId: "project_1", issueNumber: 1,
             status: IssueStatus.InProgress, workflowRunId: "wr_completed");
 
         var grains = new RecordingIssueGrainFactory(database.Factory, new FakeTimeProvider(FixedNow));
@@ -263,21 +262,21 @@ public class IssueWorkflowCompletionHandlerSpecs
         // a mismatched-id CompleteWorkAsync is guarded by the aggregate.
         // Use the handler's own grain to perform the initial transition so
         // the in-memory cache and DB stay consistent.
-        var firstEvent = BuildCompletedEvent(workflowRunId: "wr_completed", issueId: "issue_1");
+        var firstEvent = BuildCompletedEvent(workflowRunId: "wr_completed");
         await handler.HandleAsync(firstEvent, CancellationToken.None);
         var firstCall = grains.Calls.Single();
-        Assert.Equal("issue_1", firstCall.IssueId);
+        Assert.Equal(new IssueWorkflowRef("project_1", 1), firstCall.Issue);
         Assert.Equal("wr_completed", firstCall.WorkflowRunId);
         grains.Calls.Clear();
 
         // Now drive the handler with the SAME run id; CompleteWorkAsync
         // is invoked again but the aggregate is already Done so the
         // transition is a no-op.
-        var evt = BuildCompletedEvent(workflowRunId: "wr_completed", issueId: "issue_1");
+        var evt = BuildCompletedEvent(workflowRunId: "wr_completed");
         await handler.HandleAsync(evt, CancellationToken.None);
 
         var secondCall = Assert.Single(grains.Calls);
-        Assert.Equal("issue_1", secondCall.IssueId);
+        Assert.Equal(new IssueWorkflowRef("project_1", 1), secondCall.Issue);
         Assert.Equal("wr_completed", secondCall.WorkflowRunId);
         grains.Calls.Clear();
 
@@ -288,7 +287,7 @@ public class IssueWorkflowCompletionHandlerSpecs
         // aggregate's Complete() returns false when the run id does
         // not match — the guard fires regardless of subscription
         // filtering.
-        var staleGrain = grains.GetIssueGrain("issue_1");
+        var staleGrain = grains.GetIssueGrain("project_1:1");
         await staleGrain.CompleteWorkAsync("wr_mismatch");
         var stillOneCall = Assert.Single(grains.Calls);
         Assert.Equal("wr_mismatch", stillOneCall.WorkflowRunId);
@@ -310,7 +309,7 @@ public class IssueWorkflowCompletionHandlerSpecs
         var handler = new IssueWorkflowCompletionHandler(grains,
             NullLogger<IssueWorkflowCompletionHandler>.Instance);
 
-        var evt = BuildCompletedEvent(workflowRunId: "wr_completed", issueId: "issue_1");
+        var evt = BuildCompletedEvent(workflowRunId: "wr_completed");
 
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
             handler.HandleAsync(evt, CancellationToken.None));
@@ -368,7 +367,7 @@ public class IssueWorkflowCompletionHandlerSpecs
         var handler = new IssueWorkflowCompletionHandler(grains,
             NullLogger<IssueWorkflowCompletionHandler>.Instance);
 
-        var evt = BuildCompletedEvent(workflowRunId: "wr_completed", issueId: "issue_1");
+        var evt = BuildCompletedEvent(workflowRunId: "wr_completed");
 
         Assert.True(handler.Filter(evt));
     }
@@ -376,13 +375,12 @@ public class IssueWorkflowCompletionHandlerSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
-    public async Task HandleAsync_CompletesIssue_FromIssueIdExtension()
+    public async Task HandleAsync_CompletesIssue_FromScopedIssueExtensions()
     {
-        // The owning issue is recovered from extensions["issueid"]
-        // stamped at write time — no scoped service resolution or DB
-        // lookup. The handler dispatches CompleteWorkAsync directly.
+        // The event carries the project-scoped issue reference, so the
+        // handler dispatches CompleteWorkAsync without a reverse lookup.
         await using var database = CreateDatabase();
-        await SeedIssueAsync(database, projectId: "project_1", issueId: "issue_1", issueNumber: 1,
+        await SeedIssueAsync(database, projectId: "project_1", issueNumber: 1,
             status: IssueStatus.InProgress, workflowRunId: "wr_completed");
 
         var grains = new RecordingIssueGrainFactory(database.Factory, new FakeTimeProvider(FixedNow));
@@ -390,11 +388,11 @@ public class IssueWorkflowCompletionHandlerSpecs
             NullLogger<IssueWorkflowCompletionHandler>.Instance);
 
         await handler.HandleAsync(
-            BuildCompletedEvent(workflowRunId: "wr_completed", issueId: "issue_1"),
+            BuildCompletedEvent(workflowRunId: "wr_completed"),
             CancellationToken.None);
 
         var call = Assert.Single(grains.Calls);
-        Assert.Equal("issue_1", call.IssueId);
+        Assert.Equal(new IssueWorkflowRef("project_1", 1), call.Issue);
         Assert.Equal("wr_completed", call.WorkflowRunId);
 
         await using var verify = database.CreateDbContext();
@@ -402,7 +400,10 @@ public class IssueWorkflowCompletionHandlerSpecs
         Assert.Equal(IssueStatus.Done, IssueStore.Deserialize(stored.State)!.Status);
     }
 
-    private static CloudEvent BuildCompletedEvent(string workflowRunId, string issueId) =>
+    private static CloudEvent BuildCompletedEvent(
+        string workflowRunId,
+        string projectId = "project_1",
+        int issueNumber = 1) =>
         new(
             id: Guid.NewGuid().ToString(),
             source: new Uri($"/mohist/workflow-runs/{workflowRunId}", UriKind.Relative),
@@ -411,13 +412,32 @@ public class IssueWorkflowCompletionHandlerSpecs
             data: null,
             extensions: new Dictionary<string, string>(StringComparer.Ordinal)
             {
-                ["issueid"] = issueId,
+                [EventCatalog.Lineage.ProjectId] = projectId,
+                [EventCatalog.Lineage.Issue] = issueNumber.ToString(),
+                [EventCatalog.Lineage.WorkflowRunId] = workflowRunId,
             });
+
+    private static CloudEvent<IssueWorkStarted> BuildWorkStartedEvent(
+        string workflowRunId,
+        string projectId,
+        int? issueNumber) =>
+        new(
+            Guid.NewGuid().ToString(),
+            new Uri($"/mohist/projects/{projectId}/issues/{issueNumber?.ToString() ?? "missing"}", UriKind.Relative),
+            EventCatalog.ReverseDns.IssueWorkStarted,
+            FixedNow,
+            new IssueWorkStarted(workflowRunId),
+            extensions: issueNumber is null
+                ? new Dictionary<string, string>(StringComparer.Ordinal)
+                : new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    [EventCatalog.Lineage.ProjectId] = projectId,
+                    [EventCatalog.Lineage.Issue] = issueNumber.Value.ToString(),
+                });
 
     private static async Task SeedIssueAsync(
         TestDatabase database,
         string projectId,
-        string issueId,
         int issueNumber,
         IssueStatus status,
         string? workflowRunId,
@@ -425,7 +445,6 @@ public class IssueWorkflowCompletionHandlerSpecs
     {
         var issue = new DomainIssue
         {
-            Id = issueId,
             ProjectId = projectId,
             Number = issueNumber,
             Title = $"Issue {issueNumber}",
@@ -437,7 +456,6 @@ public class IssueWorkflowCompletionHandlerSpecs
         await using var db = database.CreateDbContext();
         db.Issues.Add(new IssueRow
         {
-            IssueId = issueId,
             ProjectId = projectId,
             Number = issueNumber,
             WorkflowRunId = workflowRunId,
@@ -448,7 +466,7 @@ public class IssueWorkflowCompletionHandlerSpecs
 
     /// <summary>
     /// Minimal querier for unit tests: <see cref="IssueQuerier"/> has
-    /// many collaborators, but <c>GetIssueIdForWorkflowRunAsync</c>
+    /// many collaborators, but <c>GetIssueForWorkflowRunAsync</c>
     /// only uses the db factory. The unused dependencies are left as
     /// <c>null!</c>, matching the existing EpicQuerier unit-test
     /// pattern in <c>EpicAutoDoneHandlerSpecs</c>.
@@ -560,7 +578,7 @@ public class IssueWorkflowCompletionHandlerSpecs
         public IAddressable GetGrain(Type interfaceType, IdSpan grainKey) => throw new NotSupportedException();
     }
 
-    public sealed record RecordedCall(string IssueId, string WorkflowRunId);
+    public sealed record RecordedCall(IssueWorkflowRef Issue, string WorkflowRunId);
 
     /// <summary>
     /// Minimal <see cref="IIssueGrain"/> that only implements
@@ -592,9 +610,15 @@ public class IssueWorkflowCompletionHandlerSpecs
             _calls = calls;
         }
 
+        private static RecordedCall RecordedCallFor(string grainKey, string workflowRunId)
+        {
+            Mohist.Server.Infrastructure.Orleans.ScopedGrainKeyCodec.Parse(grainKey, out var projectId, out var issueNumber);
+            return new RecordedCall(new IssueWorkflowRef(projectId, issueNumber), workflowRunId);
+        }
+
         public async Task CompleteWorkAsync(string workflowRunId)
         {
-            _calls.Add(new RecordedCall(_key, workflowRunId));
+            _calls.Add(RecordedCallFor(_key, workflowRunId));
             var state = await LoadAsync(_key);
             if (state is null) return;
             if (!state.Complete(workflowRunId, _time.GetUtcNow().UtcDateTime)) return;
@@ -607,7 +631,8 @@ public class IssueWorkflowCompletionHandlerSpecs
             var fromMemory = await _stateStore.LoadAsync(key);
             if (fromMemory is not null) return fromMemory;
             await using var db = await _dbFactory.CreateDbContextAsync();
-            var row = await db.Issues.AsNoTracking().FirstOrDefaultAsync(r => r.IssueId == key);
+            Mohist.Server.Infrastructure.Orleans.ScopedGrainKeyCodec.Parse(key, out var projectId, out var issueNumber);
+            var row = await db.Issues.AsNoTracking().FirstOrDefaultAsync(r => r.ProjectId == projectId && r.Number == issueNumber);
             if (row is null) return null;
             var state = IssueStore.Deserialize(row.State);
             if (state is not null)
@@ -618,13 +643,14 @@ public class IssueWorkflowCompletionHandlerSpecs
         private async Task PersistAsync(string key, DomainIssue state)
         {
             await using var db = await _dbFactory.CreateDbContextAsync();
-            var row = await db.Issues.FirstOrDefaultAsync(r => r.IssueId == key);
+            Mohist.Server.Infrastructure.Orleans.ScopedGrainKeyCodec.Parse(key, out var projectId, out var issueNumber);
+            var row = await db.Issues.FirstOrDefaultAsync(r => r.ProjectId == projectId && r.Number == issueNumber);
             if (row is null) return;
             row.State = IssueStore.Serialize(state);
             await db.SaveChangesAsync();
         }
 
-        public Task<string> CreateAsync(string projectId, int number, string title, string? body, IReadOnlyDictionary<string, string>? labels, string? priority, string? repositoryRef = null, string? issueId = null, string? risk = null, bool isDraft = false, string[]? attachmentIds = null, string? workflowProfileId = null, int[]? prerequisiteNumbers = null) => throw new NotSupportedException();
+        public Task<int> CreateAsync(string projectId, int number, string title, string? body, IReadOnlyDictionary<string, string>? labels, string? priority, string? repositoryRef = null, string? risk = null, bool isDraft = false, string[]? attachmentIds = null, string? workflowProfileId = null, int[]? prerequisiteNumbers = null) => throw new NotSupportedException();
         public Task<string> StartWorkAsync(WorkflowProjectContext? project = null) => throw new NotSupportedException();
         public Task CancelAsync() => throw new NotSupportedException();
         public Task UpdateAsync(string title, string? body) => throw new NotSupportedException();
@@ -638,6 +664,9 @@ public class IssueWorkflowCompletionHandlerSpecs
         public Task<IssueStartReadiness> GetStartReadinessAsync() => throw new NotSupportedException();
         public Task<IssueCommentResult> AddCommentAsync(string body, string[]? attachmentIds = null) => throw new NotSupportedException();
         public Task DeactivateForTestAsync() => throw new NotSupportedException();
+        public Task<bool> AssignEpicAsync(int epicNumber) => throw new NotSupportedException();
+        public Task<bool> RemoveEpicAsync(int expectedEpicNumber) => throw new NotSupportedException();
+        public Task<bool> TryStartFromEpicAsync(int expectedEpicNumber) => throw new NotSupportedException();
     }
 
     private sealed class ThrowingIssueGrainFactory : IGrainFactory
@@ -691,7 +720,7 @@ public class IssueWorkflowCompletionHandlerSpecs
     {
         public Task CompleteWorkAsync(string workflowRunId) =>
             throw new InvalidOperationException("simulated grain failure");
-        public Task<string> CreateAsync(string projectId, int number, string title, string? body, IReadOnlyDictionary<string, string>? labels, string? priority, string? repositoryRef = null, string? issueId = null, string? risk = null, bool isDraft = false, string[]? attachmentIds = null, string? workflowProfileId = null, int[]? prerequisiteNumbers = null) => throw new NotSupportedException();
+        public Task<int> CreateAsync(string projectId, int number, string title, string? body, IReadOnlyDictionary<string, string>? labels, string? priority, string? repositoryRef = null, string? risk = null, bool isDraft = false, string[]? attachmentIds = null, string? workflowProfileId = null, int[]? prerequisiteNumbers = null) => throw new NotSupportedException();
         public Task<string> StartWorkAsync(WorkflowProjectContext? project = null) => throw new NotSupportedException();
         public Task CancelAsync() => throw new NotSupportedException();
         public Task UpdateAsync(string title, string? body) => throw new NotSupportedException();
@@ -705,5 +734,8 @@ public class IssueWorkflowCompletionHandlerSpecs
         public Task<IssueStartReadiness> GetStartReadinessAsync() => throw new NotSupportedException();
         public Task<IssueCommentResult> AddCommentAsync(string body, string[]? attachmentIds = null) => throw new NotSupportedException();
         public Task DeactivateForTestAsync() => throw new NotSupportedException();
+        public Task<bool> AssignEpicAsync(int epicNumber) => throw new NotSupportedException();
+        public Task<bool> RemoveEpicAsync(int expectedEpicNumber) => throw new NotSupportedException();
+        public Task<bool> TryStartFromEpicAsync(int expectedEpicNumber) => throw new NotSupportedException();
     }
 }

@@ -9,7 +9,6 @@ namespace Mohist.Server.Issue.Services;
 
 public class IssueReadModel
 {
-    public string Id { get; set; } = null!;
     public int Number { get; set; }
     public string Title { get; set; } = null!;
     public string? Body { get; set; }

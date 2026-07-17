@@ -33,5 +33,4 @@ public sealed record RunnerActiveWorkView(
 
 public sealed record RunnerActiveWorkIssueView(
     string ProjectId,
-    string IssueId,
     int IssueNumber);

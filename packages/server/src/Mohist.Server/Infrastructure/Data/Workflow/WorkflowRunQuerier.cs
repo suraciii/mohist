@@ -28,7 +28,10 @@ public sealed class WorkflowRunQuerier
         var row = await db.WorkflowRuns.AsNoTracking()
             .FirstOrDefaultAsync(x => x.WorkflowRunId == workflowRunId, ct);
         if (row is null) return null;
-        return JSON.Deserialize<WorkflowRun>(WorkflowRunStore.MigrateLegacyWorkflowRunJson(row.State));
+        var run = JSON.Deserialize<WorkflowRun>(WorkflowRunStore.MigrateLegacyWorkflowRunJson(row.State));
+        if (run is not null)
+            WorkflowRunLineage.RestoreStoredEpicNumber(run, row.EpicNumber);
+        return run;
     }
 
     /// <summary>

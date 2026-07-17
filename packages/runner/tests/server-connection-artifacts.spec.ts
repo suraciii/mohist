@@ -315,7 +315,6 @@ describe("ServerConnection.poll", () => {
           title: "Workflow task",
           ownerKind: "workflow",
           projectId: "project-wf",
-          issueId: "issue-1",
           issueNumber: 7,
         }),
       }),

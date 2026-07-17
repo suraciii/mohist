@@ -84,11 +84,9 @@ export function useSessionTranscript({
   const isStreamingRef = useRef(false)
   const hasLiveTailRef = useRef(false)
 
-  const issueId = String(issueNumber)
-
   useEffect(() => {
     hasLiveTailRef.current = false
-  }, [issueId, sessionId, runtimeSessionId])
+  }, [issueNumber, sessionId, runtimeSessionId])
 
   const scrollToBottom = useCallback(() => {
     setIsNearBottom(true)
@@ -515,7 +513,7 @@ export function useSessionTranscript({
       }
       for (const unsub of unsubs) unsub()
     }
-  }, [issueId, sessionId, runtimeSessionId, runtime, issueNumber, isRunning, queryClient, invalidateAndRefetch])
+  }, [sessionId, runtimeSessionId, runtime, issueNumber, isRunning, queryClient, invalidateAndRefetch])
 
   return {
     turns,

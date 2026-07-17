@@ -2,48 +2,16 @@ namespace Mohist.Server.Infrastructure.Events;
 
 /// <summary>
 /// Read-only inventory of every CloudEvents <c>type</c> value used in the system.
-/// This is a documentation / introspection surface, not a dispatch table — the bus
-/// dispatches on <see cref="CloudNative.CloudEvents.CloudEvent.Type"/> directly.
+/// The catalog provides stable type names only. Each producer owns the business
+/// context it stamps, and producer-path specs verify that context directly.
 /// </summary>
 public static class EventCatalog
 {
     /// <summary>
-    /// All registered CloudEvents <c>type</c> values. New events must be added here
-    /// AND must have a producer that calls <c>bus.Emit</c> with that exact type string.
-    /// Generic session runtime event names are listed here for subscription discovery,
-    /// but they flow through the dedicated transcript SignalR channel instead of the
-    /// domain EventBridge path.
+    /// Protocol CloudEvents <c>type</c> values.
     /// </summary>
     public static readonly IReadOnlyList<string> All = new[]
     {
-        // === Agent-detail / transcript vocabulary (legacy agent-detail names) ===
-        "tool_call",
-        "agent_text_chunk",
-        "main_tool_call",
-        "coder_session_started",
-        "coder_session_completed",
-        "coder_session_failed",
-        "coder_session_cancelled",
-        "coder_session_status_changed",
-        "coder_recovery_status",
-        "plan_session_update",
-        "plan_round_start",
-        "plan_round_complete",
-        // === Generic session runtime event names (transcript channel) ===
-        "session.input",
-        "message.delta",
-        "reasoning.delta",
-        "tool_call.started",
-        "tool_call.updated",
-        "tool_call.completed",
-        "session.closed",
-        "session.liveness",
-        "usage.updated",
-        "model.resolved",
-        "compaction",
-        "compaction_event",
-        "context_health_update",
-        // === Reverse-DNS names (com.mohist.*) — preferred for new emits ===
         ReverseDns.WorkflowRunStarted,
         ReverseDns.WorkflowRunResumed,
         ReverseDns.WorkflowRunPaused,
@@ -61,7 +29,6 @@ public static class EventCatalog
         ReverseDns.TaskStarted,
         ReverseDns.TaskCompleted,
         ReverseDns.TaskFailed,
-        ReverseDns.CheckStarted,
         ReverseDns.CheckPassed,
         ReverseDns.CheckFailed,
         ReverseDns.CheckPending,
@@ -84,6 +51,7 @@ public static class EventCatalog
         ReverseDns.IssuePrerequisiteAdded,
         ReverseDns.IssuePrerequisiteRemoved,
         ReverseDns.IssueWorkflowProfileChanged,
+        ReverseDns.IssueEpicChanged,
         ReverseDns.IssueArchived,
         ReverseDns.IssueUnarchived,
         ReverseDns.IssueReopened,
@@ -91,13 +59,57 @@ public static class EventCatalog
         ReverseDns.EpicCreated,
         ReverseDns.EpicUpdated,
         ReverseDns.EpicPriorityChanged,
-        ReverseDns.EpicIssueLinked,
-        ReverseDns.EpicIssueUnlinked,
         ReverseDns.EpicStatusChanged,
         ReverseDns.EpicClosed,
         ReverseDns.EpicReopened,
         ReverseDns.EpicStartAttemptFailed,
     };
+
+    /// <summary>
+    /// Transcript-only vocabulary carried on the dedicated session channel.
+    /// These are not CloudEvents protocol entries.
+    /// </summary>
+    public static readonly IReadOnlyList<string> TranscriptTypes = new[]
+    {
+        "tool_call",
+        "agent_text_chunk",
+        "main_tool_call",
+        "coder_session_started",
+        "coder_session_completed",
+        "coder_session_failed",
+        "coder_session_cancelled",
+        "coder_session_status_changed",
+        "coder_recovery_status",
+        "plan_session_update",
+        "plan_round_start",
+        "plan_round_complete",
+        "session.input",
+        "message.delta",
+        "reasoning.delta",
+        "tool_call.started",
+        "tool_call.updated",
+        "tool_call.completed",
+        "session.closed",
+        "session.liveness",
+        "usage.updated",
+        "model.resolved",
+        "compaction",
+        "compaction_event",
+        "context_health_update",
+    };
+
+    // Canonical envelope extension names.
+    public static class Lineage
+    {
+        public const string ProjectId = "projectid";
+        public const string WorkflowRunId = "workflowrunid";
+        public const string Issue = "issue";
+        public const string Epic = "epic";
+        public const string Stage = "stage";
+        public const string AgentId = "agentid";
+        public const string SessionId = "sessionid";
+        public const string RunnerId = "runnerid";
+    }
 
     /// <summary>
     /// Reverse-DNS type values for new emits. Producers should prefer these over
@@ -126,7 +138,6 @@ public static class EventCatalog
         public const string TaskStarted = "com.mohist.workflow.task.started";
         public const string TaskCompleted = "com.mohist.workflow.task.completed";
         public const string TaskFailed = "com.mohist.workflow.task.failed";
-        public const string CheckStarted = "com.mohist.workflow.check.started";
         public const string CheckPassed = "com.mohist.workflow.check.passed";
         public const string CheckFailed = "com.mohist.workflow.check.failed";
         public const string CheckPending = "com.mohist.workflow.check.pending";
@@ -152,6 +163,7 @@ public static class EventCatalog
         public const string IssuePrerequisiteAdded = "com.mohist.issue.prerequisite-added";
         public const string IssuePrerequisiteRemoved = "com.mohist.issue.prerequisite-removed";
         public const string IssueWorkflowProfileChanged = "com.mohist.issue.workflow-profile-changed";
+        public const string IssueEpicChanged = "com.mohist.issue.epic-changed";
         public const string IssueArchived = "com.mohist.issue.archived";
         public const string IssueUnarchived = "com.mohist.issue.unarchived";
         public const string IssueReopened = "com.mohist.issue.reopened";
@@ -159,8 +171,6 @@ public static class EventCatalog
         public const string EpicCreated = "com.mohist.epic.created";
         public const string EpicUpdated = "com.mohist.epic.updated";
         public const string EpicPriorityChanged = "com.mohist.epic.priority-changed";
-        public const string EpicIssueLinked = "com.mohist.epic.issue-linked";
-        public const string EpicIssueUnlinked = "com.mohist.epic.issue-unlinked";
         public const string EpicStatusChanged = "com.mohist.epic.status-changed";
         public const string EpicClosed = "com.mohist.epic.closed";
         public const string EpicReopened = "com.mohist.epic.reopened";

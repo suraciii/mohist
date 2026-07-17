@@ -12,8 +12,8 @@ let _epicData: EpicDetail
 describe('EpicDetailPage next issue reason display', () => {
   function makeEpic(overrides: Record<string, unknown> = {}): EpicDetail {
     return {
-      id: 'epic-12345678',
-      number: null,
+      projectId: 'proj-1',
+      number: 7,
       title: 'Epic title',
       description: 'Epic description',
       priority: 'p1',
@@ -30,7 +30,7 @@ describe('EpicDetailPage next issue reason display', () => {
         readyToMarkDone: false,
       },
       linkedIssues: [
-        linkedIssue({ id: 'issue-1', number: 1, title: 'Pending issue', status: IssueStatus.InProgress, stage: WorkflowStage.Build, priority: 'p1' }),
+        linkedIssue({ number: 1, title: 'Pending issue', status: IssueStatus.InProgress, stage: WorkflowStage.Build, priority: 'p1' }),
       ],
       ...overrides,
     } as EpicDetail
@@ -63,11 +63,11 @@ describe('EpicDetailPage next issue reason display', () => {
         totalIssueCount: 1,
         blockedIssues: [],
         activeIssues: [],
-        nextIssue: { id: 'issue-3', number: 3, title: 'Candidate issue' },
+        nextIssue: { number: 3, title: 'Candidate issue' },
         nextIssueReason: null,
         readyToMarkDone: false,
       },
-      linkedIssues: [linkedIssue({ id: 'issue-3', number: 3, title: 'Candidate issue' })],
+      linkedIssues: [linkedIssue({ number: 3, title: 'Candidate issue' })],
     })
 
     renderPage({ epic: _epicData, issues })

@@ -31,7 +31,6 @@ public class IssueMetricsQuerier : IScopedService
     // literal — a previous mismatch silenced every IssueEvents-backed metric.
     internal const string WorkCompletedType = EventCatalog.ReverseDns.IssueCompleted;
     internal const string ClosedType = EventCatalog.ReverseDns.IssueCancelled;
-    internal const string IssueSourcePrefix = "/mohist/issues/";
 
     private static readonly string[] QualityStageOrder = ["plan", "build", "check", "integrate"];
     private static readonly string[] QualityWorkflowEventTypes =
@@ -485,18 +484,19 @@ public class IssueMetricsQuerier : IScopedService
 
         var issues = await _loader.LoadProjectedAsync(db, projectId);
 
-        var projectIssueIds = issues.Select(i => i.Id).ToList();
+        var projectIssueNumbers = issues.Select(i => i.Number).ToList();
+        var sourcePrefix = IssueSourcePrefixFor(projectId);
 
         var shipTimes = new Dictionary<string, DateTimeOffset>(StringComparer.Ordinal);
         var runIdsByIssue = issues.ToDictionary(
-            i => i.Id,
+            i => i.Number.ToString(),
             _ => new List<string>(),
             StringComparer.Ordinal);
 
-        if (projectIssueIds.Count > 0)
+        if (projectIssueNumbers.Count > 0)
         {
             var sourceSet = new HashSet<string>(
-                projectIssueIds.Select(id => IssueSourcePrefix + id),
+                projectIssueNumbers.Select(number => sourcePrefix + number),
                 StringComparer.Ordinal);
             var workStartAndComplete = await ScanIssueEventsByProjectSourceAsync(
                 db, projectId, typeFilter: [WorkStartedType, WorkCompletedType], includeData: true);
@@ -505,21 +505,21 @@ public class IssueMetricsQuerier : IScopedService
             {
                 if (!sourceSet.Contains(e.Source)) continue;
 
-                var issueId = e.Source[IssueSourcePrefix.Length..];
+                var issueNumber = e.Source[sourcePrefix.Length..];
 
                 if (e.Type == WorkStartedType)
                 {
                     var workflowRunId = ReadWorkflowRunId(e.Data);
-                    if (!string.IsNullOrWhiteSpace(workflowRunId) && runIdsByIssue.TryGetValue(issueId, out var ids))
+                    if (!string.IsNullOrWhiteSpace(workflowRunId) && runIdsByIssue.TryGetValue(issueNumber, out var ids))
                         ids.Add(workflowRunId);
                 }
                 else if (e.Type == WorkCompletedType)
                 {
-                    if (!shipTimes.TryGetValue(issueId, out var existing) || e.Time > existing)
-                        shipTimes[issueId] = e.Time;
+                    if (!shipTimes.TryGetValue(issueNumber, out var existing) || e.Time > existing)
+                        shipTimes[issueNumber] = e.Time;
 
                     var workflowRunId = ReadWorkflowRunId(e.Data);
-                    if (!string.IsNullOrWhiteSpace(workflowRunId) && runIdsByIssue.TryGetValue(issueId, out var ids))
+                    if (!string.IsNullOrWhiteSpace(workflowRunId) && runIdsByIssue.TryGetValue(issueNumber, out var ids))
                         ids.Add(workflowRunId);
                 }
             }
@@ -527,7 +527,7 @@ public class IssueMetricsQuerier : IScopedService
 
         foreach (var issue in issues)
         {
-            if (!string.IsNullOrWhiteSpace(issue.WorkflowRunId) && runIdsByIssue.TryGetValue(issue.Id, out var ids))
+            if (!string.IsNullOrWhiteSpace(issue.WorkflowRunId) && runIdsByIssue.TryGetValue(issue.Number.ToString(), out var ids))
                 ids.Add(issue.WorkflowRunId);
         }
 
@@ -540,9 +540,9 @@ public class IssueMetricsQuerier : IScopedService
         foreach (var issue in issues)
         {
             if (issue.Status != MohistDefaultWorkflowProjection.IssueStatusName(IssueStatus.Done)) continue;
-            if (!shipTimes.TryGetValue(issue.Id, out var shipTime)) continue;
+            if (!shipTimes.TryGetValue(issue.Number.ToString(), out var shipTime)) continue;
 
-            if (!runIdsByIssue.TryGetValue(issue.Id, out var issueRunIds)) continue;
+            if (!runIdsByIssue.TryGetValue(issue.Number.ToString(), out var issueRunIds)) continue;
 
             var distinctRunIds = issueRunIds
                 .Where(id => !string.IsNullOrWhiteSpace(id))
@@ -718,12 +718,16 @@ public class IssueMetricsQuerier : IScopedService
                 PreviousAverageCycleDays: null);
         }
 
-        var issuesById = IssueRowMapper.ById(issueRows, projectId)
-            .ToDictionary(i => i.Id, StringComparer.Ordinal);
+        var issueNumbers = issueRows
+            .Where(row => row.Number is > 0)
+            .Select(row => row.Number!.Value)
+            .ToArray();
+        var issuesByNumber = IssueRowMapper.ByNumber(issueRows, projectId, issueNumbers);
 
-        var projectIssueIds = issuesById.Keys.ToList();
-        var projectSources = projectIssueIds
-            .Select(id => IssueSourcePrefix + id)
+        var sourcePrefix = IssueSourcePrefixFor(projectId);
+        var projectIssueNumbers = issuesByNumber.Keys.ToList();
+        var projectSources = projectIssueNumbers
+            .Select(number => sourcePrefix + number)
             .ToList();
 
         // Scan durable `IssueEvents` for the project's work-started
@@ -740,19 +744,19 @@ public class IssueMetricsQuerier : IScopedService
 
             foreach (var e in workStartedEvents)
             {
-                var issueId = e.Source[IssueSourcePrefix.Length..];
-                if (!earliestWorkStartedByIssue.TryGetValue(issueId, out var existing) || e.Time < existing)
+                var issueNumber = e.Source[sourcePrefix.Length..];
+                if (!earliestWorkStartedByIssue.TryGetValue(issueNumber, out var existing) || e.Time < existing)
                 {
-                    earliestWorkStartedByIssue[issueId] = e.Time;
+                    earliestWorkStartedByIssue[issueNumber] = e.Time;
                 }
             }
         }
 
-        var points = new List<DeliveryTimePoint>(issuesById.Count);
+        var points = new List<DeliveryTimePoint>(issuesByNumber.Count);
         double previousCycleSum = 0;
         int previousCycleCount = 0;
 
-        foreach (var issue in issuesById.Values)
+        foreach (var issue in issuesByNumber.Values)
         {
             if (issue.Status != IssueStatus.Done) continue;
             if (issue.CompletedAt is null) continue;
@@ -760,7 +764,7 @@ public class IssueMetricsQuerier : IScopedService
             var completedAtDt = DateTime.SpecifyKind(issue.CompletedAt.Value, DateTimeKind.Utc);
 
             double? cycleDays = null;
-            if (earliestWorkStartedByIssue.TryGetValue(issue.Id, out var firstStart))
+            if (earliestWorkStartedByIssue.TryGetValue(issue.Number.ToString(), out var firstStart))
             {
                 var cycleSpan = completedAtDt - firstStart.UtcDateTime;
                 cycleDays = cycleSpan.TotalDays;
@@ -863,7 +867,7 @@ public class IssueMetricsQuerier : IScopedService
             return BuildEmptyStageDurationResult(windowFrom, windowTo);
         }
 
-        var issuesById = issueReadModels.ToDictionary(i => i.Id, StringComparer.Ordinal);
+        var issuesByNumber = issueReadModels.ToDictionary(i => i.Number.ToString(), StringComparer.Ordinal);
 
         // Resolve the workflow stage order from the project's effective
         // workflow profile so reached stages are reported in the right
@@ -878,7 +882,7 @@ public class IssueMetricsQuerier : IScopedService
         // reruns / rerun-from-stage — the same cross-run discovery
         // pattern as `GetQualityAsync`).
         var earliestWorkStartedByIssue = new Dictionary<string, DateTimeOffset>(StringComparer.Ordinal);
-        var runIdsByIssue = issuesById.Keys.ToDictionary(
+        var runIdsByIssue = issuesByNumber.Keys.ToDictionary(
             id => id,
             _ => new List<string>(),
             StringComparer.Ordinal);
@@ -889,6 +893,7 @@ public class IssueMetricsQuerier : IScopedService
         // job produce the same "latest stage" verdict for the same
         // issue.
         var lifecycleEventsByIssue = new Dictionary<string, List<IssueStageAttribution.AttributionEvent>>(StringComparer.Ordinal);
+        var sourcePrefix = IssueSourcePrefixFor(projectId);
 
         var lifecycleTypes = new HashSet<string>(StringComparer.Ordinal)
         {
@@ -902,16 +907,16 @@ public class IssueMetricsQuerier : IScopedService
 
         foreach (var e in lifecycleEvents)
         {
-            var issueId = e.Source[IssueSourcePrefix.Length..];
+            var issueNumber = e.Source[sourcePrefix.Length..];
 
             // Record every lifecycle event the shared attribution
             // core consumes; the WorkStarted / WorkCompleted
             // branches below also drive the existing per-issue
             // run-id / earliest-start accumulators.
-            if (!lifecycleEventsByIssue.TryGetValue(issueId, out var list))
+            if (!lifecycleEventsByIssue.TryGetValue(issueNumber, out var list))
             {
                 list = new List<IssueStageAttribution.AttributionEvent>();
-                lifecycleEventsByIssue[issueId] = list;
+                lifecycleEventsByIssue[issueNumber] = list;
             }
             list.Add(new IssueStageAttribution.AttributionEvent(
                 Type: e.Type,
@@ -922,23 +927,23 @@ public class IssueMetricsQuerier : IScopedService
 
             if (e.Type == WorkStartedType)
             {
-                if (earliestWorkStartedByIssue.TryGetValue(issueId, out var existing))
+                if (earliestWorkStartedByIssue.TryGetValue(issueNumber, out var existing))
                 {
-                    if (e.Time < existing) earliestWorkStartedByIssue[issueId] = e.Time;
+                    if (e.Time < existing) earliestWorkStartedByIssue[issueNumber] = e.Time;
                 }
                 else
                 {
-                    earliestWorkStartedByIssue[issueId] = e.Time;
+                    earliestWorkStartedByIssue[issueNumber] = e.Time;
                 }
 
                 var wrId = ReadWorkflowRunId(e.Data);
-                if (!string.IsNullOrWhiteSpace(wrId) && runIdsByIssue.TryGetValue(issueId, out var ids))
+                if (!string.IsNullOrWhiteSpace(wrId) && runIdsByIssue.TryGetValue(issueNumber, out var ids))
                     ids.Add(wrId);
             }
             else if (e.Type == WorkCompletedType)
             {
                 var wrId = ReadWorkflowRunId(e.Data);
-                if (!string.IsNullOrWhiteSpace(wrId) && runIdsByIssue.TryGetValue(issueId, out var ids))
+                if (!string.IsNullOrWhiteSpace(wrId) && runIdsByIssue.TryGetValue(issueNumber, out var ids))
                     ids.Add(wrId);
             }
         }
@@ -947,9 +952,9 @@ public class IssueMetricsQuerier : IScopedService
         // ids found in events, so a stage whose events live only on the
         // current run (and never produced a fresh WorkStarted) is still
         // discoverable.
-        foreach (var issue in issuesById.Values)
+        foreach (var issue in issuesByNumber.Values)
         {
-            if (!string.IsNullOrWhiteSpace(issue.WorkflowRunId) && runIdsByIssue.TryGetValue(issue.Id, out var ids))
+            if (!string.IsNullOrWhiteSpace(issue.WorkflowRunId) && runIdsByIssue.TryGetValue(issue.Number.ToString(), out var ids))
                 ids.Add(issue.WorkflowRunId);
         }
 
@@ -973,7 +978,7 @@ public class IssueMetricsQuerier : IScopedService
         var perIssue = new List<PerIssueCycleBreakdown>();
         var samplesByStage = new Dictionary<string, List<double>>(StringComparer.Ordinal);
 
-        foreach (var issue in issuesById.Values)
+        foreach (var issue in issuesByNumber.Values)
         {
             if (!string.Equals(issue.Status, "done", StringComparison.OrdinalIgnoreCase)) continue;
             if (string.IsNullOrWhiteSpace(issue.CompletedAt)) continue;
@@ -987,14 +992,14 @@ public class IssueMetricsQuerier : IScopedService
             var completedAtDt = DateTime.SpecifyKind(completedAtRaw, DateTimeKind.Utc);
             if (completedAtDt < windowFrom.UtcDateTime || completedAtDt > windowTo.UtcDateTime) continue;
 
-            if (!runIdsByIssue.TryGetValue(issue.Id, out var issueRunIds)) continue;
+            if (!runIdsByIssue.TryGetValue(issue.Number.ToString(), out var issueRunIds)) continue;
 
             // Attribution core: the snapshot and the stage-duration
             // surface share the same latest-run decision. When the
             // attribution model can identify the active workflow run,
             // durations are computed from that run only so historical
             // invalidated runs cannot contribute samples.
-            var lifecycleForIssue = lifecycleEventsByIssue.TryGetValue(issue.Id, out var le)
+            var lifecycleForIssue = lifecycleEventsByIssue.TryGetValue(issue.Number.ToString(), out var le)
                 ? le
                 : (IReadOnlyList<IssueStageAttribution.AttributionEvent>)Array.Empty<IssueStageAttribution.AttributionEvent>();
             var attribution = ComputeIssueAttribution(lifecycleForIssue, issueRunIds, stageEventsByRun, stageOrder, dayEndUtc: now);
@@ -1008,7 +1013,7 @@ public class IssueMetricsQuerier : IScopedService
 
             // Cycle = CompletedAt - earliest IssueWorkStarted.
             double? cycleSeconds = null;
-            if (earliestWorkStartedByIssue.TryGetValue(issue.Id, out var firstStart))
+            if (earliestWorkStartedByIssue.TryGetValue(issue.Number.ToString(), out var firstStart))
             {
                 var span = completedAtDt - firstStart.UtcDateTime;
                 cycleSeconds = span.TotalSeconds;
@@ -1129,18 +1134,19 @@ public class IssueMetricsQuerier : IScopedService
         IReadOnlyCollection<string>? typeFilter = null,
         bool includeData = false)
     {
-        var projectIssueIds = await db.Issues.AsNoTracking()
+        var projectIssueNumbers = await db.Issues.AsNoTracking()
             .Where(row => row.ProjectId == projectId)
-            .Select(row => row.IssueId)
+            .Where(row => row.Number != null)
+            .Select(row => row.Number!.Value)
             .ToListAsync();
 
-        if (projectIssueIds.Count == 0)
+        if (projectIssueNumbers.Count == 0)
         {
             return new List<IssueEventRowLite>();
         }
 
         var projectSources = new HashSet<string>(
-            projectIssueIds.Select(id => IssueSourcePrefix + id),
+            projectIssueNumbers.Select(number => IssueEventPersistence.IssueSource(projectId, number)),
             StringComparer.Ordinal);
 
         var typeSet = typeFilter is null
@@ -1164,6 +1170,9 @@ public class IssueMetricsQuerier : IScopedService
             .Select(r => new IssueEventRowLite(r.Source, r.Id, r.Type, r.Time, r.Data))
             .ToList();
     }
+
+    private static string IssueSourcePrefixFor(string projectId) =>
+        IssueEventPersistence.ProjectSourcePrefix(projectId);
 
     private readonly record struct IssueEventRowLite(
         string Source,

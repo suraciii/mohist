@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Mohist.Server.Issue.Domain;
+using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Services;
 using Mohist.Server.Project.Grains;
@@ -261,7 +262,7 @@ public class IssueStartReadinessApiSpecs
     {
         var project = await CreateProjectAsync();
         var draftIssue = await CreateIssueAsync(project.Id, "Draft grain", isDraft: true);
-        var draftGrain = _grains.GetGrain<IIssueGrain>(draftIssue.Id);
+        var draftGrain = _grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(project.Id, draftIssue.Number)));
 
         var draftReadiness = await draftGrain.GetStartReadinessAsync();
         Assert.True(draftReadiness.IsDraft);
@@ -271,7 +272,7 @@ public class IssueStartReadinessApiSpecs
 
         var prereq = await CreateIssueAsync(project.Id, "Grain prereq", isDraft: false);
         var dependent = await CreateIssueAsync(project.Id, "Grain dependent", isDraft: false);
-        var dependentGrain = _grains.GetGrain<IIssueGrain>(dependent.Id);
+        var dependentGrain = _grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(project.Id, dependent.Number)));
         await dependentGrain.AddPrerequisiteAsync(prereq.Number);
 
         var waitingReadiness = await dependentGrain.GetStartReadinessAsync();

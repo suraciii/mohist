@@ -33,13 +33,9 @@ public class WorkflowQuerier : IScopedService
     {
         await using var db = await _db.CreateDbContextAsync();
 
-        var runJson = await db.WorkflowRuns.AsNoTracking()
-            .Where(e => e.WorkflowRunId == workflowRunId)
-            .Select(e => e.State)
-            .FirstOrDefaultAsync();
-        if (runJson is null) return null;
-
-        var run = DeserializeWorkflowRun(runJson);
+        var row = await db.WorkflowRuns.AsNoTracking()
+            .FirstOrDefaultAsync(e => e.WorkflowRunId == workflowRunId);
+        var run = row is null ? null : Hydrate(row);
         if (run is null) return null;
 
         var definition = (await _profileManager.LoadTemplateAsync(workflowRunId)).Structure;
@@ -99,13 +95,9 @@ public class WorkflowQuerier : IScopedService
     {
         await using var db = await _db.CreateDbContextAsync();
 
-        var runJson = await db.WorkflowRuns.AsNoTracking()
-            .Where(e => e.WorkflowRunId == workflowRunId)
-            .Select(e => e.State)
-            .FirstOrDefaultAsync();
-        if (runJson is null) return null;
-
-        var run = DeserializeWorkflowRun(runJson);
+        var row = await db.WorkflowRuns.AsNoTracking()
+            .FirstOrDefaultAsync(e => e.WorkflowRunId == workflowRunId);
+        var run = row is null ? null : Hydrate(row);
         return run?.Workspace;
     }
 
@@ -129,32 +121,30 @@ public class WorkflowQuerier : IScopedService
     public async Task<bool> HasIncompleteTaskWithUsesAsync(string workflowRunId, string uses)
     {
         await using var db = await _db.CreateDbContextAsync();
-        var runJson = await db.WorkflowRuns.AsNoTracking()
-            .Where(e => e.WorkflowRunId == workflowRunId)
-            .Select(e => e.State)
-            .FirstOrDefaultAsync();
-
-        var run = runJson is not null
-            ? DeserializeWorkflowRun(runJson)
-            : null;
+        var row = await db.WorkflowRuns.AsNoTracking()
+            .FirstOrDefaultAsync(e => e.WorkflowRunId == workflowRunId);
+        var run = row is null ? null : Hydrate(row);
         return run?.HasIncompleteTaskWithUses(uses) ?? false;
     }
 
     public async Task<bool> HasIncompleteTaskByIdAsync(string workflowRunId, string id)
     {
         await using var db = await _db.CreateDbContextAsync();
-        var runJson = await db.WorkflowRuns.AsNoTracking()
-            .Where(e => e.WorkflowRunId == workflowRunId)
-            .Select(e => e.State)
-            .FirstOrDefaultAsync();
-
-        var run = runJson is not null
-            ? DeserializeWorkflowRun(runJson)
-            : null;
+        var row = await db.WorkflowRuns.AsNoTracking()
+            .FirstOrDefaultAsync(e => e.WorkflowRunId == workflowRunId);
+        var run = row is null ? null : Hydrate(row);
         return run?.HasIncompleteTaskById(id) ?? false;
     }
 
     private static WorkflowRun? DeserializeWorkflowRun(string json) =>
         JsonSerializer.Deserialize<WorkflowRun>(WorkflowRunStore.MigrateLegacyWorkflowRunJson(json), JSON.Options);
+
+    private static WorkflowRun? Hydrate(WorkflowRunRow row)
+    {
+        var run = DeserializeWorkflowRun(row.State);
+        if (run is not null)
+            WorkflowRunLineage.RestoreStoredEpicNumber(run, row.EpicNumber);
+        return run;
+    }
 
 }
