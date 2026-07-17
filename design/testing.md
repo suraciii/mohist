@@ -90,7 +90,7 @@ Web tests run with `isolate: false`: test files share a worker module registry a
 | Track | Per test | Per file |
 |---|---|---|
 | Unit | < 50ms | < 300 LOC |
-| Spec | < 500ms (hard cap 5s); collection ≤ 2min | < 800 LOC (C# 24KB enforced) |
+| Spec | < 500ms (hard cap 5s); collection ≤ 2min | < 800 LOC (C# 24KB ratchet: existing baseline files cannot grow; new over-budget files fail) |
 | Browser | separate `npm run test:browser`; never in default `npm test` | |
 
 Extract shared setup. One product ability = one test file. Migration splits: delete old file once equivalent coverage exists.
