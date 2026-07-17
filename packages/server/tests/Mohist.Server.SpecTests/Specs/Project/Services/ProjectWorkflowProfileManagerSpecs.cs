@@ -7,7 +7,7 @@ using Mohist.Server.Workflow.Services.Prompts;
 using Xunit;
 using Mohist.Server.SpecTests.Support;
 
-namespace Mohist.Server.SpecTests.Specs.Project.Api;
+namespace Mohist.Server.SpecTests.Specs.Project.Services;
 
 public class ProjectWorkflowProfileManagerSpecs : IAsyncLifetime
 {
