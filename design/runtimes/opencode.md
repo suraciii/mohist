@@ -310,8 +310,9 @@ compatibility alias 或 ACP fallback。
 - 已持久化的 AgentSession（含 `acpSessionId`、历史 Compact / Reset 轮换出的旧
   Session 记录）保持可查询与可审计；ACP 时代的 Runtime 绑定在替换后视为
   "当前 Runtime Session 不存在"，Session 操作明确失败并提示 Reset。
-- 旧结构 Workflow Profile（`with.expect`、`with.agent`、`uses: mohist/acp-agent`）在
-  加载 / 校验时返回可操作错误，不被静默忽略，也不自动改写。
+- 旧结构 Workflow Profile 不被静默忽略，也不自动改写：`uses: mohist/acp-agent` 的任务
+  在 dispatch 时以可操作错误失败——该 Action 已移除。`with.expect`、`with.agent` 等旧
+  输入键归 Action 契约处理，definition 校验不检查 `with` 内部。
 - 切换前已开始的 WorkflowRun 不自动迁移；其后续 agent task dispatch 以可操作错误
   失败，由用户 rerun 受影响 stage。
 - issue 级 `agentConfig` 配置面收敛为 model / variant（`type` 与 ACP liveness 字段从

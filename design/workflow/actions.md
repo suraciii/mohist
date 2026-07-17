@@ -66,28 +66,16 @@ setVars:
 ```yaml
 artifacts:
   files:
-    - path: ${{ openspecChangeDir }}/proposal.md
+    - path: docs/proposal.md
 ```
 
 ## expect
 
-`expect` 是由 Workflow 拥有的 task 完成契约，与 Action Input 分离。Runner 的
+`expect` 是由 Workflow 拥有的 task 完成契约，与 Action Input 分离。作者可见语义
+（失败规则、与 `artifacts` 的搭配）见
+[docs 的 expect 节](../../docs/workflow-definition.md#expect--完成要求)。Runner 的
 Workflow task executor 同时接收展开后的 Action Input 和 `expect`，在 Action 执行后
-应用完成判断；Action 与 Runtime 模块都不解释它。Action 执行失败会让 task 失败；Action
-成功后，`expect` 不满足也会让 task 失败。
-
-```yaml
-expect:
-  files:
-    - path: ${{ openspecChangeDir }}/proposal.md
-  markers:
-    - path: ${{ openspecChangeDir }}/review.md
-      oneOf:
-        - <promise>PASS</promise>
-        - <promise>FAIL</promise>
-```
-
-必须存在的 path 同时放进 `expect` 与 `artifacts`；可选产物只放进 `artifacts`。
+应用完成判断；Action 与 Runtime 模块都不解释它。
 
 marker 的 `path` 可以是特殊值 `_output`，表示对回合最终 assistant 文本匹配，而不是
 文件内容。task executor 从 Action result 携带的回合事实中取得该文本；它不进入

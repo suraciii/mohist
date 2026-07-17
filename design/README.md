@@ -111,7 +111,7 @@
 
 ## Workflow 核心域
 
-- [workflow/definition.md](workflow/definition.md) — Workflow Definition DSL（**WIP**）：语法权威在 [`docs/workflow-definition.md`](../docs/workflow-definition.md)（DSL 是产品命令面）；本篇登记实现侧语义分布与开放问题。
+- [workflow/definition.md](workflow/definition.md) — Workflow Definition DSL（**WIP**）：语义模型（Expect 一等建模）、唯一权威校验器（规则目录、三处入口含 `mo` 本地校验）与实现侧语义索引；语法权威在 [`docs/workflow-definition.md`](../docs/workflow-definition.md)。
 - [workflow/actions.md](workflow/actions.md) — action input/output 接口、errorCode、失败恢复编排。
 - [workflow/builtin-workflows.md](workflow/builtin-workflows.md) — 内置 workflow（local / github-pr）的设计要点；yaml 定义是真源。
 - [workflow/profile.md](workflow/profile.md) — Workflow Profile（**WIP**）：Project-scoped collection、默认选择、Issue override 与 Run snapshot。
