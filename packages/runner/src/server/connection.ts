@@ -345,6 +345,7 @@ function toWorkItem(dispatch: WorkDispatchResponse): RenderedWorkItem {
     title: dispatch.title,
     uses: dispatch.uses,
     with: parseObject(dispatch.with),
+    expect: parseObject(dispatch.expect),
     variables: parseObject(dispatch.variables),
     projectId: dispatch.projectId,
     issueNumber: dispatch.issueNumber ?? undefined,

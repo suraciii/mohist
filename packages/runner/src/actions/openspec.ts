@@ -93,7 +93,7 @@ function isCrossDeviceError(err: unknown): boolean {
 const DEFAULT_OPENSPEC_ITEMS_PATH = "tasks"
 
 export async function openspecTasksAction(context: ActionContext): Promise<ActionResult> {
-  const path = resolveActionPath(context, stringInput(context.with, "path"))
+  const path = resolveActionPath(context.workDir, stringInput(context.with, "path"))
   if (!path) return { status: "failure", message: "OpenSpec task loader requires 'path'" }
   if (!exists(path)) return { status: "failure", message: `tasks.json not found: ${path}` }
 
@@ -460,7 +460,7 @@ function resolveBuildPrompt(variables?: JsonObject): string | undefined {
 function resolveChangeDir(context: ActionContext) {
   const changeDir = stringInput(context.with, "changeDir")
   if (!changeDir?.trim()) return undefined
-  return resolveActionPath(context, changeDir)
+  return resolveActionPath(context.workDir, changeDir)
 }
 
 function validateArchivePrefix(prefix: string): string | null {

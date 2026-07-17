@@ -88,3 +88,71 @@
 - Web typecheck: clean.
 - Web vitest: 4698 / 4698 passing.
 
+
+## T-003 Runner completion evaluator, output projection, and dispatch contract
+
+### Codebase patterns discovered
+
+- `ActionResult.turnFact` (private channel) lives on the *internal* `ActionResult` type only. The runner MUST strip it before any `WorkItemResult` field reaches the server. The strip is centralized at `stripRunnerPrivateFacts` so the Action cannot leak final assistant text via `output`, `setVars`, `capturedOutputs`, artifacts, recovery matching, or the wire report.
+- `evaluateCompletion(expect, workDir, finalAssistantText)` is the new Workflow-owned completion evaluator. It takes the *rendered* `expect` object directly — the executor passes the dispatch's `RenderedWorkItem.expect` after template expansion. It does NOT receive `ActionContext` or read `with.expect`.
+- The Action↔executor boundary changed: `verifyExpectations(context, agentText)` is gone. `expectations.ts` now exports `evaluateCompletion`, `CompletionEvaluation`, `FailIfMatch`, and `parseLastMarker(text, accepted)` — no Action-context-aware API.
+- `parseLastMarker` is *generalized*: it accepts arbitrary `<promise>VALUE</promise>` markers with `VALUE`s drawn from the marker's `oneOf`/`contains` list (no longer hardcoded `done|unfinished`). The marker precedence rules are asymmetric: file markers use first-in-declaration-order; `_output` markers use last-accepted-occurrence in text.
+- `_output` markers are unsatisfied when `finalAssistantText` is null — the executor never falls back to Action Output as a text source (spec scenario "The turn fact is unavailable").
+- Output projection lives in the executor (`projectTaskOutput`). For `mohist/opencode` (the one Action in `PROMISE_PROJECTED_ACTIONS`), the handler's output is dropped. If a promise marker matched, output becomes `{ "promise": "<value>" }`; otherwise `null`. Every other Action's output is preserved unchanged.
+- Branch-stability evidence attachment is bypassed for opencode so the minimal `null | { promise }` contract is preserved on the wire (no `branchStability` key leaks into the opencode output JSON).
+- Successful Action + unsatisfied completion → failed completion with diagnostic `message`. Action failure (regardless of completion) stays an Action failure; completion does not rescue Action failures.
+- `tryRecovery` copies `work.expect` (alongside `with`/`recovery`/`recoveryRemaining`) into the self-retry `AddTaskInput`. The decoupled contract now survives the round-trip.
+
+### Gotchas
+
+- `expectations.ts` keeps `resolveActionPath(workDir, value)` exported for non-completion callers (`core/artifact-exists`, `core/marker`, `mohist/openspec-tasks`, `mohist/archive-change`). The signature changed from `(context, value)` to `(workDir, value)` and required updating 3 callsites.
+- `acp-agent.ts` no longer reads `with.expect`, no longer emits `output.expectation/promise/failIfMarker`, and no longer triggers expectation repair. The Action sets `turnFact.finalAssistantText` from the agent's transcript text. The text NEVER becomes Action Output.
+- `acp/session-strategies.ts` still exports no implicit repair turn logic. Removed: `satisfyExpectations`, `expectationRepairLimit`, `buildExpectationRepairPrompt`, `appendAgentText`, and the `expectation` field on `AcpSessionResult`. Three test cases that locked the legacy Action-private verifyExpectations behavior were rewritten to lock the new contract.
+- The executor's whole-string-unresolved check now reports unresolved references in BOTH `with` and `expect`. This catches `${{ openspecChangeDir }}` in `expect.markers.*.path` before the Action is invoked, with the existing actionable error message.
+- `template.ts` `LITERAL_FIELD_PATHS` was extended with `markers.*.contains` and `markers.*.oneOf.*` (in addition to the existing `expect.markers.*.contains` and `expect.markers.*.oneOf.*`). The `expect.*` variants remain for legacy callers that render the `with.expect` shape; the unprefixed versions cover the new contract rendering `expect` standalone.
+- The `executor-completion` test fixture uses `{} as never` for `sessionManager` and `acpConnection` because the completion path never reaches them. The `silentConnection()` helper is cast to `ServerConnection` (instead of `Pick`) so the executor constructor accepts it directly.
+- `RenderedWorkItem.expect` is parsed at the connection boundary via `parseObject(dispatch.expect)` — the same path `with`/`recovery` take — so absent vs empty-string vs JSON-stringified expectations are decoded uniformly.
+- ActionContext does not gain an `expect` field. The Action never receives the completion contract; it's read only by the executor's completion evaluator.
+
+### Patterns established
+
+- The completion evaluator is called between `action(...)` return and `tryRecovery(...)`:
+  ```
+  render with → render expect → Action → stripRunnerPrivateFacts
+    → evaluateCompletion(renderedExpect, workDir, finalAssistantText)
+    → projectTaskOutput(work, publicActionResult, completion)
+    → normalize(work, projected)
+    → tryRecovery(work, normalized)
+    → branch-stability (non-opencode path only) → worktree → artifacts → setVars
+  ```
+- `stripRunnerPrivateFacts(ActionResult)` returns `{ publicActionResult, turnFact }` and is the canonical boundary. Callers that previously passed `result` downstream now pass `publicActionResult`. `turnFact` is consumed only by completion evaluation.
+- `projectTaskOutput` is the single place that decides what the wire `output` is. It is the only place that knows about `mohist/opencode`'s projection rule.
+- All completion tests live in `tests/expectations.spec.ts` (function-level) and `tests/executor-completion.spec.ts` (executor-flow). Connection-layer expectation parsing is locked in `tests/server-connection-report.spec.ts`.
+- Template literal-field-path coverage is asserted for the standalone-`expect` rendering in `tests/template.spec.ts` so the rule survives future refactors.
+
+### Tests touched
+
+- **NEW**: `tests/executor-completion.spec.ts` (16 tests) — locks the executor's step ordering, output projection (opencode and non-opencode paths), `_output` private fact channel, self-retry `expect` copy, failIf-match + recovery interaction, and `turnFact` privacy.
+- **NEW**: `tests/server-connection-report.spec.ts` `parses expect from the dispatch response into RenderedWorkItem.expect` — locks the `expect` JSON-string parse and the `expect: null` for absent dispatch fields.
+- **NEW**: `tests/template.spec.ts` `LiteralFieldPath_StandaloneExpectRoot_ProtectsMarkersContainsAndOneOfEntries` — locks the bare-rooted literal field paths for `markers.*.contains` and `markers.*.oneOf.*`.
+- **UPDATED**: `tests/expectations.spec.ts` — full rewrite (32 tests) using the new `evaluateCompletion(expect, workDir, finalAssistantText)` API + new `parseLastMarker` tests (returns last-accepted, ignores non-accepted trailing values, returns null for empty/empty-list).
+- **UPDATED**: `tests/acp/session-strategies-expectations-and-liveness.spec.ts` — replaced three Action-private-expect tests with `DoesNotPerformExpectationRepair_WhenExpectationUnmet` proving the Action ignores `with.expect` (the legacy shape) and the action output no longer carries `expectation`/`promise`/`failIfMarker` fields.
+
+### Verification
+
+- `npm run typecheck` (runner src): clean.
+- `npm run typecheck:tests` (runner tests): clean.
+- `npm run test:ci` (runner): 1093 / 1093 passing across 95 test files.
+- `npm test` (full monorepo):
+  - Mohist.Cli.Tests: 933 / 933 passing.
+  - Mohist.Server.UnitTests: 1405 / 1405 passing.
+  - Mohist.Server.ArchTests: 27 / 27 passing.
+  - Mohist.Server.SpecTests: 2869 / 2869 passing.
+  - Web Vitest: 4698 / 4698 passing.
+  - Runner Vitest: 1093 / 1093 passing.
+
+### Decisions worth flagging for review
+
+- The Action private `verifyExpectations(context, agentText)` API was deleted entirely (not deprecated). Some session-strategies call sites that imported it were also deleted. The Action's `acp-agent.ts` handler now returns the run's `text` as `turnFact.finalAssistantText` and trusts the executor to interpret completion. If future Actions need Action-private verification (we don't expect this), they can re-introduce the function with a non-`ActionContext` API.
+- The branch-stability-evidence attachment (`attachBranchStabilityEvidence`) is now skipped for `mohist/opencode` only. This protects the minimal `null | { promise }` output contract (no `branchStability` key in the opencode output). Other Actions still get the evidence attachment in their wire output because their output contract tolerates it. This trade-off is narrow and reversible once a separate diagnostics channel exists.
+- `RenderedWorkItem.expect` is rendered (`renderTemplate`) before completion evaluation, mirroring `with`. This catches `${{ openspecChangeDir }}`-style references in `expect.markers.*.path`. The same whole-string-unresolved guard fires if the marker path is missing a variable; the error message names the task id and the unresolved reference.

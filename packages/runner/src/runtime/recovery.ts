@@ -48,6 +48,7 @@ export function tryRecovery(
       setVars: work.setVars ?? null,
       recovery: work.recovery,
       recoveryRemaining: remaining - 1,
+      expect: work.expect ?? null,
     })
   }
 
